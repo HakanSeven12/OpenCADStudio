@@ -676,6 +676,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         )
         .unwrap();
         let child = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        let second_parent = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y * 2.).unwrap();
         for handle in [parent, child] {
             let codec::objects::ObjectType::DynamicBlock(object) =
                 doc.objects.get_mut(&handle).unwrap()
@@ -711,6 +712,24 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         )
         .unwrap();
         actions::create(doc, def, actions::Kind::Move, child, &[member], DVec3::ZERO).unwrap();
+        let second_move = actions::create(
+            doc,
+            def,
+            actions::Kind::Move,
+            second_parent,
+            &[member],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        let codec::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get_mut(&second_move).unwrap()
+        else {
+            panic!()
+        };
+        let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+            panic!()
+        };
+        action.action.dependencies = vec![child];
         let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
         else {
             panic!()
@@ -728,6 +747,11 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         let params = actions::all_parameters(doc, def);
         let root = params.iter().find(|p| p.handle == parent).unwrap().clone();
         let point = params.iter().find(|p| p.handle == child).unwrap().clone();
+        let second_point = params
+            .iter()
+            .find(|p| p.handle == second_parent)
+            .unwrap()
+            .clone();
         let _ = app.dispatch_command("BSAVE");
         let _ = app.dispatch_command("BCLOSE");
         app.tabs[i].scene.select_entity(insert, true);
@@ -831,6 +855,94 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 5.), DVec3::X * (start + 7.))
+        );
+        assert_eq!(line(&app.tabs[i].scene.document, other), original);
+
+        // Drive a second parent after the direct child edit. Both its delta and
+        // the child's autonomous input must survive subsequent parent history.
+        app.tabs[i].scene.select_entity(insert, true);
+        app.tabs[i].selected_handle = Some(insert);
+        app.refresh_properties();
+        let second_grip = app.tabs[i]
+            .selected_grips
+            .iter()
+            .find(|g| runtime::decode(g.id).is_some_and(|(id, _)| id == second_point.id))
+            .unwrap()
+            .id;
+        assert!(app.start_test_action_grip(insert, second_grip));
+        let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(3., 0., 0.)));
+        assert_eq!(
+            line(&app.tabs[i].scene.document, insert),
+            (DVec3::X * (start + 8.), DVec3::X * (start + 10.))
+        );
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .end,
+            DVec3::X * 18.
+        );
+        app.undo_steps(1);
+        assert_eq!(
+            line(&app.tabs[i].scene.document, insert),
+            (DVec3::X * (start + 5.), DVec3::X * (start + 7.))
+        );
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .end,
+            DVec3::X * 15.
+        );
+        app.redo_steps(1);
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .end,
+            DVec3::X * 18.
+        );
+        assert_eq!(line(&app.tabs[i].scene.document, other), original);
+
+        app.tabs[i].scene.select_entity(insert, true);
+        app.tabs[i].selected_handle = Some(insert);
+        app.refresh_properties();
+        let root_grip = app.tabs[i]
+            .selected_grips
+            .iter()
+            .find(|g| runtime::decode(g.id).is_some_and(|(id, _)| id == root.id))
+            .unwrap()
+            .id;
+        assert!(app.start_test_action_grip(insert, root_grip));
+        let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(10., 0., 0.)));
+        assert_eq!(
+            line(&app.tabs[i].scene.document, insert),
+            (DVec3::X * 8., DVec3::X * 9.)
+        );
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .end,
+            DVec3::X * 8.
+        );
+        app.undo_steps(1);
+        assert_eq!(
+            line(&app.tabs[i].scene.document, insert),
+            (DVec3::X * (start + 8.), DVec3::X * (start + 10.))
+        );
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .end,
+            DVec3::X * 18.
+        );
+        app.redo_steps(1);
+        assert_eq!(
+            line(&app.tabs[i].scene.document, insert),
+            (DVec3::X * 8., DVec3::X * 9.)
+        );
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .end,
+            DVec3::X * 8.
         );
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
     }

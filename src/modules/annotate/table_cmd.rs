@@ -1388,7 +1388,35 @@ impl TableCellEditCommand {
 
     fn set_value_type(&mut self, data_type: i32, unit_type: i32, picture: &str) {
         use codec::entities::table::CellStylePropertyFlags as P;
+        use crate::entities::table::{cell_data_category, cell_data_kind, style_for_property, CELL_DATA_CATEGORIES};
+        // A cell whose type turns into a number takes the right hand
+        // alignment of its inherited one (measured: Top Center to Top
+        // Right); an alignment set on the cell itself stays.
+        let before = cell_data_kind(&self.table, self.row, self.column).map(|(kind, _)| CELL_DATA_CATEGORIES[kind].0);
+        let after = cell_data_category(data_type, unit_type);
+        let right = (before != Some(after)
+            && matches!(after, "Whole Number" | "Decimal Number" | "Currency" | "Percentage"))
+            .then(|| {
+                let row = self.table.rows.get(self.row)?;
+                let cell = row.cells.get(self.column)?;
+                if cell.style.as_ref().is_some_and(|style| style.sets(P::ALIGNMENT)) {
+                    return None;
+                }
+                // ponytail: a table style's own data alignment is not read; the
+                // Standard one (Top Center) stands in when no style sets it.
+                let inherited = style_for_property(&self.table, row, self.column, cell, P::ALIGNMENT)
+                    .map(|style| style.alignment)
+                    .filter(|a| (1..=9).contains(a))
+                    .unwrap_or(2);
+                Some((inherited - 1) / 3 * 3 + 3)
+            })
+            .flatten();
         if let Some(cell) = self.table.cell_mut(self.row, self.column) {
+            if let Some(alignment) = right {
+                let style = cell.style.get_or_insert_with(Default::default);
+                style.alignment = alignment;
+                style.property_flags.insert(P::ALIGNMENT);
+            }
             let bits = (P::DATA_TYPE | P::DATA_FORMAT).bits() as i32;
             for content in &mut cell.contents {
                 content.format_property_flags &= !bits;

@@ -1830,6 +1830,7 @@ pub enum CmdResult {
         definition: Handle,
         action: Handle,
         expected: Box<codec::objects::ObjectType>,
+        point_choices: Option<(i32, Vec<(Handle, i32, String)>)>,
         targets: Vec<Handle>,
         frame: Option<Vec<DVec3>>,
         rotate_only: Option<Vec<Handle>>,
@@ -1854,6 +1855,7 @@ pub enum CmdResult {
         kind: crate::scene::block_actions::Kind,
         parameter: Handle,
         xy_key_point: Option<crate::scene::block_actions::XyKeyPoint>,
+        point_choices: Option<(i32, Vec<(Handle, i32, String)>)>,
         targets: Vec<Handle>,
         location: DVec3,
         frame: Option<Vec<DVec3>>,
@@ -1891,6 +1893,9 @@ pub enum CmdResult {
         kind: crate::modules::block_editor::single_parameter::Kind,
         location: DVec3,
         grips: Option<usize>,
+        /// Answers given to the placement prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::single_parameter::Options,
     },
     /// An action type was chosen that has no geometry action of its own:
     /// continue with Lookup parameter selection.
@@ -1916,6 +1921,9 @@ pub enum CmdResult {
         reference: DVec3,
         label_offset: Option<f64>,
         grips: Option<usize>,
+        /// Answers given to the base-point prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::orientation_parameter::Options,
     },
     /// Place a native two-point parameter: Linear and Polar take a base, end and
     /// label pick; XY takes its grip count and labels itself at the endpoint.
@@ -1935,6 +1943,9 @@ pub enum CmdResult {
         definition: Handle,
         location: DVec3,
         label: DVec3,
+        /// Answers given to the placement prompt's options; a missing answer
+        /// keeps the parameter's own default.
+        options: crate::modules::block_editor::point_parameter::Options,
     },
     /// Place the visibility parameter in the definition that requested it.
     PlaceBlockVisibilityParameter {
@@ -1970,6 +1981,8 @@ pub enum CmdResult {
     CommitEntitiesAndExit(Vec<EntityType>),
     /// Commit an opencadcodec entity to the document and end the command.
     CommitAndExit(EntityType),
+    /// `CommitAndExit`, then print the message.
+    CommitAndReport(EntityType, String),
     /// Commit a dimension using the drawing's association mode.
     CommitDimension {
         entity: EntityType,
@@ -3649,6 +3662,41 @@ pub trait CadCommand: Send {
 
     fn selection_forces_add(&self) -> bool {
         false
+    }
+
+    /// Consume an eligible Block Editor marker click while gathering a selection.
+    /// The returned name is drawing-authored and is shown as selection feedback.
+    fn on_selection_marker_click(
+        &mut self,
+        _scene: &Scene,
+        _position: iced::Point,
+        _context: PointPickContext,
+        _remove: bool,
+        _replace: bool,
+    ) -> Option<String> {
+        None
+    }
+
+    /// Whether a Point marker is in this command's pending target selection.
+    fn selection_marker_selected(&self, _handle: Handle) -> bool {
+        false
+    }
+
+    /// Clear pending marker selections when an entity pick replaces the set.
+    fn clear_selection_markers(&mut self) {}
+
+    /// Gather eligible Block Editor markers within a viewport selection region.
+    fn on_selection_marker_region(
+        &mut self,
+        _scene: &Scene,
+        _polygon: &[iced::Point],
+        _context: PointPickContext,
+        _crossing: bool,
+        _remove: bool,
+        _replace: bool,
+        _geometry_hit: bool,
+    ) -> Vec<String> {
+        Vec::new()
     }
 
     /// The command takes associative dimensions only. The host drops every

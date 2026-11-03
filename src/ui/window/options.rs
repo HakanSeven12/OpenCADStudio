@@ -388,7 +388,7 @@ pub fn view_window<'a>(
             text(crate::tr!("options", "language-label"))
                 .size(12)
                 .width(150),
-            iced::widget::pick_list(selected_language, language_options, |choice| choice
+            crate::ui::dropdown_list::pick_list(selected_language, language_options, |choice| choice
                 .label
                 .clone(),)
             .on_select(|choice| Message::LanguageChanged(choice.value))
@@ -469,7 +469,7 @@ pub fn view_window<'a>(
             text(crate::tr!("options", "default-save-format-label"))
                 .size(12)
                 .width(150),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 selected_format,
                 // Drawings, not the template entry (the list's last).
                 &crate::io::SAVE_FORMAT_OPTIONS[..crate::io::SAVE_FORMAT_OPTIONS.len() - 1],
@@ -678,7 +678,7 @@ pub fn view_window<'a>(
             text(crate::tr!("options", "theme-label"))
                 .size(12)
                 .width(150),
-            iced::widget::pick_list(selected_theme, theme_options, |choice| choice.label.clone(),)
+            crate::ui::dropdown_list::pick_list(selected_theme, theme_options, |choice| choice.label.clone(),)
                 .on_select(|choice| Message::OptionsThemeChanged(choice.value))
                 .width(sizing.width),
         ]
@@ -695,7 +695,7 @@ pub fn view_window<'a>(
         // value changes, which would drag a slider along with it.
         row![
             text(crate::t!("Interface scale")).size(12).width(150),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(format!("{}%", prefs.ui_scale_percent)),
                 [75u16, 100, 125, 150, 175, 200]
                     .map(|p| format!("{p}%"))
@@ -722,7 +722,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Canvas mode")).size(12).width(140),
-            iced::widget::pick_list(selected_mode, mode_options, |choice| choice.label.clone(),)
+            crate::ui::dropdown_list::pick_list(selected_mode, mode_options, |choice| choice.label.clone(),)
                 .on_select(|choice| Message::ModelSpaceModeChanged(choice.value))
                 .width(Fill),
         ]
@@ -819,7 +819,7 @@ pub fn view_window<'a>(
         .push(
             row![
                 text(crate::t!("Cursor type")).size(12).width(140),
-                iced::widget::pick_list(
+                crate::ui::dropdown_list::pick_list(
                     selected_cursor,
                     cursor_options,
                     |choice| choice.label.clone(),
@@ -1021,7 +1021,7 @@ pub fn view_window<'a>(
             };
             row![
                 text(crate::t!("Command line font")).size(12).width(140),
-                iced::widget::pick_list(Some(selected), families, |family| family.clone())
+                crate::ui::dropdown_list::pick_list(Some(selected), families, |family| family.clone())
                     .on_select(move |family| {
                         Message::CommandLineFontChanged(if family == default_label {
                             String::new()
@@ -1030,7 +1030,7 @@ pub fn view_window<'a>(
                         })
                     })
                     .width(Fill),
-                iced::widget::pick_list(
+                crate::ui::dropdown_list::pick_list(
                     Some(prefs.command_line_font_size),
                     (8..=24u16).collect::<Vec<_>>(),
                     |size| size.to_string(),
@@ -1160,7 +1160,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Window selection color")).size(12).width(140),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(selected_window_color),
                 color_choice_options.clone(),
                 |choice| choice.label.clone(),
@@ -1173,7 +1173,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Crossing selection color")).size(12).width(140),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(selected_crossing_color),
                 color_choice_options.clone(),
                 |choice| choice.label.clone(),
@@ -1195,7 +1195,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Selection highlight color")).size(12).width(140),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(selected_highlight_color),
                 color_choice_options.clone(),
                 |choice| choice.label.clone(),
@@ -1313,7 +1313,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Unselected grip color")).size(12).width(140),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(selected_grip_color),
                 color_choice_options.clone(),
                 |choice| choice.label.clone(),
@@ -1326,7 +1326,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Selected/hot grip color")).size(12).width(140),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(selected_grip_hot),
                 color_choice_options.clone(),
                 |choice| choice.label.clone(),
@@ -1339,7 +1339,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Hover grip color")).size(12).width(140),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(selected_grip_hover),
                 color_choice_options,
                 |choice| choice.label.clone(),
@@ -1395,7 +1395,7 @@ pub fn view_window<'a>(
         Space::new().height(12),
         text(crate::t!("Navigation style")).size(15),
         Space::new().height(10),
-        iced::widget::pick_list(
+        crate::ui::dropdown_list::pick_list(
             Some(prefs.navigation_style),
             crate::app::settings::NavigationStyle::ALL,
             |style| style.to_string(),
@@ -1485,7 +1485,7 @@ pub fn view_window<'a>(
         Space::new().height(12),
         row![
             text(crate::t!("QDIM origin priority")).size(12).width(150),
-            iced::widget::pick_list(selected_qdim, qdim_options, |choice| choice.label.clone())
+            crate::ui::dropdown_list::pick_list(selected_qdim, qdim_options, |choice| choice.label.clone())
                 .on_select(|choice| Message::QdimSnapPriorityChanged(choice.value))
                 .width(Fill),
         ]
@@ -1502,7 +1502,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Add scales automatically")).size(12).width(150),
-            iced::widget::pick_list(selected_auto_scale, auto_scale_options, |choice| {
+            crate::ui::dropdown_list::pick_list(selected_auto_scale, auto_scale_options, |choice| {
                 choice.label.clone()
             })
             .on_select(|choice| Message::AnnoAutoScaleChanged(choice.value))
@@ -1521,7 +1521,7 @@ pub fn view_window<'a>(
         Space::new().height(10),
         row![
             text(crate::t!("Right-click in drawing area")).size(12).width(150),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 selected_right_click,
                 right_click_options,
                 |choice| choice.label.clone(),
@@ -1778,7 +1778,7 @@ pub fn view_window<'a>(
             text(crate::t!("Polar tracking increment"))
                 .size(12)
                 .width(150),
-            iced::widget::pick_list(Some(selected_polar), polar_options, |choice| {
+            crate::ui::dropdown_list::pick_list(Some(selected_polar), polar_options, |choice| {
                 choice.label.clone()
             })
             .on_select(|choice| Message::PolarIncrementChanged(choice.value))
@@ -1966,7 +1966,7 @@ pub fn view_window<'a>(
             .push(
                 row![
                     text(crate::t!("Surface type")).size(12).width(150),
-                    iced::widget::pick_list(
+                    crate::ui::dropdown_list::pick_list(
                         selected_surface_type,
                         surface_type_options,
                         |choice| choice.label.clone(),
@@ -2004,7 +2004,7 @@ pub fn view_window<'a>(
             .push(
                 row![
                     text(crate::t!("Show solid history")).size(12).width(150),
-                    iced::widget::pick_list(
+                    crate::ui::dropdown_list::pick_list(
                         selected_show_history,
                         show_history_options,
                         |choice| choice.label.clone(),

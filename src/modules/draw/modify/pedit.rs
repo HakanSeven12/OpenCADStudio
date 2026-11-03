@@ -1628,7 +1628,7 @@ mod convert_tests {
 
 // ── Curve fitting ─────────────────────────────────────────────────────────
 
-fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityType> {
+pub(crate) fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityType> {
     use codec::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
     let mut polyline = match entity {
         EntityType::Polyline2D(p) => p.clone(),
@@ -1730,14 +1730,19 @@ fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityT
     Some(EntityType::Polyline2D(polyline))
 }
 
+/// The vertices the user placed: curve-fit knees (flag 1) and spline samples
+/// (flag 8) are generated, and a spline frame vertex (flag 16) is a defining
+/// vertex once the fit is taken off.
 fn defining_vertices(polyline: &codec::entities::Polyline2D) -> Vec<codec::entities::Vertex2D> {
+    use codec::entities::VertexFlags;
     polyline
         .vertices
         .iter()
         .enumerate()
-        .filter(|(_, vertex)| vertex.flags.bits() & 1 == 0)
+        .filter(|(_, vertex)| vertex.flags.bits() & (1 | 8) == 0)
         .map(|(index, vertex)| {
             let mut original = vertex.clone();
+            original.flags = VertexFlags::from_bits(original.flags.bits() & !16);
             if let Some(knee) = polyline.vertices[index + 1..]
                 .iter()
                 .take_while(|next| next.flags.bits() & 1 != 0)
@@ -1748,6 +1753,73 @@ fn defining_vertices(polyline: &codec::entities::Polyline2D) -> Vec<codec::entit
             original
         })
         .collect()
+}
+
+/// Fit/Smooth "None": back to the defining vertices, keeping the bulges they
+/// carry.
+pub(crate) fn unfit_polyline2d(polyline: &mut codec::entities::Polyline2D) {
+    use codec::entities::PolylineFlags;
+    polyline.vertices = defining_vertices(polyline);
+    polyline.flags = PolylineFlags::from_bits(polyline.flags.bits() & !(2 | 4));
+    polyline.smooth_surface = codec::entities::polyline::SmoothSurfaceType::None;
+}
+
+/// Fit/Smooth "Quadratic" / "Cubic": the defining vertices become the spline
+/// frame (flag 16) and `segments` evenly spaced parameter samples per span of
+/// the B-spline they control (flag 8) follow the first of them. An open frame
+/// is clamped to its ends; a closed one wraps periodically.
+pub(crate) fn spline_fit_polyline2d(
+    polyline: &mut codec::entities::Polyline2D,
+    degree: usize,
+    segments: usize,
+) -> bool {
+    use codec::entities::polyline::SmoothSurfaceType;
+    use codec::entities::{PolylineFlags, Vertex2D, VertexFlags};
+    let frame = defining_vertices(polyline);
+    let n = frame.len();
+    if n <= degree {
+        return false;
+    }
+    let closed = polyline.flags.is_closed();
+    let control: Vec<[f64; 2]> = frame
+        .iter()
+        .map(|v| [v.location.x, v.location.y])
+        .collect();
+    let (curve, spans) = if closed {
+        let mut wrapped = control.clone();
+        wrapped.extend(control.iter().take(degree).copied());
+        let knots = (0..wrapped.len() + degree + 1).map(|i| i as f64).collect();
+        (NurbsCurve::new(degree, wrapped, knots, None), n)
+    } else {
+        let knots = clamped_uniform_knots(degree, n);
+        (NurbsCurve::new(degree, control, knots, None), n - degree)
+    };
+    let Some(curve) = curve else {
+        return false;
+    };
+    let steps = segments.max(1) * spans;
+    let count = if closed { steps } else { steps + 1 };
+    let mut frame = frame.into_iter().map(|mut vertex| {
+        vertex.flags = VertexFlags::SPLINE_CONTROL;
+        vertex
+    });
+    let mut vertices = Vec::with_capacity(n + count);
+    vertices.extend(frame.next());
+    for step in 0..count {
+        let q = curve.point_at(step as f64 / steps as f64);
+        let mut vertex = Vertex2D::new(Vector3::new(q[0], q[1], polyline.elevation));
+        vertex.flags = VertexFlags::SPLINE_VERTEX;
+        vertices.push(vertex);
+    }
+    vertices.extend(frame);
+    polyline.vertices = vertices;
+    polyline.flags = PolylineFlags::from_bits((polyline.flags.bits() & !2) | 4);
+    polyline.smooth_surface = if degree == 2 {
+        SmoothSurfaceType::QuadraticBSpline
+    } else {
+        SmoothSurfaceType::CubicBSpline
+    };
+    true
 }
 
 fn decurve_entity(entity: &EntityType) -> Option<EntityType> {

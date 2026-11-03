@@ -8,7 +8,7 @@
 use iced::wgpu;
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct EllipseInstance {
     pub center_high: [f32; 3],
     pub _pad0: f32,

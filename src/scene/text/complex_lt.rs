@@ -141,7 +141,9 @@ pub fn apply_along(
         if rt <= pattern_len {
             return None;
         }
-        let k = ((rt - a) / pattern_len).round().max(1.0);
+        // Every whole period the length holds; each end dash keeps at least
+        // half the first dash.
+        let k = (rt / pattern_len).floor().max(1.0);
         let align_end = (rt - k * pattern_len + a) * 0.5;
         atype_segments(&scaled, align_end, path_len)
     });

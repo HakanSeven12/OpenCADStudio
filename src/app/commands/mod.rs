@@ -9,6 +9,7 @@ mod block_cmdline;
 mod blocks;
 mod blockvars;
 mod center_vars;
+mod revcloud_vars;
 mod purge;
 pub(crate) use purge::purge_pass;
 mod block_editor_vars;
@@ -47,7 +48,7 @@ mod point_cloud;
 mod refedit;
 pub(crate) mod sheet_set;
 mod spell;
-mod table_cells;
+pub(in crate::app) mod table_cells;
 mod styleprops;
 mod text_edit;
 mod table_style_var;
@@ -1192,6 +1193,10 @@ inventory::submit!(crate::command::CommandRegistration {
         "FILEDIA",
         "SDI",
         "TRIMEXTENDMODE",
+        "REVCLOUDCREATEMODE",
+        "REVCLOUDARCVARIANCE",
+        "REVCLOUDGRIPS",
+        "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",
         "SELECTIONCYCLING",
         "OSNAPZ",
@@ -1365,6 +1370,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "IMPORT",
         "ACISIN",
         "WMFIN",
+        "SVGIN",
         "DGNIMPORT",
         "-DGNIMPORT",
         "OPEN",

@@ -678,6 +678,7 @@ impl Scene {
         if !direct {
             // Already linked to its definition; only its block changes.
             self.repoint_representation(insert, source, copy, &name);
+            self.bump_geometry();
             return Some(name);
         }
 
@@ -730,21 +731,30 @@ impl Scene {
             .insert(data, ObjectType::DynamicBlock(link));
         self.document.block_representations.insert(data, definition);
         self.repoint_representation(insert, source, copy, &name);
+        self.bump_geometry();
         Some(name)
     }
 
-    fn repoint_representation(&mut self, insert: Handle, from: Handle, to: Handle, name: &str) {
+    pub(crate) fn repoint_representation(
+        &mut self,
+        insert: Handle,
+        from: Handle,
+        to: Handle,
+        name: &str,
+    ) {
         if let Some(EntityType::Insert(reference)) = self.document.get_entity_mut(insert) {
             reference.block_name = name.to_string();
+        }
+        if from == to {
+            return;
         }
         for record in self.document.block_records.iter_mut() {
             if record.handle == from {
                 record.insert_handles.retain(|handle| *handle != insert);
-            } else if record.handle == to {
+            } else if record.handle == to && !record.insert_handles.contains(&insert) {
                 record.insert_handles.push(insert);
             }
         }
-        self.bump_geometry();
     }
 }
 

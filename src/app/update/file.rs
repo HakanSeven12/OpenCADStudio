@@ -852,6 +852,9 @@ impl OpenCADStudio {
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
             trim_extend_quick: crate::modules::draw::modify::trim::quick_mode(),
+            revcloud_create_mode: crate::entities::revcloud::create_mode(),
+            revcloud_arc_variance: crate::entities::revcloud::arc_variance(),
+            revcloud_grips: crate::entities::revcloud::grips_on(),
             #[cfg(not(target_arch = "wasm32"))]
             fonts_folder: crate::io::font_repo::fonts_folder().map(|p| p.display().to_string()),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1039,6 +1042,9 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
+        crate::entities::revcloud::set_create_mode(s.revcloud_create_mode);
+        crate::entities::revcloud::set_arc_variance(s.revcloud_arc_variance);
+        crate::entities::revcloud::set_grips_on(s.revcloud_grips);
         #[cfg(not(target_arch = "wasm32"))]
         {
             crate::io::font_repo::set_fonts_folder(s.fonts_folder.as_ref().map(Into::into));
@@ -2015,6 +2021,7 @@ impl OpenCADStudio {
         }
         self.refresh_native_edit_guard_after_save(i, &path, path_changed, destination_lease);
         self.tabs[i].dirty = false;
+        self.tabs[i].scene.note_tables_saved();
         if set_current_path {
             self.tabs[i].recovery_save_as_required = false;
         }
@@ -2100,6 +2107,7 @@ impl OpenCADStudio {
         if self.opening.is_none() {
             return Task::none();
         }
+        let ui_started = iced::time::Instant::now();
         // Web drawings live under bare file names: two tabs sharing a name
         // also share the single browser-stored copy, and the last save
         // silently replaces the other tab's. Warn at open time — the
@@ -2457,6 +2465,13 @@ impl OpenCADStudio {
                 .set(crate::app::OPEN_PHASE_FINALIZING, 10000, 1, 1);
         }
         self.opening.take();
+        // The part of the open that blocks the UI thread, kept apart from the
+        // loader-thread phases so a slow handoff shows up on its own.
+        crate::perf_record!(
+            "[perf] open-ui-thread={}ms entities={}",
+            ui_started.elapsed().as_millis(),
+            entity_count,
+        );
         // The document and its derived caches have settled: the next message
         // boundary announces `DocumentOpened` to native plugins exactly once
         // for this load (API v9).
@@ -2809,6 +2824,7 @@ impl OpenCADStudio {
                         && self.tabs[i].scene.camera_generation == entry.camera_generation;
                     if snapshot_is_current {
                         self.tabs[i].dirty = false;
+                        self.tabs[i].scene.note_tables_saved();
                     }
                 }
                 Err(e) => self.command_line.push_error(
@@ -3301,6 +3317,7 @@ impl OpenCADStudio {
             && self.tabs[i].scene.camera_generation == camera_generation;
         if snapshot_is_current {
             self.tabs[i].dirty = false;
+            self.tabs[i].scene.note_tables_saved();
         }
         // A clean save supersedes any crash-recovery snapshot for this
         // drawing — drop the old key and the new one so stale copies don't
@@ -3917,6 +3934,7 @@ impl OpenCADStudio {
                 );
                 if snapshot_is_current {
                     self.tabs[i].dirty = false;
+                    self.tabs[i].scene.note_tables_saved();
                 }
             }
         }

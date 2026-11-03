@@ -25,6 +25,7 @@
 // The high+low pair encodes the f64 source so the relative-to-eye shader
 // stays precise at UTM-scale coordinates and after a cross-drawing paste.
 
+use super::analytic_slots::BlockSlot;
 use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
 
@@ -421,7 +422,7 @@ impl BlockWireVertex {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct BlockWireInstance {
     pub translation: [f32; 3],
     pub translation_low: [f32; 3],
@@ -673,8 +674,9 @@ pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
         // "A" alignment for a dash-first pattern of period P laid out as
         //   [D] [gap] ([dash] [gap])*(k-1) [D]
         // gives  L = 2D + (k-1)a + k(P-a)  =>  D = (L - k*P + a) / 2.
-        // Pick the interior period count k so the end dash D stays near nominal a.
-        let mut k = ((total - a) / p).round().max(1.0);
+        // k is every whole period the length holds, so each end dash keeps
+        // at least half the first dash: D = a/2 + (L mod P)/2.
+        let mut k = (total / p).floor().max(1.0);
         let mut d_end = (total - k * p + a) * 0.5;
         if d_end <= 1e-4 {
             // End dash underflowed (period ≫ first dash); drop one period so the
@@ -1200,6 +1202,64 @@ pub struct BlockGeometryRecords {
     pub records: Vec<BlockWireVertex>,
 }
 
+/// Where the placements of one upload landed: each reference's slots, and the
+/// instance buffer of every arena they index.
+pub struct BlockTracking {
+    pub slots: Vec<(codec::Handle, BlockSlot)>,
+    pub buffers: Vec<wgpu::Buffer>,
+    /// The block-local geometry of each group, indexed by `BlockSlot::group`.
+    pub shapes: Vec<Vec<[f32; 3]>>,
+}
+
+/// Group items by key: groups in the order their key first appears, members in
+/// the order they were given. Sorting finds the same groups a sequential walk
+/// with a map would, so it can use every core.
+#[cfg(not(target_arch = "wasm32"))]
+fn group_in_first_seen_order<T: Copy + Send + Sync>(
+    items: Vec<((u64, bool), T)>,
+) -> Vec<((u64, bool), Vec<T>)> {
+    use rayon::prelude::*;
+    let mut order: Vec<((u64, bool), u32)> = items
+        .iter()
+        .enumerate()
+        .map(|(index, (key, _))| (*key, index as u32))
+        .collect();
+    // Stable, so members of one key stay in submission order.
+    order.par_sort_by_key(|entry| entry.0);
+    let mut groups: Vec<(u32, (u64, bool), Vec<T>)> = Vec::new();
+    for (key, index) in order {
+        let item = items[index as usize].1;
+        match groups.last_mut() {
+            Some((_, last, members)) if *last == key => members.push(item),
+            _ => groups.push((index, key, vec![item])),
+        }
+    }
+    groups.sort_unstable_by_key(|(first, _, _)| *first);
+    groups
+        .into_iter()
+        .map(|(_, key, members)| (key, members))
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn group_in_first_seen_order<T: Copy>(items: Vec<((u64, bool), T)>) -> Vec<((u64, bool), Vec<T>)> {
+    group_with_map(items)
+}
+
+/// The sequential reference: one pass with a map from key to group.
+fn group_with_map<T: Copy>(items: Vec<((u64, bool), T)>) -> Vec<((u64, bool), Vec<T>)> {
+    let mut slots: rustc_hash::FxHashMap<(u64, bool), usize> = rustc_hash::FxHashMap::default();
+    let mut groups: Vec<((u64, bool), Vec<T>)> = Vec::new();
+    for (key, item) in items {
+        let slot = *slots.entry(key).or_insert_with(|| {
+            groups.push((key, Vec::new()));
+            groups.len() - 1
+        });
+        groups[slot].1.push(item);
+    }
+    groups
+}
+
 impl BlockWireGpu {
     /// Identity of the geometry this batch draws, comparable across pipeline
     /// modes.
@@ -1221,32 +1281,54 @@ impl BlockWireGpu {
         depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
         color_override: Option<[f32; 4]>,
         target: BlockWireTarget<'_>,
-        mut cache: Option<&mut BlockGeometryCache>,
+        cache: Option<&mut BlockGeometryCache>,
     ) -> Vec<Self> {
+        Self::from_wires_impl(device, queue, wires, depth_map, color_override, target, cache, false).0
+    }
+
+    /// `from_wires`, also reporting where every placement landed so a later
+    /// move can overwrite it in place. `None` when some placement cannot be
+    /// attributed or sits in more than one arena.
+    pub fn from_wires_tracked(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[BlockRef<'_>],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        target: BlockWireTarget<'_>,
+        cache: Option<&mut BlockGeometryCache>,
+    ) -> (Vec<Self>, Option<BlockTracking>) {
+        Self::from_wires_impl(device, queue, wires, depth_map, None, target, cache, true)
+    }
+
+    fn from_wires_impl(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[BlockRef<'_>],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        color_override: Option<[f32; 4]>,
+        target: BlockWireTarget<'_>,
+        mut cache: Option<&mut BlockGeometryCache>,
+        track: bool,
+    ) -> (Vec<Self>, Option<BlockTracking>) {
         let BlockWireTarget { const_bgl, mode } = target;
-        let mut slots: rustc_hash::FxHashMap<(u64, bool), usize> = rustc_hash::FxHashMap::default();
-        let mut groups: Vec<(bool, Vec<BlockRef<'_>>)> = Vec::new();
-        for &block in wires {
-            let wire = block.wire;
-            if color_override.is_none() && !(wire.display_visible && block.named().display_visible)
-            {
-                continue;
+        let block_started = crate::perf::enabled().then(std::time::Instant::now);
+        let block_mark = |stage: &str| {
+            if let Some(started) = block_started {
+                crate::perf_record!(
+                    "[perf] block-wires {stage}={:.1}ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
             }
-            let Some(instance) = wire.render_instance else {
-                continue;
-            };
-            if wire.points.len() < 2 {
-                continue;
-            }
-            let mesh_edge = color_override.is_none() && wire.fill_is_3d;
-            let key = (instance.source_id, mesh_edge);
-            let slot = *slots.entry(key).or_insert_with(|| {
-                let slot = groups.len();
-                groups.push((mesh_edge, Vec::new()));
-                slot
-            });
-            groups[slot].1.push(block);
-        }
+        };
+        let keyed: Vec<((u64, bool), BlockRef<'_>)> = wires
+            .iter()
+            .filter_map(|&block| block_key(&block, color_override).map(|key| (key, block)))
+            .collect();
+        let groups: Vec<(bool, Vec<BlockRef<'_>>)> = group_in_first_seen_order(keyed)
+            .into_iter()
+            .map(|((_, mesh_edge), members)| (mesh_edge, members))
+            .collect();
+        block_mark("grouped");
 
         let mut arena = BlockArenaBuilder::new(device, mode);
         let mut live_keys: rustc_hash::FxHashSet<BlockGeometryKey> =
@@ -1254,6 +1336,10 @@ impl BlockWireGpu {
         // Records emitted this call, so a cache that is earning its keep is
         // visible rather than assumed.
         let mut emitted_segments = 0usize;
+        // Definitions are resolved in order (the cache is mutable), then their
+        // placements, which are independent of one another, are built across
+        // the cores before being packed in that same order.
+        let mut prepared: Vec<(bool, Vec<BlockRef<'_>>, crate::scene::model::instance_model::RenderInstance, _)> = Vec::new();
         for (mesh_edge, group) in groups {
             // A copy reached through a stub carries the prototype's
             // geometry at the prototype's placement, which is what `base`
@@ -1308,17 +1394,63 @@ impl BlockWireGpu {
                     built
                 }
             };
-            let instances = block_instances(&group, base, mesh_edge, depth_map);
+            prepared.push((mesh_edge, group, base, geometry));
+        }
+        block_mark("prepared");
+        let placed: Vec<Vec<BlockWireInstance>> = {
+            use crate::par::prelude::*;
+            prepared
+                .par_iter()
+                .map(|(mesh_edge, group, base, _)| {
+                    block_instances(group, *base, *mesh_edge, depth_map)
+                })
+                .collect()
+        };
+        block_mark("placed");
+        let mut tracked: Option<Vec<(codec::Handle, BlockSlot)>> = track.then(Vec::new);
+        let mut shapes: Vec<Vec<[f32; 3]>> = Vec::new();
+        for ((mesh_edge, group, base, geometry), instances) in prepared.iter().zip(placed.iter()) {
             if instances.is_empty() {
                 continue;
             }
-            arena.push(&geometry, &instances, mesh_edge);
+            let landed = arena.push(geometry, instances, *mesh_edge);
+            let Some(list) = tracked.as_mut() else {
+                continue;
+            };
+            let Some((chunk, first)) = landed.filter(|_| instances.len() == group.len()) else {
+                tracked = None;
+                continue;
+            };
+            let group_index = shapes.len() as u32;
+            shapes.push(group.first().map_or_else(Vec::new, |first| relative_points(first.wire).0));
+            for (position, member) in group.iter().enumerate() {
+                let Some(handle) =
+                    crate::scene::Scene::handle_from_wire_name(&member.named().name)
+                else {
+                    tracked = None;
+                    break;
+                };
+                list.push((
+                    handle,
+                    BlockSlot {
+                        chunk: chunk as u32,
+                        index: first + position as u32,
+                        source_id: base.source_id,
+                        mesh_edge: *mesh_edge,
+                        base: base.translation,
+                        group: group_index,
+                        style: wire_look(member.wire),
+                    },
+                ));
+            }
         }
         // Release geometry that this build no longer uses.
         if let Some(cache) = cache {
             cache.retain(|key, _| live_keys.contains(key));
         }
+        block_mark("pushed");
         let out = arena.finish(device, queue, const_bgl);
+        block_mark("finished");
         if crate::perf::enabled() && arena.segments > 0 {
             crate::perf_record!(
                 "[perf] block-wire-geometry mode={} definitions={} arenas={} batches={} \
@@ -1337,7 +1469,24 @@ segments={} bytes={} bytes_if_per_definition={} emitted={}",
                 emitted_segments,
             );
         }
-        out
+        let tracking = tracked.map(|slots| {
+            // One arena per chunk, in chunk order: the batches name them in turn.
+            let mut buffers: Vec<wgpu::Buffer> = Vec::new();
+            let mut last: Option<*const BlockArena> = None;
+            for batch in &out {
+                let identity = std::sync::Arc::as_ptr(&batch.arena);
+                if last != Some(identity) {
+                    buffers.push(batch.arena.instance_buffer.clone());
+                    last = Some(identity);
+                }
+            }
+            BlockTracking {
+                slots,
+                buffers,
+                shapes,
+            }
+        });
+        (out, tracking)
     }
 }
 
@@ -1409,8 +1558,12 @@ impl BlockArenaBuilder {
         geometry: &std::sync::Arc<BlockGeometryRecords>,
         instances: &[BlockWireInstance],
         mesh_edge: bool,
-    ) {
+    ) -> Option<(usize, u32)> {
         self.segments += geometry.records.len();
+        // Where the placements landed, when that is a single run in a single
+        // arena; a definition split across arenas keeps no in-place record.
+        let mut pieces = 0usize;
+        let mut landed = None;
         // A definition's geometry, constants and placements must land in the
         // same arena — one bind group and one instance buffer draw them — so a
         // definition too large for one arena is split into pieces that each
@@ -1438,6 +1591,8 @@ impl BlockArenaBuilder {
                 chunk.consts.push(geometry.constant);
                 let first_instance = chunk.instances.len() as u32;
                 chunk.instances.extend_from_slice(run);
+                pieces += 1;
+                landed = Some((index, first_instance));
                 chunk.batches.push(PendingBlockBatch {
                     first_vertex,
                     vertex_count: take as u32 * 6,
@@ -1449,6 +1604,11 @@ impl BlockArenaBuilder {
                 });
                 placed += take;
             }
+        }
+        if pieces == 1 {
+            landed
+        } else {
+            None
         }
     }
 
@@ -1560,6 +1720,104 @@ impl BlockArenaBuilder {
         const PAGE: u64 = 64 * 1024;
         definitions as u64 * 2 * PAGE
     }
+}
+
+/// The group a block placement is drawn in, or `None` when it is not drawn at
+/// all. Shared by the upload and by in-place patching, so both agree on which
+/// placements exist.
+fn block_key(block: &BlockRef<'_>, color_override: Option<[f32; 4]>) -> Option<(u64, bool)> {
+    let wire = block.wire;
+    if color_override.is_none() && !(wire.display_visible && block.named().display_visible) {
+        return None;
+    }
+    let instance = wire.render_instance?;
+    if wire.points.len() < 2 {
+        return None;
+    }
+    let mesh_edge = color_override.is_none() && wire.fill_is_3d;
+    Some((instance.source_id, mesh_edge))
+}
+
+/// A wire's points relative to its own translation: the block-local shape that
+/// every placement of one definition shares, whatever its position, plus the
+/// largest coordinate whose f32 rounding they carry. With split (high + low)
+/// points that is the relative one, so far from the origin a turned or scaled
+/// copy still differs from its old shape; without, the absolute one.
+pub(crate) fn relative_points(wire: &WireModel) -> (Vec<[f32; 3]>, f32) {
+    let translation = wire.render_instance.map_or([0.0; 3], |instance| instance.translation);
+    let split = wire.points_low.len() == wire.points.len();
+    let mut magnitude = 0.0f32;
+    let points = wire
+        .points
+        .iter()
+        .enumerate()
+        .map(|(index, point)| {
+            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            let mut relative = [0.0f32; 3];
+            for axis in 0..3 {
+                let absolute = point[axis] as f64 + low[axis] as f64;
+                relative[axis] = (absolute - translation[axis]) as f32;
+                let rounded = if split { relative[axis] } else { absolute as f32 };
+                magnitude = magnitude.max(rounded.abs());
+            }
+            relative
+        })
+        .collect();
+    (points, magnitude)
+}
+
+/// A signature of a wire's look. Placements of one definition share one set of
+/// drawing constants, so a patch may only rewrite a placement whose wire still
+/// looks the way it did when uploaded.
+pub(crate) fn wire_look(wire: &WireModel) -> super::analytic_slots::WireLook {
+    use std::hash::{Hash, Hasher};
+    let mut dashes = rustc_hash::FxHasher::default();
+    wire.pattern_length.to_bits().hash(&mut dashes);
+    wire.pattern.map(f32::to_bits).hash(&mut dashes);
+    wire.world_width.to_bits().hash(&mut dashes);
+    wire.aci.hash(&mut dashes);
+    wire.plinegen.hash(&mut dashes);
+    wire.dash_from_start.hash(&mut dashes);
+    wire.dash_align_end.map(f32::to_bits).hash(&mut dashes);
+    super::analytic_slots::WireLook {
+        color: wire.color.map(f32::to_bits),
+        selected: wire.selected,
+        weight: wire.line_weight_px.to_bits(),
+        dashes: dashes.finish(),
+    }
+}
+
+/// What the given block placements are now, in the form an in-place patch
+/// compares against the slots recorded at upload.
+pub(crate) fn new_blocks(
+    blocks: &[BlockRef<'_>],
+    depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+) -> Vec<super::analytic_slots::NewBlock> {
+    blocks
+        .iter()
+        .filter_map(|block| {
+            let (source_id, mesh_edge) = block_key(block, None)?;
+            let instance = block.wire.render_instance?;
+            let (points, magnitude) = relative_points(block.wire);
+            Some(super::analytic_slots::NewBlock {
+                source_id,
+                mesh_edge,
+                position: [
+                    instance.translation[0] + block.delta[0],
+                    instance.translation[1] + block.delta[1],
+                    instance.translation[2] + block.delta[2],
+                ],
+                depth: if mesh_edge {
+                    0.0
+                } else {
+                    block.draw_depth(depth_map)
+                },
+                style: wire_look(block.wire),
+                points,
+                magnitude,
+            })
+        })
+        .collect()
 }
 
 /// Placements and draw depths relative to the group's first instance.
@@ -2071,5 +2329,36 @@ mod block_wire_storage_tests {
         validator
             .validate(&module)
             .expect("wire_indexed.wgsl validates cleanly with naga");
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod grouping_tests {
+    use super::{group_in_first_seen_order, group_with_map};
+
+    /// A small deterministic generator, so the cases are the same every run.
+    fn next(state: &mut u64) -> u64 {
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *state >> 33
+    }
+
+    #[test]
+    fn sorted_grouping_matches_the_sequential_walk() {
+        let mut state = 7;
+        for &(count, keys) in &[(0usize, 1u64), (1, 1), (50, 3), (5_000, 40), (40_000, 9_000)] {
+            let items: Vec<((u64, bool), u32)> = (0..count)
+                .map(|index| {
+                    let key = (next(&mut state) % keys, next(&mut state) % 2 == 0);
+                    (key, index as u32)
+                })
+                .collect();
+            assert_eq!(
+                group_in_first_seen_order(items.clone()),
+                group_with_map(items),
+                "{count} items over {keys} keys"
+            );
+        }
     }
 }

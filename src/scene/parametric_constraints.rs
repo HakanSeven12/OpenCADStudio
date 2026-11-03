@@ -2781,6 +2781,25 @@ impl super::Scene {
         // Centre marks and centre lines go out in their stored form.
         crate::scene::center_native::export(&mut document);
         crate::entities::field::stamp_save_dates(&mut document);
+        // Each table keeps where its cell contents sit (a DXF file writes
+        // them beside the table).
+        let tables: Vec<_> = document
+            .entities()
+            .filter_map(|entity| match entity {
+                codec::EntityType::Table(table) => Some(table.common.handle),
+                _ => None,
+            })
+            .collect();
+        for handle in tables {
+            let Some(codec::EntityType::Table(table)) = document.get_entity(handle) else {
+                continue;
+            };
+            let mut table = (**table).clone();
+            crate::entities::table::store_cell_geometry(&mut table, &document, self.table_modified_since_save(handle));
+            if let Some(codec::EntityType::Table(stored)) = document.get_entity_mut(handle) {
+                **stored = table;
+            }
+        }
         for name in &self.unopened_layouts {
             crate::scene::write_layout_unopened(&mut document, name);
         }

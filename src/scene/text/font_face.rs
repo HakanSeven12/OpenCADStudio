@@ -60,6 +60,30 @@ pub enum Face {
 /// [`Face::with_big_font`]); a control character no font name contains.
 pub const BIG_FONT_SEP: char = '\u{1}';
 
+/// What an SHX font shows for a character it has no glyph for: the system
+/// stand-in glyph, taking only the room of the font's own `?` (measured:
+/// `₺` in txt is drawn in full yet advances and measures 5 × 10 at height
+/// 10 like `?`, so the next character overlaps it). Without a stand-in the
+/// `?` itself is drawn. A full-width character keeps the stand-in as it is
+/// (a missing big font); spaces and invisible marks stay blank.
+fn shx_missing_glyph(path: &str, ch: char) -> Option<Arc<Glyph>> {
+    let invisible = ch.is_whitespace()
+        || ch.is_control()
+        || matches!(ch, '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}');
+    if invisible || ttf_glyph::is_full_width(ch) {
+        return None;
+    }
+    let mark = shx::font_glyph(path, '?' as u16)?;
+    Some(match ttf_glyph::fallback_glyph(ch) {
+        Some(stand_in) => Arc::new(Glyph {
+            strokes: stand_in.strokes.clone(),
+            advance: mark.advance,
+            fill_tris: stand_in.fill_tris.clone(),
+        }),
+        None => mark,
+    })
+}
+
 impl Face {
     /// Resolve a style's font name to a concrete face. Embedded stroke fonts
     /// take priority; only otherwise-unknown names try the system fonts.
@@ -133,6 +157,7 @@ impl Face {
                 .or_else(|| ttf_glyph::fallback_glyph(ch))
                 .map(GlyphRef::Owned),
             Face::Shx { path, .. } => shx::font_glyph(path, ch as u16)
+                .or_else(|| shx_missing_glyph(path, ch))
                 .map(GlyphRef::Owned)
                 .or_else(|| ttf_glyph::fallback_glyph(ch).map(GlyphRef::Owned)),
             Face::WithBig { primary, big } => {
@@ -172,7 +197,7 @@ impl Face {
                 Some(_) => ttf_glyph::glyph_source(family, ch),
                 None => ttf_glyph::fallback_source(ch),
             },
-            Face::Shx { path, .. } => match shx::font_glyph(path, ch as u16) {
+            Face::Shx { path, .. } => match shx::font_glyph(path, ch as u16).or_else(|| shx_missing_glyph(path, ch)) {
                 Some(_) => None,
                 None => ttf_glyph::fallback_source(ch),
             },

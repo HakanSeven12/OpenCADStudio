@@ -8,7 +8,7 @@
 use iced::wgpu;
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CircleInstance {
     pub center_high: [f32; 3],
     pub start_width: f32,

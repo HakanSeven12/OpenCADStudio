@@ -1019,6 +1019,18 @@ impl OpenCADStudio {
         let label = self.history_label_from_active_cmd(i, "EDIT");
         self.push_undo_snapshot(i, label);
         let is_dimension = matches!(entity, codec::EntityType::Dimension(_));
+        // The updated object's xdata applications must be registered, as
+        // for a new object.
+        let apps: Vec<String> = entity
+            .common()
+            .extended_data
+            .records()
+            .iter()
+            .map(|record| record.application_name.clone())
+            .collect();
+        for app in &apps {
+            self.tabs[i].scene.ensure_app_id(app);
+        }
         if let Some(current) = self.tabs[i].scene.document.get_entity_mut(handle) {
             *current = entity;
             if is_dimension {

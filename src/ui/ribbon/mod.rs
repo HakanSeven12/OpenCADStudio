@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use rustc_hash::FxHashMap as HashMap;
 
 use codec::types::{Color as AcadColor, LineWeight};
-use iced::widget::{button, column, container, mouse_area, row, scrollable, text, Space};
+use iced::widget::{button, column, container, mouse_area, row, text, Space};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
 use crate::app::Message;
@@ -1600,25 +1600,30 @@ impl Ribbon {
                 return None;
             }
 
-            let rows: Vec<Element<Message>> = labels
+            use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+            let rows: Vec<DropdownRow<Message>> = labels
                 .iter()
                 .enumerate()
                 .map(|(idx, label)| {
                     let step = idx + 1;
-                    button(text(label.clone()).size(11))
-                        .on_press(if is_undo {
-                            Message::UndoMany(step)
-                        } else {
-                            Message::RedoMany(step)
-                        })
+                    let msg = if is_undo {
+                        Message::UndoMany(step)
+                    } else {
+                        Message::RedoMany(step)
+                    };
+                    let btn = button(text(label.clone()).size(11))
+                        .on_press(msg.clone())
                         .style(popup_row_style)
                         .width(Fill)
-                        .padding([5, 10])
-                        .into()
+                        .padding([5, 10]);
+                    DropdownRow::item(btn, label.clone(), msg)
                 })
                 .collect();
 
-            let panel = container(column(rows))
+            let list = DropdownList::new(rows)
+                .selected(Some(0))
+                .on_escape(Message::CloseRibbonDropdown);
+            let panel = container(list)
                 .style(popup_panel_style)
                 .width(Length::Fixed(170.0));
 
@@ -1781,6 +1786,7 @@ impl Ribbon {
         pick: fn(String) -> Message,
         win: (f32, f32),
     ) -> Element<'_, Message> {
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         const W: f32 = 220.0;
         let current = current.to_string();
         let entry = |value: String, label: String, color: Option<iced::Color>| {
@@ -1801,36 +1807,51 @@ impl Ribbon {
                     .into(),
                 None => iced::widget::Space::new().width(10).height(10).into(),
             };
+            let msg = pick(value);
             let item: Element<'_, Message> = button(
                 row![
                     crate::ui::icons::themed_check_cell(on),
                     swatch,
-                    text(label).size(11)
+                    text(label.clone()).size(11)
                 ]
                 .spacing(6)
                 .align_y(iced::Center),
             )
-            .on_press(pick(value))
+            .on_press(msg.clone())
             .style(popup_row_style)
             .width(Fill)
             .padding([3, 8])
             .into();
-            item
+            (on, DropdownRow::item(item, label, msg))
         };
-        let mut rows: Vec<Element<'_, Message>> =
-            vec![entry(String::new(), t!("Use Current").into_owned(), None)];
-        rows.extend(
-            self.layer_infos
-                .iter()
-                .map(|info| entry(info.name.clone(), info.name.clone(), Some(info.color))),
-        );
+        let mut initial_selected: Option<usize> = None;
+        let mut rows: Vec<DropdownRow<'_, Message>> = Vec::with_capacity(self.layer_infos.len() + 1);
+        let (on_cur, first_row) = entry(String::new(), t!("Use Current").into_owned(), None);
+        if on_cur {
+            initial_selected = Some(0);
+        }
+        rows.push(first_row);
+        for info in &self.layer_infos {
+            let (on, row) = entry(info.name.clone(), info.name.clone(), Some(info.color));
+            if on && initial_selected.is_none() {
+                initial_selected = Some(rows.len());
+            }
+            rows.push(row);
+        }
         let list_height = ((self.layer_infos.len() + 1) as f32 * 24.0).min(260.0);
-        let panel = container(
-            scrollable(column(rows).spacing(1)).height(Length::Fixed(list_height)),
+        let list = DropdownList::with_options(
+            rows,
+            Length::Fixed(list_height),
+            Length::Fill,
+            1.0,
+            0.0,
         )
-        .style(popup_panel_style)
-        .padding(2)
-        .width(Length::Fixed(W));
+        .selected(initial_selected)
+        .on_escape(Message::CloseRibbonDropdown);
+        let panel = container(list)
+            .style(popup_panel_style)
+            .padding(2)
+            .width(Length::Fixed(W));
         let (align_right, h_pad, top) = self.dd_anchor(id, W, win.0);
         dropdown_backdrop(position_ribbon_dropdown(panel.into(), align_right, h_pad, top))
     }
@@ -1838,6 +1859,7 @@ impl Ribbon {
     /// The layer list under the layer combo `id` (the ribbon's or the Quick
     /// Access Toolbar's).
     fn layer_combo_overlay(&self, id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         // Each layer icon is its own button so state toggles and colour edits
         // do not bubble up to the row's make-active handler (#133).
         let icon_btn = |bytes: &'static [u8], msg: Message| -> Element<'_, Message> {
@@ -1848,82 +1870,88 @@ impl Ribbon {
                 .into()
         };
         let filter = self.layer_filter.to_lowercase();
-        let rows: Vec<Element<Message>> = self
+        let mut initial_selected: Option<usize> = None;
+        let mut rows: Vec<DropdownRow<Message>> = Vec::new();
+        for info in self
             .layer_infos
             .iter()
             .filter(|info| filter.is_empty() || info.name.to_lowercase().contains(&filter))
-            .map(|info| {
-                let is_active = info.name == self.active_layer;
-                let lc = info.color;
-                let lv = info.visible;
-                let lf = info.frozen;
-                let ll = info.locked;
-                let name = info.name.clone();
+        {
+            let is_active = info.name == self.active_layer;
+            if is_active && initial_selected.is_none() {
+                initial_selected = Some(rows.len());
+            }
+            let lc = info.color;
+            let lv = info.visible;
+            let lf = info.frozen;
+            let ll = info.locked;
+            let name = info.name.clone();
 
-                let swatch = container(text(""))
-                    .style(move |theme: &Theme| container::Style {
-                        background: Some(Background::Color(lc)),
-                        border: Border {
-                            color: chrome::border(theme),
-                            width: crate::ui::icons::hairline(),
-                            radius: 1.0.into(),
-                        },
-                        ..Default::default()
-                    })
-                    .width(12)
-                    .height(12);
-                let color = button(container(swatch).center(Length::Fixed(SMALL_ICON)))
-                    .on_press(Message::ToggleRibbonDropdown(format!(
-                        "LAYER_COLOR:{id}:{}",
-                        info.name
-                    )))
-                    .style(popup_row_style)
-                    .padding([2, 4]);
+            let swatch = container(text(""))
+                .style(move |theme: &Theme| container::Style {
+                    background: Some(Background::Color(lc)),
+                    border: Border {
+                        color: chrome::border(theme),
+                        width: crate::ui::icons::hairline(),
+                        radius: 1.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .width(12)
+                .height(12);
+            let color = button(container(swatch).center(Length::Fixed(SMALL_ICON)))
+                .on_press(Message::ToggleRibbonDropdown(format!(
+                    "LAYER_COLOR:{id}:{}",
+                    info.name
+                )))
+                .style(popup_row_style)
+                .padding([2, 4]);
 
-                let vis = icon_btn(
-                    crate::ui::icons::layer_visible(lv),
-                    Message::LayerToggleVisible(info.name.clone()),
-                );
-                let freeze = icon_btn(
-                    crate::ui::icons::layer_freeze(lf),
-                    Message::LayerToggleFreeze(info.name.clone()),
-                );
-                let lock = icon_btn(
-                    crate::ui::icons::layer_lock(ll),
-                    Message::LayerToggleLock(info.name.clone()),
-                );
-                // Freeze in the current viewport only (#1466).
-                let vp_freeze = info.vp_frozen.map(|(column, frozen)| {
-                    icon_btn(
-                        crate::ui::icons::layer_vp_freeze(frozen),
-                        Message::LayerToggleVpFreeze(info.name.clone(), column),
-                    )
-                });
-                let checkmark: Element<'_, Message> =
-                    crate::ui::icons::themed_check_cell(is_active);
-                let label = text(&info.name).size(11);
-
-                // The label area selects the layer as active; the
-                // icon buttons above handle their own toggles.
-                let select = button(label)
-                    .on_press(Message::RibbonLayerChanged(name))
-                    .style(popup_row_style)
-                    .width(Fill)
-                    .padding([4, 4]);
-
-                container(
-                    row![checkmark, vis, freeze]
-                        .push(vp_freeze)
-                        .push(lock)
-                        .push(color)
-                        .push(select)
-                        .spacing(5)
-                        .align_y(iced::Center),
+            let vis = icon_btn(
+                crate::ui::icons::layer_visible(lv),
+                Message::LayerToggleVisible(info.name.clone()),
+            );
+            let freeze = icon_btn(
+                crate::ui::icons::layer_freeze(lf),
+                Message::LayerToggleFreeze(info.name.clone()),
+            );
+            let lock = icon_btn(
+                crate::ui::icons::layer_lock(ll),
+                Message::LayerToggleLock(info.name.clone()),
+            );
+            // Freeze in the current viewport only (#1466).
+            let vp_freeze = info.vp_frozen.map(|(column, frozen)| {
+                icon_btn(
+                    crate::ui::icons::layer_vp_freeze(frozen),
+                    Message::LayerToggleVpFreeze(info.name.clone(), column),
                 )
-                .padding([0, 4])
-                .into()
-            })
-            .collect();
+            });
+            let checkmark: Element<'_, Message> =
+                crate::ui::icons::themed_check_cell(is_active);
+            let label = text(&info.name).size(11);
+
+            // The label area selects the layer as active; the
+            // icon buttons above handle their own toggles.
+            let select_msg = Message::RibbonLayerChanged(name.clone());
+            let select = button(label)
+                .on_press(select_msg.clone())
+                .style(popup_row_style)
+                .width(Fill)
+                .padding([4, 4]);
+
+            let row_el: Element<'_, Message> = container(
+                row![checkmark, vis, freeze]
+                    .push(vp_freeze)
+                    .push(lock)
+                    .push(color)
+                    .push(select)
+                    .spacing(5)
+                    .align_y(iced::Center),
+            )
+            .padding([0, 4])
+            .into();
+            rows.push(DropdownRow::item(row_el, name, select_msg));
+        }
 
         // Cap the panel height and make the list scrollable so a long layer
         // list stays reachable instead of running off the bottom of the
@@ -1931,18 +1959,23 @@ impl Ribbon {
         let row_count = rows.len().max(1);
         let list_h = (row_count as f32 * 26.0).min(420.0);
         // Search box (#343): filters the list live as the user types.
-        // Enter makes the first match current.
-        let first_match = self
-            .layer_infos
-            .iter()
-            .find(|info| filter.is_empty() || info.name.to_lowercase().contains(&filter))
-            .map(|info| Message::RibbonLayerChanged(info.name.clone()));
+        // ArrowUp / ArrowDown move the highlight through matches; Enter picks
+        // the highlighted layer (defaulting to the first match when filtering).
         let search = iced::widget::text_input(t!("Search layers…").as_ref(), &self.layer_filter)
             .id(iced::widget::Id::new(widgets::LAYER_SEARCH_ID))
             .on_input(Message::RibbonLayerFilterChanged)
-            .on_submit_maybe(first_match)
             .size(11)
             .padding([4, 6]);
+        let list = DropdownList::with_options(
+            rows,
+            Length::Fixed(list_h),
+            Length::Fill,
+            0.0,
+            0.0,
+        )
+        .selected(initial_selected)
+        .query(self.layer_filter.clone())
+        .on_escape(Message::CloseRibbonDropdown);
         let state_manager = button(
             row![
                 crate::ui::icons::themed_arrow_right(9.0),
@@ -1968,7 +2001,7 @@ impl Ribbon {
         let panel = container(
             column![
                 container(search).padding([4, 4]),
-                scrollable(column(rows)).height(Length::Fixed(list_h)),
+                list,
                 states,
                 container(state_manager)
                     .width(Fill)
@@ -2058,41 +2091,54 @@ impl Ribbon {
         };
         let active = ctx.active_for(style_key).to_string();
 
-        let mut rows: Vec<Element<Message>> = ctx
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+        let mut initial_selected: Option<usize> = None;
+        let mut rows: Vec<DropdownRow<Message>> = ctx
             .names_for(style_key)
             .iter()
-            .map(|name| {
+            .enumerate()
+            .map(|(idx, name)| {
                 let is_sel = name.as_str() == active.as_str();
+                if is_sel && initial_selected.is_none() {
+                    initial_selected = Some(idx);
+                }
                 let n = name.clone();
+                let msg = Message::RibbonStyleChanged {
+                    key: style_key,
+                    name: n,
+                };
                 let checkmark: Element<Message> = crate::ui::icons::themed_check_cell(is_sel);
-                button(
+                let btn = button(
                     row![checkmark, text(name.clone()).size(11),]
                         .spacing(4)
                         .align_y(iced::Center),
                 )
-                .on_press(Message::RibbonStyleChanged {
-                    key: style_key,
-                    name: n,
-                })
+                .on_press(msg.clone())
                 .style(popup_row_style)
                 .width(Fill)
-                .padding([4, 10])
-                .into()
+                .padding([4, 10]);
+                DropdownRow::item(btn, name.clone(), msg)
             })
             .collect();
 
         if let Some(mgr) = manager_cmd {
-            rows.push(
-                button(text(t!("Manage…")).size(11))
-                    .on_press(Message::Command(mgr.to_string()))
+            let label = t!("Manage…").into_owned();
+            let msg = Message::Command(mgr.to_string());
+            rows.push(DropdownRow::item(
+                button(text(label.clone()).size(11))
+                    .on_press(msg.clone())
                     .style(popup_row_style)
                     .width(Fill)
-                    .padding([4, 10])
-                    .into(),
-            );
+                    .padding([4, 10]),
+                label,
+                msg,
+            ));
         }
 
-        let panel = container(column(rows))
+        let list = DropdownList::new(rows)
+            .selected(initial_selected)
+            .on_escape(Message::CloseRibbonDropdown);
+        let panel = container(list)
             .style(popup_panel_style)
             .width(Length::Fixed(LARGE_W * 2.3));
 
@@ -2145,30 +2191,46 @@ impl Ribbon {
             }
         }
 
-        let rows: Vec<Element<Message>> = items
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+        let mut initial_selected: Option<usize> = None;
+        let rows: Vec<DropdownRow<Message>> = items
             .into_iter()
-            .map(|lt| {
+            .enumerate()
+            .map(|(idx, lt)| {
                 let is_cur = lt.name == *active_lt;
+                if is_cur && initial_selected.is_none() {
+                    initial_selected = Some(idx);
+                }
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
-                let name_col = text(linetype_display_name(&lt.name))
+                let disp = linetype_display_name(&lt.name);
+                let name_col = text(disp.clone())
                     .size(11)
                     .width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
-                let name = lt.name.clone();
-                button(
+                let msg = Message::RibbonLinetypeChanged(lt.name);
+                let btn = button(
                     row![check, name_col, art_col]
                         .spacing(4)
                         .align_y(iced::Center),
                 )
-                .on_press(Message::RibbonLinetypeChanged(name))
+                .on_press(msg.clone())
                 .style(popup_row_style)
                 .width(Fill)
-                .padding([4, 6])
-                .into()
+                .padding([4, 6]);
+                DropdownRow::item(btn, disp, msg)
             })
             .collect();
 
-        let list = container(scrollable(column(rows)).height(Length::Fixed(200.0)))
+        let dd_list = DropdownList::with_options(
+            rows,
+            Length::Fixed(200.0),
+            Length::Fill,
+            0.0,
+            0.0,
+        )
+        .selected(initial_selected)
+        .on_escape(Message::CloseRibbonDropdown);
+        let list = container(dd_list)
             .style(popup_panel_style)
             .width(Length::Fixed(220.0));
 
@@ -2182,41 +2244,41 @@ impl Ribbon {
     }
 
     fn prop_lw_overlay(&self, anchor: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         let active_lw = self.active_lineweight;
-        let rows: Vec<Element<Message>> = lw_options()
+        let mut initial_selected: Option<usize> = None;
+        let rows: Vec<DropdownRow<Message>> = lw_options()
             .into_iter()
-            .map(|item| {
+            .enumerate()
+            .map(|(idx, item)| {
                 let is_cur = item.0 == active_lw;
+                if is_cur && initial_selected.is_none() {
+                    initial_selected = Some(idx);
+                }
                 let label = item.to_string();
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
-                button(
-                    row![check, text(label).size(11)]
+                let msg = Message::RibbonLineweightChanged(item.0);
+                let btn = button(
+                    row![check, text(label.clone()).size(11)]
                         .spacing(5)
                         .align_y(iced::Center),
                 )
-                .on_press(Message::RibbonLineweightChanged(item.0))
+                .on_press(msg.clone())
                 .style(popup_row_style)
                 .width(Fill)
-                .padding([4, 8])
-                .into()
+                .padding([4, 8]);
+                DropdownRow::item(btn, label, msg)
             })
             .collect();
 
-        self.prop_overlay_positioned(rows, anchor, 140.0, win)
-    }
-
-    fn prop_overlay_positioned<'a>(
-        &'a self,
-        rows: Vec<Element<'a, Message>>,
-        dd_id: &str,
-        width: f32,
-        win: (f32, f32),
-    ) -> Option<Element<'a, Message>> {
-        let panel = container(column(rows))
+        let list = DropdownList::new(rows)
+            .selected(initial_selected)
+            .on_escape(Message::CloseRibbonDropdown);
+        let panel = container(list)
             .style(popup_panel_style)
-            .width(Length::Fixed(width));
+            .width(Length::Fixed(140.0));
 
-        let (align_right, h_pad, top) = self.dd_anchor(dd_id, width, win.0);
+        let (align_right, h_pad, top) = self.dd_anchor(anchor, 140.0, win.0);
         Some(dropdown_backdrop(position_ribbon_dropdown(
             panel.into(),
             align_right,
@@ -2250,52 +2312,59 @@ fn dropdown_list<'a>(
     header: Option<String>,
     pick: impl Fn(&'static str) -> Message,
 ) -> (Element<'a, Message>, f32) {
+    use crate::ui::dropdown_list::{DropdownList, DropdownRow};
     let last_cmd = current;
-    // Each item: its large icon and its name, the current one lit.
-    let mut rows: Vec<Element<Message>> = items
-        .iter()
-        .map(|(cmd, label, item_icon)| {
-            let is_current = *cmd == last_cmd;
-            let disabled = widgets::is_disabled_item(cmd);
-            let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
-                .width(Length::Fixed(LARGE_ICON))
-                .into();
-            let label_el = text(t!(*label))
-                .size(DD_LABEL)
-                .wrapping(iced::advanced::text::Wrapping::None)
-                .style(move |theme: &Theme| iced::widget::text::Style {
-                    color: disabled.then_some(chrome::muted(theme)),
-                });
-            let label_el = keytips::label_anchor(
-                || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
-                label_el,
-            );
-            let item = button(
-                row![icon_el, label_el]
-                    .spacing(DD_GAP)
-                    .align_y(iced::Center),
-            )
-            .on_press_maybe((!disabled).then(|| pick(cmd)))
-            .style(move |theme: &Theme, status| {
-                if is_current {
-                    popup_row_style(theme, button::Status::Hovered)
-                } else {
-                    popup_row_style(theme, status)
-                }
-            })
-            .width(Fill)
-            .padding(DD_PAD);
-            keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item)
-        })
-        .collect();
-
+    let mut rows: Vec<DropdownRow<Message>> = Vec::with_capacity(items.len() + 1);
     if let Some(header) = &header {
-        rows.insert(
-            0,
+        rows.push(DropdownRow::header(
             container(text(header.clone()).size(10).style(muted_text_style))
-                .padding([4, 10])
-                .into(),
+                .padding([4, 10]),
+        ));
+    }
+    let mut initial_selected: Option<usize> = None;
+    // Each item: its large icon and its name, the current one lit.
+    for (cmd, label, item_icon) in items {
+        let is_current = *cmd == last_cmd;
+        let disabled = widgets::is_disabled_item(cmd);
+        let icon_el: Element<Message> = container(make_icon(*item_icon, LARGE_ICON))
+            .width(Length::Fixed(LARGE_ICON))
+            .into();
+        let translated = t!(*label).into_owned();
+        let label_el = text(translated.clone())
+            .size(DD_LABEL)
+            .wrapping(iced::advanced::text::Wrapping::None)
+            .style(move |theme: &Theme| iced::widget::text::Style {
+                color: disabled.then_some(chrome::muted(theme)),
+            });
+        let label_el = keytips::label_anchor(
+            || keytips::label_id(&keytips::item_anchor(dd_id, cmd)),
+            label_el,
         );
+        let msg = (!disabled).then(|| pick(cmd));
+        let item = button(
+            row![icon_el, label_el]
+                .spacing(DD_GAP)
+                .align_y(iced::Center),
+        )
+        .on_press_maybe(msg.clone())
+        .style(move |theme: &Theme, status| {
+            if is_current && !matches!(status, button::Status::Hovered) {
+                popup_row_style(theme, button::Status::Hovered)
+            } else {
+                popup_row_style(theme, status)
+            }
+        })
+        .width(Fill)
+        .padding(DD_PAD);
+        let anchored = keytips::anchor_with(|| keytips::item_anchor(dd_id, cmd), item);
+        if let Some(msg) = msg {
+            if is_current && initial_selected.is_none() {
+                initial_selected = Some(rows.len());
+            }
+            rows.push(DropdownRow::item(anchored, translated, msg));
+        } else {
+            rows.push(DropdownRow::header(anchored));
+        }
     }
     // As wide as the longest name, as the right-click menus are; a
     // header wraps rather than widening the list.
@@ -2310,7 +2379,10 @@ fn dropdown_list<'a>(
         panel_w
     };
 
-    let panel = container(column(rows))
+    let list = DropdownList::new(rows)
+        .selected(initial_selected)
+        .on_escape(Message::CloseRibbonDropdown);
+    let panel = container(list)
         .style(popup_panel_style)
         .width(Length::Fixed(panel_w));
     (panel.into(), panel_w)

@@ -425,6 +425,19 @@ fn over_ucs_icon(p: Point, h: &crate::ui::overlay::UcsIconHit) -> bool {
 }
 
 impl OpenCADStudio {
+    fn select_command_marker_region(&mut self, i: usize, edit_cam: &Option<crate::scene::view::camera::Camera>, bounds: iced::Rectangle, polygon: &[Point], crossing: bool, replace: bool, geometry_hit: bool) -> bool {
+        let (view, eye) = match edit_cam {
+            Some(camera) => (camera.view_proj_rte(bounds), camera.eye()),
+            None => { let camera = self.tabs[i].scene.camera.borrow(); (camera.view_proj_rte(bounds), camera.eye()) }
+        };
+        let context = crate::command::PointPickContext { view, eye, bounds, aperture_px: crate::ui::overlay::pick_box_aperture_px(self.pick_box) };
+        let remove = self.shift_down || self.select_remove_mode;
+        let tab = &mut self.tabs[i];
+        let names = tab.active_cmd.as_mut().map(|command| command.on_selection_marker_region(&tab.scene, polygon, context, crossing, remove, replace, geometry_hit)).unwrap_or_default();
+        for name in &names { self.command_line.push_info(&format!("{} {}", if remove { "−" } else { "+" }, name)); }
+        !names.is_empty()
+    }
+
     fn active_construction_ray(
         &self,
         tab: usize,
@@ -2187,11 +2200,21 @@ impl OpenCADStudio {
             // Initialize once: constraint solves may add neighbors to this gesture.
             // Wire entities use the overlay; solid meshes stay visible and move live.
             if self.grip_preview_handles.is_empty() {
+                let init_started = crate::perf::enabled().then(Instant::now);
+                let init_mark = |stage: &str| {
+                    if let Some(started) = init_started {
+                        crate::perf_record!(
+                            "[perf] grip-init {stage}={:.1}ms",
+                            started.elapsed().as_secs_f64() * 1000.0
+                        );
+                    }
+                };
                 let preview_handles = self.tabs[i].scene.parametric_connected_handles(
                     self.tabs[i].current_parametric_scope(),
                     &edited_handles,
                     true,
                 );
+                init_mark("connected-handles");
                 if self.grip_dirty_before.is_none() {
                     self.grip_dirty_before = Some(self.tabs[i].dirty);
                 }
@@ -2212,6 +2235,7 @@ impl OpenCADStudio {
                         .collect();
                 }
                 self.capture_grip_history_originals(i, &edited_handles);
+                init_mark("history-originals");
                 for &handle in &preview_handles {
                     if !self.tabs[i].scene.meshes.contains_key(&handle) {
                         self.tabs[i].scene.preview_hidden.insert(handle);
@@ -2224,6 +2248,7 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .bump_entities_after_parametric_solve(&changes);
+                init_mark("bump-after-solve");
                 self.grip_preview_handles = preview_handles;
                 // Snapshot the entity's glyph quads once so each move can
                 // slide the already-shaped text rather than re-shaping it
@@ -2235,6 +2260,7 @@ impl OpenCADStudio {
                 let snap = self.tabs[i]
                     .scene
                     .wire_models_for(&self.grip_preview_handles);
+                init_mark("wire-models-for");
 
                 // Preserve the exact geometry from the instant the grip drag began.
                 // This snapshot is visual/reference-only: do NOT append it to
@@ -7008,6 +7034,8 @@ impl OpenCADStudio {
                         // The drag gesture applies the selection filter as the click one does.
                         handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
                         self.filter_handles_reject_locked(i, &mut handles);
+                        let polygon = [a, Point::new(p.x, a.y), p, Point::new(a.x, p.y)];
+                        let marker_hit = is_gathering && self.select_command_marker_region(i, &edit_cam, bounds, &polygon, crossing, !selection_pick_add, !handles.is_empty());
                         let cand_ms = timing.candidates;
                         // Box/lasso accumulates like individual picks
                         // (issue #83): a plain box adds to the current
@@ -7019,7 +7047,7 @@ impl OpenCADStudio {
                         if self.shift_down || self.select_remove_mode {
                             self.tabs[i].scene.deselect_entities(&handles);
                         } else {
-                            if !selection_pick_add && !handles.is_empty() {
+                            if !selection_pick_add && (!handles.is_empty() || marker_hit) {
                                 self.tabs[i].scene.deselect_all();
                             }
                             self.tabs[i].scene.select_entities(&handles);
@@ -7068,6 +7096,7 @@ properties={:.1}ms picked={}",
                     );
                     handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
                     self.filter_handles_reject_locked(i, &mut handles);
+                    let marker_hit = is_gathering && self.select_command_marker_region(i, &edit_cam, bounds, &poly_pts, crossing, !selection_pick_add, !handles.is_empty());
                     // Accumulate like the box path (issue #83): plain
                     // lasso adds, Shift+lasso removes. An empty lasso
                     // leaves the current selection untouched so a stray
@@ -7082,7 +7111,7 @@ properties={:.1}ms picked={}",
                         // PICKADD 0 (#226): a plain marquee REPLACES
                         // the selection (empty results still leave it
                         // alone, matching the box rule).
-                        if !selection_pick_add && !handles.is_empty() {
+                        if !selection_pick_add && (!handles.is_empty() || marker_hit) {
                             self.tabs[i].scene.deselect_all();
                         }
                         self.tabs[i].scene.select_entities(&handles);
@@ -7100,6 +7129,34 @@ properties={:.1}ms picked={}",
                 sel.gesture.box_current = None;
             } else {
                 if box_anchor.is_none() {
+                    if is_gathering && is_click {
+                        let (view, eye) = match &edit_cam {
+                            Some(camera) => (camera.view_proj_rte(bounds), camera.eye()),
+                            None => {
+                                let camera = self.tabs[i].scene.camera.borrow();
+                                (camera.view_proj_rte(bounds), camera.eye())
+                            }
+                        };
+                        let context = crate::command::PointPickContext {
+                            view, eye, bounds,
+                            aperture_px: crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                        };
+                        let remove = self.shift_down || self.select_remove_mode;
+                        let tab = &mut self.tabs[i];
+                        let hit = tab.active_cmd.as_mut().and_then(|command|
+                            command.on_selection_marker_click(&tab.scene, p, context, remove, !selection_pick_add));
+                        if let Some(name) = hit {
+                            tab.scene.selection.borrow_mut().clear_left_selection_gesture();
+                            if !remove && !selection_pick_add {
+                                tab.scene.deselect_all();
+                            }
+                            self.command_line.push_info(&format!("{} {}", if remove { "−" } else { "+" }, name));
+                            if !remove && !selection_pick_add {
+                                return self.feed_command(crate::command::StepInput::SelectionComplete(Vec::new()));
+                            }
+                            return Task::none();
+                        }
+                    }
                     // A parametric-constraint glyph draws above its geometry
                     // and takes click priority over the entity beneath it.
                     let glyph_hit = (self.tabs[i].scene.current_layout == "Model")
@@ -7348,6 +7405,11 @@ properties={:.1}ms picked={}",
                                             self.tabs[i].scene.deselect_entity(handle);
                                         }
                                     } else {
+                                        if !selection_pick_add {
+                                            if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                                command.clear_selection_markers();
+                                            }
+                                        }
                                         self.tabs[i]
                                             .scene
                                             .select_entity(handle, !selection_pick_add);
@@ -7365,6 +7427,9 @@ properties={:.1}ms picked={}",
                                 // PICKADD 0 (#226): OS convention — the
                                 // empty click also drops the selection.
                                 if !selection_pick_add && !self.shift_down {
+                                    if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+                                        command.clear_selection_markers();
+                                    }
                                     self.tabs[i].scene.deselect_all();
                                     self.refresh_properties();
                                 }
@@ -7459,6 +7524,8 @@ was_selected={}",
                     // Selection filter: keep only allowed types.
                     handles.retain(|&h| self.tabs[i].scene.passes_selection_filter(h));
                     self.filter_handles_reject_locked(i, &mut handles);
+                    let polygon = [a, Point::new(p.x, a.y), p, Point::new(a.x, p.y)];
+                    let marker_hit = is_gathering && self.select_command_marker_region(i, &edit_cam, bounds, &polygon, crossing, !selection_pick_add, !handles.is_empty());
                     let filter_ms = t_filter.map_or(0.0, |t| t.elapsed().as_secs_f64() * 1000.0);
                     let t_apply = crate::perf::enabled().then(Instant::now);
                     // Accumulate (issue #83): a plain box adds to the
@@ -7473,7 +7540,7 @@ was_selected={}",
                     if self.shift_down || self.select_remove_mode {
                         self.tabs[i].scene.deselect_entities(&handles);
                     } else {
-                        if !selection_pick_add && !handles.is_empty() {
+                        if !selection_pick_add && (!handles.is_empty() || marker_hit) {
                             self.tabs[i].scene.deselect_all();
                         }
                         self.tabs[i].scene.select_entities(&handles);

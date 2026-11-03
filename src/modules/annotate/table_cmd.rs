@@ -1378,6 +1378,52 @@ impl TableCellEditCommand {
             column,
         }
     }
+
+    /// The cell takes the given data type and picture with the text put
+    /// in, in the same undo step.
+    pub fn with_value_type(mut self, data_type: i32, unit_type: i32, picture: &str) -> Self {
+        self.set_value_type(data_type, unit_type, picture);
+        self
+    }
+
+    fn set_value_type(&mut self, data_type: i32, unit_type: i32, picture: &str) {
+        use codec::entities::table::CellStylePropertyFlags as P;
+        use crate::entities::table::{cell_data_category, cell_data_kind, CELL_DATA_CATEGORIES};
+        // A cell whose type turns into a number aligns Top Right, whatever
+        // its table style's alignment (measured with Top Center, Middle
+        // Left, Bottom Center, Top Left, Middle Right, Bottom Left); an
+        // alignment set on the cell itself stays.
+        let before = cell_data_kind(&self.table, self.row, self.column).map(|(kind, _)| CELL_DATA_CATEGORIES[kind].0);
+        let after = cell_data_category(data_type, unit_type);
+        let own_alignment = self
+            .table
+            .rows
+            .get(self.row)
+            .and_then(|row| row.cells.get(self.column))
+            .and_then(|cell| cell.style.as_ref())
+            .is_some_and(|style| style.sets(P::ALIGNMENT));
+        let right = (before != Some(after)
+            && !own_alignment
+            && matches!(after, "Whole Number" | "Decimal Number" | "Currency" | "Percentage"))
+            .then_some(3);
+        if let Some(cell) = self.table.cell_mut(self.row, self.column) {
+            if let Some(alignment) = right {
+                let style = cell.style.get_or_insert_with(Default::default);
+                style.alignment = alignment;
+                style.property_flags.insert(P::ALIGNMENT);
+            }
+            let bits = (P::DATA_TYPE | P::DATA_FORMAT).bits() as i32;
+            for content in &mut cell.contents {
+                content.format_property_flags &= !bits;
+                content.format_override_flags &= !bits;
+            }
+            let style = cell.style.get_or_insert_with(Default::default);
+            style.value_data_type = data_type;
+            style.value_unit_type = unit_type;
+            style.value_format = picture.to_string();
+            style.property_flags.insert(P::DATA_TYPE | P::DATA_FORMAT);
+        }
+    }
 }
 
 impl CadCommand for TableCellEditCommand {
@@ -1417,6 +1463,12 @@ impl CadCommand for TableCellEditCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         use codec::entities::table::CellStateFlags;
+        // Typed text sets a General cell's type, or a number cell's picture.
+        if let Some((data_type, unit_type, picture)) =
+            crate::entities::table::typed_entry_type(&self.table, self.row, self.column, text)
+        {
+            self.set_value_type(data_type, unit_type, &picture);
+        }
         let cell = self.table.cell_mut(self.row, self.column)?;
         if cell
             .state

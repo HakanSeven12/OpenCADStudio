@@ -37,9 +37,9 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-codec = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "598b1bb", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "1cb61c1", features = ["acis", "offset"] }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "1cb61c1" }
+codec = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "19363a7", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "cebc7f4", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "cebc7f4" }
 graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one
@@ -114,7 +114,6 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
@@ -208,9 +207,28 @@ iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00
 # CARGO_PROFILE_TEST_DEBUG=1 when needed.
 [profile.dev]
 debug = 0
-
-[profile.dev.package."*"]
+# A wildcard package override would also override build-time dependencies.
 opt-level = 2
+
+# Build-time dependencies do not need the runtime optimization level.
+[profile.dev.build-override]
+opt-level = 0
+
+# Keep this list in sync with the root package and workspace members.
+[profile.dev.package]
+OpenCADStudio = { opt-level = 0 }
+ocs_plugin_api = { opt-level = 0 }
+ocs_save = { opt-level = 0 }
+ocs_web_worker = { opt-level = 0 }
+dwg-thumbnailer = { opt-level = 0 }
+dwg-thumbnailer-win = { opt-level = 0 }
+
+# Keep translation-resource and manifest parsing fast during macro expansion.
+i18n-embed = { opt-level = 2 }
+fluent-bundle = { opt-level = 2 }
+fluent-syntax = { opt-level = 2 }
+find-crate = { opt-level = 2 }
+"toml:0.5.11" = { opt-level = 2 }
 
 # meshopt's C++ build maps DEBUG=false to NDEBUG. Keep its C assertions.
 [profile.dev.package.meshopt]

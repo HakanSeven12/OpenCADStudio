@@ -981,6 +981,7 @@ fn block_actions_set_frame_cancel_stale_and_context_guards() {
         definition: def,
         action,
         expected: expected.clone(),
+        point_choices: None,
         targets: targets.clone(),
         frame: None,
         rotate_only: None,
@@ -1000,6 +1001,7 @@ fn block_actions_set_frame_cancel_stale_and_context_guards() {
         definition: def,
         action,
         expected,
+        point_choices: None,
         targets,
         frame: None,
         rotate_only: None,
@@ -2767,6 +2769,7 @@ fn block_actions_rejected_outside_editor_preserve_running_command_and_stale_resu
         kind: Kind::Move,
         parameter: p,
         xy_key_point: None,
+        point_choices: None,
         targets: members(&app),
         location: glam::DVec3::ZERO,
         frame: None,
@@ -3368,6 +3371,210 @@ fn alignment_visibility_and_lookup_name_their_labels_without_asking() {
 }
 
 #[test]
+fn a_lookup_takes_its_name_description_and_palette_switch_at_the_placement_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Lookup1>:",
+        "the name question offers the next free name"
+    );
+    feed(&mut app, "Grip9");
+    feed(&mut app, "D");
+    feed(&mut app, "shows the grip");
+    feed(&mut app, "P");
+    feed(&mut app, "No");
+    feed(&mut app, "6,6");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let lookups = crate::scene::block_lookup::parameters(doc, definition);
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].1.lookup_name, "Grip9");
+    assert_eq!(lookups[0].1.lookup_description, "shows the grip");
+    assert!(!lookups[0].1.parameter.parameter.show_properties);
+    assert_eq!(
+        lookups[0].1.parameter.definition_point,
+        Vector3::new(6.0, 6.0, 0.0)
+    );
+}
+
+#[test]
+fn a_point_takes_its_chain_and_palette_answers_at_the_placement_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER POINT");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER  Specify parameter location or [Chain/Palette]:"
+    );
+    feed(&mut app, "C");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+    );
+    feed(&mut app, "Z");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:",
+        "an answer that is neither Yes nor No keeps the question"
+    );
+    feed(&mut app, "Yes");
+    feed(&mut app, "P");
+    feed(&mut app, "");
+    feed(&mut app, "3,4");
+    feed(&mut app, "6,7");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let points = crate::scene::block_point_parameter::parameters(doc, definition);
+    assert_eq!(points.len(), 1);
+    assert!(points[0].1.parameter.parameter.chain_actions);
+    assert!(
+        points[0].1.parameter.parameter.show_properties,
+        "Enter at the palette question keeps the property visible"
+    );
+    assert_eq!(
+        points[0].1.parameter.definition_point,
+        Vector3::new(3.0, 4.0, 0.0)
+    );
+    assert_eq!(
+        points[0].1.definition_label_point,
+        Vector3::new(6.0, 7.0, 0.0)
+    );
+}
+
+#[test]
+fn a_rotation_takes_its_chain_description_and_palette_answers_at_the_base_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+    );
+    feed(&mut app, "C");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+    );
+    feed(&mut app, "Yes");
+    feed(&mut app, "D");
+    feed(&mut app, "turns the frame");
+    feed(&mut app, "P");
+    feed(&mut app, "");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let rotation = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+        .expect("placed rotation parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&rotation.handle).expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert!(native.parameter.parameter.chain_actions);
+    assert_eq!(native.angle_description, "turns the frame");
+    assert!(
+        native.parameter.parameter.show_properties,
+        "Enter at the palette question keeps the property visible"
+    );
+}
+
+#[test]
+fn a_rotation_keeps_the_defaults_shown_at_each_question() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "C");
+    feed(&mut app, "");
+    feed(&mut app, "P");
+    feed(&mut app, "No");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let rotation = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+        .expect("placed rotation parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&rotation.handle).expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert!(!native.parameter.parameter.chain_actions);
+    assert_eq!(native.angle_description, "");
+    assert!(!native.parameter.parameter.show_properties);
+}
+
+#[test]
+fn a_second_lookup_offers_the_next_free_name_and_a_taken_name_keeps_its_default() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "2,2");
+    feed(&mut app, "");
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Lookup2>:",
+        "the second parameter skips the name already placed"
+    );
+    feed(&mut app, "Lookup1");
+    feed(&mut app, "4,4");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let names = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+        .into_iter()
+        .map(|(_, parameter)| parameter.lookup_name.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        ["Lookup1", "Lookup2"],
+        "a name already in use is refused and the default stands"
+    );
+}
+
+#[test]
 fn orientation_parameter_batch_numeric_rotation_local_history_save_and_parent_undo() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -3769,6 +3976,7 @@ fn orientation_parameter_stale_context_and_invalid_result_do_not_start_history()
                 reference: glam::DVec3::X,
                 label_offset: None,
                 grips: None,
+                options: Default::default(),
             },
         );
         assert_eq!(app.tabs[i].scene.document, before);
@@ -4199,6 +4407,7 @@ fn point_parameter_placement_discard_and_stale_context_leave_no_objects() {
                 definition,
                 location,
                 label: glam::DVec3::ZERO,
+                options: Default::default(),
             },
         );
         assert_eq!(app.tabs[i].scene.document, start);

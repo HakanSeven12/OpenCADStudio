@@ -6,17 +6,19 @@ use codec::{Document, EntityType};
 use std::io::Cursor;
 
 fn fixture() -> OpenCADStudio {
+    fixture_with_entities(vec![EntityType::Line(Line::from_points(
+        Vector3::ZERO,
+        Vector3::UNIT_X,
+    ))])
+}
+
+fn fixture_with_entities(entities: Vec<EntityType>) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
     let i = app.active_tab;
-    app.tabs[i].scene.define_block_raw(
-        "PROPERTIES",
-        Vector3::ZERO,
-        vec![EntityType::Line(Line::from_points(
-            Vector3::ZERO,
-            Vector3::UNIT_X,
-        ))],
-    );
+    app.tabs[i]
+        .scene
+        .define_block_raw("PROPERTIES", Vector3::ZERO, entities);
     let reference = app.tabs[i]
         .scene
         .document
@@ -726,6 +728,25 @@ fn select_editor_line(app: &mut OpenCADStudio) -> codec::types::Handle {
     handle
 }
 
+/// Select one line of the edited definition by position, replacing whatever
+/// was selected so each call starts from a known selection.
+fn select_editor_line_at(app: &mut OpenCADStudio, index: usize) -> codec::types::Handle {
+    let i = app.active_tab;
+    let handle = app.tabs[i]
+        .scene
+        .document
+        .entities_in_block("PROPERTIES")
+        .filter(|entity| matches!(entity, EntityType::Line(_)))
+        .nth(index)
+        .unwrap()
+        .common()
+        .handle;
+    app.tabs[i].scene.deselect_all();
+    app.tabs[i].scene.selected.insert(handle);
+    app.refresh_properties();
+    handle
+}
+
 fn block_parameter_key() -> crate::scene::model::object::BlockParameterKey {
     use crate::scene::model::object::{BlockParameterComponent, BlockParameterKey};
     BlockParameterKey {
@@ -778,6 +799,107 @@ fn each_surface_toggles_its_own_copy_of_the_list() {
     assert_eq!(app.tabs[app.active_tab].properties.open_block_picker, None);
 }
 
+/// A generic choice row keeps its list as panel state so the list can close
+/// on the same Escape that would otherwise reach the viewport, and a value
+/// picked from it closes it too. A rebuild keeps the list while the same row
+/// stays on the same selection and drops it when the selection changes.
+#[test]
+fn a_generic_choice_list_is_panel_state_and_closes_on_escape_or_a_value() {
+    let mut app = fixture_with_entities(vec![
+        EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_X)),
+        EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_Y)),
+    ]);
+    let i = app.active_tab;
+    let toggle = |app: &mut OpenCADStudio, field, quick: bool| {
+        let _ = app.update(Message::PropChoiceToggle { field, quick });
+    };
+    let open = |app: &OpenCADStudio| app.tabs[app.active_tab].properties.open_choice;
+
+    // A definition row: both surfaces read it, a dismissal closes it, and a
+    // picked value reaches the definition.
+    let field = "bedit_units";
+    row(&app, field);
+    toggle(&mut app, field, false);
+    assert_eq!(open(&app), Some((field, false)));
+    toggle(&mut app, field, true);
+    assert_eq!(
+        open(&app),
+        Some((field, true)),
+        "the second surface takes the list over"
+    );
+    toggle(&mut app, field, true);
+    assert_eq!(open(&app), None);
+
+    toggle(&mut app, field, false);
+    let _ = app.update(Message::PropChoiceDismiss {
+        field,
+        quick: false,
+    });
+    assert_eq!(open(&app), None, "the overlay's own dismissal closes it");
+
+    toggle(&mut app, field, false);
+    let _ = app.update(Message::PropGeomChoiceChanged {
+        field,
+        value: "Meters".into(),
+    });
+    assert_eq!(open(&app), None, "picking a value closes the list");
+    assert_eq!(
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PROPERTIES")
+            .unwrap()
+            .units,
+        6,
+        "the pick reached the definition"
+    );
+
+    // An entity row: it survives a rebuild for the same selection and drops
+    // when another entity is selected, although the row itself stays on the
+    // panel.
+    let field = "material";
+    let first = select_editor_line_at(&mut app, 0);
+    row(&app, field);
+    toggle(&mut app, field, false);
+    app.refresh_properties();
+    assert_eq!(
+        open(&app),
+        Some((field, false)),
+        "a rebuild for the same selection keeps the list"
+    );
+    let second = select_editor_line_at(&mut app, 1);
+    assert_ne!(first, second);
+    row(&app, field);
+    assert_eq!(
+        open(&app),
+        None,
+        "a rebuild for another selection drops the list"
+    );
+
+    toggle(&mut app, field, false);
+    let _ = app.update(Message::CommandEscape);
+    assert_eq!(open(&app), None);
+    assert!(
+        app.tabs[app.active_tab].scene.selected.contains(&second),
+        "Escape closes the list and keeps the selection"
+    );
+
+    // The overlay reports its own Escape first; the global shortcut repeats the
+    // same keypress a moment later, with the list already closed. The repeat
+    // must not clear the selection the list was opened for.
+    toggle(&mut app, field, false);
+    let _ = app.update(Message::PropChoiceDismiss {
+        field,
+        quick: false,
+    });
+    let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+    assert!(
+        app.tabs[app.active_tab].scene.selected.contains(&second),
+        "the repeated Escape must not clear the selection"
+    );
+}
+
 /// Keys the list must keep to itself. Escape closes it; Enter and the arrows
 /// would otherwise leave the list open behind a viewport that has already
 /// reacted (a cleared selection, a recalled command, a nudged selection).
@@ -804,13 +926,13 @@ fn open_dynamic_value_list_swallows_escape_enter_and_the_arrows() {
         Message::ShortcutPressed("SPACE".into()),
     ] {
         assert!(
-            app.intercept_block_picker_key(&msg).is_some(),
+            app.intercept_property_list_key(&msg).is_some(),
             "{msg:?} must not reach the command line or the viewport"
         );
     }
     assert!(app.tabs[app.active_tab].properties.open_block_picker.is_some());
     assert!(app
-        .intercept_block_picker_key(&Message::PropBlockPickerToggle {
+        .intercept_property_list_key(&Message::PropBlockPickerToggle {
             key: block_parameter_key(),
             quick: false,
         })

@@ -382,9 +382,9 @@ impl OpenCADStudio {
     }
 
     /// Keep Escape, Enter, Space and the arrows out of the command line and the
-    /// viewport while a dynamic-value list is open: they would otherwise
-    /// dismiss the selection the list was opened for. Escape closes the list.
-    pub(in crate::app) fn intercept_block_picker_key(
+    /// viewport while a property list is open: they would otherwise dismiss the
+    /// selection the list was opened for. Escape closes the list.
+    pub(in crate::app) fn intercept_property_list_key(
         &mut self,
         msg: &Message,
     ) -> Option<Task<Message>> {
@@ -408,11 +408,9 @@ impl OpenCADStudio {
             self.block_picker_dismissed = false;
             return None;
         }
-        if self.tabs[self.active_tab]
-            .properties
-            .open_block_picker
-            .is_none()
-        {
+        let panel = &self.tabs[self.active_tab].properties;
+        let any_open = panel.open_block_picker.is_some() || panel.open_choice.is_some();
+        if !any_open {
             // The overlay reported its own Escape a moment earlier; the global
             // shortcut repeats the same keypress with the list already closed.
             // Dropping that repeat keeps the selection; any other key ends the
@@ -425,7 +423,9 @@ impl OpenCADStudio {
             return None;
         }
         if escape {
-            self.tabs[self.active_tab].properties.open_block_picker = None;
+            let panel = &mut self.tabs[self.active_tab].properties;
+            panel.open_block_picker = None;
+            panel.open_choice = None;
         }
         Some(Task::none())
     }

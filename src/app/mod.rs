@@ -738,9 +738,9 @@ pub(super) struct OpenCADStudio {
     clean_screen: bool,
     /// Properties opened on top of clean screen (Ctrl+1 while it is on).
     clean_screen_properties: bool,
-    /// The dynamic-value list closed itself a moment ago. The overlay reports
-    /// Escape before the global shortcut repeats it, so the repeat is dropped
-    /// instead of clearing the selection the list was opened for.
+    /// A property list closed itself a moment ago. The overlay reports Escape
+    /// before the global shortcut repeats it, so the repeat is dropped instead
+    /// of clearing the selection the list was opened for.
     block_picker_dismissed: bool,
     /// Quick Properties: show a compact floating property panel on selection.
     quick_properties: bool,
@@ -805,6 +805,8 @@ pub(super) struct OpenCADStudio {
     attman: Option<crate::ui::window::attman_dialog::AttManState>,
     /// Field dialog working copy; `None` while closed.
     field_dialog: Option<crate::ui::window::field_dialog::FieldDialogState>,
+    /// The Formula dialog kept while Insert Field has another one open.
+    field_formula_parent: Option<crate::ui::window::field_dialog::FieldDialogState>,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     /// -VIEW sEttings Background dialog.
@@ -828,6 +830,11 @@ pub(super) struct OpenCADStudio {
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
     table_cell_warning: Option<(crate::ui::window::table_cell_dialog::CellFormatState, Vec<String>)>,
+    /// A value typed into a cell that waits on the data type question.
+    table_cell_entry: Option<commands::table_cells::CellEntry>,
+    /// The next cell step puts its value in without the data type question
+    /// (the type was just changed to fit it).
+    table_cell_entry_typed: bool,
     /// The Data Link Manager was opened by Link Cell: its link feeds the
     /// picked cells when it closes.
     data_link_cell_target: bool,
@@ -2983,6 +2990,8 @@ pub enum ModalKind {
     TableCellBlock,
     TableCellFormat,
     TableCellWarning,
+    /// A value typed into a cell that is not of the cell's data type.
+    TableCellEntry,
     PdfShxSettings,
     UnderlayLayers,
     PdfImportSettings,
@@ -4612,6 +4621,19 @@ pub enum Message {
         field: &'static str,
         value: String,
     },
+    /// Open or close one generic choice row's list. It carries the surface it
+    /// was clicked on, so the docked panel and Quick Properties each keep
+    /// their own open state.
+    PropChoiceToggle {
+        field: &'static str,
+        quick: bool,
+    },
+    /// The list dismissed itself: the overlay's Escape or a click outside; the
+    /// global shortcut repeats the same Escape a moment later.
+    PropChoiceDismiss {
+        field: &'static str,
+        quick: bool,
+    },
     /// User is typing in an editable geometry field (live buffer update).
     PropGeomInput {
         field: &'static str,
@@ -5778,6 +5800,7 @@ impl OpenCADStudio {
             attman: None,
             attdef_edit: None,
             field_dialog: None,
+            field_formula_parent: None,
             point_cloud_color_map: None,
             pc_section: None,
             view_background: None,
@@ -5790,6 +5813,8 @@ impl OpenCADStudio {
             table_cell_block: None,
             table_cell_format: None,
             table_cell_warning: None,
+            table_cell_entry: None,
+            table_cell_entry_typed: false,
             data_link_cell_target: false,
             pdf_shx_dialog: None,
             underlay_layers: None,

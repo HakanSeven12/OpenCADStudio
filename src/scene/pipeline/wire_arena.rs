@@ -172,6 +172,31 @@ pub fn classify_wire(wire: &WireModel) -> WireKind {
     }
 }
 
+/// Handles behind the retained analytical uploads. Held as the per-run sets
+/// the partition built them in: merging or copying one enormous set cost more
+/// than the few membership questions that are ever asked of it.
+#[derive(Clone, Default)]
+pub struct ContributorSet {
+    parts: Vec<std::sync::Arc<rustc_hash::FxHashSet<Handle>>>,
+}
+
+impl ContributorSet {
+    fn single(set: rustc_hash::FxHashSet<Handle>) -> Self {
+        Self {
+            parts: vec![std::sync::Arc::new(set)],
+        }
+    }
+
+    pub fn contains(&self, handle: &Handle) -> bool {
+        self.parts.iter().any(|part| part.contains(handle))
+    }
+
+    /// Entries across the runs; a handle seen in two runs counts twice.
+    pub fn len(&self) -> usize {
+        self.parts.iter().map(|part| part.len()).sum()
+    }
+}
+
 /// Result of a single-pass partitioning of viewport wires.
 pub struct PartitionedWires<'a> {
     pub regular: Vec<&'a WireModel>,
@@ -179,8 +204,12 @@ pub struct PartitionedWires<'a> {
     pub instanced: Vec<super::wire_gpu::BlockRef<'a>>,
     pub circle_instances: Vec<super::circle_gpu::CircleInstance>,
     pub ellipse_instances: Vec<super::ellipse_gpu::EllipseInstance>,
+    /// The reference each circle and ellipse instance came from, index for
+    /// index (`Handle::NULL` for a wire that carries no handle).
+    pub circle_owners: Vec<Handle>,
+    pub ellipse_owners: Vec<Handle>,
     /// Handles that contributed to the retained analytical uploads.
-    pub contributors: rustc_hash::FxHashSet<Handle>,
+    pub contributors: ContributorSet,
 }
 
 /// Whether this wire contributes to an upload retained across arena patches.
@@ -200,12 +229,48 @@ pub fn partition_wires<'a>(
     wires: &'a [WireModel],
     depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
 ) -> PartitionedWires<'a> {
+    // Wires are independent, so partition fixed runs of them in parallel and
+    // join the results in order, which keeps every list in submission order.
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rayon::prelude::*;
+        const RUN: usize = 8192;
+        let mut parts = wires
+            .par_chunks(RUN)
+            .map(|run| partition_run(run, depth_map))
+            .collect::<Vec<_>>()
+            .into_iter();
+        let Some(mut merged) = parts.next() else {
+            return partition_run(wires, depth_map);
+        };
+        for part in parts {
+            merged.regular.extend(part.regular);
+            merged.mesh.extend(part.mesh);
+            merged.instanced.extend(part.instanced);
+            merged.circle_instances.extend(part.circle_instances);
+            merged.ellipse_instances.extend(part.ellipse_instances);
+            merged.circle_owners.extend(part.circle_owners);
+            merged.ellipse_owners.extend(part.ellipse_owners);
+            merged.contributors.parts.extend(part.contributors.parts);
+        }
+        merged
+    }
+    #[cfg(target_arch = "wasm32")]
+    partition_run(wires, depth_map)
+}
+
+pub fn partition_run<'a>(
+    wires: &'a [WireModel],
+    depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+) -> PartitionedWires<'a> {
     let cap = wires.len();
     let mut regular = Vec::with_capacity(cap);
     let mut mesh = Vec::new();
     let mut instanced = Vec::new();
     let mut circle_instances = Vec::with_capacity(cap);
     let mut ellipse_instances = Vec::new();
+    let mut circle_owners: Vec<Handle> = Vec::new();
+    let mut ellipse_owners: Vec<Handle> = Vec::new();
     let mut contributors: rustc_hash::FxHashSet<Handle> = rustc_hash::FxHashSet::default();
     contributors.reserve(cap.min(1024));
 
@@ -229,6 +294,10 @@ pub fn partition_wires<'a>(
             let depth = super::wire_gpu::wire_draw_depth(wire, depth_map);
             if super::circle_gpu::extract_circle_instances_into(wire, depth, &mut circle_instances)
             {
+                circle_owners.resize(
+                    circle_instances.len(),
+                    handle_of(wire).unwrap_or(Handle::NULL),
+                );
                 if let Some(handle) = handle_of(wire) {
                     contributors.insert(handle);
                 }
@@ -239,6 +308,10 @@ pub fn partition_wires<'a>(
                 depth,
                 &mut ellipse_instances,
             ) {
+                ellipse_owners.resize(
+                    ellipse_instances.len(),
+                    handle_of(wire).unwrap_or(Handle::NULL),
+                );
                 if let Some(handle) = handle_of(wire) {
                     contributors.insert(handle);
                 }
@@ -260,7 +333,9 @@ pub fn partition_wires<'a>(
         instanced,
         circle_instances,
         ellipse_instances,
-        contributors,
+        circle_owners,
+        ellipse_owners,
+        contributors: ContributorSet::single(contributors),
     }
 }
 

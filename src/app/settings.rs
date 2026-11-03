@@ -918,6 +918,12 @@ pub struct UserSettings {
     pub ole_quality: i16,
     /// TRIMEXTENDMODE: TRIM and EXTEND start in Quick mode (else Standard).
     pub trim_extend_quick: bool,
+    /// REVCLOUDCREATEMODE: the type REVCLOUD starts with (0 Freehand, 1 Rectangular, 2 Polygonal).
+    pub revcloud_create_mode: u8,
+    /// REVCLOUDARCVARIANCE: cloud chords of random length.
+    pub revcloud_arc_variance: bool,
+    /// REVCLOUDGRIPS: clouds show the grips of their path.
+    pub revcloud_grips: bool,
     /// Fonts and plot styles kept in a chosen folder (`None`: the default).
     pub fonts_folder: Option<String>,
     pub plot_styles_folder: Option<String>,
@@ -1457,6 +1463,9 @@ impl Default for UserSettings {
             ole_hide: 0,
             ole_quality: 3,
             trim_extend_quick: true,
+            revcloud_create_mode: 1,
+            revcloud_arc_variance: true,
+            revcloud_grips: true,
             fonts_folder: None,
             plot_styles_folder: None,
             support_folder: None,

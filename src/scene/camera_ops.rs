@@ -1003,18 +1003,29 @@ impl Scene {
         // so the drawing opens square, the way it was saved, instead of in raw
         // world orientation (which looks tilted).
         let rotation = view::camera::yaw_pitch_to_quat(yaw, pitch, -twist as f32);
-        let view_right = rotation * glam::Vec3::X;
-        let view_up = rotation * glam::Vec3::Y;
         // view_target is WCS; wire-space subtracts world_offset. view_center is
         // a DCS (screen-plane) offset, so fold it through the view basis.
         // Keep the target in f64: casting it to f32 first quantizes the camera
         // to ~0.5 m at UTM scale, so panning/zooming inside a floating viewport
         // (which nudges view_target by sub-metre f64 steps) made the content
-        // jump on the f32 grid. The axis directions stay f32 (orientation only);
-        // only the position must stay precise — matching the model camera.
+        // jump on the f32 grid.
         let base = glam::DVec3::new(view_target.x, view_target.y, view_target.z);
-        let target =
-            base + view_right.as_dvec3() * view_center.x + view_up.as_dvec3() * view_center.y;
+        // The axes that carry view_center stay f64 too: a view saved with its
+        // target far from the drawing stores a view_center hundreds of
+        // millions of units long, and f32 axes, true to ~1e-7, then misplace
+        // the content by tens of units.
+        let vd64 = glam::DVec3::new(view_direction.x, view_direction.y, view_direction.z)
+            .normalize_or(glam::DVec3::Z);
+        let yaw64 = if vd64.x.abs() < 1e-6 && vd64.y.abs() < 1e-6 {
+            0.0
+        } else {
+            vd64.x.atan2(-vd64.y)
+        };
+        let rotation64 =
+            view::camera::yaw_pitch_to_dquat(yaw64, vd64.z.clamp(-1.0, 1.0).asin(), -twist);
+        let target = base
+            + rotation64 * glam::DVec3::X * view_center.x
+            + rotation64 * glam::DVec3::Y * view_center.y;
         let lens_length = lens_length.max(1.0) as f32;
         // The saved-view convention uses a 24 mm vertical aperture. This is
         // the inverse of the projection path's documented
@@ -1887,6 +1898,7 @@ impl Scene {
             self.annotation_all_visible(),
             None,
             None,
+            None,
         ) {
             if let Some([x0, y0, z0, x1, y1, z1]) = set.instance_aabb {
                 fold!(Some((glam::DVec3::new(x0, y0, z0), glam::DVec3::new(x1, y1, z1))));
@@ -2207,5 +2219,44 @@ pub fn copy_background(document: &mut codec::Document, handle: Handle) -> Handle
             add_background(document, data)
         }
         _ => Handle::NULL,
+    }
+}
+
+#[cfg(test)]
+mod far_view_center_tests {
+    use super::*;
+
+    #[test]
+    fn far_view_center_lands_where_the_view_was_saved() {
+        // A twisted viewport whose target was saved far from the drawing:
+        // its view_center (a DCS offset from that target) is ~5e8 long. The
+        // camera has to land on the drawing to the millimetre; folding the
+        // offset through f32 axes put it tens of units off.
+        let target = codec::types::Vector3::new(34_000_000.0, 630_000_000.0, 0.0);
+        let twist: f64 = -0.93;
+        let want = glam::DVec2::new(500_000.0, 4_000_000.0);
+        // WCS = target + R(-twist) * center, so center = R(twist) * (want - target).
+        let d = want - glam::DVec2::new(target.x, target.y);
+        let (s, c) = twist.sin_cos();
+        let center = codec::types::Vector2::new(c * d.x - s * d.y, s * d.x + c * d.y);
+        assert!(center.x.hypot(center.y) > 4.0e8);
+
+        let scene = crate::scene::Scene::new();
+        let cam = scene
+            .camera_from_view_mode(
+                codec::types::Vector3::new(0.0, 0.0, 1.0),
+                target,
+                center,
+                100.0,
+                twist,
+                false,
+                50.0,
+            )
+            .expect("a camera");
+        assert!(
+            (cam.target.x - want.x).abs() < 1e-3 && (cam.target.y - want.y).abs() < 1e-3,
+            "camera at {:?}, view saved at {want:?}",
+            cam.target
+        );
     }
 }

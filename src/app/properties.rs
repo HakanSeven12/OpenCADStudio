@@ -23,30 +23,6 @@ const PARALLEL_AGGREGATE_MIN: usize = 32;
 /// most one wave of builds is ever wasted.
 const PARALLEL_AGGREGATE_CHUNK: usize = 256;
 
-
-fn property_choice_combos(
-    sections: &[crate::scene::model::object::PropSection],
-) -> rustc_hash::FxHashMap<String, iced::widget::combo_box::State<ui::properties::LocalizedChoice>>
-{
-    sections
-        .iter()
-        .flat_map(|section| section.props.iter())
-        .filter_map(|prop| match &prop.value {
-            PropValue::Choice { options, .. } | PropValue::ChoiceWithTooltip { options, .. } => Some((
-                prop.field.to_string(),
-                iced::widget::combo_box::State::new(
-                    options
-                        .iter()
-                        .cloned()
-                        .map(ui::properties::LocalizedChoice::new)
-                        .collect(),
-                ),
-            )),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Cap the total number of selection grips at
 /// [`crate::app::settings::MAX_SELECTED_GRIPS`], keeping entity order with
 /// non-midpoint (vertex/stretch) grips first. Below the cap both vecs are
@@ -455,6 +431,8 @@ impl OpenCADStudio {
                             != codec::entities::CENTERMARK_XDATA_APPLICATION
                         && rec.application_name
                             != codec::entities::CENTERLINE_XDATA_APPLICATION
+                        // A cloud's arc length is its Arc Length row.
+                        && rec.application_name != crate::entities::revcloud::APP
                 }) {
                     let value_text = rec
                         .values
@@ -964,17 +942,30 @@ impl OpenCADStudio {
                 // Name row: editable for regular blocks — pick an
                 // existing definition to re-point this reference, or
                 // type a new name to rename the definition (every
-                // insert of it follows). Anonymous (*) and
-                // xref(-dependent) blocks keep the read-only row.
+                // insert of it follows). An evaluated reference names
+                // the definition it came from, so the row stays
+                // editable and shows that definition rather than the
+                // generated record. A reference with no regular
+                // definition behind it keeps the read-only row.
                 let regular = |br: &codec::tables::BlockRecord| {
                     !br.is_anonymous() && !br.flags.is_xref && !br.name.contains('|')
                 };
-                let editable = doc
+                let named = doc
                     .block_records
                     .get(&ins.block_name)
-                    .map(&regular)
-                    .unwrap_or(false);
-                if editable {
+                    .filter(|record| regular(record))
+                    .map(|record| record.name.clone())
+                    .or_else(|| {
+                        definition
+                            .and_then(|handle| {
+                                doc.block_records
+                                    .iter()
+                                    .find(|record| record.handle == handle)
+                            })
+                            .filter(|record| regular(record))
+                            .map(|record| record.name.clone())
+                    });
+                if let Some(value) = named {
                     let mut options: Vec<String> = doc
                         .block_records
                         .iter()
@@ -985,10 +976,7 @@ impl OpenCADStudio {
                     set_row_value(
                         &mut sections,
                         "block",
-                        crate::scene::model::object::PropValue::EditChoice {
-                            value: ins.block_name.clone(),
-                            options,
-                        },
+                        crate::scene::model::object::PropValue::EditChoice { value, options },
                     );
                 } else {
                     set_row(&mut sections, "block", display_name);
@@ -1480,8 +1468,15 @@ impl OpenCADStudio {
                                 .or_else(|| document_row_style.map(|style| style.fill_enabled))
                                 .unwrap_or(false),
                         );
-                        let format = local(CellStylePropertyFlags::DATA_FORMAT)
-                            .map(|style| style.value_format.clone())
+                        let format = Some(crate::entities::table::cell_value_picture(
+                            row,
+                            column_index,
+                            table,
+                            cell,
+                        ))
+                        .filter(|picture| {
+                            !picture.is_empty() || local(CellStylePropertyFlags::DATA_FORMAT).is_some()
+                        })
                             .or_else(|| document_row_style.map(|style| style.format_string.clone()))
                             .unwrap_or_default();
                         update_row_text(&mut sections, "tbl_cell_format", format);
@@ -1715,7 +1710,9 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             );
-                            if local(CellStylePropertyFlags::DATA_TYPE).is_none() {
+                            if crate::entities::table::cell_value_type(row, column_index, table, cell)
+                                .is_none()
+                            {
                                 if let Some(style) = document_row_style {
                                     update_row_text(
                                         &mut sections,
@@ -2129,6 +2126,7 @@ impl OpenCADStudio {
             crate::entities::common::set_unit_context(
                 crate::entities::common::UnitContext::from_header(h),
             );
+            crate::entities::polyline::set_spline_segments(h.spline_segments);
         }
         {
             // Which text styles fix their own height — the height rows read it
@@ -2198,7 +2196,9 @@ impl OpenCADStudio {
                 .get_entity(cur_handles[0])
                 .and_then(|entity| match entity {
                     codec::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
-                    codec::EntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
+                    codec::EntityType::Polyline2D(polyline) => Some(
+                        crate::entities::polyline::polyline2d_frame_indices(polyline).len(),
+                    ),
                     codec::EntityType::PolygonMesh(mesh) => Some(mesh.vertices.len()),
                     codec::EntityType::Polyline3D(polyline) => Some(
                         crate::entities::polyline::polyline3d_control_vertex_count(polyline),
@@ -2629,7 +2629,6 @@ impl OpenCADStudio {
                         block_definition: tab
                             .active_block_edit_session()
                             .map(|session| session.br_handle),
-                        choice_combos: property_choice_combos(&sections),
                         sections,
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
                         linetype_combo: iced::widget::combo_box::State::new(linetype_items.clone()),
@@ -2663,7 +2662,6 @@ impl OpenCADStudio {
                         }
                     }
                     ui::PropertiesPanel {
-                        choice_combos: property_choice_combos(&sections),
                         sections,
                         title,
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
@@ -2797,7 +2795,6 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                         retain_compact_solid_sections(&mut sections);
                     }
                     ui::PropertiesPanel {
-                        choice_combos: property_choice_combos(&sections),
                         sections,
                         title: t!("%{count} objects selected", count = selected.len()).into_owned(),
                         selection_group_combo: iced::widget::combo_box::State::new(groups.clone()),
@@ -3184,22 +3181,44 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
             panel
         };
         // An open dynamic-value list belongs to the row it was opened from, so
-        // the rebuild keeps it only while that row is still on the panel.
+        // the rebuild keeps it only while that row is still shown.
         let old_panel = &self.tabs[i].properties;
         let keeps_picker = old_panel.open_block_picker.is_some_and(|(open, _)| {
             same_selection
                 && new_panel.sections.iter().any(|section| {
-                    section.props.iter().any(|property| {
-                        matches!(
-                            &property.value,
-                            crate::scene::model::object::PropValue::BlockChoice { key, .. }
-                                if *key == open
-                        )
-                    })
+                    !new_panel.collapsed_sections.contains(&section.title)
+                        && section.props.iter().any(|property| {
+                            matches!(
+                                &property.value,
+                                crate::scene::model::object::PropValue::BlockChoice { key, .. }
+                                    if *key == open
+                            )
+                        })
                 })
         });
         if keeps_picker {
             new_panel.open_block_picker = old_panel.open_block_picker;
+        }
+        // A generic choice list belongs to its row too: keep it open only while
+        // the rebuild still shows that row.
+        let keeps_choice = old_panel.open_choice.is_some_and(|(open, _)| {
+            same_selection
+                && new_panel.sections.iter().any(|section| {
+                    !new_panel.collapsed_sections.contains(&section.title)
+                        && section.props.iter().any(|property| {
+                            property.field == open
+                                && matches!(
+                                    &property.value,
+                                    crate::scene::model::object::PropValue::Choice { .. }
+                                        | crate::scene::model::object::PropValue::ChoiceWithTooltip {
+                                            ..
+                                        }
+                                )
+                        })
+                })
+        });
+        if keeps_choice {
+            new_panel.open_choice = old_panel.open_choice;
         }
 
         self.tabs[i].properties = new_panel;

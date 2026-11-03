@@ -21,6 +21,7 @@ impl OpenCADStudio {
             reference,
             label_offset,
             grips,
+            options,
         } = result
         else {
             unreachable!()
@@ -79,6 +80,27 @@ impl OpenCADStudio {
         if perpendicular {
             crate::scene::block_orientation_parameter::set_alignment_type(&mut self.tabs[i].scene.document, definition, parameter, true)
                 .expect("validated Alignment parameter placement");
+        }
+        let option_error = {
+            use crate::scene::block_authoring::metadata;
+            let document = &mut self.tabs[i].scene.document;
+            let description = options.description.as_deref().map(|value| {
+                metadata::set_text(document, definition, parameter, metadata::Field::Description, value)
+            });
+            let chain = options
+                .chain
+                .map(|value| metadata::set_chain(document, definition, parameter, value));
+            let palette = options
+                .palette
+                .map(|value| metadata::set_visible(document, definition, parameter, value));
+            description
+                .into_iter()
+                .chain(chain)
+                .chain(palette)
+                .find_map(Result::err)
+        };
+        if let Some(error) = option_error {
+            self.command_line.push_error(crate::t!(error).as_ref());
         }
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
@@ -204,6 +226,7 @@ impl OpenCADStudio {
             definition,
             location,
             label,
+            options,
         } = result
         else {
             unreachable!()
@@ -237,6 +260,20 @@ impl OpenCADStudio {
             codec::types::Vector3::new(label.x, label.y, label.z),
         )
         .expect("validated Point placement");
+        let option_error = {
+            use crate::scene::block_authoring::metadata;
+            let document = &mut self.tabs[i].scene.document;
+            let chain = options
+                .chain
+                .map(|value| metadata::set_chain(document, definition, parameter, value));
+            let palette = options
+                .palette
+                .map(|value| metadata::set_visible(document, definition, parameter, value));
+            chain.into_iter().chain(palette).find_map(Result::err)
+        };
+        if let Some(error) = option_error {
+            self.command_line.push_error(crate::t!(error).as_ref());
+        }
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
@@ -504,7 +541,11 @@ impl OpenCADStudio {
                             self.tabs[i].id,
                             block,
                             kind,
-                        );
+                        )
+                        .with_default_name(crate::scene::block_lookup::next_name(
+                            &self.tabs[i].scene.document,
+                            block,
+                        ));
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(Task::none());

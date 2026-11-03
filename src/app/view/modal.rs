@@ -61,6 +61,7 @@ impl OpenCADStudio {
             Some(K::TableCellBlock) => crate::tr!("table-cells", "block-title"),
             Some(K::TableCellFormat) => crate::tr!("table-cells", "format-title"),
             Some(K::TableCellWarning) => crate::tr!("table-cells", "warning-title"),
+            Some(K::TableCellEntry) => crate::tr!("table-cells", "entry-title"),
             Some(K::PdfShxSettings) => crate::tr!("pdf-shx", "title"),
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
@@ -567,6 +568,12 @@ impl OpenCADStudio {
                 let (_, cells) = self.table_cell_warning.as_ref()?;
                 sized_flow(ex, 460, 230, |flow| {
                     crate::ui::window::table_cell_dialog::view_warning(cells, flow)
+                })
+            }
+            super::super::ModalKind::TableCellEntry => {
+                let entry = self.table_cell_entry.as_ref()?;
+                sized_flow(ex, 460, 300, |flow| {
+                    crate::ui::window::table_cell_dialog::view_entry(entry.cell_name(), &entry.text, flow)
                 })
             }
             super::super::ModalKind::TableCellFormat => {
@@ -2278,7 +2285,7 @@ fn save_as_dialog_window<'a>(
     items.push(
         row![
             label(t!("Format:")).width(70),
-            iced::widget::pick_list(sel_fmt, options, |value| value.clone())
+            crate::ui::dropdown_list::pick_list(sel_fmt, options, |value| value.clone())
                 .on_select(Message::SaveDialogFormatChanged)
             .width(field_width),
         ]

@@ -109,6 +109,10 @@ pub struct StatusBar {
     /// The quad cursor menu's display flags, mirrored from the app per
     /// message (the bar has no other path to the app's settings).
     pub quad: crate::ui::popup::quad_status::QuadStatusFlags,
+    /// Widest coordinate readout so far, in characters, and the mode it was
+    /// measured in. The pill keeps that width so the bar does not reflow,
+    /// and jump the layout tabs between one and two rows, as the cursor moves.
+    coords_width: std::cell::Cell<(i16, usize)>,
 }
 
 impl StatusBar {
@@ -116,7 +120,18 @@ impl StatusBar {
         Self {
             coord_display: "MODEL".into(),
             quad: Default::default(),
+            coords_width: std::cell::Cell::new((0, 0)),
         }
+    }
+
+    /// The character width the coordinates pill reserves for `label`: the
+    /// widest readout shown in this mode, so it only grows.
+    fn coords_pill_chars(&self, mode: i16, label: &str) -> usize {
+        let (last_mode, widest) = self.coords_width.get();
+        let widest = if last_mode == mode { widest } else { 0 };
+        let chars = label.chars().count().max(widest);
+        self.coords_width.set((mode, chars));
+        chars
     }
 
     pub fn view<'a>(
@@ -311,9 +326,10 @@ impl StatusBar {
         }
         if vis(StatusPill::Coords) {
             let coords_label = format_coords(cursor_world, last_point, coords_mode, picking);
+            let chars = self.coords_pill_chars(coords_mode, &coords_label);
             pills.push(
                 tip(
-                    action_pill(&coords_label, Message::CycleCoordsMode),
+                    fixed_width_pill(&coords_label, chars, Message::CycleCoordsMode),
                     t!("Cursor coordinates ($COORDS)\nClick to cycle: static / live / polar"),
                 )
                 .into(),
@@ -1300,6 +1316,20 @@ fn popup_pill(label: impl Into<String>) -> Element<'static, Message> {
     action_pill(label, Message::StatusMenuTooltipHidden(true))
 }
 
+/// An action pill whose label area holds `chars` characters, so its width
+/// does not follow a changing label (7 px per character of the 12 px text).
+fn fixed_width_pill(label: &str, chars: usize, msg: Message) -> Element<'static, Message> {
+    button(
+        container(text(label.to_string()).size(12))
+            .width(Length::Fixed(chars as f32 * 7.0))
+            .align_x(iced::alignment::Horizontal::Center),
+    )
+    .on_press(msg)
+    .style(button::subtle)
+    .padding([4, 7])
+    .into()
+}
+
 fn action_pill(label: impl Into<String>, msg: Message) -> Element<'static, Message> {
     let label = label.into();
     button(text(label).size(12))
@@ -1366,4 +1396,21 @@ fn active_scale_label(
             }
         })
         .map(|(label, _, _)| label.clone())
+}
+
+#[cfg(test)]
+mod coords_width_tests {
+    use super::*;
+
+    #[test]
+    fn coords_pill_width_only_grows_within_a_mode() {
+        // The readout's length follows the cursor; the pill keeps the widest
+        // so far, so the bar does not flip between one and two rows.
+        let bar = StatusBar::new();
+        assert_eq!(bar.coords_pill_chars(1, "1 5/16\", -9'-6 55/64\", 0\""), 25);
+        assert_eq!(bar.coords_pill_chars(1, "302'-5 9/32\", -175'-9 27/64\", 0\""), 32);
+        assert_eq!(bar.coords_pill_chars(1, "1\", 2\", 0\""), 32);
+        // Another mode measures afresh.
+        assert_eq!(bar.coords_pill_chars(2, "10' < 45d"), 9);
+    }
 }

@@ -992,6 +992,10 @@ impl OpenCADStudio {
                     | "FILEDIA"
                     | "SDI"
                     | "TRIMEXTENDMODE"
+                    | "REVCLOUDCREATEMODE"
+                    | "REVCLOUDARCVARIANCE"
+                    | "REVCLOUDGRIPS"
+                    | "REVCLOUDAPPROXARCLEN"
                     | "PELLIPSE"
                     | "SELECTIONCYCLING"
                     | "OSNAPZ"
@@ -1103,6 +1107,11 @@ impl OpenCADStudio {
                         crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION QUAD QUADWIDTH QUADCOMMANDLAUNCH CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY DYNMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
+                    if name.starts_with("REVCLOUD") {
+                        if self.revcloud_setvar(&name, value.as_deref(), i) {
+                            return Some(self.finish_dispatch(cmd));
+                        }
+                    }
                     // Point cloud settings, kept with the drawing.
                     if let Some(setting) = crate::scene::model::point_cloud::setting(&name) {
                         let document = &self.tabs[i].scene.document;

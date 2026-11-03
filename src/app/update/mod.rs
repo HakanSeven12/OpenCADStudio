@@ -325,6 +325,8 @@ impl OpenCADStudio {
             // OK or ✕ dismisses this map; the next one follows.
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
+            // Cancel drops the typed value; the cell keeps its value and type.
+            Some(TableCellEntry) => self.table_cell_entry = None,
             Some(TdsMissingMap) => {
                 if !self.import_dialogs.tds_maps.is_empty() {
                     self.import_dialogs.tds_maps.remove(0);
@@ -812,20 +814,22 @@ impl OpenCADStudio {
                 return task;
             }
         }
-        // An open dynamic-value list owns Escape, Enter and the arrows: without
+        // An open property list owns Escape, Enter and the arrows: without
         // this they reach the command line or the viewport and dismiss the
         // selection the list was opened for. A list whose panel is hidden is
         // not on screen, so it must not keep the guard on.
-        let picker = self.tabs[self.active_tab].properties.open_block_picker;
-        let picker_shown = picker.is_some_and(|(_, quick)| {
+        let panel = &self.tabs[self.active_tab].properties;
+        let shown = |quick: bool| {
             if quick {
                 self.quick_properties
             } else {
                 self.dock_panel_visible(crate::ui::dock::PanelId::Properties)
             }
-        });
+        };
+        let picker_shown = panel.open_block_picker.is_some_and(|(_, quick)| shown(quick))
+            || panel.open_choice.is_some_and(|(_, quick)| shown(quick));
         if picker_shown || self.block_picker_dismissed {
-            if let Some(task) = self.intercept_block_picker_key(&msg) {
+            if let Some(task) = self.intercept_property_list_key(&msg) {
                 return task;
             }
         }
@@ -1604,6 +1608,9 @@ impl OpenCADStudio {
                     .unwrap_or_default();
                 if ext == "scr" {
                     return self.dispatch_command(&format!("SCRIPT \"{}\"", path.display()));
+                }
+                if matches!(ext.as_str(), "svg" | "svgz") {
+                    return self.dispatch_command(&format!("_SVGINFILE {}", path.display()));
                 }
                 if !matches!(ext.as_str(), "dwg" | "dxf" | "bak" | "sv$")
                     && ocs_save::external_format(&ext).is_none()
@@ -3468,6 +3475,7 @@ impl OpenCADStudio {
                 self.layout_rename_state = None;
                 for tab in &mut self.tabs {
                     tab.properties.open_block_picker = None;
+                    tab.properties.open_choice = None;
                 }
                 self.block_picker_dismissed = false;
                 if idx < self.tabs.len() {
@@ -3837,6 +3845,7 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab]
                     .properties
                     .hatch_pattern_picker_open
+                    || self.graphic_attributes.hatch_editor.is_some()
                 {
                     return self.update(Message::PropHatchPatternNavigate(-2));
                 }
@@ -3869,6 +3878,7 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab]
                     .properties
                     .hatch_pattern_picker_open
+                    || self.graphic_attributes.hatch_editor.is_some()
                 {
                     return self.update(Message::PropHatchPatternNavigate(2));
                 }
@@ -6264,6 +6274,7 @@ impl OpenCADStudio {
                 // Hiding the panel takes its lists with it; a flag left behind
                 // would keep the keyboard guard swallowing keys.
                 self.tabs[self.active_tab].properties.open_block_picker = None;
+                self.tabs[self.active_tab].properties.open_choice = None;
                 if self.clean_screen {
                     // Shown over clean screen without changing the panel's
                     // normal state.
@@ -6771,6 +6782,7 @@ impl OpenCADStudio {
                 if self.clean_screen {
                     // The panel goes with the chrome; its list cannot stay open.
                     self.tabs[self.active_tab].properties.open_block_picker = None;
+                    self.tabs[self.active_tab].properties.open_choice = None;
                 }
                 Task::none()
             }
@@ -6787,6 +6799,7 @@ impl OpenCADStudio {
                 // The Quick Properties copy of the row, and its list, go with
                 // the panel.
                 self.tabs[self.active_tab].properties.open_block_picker = None;
+                self.tabs[self.active_tab].properties.open_choice = None;
                 if self.quick_properties {
                     self.quick_properties_anchor = self.tabs[self.active_tab].last_cursor_screen;
                 }
@@ -8123,6 +8136,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MTextFontPicker(event) => {
+                let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
                 let doc = &self.tabs[self.active_tab].scene.document;
                 let picked = self
                     .mtext_editor
@@ -8134,6 +8148,16 @@ impl OpenCADStudio {
                         self.mtext_apply_font(&font)
                     }
                     None => {}
+                }
+                if is_toggle
+                    && self
+                        .mtext_editor
+                        .as_ref()
+                        .is_some_and(|ed| ed.font_picker.open)
+                {
+                    return iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
+                    ));
                 }
                 Task::none()
             }
@@ -8456,6 +8480,7 @@ impl OpenCADStudio {
                 if self.tabs[self.active_tab]
                     .properties
                     .hatch_pattern_picker_open
+                    || self.graphic_attributes.hatch_editor.is_some()
                 {
                     return self.update(Message::PropHatchPatternNavigate(d as i8));
                 }
@@ -9121,22 +9146,23 @@ impl OpenCADStudio {
 
             Message::PropHatchPatternPickerToggle(current) => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                panel.hatch_pattern_picker_open = !panel.hatch_pattern_picker_open;
-                if panel.hatch_pattern_picker_open {
-                    panel.color_picker_open = false;
-                    panel.open_color_field = None;
-                    panel.edit_choice_open = false;
+                let opening = !panel.hatch_pattern_picker_open;
+                if opening {
+                    panel.close_popups();
                     panel.hatch_pattern_focus = crate::ui::properties::filtered_hatch_patterns("")
                         .iter()
                         .position(|entry| entry.name.eq_ignore_ascii_case(&current))
                         .unwrap_or(0);
+                }
+                panel.hatch_pattern_picker_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
                     return iced::widget::operation::focus(iced::widget::Id::new(
                         "hatch-pattern-search",
                     ));
-                } else {
-                    panel.hatch_pattern_search.clear();
-                    panel.hatch_pattern_focus = 0;
                 }
+                panel.hatch_pattern_search.clear();
+                panel.hatch_pattern_focus = 0;
                 Task::none()
             }
 
@@ -9159,6 +9185,14 @@ impl OpenCADStudio {
             }
 
             Message::PropHatchPatternNavigate(delta) => {
+                if let Some(editor) = self.graphic_attributes.hatch_editor.as_mut() {
+                    let len = crate::ui::properties::filtered_hatch_patterns(&editor.search).len();
+                    if len > 0 {
+                        editor.focus = (editor.focus as isize + delta as isize)
+                            .rem_euclid(len as isize) as usize;
+                    }
+                    return Task::none();
+                }
                 let panel = &mut self.tabs[self.active_tab].properties;
                 let len =
                     crate::ui::properties::filtered_hatch_patterns(&panel.hatch_pattern_search)
@@ -9352,7 +9386,9 @@ impl OpenCADStudio {
                 let n = if handles.len() == 1 {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
                         Some(codec::EntityType::LwPolyline(p)) => p.vertices.len(),
-                        Some(codec::EntityType::Polyline2D(p)) => p.vertices.len(),
+                        Some(codec::EntityType::Polyline2D(p)) => {
+                            crate::entities::polyline::polyline2d_frame_indices(p).len()
+                        }
                         Some(codec::EntityType::PolygonMesh(p)) => p.vertices.len(),
                         Some(codec::EntityType::Face3D(face)) => {
                             if face.is_triangle() {
@@ -9385,7 +9421,45 @@ impl OpenCADStudio {
             }
 
             Message::PropGeomChoiceChanged { field, value } => {
+                // Picking a row closes the list it came from, whichever panel
+                // rendered it.
+                for tab in &mut self.tabs {
+                    if tab
+                        .properties
+                        .open_choice
+                        .is_some_and(|(open, _)| open == field)
+                    {
+                        tab.properties.open_choice = None;
+                    }
+                }
                 self.on_prop_geom_choice_changed(field, value)
+            }
+
+            Message::PropChoiceToggle { field, quick } => {
+                let panel = &mut self.tabs[self.active_tab].properties;
+                let opening = panel.open_choice != Some((field, quick));
+                if opening {
+                    // One list at a time: another list left open behind this
+                    // row would stack two overlays.
+                    panel.close_popups();
+                }
+                panel.open_choice = if opening { Some((field, quick)) } else { None };
+                self.block_picker_dismissed = false;
+                Task::none()
+            }
+
+            Message::PropChoiceDismiss { field, quick } => {
+                for tab in &mut self.tabs {
+                    if tab
+                        .properties
+                        .open_choice
+                        .is_some_and(|open| open == (field, quick))
+                    {
+                        tab.properties.open_choice = None;
+                    }
+                }
+                self.block_picker_dismissed = true;
+                Task::none()
             }
 
             Message::PropGeomInput { field, value } => {
@@ -9418,11 +9492,12 @@ impl OpenCADStudio {
             }
             Message::PropBlockPickerToggle { key, quick } => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                panel.open_block_picker = if panel.open_block_picker == Some((key, quick)) {
-                    None
+                if panel.open_block_picker == Some((key, quick)) {
+                    panel.open_block_picker = None;
                 } else {
-                    Some((key, quick))
-                };
+                    panel.close_popups();
+                    panel.open_block_picker = Some((key, quick));
+                }
                 self.block_picker_dismissed = false;
                 Task::none()
             }
@@ -9440,11 +9515,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-
             Message::PropGroupToggle(key) => {
                 let panel = &mut self.tabs[self.active_tab].properties;
                 // A collapsed group can take the open list's row off screen.
                 panel.open_block_picker = None;
+                panel.open_choice = None;
                 if !panel.expanded_groups.remove(&key) {
                     panel.expanded_groups.insert(key);
                 }
@@ -9462,16 +9537,40 @@ impl OpenCADStudio {
                 for tab in &mut self.tabs {
                     tab.properties.collapsed_sections = sections.clone();
                     tab.properties.open_block_picker = None;
+                    tab.properties.open_choice = None;
                 }
                 Task::none()
             }
 
             Message::PropEditChoiceToggle => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                panel.edit_choice_open = !panel.edit_choice_open;
-                if panel.edit_choice_open {
-                    panel.hatch_pattern_picker_open = false;
-                    panel.hatch_pattern_search.clear();
+                let opening = !panel.edit_choice_open;
+                if opening {
+                    panel.close_popups();
+                }
+                panel.edit_choice_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
+                    let active_edit_choice = panel.active_field.as_ref().and_then(|k| match k {
+                        crate::ui::properties::FieldKey::Geom(f) => Some(*f),
+                        _ => None,
+                    });
+                    let field_to_focus = active_edit_choice.or_else(|| {
+                        panel.sections.iter().find_map(|sec| {
+                            sec.props.iter().find_map(|p| {
+                                matches!(
+                                    p.value,
+                                    crate::scene::model::object::PropValue::EditChoice { .. }
+                                )
+                                .then_some(p.field)
+                            })
+                        })
+                    });
+                    if let Some(field) = field_to_focus {
+                        return iced::widget::operation::focus(
+                            crate::ui::properties::prop_geom_field_id(field),
+                        );
+                    }
                 }
                 Task::none()
             }
@@ -9572,20 +9671,28 @@ impl OpenCADStudio {
             }
 
             Message::PropColorPickerToggle => {
-                let i = self.active_tab;
-                self.tabs[i].properties.color_picker_open =
-                    !self.tabs[i].properties.color_picker_open;
-                if self.tabs[i].properties.color_picker_open {
-                    self.tabs[i].properties.hatch_pattern_picker_open = false;
-                    self.tabs[i].properties.hatch_pattern_search.clear();
+                let panel = &mut self.tabs[self.active_tab].properties;
+                let opening = !panel.color_picker_open;
+                if opening {
+                    panel.close_popups();
+                }
+                panel.color_picker_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
                 }
                 Task::none()
             }
 
             Message::PropBgColorPickerToggle => {
-                let i = self.active_tab;
-                self.tabs[i].properties.bg_color_picker_open =
-                    !self.tabs[i].properties.bg_color_picker_open;
+                let panel = &mut self.tabs[self.active_tab].properties;
+                let opening = !panel.bg_color_picker_open;
+                if opening {
+                    panel.close_popups();
+                }
+                panel.bg_color_picker_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
+                }
                 Task::none()
             }
 
@@ -9615,11 +9722,13 @@ impl OpenCADStudio {
             Message::PropColorFieldToggle(field) => {
                 let i = self.active_tab;
                 let p = &mut self.tabs[i].properties;
-                p.open_color_field = if p.open_color_field.as_deref() == Some(field.as_str()) {
-                    None
+                if p.open_color_field.as_deref() == Some(field.as_str()) {
+                    p.open_color_field = None;
                 } else {
-                    Some(field)
-                };
+                    p.close_popups();
+                    p.open_color_field = Some(field);
+                    self.block_picker_dismissed = false;
+                }
                 Task::none()
             }
 
@@ -13436,6 +13545,7 @@ impl OpenCADStudio {
                 if self.selected_textstyle_is_read_only() {
                     return Task::none();
                 }
+                let is_toggle = matches!(event, crate::ui::font_picker::FontPickerEvent::Toggle);
                 let doc = &self.tabs[self.active_tab].scene.document;
                 match self.textstyle_font_picker.update(event, doc, false) {
                     // A stroke font replaces the system font, which would
@@ -13445,6 +13555,11 @@ impl OpenCADStudio {
                         self.textstyle_draft.pick_system_font(family)
                     }
                     Some(FontChoice::StyleDefault) | None => {}
+                }
+                if is_toggle && self.textstyle_font_picker.open {
+                    return iced::widget::operation::focus(iced::widget::Id::new(
+                        crate::ui::font_picker::FONT_PICKER_SEARCH_ID,
+                    ));
                 }
                 Task::none()
             }

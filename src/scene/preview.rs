@@ -5,6 +5,23 @@ use crate::scene::model::hatch_model::HatchPattern;
 
 mod block_parameter;
 
+#[cfg(test)]
+mod transform_tests;
+
+/// Preview transforms edit world-space points directly. Resolve cached block
+/// copies once when taking the snapshot, then detach their translation-only
+/// GPU identities so transformed references cannot be regrouped at old offsets.
+fn transform_preview_wires(wires: Vec<WireModel>) -> Vec<WireModel> {
+    let mut wires = match crate::scene::model::instance_model::expand_stubs(&wires) {
+        std::borrow::Cow::Owned(expanded) => expanded,
+        std::borrow::Cow::Borrowed(_) => wires,
+    };
+    for wire in &mut wires {
+        wire.render_instance = None;
+    }
+    wires
+}
+
 impl Scene {
     // ── Preview wire ──────────────────────────────────────────────────────
 
@@ -357,7 +374,7 @@ impl Scene {
     }
 
     pub fn wire_models_for(&self, handles: &[codec::Handle]) -> Vec<WireModel> {
-        handles
+        let wires = handles
             .iter()
             .flat_map(|h| {
                 match self.document.get_entity(*h) {
@@ -371,7 +388,8 @@ impl Scene {
                     None => Vec::new(),
                 }
             })
-            .collect()
+            .collect();
+        transform_preview_wires(wires)
     }
 
     /// Current candidate geometry for a hot grip. Solid-history candidates
@@ -435,7 +453,7 @@ impl Scene {
                 plain.extend(self.tessellate_one(e));
             }
         }
-        (plain, texts)
+        (transform_preview_wires(plain), texts)
     }
 
     /// Boundary wire for edit previews and selected hatches.
@@ -608,7 +626,7 @@ impl Scene {
             }
             out.extend(self.tessellate_one(e));
         }
-        out
+        transform_preview_wires(out)
     }
 }
 
@@ -741,6 +759,7 @@ impl Scene {
         };
         for (text, center) in &indicator.labels {
             let layout = layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 columns: Default::default(),
                 value: text,
                 insertion: [center.x as f64, center.y as f64, center.z as f64],

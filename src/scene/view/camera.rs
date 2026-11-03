@@ -956,6 +956,14 @@ pub fn yaw_pitch_to_quat(yaw: f32, pitch: f32, roll: f32) -> Quat {
     (q_yaw * q_pitch * q_roll).normalize()
 }
 
+/// [`yaw_pitch_to_quat`] in f64, for placing points far along the view axes.
+pub fn yaw_pitch_to_dquat(yaw: f64, pitch: f64, roll: f64) -> glam::DQuat {
+    let q_yaw = glam::DQuat::from_rotation_z(yaw);
+    let q_pitch = glam::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2 - pitch);
+    let q_roll = glam::DQuat::from_rotation_z(roll);
+    (q_yaw * q_pitch * q_roll).normalize()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

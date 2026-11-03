@@ -290,11 +290,46 @@ fn explode_multileader(
         .first()
         .map(|model| explode_leader_wire(model, common.clone()))
         .unwrap_or_default();
+    // The arrowheads: the leader drawn again with them and without its
+    // landing, less the runs the first pass already drew. A leader of type
+    // None draws neither, so only its content explodes.
     geometry.context.arrowhead_size = ml.context.arrowhead_size;
-    geometry.path_type = codec::entities::MultiLeaderPathType::Invisible;
     geometry.enable_landing = false;
-    if let Some(model) = tessellate(&geometry).first() {
-        pieces.extend(explode_leader_wire(model, common));
+    let arrows = tessellate(&geometry).into_iter().next();
+    if let (Some(path), Some(mut model)) = (models.first(), arrows) {
+        type Run = Vec<([f32; 3], [f32; 3])>;
+        let runs = |points: &[[f32; 3]], low: &[[f32; 3]]| -> Vec<Run> {
+            let mut out: Vec<Vec<_>> = vec![Vec::new()];
+            for (i, p) in points.iter().enumerate() {
+                if p[0].is_nan() {
+                    out.push(Vec::new());
+                } else {
+                    let l = low.get(i).copied().unwrap_or([0.0; 3]);
+                    out.last_mut().unwrap().push((*p, l));
+                }
+            }
+            out.retain(|run| !run.is_empty());
+            out
+        };
+        let drawn = runs(&path.points, &path.points_low);
+        let nan = [f32::NAN; 3];
+        let (mut points, mut points_low) = (Vec::new(), Vec::new());
+        // Each kept run follows a NaN, so the splitter treats every one as an
+        // arrow and leaves the edges its SOLID owns to the SOLID.
+        for run in runs(&model.points, &model.points_low) {
+            if drawn.contains(&run) {
+                continue;
+            }
+            points.push(nan);
+            points_low.push([0.0; 3]);
+            for (p, l) in run {
+                points.push(p);
+                points_low.push(l);
+            }
+        }
+        model.points = points;
+        model.points_low = points_low;
+        pieces.extend(explode_leader_wire(&model, common));
     }
     let ctx = &ml.context;
     // Same stored-context correction and fallback scale as MultiLeaderTess.
@@ -455,6 +490,7 @@ fn text_frame_polyline(
     use codec::entities::{mtext::DrawingDirection, LineSpacingStyle, LwVertex};
     let style = resolve_text_style(&text.style, doc);
     let layout = layout_mtext(&MTextRenderOpts {
+        layer_color: None,
         columns: Default::default(),
         value: &text.value,
         insertion: [0.0, 0.0, 0.0],
@@ -3483,6 +3519,17 @@ mod tests {
                 codec::types::LineWeight::from_value(50)
             );
         }
+    }
+
+    #[test]
+    fn multileader_explode_leader_type_none_keeps_only_content() {
+        // A leader of type None draws only its content, so that is all it
+        // explodes into: no arrowhead and no landing.
+        let mut ml = explode_test_multileader();
+        ml.path_type = codec::entities::MultiLeaderPathType::Invisible;
+        let pieces = explode_entity(&EntityType::MultiLeader(Box::new(ml)), &Document::new());
+        assert_eq!(pieces.len(), 1, "{pieces:?}");
+        assert!(matches!(pieces[0], EntityType::MText(_)));
     }
 
     #[test]

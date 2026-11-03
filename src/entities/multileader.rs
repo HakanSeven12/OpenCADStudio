@@ -221,6 +221,7 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
                 rot += std::f32::consts::PI;
             }
             Some(layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 // Not an MTEXT: text in a fixed box, never columnar.
                 columns: Default::default(),
                 value: &ctx.text_string,
@@ -350,8 +351,8 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
                 }
             }
 
-            // Arrowhead
-            if draw_arrow {
+            // Arrowhead; a leader of type None draws neither it nor the landing.
+            if draw_arrow && !invisible {
                 let tip = &line.points[0];
                 let tip_f = p3(tip);
                 let next = if line.points.len() >= 2 {
@@ -381,7 +382,7 @@ fn to_render(ml: &MultiLeader, document: &codec::Document) -> Option<RenderEntit
         }
 
         // Horizontal landing from the leader end to the text's near edge.
-        if dogleg > 0.0 {
+        if dogleg > 0.0 && !invisible {
             points.push(nan);
             points.push(elbow_pt);
             points.push(text_edge_pt);
@@ -481,6 +482,7 @@ fn text_box_geom(ml: &MultiLeader) -> ([f64; 2], [f64; 3]) {
             is_vertical: false,
         };
         let layout = layout_mtext(&MTextRenderOpts {
+            layer_color: None,
             columns: Default::default(),
             value: &ctx.text_string,
             insertion: [0.0, 0.0, 0.0],
@@ -1035,7 +1037,7 @@ fn yes_no_value(field: &str, value: &str) -> String {
             | "enable_dogleg"
             | "extend_leader_to_text"
             | "enable_annotation_scale"
-            | "background_fill_enabled"
+            | "background_mask_fill_on"
     );
     if !flag || value == "toggle" || value == "true" || value == "false" {
         return value.to_string();
@@ -1207,8 +1209,8 @@ fn properties(ml: &MultiLeader) -> Vec<PropSection> {
             ),
             bool_toggle(
                 t!("Background mask").as_ref(),
-                "background_fill_enabled",
-                ctx.background_fill_enabled,
+                "background_mask_fill_on",
+                ctx.background_mask_fill_on,
             ),
             choice(
                 t!("Attachment type").as_ref(),
@@ -1395,15 +1397,6 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 !ml.context.background_fill_enabled
             } else {
                 value == "true"
-            };
-            // Properties offers only this switch, no fill colour, so a mask
-            // switched on there uses the drawing background like AutoCAD.
-            // Without a colour of its own the fill would inherit the text
-            // colour and hide the text (#2131).
-            if ml.context.background_fill_enabled
-                && ml.context.background_fill_color.rgb().is_none()
-            {
-                ml.context.background_mask_fill_on = true;
             }
         }
         "background_mask_fill_on" => {
@@ -1411,6 +1404,15 @@ fn apply_geom_prop(ml: &mut MultiLeader, field: &str, value: &str) {
                 !ml.context.background_mask_fill_on
             } else {
                 value == "true"
+            };
+            // Properties offers only this switch, no fill colour, so a mask
+            // switched on there fills with the drawing background. Without a
+            // colour of its own the fill would inherit the text colour and
+            // hide the text (#2131).
+            if ml.context.background_mask_fill_on
+                && ml.context.background_fill_color.rgb().is_none()
+            {
+                ml.context.background_fill_enabled = true;
             }
         }
         "background_scale_factor" => {
@@ -2338,7 +2340,9 @@ impl MultiLeaderFrameTess for MultiLeader {
                     }
                 }
 
-                if draw_arrow {
+                // A leader of type None draws neither its arrowhead nor its
+                // landing: only the content shows.
+                if draw_arrow && !invisible {
                     let tip = &line.points[0];
                     let tip_f = p3(tip);
                     let next = if line.points.len() >= 2 {
@@ -2368,7 +2372,8 @@ impl MultiLeaderFrameTess for MultiLeader {
                 ml.text_attachment_direction,
                 codec::entities::multileader::TextAttachmentDirectionType::Vertical
             );
-            if ml.enable_landing
+            if !invisible
+                && ml.enable_landing
                 && ml.enable_dogleg
                 && root.landing_distance > 0.0
                 && !vertical_attach
@@ -2609,6 +2614,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             // fractions, …) reaches the stroke output. Stroke origins are
             // already in offset-relative space because we pass local_ins_x/y.
             let layout = layout_mtext(&MTextRenderOpts {
+                layer_color: None,
                 // Not an MTEXT: text in a fixed box, never columnar.
                 columns: Default::default(),
                 value: &ctx.text_string,
@@ -2873,7 +2879,7 @@ impl MultiLeaderFrameTess for MultiLeader {
             }
 
             // Text frame / background-fill rectangle in local frame, then rotated to WCS.
-            if ml.text_frame || ctx.background_fill_enabled {
+            if ml.text_frame || ctx.background_mask_fill_on {
                 // Border offset is a scale factor around the laid-out text box.
                 let pad = height * ((ctx.background_scale_factor.max(1.0) as f32 - 1.0) * 0.5);
                 // Box the glyphs that were actually laid out (valid for
@@ -2905,10 +2911,13 @@ impl MultiLeaderFrameTess for MultiLeader {
                 });
 
                 // Background fill — emit two triangles; renders under the text strokes.
-                if ctx.background_fill_enabled {
+                // Code 292 (`background_mask_fill_on`) switches the fill on;
+                // code 291 (`background_fill_enabled`) only picks the drawing
+                // background over the stored fill colour.
+                if ctx.background_mask_fill_on {
                     let mut fill_color = if selected {
                         line_color
-                    } else if ctx.background_mask_fill_on {
+                    } else if ctx.background_fill_enabled {
                         bg_color
                     } else {
                         color_or_inherit(&ctx.background_fill_color, entity_color)
@@ -3075,9 +3084,9 @@ mod tests {
         ml.context.text_string = "123".to_string();
         ml.context.text_height = 10.0;
         ml.path_type = MultiLeaderPathType::StraightLineSegments;
-        apply_geom_prop(&mut ml, "background_fill_enabled", "toggle");
-        assert!(ml.context.background_fill_enabled);
+        apply_geom_prop(&mut ml, "background_mask_fill_on", "toggle");
         assert!(ml.context.background_mask_fill_on);
+        assert!(ml.context.background_fill_enabled);
 
         let text_color = [1.0, 1.0, 1.0, 1.0];
         let bg_color = [0.1, 0.2, 0.3, 1.0];
@@ -3100,6 +3109,49 @@ mod tests {
             .find(|w| w.fill_tris.len() == 6 && w.points.is_empty() && w.text_verts.is_empty())
             .expect("Should produce a background mask quad");
         assert_eq!(mask.color, bg_color);
+    }
+
+    #[test]
+    fn background_fill_follows_codes_292_and_291() {
+        // Code 292 switches the text background fill on and code 291 picks
+        // the drawing background as its colour. A label saved with 291 on and
+        // 292 off has no fill: it used to be filled with its stored grey.
+        let mask_color = |color_on: bool, fill_on: bool| {
+            let mut ml = MultiLeader::default();
+            ml.content_type = LeaderContentType::MText;
+            ml.context.text_string = "LABEL".to_string();
+            ml.context.text_height = 10.0;
+            ml.path_type = MultiLeaderPathType::Invisible;
+            ml.context.background_fill_color = codec::types::Color::from_rgb(200, 200, 200);
+            ml.context.background_scale_factor = 1.5;
+            ml.context.background_fill_enabled = color_on;
+            ml.context.background_mask_fill_on = fill_on;
+            let wires = ml.tessellate(
+                &Document::default(),
+                codec::Handle::default(),
+                false,
+                [1.0, 1.0, 0.0, 1.0],
+                1.0,
+                1.0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [0.1, 0.2, 0.3, 1.0],
+            );
+            wires
+                .iter()
+                .find(|w| w.fill_tris.len() == 6 && w.points.is_empty() && w.text_verts.is_empty())
+                .map(|w| w.color)
+        };
+        let grey = 200.0 / 255.0;
+
+        assert_eq!(mask_color(true, false), None, "291 alone draws no fill");
+        let stored = mask_color(false, true).expect("292 fills");
+        assert!(stored[..3].iter().all(|c| (c - grey).abs() < 1e-3), "{stored:?}");
+        assert_eq!(mask_color(true, true), Some([0.1, 0.2, 0.3, 1.0]));
+        assert_eq!(mask_color(false, false), None);
     }
 
     /// Vertical extent of everything a tessellated MLEADER draws.
@@ -3555,6 +3607,33 @@ mod tests {
         assert_eq!(ml.block_scale.x, 1.0);
         assert_eq!(ml.block_rotation, 0.0);
         assert_eq!(ml.text_attachment_point, TextAttachmentPointType::Left);
+    }
+
+    #[test]
+    fn leader_type_none_draws_no_arrowhead_or_landing() {
+        // A leader of type None (path type Invisible) shows only its content.
+        // The arrowhead used to be drawn at the hidden leader's tip and the
+        // landing beside the text, so a site plan's street labels picked up
+        // stray dots and dashes.
+        let tip = [-341.0, -387.0];
+        let near = |p: &[f64; 2], q: [f64; 2], r: f64| (p[0] - q[0]).hypot(p[1] - q[1]) < r;
+        let on_landing = |p: &[f64; 2]| p[1].abs() < 1.0 && p[0] > -1.0 && p[0] < DOGLEG;
+
+        let mut shown = landed_leader("LABEL", TextAttachmentType::MiddleOfText);
+        shown.context.arrowhead_size = 40.0;
+        let shown_pts = drawn_positions(&tess(&shown), [0.0, 0.0]);
+        assert!(shown_pts.iter().any(|p| near(p, tip, 50.0)));
+        assert!(shown_pts.iter().any(on_landing));
+
+        let mut hidden = shown.clone();
+        hidden.path_type = MultiLeaderPathType::Invisible;
+        let hidden_pts = drawn_positions(&tess(&hidden), [0.0, 0.0]);
+        assert!(!hidden_pts.is_empty(), "the text still draws");
+        assert!(
+            !hidden_pts.iter().any(|p| near(p, tip, 50.0)),
+            "no arrowhead at the hidden leader's tip"
+        );
+        assert!(!hidden_pts.iter().any(on_landing), "no landing");
     }
 }
 

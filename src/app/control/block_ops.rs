@@ -283,6 +283,62 @@ pub(crate) fn resolve_effective_block(
     (raw_name.clone(), evaluated_handle, evaluated_handle)
 }
 
+/// Drop the evaluated-copy link an INSERT carries, so it resolves through the
+/// block record its name points at again. Both readers rebuild the link from
+/// the representation-data objects reachable through the insert's extension
+/// dictionary, so the link has to leave the drawing as well as the in-memory
+/// resolution map; the insert's own copy of the reference tag goes too. The
+/// rest of the extension data is left alone.
+pub(crate) fn detach_representation(doc: &mut Document, insert: Handle) {
+    let app = doc
+        .app_ids
+        .get(REPRESENTATION_TAG)
+        .map(|app| app.handle.value());
+    if let Some(EntityType::Insert(reference)) = doc.get_entity_mut(insert) {
+        reference
+            .common
+            .extended_data
+            .remove_record(REPRESENTATION_TAG);
+        if let Some(app) = app {
+            reference
+                .common
+                .extended_data
+                .raw_dwg_eed
+                .retain(|(owner, _)| *owner != app);
+        }
+    }
+    let Some(holder) = doc.extension_dictionary_handle(insert) else {
+        return;
+    };
+    let link = match doc.objects.get(&holder) {
+        Some(ObjectType::Dictionary(dictionary)) => dictionary
+            .entries
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("AcDbBlockRepresentation"))
+            .map(|(_, handle)| *handle),
+        _ => None,
+    };
+    if let Some(link) = link {
+        let owned: Vec<Handle> = doc
+            .objects
+            .keys()
+            .copied()
+            .filter(|handle| *handle != link && doc.owner_chain_reaches(*handle, link))
+            .collect();
+        for handle in owned {
+            doc.block_representations.remove(&handle);
+            doc.objects.remove(&handle);
+        }
+        doc.block_representations.remove(&link);
+        doc.objects.remove(&link);
+        if let Some(ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&holder) {
+            dictionary
+                .entries
+                .retain(|(key, _)| !key.eq_ignore_ascii_case("AcDbBlockRepresentation"));
+        }
+    }
+}
+
 /// Case-insensitive wildcard glob matcher supporting `*` and `?`.
 pub(crate) fn glob_match_ci(pattern: &str, text: &str) -> bool {
     if pattern == "*" {

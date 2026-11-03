@@ -315,9 +315,6 @@ fn properties(line: &Line) -> Vec<PropSection> {
                 format_length(line.length()),
             ),
             ro(t!("Angle").as_ref(), "angle", format_direction(angle)),
-            edit(t!("Normal X").as_ref(), "normal_x", line.normal.x),
-            edit(t!("Normal Y").as_ref(), "normal_y", line.normal.y),
-            edit(t!("Normal Z").as_ref(), "normal_z", line.normal.z),
         ],
     }]
 }
@@ -426,19 +423,6 @@ fn apply_geom_prop(line: &mut Line, field: &str, value: &str) {
         "end_x" => line.end.x = v,
         "end_y" => line.end.y = v,
         "end_z" => line.end.z = v,
-        "normal_x" | "normal_y" | "normal_z" => {
-            let mut normal = glam::DVec3::new(line.normal.x, line.normal.y, line.normal.z);
-            match field {
-                "normal_x" => normal.x = v,
-                "normal_y" => normal.y = v,
-                "normal_z" => normal.z = v,
-                _ => unreachable!(),
-            }
-            if normal.is_finite() && normal.length_squared() > 1.0e-18 {
-                let normal = normal.normalize();
-                line.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
-            }
-        }
         _ => {}
     }
 }

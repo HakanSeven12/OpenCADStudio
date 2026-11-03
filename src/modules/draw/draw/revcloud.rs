@@ -1,20 +1,17 @@
-// REVCLOUD command — create or modify arc-bumped lightweight polylines.
-
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+// REVCLOUD command — lay a revision cloud along a rectangle, a polygon, a
+// freehand path or an object, or reshape part of one (Modify).
 
 use codec::types::Vector3;
 use codec::{EntityType, Handle};
 use glam::DVec3;
-use kernel::geom2d::{distance_to, Curve, Polyline, PolylineVertex, Vec2};
-use kernel::space::{PlanarCurve, Plane, Vec3};
-use rustc_hash::FxHashMap;
+use kernel::geom2d::{Curve, Polyline, PolylineVertex};
+use kernel::space::{PlanarCurve, Vec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
 use crate::entities::curve::{curve_points, entity_curve, ocs_plane};
-use crate::entities::lwpolyline::{is_revision_cloud, revision_cloud_from_curve};
+use crate::entities::revcloud::{self as cloud, OnCloud};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
-use crate::t;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/revcloud.svg"));
 
@@ -27,11 +24,8 @@ pub fn tool() -> ToolDef {
     }
 }
 
-const DEFAULT_ARC_LENGTH: f64 = 1.0;
-
-static LAST_ARC_LENGTH: AtomicU64 = AtomicU64::new(0);
-static LAST_CREATION: AtomicU8 = AtomicU8::new(1);
-static LAST_STYLE: AtomicU8 = AtomicU8::new(0);
+/// The calligraphy style of the clouds REVCLOUD draws, kept for the session.
+static CALLIGRAPHY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CreationMode {
@@ -41,74 +35,47 @@ enum CreationMode {
 }
 
 impl CreationMode {
-    fn remembered() -> Self {
-        match LAST_CREATION.load(Ordering::Relaxed) {
+    fn current() -> Self {
+        match cloud::create_mode() {
             0 => Self::Freehand,
             2 => Self::Polygonal,
             _ => Self::Rectangular,
         }
     }
 
-    fn remember(self) {
-        let value = match self {
+    fn code(self) -> u8 {
+        match self {
             Self::Freehand => 0,
             Self::Rectangular => 1,
             Self::Polygonal => 2,
-        };
-        LAST_CREATION.store(value, Ordering::Relaxed);
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CloudStyle {
-    Normal,
-    Calligraphy,
-}
-
-impl CloudStyle {
-    fn remembered() -> Self {
-        if LAST_STYLE.load(Ordering::Relaxed) == 1 {
-            Self::Calligraphy
-        } else {
-            Self::Normal
-        }
-    }
-
-    fn remember(self) {
-        LAST_STYLE.store((self == Self::Calligraphy) as u8, Ordering::Relaxed);
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Self::Normal => "Normal",
-            Self::Calligraphy => "Calligraphy",
         }
     }
 }
 
-struct PendingCloud {
+struct Pending {
     entity: EntityType,
-    replacement: Option<Handle>,
+    /// The object the cloud replaces (Object, Modify).
+    replaces: Option<Handle>,
+    /// Report "Revision cloud finished." once made.
+    reports: bool,
 }
 
 struct ModifyState {
     handle: Handle,
     source: EntityType,
-    plane: Plane,
-    segments: Vec<Curve>,
-    vertices: Vec<DVec3>,
-    start: usize,
-    end: Option<usize>,
-    replacement: Vec<DVec3>,
+    start: OnCloud,
+    path: Vec<[f64; 2]>,
+    end: Option<OnCloud>,
 }
 
 enum Stage {
     Create,
-    ArcLength,
+    ArcLength(Option<DVec3>),
     Style,
     Object,
-    Reverse(PendingCloud),
+    Reverse(Pending),
     ModifySelect,
+    ModifyStart(ModifyState),
     ModifyDraw(ModifyState),
     ModifyErase(ModifyState),
 }
@@ -116,167 +83,116 @@ enum Stage {
 pub struct RevCloudCommand {
     points: Vec<DVec3>,
     arc_length: f64,
+    /// The arc length is the drawing's REVCLOUDAPPROXARCLEN from now on.
+    arc_stored: bool,
     creation: CreationMode,
-    style: CloudStyle,
+    calligraphy: bool,
     stage: Stage,
     tracing: bool,
-    sources: FxHashMap<Handle, EntityType>,
     plane: WorkingPlane,
-    message: Option<&'static str>,
+    /// The settings line comes before the next prompt.
+    header: bool,
+    picked: Option<EntityType>,
+    world_per_pixel: f64,
+}
+
+/// A length as the prompts show it: four places, trailing zeros dropped.
+fn length_text(value: f64) -> String {
+    let text = format!("{value:.4}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    if text == "-0" { "0".to_string() } else { text.to_string() }
 }
 
 impl RevCloudCommand {
-    pub fn new(default_arc_length: f64, sources: FxHashMap<Handle, EntityType>) -> Self {
-        let remembered = f64::from_bits(LAST_ARC_LENGTH.load(Ordering::Relaxed));
-        let arc_length = if remembered.is_finite() && remembered > 0.0 {
-            remembered
-        } else if default_arc_length.is_finite() && default_arc_length > 0.0 {
-            default_arc_length
-        } else {
-            DEFAULT_ARC_LENGTH
-        };
-        LAST_ARC_LENGTH.store(arc_length.to_bits(), Ordering::Relaxed);
+    /// `arc_length` is REVCLOUDAPPROXARCLEN, or the view's default when the
+    /// drawing holds none.
+    pub fn new(arc_length: f64, stored: bool) -> Self {
         Self {
             points: Vec::new(),
             arc_length,
-            creation: CreationMode::remembered(),
-            style: CloudStyle::remembered(),
+            arc_stored: stored,
+            creation: CreationMode::current(),
+            calligraphy: CALLIGRAPHY.load(std::sync::atomic::Ordering::Relaxed),
             stage: Stage::Create,
             tracing: false,
-            sources,
             plane: WorkingPlane::default(),
-            message: None,
+            header: true,
+            picked: None,
+            world_per_pixel: 0.0,
         }
+    }
+
+    fn variance(&self) -> bool {
+        cloud::arc_variance()
+    }
+
+    fn header_line(&self) -> String {
+        let (min, max) = cloud::chord_range(self.arc_length, self.variance());
+        let style = if self.calligraphy {
+            crate::tr!("revcloud-cmd", "style-calligraphy")
+        } else {
+            crate::tr!("revcloud-cmd", "style-normal")
+        };
+        let kind = match self.creation {
+            CreationMode::Rectangular => crate::tr!("revcloud-cmd", "type-rectangular"),
+            CreationMode::Polygonal => crate::tr!("revcloud-cmd", "type-polygonal"),
+            CreationMode::Freehand => crate::tr!("revcloud-cmd", "type-freehand"),
+        };
+        crate::tr!(
+            "revcloud-cmd",
+            "header",
+            min = length_text(min),
+            max = length_text(max),
+            style = style,
+            kind = kind
+        )
     }
 
     fn set_creation(&mut self, mode: CreationMode) {
+        if self.creation != mode {
+            self.header = true;
+        }
         self.creation = mode;
-        self.creation.remember();
+        cloud::set_create_mode(mode.code());
         self.stage = Stage::Create;
         self.points.clear();
         self.tracing = false;
-        self.message = None;
     }
 
-    fn local_points(&self, points: &[DVec3]) -> Vec<DVec3> {
-        points
-            .iter()
-            .map(|point| self.plane.to_local(*point))
-            .collect()
+    fn local(&self, point: DVec3) -> [f64; 2] {
+        let local = self.plane.to_local(point);
+        [local.x, local.y]
     }
 
-    fn guide_curve(&self, points: &[DVec3]) -> Curve {
-        let vertices = self
-            .local_points(points)
-            .into_iter()
-            .map(|point| PolylineVertex::straight([point.x, point.y]))
-            .collect();
-        Curve::Polyline(Polyline {
-            vertices,
-            closed: true,
-        })
-    }
-
-    fn cloud_from_world_points(&self, points: &[DVec3], reverse: bool) -> Option<EntityType> {
-        let curve = self.guide_curve(points);
-        let cloud = revision_cloud_from_curve(
-            &curve,
-            self.arc_length,
-            reverse,
-            style_width_ratios(self.style),
-        )?;
+    /// A cloud along the path through `points` (world), in the working plane.
+    fn cloud_through(&self, points: &[DVec3], closed: bool, preview: bool) -> Option<EntityType> {
+        let curve = Curve::Polyline(Polyline {
+            vertices: points
+                .iter()
+                .map(|point| PolylineVertex::straight(self.local(*point)))
+                .collect(),
+            closed,
+        });
+        // Previews keep one chord length so they do not flicker.
+        let variance = self.variance() && !preview;
+        let cloud = cloud::cloud_along(&curve, self.arc_length, variance, self.calligraphy, false)?;
         Some(self.plane.place_entity(EntityType::LwPolyline(cloud)))
     }
 
-    fn prepare_cloud(&mut self, points: &[DVec3], replacement: Option<Handle>) -> CmdResult {
-        let Some(mut entity) = self.cloud_from_world_points(points, false) else {
-            self.message = Some("The selected path cannot form a revision cloud.");
-            return CmdResult::NeedPoint;
-        };
-        if let Some(handle) = replacement {
-            if let Some(source) = self.sources.get(&handle) {
-                *entity.common_mut() = source.common().clone();
-                entity.common_mut().handle = Handle::NULL;
-            }
-        }
-        if replacement.is_none()
-            && matches!(
-                self.creation,
-                CreationMode::Rectangular | CreationMode::Polygonal
-            )
-        {
-            self.message = None;
-            return CmdResult::CommitAndExit(entity);
-        }
-        self.stage = Stage::Reverse(PendingCloud {
-            entity,
-            replacement,
-        });
-        self.message = None;
-        CmdResult::NeedPoint
-    }
-
-    fn prepare_planar_cloud(&mut self, curve: &PlanarCurve, replacement: Handle) -> CmdResult {
-        let Some(mut entity) = cloud_entity_on_plane(curve, self.arc_length, self.style, false)
-        else {
-            self.message = Some("The selected path cannot form a revision cloud.");
-            return CmdResult::NeedPoint;
-        };
-        if let Some(source) = self.sources.get(&replacement) {
-            *entity.common_mut() = source.common().clone();
-            entity.common_mut().handle = Handle::NULL;
-        }
-        self.stage = Stage::Reverse(PendingCloud {
-            entity,
-            replacement: Some(replacement),
-        });
-        self.message = None;
-        CmdResult::NeedPoint
-    }
-
-    fn finish_pending(pending: PendingCloud, reverse: bool) -> CmdResult {
-        let entity = if reverse {
-            reverse_cloud_entity(pending.entity)
-        } else {
-            pending.entity
-        };
-        if let Some(handle) = pending.replacement {
-            CmdResult::ReplaceEntity(handle, vec![entity])
-        } else {
-            CmdResult::CommitAndExit(entity)
-        }
-    }
-
-    fn object_curve(entity: &EntityType) -> Option<PlanarCurve> {
-        let closed = match entity {
-            EntityType::Circle(_) => true,
-            EntityType::Ellipse(ellipse) => ellipse.is_full(),
-            EntityType::LwPolyline(polyline) => polyline.is_closed,
-            EntityType::Polyline2D(polyline) => polyline.is_closed(),
-            EntityType::Spline(spline) => spline.flags.closed || spline.flags.periodic,
-            _ => false,
-        };
-        if !closed {
+    fn rectangle(&self, first: DVec3, opposite: DVec3) -> Option<Vec<DVec3>> {
+        let a = self.plane.to_local(first);
+        let b = self.plane.to_local(opposite);
+        let size = (a.x - b.x).abs().max((a.y - b.y).abs());
+        if (a.x - b.x).abs() <= size * 1.0e-12 || (a.y - b.y).abs() <= size * 1.0e-12 {
             return None;
         }
-        let curve = entity_curve(entity)?;
-        curve.is_closed().then_some(curve)
-    }
-
-    fn rectangle_points(&self, first: DVec3, opposite: DVec3) -> Option<Vec<DVec3>> {
-        let first = self.plane.to_local(first);
-        let opposite = self.plane.to_local(opposite);
-        if (first.x - opposite.x).abs() <= f64::EPSILON
-            || (first.y - opposite.y).abs() <= f64::EPSILON
-        {
-            return None;
-        }
+        // The first corner, then up (or down) its side to the opposite one.
         Some(
             [
-                DVec3::new(first.x, first.y, first.z),
-                DVec3::new(opposite.x, first.y, first.z),
-                DVec3::new(opposite.x, opposite.y, first.z),
-                DVec3::new(first.x, opposite.y, first.z),
+                DVec3::new(a.x, a.y, a.z),
+                DVec3::new(a.x, b.y, a.z),
+                DVec3::new(b.x, b.y, a.z),
+                DVec3::new(b.x, a.y, a.z),
             ]
             .into_iter()
             .map(|point| self.plane.to_world(point))
@@ -284,147 +200,107 @@ impl RevCloudCommand {
         )
     }
 
+    fn invalid_shape(&mut self) -> CmdResult {
+        CmdResult::Measurement(crate::tr!("revcloud-cmd", "invalid-shape"))
+    }
+
+    fn commit(&mut self, entity: EntityType, reports: bool) -> CmdResult {
+        self.arc_stored = true;
+        if reports {
+            CmdResult::CommitAndReport(entity, crate::tr!("revcloud-cmd", "finished"))
+        } else {
+            CmdResult::CommitAndExit(entity)
+        }
+    }
+
+    fn finish(&mut self, pending: Pending, reverse: bool) -> CmdResult {
+        let mut entity = pending.entity;
+        if reverse {
+            if let EntityType::LwPolyline(polyline) = entity {
+                entity = EntityType::LwPolyline(cloud::reversed(polyline));
+            }
+        }
+        self.arc_stored = true;
+        match pending.replaces {
+            Some(handle) => {
+                entity.common_mut().handle = handle;
+                if pending.reports {
+                    CmdResult::UpdateEntityAndReport {
+                        handle,
+                        entity,
+                        message: crate::tr!("revcloud-cmd", "finished"),
+                    }
+                } else {
+                    CmdResult::UpdateEntityAndFinish { handle, entity }
+                }
+            }
+            None if pending.reports => {
+                CmdResult::CommitAndReport(entity, crate::tr!("revcloud-cmd", "finished"))
+            }
+            None => CmdResult::CommitAndExit(entity),
+        }
+    }
+
+    /// The path of an object a cloud can follow.
+    fn object_curve(entity: &EntityType) -> Option<PlanarCurve> {
+        match entity {
+            EntityType::Line(_)
+            | EntityType::Arc(_)
+            | EntityType::Circle(_)
+            | EntityType::Ellipse(_)
+            | EntityType::Spline(_)
+            | EntityType::LwPolyline(_)
+            | EntityType::Polyline2D(_) => entity_curve(entity),
+            _ => None,
+        }
+    }
+
     fn preview(entity: &EntityType, name: &str) -> Option<WireModel> {
         let curve = entity_curve(entity)?;
         let points = curve_points(&curve);
-        (points.len() >= 2)
-            .then(|| WireModel::solid_f64(name.to_string(), points, WireModel::CYAN, false))
+        (points.len() >= 2).then(|| WireModel::solid_f64(name.to_string(), points, WireModel::CYAN, false))
     }
 
-    fn preview_world_points(&self, points: &[DVec3], name: &str) -> Option<WireModel> {
-        let entity = self.cloud_from_world_points(points, false)?;
-        Self::preview(&entity, name)
-    }
-
-    fn start_modify(&mut self, handle: Handle, picked: DVec3) -> CmdResult {
-        let Some(source) = self.sources.get(&handle).cloned() else {
-            self.message = Some("Select a closed revision-cloud polyline.");
-            return CmdResult::NeedPoint;
-        };
-        let EntityType::LwPolyline(polyline) = &source else {
-            self.message = Some("Select a closed revision-cloud polyline.");
-            return CmdResult::NeedPoint;
-        };
-        if !is_revision_cloud(polyline) {
-            self.message = Some("Select a closed revision-cloud polyline.");
-            return CmdResult::NeedPoint;
-        }
-        let Some(curve) = entity_curve(&source) else {
-            self.message = Some("The selected polyline is not planar.");
-            return CmdResult::NeedPoint;
-        };
-        let segments = curve.curve.segments();
-        if segments.len() != polyline.vertices.len() {
-            self.message = Some("The selected polyline is not planar.");
-            return CmdResult::NeedPoint;
-        }
-        let vertices: Vec<DVec3> = polyline
-            .vertices
-            .iter()
-            .map(|vertex| {
-                DVec3::from_array(curve.plane.point_at([vertex.location.x, vertex.location.y]))
-            })
-            .collect();
-        let start = vertices
-            .iter()
-            .enumerate()
-            .min_by(|(_, left), (_, right)| {
-                left.distance_squared(picked)
-                    .total_cmp(&right.distance_squared(picked))
-            })
-            .map(|(index, _)| index)
-            .unwrap_or(0);
-        self.stage = Stage::ModifyDraw(ModifyState {
-            handle,
-            source,
-            plane: curve.plane,
-            segments,
-            vertices: vertices.clone(),
-            start,
-            end: None,
-            replacement: vec![vertices[start]],
-        });
-        self.message = None;
-        CmdResult::NeedPoint
-    }
-
-    fn modify_endpoint(state: &ModifyState, point: DVec3, tolerance: f64) -> Option<usize> {
-        state
-            .vertices
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index != state.start)
-            .filter_map(|(index, vertex)| {
-                let distance = vertex.distance(point);
-                (distance <= tolerance).then_some((index, distance))
-            })
-            .min_by(|left, right| left.1.total_cmp(&right.1))
-            .map(|(index, _)| index)
-    }
-
-    fn path_indices(count: usize, from: usize, to: usize) -> Vec<usize> {
-        let mut indices = vec![from];
-        let mut current = from;
-        while current != to && indices.len() <= count {
-            current = (current + 1) % count;
-            indices.push(current);
-        }
-        indices
-    }
-
-    fn path_distance(state: &ModifyState, indices: &[usize], point: DVec3) -> f64 {
-        let Some(point) = state.plane.project(point.to_array()) else {
-            return f64::INFINITY;
-        };
-        indices
-            .windows(2)
-            .map(|pair| distance_to(&state.segments[pair[0]], point))
-            .fold(f64::INFINITY, f64::min)
-    }
-
-    fn modified_cloud(&self, state: ModifyState, erase_point: DVec3) -> Option<PendingCloud> {
-        let end = state.end?;
-        let count = state.vertices.len();
-        let forward = Self::path_indices(count, state.start, end);
-        let backward = Self::path_indices(count, end, state.start);
-        let erase_forward = Self::path_distance(&state, &forward, erase_point)
-            <= Self::path_distance(&state, &backward, erase_point);
-
-        let mut guide = Vec::new();
-        if erase_forward {
-            guide.extend(backward.iter().map(|index| state.vertices[*index]));
-            guide.extend(state.replacement.iter().skip(1).copied());
+    fn pick_tolerance(&self) -> f64 {
+        if self.world_per_pixel > 0.0 {
+            self.world_per_pixel * 5.0
         } else {
-            guide.extend(forward.iter().map(|index| state.vertices[*index]));
-            guide.extend(state.replacement.iter().rev().skip(1).copied());
+            self.arc_length * 0.1
         }
-        let style = style_from_entity(&state.source).unwrap_or(self.style);
-        let curve = guide_curve_on_plane(&state.plane, &guide, self.arc_length * 1.0e-6)?;
-        let mut entity = cloud_entity_on_plane(
-            &PlanarCurve::new(state.plane, curve),
-            self.arc_length,
-            style,
-            false,
-        )?;
-        let common = state.source.common().clone();
-        *entity.common_mut() = common;
-        entity.common_mut().handle = Handle::NULL;
-        Some(PendingCloud {
-            entity,
-            replacement: Some(state.handle),
-        })
     }
 
-    fn common_options(&self) -> Vec<CmdOption> {
-        vec![
-            CmdOption::new("Arc length", "A"),
-            CmdOption::new("Object", "O"),
-            CmdOption::new("Rectangular", "R"),
-            CmdOption::new("Polygonal", "P"),
-            CmdOption::new("Freehand", "F"),
-            CmdOption::new("Style", "S"),
-            CmdOption::new("Modify", "M"),
-        ]
+    fn on_cloud(state: &ModifyState, point: DVec3) -> Option<OnCloud> {
+        let EntityType::LwPolyline(polyline) = &state.source else {
+            return None;
+        };
+        let plane = ocs_plane(polyline.normal, polyline.elevation);
+        let local = plane.project(point.to_array())?;
+        cloud::nearest(polyline, local)
+    }
+
+    fn world(state: &ModifyState, point: [f64; 2]) -> DVec3 {
+        let EntityType::LwPolyline(polyline) = &state.source else {
+            return DVec3::ZERO;
+        };
+        DVec3::from_array(ocs_plane(polyline.normal, polyline.elevation).point_at(point))
+    }
+
+    fn take_state(&mut self) -> Option<ModifyState> {
+        match std::mem::replace(&mut self.stage, Stage::Create) {
+            Stage::ModifyStart(state) | Stage::ModifyDraw(state) | Stage::ModifyErase(state) => Some(state),
+            other => {
+                self.stage = other;
+                None
+            }
+        }
+    }
+
+    fn main_prompt(&self) -> String {
+        match self.creation {
+            CreationMode::Rectangular => crate::tr!("revcloud-cmd", "first-corner"),
+            CreationMode::Polygonal => crate::tr!("revcloud-cmd", "start-point"),
+            CreationMode::Freehand => crate::tr!("revcloud-cmd", "first-point"),
+        }
     }
 }
 
@@ -437,135 +313,91 @@ impl CadCommand for RevCloudCommand {
         "REVCLOUD"
     }
 
+    fn set_world_per_pixel(&mut self, world_per_pixel: f64) {
+        self.world_per_pixel = world_per_pixel;
+    }
+
     fn prompt(&self) -> String {
-        let message = self
-            .message
-            .map(|message| t!(message).into_owned())
-            .unwrap_or_default();
-        let style = t!(self.style.label()).into_owned();
-        match &self.stage {
+        let prompt = match &self.stage {
             Stage::Create => match self.creation {
-                CreationMode::Rectangular if self.points.is_empty() => t!(
-                    "REVCLOUD  First corner (%{style}, arc length %{length}): %{message}",
-                    style = &style,
-                    length = format!("{:.4}", self.arc_length),
-                    message = message
-                )
-                .into_owned(),
-                CreationMode::Rectangular => {
-                    t!("REVCLOUD  Opposite corner: %{message}", message = message).into_owned()
-                }
-                CreationMode::Polygonal if self.points.is_empty() => t!(
-                    "REVCLOUD  Polygonal start point (%{style}, arc length %{length}): %{message}",
-                    style = &style,
-                    length = format!("{:.4}", self.arc_length),
-                    message = message
-                )
-                .into_owned(),
-                CreationMode::Polygonal => t!(
-                    "REVCLOUD  Next polygonal point (%{count} points, Enter to close): %{message}",
-                    count = self.points.len(),
-                    message = message
-                )
-                .into_owned(),
-                CreationMode::Freehand if !self.tracing => t!(
-                    "REVCLOUD  Freehand first point (%{style}, arc length %{length}): %{message}",
-                    style = &style,
-                    length = format!("{:.4}", self.arc_length),
-                    message = message
-                )
-                .into_owned(),
-                CreationMode::Freehand => t!(
-                    "REVCLOUD  Guide the cursor, then click or press Enter to close: %{message}",
-                    message = message
-                )
-                .into_owned(),
+                _ if self.points.is_empty() && !self.tracing => self.main_prompt(),
+                CreationMode::Rectangular => crate::tr!("revcloud-cmd", "opposite"),
+                CreationMode::Polygonal if self.points.len() == 1 => crate::tr!("revcloud-cmd", "next"),
+                CreationMode::Polygonal => crate::tr!("revcloud-cmd", "next-undo"),
+                CreationMode::Freehand => crate::tr!("revcloud-cmd", "guide"),
             },
-            Stage::ArcLength => t!(
-                "REVCLOUD  Approximate arc chord length <%{length}>:",
-                length = format!("{:.4}", self.arc_length)
-            )
-            .into_owned(),
-            Stage::Style => t!(
-                "REVCLOUD  Style [Normal/Calligraphy] <%{style}>:",
-                style = &style
-            )
-            .into_owned(),
-            Stage::Object => t!(
-                "REVCLOUD  Select a closed circle, ellipse, polyline, or spline: %{message}",
-                message = message
-            )
-            .into_owned(),
-            Stage::Reverse(_) => {
-                t!("REVCLOUD  Reverse arc direction [Yes/No] <No>:").into_owned()
+            Stage::ArcLength(None) => crate::tr!(
+                "revcloud-cmd",
+                "arc",
+                length = length_text(self.arc_length)
+            ),
+            Stage::ArcLength(Some(_)) => crate::tr!("revcloud-cmd", "second"),
+            Stage::Style => crate::tr!(
+                "revcloud-cmd",
+                "style",
+                style = if self.calligraphy {
+                    crate::tr!("revcloud-cmd", "style-calligraphy")
+                } else {
+                    crate::tr!("revcloud-cmd", "style-normal")
+                }
+            ),
+            Stage::Object => crate::tr!("revcloud-cmd", "object"),
+            Stage::Reverse(_) => crate::tr!("revcloud-cmd", "reverse"),
+            Stage::ModifySelect => crate::tr!("revcloud-cmd", "modify-select"),
+            Stage::ModifyStart(_) => crate::tr!("revcloud-cmd", "modify-start"),
+            Stage::ModifyDraw(state) if state.path.len() <= 1 => {
+                crate::tr!("revcloud-cmd", "modify-first")
             }
-            Stage::ModifySelect => t!(
-                "REVCLOUD  Select a closed revision-cloud polyline near the replacement start: %{message}",
-                message = message
-            )
-            .into_owned(),
-            Stage::ModifyDraw(state) => t!(
-                "REVCLOUD  Replacement point %{count}; finish on another cloud vertex:",
-                count = state.replacement.len()
-            )
-            .into_owned(),
-            Stage::ModifyErase(_) => {
-                t!("REVCLOUD  Pick the side of the original cloud to erase:").into_owned()
-            }
+            Stage::ModifyDraw(_) => crate::tr!("revcloud-cmd", "next-undo"),
+            Stage::ModifyErase(_) => crate::tr!("revcloud-cmd", "modify-side"),
+        };
+        if self.header && matches!(self.stage, Stage::Create) {
+            format!("{}\n{}", self.header_line(), prompt)
+        } else {
+            prompt
         }
     }
 
     fn options(&self) -> Vec<CmdOption> {
         match &self.stage {
-            Stage::Create if self.points.is_empty() => self.common_options(),
-            Stage::Create if self.creation == CreationMode::Polygonal => {
-                let mut options = vec![CmdOption::new("Undo", "U")];
-                if self.points.len() >= 3 {
-                    options.push(CmdOption::enter("Close"));
-                }
-                options
-            }
-            Stage::Create if self.creation == CreationMode::Freehand && self.tracing => {
-                vec![CmdOption::enter("Close")]
-            }
-            Stage::Create => Vec::new(),
-            Stage::ArcLength => Vec::new(),
-            Stage::Style => vec![
-                CmdOption::new("Normal", "N"),
-                CmdOption::new("Calligraphy", "C"),
+            Stage::Create if self.points.is_empty() && !self.tracing => vec![
+                CmdOption::new("Arc length", "A"),
+                CmdOption::new("Object", "O"),
+                CmdOption::new("Rectangular", "R"),
+                CmdOption::new("Polygonal", "P"),
+                CmdOption::new("Freehand", "F"),
+                CmdOption::new("Style", "S"),
+                CmdOption::new("Modify", "M"),
             ],
-            Stage::Object | Stage::ModifySelect => vec![CmdOption::new("Back", "B")],
-            Stage::Reverse(_) => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
-            Stage::ModifyDraw(state) => {
-                if state.replacement.len() > 1 {
-                    vec![
-                        CmdOption::new("Undo", "U"),
-                        CmdOption::new("First point", "F"),
-                    ]
-                } else {
-                    Vec::new()
-                }
+            Stage::Create if self.creation == CreationMode::Polygonal && self.points.len() >= 2 => {
+                vec![CmdOption::new("Undo", "U")]
             }
-            Stage::ModifyErase(_) => Vec::new(),
+            Stage::Style => vec![CmdOption::new("Normal", "N"), CmdOption::new("Calligraphy", "C")],
+            Stage::Reverse(_) => vec![CmdOption::new("Yes", "Y"), CmdOption::new("No", "N")],
+            Stage::ModifyDraw(state) if state.path.len() <= 1 => {
+                vec![CmdOption::new("First point", "F")]
+            }
+            Stage::ModifyDraw(_) => vec![CmdOption::new("Undo", "U")],
+            _ => Vec::new(),
         }
     }
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
-        self.message = None;
+        self.header = false;
+        let tolerance = self.pick_tolerance();
         match &mut self.stage {
             Stage::Create => match self.creation {
                 CreationMode::Rectangular => {
-                    if self.points.is_empty() {
+                    let Some(first) = self.points.first().copied() else {
                         self.points.push(point);
-                        CmdResult::NeedPoint
-                    } else {
-                        let first = self.points[0];
-                        let Some(points) = self.rectangle_points(first, point) else {
-                            self.message = Some("The two corners must define a non-zero area.");
-                            return CmdResult::NeedPoint;
-                        };
-                        self.points.clear();
-                        self.prepare_cloud(&points, None)
+                        return CmdResult::NeedPoint;
+                    };
+                    let Some(corners) = self.rectangle(first, point) else {
+                        return self.invalid_shape();
+                    };
+                    match self.cloud_through(&corners, true, false) {
+                        Some(entity) => self.commit(entity, false),
+                        None => self.invalid_shape(),
                     }
                 }
                 CreationMode::Polygonal => {
@@ -574,46 +406,93 @@ impl CadCommand for RevCloudCommand {
                 }
                 CreationMode::Freehand => {
                     if !self.tracing {
-                        self.points.clear();
-                        self.points.push(point);
+                        self.points = vec![point];
                         self.tracing = true;
+                        return CmdResult::NeedPoint;
+                    }
+                    self.finish_freehand(point)
+                }
+            },
+            Stage::ArcLength(first) => match first.take() {
+                None => {
+                    *first = Some(point);
+                    CmdResult::NeedPoint
+                }
+                Some(start) => {
+                    let length = start.distance(point);
+                    if length > 0.0 {
+                        self.arc_length = length;
+                        self.arc_stored = true;
+                        self.stage = Stage::Create;
                         CmdResult::NeedPoint
-                    } else if self.points.len() >= 3 {
-                        self.tracing = false;
-                        let points = self.points.clone();
-                        self.points.clear();
-                        self.prepare_cloud(&points, None)
                     } else {
-                        CmdResult::NeedPoint
+                        // A zero length asks for the second point again.
+                        self.stage = Stage::ArcLength(Some(start));
+                        CmdResult::ReportError(crate::tr!("revcloud-cmd", "positive"))
                     }
                 }
             },
+            Stage::ModifyStart(_) => {
+                let Some(mut state) = self.take_state() else {
+                    return CmdResult::NeedPoint;
+                };
+                if let Some(start) = Self::on_cloud(&state, point) {
+                    state.start = start;
+                    state.path = vec![start.point];
+                }
+                self.stage = Stage::ModifyDraw(state);
+                CmdResult::NeedPoint
+            }
             Stage::ModifyDraw(state) => {
-                let tolerance = self.arc_length.max(1.0e-6) * 0.75;
-                if state.replacement.len() >= 2 {
-                    if let Some(end) = Self::modify_endpoint(state, point, tolerance) {
+                // A point within one of the cloud's own arc lengths (not the
+                // command's current one) ends the new part.
+                let reach = match &state.source {
+                    EntityType::LwPolyline(polyline) => {
+                        cloud::arc_length_of(polyline).unwrap_or(self.arc_length)
+                    }
+                    _ => self.arc_length,
+                };
+                if state.path.len() >= 2 {
+                    if let Some(end) = Self::on_cloud(state, point)
+                        .filter(|end| end.distance <= reach)
+                    {
+                        state.path.push(end.point);
                         state.end = Some(end);
-                        state.replacement.push(state.vertices[end]);
-                        let state = match std::mem::replace(&mut self.stage, Stage::Create) {
-                            Stage::ModifyDraw(state) => state,
-                            _ => unreachable!(),
-                        };
+                        let state = self.take_state().expect("modify state");
                         self.stage = Stage::ModifyErase(state);
                         return CmdResult::NeedPoint;
                     }
                 }
-                state.replacement.push(point);
-                CmdResult::NeedPoint
-            }
-            Stage::ModifyErase(_) => {
-                let state = match std::mem::replace(&mut self.stage, Stage::Create) {
-                    Stage::ModifyErase(state) => state,
-                    _ => unreachable!(),
-                };
-                let Some(pending) = self.modified_cloud(state, point) else {
+                let EntityType::LwPolyline(polyline) = &state.source else {
                     return CmdResult::Cancel;
                 };
-                self.stage = Stage::Reverse(pending);
+                let plane = ocs_plane(polyline.normal, polyline.elevation);
+                if let Some(local) = plane.project(point.to_array()) {
+                    state.path.push(local);
+                }
+                CmdResult::NeedPoint
+            }
+            Stage::ModifyErase(state) => {
+                let Some(side) = Self::on_cloud(state, point).filter(|side| side.distance <= tolerance) else {
+                    return CmdResult::NeedPoint;
+                };
+                let EntityType::LwPolyline(polyline) = &state.source else {
+                    return CmdResult::Cancel;
+                };
+                let arc_length = cloud::arc_length_of(polyline).unwrap_or(self.arc_length);
+                let Some(end) = state.end else {
+                    return CmdResult::Cancel;
+                };
+                let Some(modified) = cloud::modified(polyline, state.start, &state.path, end, side, arc_length)
+                else {
+                    return CmdResult::NeedPoint;
+                };
+                let handle = state.handle;
+                self.stage = Stage::Reverse(Pending {
+                    entity: EntityType::LwPolyline(modified),
+                    replaces: Some(handle),
+                    reports: false,
+                });
                 CmdResult::NeedPoint
             }
             _ => CmdResult::NeedPoint,
@@ -621,28 +500,48 @@ impl CadCommand for RevCloudCommand {
     }
 
     fn on_enter(&mut self) -> CmdResult {
+        self.header = false;
         match &self.stage {
-            Stage::Create if self.creation == CreationMode::Polygonal && self.points.len() >= 3 => {
-                let points = self.points.clone();
-                self.points.clear();
-                self.prepare_cloud(&points, None)
+            Stage::Create if self.points.is_empty() && !self.tracing => {
+                self.stage = Stage::Object;
+                CmdResult::NeedPoint
             }
-            Stage::Create if self.creation == CreationMode::Freehand && self.points.len() >= 3 => {
+            Stage::Create if self.creation == CreationMode::Polygonal => {
+                let points = std::mem::take(&mut self.points);
+                if points.len() < 3 {
+                    return self.invalid_shape();
+                }
+                match self.cloud_through(&points, true, false) {
+                    Some(entity) => self.commit(entity, false),
+                    None => self.invalid_shape(),
+                }
+            }
+            Stage::Create if self.creation == CreationMode::Freehand && self.tracing => {
+                // Enter leaves the cloud open.
                 self.tracing = false;
-                let points = self.points.clone();
-                self.points.clear();
-                self.prepare_cloud(&points, None)
+                let points = std::mem::take(&mut self.points);
+                match self.cloud_through(&points, false, false) {
+                    Some(entity) => {
+                        self.stage = Stage::Reverse(Pending {
+                            entity,
+                            replaces: None,
+                            reports: true,
+                        });
+                        CmdResult::NeedPoint
+                    }
+                    None => self.invalid_shape(),
+                }
             }
-            Stage::ArcLength | Stage::Style => {
+            Stage::ArcLength(_) | Stage::Style => {
                 self.stage = Stage::Create;
                 CmdResult::NeedPoint
             }
-            Stage::Reverse(_) => {
-                let stage = std::mem::replace(&mut self.stage, Stage::Create);
-                match stage {
-                    Stage::Reverse(pending) => Self::finish_pending(pending, false),
-                    _ => unreachable!(),
-                }
+            Stage::Reverse(_) => match std::mem::replace(&mut self.stage, Stage::Create) {
+                Stage::Reverse(pending) => self.finish(pending, false),
+                _ => CmdResult::Cancel,
+            },
+            Stage::Object | Stage::ModifySelect | Stage::ModifyErase(_) | Stage::ModifyStart(_) => {
+                CmdResult::NeedPoint
             }
             _ => CmdResult::Cancel,
         }
@@ -658,97 +557,96 @@ impl CadCommand for RevCloudCommand {
 
     fn input_kind(&self) -> InputKind {
         match self.stage {
-            Stage::ArcLength | Stage::Style | Stage::Reverse(_) => InputKind::SingleToken,
-            Stage::Create
-            | Stage::Object
-            | Stage::ModifySelect
-            | Stage::ModifyDraw(_)
-            | Stage::ModifyErase(_) => InputKind::Point,
+            Stage::Style | Stage::Reverse(_) => InputKind::SingleToken,
+            _ => InputKind::Point,
         }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        matches!(self.stage, Stage::Create | Stage::ModifyDraw(_))
+        matches!(self.stage, Stage::Create | Stage::ModifyDraw(_) | Stage::ArcLength(None))
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        let input = text.trim();
-        if matches!(self.stage, Stage::ArcLength) {
-            if let Ok(value) = input.parse::<f64>() {
-                if value.is_finite() && value > 0.0 {
-                    self.arc_length = value;
-                    LAST_ARC_LENGTH.store(value.to_bits(), Ordering::Relaxed);
-                    self.stage = Stage::Create;
-                    self.message = None;
-                } else {
-                    self.message = Some("Arc length must be greater than zero.");
-                }
-            } else {
-                self.message = Some("Enter a valid arc length.");
-            }
-            return Some(CmdResult::NeedPoint);
-        }
+        self.header = false;
+        let input = text.trim().trim_start_matches('_');
         let keyword = input.to_ascii_uppercase();
-        if matches!(self.stage, Stage::Style) {
-            self.style = match keyword.as_str() {
-                "N" | "NORMAL" => CloudStyle::Normal,
-                "C" | "CALLIGRAPHY" => CloudStyle::Calligraphy,
-                _ => return None,
-            };
-            self.style.remember();
-            self.stage = Stage::Create;
-            return Some(CmdResult::NeedPoint);
-        }
-        if matches!(keyword.as_str(), "F" | "FIRST") {
-            if let Stage::ModifyDraw(state) = &mut self.stage {
-                state.replacement.truncate(1);
-                return Some(CmdResult::NeedPoint);
+        match &mut self.stage {
+            // A typed point starts a length given as two points.
+            Stage::ArcLength(None) if input.contains(',') => return None,
+            Stage::ArcLength(None) => {
+                return Some(match input.parse::<f64>() {
+                    Ok(value) if value.is_finite() && value > 0.0 => {
+                        self.arc_length = value;
+                        self.arc_stored = true;
+                        self.stage = Stage::Create;
+                        CmdResult::NeedPoint
+                    }
+                    Ok(_) => CmdResult::ReportError(crate::tr!("revcloud-cmd", "positive")),
+                    Err(_) => CmdResult::ReportError(crate::tr!("revcloud-cmd", "numeric")),
+                });
             }
-        }
-        match &self.stage {
+            Stage::Style => {
+                let calligraphy = match keyword.as_str() {
+                    "N" | "NORMAL" => false,
+                    "C" | "CALLIGRAPHY" => true,
+                    _ => return Some(CmdResult::ReportError(crate::tr!("revcloud-cmd", "keyword"))),
+                };
+                self.calligraphy = calligraphy;
+                CALLIGRAPHY.store(calligraphy, std::sync::atomic::Ordering::Relaxed);
+                self.stage = Stage::Create;
+                let name = if calligraphy {
+                    crate::tr!("revcloud-cmd", "style-calligraphy")
+                } else {
+                    crate::tr!("revcloud-cmd", "style-normal")
+                };
+                return Some(CmdResult::ReportMeasurement(name));
+            }
             Stage::Reverse(_) => {
                 let reverse = match keyword.as_str() {
                     "Y" | "YES" => true,
                     "N" | "NO" => false,
-                    _ => return None,
+                    _ => return Some(CmdResult::ReportError(crate::tr!("revcloud-cmd", "keyword"))),
                 };
-                let stage = std::mem::replace(&mut self.stage, Stage::Create);
-                return Some(match stage {
-                    Stage::Reverse(pending) => Self::finish_pending(pending, reverse),
-                    _ => unreachable!(),
+                return Some(match std::mem::replace(&mut self.stage, Stage::Create) {
+                    Stage::Reverse(pending) => self.finish(pending, reverse),
+                    _ => CmdResult::Cancel,
                 });
             }
-            Stage::Object | Stage::ModifySelect if keyword == "B" || keyword == "BACK" => {
-                self.stage = Stage::Create;
-                return Some(CmdResult::NeedPoint);
+            Stage::ModifyDraw(state) => {
+                return match keyword.as_str() {
+                    "F" | "FIRST" if state.path.len() <= 1 => {
+                        let state = self.take_state()?;
+                        self.stage = Stage::ModifyStart(state);
+                        Some(CmdResult::NeedPoint)
+                    }
+                    "U" | "UNDO" if state.path.len() > 1 => {
+                        state.path.pop();
+                        Some(CmdResult::NeedPoint)
+                    }
+                    _ => None,
+                };
             }
-            Stage::ModifyDraw(_) if keyword == "U" || keyword == "UNDO" => {
-                return self.on_undo_step();
+            Stage::Create if self.points.is_empty() && !self.tracing => {}
+            Stage::Create => {
+                if self.creation == CreationMode::Polygonal
+                    && matches!(keyword.as_str(), "U" | "UNDO")
+                    && self.points.len() >= 2
+                {
+                    self.points.pop();
+                    return Some(CmdResult::NeedPoint);
+                }
+                return None;
             }
-            Stage::Create => match keyword.as_str() {
-                "C" | "CLOSE" if self.creation == CreationMode::Polygonal => {
-                    return Some(if self.points.len() >= 3 {
-                        self.on_enter()
-                    } else {
-                        CmdResult::NeedPoint
-                    });
-                }
-                "A" | "ARC" | "ARCLENGTH" => self.stage = Stage::ArcLength,
-                "O" | "OBJECT" => {
-                    self.stage = Stage::Object;
-                    self.points.clear();
-                }
-                "R" | "RECTANGULAR" | "RECTANGLE" => self.set_creation(CreationMode::Rectangular),
-                "P" | "POLYGONAL" | "POLYGON" => self.set_creation(CreationMode::Polygonal),
-                "F" | "FREEHAND" => self.set_creation(CreationMode::Freehand),
-                "S" | "STYLE" => self.stage = Stage::Style,
-                "M" | "MODIFY" => {
-                    self.stage = Stage::ModifySelect;
-                    self.points.clear();
-                }
-                "U" | "UNDO" => return self.on_undo_step(),
-                _ => return None,
-            },
+            _ => return None,
+        }
+        match keyword.as_str() {
+            "A" | "ARC" | "ARCLENGTH" => self.stage = Stage::ArcLength(None),
+            "O" | "OBJECT" => self.stage = Stage::Object,
+            "R" | "RECTANGULAR" => self.set_creation(CreationMode::Rectangular),
+            "P" | "POLYGONAL" => self.set_creation(CreationMode::Polygonal),
+            "F" | "FREEHAND" => self.set_creation(CreationMode::Freehand),
+            "S" | "STYLE" => self.stage = Stage::Style,
+            "M" | "MODIFY" => self.stage = Stage::ModifySelect,
             _ => return None,
         }
         Some(CmdResult::NeedPoint)
@@ -762,124 +660,163 @@ impl CadCommand for RevCloudCommand {
         self.needs_entity_pick()
     }
 
-    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
-        match self.stage {
-            Stage::Object => {
-                let Some(entity) = self.sources.get(&handle) else {
-                    self.message = Some("Select a supported closed curve.");
-                    return CmdResult::NeedPoint;
-                };
-                let Some(curve) = Self::object_curve(entity) else {
-                    self.message = Some("Select a closed circle, ellipse, polyline, or spline.");
-                    return CmdResult::NeedPoint;
-                };
-                self.prepare_planar_cloud(&curve, handle)
-            }
-            Stage::ModifySelect => self.start_modify(handle, point),
-            _ => CmdResult::Cancel,
-        }
+    fn typed_point_picks_entity(&self) -> bool {
+        self.needs_entity_pick()
     }
 
-    fn on_hover_entity(&mut self, handle: Handle, _point: DVec3) -> Vec<WireModel> {
-        if !matches!(self.stage, Stage::Object) {
-            return Vec::new();
-        }
-        let Some(curve) = self.sources.get(&handle).and_then(Self::object_curve) else {
-            return Vec::new();
+    fn inject_before_entity_pick(&self) -> bool {
+        self.needs_entity_pick()
+    }
+
+    fn inject_picked_entity(&mut self, entity: EntityType) {
+        self.picked = Some(entity);
+    }
+
+    fn on_entity_pick(&mut self, handle: Handle, point: DVec3) -> CmdResult {
+        self.header = false;
+        let Some(entity) = self.picked.take().filter(|entity| entity.common().handle == handle) else {
+            return CmdResult::NeedPoint;
         };
-        cloud_entity_on_plane(&curve, self.arc_length, self.style, false)
-            .as_ref()
-            .and_then(|entity| Self::preview(entity, "revcloud_object_preview"))
-            .into_iter()
-            .collect()
+        match self.stage {
+            Stage::Object => {
+                let made = Self::object_curve(&entity)
+                    .and_then(|curve| cloud_on_plane(&curve, self.arc_length, self.variance(), self.calligraphy));
+                let Some(mut made) = made else {
+                    return CmdResult::ReportError(crate::tr!("revcloud-cmd", "unable"));
+                };
+                let mut common = entity.common().clone();
+                common.extended_data = made.common().extended_data.clone();
+                *made.common_mut() = common;
+                self.stage = Stage::Reverse(Pending {
+                    entity: made,
+                    replaces: Some(handle),
+                    reports: true,
+                });
+                CmdResult::NeedPoint
+            }
+            Stage::ModifySelect => {
+                let EntityType::LwPolyline(polyline) = &entity else {
+                    return CmdResult::NeedPoint;
+                };
+                if !polyline.is_closed {
+                    return CmdResult::NeedPoint;
+                }
+                let plane = ocs_plane(polyline.normal, polyline.elevation);
+                let Some(start) = plane
+                    .project(point.to_array())
+                    .and_then(|local| cloud::nearest(polyline, local))
+                else {
+                    return CmdResult::NeedPoint;
+                };
+                self.stage = Stage::ModifyDraw(ModifyState {
+                    handle,
+                    source: entity,
+                    start,
+                    path: vec![start.point],
+                    end: None,
+                });
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::NeedPoint,
+        }
     }
 
     fn on_undo_step(&mut self) -> Option<CmdResult> {
         match &mut self.stage {
-            Stage::Create if !self.points.is_empty() => {
+            Stage::Create if self.creation == CreationMode::Polygonal && self.points.len() >= 2 => {
                 self.points.pop();
-                if self.points.is_empty() {
-                    self.tracing = false;
-                }
                 Some(CmdResult::NeedPoint)
             }
-            Stage::ModifyDraw(state) if state.replacement.len() > 1 => {
-                state.replacement.pop();
+            Stage::ModifyDraw(state) if state.path.len() > 1 => {
+                state.path.pop();
                 Some(CmdResult::NeedPoint)
             }
             _ => None,
         }
+    }
+
+    fn drawing_variable_update(&self) -> Option<(&'static str, String)> {
+        self.arc_stored
+            .then(|| (cloud::ARC_LENGTH_VARIABLE, format!("{:.6}", self.arc_length)))
     }
 
     fn on_mouse_move(&mut self, point: DVec3) -> Option<WireModel> {
         match &mut self.stage {
             Stage::Create if self.creation == CreationMode::Freehand && self.tracing => {
-                let spacing = (self.arc_length * 0.25).max(1.0e-6);
-                if self
-                    .points
-                    .last()
-                    .is_none_or(|last| last.distance(point) >= spacing)
-                {
+                let spacing = self.arc_length * 0.25;
+                if self.points.last().is_none_or(|last| last.distance(point) >= spacing) {
                     self.points.push(point);
                 }
+                let closing = self.closes_freehand(point);
                 let points = self.points.clone();
-                self.preview_world_points(&points, "revcloud_freehand_preview")
+                let entity = self.cloud_through(&points, closing, true)?;
+                Self::preview(&entity, "revcloud_freehand_preview")
             }
             Stage::Create if self.creation == CreationMode::Rectangular => {
                 let first = *self.points.first()?;
-                let points = self.rectangle_points(first, point)?;
-                self.preview_world_points(&points, "revcloud_rectangular_preview")
+                let corners = self.rectangle(first, point)?;
+                let entity = self.cloud_through(&corners, true, true)?;
+                Self::preview(&entity, "revcloud_rectangular_preview")
             }
-            Stage::Create
-                if self.creation == CreationMode::Polygonal && !self.points.is_empty() =>
-            {
+            Stage::Create if self.creation == CreationMode::Polygonal && !self.points.is_empty() => {
                 let mut points = self.points.clone();
                 points.push(point);
-                self.preview_world_points(&points, "revcloud_polygonal_preview")
+                let entity = self.cloud_through(&points, points.len() >= 3, true)?;
+                Self::preview(&entity, "revcloud_polygonal_preview")
             }
             Stage::Reverse(pending) => Self::preview(&pending.entity, "revcloud_reverse_preview"),
             Stage::ModifyDraw(state) => {
-                let mut points = state.replacement.clone();
+                let mut points: Vec<DVec3> = state.path.iter().map(|p| Self::world(state, *p)).collect();
                 points.push(point);
-                let curve = guide_curve_on_plane(&state.plane, &points, self.arc_length * 1.0e-6)?;
-                let entity = cloud_entity_on_plane(
-                    &PlanarCurve::new(state.plane, curve),
-                    self.arc_length,
-                    style_from_entity(&state.source).unwrap_or(self.style),
+                Some(WireModel::solid_f64(
+                    "revcloud_modify_preview".to_string(),
+                    points.iter().map(|p| [p.x, p.y, p.z]).collect(),
+                    WireModel::CYAN,
                     false,
-                )?;
-                Self::preview(&entity, "revcloud_modify_preview")
+                ))
             }
             _ => None,
         }
     }
 }
 
-fn style_width_ratios(style: CloudStyle) -> Option<(f64, f64)> {
-    (style == CloudStyle::Calligraphy).then_some((0.04, 0.16))
+impl RevCloudCommand {
+    /// Whether the freehand path has come back to where it started.
+    fn closes_freehand(&self, cursor: DVec3) -> bool {
+        let Some(first) = self.points.first() else {
+            return false;
+        };
+        let travelled: f64 = self.points.windows(2).map(|pair| pair[0].distance(pair[1])).sum();
+        travelled > self.arc_length * 2.0 && first.distance(cursor) <= cloud::chord_range(self.arc_length, self.variance()).0
+    }
+
+    /// A click while guiding: a closed cloud once the path is back at its
+    /// start, else an open one (then Reverse direction).
+    fn finish_freehand(&mut self, point: DVec3) -> CmdResult {
+        if self.closes_freehand(point) {
+            self.tracing = false;
+            let points = std::mem::take(&mut self.points);
+            return match self.cloud_through(&points, true, false) {
+                Some(entity) => self.commit(entity, true),
+                None => self.invalid_shape(),
+            };
+        }
+        if self.points.last().is_none_or(|last| last.distance(point) > 0.0) {
+            self.points.push(point);
+        }
+        CmdResult::NeedPoint
+    }
 }
 
-fn cloud_entity_on_plane(
-    source: &PlanarCurve,
-    arc_length: f64,
-    style: CloudStyle,
-    reverse: bool,
-) -> Option<EntityType> {
-    let cloud = revision_cloud_from_curve(
-        &source.curve,
-        arc_length,
-        reverse,
-        style_width_ratios(style),
-    )?;
+/// A cloud along a curve on its own plane, stored in that plane's OCS.
+fn cloud_on_plane(source: &PlanarCurve, arc_length: f64, variance: bool, calligraphy: bool) -> Option<EntityType> {
+    let mut cloud = cloud::cloud_along(&source.curve, arc_length, variance, calligraphy, false)?;
     let normal = Vec3::from(source.plane.normal()?);
     let elevation = Vec3::from(source.plane.origin).dot(normal);
     let normal = Vector3::new(normal.x, normal.y, normal.z);
     let storage_plane = ocs_plane(normal, elevation);
-    let mut cloud = cloud;
     for vertex in &mut cloud.vertices {
-        let world = source
-            .plane
-            .point_at([vertex.location.x, vertex.location.y]);
+        let world = source.plane.point_at([vertex.location.x, vertex.location.y]);
         let local = storage_plane.project(world)?;
         vertex.location.x = local[0];
         vertex.location.y = local[1];
@@ -887,50 +824,6 @@ fn cloud_entity_on_plane(
     cloud.normal = normal;
     cloud.elevation = elevation;
     Some(EntityType::LwPolyline(cloud))
-}
-
-fn guide_curve_on_plane(plane: &Plane, points: &[DVec3], tolerance: f64) -> Option<Curve> {
-    let mut points: Vec<[f64; 2]> = points
-        .iter()
-        .map(|point| plane.project(point.to_array()))
-        .collect::<Option<_>>()?;
-    points.dedup_by(|right, left| Vec2::from(*left).distance(Vec2::from(*right)) <= tolerance);
-    if points.len() >= 2 && Vec2::from(points[0]).distance(Vec2::from(*points.last()?)) <= tolerance
-    {
-        points.pop();
-    }
-    (points.len() >= 3).then(|| {
-        Curve::Polyline(Polyline {
-            vertices: points.into_iter().map(PolylineVertex::straight).collect(),
-            closed: true,
-        })
-    })
-}
-
-fn reverse_cloud_entity(mut entity: EntityType) -> EntityType {
-    if let EntityType::LwPolyline(polyline) = &mut entity {
-        for vertex in &mut polyline.vertices {
-            vertex.bulge = -vertex.bulge;
-        }
-    }
-    entity
-}
-
-fn style_from_entity(entity: &EntityType) -> Option<CloudStyle> {
-    let EntityType::LwPolyline(polyline) = entity else {
-        return None;
-    };
-    Some(
-        if polyline
-            .vertices
-            .iter()
-            .any(|vertex| vertex.start_width > 0.0 || vertex.end_width > 0.0)
-        {
-            CloudStyle::Calligraphy
-        } else {
-            CloudStyle::Normal
-        },
-    )
 }
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -941,43 +834,3 @@ inventory::submit!(crate::command::CommandRegistration {
         "REVCLOUD_FREEHAND"
     ]
 });
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn command(mode: CreationMode) -> RevCloudCommand {
-        let mut command = RevCloudCommand::new(1.0, FxHashMap::default());
-        command.set_creation(mode);
-        command
-    }
-
-    #[test]
-    fn rectangular_creation_commits_after_the_opposite_corner() {
-        let mut command = command(CreationMode::Rectangular);
-        assert!(matches!(
-            command.on_point(DVec3::ZERO),
-            CmdResult::NeedPoint
-        ));
-        assert!(matches!(
-            command.on_point(DVec3::new(10.0, 5.0, 0.0)),
-            CmdResult::CommitAndExit(_)
-        ));
-    }
-
-    #[test]
-    fn polygon_close_keyword_commits_three_points() {
-        let mut command = command(CreationMode::Polygonal);
-        for point in [
-            DVec3::ZERO,
-            DVec3::new(10.0, 0.0, 0.0),
-            DVec3::new(10.0, 10.0, 0.0),
-        ] {
-            assert!(matches!(command.on_point(point), CmdResult::NeedPoint));
-        }
-        assert!(matches!(
-            command.on_text_input("close"),
-            Some(CmdResult::CommitAndExit(_))
-        ));
-    }
-}

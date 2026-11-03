@@ -28,6 +28,7 @@ fn main() {
             .map(|name| LayerInfo {
                 name: name.into(),
                 color: Color::TRANSPARENT,
+                stored_color: codec::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,

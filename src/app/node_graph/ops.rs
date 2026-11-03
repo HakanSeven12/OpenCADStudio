@@ -301,7 +301,7 @@ impl AppHost<'_> {
             "Curve Length" => one(self.curve(&a[0]).map_or(Value::Null, |c| number(c.length()))),
             "Curve Area" => one(
                 self.curve(&a[0])
-                    .map_or(Value::Null, |c| number(c.curve.enclosed_area().abs())),
+                    .map_or(Value::Null, |c| number(c.curve.chord_closed_area().unwrap_or(0.0).abs())),
             ),
             "Curve Endpoints" => match self.curve(&a[0]) {
                 Some(c) => vec![point_value(c.point_at(0.0)), point_value(c.point_at(1.0))],

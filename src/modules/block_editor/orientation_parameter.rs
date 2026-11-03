@@ -1,13 +1,47 @@
 //! Interactive native Rotation, Alignment and Flip placement. Rotation's base
 //! angle sets the line the default angle turns from; the radius pick supplies
 //! the length only. Rotation then takes a label location and a grip count.
-use crate::command::{CadCommand, CmdOption, CmdResult};
+use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::scene::{
     block_orientation_parameter::{self, Kind},
     WireModel,
 };
 use codec::{types::Vector3, Handle};
 use glam::DVec3;
+
+/// Values answered at the base-point prompt before the parameter exists.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Options {
+    pub chain: Option<bool>,
+    pub description: Option<String>,
+    pub palette: Option<bool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Asking {
+    Chain,
+    Description,
+    Palette,
+}
+
+impl Asking {
+    fn question(self) -> &'static str {
+        match self {
+            Self::Chain => {
+                "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+            }
+            Self::Description => "Enter property description:",
+            Self::Palette => "Display property in Properties palette? [Yes/No] <Yes>:",
+        }
+    }
+    /// The creation default the question's Enter answer stands for.
+    fn default_answer(self) -> bool {
+        self == Self::Palette
+    }
+    fn is_default(self, value: bool) -> bool {
+        value == self.default_answer()
+    }
+}
 
 pub struct OrientationParameterCommand {
     document_id: u64,
@@ -22,6 +56,8 @@ pub struct OrientationParameterCommand {
     rotation: Option<f64>,
     label: Option<DVec3>,
     grips: Option<usize>,
+    asking: Option<Asking>,
+    options: Options,
 }
 
 impl OrientationParameterCommand {
@@ -39,7 +75,37 @@ impl OrientationParameterCommand {
             rotation: None,
             label: None,
             grips: None,
+            asking: None,
+            options: Options::default(),
         }
+    }
+    fn accept(&mut self, text: Option<&str>) -> CmdResult {
+        let asking = self.asking.expect("an option question is open");
+        if asking == Asking::Description {
+            let value = text.unwrap_or("");
+            if !value.is_empty() {
+                self.options.description = Some(value.to_owned());
+            }
+            self.asking = None;
+            return CmdResult::NeedPoint;
+        }
+        let value = match text.map(str::trim) {
+            None | Some("") => asking.default_answer(),
+            Some(text) => match text.to_ascii_uppercase().as_str() {
+                "Y" | "YES" => true,
+                "N" | "NO" => false,
+                _ => return CmdResult::ReportError(crate::t!("Enter Yes or No.").into_owned()),
+            },
+        };
+        if !asking.is_default(value) {
+            match asking {
+                Asking::Chain => self.options.chain = Some(value),
+                Asking::Palette => self.options.palette = Some(value),
+                Asking::Description => unreachable!(),
+            }
+        }
+        self.asking = None;
+        CmdResult::NeedPoint
     }
     fn asking_base_angle(&self) -> bool {
         self.kind == Kind::Rotation && self.second.is_some() && self.choosing_base_angle
@@ -74,6 +140,7 @@ impl OrientationParameterCommand {
             reference,
             label_offset,
             grips: self.grips,
+            options: self.options.clone(),
         }
     }
     fn rotation_geometry(&self, angle: f64) -> (DVec3, DVec3) {
@@ -117,6 +184,9 @@ impl CadCommand for OrientationParameterCommand {
         "BPARAMETER"
     }
     fn prompt(&self) -> String {
+        if let Some(asking) = self.asking {
+            return crate::t!(asking.question()).into_owned();
+        }
         let step = if self.choosing_type {
             if self.perpendicular {
                 "Choose alignment type [Perpendicular/Tangent] <Perpendicular>:"
@@ -124,7 +194,11 @@ impl CadCommand for OrientationParameterCommand {
                 "Choose alignment type [Perpendicular/Tangent] <Tangent>:"
             }
         } else if self.base.is_none() {
-            "Specify parameter base point:"
+            if self.kind == Kind::Rotation {
+                "Specify base point or [Chain/Description/Palette]:"
+            } else {
+                "Specify parameter base point:"
+            }
         } else {
             match (self.kind, self.second.is_some()) {
                 (Kind::Rotation, false) => "Specify radius of parameter:",
@@ -152,6 +226,16 @@ impl CadCommand for OrientationParameterCommand {
         )
         .into_owned()
     }
+    fn input_kind(&self) -> InputKind {
+        match self.asking {
+            Some(Asking::Description) => InputKind::FreeText,
+            Some(_) => InputKind::SingleToken,
+            None => InputKind::Point,
+        }
+    }
+    fn point_step_accepts_keywords(&self) -> bool {
+        self.asking.is_none() && self.kind == Kind::Rotation && self.base.is_none()
+    }
     fn options(&self) -> Vec<CmdOption> {
         if self.kind == Kind::Rotation
             && self.second.is_some()
@@ -173,6 +257,9 @@ impl CadCommand for OrientationParameterCommand {
         }
     }
     fn on_point(&mut self, point: DVec3) -> CmdResult {
+        if self.asking.is_some() {
+            return CmdResult::NeedPoint;
+        }
         if self.choosing_type {
             return CmdResult::ReportError(
                 crate::t!("Choose Perpendicular or Tangent.").into_owned(),
@@ -257,6 +344,28 @@ impl CadCommand for OrientationParameterCommand {
                 self.choosing_type = true;
                 return Some(CmdResult::NeedPoint);
             }
+        }
+        if self.asking.is_some() {
+            return Some(self.accept(Some(text)));
+        }
+        if self.kind == Kind::Rotation && self.base.is_none() {
+            let asking = match text.trim().to_ascii_uppercase().as_str() {
+                "C" | "CHAIN" => Asking::Chain,
+                "D" | "DESCRIPTION" => Asking::Description,
+                "P" | "PALETTE" => Asking::Palette,
+                _ => {
+                    return Some(CmdResult::ReportError(
+                        crate::t!("Point or option keyword required.").into_owned(),
+                    ))
+                }
+            };
+            match asking {
+                Asking::Chain => self.options.chain = None,
+                Asking::Description => self.options.description = None,
+                Asking::Palette => self.options.palette = None,
+            }
+            self.asking = Some(asking);
+            return Some(CmdResult::NeedPoint);
         }
         if self.kind != Kind::Rotation || self.base.is_none() {
             return None;
@@ -390,6 +499,9 @@ impl CadCommand for OrientationParameterCommand {
             .collect()
     }
     fn on_enter(&mut self) -> CmdResult {
+        if self.asking.is_some() {
+            return self.accept(None);
+        }
         if self.choosing_type {
             self.choosing_type = false;
             return CmdResult::NeedPoint;
@@ -409,5 +521,225 @@ impl CadCommand for OrientationParameterCommand {
         } else {
             CmdResult::Cancel
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rotation() -> OrientationParameterCommand {
+        OrientationParameterCommand::new(0, Handle::new(1), Kind::Rotation)
+    }
+
+    #[test]
+    fn a_rotation_base_point_prompt_lists_the_options_it_accepts() {
+        assert_eq!(
+            rotation().prompt(),
+            "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+        );
+    }
+
+    #[test]
+    fn other_orientation_kinds_keep_their_single_instruction() {
+        for kind in [Kind::Flip, Kind::Alignment] {
+            assert_eq!(
+                OrientationParameterCommand::new(0, Handle::new(1), kind).prompt(),
+                format!("BPARAMETER {}  Specify parameter base point:", kind.name())
+            );
+        }
+    }
+
+    #[test]
+    fn a_chain_answer_asks_whether_associated_actions_run() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("C"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+        );
+        assert!(matches!(
+            command.on_text_input("Yes"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.chain, Some(true));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+        );
+    }
+
+    #[test]
+    fn an_empty_chain_answer_keeps_actions_unchained() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("C"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.chain, None);
+    }
+
+    #[test]
+    fn a_description_answer_takes_its_text_as_written() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("D"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter property description:");
+        assert!(matches!(
+            command.on_text_input("  turns the frame  "),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.options.description.as_deref(),
+            Some("  turns the frame  ")
+        );
+    }
+
+    #[test]
+    fn a_palette_answer_lists_in_the_palette_by_default() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("P"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Display property in Properties palette? [Yes/No] <Yes>:"
+        );
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.palette, None);
+    }
+
+    #[test]
+    fn a_palette_answer_can_hide_the_property() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("PALETTE"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("No"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.palette, Some(false));
+    }
+
+    #[test]
+    fn a_yes_or_no_answer_outside_yes_or_no_is_refused() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("C"),
+            Some(CmdResult::NeedPoint)
+        ));
+        let Some(CmdResult::ReportError(error)) = command.on_text_input("maybe") else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error, "Enter Yes or No.");
+        assert_eq!(
+            command.prompt(),
+            "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+        );
+    }
+
+    #[test]
+    fn text_that_is_not_an_option_is_refused_with_the_prompt() {
+        let Some(CmdResult::ReportError(error)) = rotation().on_text_input("Z") else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error, "Point or option keyword required.");
+    }
+
+    #[test]
+    fn options_can_be_answered_in_any_order() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("P"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("No"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("D"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("audit note"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("CHAIN"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Yes"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.chain, Some(true));
+        assert_eq!(command.options.description.as_deref(), Some("audit note"));
+        assert_eq!(command.options.palette, Some(false));
+    }
+
+    #[test]
+    fn a_click_while_an_option_is_open_keeps_the_question() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("C"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_point(DVec3::new(1., 2., 0.)),
+            CmdResult::NeedPoint
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Evaluate associated actions when parameter is edited by another action? [Yes/No] <No>:"
+        );
+    }
+
+    #[test]
+    fn a_description_question_takes_typed_text() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("D"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.input_kind(), InputKind::FreeText);
+    }
+
+    #[test]
+    fn a_keyword_after_the_base_point_is_not_an_option() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_point(DVec3::new(1., 2., 0.)),
+            CmdResult::NeedPoint
+        ));
+        assert!(command.on_text_input("C").is_none());
+    }
+
+    #[test]
+    fn reopening_an_option_keeps_the_default_it_shows() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("P"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("No"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("P"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.palette, None);
     }
 }

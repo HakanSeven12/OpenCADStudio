@@ -34,7 +34,22 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            cmd if cmd == "WIPEOUT" || cmd == "WO" || cmd.starts_with("WIPEOUT ") => {
+            // WIPEOUT's Frames option: a new mode regenerates twice (the
+            // reference prints it twice); the current mode changes nothing.
+            cmd if cmd.starts_with("_WIPEOUT_FRAMES ") => {
+                let mode = cmd["_WIPEOUT_FRAMES ".len()..].trim().parse::<i16>().unwrap_or(1);
+                let current = crate::modules::draw::draw::wipeout::wipeout_frame_mode(
+                    &self.tabs[i].scene.document,
+                );
+                if mode != current {
+                    let task = self.dispatch_command(&format!("WIPEOUTFRAME {mode}"));
+                    self.command_line.push_output(crate::t!("Regenerating model.").as_ref());
+                    return Some(task);
+                }
+                return Some(Task::none());
+            }
+
+            cmd if cmd == "WIPEOUT" || cmd.starts_with("WIPEOUT ") => {
                 use crate::modules::draw::draw::wipeout::WipeoutCommand;
                 let args = cmd
                     .split_once(' ')
@@ -63,19 +78,32 @@ impl OpenCADStudio {
 
             "REVCLOUD" | "REVCLOUD_RECTANGULAR" | "REVCLOUD_POLYGONAL" | "REVCLOUD_FREEHAND" => {
                 use crate::modules::draw::draw::revcloud::RevCloudCommand;
+                // REVCLOUDAPPROXARCLEN, or (while it is 0) a twentieth of the
+                // view's diagonal.
+                let stored = crate::io::drawing_variable(
+                    &self.tabs[i].scene.document,
+                    crate::entities::revcloud::ARC_LENGTH_VARIABLE,
+                )
+                .and_then(|value| value.trim().parse::<f64>().ok())
+                .filter(|value| value.is_finite() && *value > 0.0);
                 let view_height = self.tabs[i].scene.camera.borrow().ortho_size() as f64 * 2.0;
-                let default_arc_length = (view_height * 0.0125).max(1.0e-6);
-                let sources = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .map(|entity| (entity.common().handle, entity.clone()))
-                    .collect();
-                let mut command = RevCloudCommand::new(default_arc_length, sources);
+                let arc_length = stored.unwrap_or_else(|| {
+                    crate::entities::revcloud::view_arc_length(
+                        view_height,
+                        self.tabs[i].scene.view_aspect(),
+                    )
+                    .max(1.0e-6)
+                });
+                let mut command = RevCloudCommand::new(arc_length, stored.is_some());
+                let mut prompt = command.prompt();
+                // The ribbon's Rectangular / Polygonal / Freehand choose the
+                // type first, as `_R` / `_P` / `_F` after the command.
                 if let Some(mode) = cmd.strip_prefix("REVCLOUD_") {
-                    command.on_text_input(mode);
+                    self.command_line.push_info(&prompt);
+                    command.on_text_input(&mode[..1]);
+                    prompt = command.prompt();
                 }
-                self.command_line.push_info(&command.prompt());
+                self.command_line.push_info(&prompt);
                 self.tabs[i].active_cmd = Some(Box::new(command));
             }
 

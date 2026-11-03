@@ -2088,18 +2088,9 @@ impl OpenCADStudio {
             let Some(window) = self.main_window else {
                 return Task::done(Message::ControlScreenshot(path, None));
             };
-            // A minimized window has a 0x0 surface and the renderer panics
-            // reading it back, so report instead of capturing.
-            iced::window::size(window).then(move |size| {
-                let path = path.clone();
-                if size.width <= 0.0 || size.height <= 0.0 {
-                    Task::done(Message::ControlScreenshot(path, None))
-                } else {
-                    iced::window::screenshot(window).map(move |screenshot| {
-                        Message::ControlScreenshot(path.clone(), Some(screenshot))
-                    })
-                }
-            })
+            // A minimized window reports a failed capture instead.
+            crate::app::screenshot_if_drawn(window)
+                .map(move |screenshot| Message::ControlScreenshot(path.clone(), screenshot))
         }
     }
 }

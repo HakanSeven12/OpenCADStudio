@@ -1378,6 +1378,25 @@ impl TableCellEditCommand {
             column,
         }
     }
+
+    /// The cell takes the given data type (and no picture) with the text
+    /// put in, in the same undo step.
+    pub fn with_value_type(mut self, data_type: i32, unit_type: i32) -> Self {
+        use codec::entities::table::CellStylePropertyFlags as P;
+        if let Some(cell) = self.table.cell_mut(self.row, self.column) {
+            let bits = (P::DATA_TYPE | P::DATA_FORMAT).bits() as i32;
+            for content in &mut cell.contents {
+                content.format_property_flags &= !bits;
+                content.format_override_flags &= !bits;
+            }
+            let style = cell.style.get_or_insert_with(Default::default);
+            style.value_data_type = data_type;
+            style.value_unit_type = unit_type;
+            style.value_format.clear();
+            style.property_flags.insert(P::DATA_TYPE | P::DATA_FORMAT);
+        }
+        self
+    }
 }
 
 impl CadCommand for TableCellEditCommand {

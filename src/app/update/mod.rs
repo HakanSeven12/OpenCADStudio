@@ -325,6 +325,8 @@ impl OpenCADStudio {
             // OK or ✕ dismisses this map; the next one follows.
             // Cancel or ✕ leaves the cells as they were.
             Some(TableCellWarning) => self.table_cell_warning = None,
+            // Cancel drops the typed value; the cell keeps its value and type.
+            Some(TableCellEntry) => self.table_cell_entry = None,
             Some(TdsMissingMap) => {
                 if !self.import_dialogs.tds_maps.is_empty() {
                     self.import_dialogs.tds_maps.remove(0);

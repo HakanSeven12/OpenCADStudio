@@ -790,6 +790,11 @@ pub(super) struct OpenCADStudio {
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
     table_cell_warning: Option<(crate::ui::window::table_cell_dialog::CellFormatState, Vec<String>)>,
+    /// A value typed into a cell that waits on the data type question.
+    table_cell_entry: Option<commands::table_cells::CellEntry>,
+    /// The next cell step puts its value in without the data type question
+    /// (the type was just changed to fit it).
+    table_cell_entry_typed: bool,
     /// The Data Link Manager was opened by Link Cell: its link feeds the
     /// picked cells when it closes.
     data_link_cell_target: bool,
@@ -2892,6 +2897,8 @@ pub enum ModalKind {
     TableCellBlock,
     TableCellFormat,
     TableCellWarning,
+    /// A value typed into a cell that is not of the cell's data type.
+    TableCellEntry,
     PdfShxSettings,
     UnderlayLayers,
     PdfImportSettings,
@@ -5690,6 +5697,8 @@ impl OpenCADStudio {
             table_cell_block: None,
             table_cell_format: None,
             table_cell_warning: None,
+            table_cell_entry: None,
+            table_cell_entry_typed: false,
             data_link_cell_target: false,
             pdf_shx_dialog: None,
             underlay_layers: None,

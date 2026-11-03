@@ -264,6 +264,38 @@ impl OpenCADStudio {
         self.table_cell_step(CellStep::Down)
     }
 
+    /// After the data type question: "change the type" puts the value in
+    /// with the cell's type changed to the value's (one undo step) and goes
+    /// on as the key that ended the editing would; "change the value"
+    /// reopens the cell's editor with the value.
+    fn resume_cell_entry(&mut self, entry: CellEntry, change_type: bool) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(codec::EntityType::Table(table)) =
+            self.tabs[i].scene.document.get_entity(entry.handle)
+        else {
+            return Task::none();
+        };
+        let mut command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+            entry.handle,
+            table,
+            entry.row,
+            entry.column,
+        );
+        if change_type {
+            let (data_type, unit_type) = crate::entities::table::entered_value_type(&entry.text);
+            command = command.with_value_type(data_type, unit_type);
+        }
+        use crate::command::CadCommand;
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        self.command_line.input = entry.text;
+        if !change_type {
+            return self.focus_cmd_input();
+        }
+        self.table_cell_entry_typed = true;
+        self.table_cell_step(entry.step).unwrap_or_else(Task::none)
+    }
+
     fn table_cell_step(&mut self, step: CellStep) -> Option<Task<Message>> {
         let forward = step == CellStep::Next;
         let i = self.active_tab;
@@ -272,6 +304,27 @@ impl OpenCADStudio {
         let text = std::mem::take(&mut self.command_line.input)
             .trim_end()
             .to_string();
+        // A value that does not read as the cell's data type is not put in:
+        // a question asks whether the type changes, the value is edited
+        // again, or the value is dropped.
+        let fits = match self.tabs[i].scene.document.get_entity(handle) {
+            Some(codec::EntityType::Table(table)) => crate::entities::table::typed_text_fits(
+                &self.tabs[i].scene.document,
+                table,
+                row,
+                column,
+                &text,
+            ),
+            _ => true,
+        };
+        if !fits && !self.table_cell_entry_typed {
+            self.tabs[i].active_cmd = None;
+            self.table_cell_entry = Some(CellEntry { handle, row, column, text, step });
+            self.active_modal = Some(crate::app::ModalKind::TableCellEntry);
+            self.reset_modal_geometry();
+            return Some(Task::none());
+        }
+        self.table_cell_entry_typed = false;
         let committed = if text.is_empty() {
             self.tabs[i].active_cmd = None;
             Task::none()
@@ -344,6 +397,22 @@ impl OpenCADStudio {
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
         Some(Task::batch([committed, self.focus_cmd_input()]))
+    }
+}
+
+/// A value typed into a cell's editor that is not of the cell's data type.
+pub(in crate::app) struct CellEntry {
+    handle: codec::Handle,
+    row: usize,
+    column: usize,
+    pub(in crate::app) text: String,
+    step: CellStep,
+}
+
+impl CellEntry {
+    /// The cell's name, as the column letters and row number show it.
+    pub(in crate::app) fn cell_name(&self) -> String {
+        format!("{}{}", super::field::column_letters(self.column), self.row + 1)
     }
 }
 
@@ -905,6 +974,15 @@ impl OpenCADStudio {
         let i = self.active_tab;
         // OK in the invalid data type warning converts the cells as the
         // format asked; values that read as no such type are emptied.
+        if matches!(message, M::EntryType | M::EntryValue)
+            && self.active_modal == Some(crate::app::ModalKind::TableCellEntry)
+        {
+            if let Some(entry) = self.table_cell_entry.take() {
+                self.close_active_modal();
+                return self.resume_cell_entry(entry, matches!(message, M::EntryType));
+            }
+            return Task::none();
+        }
         if matches!(message, M::WarnOk)
             && self.active_modal == Some(crate::app::ModalKind::TableCellWarning)
         {

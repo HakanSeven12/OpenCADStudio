@@ -160,6 +160,7 @@ pub(super) const NAMES: &[&str] = &[
     "dim_inspect_dialog",
     "table_cell_dialog",
     "table_cell_warning",
+    "table_cell_entry",
     "hyperlink_dialog",
     "spell_dialog",
     "table_cell_tab",
@@ -2555,6 +2556,22 @@ impl OpenCADStudio {
                     "ok" => Message::TableCellDialog(
                         crate::ui::window::table_cell_dialog::TableCellDialogMsg::WarnOk,
                     ),
+                    "cancel" | "close" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", spec)),
+                }
+            }
+            // A typed value that is not of the cell's data type: "type"
+            // changes the cell's type, "value" edits the value again,
+            // "cancel" drops it.
+            "table_cell_entry" => {
+                if self.active_modal != Some(crate::app::ModalKind::TableCellEntry) {
+                    return Err(failure("no_dialog", "The cell value question is not open"));
+                }
+                use crate::ui::window::table_cell_dialog::TableCellDialogMsg as T;
+                let spec = string(req, "value")?;
+                match spec {
+                    "type" => Message::TableCellDialog(T::EntryType),
+                    "value" => Message::TableCellDialog(T::EntryValue),
                     "cancel" | "close" => Message::CloseModal,
                     _ => return Err(failure("invalid_value", spec)),
                 }

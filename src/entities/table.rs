@@ -5067,6 +5067,41 @@ fn parse_cell_point(text: &str) -> Option<[f64; 3]> {
     }
 }
 
+/// Whether text typed into a cell reads as the cell's data type: any text
+/// fits a cell without one (General, Text); otherwise the text has to read
+/// as the type, as the cell's editor checks it before it is put in.
+pub(crate) fn typed_text_fits(
+    document: &codec::Document,
+    table: &Table,
+    row: usize,
+    column: usize,
+    text: &str,
+) -> bool {
+    let Some((kind, picture)) = cell_data_kind(table, row, column) else {
+        return true;
+    };
+    if matches!(kind, 4 | 7) || text.trim().is_empty() {
+        return true;
+    }
+    let value = codec::entities::table::CellValue::text(text);
+    matches!(typed_cell_value(document, &value, kind, &picture), TypedValue::Converted(_))
+}
+
+/// The data type (and unit) of a typed value, as the cell takes it when its
+/// type changes to fit what was typed: a whole number, a number, a 2D or 3D
+/// point (numbers separated by commas), else text.
+pub(crate) fn entered_value_type(text: &str) -> (i32, i32) {
+    let text = text.trim();
+    let numbers: Vec<Option<f64>> = text.split(',').map(|part| part.trim().parse().ok()).collect();
+    match numbers.as_slice() {
+        [Some(_)] if text.parse::<i64>().is_ok() => (1, 0),
+        [Some(_)] => (2, 0),
+        [Some(_), Some(_)] => (16, 0),
+        [Some(_), Some(_), Some(_)] => (32, 0),
+        _ => (4, 0),
+    }
+}
+
 /// Outcome of reading a cell value as a data type.
 pub(crate) enum TypedValue {
     /// The value as the type, formatted by the picture.

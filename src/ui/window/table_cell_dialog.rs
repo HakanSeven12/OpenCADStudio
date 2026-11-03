@@ -67,6 +67,11 @@ pub enum TableCellDialogMsg {
     Ok,
     /// OK in the invalid data type warning.
     WarnOk,
+    /// The typed value that is not of the cell's data type: the cell's
+    /// type changes to the value's.
+    EntryType,
+    /// The typed value goes back into the cell's editor.
+    EntryValue,
 }
 
 fn msg(m: TableCellDialogMsg) -> Message {
@@ -797,6 +802,71 @@ pub fn view_warning<'a>(cells: &'a [String], sizing: crate::ui::modal::ModalSizi
         .spacing(8),
     ]
     .spacing(12)
+    .padding([12, 14])
+    .width(sizing.width)
+    .into()
+}
+
+/// A value typed into a cell is not of the cell's data type: the type can
+/// change to the value's, the value can go back into the editor, or Cancel
+/// drops the value.
+pub fn view_entry<'a>(
+    cell: String,
+    value: &'a str,
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
+    use TableCellDialogMsg as M;
+    let choice = |title: String, note: String, message: M| {
+        iced::widget::button(
+            column![
+                text(title).size(13).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
+                text(note).size(11).style(muted_style),
+            ]
+            .spacing(2),
+        )
+        .on_press(msg(message))
+        .width(Fill)
+        .padding([8, 10])
+        .style(iced::widget::button::secondary)
+    };
+    column![
+        row![
+            crate::ui::window::import_dialogs::warning_badge(),
+            column![
+                text(crate::tr!("table-cells", "entry-heading")).size(13).font(iced::Font {
+                    weight: iced::font::Weight::Bold,
+                    ..iced::Font::DEFAULT
+                }),
+                row![chip(cell, false, Message::Noop), chip(value.to_string(), true, Message::Noop)]
+                    .spacing(4),
+            ]
+            .spacing(8),
+        ]
+        .spacing(12),
+        choice(
+            crate::tr!("table-cells", "entry-type"),
+            crate::tr!("table-cells", "entry-type-note"),
+            M::EntryType,
+        ),
+        choice(
+            crate::tr!("table-cells", "entry-value"),
+            crate::tr!("table-cells", "entry-value-note"),
+            M::EntryValue,
+        ),
+        iced::widget::rule::horizontal(1),
+        row![
+            Space::new().width(Fill),
+            dialog_button_styled_opt(
+                std::borrow::Cow::Owned(crate::tr!("table-cells", "warning-cancel")),
+                Some(Message::CloseModal),
+                iced::widget::button::secondary
+            ),
+        ],
+    ]
+    .spacing(10)
     .padding([12, 14])
     .width(sizing.width)
     .into()

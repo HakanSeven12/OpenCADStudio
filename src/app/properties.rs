@@ -2201,7 +2201,9 @@ impl OpenCADStudio {
                 .get_entity(cur_handles[0])
                 .and_then(|entity| match entity {
                     codec::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
-                    codec::EntityType::Polyline2D(polyline) => Some(polyline.vertices.len()),
+                    codec::EntityType::Polyline2D(polyline) => Some(
+                        crate::entities::polyline::polyline2d_frame_indices(polyline).len(),
+                    ),
                     codec::EntityType::PolygonMesh(mesh) => Some(mesh.vertices.len()),
                     codec::EntityType::Polyline3D(polyline) => Some(
                         crate::entities::polyline::polyline3d_control_vertex_count(polyline),

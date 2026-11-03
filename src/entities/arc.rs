@@ -4,7 +4,7 @@ use codec::entities::Arc;
 use crate::command::EntityTransform;
 use crate::entities::common::{
     center_grip, edit_angle_prop as edit_angle, edit_prop as edit, format_angle, format_area,
-    format_length, parse_f64, ro_prop as ro, square_grip,
+    format_decimal, format_length, parse_f64, ro_prop as ro, square_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
@@ -210,11 +210,11 @@ fn properties(arc: &Arc) -> Vec<PropSection> {
                 "total_angle",
                 format_angle(total_angle.to_radians()),
             ),
-            edit(t!("Arc length").as_ref(), "arc_length", arc_length),
+            ro(t!("Arc length").as_ref(), "arc_length", format_length(arc_length)),
             ro(t!("Area").as_ref(), "area", format_area(area)),
-            edit(t!("Normal X").as_ref(), "normal_x", arc.normal.x),
-            edit(t!("Normal Y").as_ref(), "normal_y", arc.normal.y),
-            edit(t!("Normal Z").as_ref(), "normal_z", arc.normal.z),
+            ro(t!("Normal X").as_ref(), "normal_x", format_decimal(arc.normal.x)),
+            ro(t!("Normal Y").as_ref(), "normal_y", format_decimal(arc.normal.y)),
+            ro(t!("Normal Z").as_ref(), "normal_z", format_decimal(arc.normal.z)),
         ],
     }]
 }
@@ -244,28 +244,6 @@ fn apply_geom_prop(arc: &mut Arc, field: &str, value: &str) {
         "radius" if v > 0.0 => arc.radius = v,
         "start_angle" => arc.start_angle = v.to_radians(),
         "end_angle" => arc.end_angle = v.to_radians(),
-        // The start stays put; the end moves along the circle.
-        "arc_length" if v > 0.0 && v < TAU * arc.radius => {
-            arc.end_angle = (arc.start_angle + v / arc.radius).rem_euclid(TAU);
-        }
-        "normal_x" | "normal_y" | "normal_z" => {
-            let center = arc.center_wcs();
-            let mut normal = kernel::space::Vec3::new(arc.normal.x, arc.normal.y, arc.normal.z);
-            match field {
-                "normal_x" => normal.x = v,
-                "normal_y" => normal.y = v,
-                "normal_z" => normal.z = v,
-                _ => {}
-            }
-            if let Some(normal) = normal.normalize() {
-                arc.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
-                let (x, y, z) = crate::scene::view::transform::wcs_point_to_ocs(
-                    (center.x, center.y, center.z),
-                    (normal.x, normal.y, normal.z),
-                );
-                arc.center = codec::types::Vector3::new(x, y, z);
-            }
-        }
         _ => {}
     }
 }

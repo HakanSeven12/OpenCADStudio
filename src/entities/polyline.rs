@@ -192,6 +192,41 @@ pub fn set_spline_segments(segments: i16) {
     SPLINE_SEGMENTS.with(|c| c.set(segments));
 }
 
+/// A Fit/Smooth list, shown in the panel's language; `selected` and
+/// `options` are the English keys [`fit_smooth_key`] reads back.
+fn fit_smooth_choice(selected: &str, options: &[&str]) -> PropValue {
+    PropValue::Choice {
+        selected: t!(selected).into_owned(),
+        options: options.iter().map(|o| t!(*o).into_owned()).collect(),
+    }
+}
+
+/// The English key of a Fit/Smooth choice, whichever language it came in.
+fn fit_smooth_key(value: &str) -> Option<&'static str> {
+    ["None", "Curve fit", "Quadratic", "Cubic"]
+        .into_iter()
+        .find(|key| value == *key || value == t!(*key).as_ref())
+}
+
+/// The vertices the Current Vertex stepper walks: a fitted polyline's
+/// frame (its defining vertices), otherwise every vertex.
+pub(crate) fn polyline2d_frame_indices(pl: &Polyline2D) -> Vec<usize> {
+    let fitted = pl.flags.bits() & (2 | 4) != 0;
+    (0..pl.vertices.len())
+        .filter(|&i| !fitted || pl.vertices[i].flags.bits() & (1 | 8) == 0)
+        .collect()
+}
+
+/// The vertex index the panel is focused on, through the frame.
+fn polyline2d_focused_vertex(pl: &Polyline2D) -> (usize, usize) {
+    let frame = polyline2d_frame_indices(pl);
+    let Some(last) = frame.len().checked_sub(1) else {
+        return (0, 0);
+    };
+    let step = crate::scene::view::dispatch::prop_current_vertex().min(last);
+    (step, frame[step])
+}
+
 /// The Fit/Smooth choice a 2D polyline shows.
 fn polyline2d_fit_smooth(pl: &Polyline2D) -> &'static str {
     use codec::entities::polyline::SmoothSurfaceType;
@@ -703,7 +738,6 @@ pub(crate) fn polyline2d_global_width(pline: &Polyline2D) -> Option<f64> {
 
 impl PropertyEditable for Polyline2D {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
-        let n = self.vertices.len();
         // Area and length are the drawn curve's: a spline-fit polyline's
         // samples, with each bulge segment measured along its arc.
         let drawn = drawn_vertices2d(self);
@@ -729,12 +763,10 @@ impl PropertyEditable for Polyline2D {
         }
         area = (area * 0.5).abs();
 
-        let vi = if n == 0 {
-            0
-        } else {
-            crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
-        };
-        let v = self.vertices.get(vi);
+        let n = polyline2d_frame_indices(self).len();
+        let (vi, index) = polyline2d_focused_vertex(self);
+        let spline_fit = self.flags.bits() & 4 != 0;
+        let v = self.vertices.get(index);
         let vertex_x = v.map(|v| v.location.x).unwrap_or_default();
         let vertex_y = v.map(|v| v.location.y).unwrap_or_default();
         let (seg_start_w, seg_end_w) = v.map_or((0.0, 0.0), |v| {
@@ -766,12 +798,21 @@ impl PropertyEditable for Polyline2D {
                     ),
                     edit(t!("Vertex X").as_ref(), "pl2_vertex_x", vertex_x),
                     edit(t!("Vertex Y").as_ref(), "pl2_vertex_y", vertex_y),
-                    edit(
-                        t!("Start segment width").as_ref(),
-                        "pl2_seg_start_w",
-                        seg_start_w,
-                    ),
-                    edit(t!("End segment width").as_ref(), "pl2_seg_end_w", seg_end_w),
+                    // A spline-fit polyline's frame has no segment widths of its own.
+                    if spline_fit {
+                        ro(t!("Start segment width").as_ref(), "pl2_seg_start_w", "")
+                    } else {
+                        edit(
+                            t!("Start segment width").as_ref(),
+                            "pl2_seg_start_w",
+                            seg_start_w,
+                        )
+                    },
+                    if spline_fit {
+                        ro(t!("End segment width").as_ref(), "pl2_seg_end_w", "")
+                    } else {
+                        edit(t!("End segment width").as_ref(), "pl2_seg_end_w", seg_end_w)
+                    },
                     global_width_prop,
                     edit(t!("Elevation").as_ref(), "pl2_elevation", self.elevation),
                     ro(t!("Area").as_ref(), "pl2_area", format_area(area)),
@@ -784,12 +825,10 @@ impl PropertyEditable for Polyline2D {
                     Property {
                         label: t!("Fit/Smooth").into_owned(),
                         field: "pl2_fit_smooth",
-                        value: PropValue::Choice {
-                            selected: polyline2d_fit_smooth(self).to_string(),
-                            options: ["None", "Curve fit", "Quadratic", "Cubic"]
-                                .map(str::to_string)
-                                .to_vec(),
-                        },
+                        value: fit_smooth_choice(
+                            polyline2d_fit_smooth(self),
+                            &["None", "Curve fit", "Quadratic", "Cubic"],
+                        ),
                     },
                     Property {
                         label: t!("Closed").into_owned(),
@@ -811,15 +850,13 @@ impl PropertyEditable for Polyline2D {
 
     fn apply_geom_prop(&mut self, field: &str, value: &str) {
         // Per-vertex edits target the vertex the panel is focused on.
-        let n = self.vertices.len();
-        let vi = if n == 0 {
-            0
-        } else {
-            crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
-        };
+        let (_, vi) = polyline2d_focused_vertex(self);
         match field {
             "pl2_fit_smooth" => {
                 use crate::modules::draw::modify::pedit;
+                let Some(value) = fit_smooth_key(value) else {
+                    return;
+                };
                 match value {
                     "None" => pedit::unfit_polyline2d(self),
                     "Curve fit" => {
@@ -868,14 +905,26 @@ impl PropertyEditable for Polyline2D {
                     }
                 }
             }
-            "pl2_vertex_x" => {
+            "pl2_vertex_x" | "pl2_vertex_y" => {
                 if let (Some(v), Some(vert)) = (parse_f64(value), self.vertices.get_mut(vi)) {
-                    vert.location.x = v;
+                    if field == "pl2_vertex_x" {
+                        vert.location.x = v;
+                    } else {
+                        vert.location.y = v;
+                    }
                 }
-            }
-            "pl2_vertex_y" => {
-                if let (Some(v), Some(vert)) = (parse_f64(value), self.vertices.get_mut(vi)) {
-                    vert.location.y = v;
+                // A moved frame vertex reshapes the spline it drives.
+                if self.flags.bits() & 4 != 0 {
+                    let degree = match self.smooth_surface {
+                        codec::entities::polyline::SmoothSurfaceType::QuadraticBSpline => 2,
+                        _ => 3,
+                    };
+                    let segments = SPLINE_SEGMENTS.with(|c| c.get()).unsigned_abs().max(1);
+                    crate::modules::draw::modify::pedit::spline_fit_polyline2d(
+                        self,
+                        degree,
+                        segments as usize,
+                    );
                 }
             }
             "pl2_seg_start_w" => {
@@ -1319,12 +1368,12 @@ impl PropertyEditable for Polyline3D {
             SST::QuadraticBSpline => "Quadratic",
             SST::CubicBSpline | SST::Bezier => "Cubic",
         };
-        let mut smooth_options = vec!["None".to_string()];
+        let mut smooth_options = vec!["None"];
         if n >= 3 {
-            smooth_options.push("Quadratic".to_string());
+            smooth_options.push("Quadratic");
         }
         if n >= 4 {
-            smooth_options.push("Cubic".to_string());
+            smooth_options.push("Cubic");
         }
 
         vec![
@@ -1352,10 +1401,7 @@ impl PropertyEditable for Polyline3D {
                     Property {
                         label: t!("Fit/Smooth").into_owned(),
                         field: "pl3_smooth",
-                        value: PropValue::Choice {
-                            selected: fit_smooth.to_string(),
-                            options: smooth_options,
-                        },
+                        value: fit_smooth_choice(fit_smooth, &smooth_options),
                     },
                     Property {
                         label: t!("Closed").into_owned(),
@@ -1396,7 +1442,7 @@ impl PropertyEditable for Polyline3D {
             }
             "pl3_smooth" => {
                 use codec::entities::polyline3d::SmoothSurfaceType as SST;
-                let next = match value {
+                let next = match fit_smooth_key(value).unwrap_or_default() {
                     "None" => SST::None,
                     "Quadratic" => SST::QuadraticBSpline,
                     "Cubic" => SST::CubicBSpline,

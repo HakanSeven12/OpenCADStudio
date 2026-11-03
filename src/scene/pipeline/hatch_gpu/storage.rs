@@ -226,6 +226,28 @@ fn hatch_buffer_cost(hatch: &HatchModel) -> [u64; 7] {
     ]
 }
 
+/// A hatch fill as triangles: local vertices and indices into them.
+type FillMesh = std::sync::Arc<(Vec<[f32; 2]>, Vec<u32>)>;
+
+/// Triangulated fills kept between uploads. A fill depends only on its
+/// boundary, and a hatch that an edit did not touch keeps the very same
+/// boundary allocation, so the allocation's identity finds its triangles
+/// again. Each entry holds its boundary alive, which keeps that identity from
+/// ever naming a different one.
+#[derive(Default)]
+pub(super) struct FillMeshCache {
+    entries: rustc_hash::FxHashMap<usize, (std::sync::Arc<Vec<[f32; 2]>>, FillMesh)>,
+    touched: rustc_hash::FxHashSet<usize>,
+}
+
+impl FillMeshCache {
+    /// Drop what the upload just finished did not use.
+    pub(super) fn finish(&mut self) {
+        let touched = std::mem::take(&mut self.touched);
+        self.entries.retain(|key, _| touched.contains(key));
+    }
+}
+
 impl StorageHatchBatch {
     /// Builds whole-hatch chunks within the device's buffer limits.
     pub(super) fn build(
@@ -233,6 +255,7 @@ impl StorageHatchBatch {
         queue: &wgpu::Queue,
         bgl: &wgpu::BindGroupLayout,
         hatches: &[HatchModel],
+        cache: &mut FillMeshCache,
     ) -> Vec<Self> {
         if hatches.is_empty() {
             return Vec::new();
@@ -267,7 +290,7 @@ impl StorageHatchBatch {
         ranges.push(start..hatches.len());
         ranges
             .into_iter()
-            .filter_map(|range| Self::build_chunk(device, queue, bgl, &hatches[range]))
+            .filter_map(|range| Self::build_chunk(device, queue, bgl, &hatches[range], cache))
             .collect()
     }
 
@@ -276,6 +299,7 @@ impl StorageHatchBatch {
         queue: &wgpu::Queue,
         bgl: &wgpu::BindGroupLayout,
         hatches: &[HatchModel],
+        cache: &mut FillMeshCache,
     ) -> Option<Self> {
         let mut instances: Vec<HatchInstance> = Vec::with_capacity(hatches.len());
         let mut families: Vec<LineFamilyGpu> = Vec::new();
@@ -298,11 +322,44 @@ impl StorageHatchBatch {
         groups.sort_by_key(|group| std::cmp::Reverse(group.len() == 1));
         let unique_source_count = groups.iter().take_while(|group| group.len() == 1).count();
 
-        for group in &groups {
+        // Triangulating every unique source is the bulk of a rebuild and each
+        // fill is independent, so run them in parallel; the ordered collect
+        // keeps the meshes aligned with `groups`.
+        let chunk_started = crate::perf::enabled().then(std::time::Instant::now);
+        let keys: Vec<usize> = groups
+            .iter()
+            .map(|group| std::sync::Arc::as_ptr(&group[0].boundary) as usize)
+            .collect();
+        let missing: Vec<usize> = (0..groups.len())
+            .filter(|&index| !cache.entries.contains_key(&keys[index]))
+            .collect();
+        let computed: Vec<(usize, FillMesh)> = {
+            use crate::par::prelude::*;
+            missing
+                .par_iter()
+                .map(|&index| (index, std::sync::Arc::new(groups[index][0].fill_mesh())))
+                .collect()
+        };
+        let triangulated = computed.len();
+        for (index, mesh) in computed {
+            cache.entries.insert(
+                keys[index],
+                (std::sync::Arc::clone(&groups[index][0].boundary), mesh),
+            );
+        }
+        let fill_meshes: Vec<FillMesh> = keys
+            .iter()
+            .map(|key| {
+                cache.touched.insert(*key);
+                std::sync::Arc::clone(&cache.entries[key].1)
+            })
+            .collect();
+        let meshes_ms = chunk_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
+        for (group_index, group) in groups.iter().enumerate() {
             let h = group[0];
-            let mesh = h.fill_mesh();
+            let mesh = &fill_meshes[group_index];
             let has_mesh = !mesh.0.is_empty() && !mesh.1.is_empty();
-            meshes.push(mesh);
+            meshes.push(std::sync::Arc::clone(mesh));
             let family_offset = families.len() as u32;
             let mut family_count = 0u32;
 
@@ -446,18 +503,19 @@ impl StorageHatchBatch {
         let mut verts = Vec::new();
         let mut indices = Vec::new();
         let mut mesh_ranges = Vec::with_capacity(meshes.len());
-        for (instance_index, (points, mesh_indices)) in meshes.into_iter().enumerate() {
+        for (instance_index, mesh) in meshes.iter().enumerate() {
+            let (points, mesh_indices) = &**mesh;
             let Ok(base) = u32::try_from(verts.len()) else {
                 return None;
             };
             let Ok(start) = u32::try_from(indices.len()) else {
                 return None;
             };
-            verts.extend(points.into_iter().map(|local_xy| HatchVertex {
+            verts.extend(points.iter().map(|&local_xy| HatchVertex {
                 local_xy,
                 instance_index: instance_index as u32,
             }));
-            for index in mesh_indices {
+            for &index in mesh_indices {
                 let Some(index) = base.checked_add(index) else {
                     return None;
                 };
@@ -551,6 +609,7 @@ impl StorageHatchBatch {
             return None;
         }
 
+        let packed_ms = chunk_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
         let vertex_buffer = crate::scene::pipeline::gpu_upload::upload_buffer(
             device,
             queue,
@@ -629,6 +688,17 @@ impl StorageHatchBatch {
             .map(|inst| world_aabb(inst, [0.0; 2]))
             .collect();
 
+        if let Some(started) = chunk_started {
+            crate::perf_record!(
+                "[perf] hatch-chunk meshes={:.1}ms packed={:.1}ms total={:.1}ms hatches={} sources={} triangulated={}",
+                meshes_ms.unwrap_or(0.0),
+                packed_ms.unwrap_or(0.0),
+                started.elapsed().as_secs_f64() * 1000.0,
+                hatches.len(),
+                groups.len(),
+                triangulated,
+            );
+        }
         Some(Self {
             vertex_buffer,
             index_buffer,

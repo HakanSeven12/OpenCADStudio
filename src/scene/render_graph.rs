@@ -1181,6 +1181,49 @@ pub fn block_contains_hatch(
     block_name: &str,
     memo: &mut std::collections::HashMap<String, bool>,
 ) -> bool {
+    block_contains_kind(document, block_name, memo, &|entity| {
+        matches!(entity, EntityType::Hatch(_))
+    })
+}
+
+/// Whether the block, or a block it nests, holds a WIPEOUT mask.
+pub fn block_contains_wipeout(
+    document: &Document,
+    block_name: &str,
+    memo: &mut std::collections::HashMap<String, bool>,
+) -> bool {
+    block_contains_kind(document, block_name, memo, &|entity| {
+        matches!(entity, EntityType::Wipeout(_))
+    })
+}
+
+/// Whether the block, or a block it nests, holds a solid, surface or mesh
+/// entity, the kinds that draw through the mesh cache.
+pub fn block_contains_mesh(
+    document: &Document,
+    block_name: &str,
+    memo: &mut std::collections::HashMap<String, bool>,
+) -> bool {
+    block_contains_kind(document, block_name, memo, &|entity| {
+        matches!(
+            entity,
+            EntityType::Solid3D(_)
+                | EntityType::Region(_)
+                | EntityType::Body(_)
+                | EntityType::Surface(_)
+                | EntityType::Mesh(_)
+                | EntityType::PolygonMesh(_)
+                | EntityType::PolyfaceMesh(_)
+        )
+    })
+}
+
+fn block_contains_kind(
+    document: &Document,
+    block_name: &str,
+    memo: &mut std::collections::HashMap<String, bool>,
+    is_kind: &dyn Fn(&EntityType) -> bool,
+) -> bool {
     let key = block_name.to_ascii_lowercase();
     if let Some(&contains) = memo.get(&key) {
         return contains;
@@ -1191,12 +1234,17 @@ pub fn block_contains_hatch(
             .entity_handles
             .iter()
             .any(|&handle| match document.get_entity(handle) {
-                Some(EntityType::Hatch(_)) => true,
+                Some(entity) if is_kind(entity) => true,
                 Some(entity) => entity_render_block_uses(document, entity, 1.0)
                     .into_iter()
                     .filter(|block_use| block_use.active)
                     .any(|block_use| {
-                        block_contains_hatch(document, &block_use.insert.block_name, memo)
+                        block_contains_kind(
+                            document,
+                            &block_use.insert.block_name,
+                            memo,
+                            is_kind,
+                        )
                     }),
                 _ => false,
             })

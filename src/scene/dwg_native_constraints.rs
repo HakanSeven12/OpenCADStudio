@@ -4242,9 +4242,18 @@ impl Scene {
             owners.push(model_owner);
         }
 
+        // Whether each owner already holds a network is a read of the
+        // untouched document, and a drawing can have tens of thousands of
+        // block definitions, so ask for all of them across the cores first.
+        let existing_networks: Vec<bool> = {
+            use crate::par::prelude::*;
+            owners
+                .par_iter()
+                .map(|&owner| native_scope_network_handle(&self.document, owner).is_some())
+                .collect()
+        };
         let mut scopes = Vec::new();
-        for owner in owners {
-            let existing = native_scope_network_handle(&self.document, owner).is_some();
+        for (owner, existing) in owners.into_iter().zip(existing_networks) {
             let runtime = self
                 .parametric_constraints
                 .iter()

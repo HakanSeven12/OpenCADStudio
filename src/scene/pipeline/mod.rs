@@ -13,6 +13,7 @@ macro_rules! draw_order_shader {
     };
 }
 
+mod analytic_slots;
 pub mod circle_gpu;
 #[cfg(test)]
 mod depth_tests;
@@ -293,7 +294,10 @@ pub struct Pipeline {
     /// have to be rebuilt instead of patched.
     pub(crate) wire_arena_depth_generation: u64,
     /// Handles that contributed to this slot's retained analytical uploads.
-    pub(crate) partition_contributors: rustc_hash::FxHashSet<codec::Handle>,
+    pub(crate) partition_contributors: wire_arena::ContributorSet,
+    /// Where each reference's analytical instances sit in the uploads above, so
+    /// a move can overwrite them in place. `None` until a full upload recorded them.
+    pub(crate) analytic_slots: Option<analytic_slots::AnalyticSlots>,
     /// The draw-depth generation those uploads baked. A full depth rebuild
     /// reassigns every label, so they stop being reusable when it moves.
     pub(crate) partition_depth_generation: u64,
@@ -2490,7 +2494,8 @@ impl Pipeline {
             wire_arena_fallback_handles: rustc_hash::FxHashSet::default(),
             wire_arena_id: u64::MAX,
             wire_arena_depth_generation: u64::MAX,
-            partition_contributors: rustc_hash::FxHashSet::default(),
+            partition_contributors: wire_arena::ContributorSet::default(),
+            analytic_slots: None,
             partition_depth_generation: u64::MAX,
             wire_cull_key: (u64::MAX, u64::MAX, 0, 0),
             hatch_lod_key: (usize::MAX, u64::MAX, 0, 0, false),
@@ -2600,11 +2605,24 @@ impl Pipeline {
             vec![]
         } else {
             let mut sorted = instances.to_vec();
-            sorted.sort_by(|a, b| {
-                a.params[2]
-                    .partial_cmp(&b.params[2])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            {
+                // A stable parallel sort: the same order, a quarter-million
+                // instances sorted across the cores.
+                #[cfg(not(target_arch = "wasm32"))]
+                use rayon::prelude::*;
+                #[cfg(not(target_arch = "wasm32"))]
+                sorted.par_sort_by(|a, b| {
+                    a.params[2]
+                        .partial_cmp(&b.params[2])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                #[cfg(target_arch = "wasm32")]
+                sorted.sort_by(|a, b| {
+                    a.params[2]
+                        .partial_cmp(&b.params[2])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
             vec![CircleGpu::from_instances(
                 device,
                 queue,
@@ -2646,11 +2664,22 @@ impl Pipeline {
             vec![]
         } else {
             let mut sorted = instances.to_vec();
-            sorted.sort_by(|a, b| {
-                a.params[2]
-                    .partial_cmp(&b.params[2])
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            {
+                #[cfg(not(target_arch = "wasm32"))]
+                use rayon::prelude::*;
+                #[cfg(not(target_arch = "wasm32"))]
+                sorted.par_sort_by(|a, b| {
+                    a.params[2]
+                        .partial_cmp(&b.params[2])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+                #[cfg(target_arch = "wasm32")]
+                sorted.sort_by(|a, b| {
+                    a.params[2]
+                        .partial_cmp(&b.params[2])
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
+            }
             vec![EllipseGpu::from_instances(
                 device,
                 queue,
@@ -2658,6 +2687,181 @@ impl Pipeline {
                 &sorted,
             )]
         }
+    }
+
+    /// `upload_block_wires`, also reporting where every placement landed.
+    pub fn upload_block_wires_tracked(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        wires: &[wire_gpu::BlockRef<'_>],
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        block_geometry: &mut wire_gpu::BlockGeometryCache,
+    ) -> (Vec<BlockWireGpu>, Option<wire_gpu::BlockTracking>) {
+        BlockWireGpu::from_wires_tracked(
+            device,
+            queue,
+            wires,
+            depth_map,
+            wire_gpu::BlockWireTarget {
+                const_bgl: &self.block_wire_const_bgl,
+                mode: self.block_wire_mode,
+            },
+            Some(block_geometry),
+        )
+    }
+
+    /// `upload_circles_from_instances`, also reporting where each instance
+    /// landed in the depth-sorted buffer, paired with the reference that owns it.
+    pub fn upload_circles_tracked(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[CircleInstance],
+        owners: &[codec::Handle],
+    ) -> (Vec<CircleGpu>, Vec<(codec::Handle, analytic_slots::CurveSlot)>) {
+        if instances.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let (sorted, position) = analytic_slots::sort_by_depth(instances, |c| c.params[2]);
+        let gpu = CircleGpu::from_instances(device, queue, "viewer.circles", &sorted);
+        let slots = owners
+            .iter()
+            .zip(position)
+            .enumerate()
+            .map(|(original, (owner, index))| {
+                (
+                    *owner,
+                    analytic_slots::CurveSlot {
+                        index,
+                        depth_bits: instances[original].params[2].to_bits(),
+                    },
+                )
+            })
+            .collect();
+        (vec![gpu], slots)
+    }
+
+    /// The ellipse counterpart of `upload_circles_tracked`.
+    pub fn upload_ellipses_tracked(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        instances: &[EllipseInstance],
+        owners: &[codec::Handle],
+    ) -> (Vec<EllipseGpu>, Vec<(codec::Handle, analytic_slots::CurveSlot)>) {
+        if instances.is_empty() {
+            return (Vec::new(), Vec::new());
+        }
+        let (sorted, position) = analytic_slots::sort_by_depth(instances, |e| e.params[2]);
+        let gpu = EllipseGpu::from_instances(device, queue, "viewer.ellipses", &sorted);
+        let slots = owners
+            .iter()
+            .zip(position)
+            .enumerate()
+            .map(|(original, (owner, index))| {
+                (
+                    *owner,
+                    analytic_slots::CurveSlot {
+                        index,
+                        depth_bits: instances[original].params[2].to_bits(),
+                    },
+                )
+            })
+            .collect();
+        (vec![gpu], slots)
+    }
+
+    /// Remember where every reference's analytical instances landed in the
+    /// uploads this slot now holds. Without a complete record (or with the
+    /// feature off) in-place patching stays disabled until the next full
+    /// upload.
+    pub(crate) fn record_analytic_slots(
+        &mut self,
+        blocks: Option<wire_gpu::BlockTracking>,
+        circles: Vec<(codec::Handle, analytic_slots::CurveSlot)>,
+        ellipses: Vec<(codec::Handle, analytic_slots::CurveSlot)>,
+        depth_generation: u64,
+    ) {
+        self.analytic_slots = None;
+        let Some(blocks) = blocks.filter(|_| analytic_slots::enabled()) else {
+            return;
+        };
+        if self.gpu_circles.len() > 1 || self.gpu_ellipses.len() > 1 {
+            return;
+        }
+        let mut by_handle: rustc_hash::FxHashMap<codec::Handle, analytic_slots::HandleSlots> =
+            rustc_hash::FxHashMap::default();
+        for (handle, slot) in blocks.slots {
+            by_handle.entry(handle).or_default().blocks.push(slot);
+        }
+        for (handle, slot) in circles {
+            by_handle.entry(handle).or_default().circles.push(slot);
+        }
+        for (handle, slot) in ellipses {
+            by_handle.entry(handle).or_default().ellipses.push(slot);
+        }
+        self.analytic_slots = Some(analytic_slots::AnalyticSlots {
+            by_handle,
+            block_buffers: blocks.buffers,
+            shapes: blocks.shapes,
+            circle_buffer: self.gpu_circles.first().map(|gpu| gpu.instance_buffer.clone()),
+            ellipse_buffer: self.gpu_ellipses.first().map(|gpu| gpu.instance_buffer.clone()),
+            blocks_id: std::sync::Arc::as_ptr(&self.gpu_block_wires) as usize,
+            circles_id: std::sync::Arc::as_ptr(&self.gpu_circles) as usize,
+            ellipses_id: std::sync::Arc::as_ptr(&self.gpu_ellipses) as usize,
+            depth_generation,
+        });
+    }
+
+    /// Apply an edit patch to the analytical uploads by overwriting the
+    /// changed references' instances. `Err` names why that was not possible,
+    /// and nothing was written.
+    pub(crate) fn patch_analytic_in_place(
+        &mut self,
+        queue: &wgpu::Queue,
+        patch: &crate::scene::WireGpuPatch,
+        depth_map: &rustc_hash::FxHashMap<u64, [f32; 2]>,
+        depth_generation: u64,
+    ) -> Result<usize, &'static str> {
+        let Some(slots) = self.analytic_slots.as_ref() else {
+            return Err("no recorded slots");
+        };
+        if slots.depth_generation != depth_generation {
+            return Err("draw order was relabelled");
+        }
+        if slots.blocks_id != std::sync::Arc::as_ptr(&self.gpu_block_wires) as usize
+            || slots.circles_id != std::sync::Arc::as_ptr(&self.gpu_circles) as usize
+            || slots.ellipses_id != std::sync::Arc::as_ptr(&self.gpu_ellipses) as usize
+        {
+            return Err("uploads were replaced");
+        }
+        let mut edits = Vec::new();
+        for &(handle, _) in patch.changes.iter() {
+            let run = patch
+                .runs
+                .get(&handle)
+                .map(|wires| wires.as_slice())
+                .unwrap_or(&[]);
+            let part = wire_arena::partition_run(run, depth_map);
+            let blocks = wire_gpu::new_blocks(&part.instanced, depth_map);
+            let contribution = analytic_slots::Contribution {
+                blocks: &blocks,
+                circles: &part.circle_instances,
+                ellipses: &part.ellipse_instances,
+            };
+            match analytic_slots::plan_reference(
+                slots.by_handle.get(&handle),
+                &contribution,
+                &slots.shapes,
+            ) {
+                analytic_slots::Outcome::Unchanged => {}
+                analytic_slots::Outcome::Edits(mut more) => edits.append(&mut more),
+                analytic_slots::Outcome::Rebuild(reason) => return Err(reason),
+            }
+        }
+        slots.apply(queue, &edits);
+        Ok(edits.len())
     }
 
     /// Build resident batches and a handle index shared across viewport slots.
@@ -3595,12 +3799,13 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         // planar SOLID interiors; HATCH is handled by a separate pass.
         let keep_3d_mesh_fills = !wireframe_only;
         let solid_fill_hidden = |wire: &WireModel| !show_2d_solid_fills && wire.fill_is_2d_solid;
+        use crate::par::prelude::*;
         let has_any_2d_fill = all_wires
-            .iter()
+            .par_iter()
             .any(|w| !w.fill_tris.is_empty() && !w.fill_is_3d && !solid_fill_hidden(w));
         let has_any_3d_fill = !face3d_wires.is_empty()
             || all_wires
-                .iter()
+                .par_iter()
                 .any(|w| !w.fill_tris.is_empty() && w.fill_is_3d);
         let has_fills = has_any_2d_fill || (keep_3d_mesh_fills && has_any_3d_fill);
         if !has_fills {
@@ -4012,15 +4217,20 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                 atlas.clear_dirty();
             }
         }
+        let atlas_ms = perf_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
         self.text_gpu = text_gpu::upload_vertices(device, queue, verts);
+        let plain_ms = perf_started.map(|started| started.elapsed().as_secs_f64() * 1000.0);
         self.block_text_gpu = text_gpu::upload_block_vertices(device, queue, wires, depth_map);
         if let Some(started) = perf_started {
             let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
             if elapsed_ms >= 1.0 {
                 crate::perf_record!(
-                    "[perf] text-upload {:>7.1}ms vertices={}",
+                    "[perf] text-upload {:>7.1}ms vertices={} atlas={:.1}ms plain={:.1}ms block-batches={}",
                     elapsed_ms,
                     verts.len(),
+                    atlas_ms.unwrap_or(0.0),
+                    plain_ms.unwrap_or(0.0),
+                    self.block_text_gpu.len(),
                 );
             }
         }
@@ -5016,9 +5226,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                     if have_blocks {
                         pass.set_pipeline(&self.block_text_pipeline);
                         for text in &self.block_text_gpu {
-                            pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
-                            pass.set_vertex_buffer(1, text.instance_buffer.slice(..));
-                            pass.draw(0..text.vertex_count, 0..text.instance_count);
+                            text.draw(&mut pass);
                         }
                     }
                 }
@@ -5318,9 +5526,7 @@ analytic={:.1} regular={:.1} blocks={:.1}",
                         pass.set_pipeline(&self.block_text_highlight_pipeline);
                         pass.set_bind_group(1, &atlas.bind_group, &[]);
                         for text in &self.block_text_highlight_gpu {
-                            pass.set_vertex_buffer(0, text.vertex_buffer.slice(..));
-                            pass.set_vertex_buffer(1, text.instance_buffer.slice(..));
-                            pass.draw(0..text.vertex_count, 0..text.instance_count);
+                            text.draw(&mut pass);
                         }
                     }
                 }
@@ -5470,7 +5676,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.silhouette_source_key = (usize::MAX, usize::MAX, u64::MAX);
         self.render_sig = u64::MAX;
         // The retained-upload record is part of the slot's cached state.
-        self.partition_contributors.clear();
+        self.partition_contributors = wire_arena::ContributorSet::default();
+        self.analytic_slots = None;
         self.partition_depth_generation = u64::MAX;
     }
 
@@ -5485,7 +5692,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.wire_arena = None;
         self.wire_arena_mesh = None;
         self.wire_arena_id = u64::MAX;
-        self.partition_contributors.clear();
+        self.partition_contributors = wire_arena::ContributorSet::default();
+        self.analytic_slots = None;
         self.partition_depth_generation = u64::MAX;
         self.alloc_size = Size::new(0, 0);
         self.shadow_full = None;
@@ -5518,7 +5726,8 @@ analytic={:.1} regular={:.1} blocks={:.1}",
         self.wire_arena_fallback_kind = None;
         self.wire_arena_fallback_handles.clear();
         self.wire_arena_id = u64::MAX;
-        self.partition_contributors.clear();
+        self.partition_contributors = wire_arena::ContributorSet::default();
+        self.analytic_slots = None;
         self.partition_depth_generation = u64::MAX;
 
         self.gpu_selected_wires.clear();
@@ -6487,4 +6696,10 @@ mod highlight_classification_tests {
             "without a tint the extractor's own colour stands",
         );
     }
+}
+
+/// Whether analytical blocks, circles and ellipses are patched in place on an
+/// edit (`OCS_ANALYTIC_PATCH=0` turns it off).
+pub(crate) fn analytic_patch_enabled() -> bool {
+    analytic_slots::enabled()
 }

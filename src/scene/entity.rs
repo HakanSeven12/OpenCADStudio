@@ -2067,6 +2067,29 @@ impl Scene {
         viewport: Option<Handle>,
         tint_selected: bool,
     ) -> Vec<HatchModel> {
+        self.synced_hatch_models_hosted(
+            target_block,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            tint_selected,
+        )
+        .0
+    }
+
+    /// `synced_hatch_models` plus, for every model, the top-level reference
+    /// that draws it (`Handle::NULL` for a fill drawn directly), index for
+    /// index.
+    pub(super) fn synced_hatch_models_hosted(
+        &self,
+        target_block: Handle,
+        frozen: Option<&rustc_hash::FxHashSet<Handle>>,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        viewport: Option<Handle>,
+        tint_selected: bool,
+    ) -> (Vec<HatchModel>, Vec<Handle>) {
         // synced_hatch_models is cached on geometry_epoch and the GPU
         // upload is keyed on geometry_epoch only (see render.rs — hatch
         // buffers are "static"). Don't view-cull here; the per-frame
@@ -2120,7 +2143,9 @@ impl Scene {
 
         // Background for adapting block-child hatch colours at the leaf (#221).
         // Instanced/owned hatch leaves are produced by the shared scene graph.
-        models.extend(self.instanced_hatch_models(
+        let mut hosts = vec![Handle::NULL; models.len()];
+        for (host, model) in self.instanced_hatch_models_hosted_for_document(
+            &self.document,
             target_block,
             hatch_bg,
             tint_selected,
@@ -2128,12 +2153,47 @@ impl Scene {
             annotation_scale_handle,
             all_visible,
             viewport,
-        ));
+            None,
+            false,
+            false,
+        ) {
+            hosts.push(host);
+            models.push(model);
+        }
 
         // Wide polyline bands remain on the wire path, including inside block
         // instances; the graph does not reclassify them as hatch fills.
 
-        models
+        (models, hosts)
+    }
+
+    /// Fresh fills for just the given INSERTs (as `synced_hatch_models`
+    /// would produce them), each with its host reference.
+    pub(super) fn hatch_models_for_hosts(
+        &self,
+        target_block: Handle,
+        hosts: &rustc_hash::FxHashSet<Handle>,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+    ) -> Vec<(Handle, HatchModel)> {
+        let hatch_bg = if self.current_layout != "Model" {
+            self.paper_bg_color
+        } else {
+            self.bg_color
+        };
+        self.instanced_hatch_models_hosted_for_document(
+            &self.document,
+            target_block,
+            hatch_bg,
+            false,
+            None,
+            annotation_scale_handle,
+            all_visible,
+            None,
+            Some(hosts),
+            false,
+            false,
+        )
     }
 
     /// Materialize hatch leaves reached through visible scene containers in
@@ -2303,6 +2363,40 @@ impl Scene {
         include_preview_hidden: bool,
         plot_only: bool,
     ) -> Vec<HatchModel> {
+        self.instanced_hatch_models_hosted_for_document(
+            document,
+            layout_block,
+            hatch_bg,
+            tint_selected,
+            frozen,
+            annotation_scale_handle,
+            all_visible,
+            viewport,
+            targets,
+            include_preview_hidden,
+            plot_only,
+        )
+        .into_iter()
+        .map(|(_, model)| model)
+        .collect()
+    }
+
+    /// The same models, each paired with the top-level reference that draws
+    /// it, so a later edit of one reference can replace just its fills.
+    pub(super) fn instanced_hatch_models_hosted_for_document(
+        &self,
+        document: &Document,
+        layout_block: Handle,
+        hatch_bg: [f32; 4],
+        tint_selected: bool,
+        frozen: Option<&rustc_hash::FxHashSet<Handle>>,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        viewport: Option<Handle>,
+        targets: Option<&rustc_hash::FxHashSet<Handle>>,
+        include_preview_hidden: bool,
+        plot_only: bool,
+    ) -> Vec<(Handle, HatchModel)> {
         let constraint_display = (!plot_only && self.constraint_shading_active() && self.block_edit_block == Some(layout_block))
             .then(|| (self.block_constraint_report(layout_block), self.constraint_palette()));
         let depth_map = self.draw_depth_map();
@@ -2495,7 +2589,7 @@ impl Scene {
                     source_id,
                     translation: [matrix[0][3], matrix[1][3], matrix[2][3]],
                 });
-                models.push(model);
+                models.push((context.root_handle, model));
             },
         );
         models

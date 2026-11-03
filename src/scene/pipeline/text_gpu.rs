@@ -102,11 +102,64 @@ pub struct TextGpu {
     pub vertex_count: u32,
 }
 
+/// Block text for many block sources in one pair of GPU buffers. Each draw is
+/// one source: the range of its glyph vertices and the range of instances that
+/// place it. A drawing with thousands of text-bearing blocks otherwise paid
+/// two buffer allocations per source on every upload.
 pub struct BlockTextGpu {
     pub vertex_buffer: wgpu::Buffer,
     pub instance_buffer: wgpu::Buffer,
-    pub vertex_count: u32,
-    pub instance_count: u32,
+    pub draws: Vec<(std::ops::Range<u32>, std::ops::Range<u32>)>,
+}
+
+impl BlockTextGpu {
+    /// Bind the shared buffers once and issue one draw per source.
+    pub fn draw<'pass>(&'pass self, pass: &mut wgpu::RenderPass<'pass>) {
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+        for (vertices, instances) in &self.draws {
+            pass.draw(vertices.clone(), instances.clone());
+        }
+    }
+}
+
+/// Glyph vertices and placements gathered for one pair of buffers.
+#[derive(Default)]
+struct BlockTextBatch {
+    vertices: Vec<TextVertex>,
+    instances: Vec<BlockTextInstance>,
+    draws: Vec<(std::ops::Range<u32>, std::ops::Range<u32>)>,
+}
+
+impl BlockTextBatch {
+    fn flush(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        out: &mut Vec<BlockTextGpu>,
+    ) {
+        if self.draws.is_empty() {
+            return;
+        }
+        let batch = std::mem::take(self);
+        out.push(BlockTextGpu {
+            vertex_buffer: super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                "block_text.vertices",
+                &batch.vertices,
+                wgpu::BufferUsages::VERTEX,
+            ),
+            instance_buffer: super::gpu_upload::upload_buffer(
+                device,
+                queue,
+                "block_text.instances",
+                &batch.instances,
+                wgpu::BufferUsages::VERTEX,
+            ),
+            draws: batch.draws,
+        });
+    }
 }
 
 /// Split an f64 into the double-single (high f32, low residual f32) pair the
@@ -496,16 +549,25 @@ pub fn upload_block_vertex_refs(
 ) -> Vec<BlockTextGpu> {
     let mut slots = rustc_hash::FxHashMap::default();
     let mut groups: Vec<Vec<&crate::scene::model::wire_model::WireModel>> = Vec::new();
-    for &wire in wires {
-        if tint.is_none() && !wire.display_visible {
-            continue;
-        }
+    // Only a few wires of a large set carry block text, but finding them
+    // touches every wire. Run that scan in parallel; the ordered collect
+    // keeps the grouping below in submission order.
+    let text_wires: Vec<&crate::scene::model::wire_model::WireModel> = {
+        use crate::par::prelude::*;
+        wires
+            .par_iter()
+            .filter(|wire| {
+                (tint.is_some() || wire.display_visible)
+                    && wire.render_instance.is_some()
+                    && !wire.text_verts.is_empty()
+            })
+            .map(|wire| *wire)
+            .collect()
+    };
+    for wire in text_wires {
         let Some(instance) = wire.render_instance else {
             continue;
         };
-        if wire.text_verts.is_empty() {
-            continue;
-        }
         let slot = *slots.entry(instance.source_id).or_insert_with(|| {
             let slot = groups.len();
             groups.push(Vec::new());
@@ -513,7 +575,10 @@ pub fn upload_block_vertex_refs(
         });
         groups[slot].push(wire);
     }
+    let max_vertices = super::gpu_budget::max_elements_grouped::<TextVertex>(device, 6);
+    let max_instances = super::gpu_budget::max_elements::<BlockTextInstance>(device);
     let mut out = Vec::new();
+    let mut batch = BlockTextBatch::default();
     for group in groups {
         let Some(&source) = group.first() else {
             continue;
@@ -535,7 +600,6 @@ pub fn upload_block_vertex_refs(
         } else {
             source.text_verts.as_slice()
         };
-        let vertex_chunks = upload_vertices(device, queue, vertices);
         let instances: Vec<BlockTextInstance> = group
             .iter()
             .filter_map(|wire| {
@@ -558,25 +622,47 @@ pub fn upload_block_vertex_refs(
                 })
             })
             .collect();
-        let max_instances = super::gpu_budget::max_elements::<BlockTextInstance>(device);
-        for chunk in instances.chunks(max_instances) {
-            let instance_buffer = super::gpu_upload::upload_buffer(
-                device,
-                queue,
-                "block_text.instances",
-                chunk,
-                wgpu::BufferUsages::VERTEX,
-            );
-            for text in &vertex_chunks {
-                out.push(BlockTextGpu {
-                    vertex_buffer: text.vertex_buffer.clone(),
-                    instance_buffer: instance_buffer.clone(),
-                    vertex_count: text.vertex_count,
-                    instance_count: chunk.len() as u32,
-                });
-            }
+        if vertices.is_empty() || instances.is_empty() {
+            continue;
         }
+        // A source too large to share a buffer keeps buffers of its own,
+        // split to the budget as before.
+        if vertices.len() > max_vertices || instances.len() > max_instances {
+            batch.flush(device, queue, &mut out);
+            let vertex_chunks = upload_vertices(device, queue, vertices);
+            for chunk in instances.chunks(max_instances) {
+                let instance_buffer = super::gpu_upload::upload_buffer(
+                    device,
+                    queue,
+                    "block_text.instances",
+                    chunk,
+                    wgpu::BufferUsages::VERTEX,
+                );
+                for text in &vertex_chunks {
+                    out.push(BlockTextGpu {
+                        vertex_buffer: text.vertex_buffer.clone(),
+                        instance_buffer: instance_buffer.clone(),
+                        draws: vec![(0..text.vertex_count, 0..chunk.len() as u32)],
+                    });
+                }
+            }
+            continue;
+        }
+        if batch.vertices.len() + vertices.len() > max_vertices
+            || batch.instances.len() + instances.len() > max_instances
+        {
+            batch.flush(device, queue, &mut out);
+        }
+        let first_vertex = batch.vertices.len() as u32;
+        let first_instance = batch.instances.len() as u32;
+        batch.vertices.extend_from_slice(vertices);
+        batch.instances.extend(instances);
+        batch.draws.push((
+            first_vertex..batch.vertices.len() as u32,
+            first_instance..batch.instances.len() as u32,
+        ));
     }
+    batch.flush(device, queue, &mut out);
     out
 }
 

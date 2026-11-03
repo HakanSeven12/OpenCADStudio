@@ -2187,11 +2187,21 @@ impl OpenCADStudio {
             // Initialize once: constraint solves may add neighbors to this gesture.
             // Wire entities use the overlay; solid meshes stay visible and move live.
             if self.grip_preview_handles.is_empty() {
+                let init_started = crate::perf::enabled().then(Instant::now);
+                let init_mark = |stage: &str| {
+                    if let Some(started) = init_started {
+                        crate::perf_record!(
+                            "[perf] grip-init {stage}={:.1}ms",
+                            started.elapsed().as_secs_f64() * 1000.0
+                        );
+                    }
+                };
                 let preview_handles = self.tabs[i].scene.parametric_connected_handles(
                     self.tabs[i].current_parametric_scope(),
                     &edited_handles,
                     true,
                 );
+                init_mark("connected-handles");
                 if self.grip_dirty_before.is_none() {
                     self.grip_dirty_before = Some(self.tabs[i].dirty);
                 }
@@ -2212,6 +2222,7 @@ impl OpenCADStudio {
                         .collect();
                 }
                 self.capture_grip_history_originals(i, &edited_handles);
+                init_mark("history-originals");
                 for &handle in &preview_handles {
                     if !self.tabs[i].scene.meshes.contains_key(&handle) {
                         self.tabs[i].scene.preview_hidden.insert(handle);
@@ -2224,6 +2235,7 @@ impl OpenCADStudio {
                 self.tabs[i]
                     .scene
                     .bump_entities_after_parametric_solve(&changes);
+                init_mark("bump-after-solve");
                 self.grip_preview_handles = preview_handles;
                 // Snapshot the entity's glyph quads once so each move can
                 // slide the already-shaped text rather than re-shaping it
@@ -2235,6 +2247,7 @@ impl OpenCADStudio {
                 let snap = self.tabs[i]
                     .scene
                     .wire_models_for(&self.grip_preview_handles);
+                init_mark("wire-models-for");
 
                 // Preserve the exact geometry from the instant the grip drag began.
                 // This snapshot is visual/reference-only: do NOT append it to

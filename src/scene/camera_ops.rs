@@ -1887,6 +1887,7 @@ impl Scene {
             self.annotation_all_visible(),
             None,
             None,
+            None,
         ) {
             if let Some([x0, y0, z0, x1, y1, z1]) = set.instance_aabb {
                 fold!(Some((glam::DVec3::new(x0, y0, z0), glam::DVec3::new(x1, y1, z1))));

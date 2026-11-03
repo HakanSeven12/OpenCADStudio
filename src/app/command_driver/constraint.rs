@@ -991,7 +991,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.bump_entities_after_constraint_added(
             &changes,
             &anchors,
-            kind == ConstraintKind::Angle,
+            self.constraint_solve_mode && kind == ConstraintKind::Angle,
             &[],
         );
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();

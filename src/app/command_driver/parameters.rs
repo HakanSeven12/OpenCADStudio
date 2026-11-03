@@ -482,6 +482,15 @@ impl OpenCADStudio {
                 )
             })
             .collect();
+        // Editing a corner turns a side and leaves both lengths alone, as
+        // applying it does. Retention covers every entity the scope solves,
+        // so it is only safe when all this parameter drives is a two-side
+        // corner: a radius would be pinned to its current size, and the
+        // three-point form needs the solver free to resize.
+        let retain_sizes = self.constraint_solve_mode
+            && readers
+                .iter()
+                .all(|c| c.kind == crate::scene::parametric_constraints::ConstraintKind::Angle);
         self.tabs[i].dirty = true;
         if touched.is_empty() {
             self.tabs[i].scene.sync_native_parametric_graph();
@@ -493,7 +502,7 @@ impl OpenCADStudio {
             .collect();
         self.tabs[i]
             .scene
-            .bump_entities_with_parametric_policy(&changes, &anchors, false);
+            .bump_entities_with_parametric_policy(&changes, &anchors, retain_sizes);
     }
 
     /// Commits one field of one Parameters-section row (Properties panel) —

@@ -323,6 +323,97 @@ fn an_angular_value_turns_the_second_side_without_resizing_it() {
 }
 
 #[test]
+fn editing_the_corner_turns_the_side_without_resizing_it() {
+    let (mut app, i, first, second) = two_lines();
+    walk_to_the_angular_prompt(&mut app, first, second);
+    let _ = app.feed_command(StepInput::Text("90".into()));
+    let drawn = length(&app, i, second);
+    let _ = app.dispatch_command("DCVALUE ang1 45");
+    let turned = signed_angle(line_ends(&app, i, first), line_ends(&app, i, second));
+    assert!(
+        corner_is(turned, 45.0),
+        "the edited corner is reached, found {turned}"
+    );
+    let kept = line_ends(&app, i, first);
+    assert!(
+        sits_at(kept.0, DVec3::ZERO) && sits_at(kept.1, DVec3::new(50.0, 0.0, 0.0)),
+        "the side that stays keeps its place, found {kept:?}"
+    );
+    assert!(
+        solved(length(&app, i, second), drawn),
+        "the turned side keeps the length it was drawn with, found {}",
+        length(&app, i, second)
+    );
+}
+
+#[test]
+fn a_solve_mode_of_zero_creates_the_corner_by_resizing_it() {
+    let (mut app, i, first, second) = two_lines();
+    app.constraint_solve_mode = false;
+    walk_to_the_angular_prompt(&mut app, first, second);
+    let drawn = length(&app, i, second);
+    let _ = app.feed_command(StepInput::Text("90".into()));
+    let turned = signed_angle(line_ends(&app, i, first), line_ends(&app, i, second));
+    assert!(
+        corner_is(turned, 90.0),
+        "the corner is reached either way, found {turned}"
+    );
+    let resized = length(&app, i, second);
+    assert!(
+        !solved(resized, drawn),
+        "at zero the corner is reached by resizing the side it turns, found {resized}"
+    );
+}
+
+#[test]
+fn a_solve_mode_of_zero_edits_the_corner_by_resizing_it() {
+    let (mut app, i, first, second) = two_lines();
+    walk_to_the_angular_prompt(&mut app, first, second);
+    let _ = app.feed_command(StepInput::Text("90".into()));
+    let drawn = length(&app, i, second);
+    assert!(
+        solved(drawn, 30.0 * std::f64::consts::SQRT_2),
+        "applying the corner kept the side it turns, found {drawn}"
+    );
+    app.constraint_solve_mode = false;
+    let _ = app.dispatch_command("DCVALUE ang1 45");
+    let turned = signed_angle(line_ends(&app, i, first), line_ends(&app, i, second));
+    assert!(
+        corner_is(turned, 45.0),
+        "the edited corner is reached either way, found {turned}"
+    );
+    let resized = length(&app, i, second);
+    assert!(
+        !solved(resized, drawn),
+        "at zero the edit is reached by resizing the side it turns, found {resized}"
+    );
+}
+
+#[test]
+fn editing_a_radius_moves_the_rim() {
+    let (mut app, i, shape) = circle_at("10,10", "25");
+    let _ = app.dispatch_command("DCRADIUS");
+    let _ = app.feed_command(StepInput::EntityPick(shape, DVec3::new(35.0, 10.0, 0.0)));
+    let _ = app.feed_command(StepInput::Point(DVec3::new(50.0, 20.0, 0.0)));
+    let _ = app.feed_command(StepInput::Text("40".into()));
+    assert!(
+        solved(circle_state(&app, i, shape).1, 40.0),
+        "the applied radius is the typed one, found {}",
+        circle_state(&app, i, shape).1
+    );
+    let _ = app.dispatch_command("DCVALUE rad1 55");
+    let (centre, radius) = circle_state(&app, i, shape);
+    assert!(
+        solved(radius, 55.0),
+        "editing the radius moves the rim, found {radius}"
+    );
+    assert!(
+        sits_at(centre, DVec3::new(10.0, 10.0, 0.0)),
+        "the centre stays where the circle was drawn, found {centre:?}"
+    );
+}
+
+#[test]
 fn naming_the_value_at_the_angular_prompt_names_the_constraint() {
     let (mut app, i, first, second) = two_lines();
     walk_to_the_angular_prompt(&mut app, first, second);

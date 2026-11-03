@@ -1329,13 +1329,6 @@ impl OpenCADStudio {
         )
     }
 
-    /// A typed coordinate at an object prompt picks the object under it, as
-    /// a click there would: while objects are gathered it adds the object
-    /// found there (or, on empty space, starts a window whose opposite
-    /// corner is the next typed coordinate), and at a single-object prompt
-    /// that takes no points it is the pick itself. `None` when the token is
-    /// no coordinate or the prompt reads it some other way. Shared by the
-    /// command line and the token feeder so both read a typed point the same.
     /// A typed first corner draws its box out to the cursor, as a clicked
     /// one does; a click then finishes it through the same machinery.
     fn open_typed_window_box(&mut self, i: usize, corner: glam::DVec3) {
@@ -1366,6 +1359,13 @@ impl OpenCADStudio {
         }
     }
 
+    /// A typed coordinate at an object prompt picks the object under it, as
+    /// a click there would: while objects are gathered it adds the object
+    /// found there (or, on empty space, starts a window whose opposite
+    /// corner is the next typed coordinate), and at a single-object prompt
+    /// that takes no points it is the pick itself. `None` when the token is
+    /// no coordinate or the prompt reads it some other way. Shared by the
+    /// command line and the token feeder so both read a typed point the same.
     pub(in crate::app) fn typed_object_pick(&mut self, token: &str) -> Option<Task<Message>> {
         let i = self.active_tab;
         let (gathering, picks_entity, key) = self.tabs[i].active_cmd.as_ref().map(|command| {

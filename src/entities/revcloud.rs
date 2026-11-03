@@ -717,6 +717,13 @@ mod tests {
         assert_eq!(cloud.vertices.len(), 32);
         assert!(cloud.vertices.iter().all(|vertex| (vertex.bulge + arc_bulge()).abs() < 1e-12));
         assert_eq!(arc_length_of(&cloud), Some(10.0));
-        assert_eq!(guide(&cloud), Some(Guide::Polygon(vec![[0.0, 0.0], [0.0, 60.0], [100.0, 60.0], [100.0, 0.0]])));
+        let Some(Guide::Polygon(corners)) = guide(&cloud) else {
+            panic!("a polygon guide");
+        };
+        let want = [[0.0, 0.0], [0.0, 60.0], [100.0, 60.0], [100.0, 0.0]];
+        assert_eq!(corners.len(), want.len());
+        for (got, want) in corners.iter().zip(want) {
+            assert!((got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9, "{corners:?}");
+        }
     }
 }

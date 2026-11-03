@@ -37,9 +37,9 @@ rfd = "0.17"
 clap = { version = "4", features = ["derive", "string"] }
 env_logger = "0.11"
 log = "0.4"
-codec = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "598b1bb", features = ["serde"] }
-kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "76542bc", features = ["acis", "offset"] }
-kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "76542bc" }
+codec = { package = "opencaddocument", git = "https://github.com/HakanSeven12/opencaddocument.git", rev = "19363a7", features = ["serde"] }
+kernel = { package = "opencadkernel", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "66b862b", features = ["acis", "offset"] }
+kernel-constraints = { package = "opencadkernel-constraints", git = "https://github.com/HakanSeven12/opencadkernel.git", rev = "66b862b" }
 graph = { package = "opencadgraph", git = "https://github.com/HakanSeven12/opencadgraph.git", rev = "5e4dc20" }
 dwg-thumbnailer = { path = "crates/dwg-thumbnailer" }
 # Shared SAVE serialization dispatch + web-worker wire format: one
@@ -114,8 +114,6 @@ objc2-foundation = { version = "0.2", features = ["NSArray", "NSURL", "NSString"
 [patch.crates-io]
 iced_core = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
 iced_widget = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00b9327cb7b8546ed84db39" }
-
-
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = "0.3"
@@ -365,10 +363,3 @@ harness = false
 [[test]]
 name = "integration"
 path = "tests/integration.rs"
-
-[patch."https://github.com/HakanSeven12/acadrust.git"]
-acadrust = { git = "https://github.com/ramox81/cadcodec.git", rev = "d7ef91eada5fe7023b55162e9bb8cb46bc7233a6" }
-
-[patch."https://github.com/HakanSeven12/opencadkernel.git"]
-opencadkernel = { git = "https://github.com/ramox81/cadkernel.git", rev = "8562fda" }
-opencadkernel-constraints = { git = "https://github.com/ramox81/cadkernel.git", rev = "8562fda" }

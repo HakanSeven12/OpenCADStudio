@@ -9607,6 +9607,12 @@ impl Scene {
                                 |h| {
                                     self.hatches.contains_key(&h)
                                         || self.insert_may_place_hatches(h, &hatch_memo)
+                                        // An INSERT that drew fills before
+                                        // the edit (repointed to a plain
+                                        // block) still changes the list.
+                                        || self.hatch_hosts.borrow().get(&key).is_some_and(
+                                            |(_, hosts)| hosts.contains(&h),
+                                        )
                                 },
                             ) =>
                     {
@@ -9690,7 +9696,6 @@ impl Scene {
 
     pub(super) fn wipeout_models_arc(&self) -> Arc<Vec<HatchModel>> {
         let target_block = self.content_render_block_handle();
-        let wipeout_memo = RefCell::new(std::collections::HashMap::new());
         let any_wipeout = std::cell::OnceCell::<bool>::new();
         let key = (target_block, self.current_layout.clone());
         {
@@ -9725,22 +9730,10 @@ impl Scene {
                                     {
                                         false
                                     }
-                                    Some(entity @ EntityType::Insert(_)) => {
-                                        render_graph::entity_render_block_uses(
-                                            &self.document,
-                                            entity,
-                                            self.annotation_scale,
-                                        )
-                                        .into_iter()
-                                        .filter(|block_use| block_use.active)
-                                        .any(|block_use| {
-                                            render_graph::block_contains_wipeout(
-                                                &self.document,
-                                                &block_use.insert.block_name,
-                                                &mut wipeout_memo.borrow_mut(),
-                                            )
-                                        })
-                                    }
+                                    // No host list is kept: the INSERT may have
+                                    // placed a mask before the edit (its block
+                                    // repointed), so any INSERT edit counts.
+                                    Some(EntityType::Insert(_)) => true,
                                     _ => false,
                                 }
                             },
@@ -10142,6 +10135,9 @@ impl Scene {
                     Some((cached_epoch, arc))
                         if self.category_cache_valid(*cached_epoch, CACHE_CATEGORY_MESH, |h| {
                             self.meshes.contains_key(&h)
+                                // An INSERT that placed solids before the
+                                // edit (repointed to a plain block).
+                                || arc.iter().any(|set| set.instance_handle == Some(h))
                                 || match self.document.get_entity(h) {
                                     Some(entity @ EntityType::Insert(_)) => {
                                         !self.block_meshes.is_empty()

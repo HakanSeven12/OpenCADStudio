@@ -1740,9 +1740,12 @@ fn block_key(block: &BlockRef<'_>, color_override: Option<[f32; 4]>) -> Option<(
 
 /// A wire's points relative to its own translation: the block-local shape that
 /// every placement of one definition shares, whatever its position, plus the
-/// largest absolute coordinate (which sets how much f32 rounding to expect).
+/// largest coordinate whose f32 rounding they carry. With split (high + low)
+/// points that is the relative one, so far from the origin a turned or scaled
+/// copy still differs from its old shape; without, the absolute one.
 pub(crate) fn relative_points(wire: &WireModel) -> (Vec<[f32; 3]>, f32) {
     let translation = wire.render_instance.map_or([0.0; 3], |instance| instance.translation);
+    let split = wire.points_low.len() == wire.points.len();
     let mut magnitude = 0.0f32;
     let points = wire
         .points
@@ -1753,8 +1756,9 @@ pub(crate) fn relative_points(wire: &WireModel) -> (Vec<[f32; 3]>, f32) {
             let mut relative = [0.0f32; 3];
             for axis in 0..3 {
                 let absolute = point[axis] as f64 + low[axis] as f64;
-                magnitude = magnitude.max(absolute.abs() as f32);
                 relative[axis] = (absolute - translation[axis]) as f32;
+                let rounded = if split { relative[axis] } else { absolute as f32 };
+                magnitude = magnitude.max(rounded.abs());
             }
             relative
         })

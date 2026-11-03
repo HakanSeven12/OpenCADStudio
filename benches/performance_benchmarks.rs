@@ -797,6 +797,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "0".to_string(),
                 color: Color::TRANSPARENT,
+                stored_color: codec::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -805,6 +806,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "DRAWING".to_string(),
                 color: Color::TRANSPARENT,
+                stored_color: codec::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -813,6 +815,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "DIMENSIONS".to_string(),
                 color: Color::TRANSPARENT,
+                stored_color: codec::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -821,6 +824,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "ANNOTATIONS".to_string(),
                 color: Color::TRANSPARENT,
+                stored_color: codec::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,

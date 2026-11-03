@@ -181,6 +181,32 @@ impl Transformable for Polyline {
 
 // ── Polyline2D (heavy 2D polyline with bulge) ─────────────────────────────────
 
+thread_local! {
+    /// The drawing's SPLINESEGS, seeded with the Properties panel so its
+    /// Fit/Smooth row samples a spline-fit 2D polyline as the drawing asks.
+    static SPLINE_SEGMENTS: std::cell::Cell<i16> = const { std::cell::Cell::new(8) };
+}
+
+// ponytail: a negative SPLINESEGS (arc-fit samples) is taken by its magnitude.
+pub fn set_spline_segments(segments: i16) {
+    SPLINE_SEGMENTS.with(|c| c.set(segments));
+}
+
+/// The Fit/Smooth choice a 2D polyline shows.
+fn polyline2d_fit_smooth(pl: &Polyline2D) -> &'static str {
+    use codec::entities::polyline::SmoothSurfaceType;
+    if pl.flags.bits() & 4 != 0 {
+        match pl.smooth_surface {
+            SmoothSurfaceType::QuadraticBSpline => "Quadratic",
+            _ => "Cubic",
+        }
+    } else if pl.flags.bits() & 2 != 0 {
+        "Curve fit"
+    } else {
+        "None"
+    }
+}
+
 /// The vertices a curve-/spline-fit 2D polyline actually DRAWS: the
 /// fit-generated points (VertexFlags 8 / 1) plus any unflagged originals,
 /// with the spline-frame CONTROL points (flag 16) dropped — those are editing
@@ -746,6 +772,16 @@ impl PropertyEditable for Polyline2D {
                 title: t!("Misc").into_owned(),
                 props: vec![
                     Property {
+                        label: t!("Fit/Smooth").into_owned(),
+                        field: "pl2_fit_smooth",
+                        value: PropValue::Choice {
+                            selected: polyline2d_fit_smooth(self).to_string(),
+                            options: ["None", "Curve fit", "Quadratic", "Cubic"]
+                                .map(str::to_string)
+                                .to_vec(),
+                        },
+                    },
+                    Property {
                         label: t!("Closed").into_owned(),
                         field: "pl2_closed",
                         value: PropValue::BoolToggle {
@@ -772,6 +808,27 @@ impl PropertyEditable for Polyline2D {
             crate::scene::view::dispatch::prop_current_vertex().min(n - 1)
         };
         match field {
+            "pl2_fit_smooth" => {
+                use crate::modules::draw::modify::pedit;
+                match value {
+                    "None" => pedit::unfit_polyline2d(self),
+                    "Curve fit" => {
+                        if let Some(codec::EntityType::Polyline2D(mut fitted)) =
+                            pedit::fit_entity(&codec::EntityType::Polyline2D(self.clone()), &[])
+                        {
+                            fitted.smooth_surface =
+                                codec::entities::polyline::SmoothSurfaceType::None;
+                            *self = fitted;
+                        }
+                    }
+                    "Quadratic" | "Cubic" => {
+                        let degree = if value == "Quadratic" { 2 } else { 3 };
+                        let segments = SPLINE_SEGMENTS.with(|c| c.get()).unsigned_abs().max(1);
+                        pedit::spline_fit_polyline2d(self, degree, segments as usize);
+                    }
+                    _ => {}
+                }
+            }
             "pl2_closed" => {
                 let closed = if value == "toggle" {
                     !self.is_closed()

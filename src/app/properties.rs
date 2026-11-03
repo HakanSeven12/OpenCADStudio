@@ -2131,6 +2131,7 @@ impl OpenCADStudio {
             crate::entities::common::set_unit_context(
                 crate::entities::common::UnitContext::from_header(h),
             );
+            crate::entities::polyline::set_spline_segments(h.spline_segments);
         }
         {
             // Which text styles fix their own height — the height rows read it

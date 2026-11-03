@@ -934,6 +934,30 @@ impl Scene {
     }
 
     pub fn restore_solid_models(&mut self, handles: &[Handle]) {
+        /// The box around a body's surface, from a coarse tessellation.
+        fn body_box(body: &kernel::brep::Body) -> Option<([f64; 3], [f64; 3])> {
+            let tolerance = kernel::brep::mesh::TessellationTolerance::new(0.5, 1e-3);
+            let mesh = kernel::brep::mesh::tessellate(body, tolerance).mesh;
+            let mut points = mesh.positions.iter().copied();
+            let first = points.next()?;
+            Some(points.fold((first, first), |(lo, hi), p| {
+                (
+                    [lo[0].min(p[0]), lo[1].min(p[1]), lo[2].min(p[2])],
+                    [hi[0].max(p[0]), hi[1].max(p[1]), hi[2].max(p[2])],
+                )
+            }))
+        }
+        /// Whether two bodies fill the same box, to a hundredth of its size
+        /// (the coarse tessellation cuts curved sides differently).
+        fn same_place(a: &kernel::brep::Body, b: &kernel::brep::Body) -> bool {
+            let (Some((alo, ahi)), Some((blo, bhi))) = (body_box(a), body_box(b)) else {
+                return true;
+            };
+            let size = (0..3).map(|k| ahi[k] - alo[k]).fold(0.0_f64, f64::max);
+            let slack = size * 1e-2 + 1e-9;
+            (0..3).all(|k| (alo[k] - blo[k]).abs() <= slack && (ahi[k] - bhi[k]).abs() <= slack)
+        }
+
         let bodies: Vec<(Handle, kernel::brep::Body)> = handles
             .iter()
             .filter(|handle| !self.solid_models.contains_key(handle))
@@ -960,7 +984,15 @@ impl Scene {
                 let body = if tree.as_ref().is_some_and(|tree| tree.has_boolean()) {
                     stored().or_else(rebuilt)
                 } else {
-                    rebuilt().or_else(stored)
+                    match (rebuilt(), stored()) {
+                        // A history that no longer matches the saved body
+                        // (moved by a path that left it behind) would cut or
+                        // join the solid where it is not drawn.
+                        (Some(rebuilt), Some(stored)) if !same_place(&rebuilt, &stored) => {
+                            Some(stored)
+                        }
+                        (rebuilt, stored) => rebuilt.or(stored),
+                    }
                 }?;
                 Some((handle, body))
             })

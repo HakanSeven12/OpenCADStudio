@@ -283,7 +283,7 @@ impl OpenCADStudio {
         );
         if change_type {
             let (data_type, unit_type, picture) = crate::entities::table::entered_value_type(&entry.text);
-            command = command.with_value_type(data_type, unit_type, picture);
+            command = command.with_value_type(data_type, unit_type, &picture);
         }
         use crate::command::CadCommand;
         self.command_line.push_info(&command.prompt());

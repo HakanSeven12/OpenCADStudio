@@ -5093,19 +5093,45 @@ pub(crate) fn typed_text_fits(
     matches!(typed_cell_value(document, &value, kind, &picture), TypedValue::Converted(_))
 }
 
-/// The data type, unit and picture a cell takes when its type changes to
-/// fit what was typed: a whole number Whole, a number Decimal in the
-/// current units (scientific when typed with an exponent), two or three
-/// numbers apart by commas a 3D point, a date Date, else Text.
-pub(crate) fn entered_value_type(text: &str) -> (i32, i32, &'static str) {
+/// A typed number's unit sign: `$` before or after it (currency), `%`
+/// after it (percentage). Returns the number's text, the unit and the
+/// picture affixes (`[$,]`, `[,$]`, `[,%]`).
+fn unit_sign(text: &str) -> (&str, i32, &'static str) {
+    if let Some(body) = text.strip_prefix('$') {
+        (body, 16, "[$,]")
+    } else if let Some(body) = text.strip_suffix('$') {
+        (body, 16, "[,$]")
+    } else if let Some(body) = text.strip_suffix('%') {
+        (body, 32, "[,%]")
+    } else {
+        (text, 0, "")
+    }
+}
+
+/// The data type, unit and picture of a typed value (measured), which a
+/// cell takes when its type changes to fit it and a General cell takes
+/// when it is typed in: a whole number Whole, a number Decimal in the
+/// current units (scientific when typed with an exponent), a number with a
+/// `$` or `%` sign currency or percentage (`$12` Whole `%ps[$,]`, `12.5%`
+/// Decimal `%lu2%pr2%ps[,%]`), two or three numbers apart by commas a 3D
+/// point, a date Date, else Text.
+pub(crate) fn entered_value_type(text: &str) -> (i32, i32, String) {
     let text = text.trim();
     let number = |part: &str| {
         let part = part.trim();
         let plain = !part.is_empty() && part.chars().all(|c| c.is_ascii_digit() || "+-.eE".contains(c));
         plain.then(|| part.parse::<f64>().ok()).flatten()
     };
+    let (body, unit, affixes) = unit_sign(text);
+    if unit != 0 {
+        return match number(body) {
+            Some(_) if body.parse::<i64>().is_ok() => (1, unit, format!("%ps{affixes}")),
+            Some(_) => (2, unit, format!("%lu2%pr2%ps{affixes}")),
+            None => (4, 0, String::new()),
+        };
+    }
     let numbers: Vec<Option<f64>> = text.split(',').map(number).collect();
-    match numbers.as_slice() {
+    let (data_type, unit_type, picture) = match numbers.as_slice() {
         [Some(_)] if text.parse::<i64>().is_ok() => (1, 0, ""),
         [Some(_)] if text.contains(['e', 'E']) => (2, 0, "%lu1"),
         [Some(_)] => (2, 0, "%lu6"),
@@ -5114,7 +5140,36 @@ pub(crate) fn entered_value_type(text: &str) -> (i32, i32, &'static str) {
             (8, 0, "%x")
         }
         _ => (4, 0, ""),
+    };
+    (data_type, unit_type, picture.to_string())
+}
+
+/// The data type and picture a cell takes when text is typed into it
+/// (measured): a General cell takes the typed value's own (`12` Whole,
+/// `abc` Text); a Currency, Decimal, Percentage or Whole cell without a
+/// picture takes its type's default picture when the value comes with
+/// another unit (`$12` in a Decimal cell shows `%lu6`, `12` in a Currency
+/// cell the currency picture), and keeps its picture otherwise. `None`
+/// leaves the cell's type as it is.
+pub(crate) fn typed_entry_type(table: &Table, row: usize, column: usize, text: &str) -> Option<(i32, i32, String)> {
+    if text.trim().is_empty() {
+        return None;
     }
+    let (kind, picture) = cell_data_kind(table, row, column).unwrap_or((4, String::new()));
+    if kind == 4 {
+        return Some(entered_value_type(text));
+    }
+    if !picture.is_empty() || !matches!(kind, 1 | 3 | 5 | 8) {
+        return None;
+    }
+    let (_, cell_data_type, cell_unit) = CELL_DATA_CATEGORIES[kind];
+    let default = match kind {
+        1 => format!("%lu2%pr2%ps[{},]", crate::entities::field::os_currency_symbol()),
+        3 => "%lu6".to_string(),
+        5 => "%lu2%pr2%ps[,%]".to_string(),
+        _ => String::new(),
+    };
+    (entered_value_type(text).1 != cell_unit && !default.is_empty()).then_some((cell_data_type, cell_unit, default))
 }
 
 /// Outcome of reading a cell value as a data type.
@@ -5144,6 +5199,9 @@ pub(crate) fn typed_cell_value(
     }
     let number = match value.value_type {
         V::Long | V::Double => Some(value.numeric_value),
+        // A Currency, Decimal, Percentage or Whole cell reads a number with
+        // a `$` or `%` sign (measured; an Angle cell does not).
+        _ if kind != 0 => unit_sign(&shown).0.replace(',', "").parse::<f64>().ok(),
         _ => shown.replace(',', "").parse::<f64>().ok(),
     };
     let mut next = value.clone();
@@ -5203,7 +5261,12 @@ pub(crate) fn typed_cell_value(
         8 => {
             let Some(number) = number else { return TypedValue::Unchanged };
             let whole = number.trunc();
-            (V::Long, U::NoUnits, whole, format!("{}", whole as i64))
+            // A picture with only a sign (`%ps[$,]`) puts it around the number.
+            let text = match picture.strip_prefix("%ps[").and_then(|p| p.strip_suffix(']')).and_then(|p| p.split_once(',')) {
+                Some((prefix, suffix)) => format!("{prefix}{}{suffix}", whole as i64),
+                None => format!("{}", whole as i64),
+            };
+            (V::Long, U::NoUnits, whole, text)
         }
         _ => return TypedValue::Unchanged,
     };

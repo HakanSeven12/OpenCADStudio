@@ -1382,6 +1382,11 @@ impl TableCellEditCommand {
     /// The cell takes the given data type and picture with the text put
     /// in, in the same undo step.
     pub fn with_value_type(mut self, data_type: i32, unit_type: i32, picture: &str) -> Self {
+        self.set_value_type(data_type, unit_type, picture);
+        self
+    }
+
+    fn set_value_type(&mut self, data_type: i32, unit_type: i32, picture: &str) {
         use codec::entities::table::CellStylePropertyFlags as P;
         if let Some(cell) = self.table.cell_mut(self.row, self.column) {
             let bits = (P::DATA_TYPE | P::DATA_FORMAT).bits() as i32;
@@ -1395,7 +1400,6 @@ impl TableCellEditCommand {
             style.value_format = picture.to_string();
             style.property_flags.insert(P::DATA_TYPE | P::DATA_FORMAT);
         }
-        self
     }
 }
 
@@ -1436,6 +1440,12 @@ impl CadCommand for TableCellEditCommand {
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         use codec::entities::table::CellStateFlags;
+        // Typed text sets a General cell's type, or a number cell's picture.
+        if let Some((data_type, unit_type, picture)) =
+            crate::entities::table::typed_entry_type(&self.table, self.row, self.column, text)
+        {
+            self.set_value_type(data_type, unit_type, &picture);
+        }
         let cell = self.table.cell_mut(self.row, self.column)?;
         if cell
             .state

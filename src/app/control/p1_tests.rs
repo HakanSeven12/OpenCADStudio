@@ -1193,6 +1193,17 @@ fn control(app: &mut OpenCADStudio, mut op: Value) -> Value {
     response
 }
 
+/// A line end from the `geometry` query, as (x, y).
+fn line_point(entity: &Value, key: &str) -> (f64, f64) {
+    let p = entity[key].as_array().expect("the line reports both ends");
+    (p[0].as_f64().expect("x"), p[1].as_f64().expect("y"))
+}
+
+/// Whether a point is within solver tolerance of where it was drawn.
+fn stays(p: (f64, f64), want: (f64, f64)) -> bool {
+    (p.0 - want.0).abs() < 1e-9 && (p.1 - want.1).abs() < 1e-9
+}
+
 /// A fixed entity must not move under a grip drag: the constraint that
 /// reports itself applied has to hold the geometry where it was drawn.
 #[test]
@@ -1218,14 +1229,304 @@ fn a_fixed_entity_resists_a_grip_drag() {
     assert_eq!(dragged["ok"], json!(true), "{dragged}");
     let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
     let entity = &q["entities"][0];
-    let coords = |key: &str| {
-        let p = entity[key].as_array().expect("the line reports both ends");
-        (p[0].as_f64().expect("x"), p[1].as_f64().expect("y"))
-    };
-    let (sx, sy) = coords("start");
-    let (ex, ey) = coords("end");
     assert!(
-        sx.abs() < 1e-9 && sy.abs() < 1e-9 && (ex - 10.0).abs() < 1e-9 && ey.abs() < 1e-9,
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
         "a fixed line stays where it was drawn: {q}"
+    );
+}
+
+/// A command transform must leave a fixed entity where it was, and say why.
+#[test]
+fn a_fixed_entity_resists_a_move() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let moved = app.automation_op(r#"{"op":"run","cmd":"MOVE 0,0,0 5,5,0"}"#);
+    assert_eq!(moved["ok"], json!(false), "{moved}");
+    assert!(
+        moved["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {moved}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays put: {q}"
+    );
+
+    // The panel edits the current selection, which the command's completion
+    // cleared; pick the line again to reach the same refusal through the
+    // panel's own commit.
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    app.refresh_properties();
+    let before = app.command_line.history.len();
+    let _ = app.update(crate::app::Message::PropGeomInput {
+        field: "start_x",
+        value: "5".to_owned(),
+    });
+    let _ = app.update(crate::app::Message::PropGeomCommit("start_x"));
+    let refusal: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        refusal.iter().any(|text| text.contains("fixed constraint")),
+        "the panel says why it ignored the edit: {refusal:?}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "the refused panel edit left the line put: {q}"
+    );
+}
+
+/// A fixed object holds the whole selection: the free object is not moved
+/// alone and the command is reported as refused.
+#[test]
+fn a_move_holds_the_whole_selection_when_one_object_is_fixed() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 20,0 30,0"}"#);
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+    let handles: Vec<String> = q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .map(|entity| entity["handle"].as_str().expect("handle").to_owned())
+        .collect();
+    assert_eq!(handles.len(), 2, "{q}");
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}"]}}"#,
+        handles[0]
+    ));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}","{}"]}}"#,
+        handles[0], handles[1]
+    ));
+    let moved = app.automation_op(r#"{"op":"run","cmd":"MOVE 0,0,0 5,5,0"}"#);
+    assert_eq!(moved["ok"], json!(false), "{moved}");
+    assert!(
+        moved["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {moved}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let placed = [((0.0, 0.0), (10.0, 0.0)), ((20.0, 0.0), (30.0, 0.0))];
+    for (entity, (start, end)) in q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .zip(placed)
+    {
+        assert!(
+            stays(line_point(entity, "start"), start) && stays(line_point(entity, "end"), end),
+            "neither line left its place: {q}"
+        );
+    }
+}
+
+/// Bounds alignment moves whole objects, so it answers the same refusal.
+#[test]
+fn a_fixed_entity_resists_bounds_alignment() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 20,0 30,0"}"#);
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+    let handles: Vec<String> = q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .map(|entity| entity["handle"].as_str().expect("handle").to_owned())
+        .collect();
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}"]}}"#,
+        handles[0]
+    ));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{}","{}"]}}"#,
+        handles[0], handles[1]
+    ));
+
+    let aligned = app.automation_op(r#"{"op":"run","cmd":"ALIGNLEFT"}"#);
+    assert_eq!(aligned["ok"], json!(false), "{aligned}");
+    assert!(
+        aligned["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {aligned}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let placed = [((0.0, 0.0), (10.0, 0.0)), ((20.0, 0.0), (30.0, 0.0))];
+    for (entity, (start, end)) in q["entities"]
+        .as_array()
+        .expect("two lines")
+        .iter()
+        .zip(placed)
+    {
+        assert!(
+            stays(line_point(entity, "start"), start) && stays(line_point(entity, "end"), end),
+            "neither line left its place: {q}"
+        );
+    }
+}
+
+/// The panel's boolean and choice rows that reshape a curve answer the same
+/// refusal as its numeric rows.
+#[test]
+fn a_fixed_curve_resists_a_boolean_and_a_choice() {
+    use codec::entities::{Polyline2D, Spline, Vertex2D};
+    use codec::types::Vector3;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let mut polyline = Polyline2D::new();
+    polyline
+        .vertices
+        .push(Vertex2D::new(Vector3::new(0.0, 0.0, 0.0)));
+    polyline
+        .vertices
+        .push(Vertex2D::new(Vector3::new(10.0, 0.0, 0.0)));
+    let polyline_handle = app
+        .commit_entity_handle(codec::EntityType::Polyline2D(polyline))
+        .expect("the polyline commits");
+    let mut spline = Spline::new();
+    spline.control_points = vec![
+        Vector3::new(0.0, 5.0, 0.0),
+        Vector3::new(3.0, 8.0, 0.0),
+        Vector3::new(6.0, 2.0, 0.0),
+        Vector3::new(9.0, 5.0, 0.0),
+    ];
+    spline.knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    spline.weights = vec![1.0; 4];
+    let spline_handle = app
+        .commit_entity_handle(codec::EntityType::Spline(spline.clone()))
+        .expect("the spline commits");
+    for handle in [polyline_handle, spline_handle] {
+        app.automation_op(&format!(
+            r#"{{"op":"select","handles":["{:X}"]}}"#,
+            handle.value()
+        ));
+        let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+        assert_eq!(fixed["ok"], json!(true), "{fixed}");
+    }
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{:X}"]}}"#,
+        polyline_handle.value()
+    ));
+    app.refresh_properties();
+    let before = app.command_line.history.len();
+    let _ = app.update(crate::app::Message::PropBoolToggle("pl2_closed"));
+    let said: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|text| text.contains("fixed constraint")),
+        "the Closed toggle says why it was ignored: {said:?}"
+    );
+    match app.tabs[app.active_tab]
+        .scene
+        .document
+        .get_entity(polyline_handle)
+    {
+        Some(codec::EntityType::Polyline2D(polyline)) => {
+            assert!(!polyline.is_closed(), "the fixed polyline stayed open");
+        }
+        other => panic!("the polyline is still there: {other:?}"),
+    }
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{:X}"]}}"#,
+        spline_handle.value()
+    ));
+    app.refresh_properties();
+    let before = app.command_line.history.len();
+    let _ = app.update(crate::app::Message::PropGeomChoiceChanged {
+        field: "spline_method",
+        value: "Control Vertices".to_owned(),
+    });
+    let said: Vec<_> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|text| text.contains("fixed constraint")),
+        "the Method choice says why it was ignored: {said:?}"
+    );
+    match app.tabs[app.active_tab]
+        .scene
+        .document
+        .get_entity(spline_handle)
+    {
+        Some(codec::EntityType::Spline(after)) => {
+            assert_eq!(
+                after.control_points, spline.control_points,
+                "the fixed spline kept its points"
+            );
+        }
+        other => panic!("the spline is still there: {other:?}"),
+    }
+}
+
+/// A property write must not move a fixed entity, and must say why.
+#[test]
+fn a_fixed_entity_resists_a_property_write() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{handle}"]}}"#));
+    let fixed = app.automation_op(r#"{"op":"run","cmd":"GCFIX"}"#);
+    assert_eq!(fixed["ok"], json!(true), "{fixed}");
+
+    let written = control(
+        &mut app,
+        json!({"op":"property","field":"start_x","value":5.0}),
+    );
+    assert_eq!(written["ok"], json!(false), "{written}");
+    assert!(
+        written["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fixed constraint"),
+        "the refusal names the constraint: {written}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    assert!(
+        stays(line_point(entity, "start"), (0.0, 0.0))
+            && stays(line_point(entity, "end"), (10.0, 0.0)),
+        "a fixed line stays put: {q}"
     );
 }

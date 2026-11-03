@@ -9146,6 +9146,12 @@ impl OpenCADStudio {
                 }
                 let i = self.active_tab;
                 let handles = self.property_target_handles(i);
+                if crate::app::properties::field_moves_geometry(field) && self.any_entity_is_fixed(i, &handles)
+                {
+                    self.command_line
+                        .push_error(crate::app::properties::HELD_BY_FIXED);
+                    return Task::none();
+                }
                 if !handles.is_empty() {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         match field {

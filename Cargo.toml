@@ -208,9 +208,28 @@ iced = { git = "https://github.com/iced-rs/iced.git", rev = "23604ff22ab0aad9e00
 # CARGO_PROFILE_TEST_DEBUG=1 when needed.
 [profile.dev]
 debug = 0
-
-[profile.dev.package."*"]
+# A wildcard package override would also override build-time dependencies.
 opt-level = 2
+
+# Build-time dependencies do not need the runtime optimization level.
+[profile.dev.build-override]
+opt-level = 0
+
+# Keep this list in sync with the root package and workspace members.
+[profile.dev.package]
+OpenCADStudio = { opt-level = 0 }
+ocs_plugin_api = { opt-level = 0 }
+ocs_save = { opt-level = 0 }
+ocs_web_worker = { opt-level = 0 }
+dwg-thumbnailer = { opt-level = 0 }
+dwg-thumbnailer-win = { opt-level = 0 }
+
+# Keep translation-resource and manifest parsing fast during macro expansion.
+i18n-embed = { opt-level = 2 }
+fluent-bundle = { opt-level = 2 }
+fluent-syntax = { opt-level = 2 }
+find-crate = { opt-level = 2 }
+"toml:0.5.11" = { opt-level = 2 }
 
 # meshopt's C++ build maps DEBUG=false to NDEBUG. Keep its C assertions.
 [profile.dev.package.meshopt]

@@ -48,6 +48,8 @@ pub struct HatchGpu {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     backend: HatchBackend,
+    /// Triangulated fills of the resident set, reused by the next upload.
+    fill_meshes: storage::FillMeshCache,
 }
 
 impl HatchGpu {
@@ -155,6 +157,7 @@ impl HatchGpu {
             pipeline,
             bind_group_layout,
             backend,
+            fill_meshes: storage::FillMeshCache::default(),
         }
     }
 
@@ -166,6 +169,7 @@ impl HatchGpu {
     }
 
     pub(super) fn clear(&mut self) {
+        self.fill_meshes = storage::FillMeshCache::default();
         match &mut self.backend {
             HatchBackend::Storage { resident, preview } => {
                 resident.clear();
@@ -186,8 +190,14 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *resident =
-                    StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
+                *resident = StorageHatchBatch::build(
+                    device,
+                    queue,
+                    &self.bind_group_layout,
+                    &renderable,
+                    &mut self.fill_meshes,
+                );
+                self.fill_meshes.finish();
             }
             HatchBackend::Texture { resident, .. } => {
                 let renderable: Vec<HatchModel> = hatches
@@ -214,8 +224,15 @@ impl HatchGpu {
                     .filter(|hatch| hatch.boundary.len() >= 3)
                     .cloned()
                     .collect();
-                *preview =
-                    StorageHatchBatch::build(device, queue, &self.bind_group_layout, &renderable);
+                // A throwaway cache: the small preview set must not evict the
+                // resident set's triangles.
+                *preview = StorageHatchBatch::build(
+                    device,
+                    queue,
+                    &self.bind_group_layout,
+                    &renderable,
+                    &mut storage::FillMeshCache::default(),
+                );
             }
             HatchBackend::Texture { preview, .. } => {
                 let renderable: Vec<HatchModel> = hatches

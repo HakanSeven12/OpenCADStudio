@@ -2082,6 +2082,7 @@ impl OpenCADStudio {
         if self.opening.is_none() {
             return Task::none();
         }
+        let ui_started = iced::time::Instant::now();
         // Web drawings live under bare file names: two tabs sharing a name
         // also share the single browser-stored copy, and the last save
         // silently replaces the other tab's. Warn at open time — the
@@ -2439,6 +2440,13 @@ impl OpenCADStudio {
                 .set(crate::app::OPEN_PHASE_FINALIZING, 10000, 1, 1);
         }
         self.opening.take();
+        // The part of the open that blocks the UI thread, kept apart from the
+        // loader-thread phases so a slow handoff shows up on its own.
+        crate::perf_record!(
+            "[perf] open-ui-thread={}ms entities={}",
+            ui_started.elapsed().as_millis(),
+            entity_count,
+        );
         // The document and its derived caches have settled: the next message
         // boundary announces `DocumentOpened` to native plugins exactly once
         // for this load (API v9).

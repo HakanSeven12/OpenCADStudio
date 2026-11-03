@@ -3952,6 +3952,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "DGN Import" => Some(("dgn-import", "dgn-import")),
         "Import DGN File" => Some(("dgn-import", "import-dgn-file")),
         "Import WMF" => Some(("dgn-import", "import-wmf")),
+        "Import SVG" => Some(("dgn-import", "import-svg")),
         "Imports a DGN model as drawing objects: levels as layers, cells as blocks." => Some(("dgn-import", "help-dgn")),
         "Imports a file of the chosen format with the format's importer." => Some(("dgn-import", "help-import")),
         "Filename cannot be blank" => Some(("dgn-import", "blank")),

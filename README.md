@@ -79,6 +79,7 @@ The project is under active development. Keep backups of important production dr
 | DXF | Read and write; versioned save targets from R14 through 2018 |
 | BAK / SV$ | Open drawing backups and autosave files |
 | OBJ | Import polygon meshes |
+| SVG / SVGZ | Import vector shapes as a block (`SVGIN`, or `IMPORT`) |
 | LandXML | Import `CgPoint` survey points |
 | STL | Export 3D mesh data |
 | STEP AP203 | Export 3D mesh data |

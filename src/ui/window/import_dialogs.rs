@@ -102,11 +102,12 @@ const fn format(
 }
 
 /// The reference's Import File types, in its order of groups.
-pub const FORMATS: [ImportFormat; 21] = [
+pub const FORMATS: [ImportFormat; 22] = [
     format("PDF Files", "*.pdf", &["pdf"], 0, Support::Yes),
     format("MicroStation DGN", "*.dgn", &["dgn"], 0, Support::Yes),
     format("All DGN Files", "*.*", &["*"], 0, Support::Yes),
     format("Metafile", "*.wmf", &["wmf"], 0, Support::Yes),
+    format("SVG", "*.svg; *.svgz", &["svg", "svgz"], 0, Support::Yes),
     format("3D Studio", "*.3ds", &["3ds"], 1, Support::Yes),
     format("ACIS", "*.sat", &["sat"], 1, Support::Yes),
     format(

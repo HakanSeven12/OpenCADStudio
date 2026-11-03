@@ -7250,6 +7250,7 @@ dgn-import =
     .dgn-import = DGN importálása
     .import-dgn-file = DGN-fájl importálása
     .import-wmf = WMF importálása
+    .import-svg = SVG importálása
     .help-dgn = DGN-modellt importál rajzobjektumokként: a szinteket fóliaként, a cellákat blokként.
     .help-import = A kiválasztott formátum importálójával importálja a fájlt.
     .blank = A fájlnév nem lehet üres

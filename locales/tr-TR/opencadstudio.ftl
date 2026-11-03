@@ -7197,6 +7197,7 @@ dgn-import =
     .dgn-import = DGN İçe Aktar
     .import-dgn-file = DGN Dosyası İçe Aktar
     .import-wmf = WMF İçe Aktar
+    .import-svg = SVG İçe Aktar
     .help-dgn = DGN modelini çizim nesneleri olarak içe aktarır: seviyeler katman, hücreler blok olur.
     .help-import = Seçilen biçimdeki dosyayı o biçimin içe aktarıcısıyla içe aktarır.
     .blank = Dosya adı boş olamaz

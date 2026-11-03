@@ -3598,6 +3598,7 @@ layers =
     .layer-s-frozen = Vrstva(y) zamrzlá.
     .layer-s-locked = Vrstva(y) uzamčena.
     .layer-s-turned-off = Vrstva(y) vypnuta.
+    .layoff-select-object-on-layer-undo = LAYOFF  Vyberte objekt v hladině, která se má vypnout, nebo [Undo]:
     .layer-s-unlocked = Vrstva(y) odemčena.
     .layers = Vrstvy: __ocs_fmt_0__
     .lock = Zámek

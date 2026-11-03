@@ -1954,6 +1954,8 @@ pub enum CmdResult {
     /// The Table Style window's starting-table pick ended: the picked
     /// object, or none when the pick was left with Enter or Esc.
     TableTemplatePick(Option<Handle>),
+    /// Turn a layer off (or back on) and keep the command for its next pick.
+    SetLayerOn { layer: String, on: bool },
     /// Command is still waiting for the next point; show updated prompt.
     NeedPoint,
     /// Update the committed-segment wire (normal colour) and keep collecting points.

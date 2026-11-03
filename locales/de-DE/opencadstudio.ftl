@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Ebene(n) eingefroren.
     .layer-s-locked = Ebene(n) gesperrt.
     .layer-s-turned-off = Layer(s) ausgeschaltet.
+    .layoff-select-object-on-layer-undo = LAYOFF  Objekt auf dem auszuschaltenden Layer wählen oder [Undo]:
     .layer-s-unlocked = Ebene(n) entsperrt.
     .layers = Ebenen: __ocs_fmt_0__
     .lock = Schleusen

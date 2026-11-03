@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Fóliák fagyasztva.
     .layer-s-locked = Fóliák zárolva.
     .layer-s-turned-off = Fóliák kikapcsolva.
+    .layoff-select-object-on-layer-undo = LAYOFF  Válasszon objektumot a kikapcsolandó fóliáról vagy [Undo]:
     .layer-s-unlocked = Fóliák zárolása feloldva.
     .layers = Fóliák: __ocs_fmt_0__
     .lock = Zárolás

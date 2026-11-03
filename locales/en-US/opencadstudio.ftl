@@ -3604,6 +3604,7 @@ layers =
     .layer-s-frozen = Layer(s) frozen.
     .layer-s-locked = Layer(s) locked.
     .layer-s-turned-off = Layer(s) turned off.
+    .layoff-select-object-on-layer-undo = LAYOFF  Select an object on the layer to be turned off or [Undo]:
     .layer-s-unlocked = Layer(s) unlocked.
     .layers = Layers: __ocs_fmt_0__
     .lock = Lock

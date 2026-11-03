@@ -3598,6 +3598,7 @@ layers =
     .layer-s-frozen = Livello/i congelato/i.
     .layer-s-locked = Livelli bloccati.
     .layer-s-turned-off = Livelli disattivati.
+    .layoff-select-object-on-layer-undo = LAYOFF  Selezionare un oggetto sul layer da disattivare o [Undo]:
     .layer-s-unlocked = Livelli sbloccati.
     .layers = Livelli: __ocs_fmt_0__
     .lock = Bloccare

@@ -3589,6 +3589,7 @@ layers =
     .layer-s-frozen = レイヤーをフリーズしました。
     .layer-s-locked = レイヤーをロックしました。
     .layer-s-turned-off = レイヤーをオフにしました。
+    .layoff-select-object-on-layer-undo = LAYOFF  オフにする画層上のオブジェクトを選択 または [Undo]:
     .layer-s-unlocked = レイヤーのロックを解除しました。
     .layers = レイヤー: __ocs_fmt_0__
     .lock = ロック

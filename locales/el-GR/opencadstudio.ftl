@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Το/τα επίπεδο(α) πάγωσαν.
     .layer-s-locked = Το/τα επίπεδο(α) κλειδώθηκαν.
     .layer-s-turned-off = Το/τα επίπεδο(α) απενεργοποιήθηκαν.
+    .layoff-select-object-on-layer-undo = LAYOFF  Επιλέξτε ένα αντικείμενο στο επίπεδο που θα απενεργοποιηθεί ή [Undo]:
     .layer-s-unlocked = Το/τα επίπεδο(α) ξεκλειδώθηκαν.
     .layers = Επίπεδα: __ocs_fmt_0__
     .lock = Κλείδωμα

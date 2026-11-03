@@ -3598,6 +3598,7 @@ layers =
     .layer-s-frozen = 레이어가 동결되었습니다.
     .layer-s-locked = 레이어가 잠겨 있습니다.
     .layer-s-turned-off = 레이어가 꺼졌습니다.
+    .layoff-select-object-on-layer-undo = LAYOFF  끌 도면층의 객체 선택 또는 [Undo]:
     .layer-s-unlocked = 레이어가 잠금 해제되었습니다.
     .layers = 레이어: __ocs_fmt_0__
     .lock = 잠금

@@ -3586,6 +3586,7 @@ layers =
     .layer-s-frozen = 层被冻结 。
     .layer-s-locked = 层已锁定 。
     .layer-s-turned-off = 层已关闭 。
+    .layoff-select-object-on-layer-undo = LAYOFF  选择要关闭的图层上的对象或 [Undo]:
     .layer-s-unlocked = 层已解锁 。
     .layers = 图层 : __ocs_fmt_0__
     .lock = 锁定

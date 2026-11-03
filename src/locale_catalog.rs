@@ -2308,6 +2308,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Layer(s) frozen." => Some(("layers", "layer-s-frozen")),
         "Layer(s) locked." => Some(("layers", "layer-s-locked")),
         "Layer(s) turned off." => Some(("layers", "layer-s-turned-off")),
+        "LAYOFF  Select an object on the layer to be turned off or [Undo]:" => Some(("layers", "layoff-select-object-on-layer-undo")),
         "Layer(s) unlocked." => Some(("layers", "layer-s-unlocked")),
         "Layers" => Some(("common", "layers")),
         "Layers ({}): {}" => Some(("insert", "layers")),

@@ -538,6 +538,7 @@ impl OpenCADStudio {
                 ));
             }
             CmdResult::TableTemplatePick(handle) => self.table_template_pick_done(handle),
+            CmdResult::SetLayerOn { layer, on } => self.set_layer_on_from_command(i, &layer, on),
             CmdResult::OpenTxt2MtxtSettings => self.open_txt2mtxt_settings(),
             CmdResult::OpenAutoConstrainSettings => {
                 self.handle_open_auto_constrain_settings();

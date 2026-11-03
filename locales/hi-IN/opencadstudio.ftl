@@ -3587,6 +3587,7 @@ layers =
     .layer-s-frozen = लेयर फ़्रीज़ की गईं।
     .layer-s-locked = लेयर लॉक की गईं।
     .layer-s-turned-off = लेयर बंद की गईं।
+    .layoff-select-object-on-layer-undo = LAYOFF  बंद की जाने वाली लेयर पर कोई ऑब्जेक्ट चुनें या [Undo]:
     .layer-s-unlocked = लेयर अनलॉक की गईं।
     .layers = लेयर: __ocs_fmt_0__
     .lock = लॉक

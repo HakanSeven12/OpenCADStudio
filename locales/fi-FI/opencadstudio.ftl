@@ -3598,6 +3598,7 @@ layers =
     .layer-s-frozen = Kerros(t) jäädytetty.
     .layer-s-locked = Taso(t) lukittu.
     .layer-s-turned-off = Tasot pois päältä.
+    .layoff-select-object-on-layer-undo = LAYOFF  Valitse objekti tasolta, joka sammutetaan, tai [Undo]:
     .layer-s-unlocked = Taso(t) avattu.
     .layers = Kerrokset: __ocs_fmt_0__
     .lock = Lukko

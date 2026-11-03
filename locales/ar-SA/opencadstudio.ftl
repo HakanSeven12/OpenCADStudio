@@ -3611,6 +3611,7 @@ layers =
     .layer-s-frozen = جُمّدت الطبقات.
     .layer-s-locked = قُفلت الطبقات.
     .layer-s-turned-off = أُوقفت الطبقات.
+    .layoff-select-object-on-layer-undo = LAYOFF  حدد كائنًا على الطبقة المراد إيقاف تشغيلها أو [Undo]:
     .layer-s-unlocked = أُلغي قفل الطبقات.
     .layers = الطبقات: __ocs_fmt_0__
     .lock = قفل

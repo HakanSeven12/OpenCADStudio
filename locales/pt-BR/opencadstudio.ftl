@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Camadas congeladas.
     .layer-s-locked = Camadas bloqueadas.
     .layer-s-turned-off = Camadas desativadas.
+    .layoff-select-object-on-layer-undo = LAYOFF  Selecione um objeto na camada a ser desligada ou [Undo]:
     .layer-s-unlocked = Camadas desbloqueadas.
     .layers = Camadas: __ocs_fmt_0__
     .lock = Bloquear

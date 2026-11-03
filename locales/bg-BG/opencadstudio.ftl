@@ -3598,6 +3598,7 @@ layers =
     .layer-s-frozen = Слой(еве) замразени.
     .layer-s-locked = Слой(еве) заключени.
     .layer-s-turned-off = Слой(еве) изключени.
+    .layoff-select-object-on-layer-undo = LAYOFF  Изберете обект от слоя за изключване или [Undo]:
     .layer-s-unlocked = Слой(еве) отключени.
     .layers = Слоеве: __ocs_fmt_0__
     .lock = Заключи

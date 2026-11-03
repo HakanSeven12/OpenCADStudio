@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Calque(s) gelée(s).
     .layer-s-locked = Calque(s) verrouillé(s).
     .layer-s-turned-off = Calque(s) éteint(s).
+    .layoff-select-object-on-layer-undo = LAYOFF  Sélectionnez un objet sur le calque à désactiver ou [Undo] :
     .layer-s-unlocked = Calque(s) déverrouillé(s).
     .layers = Calque : __ocs_fmt_0__
     .lock = Verrouillage

@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Capas inutilizadas.
     .layer-s-locked = Capas bloqueadas.
     .layer-s-turned-off = Capas desactivadas.
+    .layoff-select-object-on-layer-undo = LAYOFF  Seleccione un objeto de la capa que desea desactivar o [Undo]:
     .layer-s-unlocked = Capas desbloqueadas.
     .layers = Capas: __ocs_fmt_0__
     .lock = Bloquear

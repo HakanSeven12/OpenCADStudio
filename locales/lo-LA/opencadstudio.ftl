@@ -3600,6 +3600,7 @@ layers =
     .layer-s-frozen = ແຊ່ແຂງຊັ້ນງານແລ້ວ.
     .layer-s-locked = ລັອກຊັ້ນງານແລ້ວ.
     .layer-s-turned-off = ປິດຊັ້ນງານແລ້ວ.
+    .layoff-select-object-on-layer-undo = LAYOFF  ເລືອກວັດຖຸຢູ່ໃນເລເຍີທີ່ຈະປິດ ຫຼື [Undo]:
     .layer-s-unlocked = ປົດລັອກຊັ້ນງານແລ້ວ.
     .layers = ຊັ້ນງານ: __ocs_fmt_0__
     .lock = ລັອກ

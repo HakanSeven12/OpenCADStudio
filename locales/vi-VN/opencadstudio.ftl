@@ -3606,6 +3606,7 @@ layers =
     .layer-s-frozen = (Các) lớp bị đóng băng.
     .layer-s-locked = (Các) lớp đã bị khóa.
     .layer-s-turned-off = (Các) lớp đã tắt.
+    .layoff-select-object-on-layer-undo = LAYOFF  Chọn một đối tượng trên lớp cần tắt hoặc [Undo]:
     .layer-s-unlocked = (Các) lớp đã được mở khóa.
     .layers = Lớp: __ocs_fmt_0__
     .lock = Khóa

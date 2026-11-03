@@ -3598,6 +3598,7 @@ layers =
     .layer-s-frozen = Warstwy zamrożone.
     .layer-s-locked = Warstwy zablokowane.
     .layer-s-turned-off = Warstwy wyłączone.
+    .layoff-select-object-on-layer-undo = LAYOFF  Wskaż obiekt na warstwie do wyłączenia lub [Undo]:
     .layer-s-unlocked = Warstwy odblokowane.
     .layers = Warstwy: __ocs_fmt_0__
     .lock = Blokada

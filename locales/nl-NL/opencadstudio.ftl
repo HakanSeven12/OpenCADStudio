@@ -3599,6 +3599,7 @@ layers =
     .layer-s-frozen = Laag(s) bevroren.
     .layer-s-locked = Laag(s) vergrendeld.
     .layer-s-turned-off = Laag(s) uitgeschakeld.
+    .layoff-select-object-on-layer-undo = LAYOFF  Selecteer een object op de laag die uit moet of [Undo]:
     .layer-s-unlocked = Laag(s) ontgrendeld.
     .layers = Lagen: __ocs_fmt_0__
     .lock = Vergrendelen

@@ -5215,8 +5215,14 @@ pub(crate) fn typed_cell_value(
             } else {
                 number.to_radians()
             };
-            let picture = if picture.is_empty() { "%au5" } else { picture };
-            (V::Double, U::Angle, radians, document.format_with_picture(radians, picture))
+            // Without a picture an angle shows in radians, six decimals
+            // (measured: 45 typed shows 0.785398; no picture is assigned).
+            let text = if picture.is_empty() {
+                format!("{radians:.6}")
+            } else {
+                document.format_with_picture(radians, picture)
+            };
+            (V::Double, U::Angle, radians, text)
         }
         1 | 3 | 5 => {
             let Some(number) = number else { return TypedValue::Unchanged };

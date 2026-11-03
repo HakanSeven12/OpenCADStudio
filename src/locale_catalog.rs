@@ -3,6 +3,16 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "An action needs at least one target." => Some(("block-action-targets", "empty")),
+        "Select supported targets belonging to this block." => Some(("block-action-targets", "invalid")),
+        "The action or its Block Editor session changed; restart BACTIONSET." => Some(("block-action-targets", "stale")),
+        "This row has no number to edit." => Some(("parameters-manager-feedback", "no-number")),
+        "This row has no visibility flag to change." => Some(("parameters-manager-feedback", "no-flag")),
+        "Specify a finite numeric parameter value." => Some(("parameters-manager-feedback", "finite-number")),
+        "The Block Editor session is no longer active." => Some(("parameters-manager-feedback", "stale-session")),
+        "Specify a positive parameter length." => Some(("parameters-manager-feedback", "positive-length")),
+        "The parameter direction is unavailable." => Some(("parameters-manager-feedback", "no-direction")),
+        "Parameters Manager edit" => Some(("parameters-manager-feedback", "history")),
         "Show in Properties" => Some(("block-parameter-properties", "show-properties")),
         "Parameter name" => Some(("block-parameter-properties", "parameter-name")),
         "Number of grips" => Some(("block-parameter-properties", "grip-count")),
@@ -2309,6 +2319,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Layer(s) frozen." => Some(("layers", "layer-s-frozen")),
         "Layer(s) locked." => Some(("layers", "layer-s-locked")),
         "Layer(s) turned off." => Some(("layers", "layer-s-turned-off")),
+        "LAYOFF  Select an object on the layer to be turned off or [Undo]:" => Some(("layers", "layoff-select-object-on-layer-undo")),
         "Layer(s) unlocked." => Some(("layers", "layer-s-unlocked")),
         "Layers" => Some(("common", "layers")),
         "Layers ({}): {}" => Some(("insert", "layers")),

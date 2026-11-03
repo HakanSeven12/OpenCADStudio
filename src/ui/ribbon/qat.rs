@@ -12,7 +12,7 @@ use iced::widget::{button, container, row, text, tooltip, Space};
 use iced::{Background, Element, Fill, Length, Theme};
 
 use super::layout::{QatBuiltin, QatItem};
-use super::ribbon_menu::{check_row, fit_width, panel_of_width, MenuTarget, RightPress};
+use super::ribbon_menu::{check_row, fit_width, MenuTarget, RightPress};
 use super::widgets::{
     combo_btn_style, layer_combo_face, make_tip, qat_split_part_style, quick_access_btn,
     render_history_control, split_outline, tip_style, top_hist_btn_style, CENTER_LAYER_COMBO,
@@ -491,57 +491,79 @@ impl Ribbon {
             menu_bar.as_str(),
             place.as_str(),
         ]));
-        let mut items: Vec<Element<'_, Message>> = vec![menu_header(title)];
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+        let mut items: Vec<DropdownRow<'_, Message>> = vec![DropdownRow::header(menu_header(title))];
         items.extend(standard.into_iter().map(|(label, item)| {
             let checked = self.layout.qat_has(&item);
             let on_press = self
                 .can_toggle(&item)
                 .then(|| Message::RibbonQat(QatMsg::Toggle(item)));
-            check_row(label, checked, on_press).into()
+            let el: Element<'_, Message> = check_row(label.clone(), checked, on_press.clone()).into();
+            if let Some(msg) = on_press {
+                DropdownRow::item(el, label, msg)
+            } else {
+                DropdownRow::header(el)
+            }
         }));
-        items.push(menu_separator());
-        items.push(check_row(more, false, Some(Message::RibbonQat(QatMsg::OpenPicker))).into());
-        items.push(
-            check_row(
-                menu_bar,
-                false,
-                Some(Message::RibbonMenu(super::RibbonMenuMsg::ShowMenuBar(
-                    !show_menu_bar,
-                ))),
-            )
-            .into(),
-        );
-        items.push(place_row(place, self.layout.qat_below, ribbon_closed));
-        self.place_dropdown(QAT_CUSTOMIZE_ID, panel_of_width(items, width), width, win.0)
+        items.push(DropdownRow::header(menu_separator()));
+        let more_msg = Message::RibbonQat(QatMsg::OpenPicker);
+        items.push(DropdownRow::item(
+            check_row(more.clone(), false, Some(more_msg.clone())),
+            more,
+            more_msg,
+        ));
+        let mb_msg = Message::RibbonMenu(super::RibbonMenuMsg::ShowMenuBar(!show_menu_bar));
+        items.push(DropdownRow::item(
+            check_row(menu_bar.clone(), false, Some(mb_msg.clone())),
+            menu_bar,
+            mb_msg,
+        ));
+        let place_el = place_row(place.clone(), self.layout.qat_below, ribbon_closed);
+        if ribbon_closed {
+            items.push(DropdownRow::header(place_el));
+        } else {
+            items.push(DropdownRow::item(
+                place_el,
+                place,
+                Message::RibbonQat(QatMsg::SetBelow(!self.layout.qat_below)),
+            ));
+        }
+        let list = DropdownList::new(items).on_escape(Message::CloseRibbonDropdown);
+        let panel = container(list)
+            .style(super::widgets::popup_panel_style)
+            .padding(icons::hairline())
+            .width(Length::Fixed(width));
+        self.place_dropdown(QAT_CUSTOMIZE_ID, panel.into(), width, win.0)
     }
 
     /// More Commands: the command search's box and results; a result is
     /// added to the toolbar instead of run.
     fn more_commands(&self, win: (f32, f32)) -> Element<'_, Message> {
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         let input = iced::widget::text_input(
             &crate::tr!("ribbon-menu", "find-command-to-add"),
             &self.qat_query,
         )
         .id(iced::widget::Id::new(QAT_PICKER_INPUT))
         .on_input(|query| Message::RibbonQat(QatMsg::PickerInput(query)))
-        .on_submit(Message::RibbonQat(QatMsg::PickerSubmit))
         .size(metrics::QAT_PICKER_INPUT_SIZE)
         .padding(metrics::QAT_PICKER_INPUT_PAD);
         // Worked out when the query changes, not on every frame.
         let candidates = &self.qat_found;
         let list_h = (candidates.len().max(1) as f32 * metrics::QAT_PICKER_ROW_H)
             .min(metrics::QAT_PICKER_LIST_H);
-        let rows: Vec<Element<'_, Message>> =
+        let rows: Vec<DropdownRow<'_, Message>> =
             if candidates.is_empty() && !self.qat_query.trim().is_empty() {
-                vec![container(
-                    text(crate::tr!("ribbon-menu", "no-matches"))
-                        .size(metrics::QAT_TEXT_SIZE)
-                        .style(|theme: &Theme| text::Style {
-                            color: Some(chrome::muted(theme)),
-                        }),
-                )
-                .padding(metrics::QAT_PICKER_EMPTY_PAD)
-                .into()]
+                vec![DropdownRow::header(
+                    container(
+                        text(crate::tr!("ribbon-menu", "no-matches"))
+                            .size(metrics::QAT_TEXT_SIZE)
+                            .style(|theme: &Theme| text::Style {
+                                color: Some(chrome::muted(theme)),
+                            }),
+                    )
+                    .padding(metrics::QAT_PICKER_EMPTY_PAD),
+                )]
             } else {
                 candidates
                     .iter()
@@ -567,21 +589,30 @@ impl Ribbon {
                                 icons::themed_disabled(icons::CHECK, metrics::QAT_MENU_CHECK),
                             );
                         }
-                        button(content)
-                            .on_press_maybe(
-                                (!held).then(|| {
-                                    Message::RibbonQat(QatMsg::Add(candidate.item.clone()))
-                                }),
-                            )
+                        let msg = (!held)
+                            .then(|| Message::RibbonQat(QatMsg::Add(candidate.item.clone())));
+                        let btn = button(content)
+                            .on_press_maybe(msg.clone())
                             .style(super::widgets::popup_row_style)
                             .width(Fill)
-                            .padding(metrics::QAT_PICKER_ROW_PAD)
-                            .into()
+                            .padding(metrics::QAT_PICKER_ROW_PAD);
+                        if let Some(msg) = msg {
+                            DropdownRow::item(btn, candidate.label.clone(), msg)
+                        } else {
+                            DropdownRow::header(btn)
+                        }
                     })
                     .collect()
             };
-        let list =
-            iced::widget::scrollable(iced::widget::column(rows)).height(Length::Fixed(list_h));
+        let list = DropdownList::with_options(
+            rows,
+            Length::Fixed(list_h),
+            Length::Fill,
+            0.0,
+            0.0,
+        )
+        .query(self.qat_query.clone())
+        .on_escape(Message::CloseRibbonDropdown);
         let panel = container(
             iced::widget::column![
                 menu_header(crate::tr!("ribbon-menu", "more-commands-title")),
@@ -948,12 +979,33 @@ impl Ribbon {
         rows: Vec<(String, bool, Option<Message>)>,
         win: (f32, f32),
     ) -> Element<'_, Message> {
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
         let width = fit_width(rows.iter().map(|(label, _, _)| label.as_str()));
-        let items = rows
+        let mut initial_selected: Option<usize> = None;
+        let items: Vec<DropdownRow<'_, Message>> = rows
             .into_iter()
-            .map(|(label, checked, on_press)| check_row(label, checked, on_press).into())
+            .enumerate()
+            .map(|(idx, (label, checked, on_press))| {
+                let el: Element<'_, Message> =
+                    check_row(label.clone(), checked, on_press.clone()).into();
+                if let Some(msg) = on_press {
+                    if checked && initial_selected.is_none() {
+                        initial_selected = Some(idx);
+                    }
+                    DropdownRow::item(el, label, msg)
+                } else {
+                    DropdownRow::header(el)
+                }
+            })
             .collect();
-        self.place_dropdown(id, panel_of_width(items, width), width, win.0)
+        let list = DropdownList::new(items)
+            .selected(initial_selected)
+            .on_escape(Message::CloseRibbonDropdown);
+        let panel = container(list)
+            .style(super::widgets::popup_panel_style)
+            .padding(icons::hairline())
+            .width(Length::Fixed(width));
+        self.place_dropdown(id, panel.into(), width, win.0)
     }
 
     /// Apply a Quick Access message. Returns whether the toolbar changed and

@@ -141,7 +141,7 @@ fn enum_row<'a>(
         .unwrap_or_else(|| crate::i18n::translate(&selected));
     row![
         text(label).size(11).style(muted_style).width(165),
-        iced::widget::pick_list(
+        crate::ui::dropdown_list::pick_list(
             Some(EnumChoice {
                 code: selected,
                 label: selected_label
@@ -186,7 +186,7 @@ fn handle_row<'a>(
         .collect();
     row![
         text(label).size(11).style(muted_style).width(165),
-        iced::widget::pick_list(Some(selected), options, |value| value.to_string())
+        crate::ui::dropdown_list::pick_list(Some(selected), options, |value| value.to_string())
             .on_select(move |value| Message::MLeaderStyleSetHandle {
                 field,
                 value: value.code
@@ -700,7 +700,7 @@ pub fn view_window<'a>(
                     .size(11)
                     .style(muted_style)
                     .width(165),
-                iced::widget::pick_list(
+                crate::ui::dropdown_list::pick_list(
                     Some(crate::ui::properties::LwItem(style.line_weight)),
                     crate::ui::properties::lw_options(),
                     |value| value.to_string(),

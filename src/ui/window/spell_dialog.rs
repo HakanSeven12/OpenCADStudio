@@ -359,7 +359,7 @@ pub fn view<'a>(state: &'a SpellState, sizing: crate::ui::modal::ModalSizing) ->
         .iter()
         .find(|(tag, _)| *tag == state.language)
         .map(|(_, name)| name.clone());
-    let languages = iced::widget::pick_list(current, names, |name: &String| name.clone())
+    let languages = crate::ui::dropdown_list::pick_list(current, names, |name: &String| name.clone())
         .on_select(|name| msg(SpellMsg::Language(name)))
         .text_size(11)
         .padding([4, 8]);

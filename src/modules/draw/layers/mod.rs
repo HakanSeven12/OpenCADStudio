@@ -2,7 +2,7 @@ pub(super) mod color;
 pub(super) mod layfrz;
 pub(super) mod layiso;
 pub(super) mod laylck;
-pub(super) mod layoff;
+pub mod layoff;
 pub(super) mod layon;
 pub(super) mod laythw;
 pub mod laytrans;

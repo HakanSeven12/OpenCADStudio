@@ -1336,10 +1336,11 @@ impl OpenCADStudio {
                             .copied()
                             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                             .collect();
-                        self.tabs[i].scene.bump_entities_with_parametric_policy(
+                        self.tabs[i].scene.bump_entities_after_constraint_added(
                             &changes,
                             &[],
                             self.constraint_solve_mode,
+                            &[],
                         );
                         self.tabs[i].dirty = true;
                         self.refresh_properties();
@@ -1351,6 +1352,7 @@ impl OpenCADStudio {
                             )
                             .as_str(),
                         );
+                        self.report_pending_network_moves(i);
                         if let Some(pd) = pending {
                             self.commit_undo_delta(i, pd);
                         }
@@ -1592,7 +1594,9 @@ impl OpenCADStudio {
                     .into_iter()
                     .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                     .collect();
-                self.tabs[i].scene.bump_entities(&changes);
+                self.tabs[i]
+                    .scene
+                    .bump_entities_after_constraint_added(&changes, &[], false, &[]);
                 self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
                 self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
                 self.tabs[i].scene.deselect_all();
@@ -1605,6 +1609,7 @@ impl OpenCADStudio {
                     crate::tf!("{refused} associative dimension(s) could not be converted")
                         .as_ref(),
                 );
+                self.report_pending_network_moves(i);
                 if let Some(pd) = pending {
                     self.commit_undo_delta(i, pd);
                 }

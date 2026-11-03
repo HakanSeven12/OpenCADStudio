@@ -258,7 +258,7 @@ fn pick_field<'a>(
     on_select: impl Fn(String) -> Message + 'a,
     width: Length,
 ) -> Element<'a, Message> {
-    let pl = iced::widget::pick_list(selected, options, |value| value.to_string())
+    let pl = crate::ui::dropdown_list::pick_list(selected, options, |value| value.to_string())
         .on_select(on_select)
         .text_size(13)
         .padding([3, 6])
@@ -301,7 +301,7 @@ fn localized_pick_field<'a>(
         .map(LocalizedChoice::new)
         .collect::<Vec<_>>();
     let selected = selected.map(LocalizedChoice::new);
-    let pl = iced::widget::pick_list(selected, options, |value| value.to_string())
+    let pl = crate::ui::dropdown_list::pick_list(selected, options, |value| value.to_string())
         .on_select(move |choice: LocalizedChoice| on_select(choice.raw))
         .text_size(13)
         .padding([3, 6])
@@ -600,7 +600,7 @@ fn properties_tab<'a>(
 
     let lw_opts = lw_options();
     let lw_sel = LwItem(r.line_weight);
-    let lw = iced::widget::pick_list(Some(lw_sel), lw_opts, |value| value.to_string())
+    let lw = crate::ui::dropdown_list::pick_list(Some(lw_sel), lw_opts, |value| value.to_string())
         .on_select(|it: LwItem| Message::AttrEditorLineweight(it.0))
         .text_size(13)
         .padding([3, 6])

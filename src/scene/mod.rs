@@ -2960,6 +2960,15 @@ pub struct Scene {
         RefCell<HashMap<String, Option<crate::scene::model::image_model::DecodedImage>>>,
     /// Runtime parametric constraint sets decoded from standard graph scopes.
     pub(crate) parametric_constraints: Vec<parametric_constraints::ParametricConstraintSet>,
+    /// Handles a constraint addition's solve moved that the command did not
+    /// name. The result driver clears the list at the outermost result and
+    /// drains it once that result is applied; a command that adds constraints
+    /// without a result drains it itself.
+    pub(crate) constraint_network_moves: Vec<Handle>,
+    /// Scratch list a solve fills with the entities it moved, whether or not
+    /// anyone asked for a report. Only a constraint addition copies it into
+    /// `constraint_network_moves`; every other solve drops it.
+    solve_moved: Vec<Handle>,
     /// CONSTRAINTNAMEFORMAT: what a dynamic dimension's text shows —
     /// 0 the parameter name, 1 the value, 2 `name=value`.
     pub constraint_name_format: u8,
@@ -3375,6 +3384,8 @@ impl Scene {
             associative_centermark_source_cache: RefCell::new(None),
             center_notices: Vec::new(),
             parametric_constraints: Vec::new(),
+            constraint_network_moves: Vec::new(),
+            solve_moved: Vec::new(),
             constraint_name_format: 2,
             dynamic_constraint_display: true,
             hidden_dynamic_dimensions: HashSet::default(),
@@ -4550,6 +4561,19 @@ impl Scene {
                     retained_originals,
                     fixed_refs,
                 );
+                // The solve records everything it moved, including geometry
+                // the caller named. Only a constraint addition reports the
+                // rest; every other solve swallows the record.
+                let moved = std::mem::take(&mut self.solve_moved);
+                if report_before.is_some() {
+                    // The refreshes above may have appended annotation
+                    // handles to `changes`; those are never solved, so
+                    // counting them as named changes nothing.
+                    let named: HashSet<Handle> =
+                        changes.iter().map(|(handle, _)| *handle).collect();
+                    self.constraint_network_moves
+                        .extend(moved.into_iter().filter(|handle| !named.contains(handle)));
+                }
                 Self::absorb_refreshed(&mut changes, &mut refreshed_handles, refreshed);
             }
         }

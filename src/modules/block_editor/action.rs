@@ -79,6 +79,45 @@ impl ActionCommand {
         command.selecting = !actions::needs_frame(kind);
         Some(command)
     }
+    fn point_source(&self) -> Option<i32> {
+        (self.kind == Some(Kind::Move) && self.selecting && !self.choosing_rotation)
+            .then(|| {
+                self.candidates
+                    .iter()
+                    .find(|p| Some(p.handle) == self.parameter)
+                    .map(|p| p.id)
+            })
+            .flatten()
+    }
+    fn point_choices(&self) -> Option<(i32, Vec<(Handle, i32, String)>)> {
+        let source = self.point_source()?;
+        Some((
+            source,
+            self.candidates
+                .iter()
+                .filter(|p| p.point && p.id != source)
+                .map(|p| (p.handle, p.id, p.name.clone()))
+                .collect(),
+        ))
+    }
+    fn point_choices_snapshot(&self) -> Option<(i32, Vec<(Handle, i32, String)>)> {
+        if self.kind != Some(Kind::Move) {
+            return None;
+        }
+        let source = self
+            .candidates
+            .iter()
+            .find(|p| Some(p.handle) == self.parameter)?
+            .id;
+        Some((
+            source,
+            self.candidates
+                .iter()
+                .filter(|p| p.point && p.id != source)
+                .map(|p| (p.handle, p.id, p.name.clone()))
+                .collect(),
+        ))
+    }
     fn finish_frame(&mut self) -> CmdResult {
         if self.frame.len() < 3 {
             return CmdResult::ReportError(
@@ -110,6 +149,12 @@ impl CadCommand for ActionCommand {
     fn input_kind(&self) -> crate::command::InputKind {
         if self.override_input.is_some() {
             return crate::command::InputKind::SingleToken;
+        }
+        if self
+            .point_choices()
+            .is_some_and(|(_, choices)| !choices.is_empty())
+        {
+            return crate::command::InputKind::FreeText;
         }
         if self.parameter.is_some() {
             if self.kind == Some(Kind::Array) && !self.selecting {
@@ -162,7 +207,11 @@ impl CadCommand for ActionCommand {
         }
         if self.kind.is_some_and(actions::needs_frame) && self.frame.is_empty() {
             if self.kind == Some(Kind::PolarStretch) {
-                let point = if self.xy_key_point == Some(XyKeyPoint::Base) { "Base" } else { "End" };
+                let point = if self.xy_key_point == Some(XyKeyPoint::Base) {
+                    "Base"
+                } else {
+                    "End"
+                };
                 return crate::tf!("BACTION  Specify first corner of action frame or [CPolygon/Base/End] <{point}>:").into_owned();
             }
             if let Some(point) = self.xy_key_point {
@@ -185,6 +234,12 @@ impl CadCommand for ActionCommand {
                 .into_owned();
         }
         if self.selecting {
+            if self
+                .point_choices()
+                .is_some_and(|(_, choices)| !choices.is_empty())
+            {
+                return crate::tr!("block-action-targets", "create-prompt");
+            }
             if let Some(point) = self.xy_key_point {
                 let point = match point {
                     XyKeyPoint::Base => "base",
@@ -282,13 +337,47 @@ impl CadCommand for ActionCommand {
         }
     }
     fn on_text_input(&mut self, s: &str) -> Option<CmdResult> {
-        if self.parameter.is_some() && self.kind == Some(Kind::PolarStretch) && self.frame.is_empty() && !self.frame_done {
+        if let Some((_, choices)) = self.point_choices() {
+            if let Some(raw) = s
+                .get(..10)
+                .filter(|prefix| prefix.eq_ignore_ascii_case("parameter "))
+                .and_then(|_| s.get(10..))
+            {
+                let name = if raw.starts_with('"') {
+                    serde_json::from_str::<String>(raw).ok()
+                } else {
+                    Some(raw.trim().to_owned())
+                };
+                let matches = choices
+                    .iter()
+                    .filter(|(_, _, candidate)| {
+                        name.as_ref()
+                            .is_some_and(|name| candidate.eq_ignore_ascii_case(name))
+                    })
+                    .map(|(handle, _, _)| *handle)
+                    .collect::<Vec<_>>();
+                return Some(if matches.len() == 1 {
+                    self.targets.push(matches[0]);
+                    CmdResult::NeedPoint
+                } else {
+                    CmdResult::ReportError(crate::tr!("block-action-targets", "unique-point"))
+                });
+            }
+        }
+        if self.parameter.is_some()
+            && self.kind == Some(Kind::PolarStretch)
+            && self.frame.is_empty()
+            && !self.frame_done
+        {
             let key = match s.trim().to_ascii_uppercase().as_str() {
                 "BASE" | "B" => Some(XyKeyPoint::Base),
                 "END" | "E" => Some(XyKeyPoint::End),
                 _ => None,
             };
-            if let Some(key) = key { self.xy_key_point = Some(key); return Some(CmdResult::NeedPoint); }
+            if let Some(key) = key {
+                self.xy_key_point = Some(key);
+                return Some(CmdResult::NeedPoint);
+            }
         }
         if self.parameter.is_some()
             && self.kind.is_some_and(actions::needs_frame)
@@ -345,10 +434,7 @@ impl CadCommand for ActionCommand {
             }
         }
         if self.kind.is_none() {
-            if matches!(
-                s.trim().to_ascii_uppercase().as_str(),
-                "LOOKUP" | "L"
-            ) {
+            if matches!(s.trim().to_ascii_uppercase().as_str(), "LOOKUP" | "L") {
                 return Some(CmdResult::StartBlockLookupAction {
                     document: self.document,
                     definition: self.definition,
@@ -550,6 +636,7 @@ impl CadCommand for ActionCommand {
             kind: self.kind.unwrap(),
             parameter: self.parameter.unwrap(),
             xy_key_point: self.xy_key_point,
+            point_choices: self.point_choices_snapshot(),
             targets: {
                 let mut targets = self.targets.clone();
                 targets.extend(&self.rotate_only);
@@ -577,6 +664,95 @@ impl CadCommand for ActionCommand {
         }
     }
 
+    fn on_selection_marker_click(
+        &mut self,
+        scene: &crate::scene::Scene,
+        position: iced::Point,
+        context: PointPickContext,
+        remove: bool,
+        replace: bool,
+    ) -> Option<String> {
+        let source = self.point_source()?;
+        let (handle, name) = super::action_set::pick_point_marker(
+            scene,
+            self.definition,
+            |h| {
+                self.candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == h)
+            },
+            position,
+            context,
+        )?;
+        if !remove && replace {
+            self.targets.retain(|h| {
+                !self
+                    .candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == *h)
+            });
+        }
+        if remove {
+            self.targets.retain(|h| *h != handle);
+        } else if !self.targets.contains(&handle) {
+            self.targets.push(handle);
+        }
+        Some(name)
+    }
+    fn selection_marker_selected(&self, handle: Handle) -> bool {
+        self.kind == Some(Kind::Move)
+            && self.targets.contains(&handle)
+            && self
+                .candidates
+                .iter()
+                .any(|p| p.point && p.handle == handle)
+    }
+    fn clear_selection_markers(&mut self) {
+        self.targets
+            .retain(|h| !self.candidates.iter().any(|p| p.point && p.handle == *h));
+    }
+    fn on_selection_marker_region(
+        &mut self,
+        scene: &crate::scene::Scene,
+        polygon: &[iced::Point],
+        context: PointPickContext,
+        crossing: bool,
+        remove: bool,
+        replace: bool,
+        geometry_hit: bool,
+    ) -> Vec<String> {
+        let Some(source) = self.point_source() else {
+            return Vec::new();
+        };
+        let hits = super::action_set::point_markers_in_region(
+            scene,
+            self.definition,
+            |h| {
+                self.candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == h)
+            },
+            polygon,
+            context,
+            crossing,
+        );
+        if !remove && replace && (geometry_hit || !hits.is_empty()) {
+            self.targets.retain(|h| {
+                !self
+                    .candidates
+                    .iter()
+                    .any(|p| p.point && p.id != source && p.handle == *h)
+            });
+        }
+        for (handle, _) in &hits {
+            if remove {
+                self.targets.retain(|h| h != handle);
+            } else if !self.targets.contains(handle) {
+                self.targets.push(*handle);
+            }
+        }
+        hits.into_iter().map(|(_, name)| name).collect()
+    }
     fn is_selection_gathering(&self) -> bool {
         self.selecting
     }
@@ -585,6 +761,10 @@ impl CadCommand for ActionCommand {
         // Retain the current set while the user gathers additional objects.
         if self.choosing_rotation {
             self.rotate_only = handles;
+        } else if let Some((_, choices)) = self.point_choices() {
+            self.targets
+                .retain(|h| choices.iter().any(|(point, _, _)| point == h));
+            self.targets.extend(handles);
         } else {
             self.targets = handles;
         }
@@ -631,7 +811,10 @@ impl TestParameterCommand {
             document: self.document,
             definition: self.definition,
             parameter: self.parameter,
-            value: self.grip_input.as_ref().map(|input| input.value(position))
+            value: self
+                .grip_input
+                .as_ref()
+                .map(|input| input.value(position))
                 .unwrap_or(actions::Value::Point(position - self.display_offset)),
         }
     }
@@ -642,8 +825,12 @@ impl CadCommand for TestParameterCommand {
     }
     fn cursor_plane(&self) -> Option<(DVec3, DVec3)> {
         let input = self.grip_input.as_ref()?;
-        let normal = actions::v(input.to_world.apply_rotation(actions::native(DVec3::Z))).try_normalize()?;
-        Some((normal, actions::v(input.to_world.apply(actions::native(input.frame.base)))))
+        let normal =
+            actions::v(input.to_world.apply_rotation(actions::native(DVec3::Z))).try_normalize()?;
+        Some((
+            normal,
+            actions::v(input.to_world.apply(actions::native(input.frame.base))),
+        ))
     }
     fn block_parameter_grip_id(&self) -> Option<usize> {
         self.grip_input.as_ref().map(|input| input.id)

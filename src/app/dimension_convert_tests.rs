@@ -367,3 +367,53 @@ fn converting_an_angular_dimension_keeps_its_own_styles_precision() {
         "the restated label is stable across refreshes"
     );
 }
+
+/// The conversion adds a constraint, and that solve covers the whole space: it
+/// can level a line the conversion never named. Run on a pre-selection it
+/// prints that report itself, naming every such line once.
+#[test]
+fn converting_a_dimension_names_every_line_the_network_moves() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let (mut app, i, line, dimension) = fixture();
+    let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 10,60"}"#);
+    let _ = app.automation_op(r#"{"op":"run","cmd":"LINE 0,100 10,110"}"#);
+    let mut slanted: Vec<Handle> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter(|entity| matches!(entity, EntityType::Line(_)))
+        .map(|entity| entity.common().handle)
+        .filter(|handle| *handle != line)
+        .collect();
+    assert_eq!(slanted.len(), 2, "the two slanted lines");
+    slanted.sort_unstable();
+    for handle in &slanted {
+        app.tabs[i]
+            .scene
+            .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+            .add(
+                ConstraintKind::Horizontal,
+                vec![ParametricRef::whole(*handle)],
+                None,
+            );
+    }
+
+    app.tabs[i].scene.select_entity(dimension, false);
+    let before = app.command_line.history.len();
+    let _ = app.dispatch_command("DCCONVERTAPPLY");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    let handles: Vec<String> = slanted.iter().map(|handle| handle.to_string()).collect();
+    let report = format!(
+        "The constraint network moved 2 entities the command did not name: {}.",
+        handles.join(", ")
+    );
+    assert_eq!(
+        said.iter().filter(|text| **text == report).count(),
+        1,
+        "the completion names both lines the network moved, once: {said:?}"
+    );
+}

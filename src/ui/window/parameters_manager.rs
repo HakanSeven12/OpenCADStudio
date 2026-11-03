@@ -123,7 +123,7 @@ fn number_cell(
 
 fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
     container(
-        button(text(if show { "Yes" } else { "No" }).size(11))
+        button(text(crate::t!(if show { "Yes" } else { "No" }).into_owned()).size(11))
             .clip(true)
             .on_press(Message::ParametersManagerShow(name.to_owned())),
     )
@@ -131,21 +131,23 @@ fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
     .into()
 }
 
-fn line(cells: [&str; 7]) -> Element<'static, Message> {
-    let mut cells = cells.into_iter();
-    row(COLUMNS
-        .into_iter()
-        .map(|(width, _)| cell(cells.next().unwrap_or_default(), width)))
-    .spacing(SPACING)
-    .into()
-}
-
 fn header_line() -> Element<'static, Message> {
-    line(COLUMNS.map(|(_, name)| name))
+    row(COLUMNS.into_iter().map(|(width, name)| {
+        let label = if name == "Order" {
+            crate::tr!("parameters-manager", "order")
+        } else {
+            crate::t!(name).into_owned()
+        };
+        cell(&label, width)
+    })).spacing(SPACING).into()
 }
 
 fn group_line(group: Group) -> Element<'static, Message> {
-    container(text(crate::t!(group.name()).into_owned()).size(11))
+    let label = match group {
+        Group::ActionParameters => crate::tr!("parameters-manager", "action-parameters"),
+        Group::Attributes => crate::t!(group.name()).into_owned(),
+    };
+    container(text(label).size(11))
         .padding([6, 2])
         .into()
 }
@@ -158,14 +160,14 @@ fn group_line(group: Group) -> Element<'static, Message> {
 fn toolbar(panel: &Panel) -> Element<'static, Message> {
     row(vec![
         container(
-            text_input("Name*", &panel.filter)
+            text_input(&crate::tr!("parameters-manager", "filter"), &panel.filter)
                 .on_input(Message::ParametersManagerFilter)
                 .size(11),
         )
         .width(Length::Fixed(96.0))
         .into(),
         container(
-            text_input("Search for parameter", &panel.search)
+            text_input(&crate::tr!("parameters-manager", "search"), &panel.search)
                 .on_input(Message::ParametersManagerSearch)
                 .size(11),
         )
@@ -207,7 +209,12 @@ fn row_line(entry: &Row, panel: &Panel, definition: codec::Handle) -> Element<'s
         cell(name, COLUMNS[0].0),
         expression,
         value,
-        cell(entry.type_name, COLUMNS[3].0),
+        cell(&match entry.type_name {
+            "Polar" => crate::tr!("parameters-manager", "polar"),
+            "Visibility" => crate::tr!("parameters-manager", "visibility"),
+            "Variable" => crate::tr!("parameters-manager", "variable"),
+            name => crate::t!(name).into_owned(),
+        }, COLUMNS[3].0),
         show_cell(name, entry.show, COLUMNS[4].0),
         cell(&entry.order, COLUMNS[5].0),
         cell(&entry.description, COLUMNS[6].0),
@@ -239,7 +246,7 @@ pub fn view(
             lines.push(row_line(row, panel, definition));
         }
     }
-    let footer = manager::footer(rows.len(), listed.len());
+    let footer = crate::tr!("parameters-manager", "footer", shown = listed.len().to_string(), total = rows.len().to_string());
     dock::frame(
         dock::title_bar(
             PanelId::ParametersManager,
@@ -255,7 +262,7 @@ pub fn view(
             )
             .width(Fill)
             .height(Fill),
-            container(text(crate::t!(footer.as_str()).into_owned()).size(11))
+            container(text(footer).size(11))
                 .width(Fill)
                 .padding([2, 2]),
         ]
@@ -453,7 +460,7 @@ mod tests {
             );
         }
         assert!(
-            locate(&both_empty, "All: 3 of 3 parameters displayed").is_some(),
+            locate(&both_empty, &crate::tr!("parameters-manager", "footer", shown = "3", total = "3")).is_some(),
             "and the footer says so"
         );
 
@@ -476,7 +483,7 @@ mod tests {
             "and a group with no row left has no header either"
         );
         assert!(
-            locate(&angle_only, "All: 1 of 3 parameters displayed").is_some(),
+            locate(&angle_only, &crate::tr!("parameters-manager", "footer", shown = "1", total = "3")).is_some(),
             "the footer counts what is left out of what there is"
         );
     }

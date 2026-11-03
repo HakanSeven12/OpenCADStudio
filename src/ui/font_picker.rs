@@ -8,7 +8,7 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::{muted_style, readable_accent};
 use codec::Document;
-use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
+use iced::widget::{button, container, row, text, text_input, Space};
 use iced::{Background, Border, Color, Element, Font, Length, Theme};
 use std::borrow::Cow;
 use std::path::Path;
@@ -354,6 +354,8 @@ pub struct FontPicker<'a> {
 }
 
 const ROW_H: f32 = 22.0;
+/// Widget id for the font picker's search input, focused when the list opens.
+pub const FONT_PICKER_SEARCH_ID: &str = "FONT_PICKER_SEARCH";
 /// The narrowest list: a name and the missing note or the file side by side.
 /// A wider field gets a list of its own width.
 const POPUP_MIN_W: f32 = 260.0;
@@ -462,7 +464,7 @@ fn entry_row<'a>(
         .on_press(on_event(FontPickerEvent::Pick(entry.choice.clone())))
         .style(move |theme: &Theme, status| {
             let style = crate::ui::color_select::list_row_style(theme, status);
-            if active {
+            if active && !matches!(status, button::Status::Hovered) {
                 let palette = theme.palette();
                 button::Style {
                     background: Some(Background::Color(palette.primary.weak.color)),
@@ -500,6 +502,7 @@ pub fn view<'a>(picker: FontPicker<'a>) -> Element<'a, Message> {
         return crate::ui::read_only::field(&label, 11.0, width);
     }
     let input = text_input(&label, if state.open { &state.query } else { &label })
+        .id(iced::widget::Id::new(FONT_PICKER_SEARCH_ID))
         .on_input(move |query| on_event(FontPickerEvent::Search(query)))
         .size(11)
         .style(|theme: &Theme, status| text_input::Style {
@@ -540,23 +543,28 @@ pub fn view<'a>(picker: FontPicker<'a>) -> Element<'a, Message> {
         })
         .width(width);
 
-    let mut list = column![].spacing(1);
+    use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+    let mut rows: Vec<DropdownRow<'a, Message>> = Vec::new();
+    let mut initial_selected: Option<usize> = None;
     if let Some(typed) = state.typed_choice() {
         let name = typed.label().into_owned();
-        list = list.push(
+        let msg = on_event(FontPickerEvent::Pick(typed));
+        rows.push(DropdownRow::item(
             button(text(crate::tf!("Use “{name}”")).size(11))
-                .on_press(on_event(FontPickerEvent::Pick(typed)))
+                .on_press(msg.clone())
                 .style(crate::ui::color_select::list_row_style)
                 .padding([2, 6])
                 .height(ROW_H)
                 .width(Length::Fill),
-        );
+            name,
+            msg,
+        ));
     }
     let mut section = None;
     for entry in state.matches() {
         if section != Some(entry.section) && entry.choice != FontChoice::StyleDefault {
             section = Some(entry.section);
-            list = list.push(
+            rows.push(DropdownRow::header(
                 container(
                     text(entry.section.title().to_uppercase())
                         .size(9)
@@ -566,22 +574,34 @@ pub fn view<'a>(picker: FontPicker<'a>) -> Element<'a, Message> {
                         }),
                 )
                 .padding(iced::Padding::from([4, 6]).top(7)),
-            );
+            ));
         }
-        list = list.push(entry_row(
-            entry,
-            entry.choice.same_font(&selected),
-            on_event,
+        let is_selected = entry.choice.same_font(&selected);
+        if is_selected && initial_selected.is_none() {
+            initial_selected = Some(rows.len());
+        }
+        let entry_label = entry.choice.label().into_owned();
+        let msg = on_event(FontPickerEvent::Pick(entry.choice.clone()));
+        rows.push(DropdownRow::item(
+            entry_row(entry, is_selected, on_event),
+            entry_label,
+            msg,
         ));
     }
     // The right padding keeps the file names clear of the scroll bar.
-    let list = list.padding(iced::Padding {
-        right: 12.0,
-        ..Default::default()
-    });
-    let popup = container(scrollable(list).height(Length::Fixed(300.0)))
-        .style(container::bordered_box)
-        .padding(2);
+    let list = DropdownList::with_options(
+        rows,
+        Length::Fixed(300.0),
+        Length::Fill,
+        1.0,
+        iced::Padding {
+            right: 12.0,
+            ..Default::default()
+        },
+    )
+    .selected(initial_selected)
+    .query(state.query.clone());
+    let popup = container(list).style(container::bordered_box).padding(2);
     // The list opens centred under the field: as wide as the field, it lines
     // up with it and stays in the field's column.
     let popup_width = match width {

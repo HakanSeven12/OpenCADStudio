@@ -131,7 +131,7 @@ fn test_block_widget_picker<'a>(
 ) -> Element<'a, Message> {
     let labels = widget.items.clone();
     container(
-        iced::widget::pick_list(
+        crate::ui::dropdown_list::pick_list(
             widget.current,
             (0..widget.items.len()).collect::<Vec<_>>(),
             move |idx: &usize| labels.get(*idx).cloned().unwrap_or_default(),
@@ -1339,7 +1339,8 @@ bg={bg_ms:.1}ms n={view_count}"
                                 project(parameter.definition_label_point)?,
                                 parameter.position_name.clone(),
                                 vp_bounds,
-                                tab.selected_authoring == Some(handle),
+                                tab.selected_authoring == Some(handle)
+                                    || tab.active_cmd.as_ref().is_some_and(|command| command.selection_marker_selected(handle)),
                             ))
                         })
                         .collect()
@@ -3489,6 +3490,7 @@ impl OpenCADStudio {
         let hatch_pattern_keys = if self.tabs[self.active_tab]
             .properties
             .hatch_pattern_picker_open
+            || self.graphic_attributes.hatch_editor.is_some()
         {
             event::listen_with(hatch_pattern_key_event)
         } else {
@@ -3657,6 +3659,7 @@ impl OpenCADStudio {
                         if !has_printable_text
                             && status == Status::Captured
                             && matches!(arrow, Some(ArrowKey::Up | ArrowKey::Down))
+                            && !crate::ui::dropdown_list::take_dropdown_arrow_captured()
                         {
                             return Some(Message::CommandLineArrowProbe {
                                 direction: arrow?,
@@ -3677,6 +3680,12 @@ impl OpenCADStudio {
                             }
                         }
                         let shortcut = shortcut_key_name(&key, modifiers)?;
+                        if shortcut == "ESCAPE"
+                            && status == Status::Captured
+                            && crate::ui::dropdown_list::take_dropdown_escape_captured()
+                        {
+                            return None;
+                        }
                         if status == Status::Ignored
                             || crate::app::shortcuts::is_global_key(&shortcut)
                         {

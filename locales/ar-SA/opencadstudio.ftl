@@ -3988,6 +3988,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  حدد زاوية الدوران <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE  حدد نقطة الإدراج:
+    .tcell-row-above =
+        إدراج صف
+        أعلى
+    .tcell-row-below =
+        إدراج صف
+        أسفل
+    .tcell-delete-rows =
+        حذف
+        الصفوف
+    .tcell-col-left =
+        إدراج عمود
+        يسارًا
+    .tcell-col-right =
+        إدراج عمود
+        يمينًا
+    .tcell-delete-cols =
+        حذف
+        الأعمدة
+    .tcell-merge =
+        دمج
+        الخلايا
+    .tcell-unmerge =
+        إلغاء دمج
+        الخلايا
+    .tcell-lock =
+        قفل
+        الخلية
+    .tcell-edit =
+        تحرير
+        النص
+    .tcell-match =
+        مطابقة
+        الخلية
+    .tcell-borders =
+        حدود
+        الخلية
+    .tcell-format =
+        تنسيق
+        البيانات
+    .tcell-block =
+        إدراج
+        كتلة
+    .tcell-field =
+        إدراج
+        حقل
+    .tcell-contents =
+        إدارة محتويات
+        الخلية
+    .tcell-link =
+        ربط
+        الخلية
+    .tcell-download =
+        تنزيل
+        من المصدر
+    .tcell-row-style = نمط الصف
+    .tcell-column-style = نمط العمود
+    .tcell-width = عرض الخلية
+    .tcell-height = ارتفاع الخلية
+    .tcell-border-color = لون الحد
+    .tcell-border-lineweight = سمك خط الحد
+    .tcell-border-linetype = نوع خط الحد
+    .tcell-locking = قفل الخلية
+    .tcell-data-link = ارتباط بيانات الخلية
+    .tcell-select-destination = حدد الخلية الوجهة:
+    .tcell-select-cell = حدد خلية الجدول:
+    .tcell-range-first = حدد الزاوية الأولى لنطاق خلايا الجدول:
+    .tcell-range-second = حدد الزاوية الثانية لنطاق خلايا الجدول:
+    .tcell-align-prompt = أدخل محاذاة الخلية [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = أدخل تنسيق البيانات [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = أدخل اسم الكتلة أو [?]:
+    .tcell-formula-prompt = أدخل صيغة [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = حسب الصف/العمود
+    .tcell-unlocked = غير مقفل
+    .tcell-content-locked = المحتوى مقفل
+    .tcell-format-locked = التنسيق مقفل
+    .tcell-content-format-locked = المحتوى والتنسيق مقفلان
+    .tcell-not-linked = غير مرتبط
+    .tcell-invalid-cell = خلية غير صالحة.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  حدد نقطة الإدراج:
@@ -6585,6 +6663,7 @@ dimstyle =
     .move-text-outside-first = نقل النص إلى الخارج أولًا
     .period = نقطة
     .space = مسافة
+    .separator-none = (بلا)
     .surveyors-units = وحدات المسّاح
 
 style-manager =
@@ -8238,3 +8317,133 @@ block-value-set =
     .title = مجموعة القيم
     .x-distance = المسافة X
     .y-distance = المسافة Y
+
+table-style-cells =
+    .tbl-start-from-style = البدء من نمط جدول
+    .tbl-extra-columns = أعمدة إضافية
+    .tbl-extra-rows = صفوف إضافية
+    .tbl-keep-from-template = الاحتفاظ من الجدول الابتدائي:
+    .tbl-keep-label-text = نص خلايا التسمية
+    .tbl-keep-data-text = نص خلايا البيانات
+    .tbl-keep-overrides = تجاوزات نمط الخلية
+    .tbl-keep-links = ارتباطات البيانات
+    .tbl-keep-fields = الحقول
+    .tbl-keep-formulas = الصيغ
+    .tbl-extra-whole = يجب أن تكون الصفوف والأعمدة الإضافية أعدادًا صحيحة.
+    .from-style-insertion = __ocs_arg_n__  حدد نقطة الإدراج أو [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  أدخل اسم نمط جدول أو [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  أدخل عدد الصفوف الإضافية <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  أدخل عدد الأعمدة الإضافية <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  أدخل خيار إدراج [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  هل تريد تضمين __ocs_arg_what__ في الجدول المُدرج؟ [Yes/No] <__ocs_arg_current__>:
+    .label-text = نص التسمية
+    .data-text = نص البيانات
+    .formulas = الصيغ
+    .fields = الحقول
+    .data-links = ارتباطات البيانات
+    .blocks = الكتل
+    .cell-style-overrides = تجاوزات نمط الخلية
+    .style-name-header = اسم نمط الجدول
+    .no-starting-table = لا يحتوي نمط الجدول على جدول.
+    .select-table = حدد جدولاً:
+    .not-a-table = الكائن ليس جدولاً.
+    .cell-style-exists = يوجد بالفعل نمط خلية بهذا الاسم.
+    .cell-style-in-use = نمط الخلية قيد الاستخدام ولا يمكن حذفه.
+    .template-size = __ocs_arg_rows__ صفوف × __ocs_arg_columns__ أعمدة
+    .cell-properties = خصائص الخلية
+    .cell-text = نص الخلية
+    .cell-borders = حدود الخلية
+    .cell-styles = أنماط الخلايا
+    .label = تسمية
+    .margins = الهوامش
+    .merge-on-create = دمج الخلايا عند إنشاء صف/عمود
+    .new-from-this = جديد من هذا
+    .new-name = اسم جديد
+    .real-number = عدد حقيقي
+    .whole-number = عدد صحيح
+    .select-table-button = تحديد جدول…
+    .starting-table = الجدول الابتدائي
+    .table-direction = اتجاه الجدول
+
+table-cells =
+    .borders-title = حدود الخلية
+    .contents-title = محتويات الخلية
+    .line = الخط
+    .lineweight = سمك الخط
+    .linetype = نوع الخط
+    .color = اللون
+    .double = خط مزدوج
+    .spacing = التباعد
+    .apply-to = تطبيق على
+    .all = الكل
+    .outside = الخارجية
+    .inside = الداخلية
+    .none = بلا
+    .top = أعلى
+    .bottom = أسفل
+    .left = يسار
+    .right = يمين
+    .inside-horizontal = الداخلية الأفقية
+    .inside-vertical = الداخلية الرأسية
+    .contents = المحتويات
+    .empty = الخلية فارغة.
+    .move-up = نقل لأعلى
+    .move-down = نقل لأسفل
+    .delete = حذف
+    .layout = التخطيط
+    .flow = تدفق
+    .stack-horizontal = مكدسة أفقيًا
+    .stack-vertical = مكدسة رأسيًا
+    .content-spacing = التباعد
+    .block-item = كتلة: { $name }
+    .text-item = نص: { $text }
+    .text-content = نص خلية الجدول
+    .borders-help = يضبط سمك الخط ونوع الخط ولون حدود الخلايا المحددة؛ اختر الحواف التي تُطبق عليها.
+    .contents-help = يرتب محتويات الخلية المحددة ويزيلها وينظم تخطيطها.
+    .block-title = كتلة الخلية
+    .format-title = تنسيق بيانات الخلية
+    .block = كتلة
+    .block-name = الاسم
+    .browse = استعراض...
+    .block-path = المسار
+    .placement = الموضع
+    .alignment = محاذاة الخلية
+    .scale = المقياس
+    .autofit = ملاءمة تلقائية
+    .rotation = زاوية الدوران
+    .format = التنسيق
+    .current-precision = الدقة الحالية
+    .precision = الدقة
+    .symbol = الرمز
+    .append-symbol = إلحاق الرمز
+    .negative-parens = القيم السالبة بين أقواس
+    .list-separator = فاصل القائمة
+    .date-format = تنسيق التاريخ
+    .no-format-settings = لا توجد إعدادات تنسيق لنوع البيانات هذا.
+    .data-type = نوع البيانات
+    .format-settings = التنسيق
+    .currency = العملة
+    .decimal-number = عدد عشري
+    .percentage = نسبة مئوية
+    .whole-number = عدد صحيح
+    .grads = غراد
+    .sample-text = نص نموذجي
+    .block-help = يضع كتلة في الخلايا المحددة: موضعها ومقياسها (أو ملاءمتها للخلية) ودورانها.
+    .format-help = يضبط نوع البيانات والتنسيق اللذين تُقرأ بهما قيم الخلايا المحددة.
+    .additional-format = تنسيق إضافي
+    .conversion = معامل التحويل
+    .prefix = بادئة
+    .suffix = لاحقة
+    .decimal-separator = الفاصل العشري
+    .thousands-separator = فاصل الآلاف
+    .space = مسافة
+    .separator-none = (بلا)
+    .zero-leading = الأصفار البادئة
+    .zero-trailing = الأصفار اللاحقة
+    .zero-feet = 0 قدم
+    .zero-inches = 0 بوصة
+    .warning-title = نوع البيانات غير متطابق
+    .warning-heading = تحتوي هذه الخلايا على قيم ليست من نوع البيانات المختار.
+    .warning-note = يقرأ التحويل كل قيمة بالنوع الجديد، وتُمسح القيمة التي لا يمكن قراءتها. يترك الإلغاء الخلايا دون تغيير.
+    .warning-ok = تحويل
+    .warning-cancel = إلغاء

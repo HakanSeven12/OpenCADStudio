@@ -3977,6 +3977,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Укажите угол поворота <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE Укажите точку вставки:
+    .tcell-row-above =
+        Вставить строку
+        выше
+    .tcell-row-below =
+        Вставить строку
+        ниже
+    .tcell-delete-rows =
+        Удалить
+        строки
+    .tcell-col-left =
+        Вставить столбец
+        слева
+    .tcell-col-right =
+        Вставить столбец
+        справа
+    .tcell-delete-cols =
+        Удалить
+        столбцы
+    .tcell-merge =
+        Объединить
+        ячейки
+    .tcell-unmerge =
+        Разделить
+        ячейки
+    .tcell-lock =
+        Блокировка
+        ячейки
+    .tcell-edit =
+        Редактировать
+        текст
+    .tcell-match =
+        Копировать
+        свойства
+    .tcell-borders =
+        Границы
+        ячейки
+    .tcell-format =
+        Формат
+        данных
+    .tcell-block =
+        Вставить
+        блок
+    .tcell-field =
+        Вставить
+        поле
+    .tcell-contents =
+        Содержимое
+        ячейки
+    .tcell-link =
+        Связать
+        ячейку
+    .tcell-download =
+        Загрузить
+        из источника
+    .tcell-row-style = Стиль строки
+    .tcell-column-style = Стиль столбца
+    .tcell-width = Ширина ячейки
+    .tcell-height = Высота ячейки
+    .tcell-border-color = Цвет границы
+    .tcell-border-lineweight = Толщина линий границы
+    .tcell-border-linetype = Тип линии границы
+    .tcell-locking = Блокировка ячейки
+    .tcell-data-link = Связь данных ячейки
+    .tcell-select-destination = Выберите целевую ячейку:
+    .tcell-select-cell = Выберите ячейку таблицы:
+    .tcell-range-first = Выберите первый угол диапазона ячеек таблицы:
+    .tcell-range-second = Выберите второй угол диапазона ячеек таблицы:
+    .tcell-align-prompt = Введите выравнивание ячейки [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Введите формат данных [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Введите имя блока или [?]:
+    .tcell-formula-prompt = Введите формулу [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = По строке/столбцу
+    .tcell-unlocked = Разблокирована
+    .tcell-content-locked = Содержимое заблокировано
+    .tcell-format-locked = Формат заблокирован
+    .tcell-content-format-locked = Содержимое и формат заблокированы
+    .tcell-not-linked = Не связана
+    .tcell-invalid-cell = Недопустимая ячейка.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Укажите точку вставки:
@@ -6574,6 +6652,7 @@ dimstyle =
     .move-text-outside-first = Сначала вынести текст
     .period = Точка
     .space = Пробел
+    .separator-none = (Нет)
     .surveyors-units = Геодезические единицы
 
 style-manager =
@@ -8239,3 +8318,133 @@ block-value-set =
     .title = Набор значений
     .x-distance = Расстояние X
     .y-distance = Расстояние Y
+
+table-style-cells =
+    .tbl-start-from-style = Начать со стиля таблицы
+    .tbl-extra-columns = Дополнительные столбцы
+    .tbl-extra-rows = Дополнительные строки
+    .tbl-keep-from-template = Сохранить из исходной таблицы:
+    .tbl-keep-label-text = Текст ячеек меток
+    .tbl-keep-data-text = Текст ячеек данных
+    .tbl-keep-overrides = Переопределения стиля ячеек
+    .tbl-keep-links = Связи данных
+    .tbl-keep-fields = Поля
+    .tbl-keep-formulas = Формулы
+    .tbl-extra-whole = Число дополнительных строк и столбцов должно быть целым.
+    .from-style-insertion = __ocs_arg_n__  Укажите точку вставки или [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Введите имя стиля таблицы или [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Введите число дополнительных строк <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Введите число дополнительных столбцов <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Введите параметр вставки [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Включить __ocs_arg_what__ во вставляемую таблицу? [Yes/No] <__ocs_arg_current__>:
+    .label-text = текст меток
+    .data-text = текст данных
+    .formulas = формулы
+    .fields = поля
+    .data-links = связи данных
+    .blocks = блоки
+    .cell-style-overrides = переопределения стиля ячеек
+    .style-name-header = Имя стиля таблицы
+    .no-starting-table = Стиль таблицы не содержит таблицы.
+    .select-table = Выберите таблицу:
+    .not-a-table = Объект не является таблицей.
+    .cell-style-exists = Стиль ячеек с таким именем уже существует.
+    .cell-style-in-use = Стиль ячеек используется и не может быть удален.
+    .template-size = __ocs_arg_rows__ строк × __ocs_arg_columns__ столбцов
+    .cell-properties = Свойства ячейки
+    .cell-text = Текст ячейки
+    .cell-borders = Границы ячейки
+    .cell-styles = Стили ячеек
+    .label = Метка
+    .margins = Поля
+    .merge-on-create = Объединять ячейки при создании строки/столбца
+    .new-from-this = Новый на основе этого
+    .new-name = Новое имя
+    .real-number = Вещественное число
+    .whole-number = Целое число
+    .select-table-button = Выбрать таблицу…
+    .starting-table = Исходная таблица
+    .table-direction = Направление таблицы
+
+table-cells =
+    .borders-title = Границы ячейки
+    .contents-title = Содержимое ячейки
+    .line = Линия
+    .lineweight = Толщина линий
+    .linetype = Тип линии
+    .color = Цвет
+    .double = Двойная линия
+    .spacing = Интервал
+    .apply-to = Применить к
+    .all = Все
+    .outside = Внешние
+    .inside = Внутренние
+    .none = Нет
+    .top = Верхняя
+    .bottom = Нижняя
+    .left = Левая
+    .right = Правая
+    .inside-horizontal = Внутренние горизонтальные
+    .inside-vertical = Внутренние вертикальные
+    .contents = Содержимое
+    .empty = Ячейка пуста.
+    .move-up = Вверх
+    .move-down = Вниз
+    .delete = Удалить
+    .layout = Расположение
+    .flow = Поток
+    .stack-horizontal = Горизонтально друг за другом
+    .stack-vertical = Вертикально друг под другом
+    .content-spacing = Интервал
+    .block-item = Блок: { $name }
+    .text-item = Текст: { $text }
+    .text-content = Текст ячейки таблицы
+    .borders-help = Задает толщину линий, тип линии и цвет границ выбранных ячеек; выберите, к каким краям они применяются.
+    .contents-help = Упорядочивает, удаляет и размещает содержимое выбранной ячейки.
+    .block-title = Блок ячейки
+    .format-title = Формат данных ячейки
+    .block = Блок
+    .block-name = Имя
+    .browse = Обзор...
+    .block-path = Путь
+    .placement = Размещение
+    .alignment = Выравнивание ячейки
+    .scale = Масштаб
+    .autofit = Автоподбор
+    .rotation = Угол поворота
+    .format = Формат
+    .current-precision = Текущая точность
+    .precision = Точность
+    .symbol = Символ
+    .append-symbol = Символ после числа
+    .negative-parens = Отрицательные в скобках
+    .list-separator = Разделитель списка
+    .date-format = Формат даты
+    .no-format-settings = У этого типа данных нет параметров формата.
+    .data-type = Тип данных
+    .format-settings = Формат
+    .currency = Денежный
+    .decimal-number = Десятичное число
+    .percentage = Процентный
+    .whole-number = Целое число
+    .grads = Грады
+    .sample-text = пример текста
+    .block-help = Помещает блок в выбранные ячейки: его положение, масштаб (или подгонку по ячейке) и поворот.
+    .format-help = Задает тип данных и формат, в котором читаются значения выбранных ячеек.
+    .additional-format = Дополнительный формат
+    .conversion = Коэффициент преобразования
+    .prefix = Префикс
+    .suffix = Суффикс
+    .decimal-separator = Десятичный разделитель
+    .thousands-separator = Разделитель тысяч
+    .space = Пробел
+    .separator-none = (Нет)
+    .zero-leading = Ведущие нули
+    .zero-trailing = Замыкающие нули
+    .zero-feet = 0 футов
+    .zero-inches = 0 дюймов
+    .warning-title = Тип данных не совпадает
+    .warning-heading = Эти ячейки содержат значения, не относящиеся к выбранному типу данных.
+    .warning-note = При преобразовании каждое значение читается как новый тип; значение, которое так прочитать нельзя, очищается. Отмена оставляет ячейки без изменений.
+    .warning-ok = Преобразовать
+    .warning-cancel = Отмена

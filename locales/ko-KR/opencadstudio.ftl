@@ -3975,6 +3975,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  회전 각도 지정 <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE 삽입점 지정:
+    .tcell-row-above =
+        위에
+        행 삽입
+    .tcell-row-below =
+        아래에
+        행 삽입
+    .tcell-delete-rows =
+        행
+        삭제
+    .tcell-col-left =
+        왼쪽에
+        열 삽입
+    .tcell-col-right =
+        오른쪽에
+        열 삽입
+    .tcell-delete-cols =
+        열
+        삭제
+    .tcell-merge =
+        셀
+        병합
+    .tcell-unmerge =
+        셀 병합
+        해제
+    .tcell-lock =
+        셀
+        잠금
+    .tcell-edit =
+        문자
+        편집
+    .tcell-match =
+        셀
+        일치
+    .tcell-borders =
+        셀
+        테두리
+    .tcell-format =
+        데이터
+        형식
+    .tcell-block =
+        블록
+        삽입
+    .tcell-field =
+        필드
+        삽입
+    .tcell-contents =
+        셀 내용
+        관리
+    .tcell-link =
+        셀
+        링크
+    .tcell-download =
+        원본에서
+        다운로드
+    .tcell-row-style = 행 스타일
+    .tcell-column-style = 열 스타일
+    .tcell-width = 셀 너비
+    .tcell-height = 셀 높이
+    .tcell-border-color = 테두리 색상
+    .tcell-border-lineweight = 테두리 선가중치
+    .tcell-border-linetype = 테두리 선종류
+    .tcell-locking = 셀 잠금
+    .tcell-data-link = 셀 데이터 링크
+    .tcell-select-destination = 대상 셀 선택:
+    .tcell-select-cell = 테이블 셀 선택:
+    .tcell-range-first = 테이블 셀 범위의 첫 번째 구석 선택:
+    .tcell-range-second = 테이블 셀 범위의 두 번째 구석 선택:
+    .tcell-align-prompt = 셀 정렬 입력 [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = 데이터 형식 입력 [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = 블록 이름 입력 또는 [?]:
+    .tcell-formula-prompt = 수식 입력 [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = 행/열 기준
+    .tcell-unlocked = 잠금 해제됨
+    .tcell-content-locked = 내용 잠김
+    .tcell-format-locked = 형식 잠김
+    .tcell-content-format-locked = 내용 및 형식 잠김
+    .tcell-not-linked = 링크되지 않음
+    .tcell-invalid-cell = 잘못된 셀입니다.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  삽입점 지정:
@@ -6572,6 +6650,7 @@ dimstyle =
     .move-text-outside-first = 먼저 텍스트를 외부로 이동하세요.
     .period = 기간
     .space = 스페이스바
+    .separator-none = (없음)
     .surveyors-units = 측량 단위
 
 style-manager =
@@ -8224,3 +8303,133 @@ block-value-set =
     .title = 값 세트
     .x-distance = X 거리
     .y-distance = Y 거리
+
+table-style-cells =
+    .tbl-start-from-style = 테이블 스타일에서 시작
+    .tbl-extra-columns = 추가 열
+    .tbl-extra-rows = 추가 행
+    .tbl-keep-from-template = 시작 테이블에서 유지할 항목:
+    .tbl-keep-label-text = 레이블 셀 문자
+    .tbl-keep-data-text = 데이터 셀 문자
+    .tbl-keep-overrides = 셀 스타일 재지정
+    .tbl-keep-links = 데이터 링크
+    .tbl-keep-fields = 필드
+    .tbl-keep-formulas = 수식
+    .tbl-extra-whole = 추가 행과 열 수는 정수여야 합니다.
+    .from-style-insertion = __ocs_arg_n__  삽입점 지정 또는 [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  테이블 스타일 이름 입력 또는 [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  추가 행 수 입력 <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  추가 열 수 입력 <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  삽입 옵션 입력 [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  삽입된 테이블에 __ocs_arg_what__ 포함? [Yes/No] <__ocs_arg_current__>:
+    .label-text = 레이블 문자
+    .data-text = 데이터 문자
+    .formulas = 수식
+    .fields = 필드
+    .data-links = 데이터 링크
+    .blocks = 블록
+    .cell-style-overrides = 셀 스타일 재지정
+    .style-name-header = 테이블 스타일 이름
+    .no-starting-table = 테이블 스타일에 테이블이 없습니다.
+    .select-table = 테이블 선택:
+    .not-a-table = 객체가 테이블이 아닙니다.
+    .cell-style-exists = 이 이름의 셀 스타일이 이미 있습니다.
+    .cell-style-in-use = 셀 스타일이 사용 중이므로 삭제할 수 없습니다.
+    .template-size = __ocs_arg_rows__행 × __ocs_arg_columns__열
+    .cell-properties = 셀 특성
+    .cell-text = 셀 문자
+    .cell-borders = 셀 테두리
+    .cell-styles = 셀 스타일
+    .label = 레이블
+    .margins = 여백
+    .merge-on-create = 행/열 작성 시 셀 병합
+    .new-from-this = 이것으로 새로 만들기
+    .new-name = 새 이름
+    .real-number = 실수
+    .whole-number = 정수
+    .select-table-button = 테이블 선택…
+    .starting-table = 시작 테이블
+    .table-direction = 테이블 방향
+
+table-cells =
+    .borders-title = 셀 테두리
+    .contents-title = 셀 내용
+    .line = 선
+    .lineweight = 선가중치
+    .linetype = 선종류
+    .color = 색상
+    .double = 이중선
+    .spacing = 간격
+    .apply-to = 적용 대상
+    .all = 모두
+    .outside = 바깥쪽
+    .inside = 안쪽
+    .none = 없음
+    .top = 위
+    .bottom = 아래
+    .left = 왼쪽
+    .right = 오른쪽
+    .inside-horizontal = 안쪽 수평
+    .inside-vertical = 안쪽 수직
+    .contents = 내용
+    .empty = 셀이 비어 있습니다.
+    .move-up = 위로 이동
+    .move-down = 아래로 이동
+    .delete = 삭제
+    .layout = 배치
+    .flow = 흐름
+    .stack-horizontal = 수평으로 쌓기
+    .stack-vertical = 수직으로 쌓기
+    .content-spacing = 간격
+    .block-item = 블록: { $name }
+    .text-item = 문자: { $text }
+    .text-content = 테이블 셀 문자
+    .borders-help = 선택한 셀 테두리의 선가중치, 선종류, 색상을 설정합니다. 적용할 가장자리를 선택하세요.
+    .contents-help = 선택한 셀의 내용을 정렬, 제거 및 배치합니다.
+    .block-title = 셀 블록
+    .format-title = 셀 데이터 형식
+    .block = 블록
+    .block-name = 이름
+    .browse = 찾아보기...
+    .block-path = 경로
+    .placement = 배치
+    .alignment = 셀 정렬
+    .scale = 축척
+    .autofit = 자동 맞춤
+    .rotation = 회전 각도
+    .format = 형식
+    .current-precision = 현재 정밀도
+    .precision = 정밀도
+    .symbol = 기호
+    .append-symbol = 기호를 뒤에 붙이기
+    .negative-parens = 음수를 괄호로 표시
+    .list-separator = 목록 구분 기호
+    .date-format = 날짜 형식
+    .no-format-settings = 이 데이터 유형에는 형식 설정이 없습니다.
+    .data-type = 데이터 유형
+    .format-settings = 형식
+    .currency = 통화
+    .decimal-number = 십진수
+    .percentage = 백분율
+    .whole-number = 정수
+    .grads = 그라드
+    .sample-text = 샘플 문자
+    .block-help = 선택한 셀에 블록을 넣습니다: 위치, 축척(또는 셀에 맞춤) 및 회전.
+    .format-help = 선택한 셀 값을 읽을 데이터 유형과 형식을 설정합니다.
+    .additional-format = 추가 형식
+    .conversion = 변환 계수
+    .prefix = 접두사
+    .suffix = 접미사
+    .decimal-separator = 소수 구분 기호
+    .thousands-separator = 천 단위 구분 기호
+    .space = 공백
+    .separator-none = (없음)
+    .zero-leading = 선행 0
+    .zero-trailing = 후행 0
+    .zero-feet = 0 피트
+    .zero-inches = 0 인치
+    .warning-title = 데이터 유형이 일치하지 않음
+    .warning-heading = 이 셀에는 선택한 데이터 유형이 아닌 값이 있습니다.
+    .warning-note = 변환하면 각 값을 새 유형으로 읽으며, 읽을 수 없는 값은 지워집니다. 취소하면 셀이 변경되지 않습니다.
+    .warning-ok = 변환
+    .warning-cancel = 취소

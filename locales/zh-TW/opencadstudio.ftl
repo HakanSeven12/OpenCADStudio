@@ -3975,6 +3975,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  指定旋轉角度 <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE  指定插入點：
+    .tcell-row-above =
+        在上方
+        插入列
+    .tcell-row-below =
+        在下方
+        插入列
+    .tcell-delete-rows =
+        刪除
+        列
+    .tcell-col-left =
+        在左側
+        插入欄
+    .tcell-col-right =
+        在右側
+        插入欄
+    .tcell-delete-cols =
+        刪除
+        欄
+    .tcell-merge =
+        合併
+        儲存格
+    .tcell-unmerge =
+        取消合併
+        儲存格
+    .tcell-lock =
+        儲存格
+        鎖定
+    .tcell-edit =
+        編輯
+        文字
+    .tcell-match =
+        匹配
+        儲存格
+    .tcell-borders =
+        儲存格
+        邊框
+    .tcell-format =
+        資料
+        格式
+    .tcell-block =
+        插入
+        圖塊
+    .tcell-field =
+        插入
+        欄位
+    .tcell-contents =
+        管理儲存格
+        內容
+    .tcell-link =
+        連結
+        儲存格
+    .tcell-download =
+        從來源
+        下載
+    .tcell-row-style = 列型式
+    .tcell-column-style = 欄型式
+    .tcell-width = 儲存格寬度
+    .tcell-height = 儲存格高度
+    .tcell-border-color = 邊框顏色
+    .tcell-border-lineweight = 邊框線寬
+    .tcell-border-linetype = 邊框線型
+    .tcell-locking = 儲存格鎖定
+    .tcell-data-link = 儲存格資料連結
+    .tcell-select-destination = 選取目標儲存格:
+    .tcell-select-cell = 選取表格儲存格:
+    .tcell-range-first = 選取表格儲存格範圍的第一個角點:
+    .tcell-range-second = 選取表格儲存格範圍的第二個角點:
+    .tcell-align-prompt = 輸入儲存格對齊方式 [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = 輸入資料格式 [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = 輸入圖塊名稱或 [?]:
+    .tcell-formula-prompt = 輸入公式 [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = 依列/欄
+    .tcell-unlocked = 未鎖定
+    .tcell-content-locked = 內容已鎖定
+    .tcell-format-locked = 格式已鎖定
+    .tcell-content-format-locked = 內容和格式已鎖定
+    .tcell-not-linked = 未連結
+    .tcell-invalid-cell = 無效的儲存格。
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  指定插入點:
@@ -6568,6 +6646,7 @@ dimstyle =
     .move-text-outside-first = 優先將文字移到外部
     .period = 句點
     .space = 空白鍵
+    .separator-none = (無)
     .surveyors-units = 測量單位
 
 style-manager =
@@ -8220,3 +8299,133 @@ block-value-set =
     .title = 值集
     .x-distance = X 距離
     .y-distance = Y 距離
+
+table-style-cells =
+    .tbl-start-from-style = 從表格型式開始
+    .tbl-extra-columns = 附加欄
+    .tbl-extra-rows = 附加列
+    .tbl-keep-from-template = 從起始表格保留:
+    .tbl-keep-label-text = 標籤儲存格文字
+    .tbl-keep-data-text = 資料儲存格文字
+    .tbl-keep-overrides = 儲存格型式取代
+    .tbl-keep-links = 資料連結
+    .tbl-keep-fields = 欄位
+    .tbl-keep-formulas = 公式
+    .tbl-extra-whole = 附加列數和欄數必須為整數。
+    .from-style-insertion = __ocs_arg_n__  指定插入點或 [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  輸入表格型式名稱或 [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  輸入附加列數 <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  輸入附加欄數 <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  輸入插入選項 [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  在插入的表格中包含__ocs_arg_what__? [Yes/No] <__ocs_arg_current__>:
+    .label-text = 標籤文字
+    .data-text = 資料文字
+    .formulas = 公式
+    .fields = 欄位
+    .data-links = 資料連結
+    .blocks = 圖塊
+    .cell-style-overrides = 儲存格型式取代
+    .style-name-header = 表格型式名稱
+    .no-starting-table = 表格型式不包含表格。
+    .select-table = 選取表格:
+    .not-a-table = 該物件不是表格。
+    .cell-style-exists = 已存在同名的儲存格型式。
+    .cell-style-in-use = 該儲存格型式正在使用中，無法刪除。
+    .template-size = __ocs_arg_rows__ 列 × __ocs_arg_columns__ 欄
+    .cell-properties = 儲存格性質
+    .cell-text = 儲存格文字
+    .cell-borders = 儲存格邊框
+    .cell-styles = 儲存格型式
+    .label = 標籤
+    .margins = 邊距
+    .merge-on-create = 建立列/欄時合併儲存格
+    .new-from-this = 以此為基礎新建
+    .new-name = 新名稱
+    .real-number = 實數
+    .whole-number = 整數
+    .select-table-button = 選取表格…
+    .starting-table = 起始表格
+    .table-direction = 表格方向
+
+table-cells =
+    .borders-title = 儲存格邊框
+    .contents-title = 儲存格內容
+    .line = 線
+    .lineweight = 線寬
+    .linetype = 線型
+    .color = 顏色
+    .double = 雙線
+    .spacing = 間距
+    .apply-to = 套用至
+    .all = 全部
+    .outside = 外部
+    .inside = 內部
+    .none = 無
+    .top = 上
+    .bottom = 下
+    .left = 左
+    .right = 右
+    .inside-horizontal = 內部水平
+    .inside-vertical = 內部垂直
+    .contents = 內容
+    .empty = 儲存格為空。
+    .move-up = 上移
+    .move-down = 下移
+    .delete = 刪除
+    .layout = 配置
+    .flow = 流動
+    .stack-horizontal = 水平堆疊
+    .stack-vertical = 垂直堆疊
+    .content-spacing = 間距
+    .block-item = 圖塊: { $name }
+    .text-item = 文字: { $text }
+    .text-content = 表格儲存格文字
+    .borders-help = 設定所選儲存格邊框的線寬、線型和顏色；選擇套用的邊。
+    .contents-help = 排序、刪除並配置所選儲存格的內容。
+    .block-title = 儲存格圖塊
+    .format-title = 儲存格資料格式
+    .block = 圖塊
+    .block-name = 名稱
+    .browse = 瀏覽...
+    .block-path = 路徑
+    .placement = 放置
+    .alignment = 儲存格對齊
+    .scale = 比例
+    .autofit = 自動調整
+    .rotation = 旋轉角度
+    .format = 格式
+    .current-precision = 目前精度
+    .precision = 精度
+    .symbol = 符號
+    .append-symbol = 符號後置
+    .negative-parens = 負數加括號
+    .list-separator = 清單分隔符
+    .date-format = 日期格式
+    .no-format-settings = 此資料類型沒有格式設定。
+    .data-type = 資料類型
+    .format-settings = 格式
+    .currency = 貨幣
+    .decimal-number = 十進位數
+    .percentage = 百分比
+    .whole-number = 整數
+    .grads = 百分度
+    .sample-text = 範例文字
+    .block-help = 將圖塊放入所選儲存格：設定其位置、比例（或符合儲存格）和旋轉。
+    .format-help = 設定讀取所選儲存格值時使用的資料類型和格式。
+    .additional-format = 附加格式
+    .conversion = 轉換係數
+    .prefix = 前綴
+    .suffix = 後綴
+    .decimal-separator = 小數分隔符
+    .thousands-separator = 千位分隔符
+    .space = 空白
+    .separator-none = (無)
+    .zero-leading = 前導零
+    .zero-trailing = 後續零
+    .zero-feet = 0 英尺
+    .zero-inches = 0 英吋
+    .warning-title = 資料類型不符
+    .warning-heading = 這些儲存格包含不屬於所選資料類型的值。
+    .warning-note = 轉換會將每個值依新類型讀取；無法讀取的值將被清除。取消則保持儲存格不變。
+    .warning-ok = 轉換
+    .warning-cancel = 取消

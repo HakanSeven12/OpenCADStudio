@@ -3975,6 +3975,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Посочи ъгъл на завъртане <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE  Посочи точка на вмъкване:
+    .tcell-row-above =
+        Вмъкване на ред
+        отгоре
+    .tcell-row-below =
+        Вмъкване на ред
+        отдолу
+    .tcell-delete-rows =
+        Изтриване
+        на редове
+    .tcell-col-left =
+        Вмъкване на колона
+        вляво
+    .tcell-col-right =
+        Вмъкване на колона
+        вдясно
+    .tcell-delete-cols =
+        Изтриване
+        на колони
+    .tcell-merge =
+        Обединяване
+        на клетки
+    .tcell-unmerge =
+        Разделяне
+        на клетки
+    .tcell-lock =
+        Заключване
+        на клетки
+    .tcell-edit =
+        Редактиране
+        на текст
+    .tcell-match =
+        Съпоставяне
+        на клетка
+    .tcell-borders =
+        Рамки
+        на клетки
+    .tcell-format =
+        Формат
+        на данни
+    .tcell-block =
+        Вмъкване
+        на блок
+    .tcell-field =
+        Вмъкване
+        на поле
+    .tcell-contents =
+        Управление на
+        съдържанието
+    .tcell-link =
+        Свързване
+        на клетка
+    .tcell-download =
+        Изтегляне
+        от източник
+    .tcell-row-style = Стил на ред
+    .tcell-column-style = Стил на колона
+    .tcell-width = Ширина на клетка
+    .tcell-height = Височина на клетка
+    .tcell-border-color = Цвят на рамка
+    .tcell-border-lineweight = Дебелина на линия на рамка
+    .tcell-border-linetype = Тип линия на рамка
+    .tcell-locking = Заключване на клетка
+    .tcell-data-link = Връзка с данни на клетка
+    .tcell-select-destination = Изберете целева клетка:
+    .tcell-select-cell = Изберете клетка от таблица:
+    .tcell-range-first = Изберете първия ъгъл на диапазона от клетки:
+    .tcell-range-second = Изберете втория ъгъл на диапазона от клетки:
+    .tcell-align-prompt = Въведете подравняване на клетка [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Въведете формат на данни [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Въведете име на блок или [?]:
+    .tcell-formula-prompt = Въведете формула [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = По ред/колона
+    .tcell-unlocked = Отключено
+    .tcell-content-locked = Заключено съдържание
+    .tcell-format-locked = Заключен формат
+    .tcell-content-format-locked = Заключени съдържание и формат
+    .tcell-not-linked = Несвързана
+    .tcell-invalid-cell = Невалидна клетка.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Задайте точка на вмъкване:
@@ -6573,6 +6651,7 @@ dimstyle =
     .move-text-outside-first = Първо премести текста навън
     .period = Точка
     .space = Интервал
+    .separator-none = (Няма)
     .surveyors-units = Геодезически единици
 
 style-manager =
@@ -8235,3 +8314,133 @@ block-value-set =
     .title = Набор от стойности
     .x-distance = Разстояние X
     .y-distance = Разстояние Y
+
+table-style-cells =
+    .tbl-start-from-style = Започване от стил на таблица
+    .tbl-extra-columns = Допълнителни колони
+    .tbl-extra-rows = Допълнителни редове
+    .tbl-keep-from-template = Запазване от началната таблица:
+    .tbl-keep-label-text = Текст в клетки за етикети
+    .tbl-keep-data-text = Текст в клетки с данни
+    .tbl-keep-overrides = Заменяния на стил на клетка
+    .tbl-keep-links = Връзки с данни
+    .tbl-keep-fields = Полета
+    .tbl-keep-formulas = Формули
+    .tbl-extra-whole = Допълнителните редове и колони трябва да са цели числа.
+    .from-style-insertion = __ocs_arg_n__  Посочете точка на вмъкване или [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Въведете име на стил на таблица или [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Въведете брой допълнителни редове <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Въведете брой допълнителни колони <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Въведете опция за вмъкване [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Включване на __ocs_arg_what__ във вмъкнатата таблица? [Yes/No] <__ocs_arg_current__>:
+    .label-text = текст на етикети
+    .data-text = текст на данни
+    .formulas = формули
+    .fields = полета
+    .data-links = връзки с данни
+    .blocks = блокове
+    .cell-style-overrides = заменяния на стил на клетка
+    .style-name-header = Име на стил на таблица
+    .no-starting-table = Стилът на таблица не съдържа таблица.
+    .select-table = Изберете таблица:
+    .not-a-table = Обектът не е таблица.
+    .cell-style-exists = Вече съществува стил на клетка с това име.
+    .cell-style-in-use = Стилът на клетка се използва и не може да бъде изтрит.
+    .template-size = __ocs_arg_rows__ реда × __ocs_arg_columns__ колони
+    .cell-properties = Свойства на клетка
+    .cell-text = Текст на клетка
+    .cell-borders = Рамки на клетки
+    .cell-styles = Стилове на клетки
+    .label = Етикет
+    .margins = Отстъпи
+    .merge-on-create = Обединяване на клетки при създаване на ред/колона
+    .new-from-this = Нов от този
+    .new-name = Ново име
+    .real-number = Реално число
+    .whole-number = Цяло число
+    .select-table-button = Избор на таблица…
+    .starting-table = Начална таблица
+    .table-direction = Посока на таблица
+
+table-cells =
+    .borders-title = Рамки на клетки
+    .contents-title = Съдържание на клетка
+    .line = Линия
+    .lineweight = Дебелина на линия
+    .linetype = Тип линия
+    .color = Цвят
+    .double = Двойна линия
+    .spacing = Разстояние
+    .apply-to = Прилагане към
+    .all = Всички
+    .outside = Външни
+    .inside = Вътрешни
+    .none = Без
+    .top = Горна
+    .bottom = Долна
+    .left = Лява
+    .right = Дясна
+    .inside-horizontal = Вътрешни хоризонтални
+    .inside-vertical = Вътрешни вертикални
+    .contents = Съдържание
+    .empty = Клетката е празна.
+    .move-up = Преместване нагоре
+    .move-down = Преместване надолу
+    .delete = Изтриване
+    .layout = Подредба
+    .flow = Поток
+    .stack-horizontal = Подредени хоризонтално
+    .stack-vertical = Подредени вертикално
+    .content-spacing = Разстояние
+    .block-item = Блок: { $name }
+    .text-item = Текст: { $text }
+    .text-content = Текст на клетка от таблица
+    .borders-help = Задава дебелината на линия, типа линия и цвета на рамките на избраните клетки; изберете страните, към които се прилагат.
+    .contents-help = Подрежда, премахва и разполага съдържанието на избраната клетка.
+    .block-title = Блок на клетка
+    .format-title = Формат на данни на клетка
+    .block = Блок
+    .block-name = Име
+    .browse = Преглед...
+    .block-path = Път
+    .placement = Разположение
+    .alignment = Подравняване на клетка
+    .scale = Мащаб
+    .autofit = Автоматично побиране
+    .rotation = Ъгъл на завъртане
+    .format = Формат
+    .current-precision = Текуща точност
+    .precision = Точност
+    .symbol = Символ
+    .append-symbol = Добавяне на символа отзад
+    .negative-parens = Отрицателни в скоби
+    .list-separator = Разделител на списък
+    .date-format = Формат на дата
+    .no-format-settings = Този тип данни няма настройки за формат.
+    .data-type = Тип данни
+    .format-settings = Формат
+    .currency = Валута
+    .decimal-number = Десетично число
+    .percentage = Процент
+    .whole-number = Цяло число
+    .grads = Гради
+    .sample-text = примерен текст
+    .block-help = Поставя блок в избраните клетки: позиция, мащаб (или побиране в клетката) и завъртане.
+    .format-help = Задава типа данни и формата, с които се четат стойностите на избраните клетки.
+    .additional-format = Допълнителен формат
+    .conversion = Коефициент на преобразуване
+    .prefix = Префикс
+    .suffix = Суфикс
+    .decimal-separator = Десетичен разделител
+    .thousands-separator = Разделител на хиляди
+    .space = Интервал
+    .separator-none = (Няма)
+    .zero-leading = Водещи нули
+    .zero-trailing = Крайни нули
+    .zero-feet = 0 фута
+    .zero-inches = 0 инча
+    .warning-title = Типът данни не съвпада
+    .warning-heading = Тези клетки съдържат стойности, които не са от избрания тип данни.
+    .warning-note = Преобразуването чете всяка стойност като новия тип; стойност, която не може да се прочете, се изчиства. Отказ оставя клетките непроменени.
+    .warning-ok = Преобразуване
+    .warning-cancel = Отказ

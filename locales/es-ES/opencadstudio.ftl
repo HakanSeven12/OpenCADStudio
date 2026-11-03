@@ -3976,6 +3976,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Precise el ángulo de rotación <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE  Especifique el punto de inserción:
+    .tcell-row-above =
+        Insertar fila
+        arriba
+    .tcell-row-below =
+        Insertar fila
+        abajo
+    .tcell-delete-rows =
+        Suprimir
+        filas
+    .tcell-col-left =
+        Insertar columna
+        a la izquierda
+    .tcell-col-right =
+        Insertar columna
+        a la derecha
+    .tcell-delete-cols =
+        Suprimir
+        columnas
+    .tcell-merge =
+        Combinar
+        celdas
+    .tcell-unmerge =
+        Separar
+        celdas
+    .tcell-lock =
+        Bloqueo
+        de celda
+    .tcell-edit =
+        Editar
+        texto
+    .tcell-match =
+        Igualar
+        celda
+    .tcell-borders =
+        Bordes
+        de celda
+    .tcell-format =
+        Formato
+        de datos
+    .tcell-block =
+        Insertar
+        bloque
+    .tcell-field =
+        Insertar
+        campo
+    .tcell-contents =
+        Gestionar contenido
+        de celda
+    .tcell-link =
+        Vincular
+        celda
+    .tcell-download =
+        Descargar
+        desde origen
+    .tcell-row-style = Estilo de fila
+    .tcell-column-style = Estilo de columna
+    .tcell-width = Anchura de celda
+    .tcell-height = Altura de celda
+    .tcell-border-color = Color de borde
+    .tcell-border-lineweight = Grosor de línea de borde
+    .tcell-border-linetype = Tipo de línea de borde
+    .tcell-locking = Bloqueo de celda
+    .tcell-data-link = Vínculo de datos de celda
+    .tcell-select-destination = Seleccione la celda de destino:
+    .tcell-select-cell = Seleccione una celda de tabla:
+    .tcell-range-first = Seleccione la primera esquina del rango de celdas:
+    .tcell-range-second = Seleccione la segunda esquina del rango de celdas:
+    .tcell-align-prompt = Indique la alineación de celda [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Indique el formato de datos [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Indique el nombre de bloque o [?]:
+    .tcell-formula-prompt = Indique una fórmula [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Por fila/columna
+    .tcell-unlocked = Desbloqueado
+    .tcell-content-locked = Contenido bloqueado
+    .tcell-format-locked = Formato bloqueado
+    .tcell-content-format-locked = Contenido y formato bloqueados
+    .tcell-not-linked = Sin vincular
+    .tcell-invalid-cell = Celda no válida.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Precise el punto de inserción:
@@ -6573,6 +6651,7 @@ dimstyle =
     .move-text-outside-first = Mover primero el texto fuera
     .period = Punto
     .space = Espacio
+    .separator-none = (Ninguno)
     .surveyors-units = Unidades de topografía
 
 style-manager =
@@ -8235,3 +8314,133 @@ block-value-set =
     .title = Conjunto de valores
     .x-distance = Distancia X
     .y-distance = Distancia Y
+
+table-style-cells =
+    .tbl-start-from-style = Iniciar desde estilo de tabla
+    .tbl-extra-columns = Columnas adicionales
+    .tbl-extra-rows = Filas adicionales
+    .tbl-keep-from-template = Conservar de la tabla inicial:
+    .tbl-keep-label-text = Texto de celdas de etiqueta
+    .tbl-keep-data-text = Texto de celdas de datos
+    .tbl-keep-overrides = Modificaciones de estilo de celda
+    .tbl-keep-links = Vínculos de datos
+    .tbl-keep-fields = Campos
+    .tbl-keep-formulas = Fórmulas
+    .tbl-extra-whole = Las filas y columnas adicionales deben ser números enteros.
+    .from-style-insertion = __ocs_arg_n__  Precise el punto de inserción o [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Indique el nombre de un estilo de tabla o [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Indique el número de filas adicionales <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Indique el número de columnas adicionales <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Indique una opción de inserción [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  ¿Incluir __ocs_arg_what__ en la tabla insertada? [Yes/No] <__ocs_arg_current__>:
+    .label-text = texto de etiqueta
+    .data-text = texto de datos
+    .formulas = fórmulas
+    .fields = campos
+    .data-links = vínculos de datos
+    .blocks = bloques
+    .cell-style-overrides = modificaciones de estilo de celda
+    .style-name-header = Nombre de estilo de tabla
+    .no-starting-table = El estilo de tabla no contiene ninguna tabla.
+    .select-table = Seleccione una tabla:
+    .not-a-table = El objeto no es una tabla.
+    .cell-style-exists = Ya existe un estilo de celda con este nombre.
+    .cell-style-in-use = El estilo de celda está en uso y no se puede suprimir.
+    .template-size = __ocs_arg_rows__ filas × __ocs_arg_columns__ columnas
+    .cell-properties = Propiedades de celda
+    .cell-text = Texto de celda
+    .cell-borders = Bordes de celda
+    .cell-styles = Estilos de celda
+    .label = Etiqueta
+    .margins = Márgenes
+    .merge-on-create = Combinar celdas al crear filas/columnas
+    .new-from-this = Nuevo a partir de este
+    .new-name = Nuevo nombre
+    .real-number = Número real
+    .whole-number = Número entero
+    .select-table-button = Seleccionar tabla…
+    .starting-table = Tabla inicial
+    .table-direction = Dirección de tabla
+
+table-cells =
+    .borders-title = Bordes de celda
+    .contents-title = Contenido de celda
+    .line = Línea
+    .lineweight = Grosor de línea
+    .linetype = Tipo de línea
+    .color = Color
+    .double = Línea doble
+    .spacing = Espaciado
+    .apply-to = Aplicar a
+    .all = Todos
+    .outside = Exterior
+    .inside = Interior
+    .none = Ninguno
+    .top = Superior
+    .bottom = Inferior
+    .left = Izquierdo
+    .right = Derecho
+    .inside-horizontal = Interior horizontal
+    .inside-vertical = Interior vertical
+    .contents = Contenido
+    .empty = La celda está vacía.
+    .move-up = Subir
+    .move-down = Bajar
+    .delete = Suprimir
+    .layout = Disposición
+    .flow = Flujo
+    .stack-horizontal = Apilado horizontal
+    .stack-vertical = Apilado vertical
+    .content-spacing = Espaciado
+    .block-item = Bloque: { $name }
+    .text-item = Texto: { $text }
+    .text-content = Texto de celda de tabla
+    .borders-help = Define el grosor de línea, el tipo de línea y el color de los bordes de las celdas elegidas; elija los lados a los que se aplican.
+    .contents-help = Ordena, elimina y dispone el contenido de la celda elegida.
+    .block-title = Bloque de celda
+    .format-title = Formato de datos de celda
+    .block = Bloque
+    .block-name = Nombre
+    .browse = Examinar...
+    .block-path = Ruta
+    .placement = Ubicación
+    .alignment = Alineación de celda
+    .scale = Escala
+    .autofit = Autoajustar
+    .rotation = Ángulo de rotación
+    .format = Formato
+    .current-precision = Precisión actual
+    .precision = Precisión
+    .symbol = Símbolo
+    .append-symbol = Añadir símbolo al final
+    .negative-parens = Negativos entre paréntesis
+    .list-separator = Separador de lista
+    .date-format = Formato de fecha
+    .no-format-settings = Este tipo de datos no tiene ajustes de formato.
+    .data-type = Tipo de datos
+    .format-settings = Formato
+    .currency = Moneda
+    .decimal-number = Número decimal
+    .percentage = Porcentaje
+    .whole-number = Número entero
+    .grads = Grados centesimales
+    .sample-text = texto de ejemplo
+    .block-help = Coloca un bloque en las celdas elegidas: su posición, su escala (o ajustado a la celda) y su rotación.
+    .format-help = Define el tipo de datos y el formato con que se leen los valores de las celdas elegidas.
+    .additional-format = Formato adicional
+    .conversion = Factor de conversión
+    .prefix = Prefijo
+    .suffix = Sufijo
+    .decimal-separator = Separador decimal
+    .thousands-separator = Separador de miles
+    .space = Espacio
+    .separator-none = (Ninguno)
+    .zero-leading = Ceros iniciales
+    .zero-trailing = Ceros finales
+    .zero-feet = 0 pies
+    .zero-inches = 0 pulgadas
+    .warning-title = El tipo de datos no coincide
+    .warning-heading = Estas celdas contienen valores que no son del tipo de datos elegido.
+    .warning-note = Al convertir, cada valor se lee como el nuevo tipo; el que no se pueda leer se borra. Cancelar deja las celdas sin cambios.
+    .warning-ok = Convertir
+    .warning-cancel = Cancelar

@@ -3964,6 +3964,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  घूर्णन कोण निर्दिष्ट करें <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE निर्दिष्ट सम्मिलन बिंदु:
+    .tcell-row-above =
+        ऊपर
+        पंक्ति जोड़ें
+    .tcell-row-below =
+        नीचे
+        पंक्ति जोड़ें
+    .tcell-delete-rows =
+        पंक्तियाँ
+        हटाएँ
+    .tcell-col-left =
+        बाएँ
+        स्तंभ जोड़ें
+    .tcell-col-right =
+        दाएँ
+        स्तंभ जोड़ें
+    .tcell-delete-cols =
+        स्तंभ
+        हटाएँ
+    .tcell-merge =
+        सेल
+        मर्ज करें
+    .tcell-unmerge =
+        मर्ज
+        हटाएँ
+    .tcell-lock =
+        सेल
+        लॉक
+    .tcell-edit =
+        टेक्स्ट
+        संपादित करें
+    .tcell-match =
+        सेल
+        मिलाएँ
+    .tcell-borders =
+        सेल
+        सीमाएँ
+    .tcell-format =
+        डेटा
+        प्रारूप
+    .tcell-block =
+        ब्लॉक
+        जोड़ें
+    .tcell-field =
+        फ़ील्ड
+        जोड़ें
+    .tcell-contents =
+        सेल सामग्री
+        प्रबंधित करें
+    .tcell-link =
+        सेल
+        लिंक करें
+    .tcell-download =
+        स्रोत से
+        डाउनलोड
+    .tcell-row-style = पंक्ति शैली
+    .tcell-column-style = स्तंभ शैली
+    .tcell-width = सेल की चौड़ाई
+    .tcell-height = सेल की ऊँचाई
+    .tcell-border-color = सीमा का रंग
+    .tcell-border-lineweight = सीमा की लाइन मोटाई
+    .tcell-border-linetype = सीमा का लाइनटाइप
+    .tcell-locking = सेल लॉकिंग
+    .tcell-data-link = सेल डेटा लिंक
+    .tcell-select-destination = गंतव्य सेल चुनें:
+    .tcell-select-cell = तालिका सेल चुनें:
+    .tcell-range-first = तालिका सेल श्रेणी का पहला कोना चुनें:
+    .tcell-range-second = तालिका सेल श्रेणी का दूसरा कोना चुनें:
+    .tcell-align-prompt = सेल संरेखण दर्ज करें [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = डेटा प्रारूप दर्ज करें [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = ब्लॉक का नाम दर्ज करें या [?]:
+    .tcell-formula-prompt = सूत्र दर्ज करें [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = पंक्ति/स्तंभ के अनुसार
+    .tcell-unlocked = अनलॉक
+    .tcell-content-locked = सामग्री लॉक
+    .tcell-format-locked = प्रारूप लॉक
+    .tcell-content-format-locked = सामग्री और प्रारूप लॉक
+    .tcell-not-linked = लिंक नहीं
+    .tcell-invalid-cell = अमान्य सेल।
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  सम्मिलन बिंदु निर्दिष्ट करें:
@@ -6561,6 +6639,7 @@ dimstyle =
     .move-text-outside-first = पहले पाठ बाहर ले जाएँ
     .period = दशमलव बिंदु
     .space = रिक्त स्थान
+    .separator-none = (कोई नहीं)
     .surveyors-units = सर्वेक्षण इकाइयाँ
 
 style-manager =
@@ -8223,3 +8302,133 @@ block-value-set =
     .title = मान समूह
     .x-distance = X दूरी
     .y-distance = Y दूरी
+
+table-style-cells =
+    .tbl-start-from-style = तालिका शैली से शुरू करें
+    .tbl-extra-columns = अतिरिक्त स्तंभ
+    .tbl-extra-rows = अतिरिक्त पंक्तियाँ
+    .tbl-keep-from-template = प्रारंभिक तालिका से रखें:
+    .tbl-keep-label-text = लेबल सेल टेक्स्ट
+    .tbl-keep-data-text = डेटा सेल टेक्स्ट
+    .tbl-keep-overrides = सेल शैली ओवरराइड
+    .tbl-keep-links = डेटा लिंक
+    .tbl-keep-fields = फ़ील्ड
+    .tbl-keep-formulas = सूत्र
+    .tbl-extra-whole = अतिरिक्त पंक्तियाँ और स्तंभ पूर्ण संख्याएँ होनी चाहिए।
+    .from-style-insertion = __ocs_arg_n__  सम्मिलन बिंदु निर्दिष्ट करें या [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  तालिका शैली का नाम दर्ज करें या [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  अतिरिक्त पंक्तियों की संख्या दर्ज करें <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  अतिरिक्त स्तंभों की संख्या दर्ज करें <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  सम्मिलन विकल्प दर्ज करें [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  सम्मिलित तालिका में __ocs_arg_what__ शामिल करें? [Yes/No] <__ocs_arg_current__>:
+    .label-text = लेबल टेक्स्ट
+    .data-text = डेटा टेक्स्ट
+    .formulas = सूत्र
+    .fields = फ़ील्ड
+    .data-links = डेटा लिंक
+    .blocks = ब्लॉक
+    .cell-style-overrides = सेल शैली ओवरराइड
+    .style-name-header = तालिका शैली नाम
+    .no-starting-table = तालिका शैली में कोई तालिका नहीं है।
+    .select-table = एक तालिका चुनें:
+    .not-a-table = ऑब्जेक्ट तालिका नहीं है।
+    .cell-style-exists = इस नाम की सेल शैली पहले से मौजूद है।
+    .cell-style-in-use = सेल शैली उपयोग में है और हटाई नहीं जा सकती।
+    .template-size = __ocs_arg_rows__ पंक्तियाँ × __ocs_arg_columns__ स्तंभ
+    .cell-properties = सेल गुण
+    .cell-text = सेल टेक्स्ट
+    .cell-borders = सेल सीमाएँ
+    .cell-styles = सेल शैलियाँ
+    .label = लेबल
+    .margins = हाशिये
+    .merge-on-create = पंक्ति/स्तंभ बनाते समय सेल मर्ज करें
+    .new-from-this = इससे नया
+    .new-name = नया नाम
+    .real-number = वास्तविक संख्या
+    .whole-number = पूर्ण संख्या
+    .select-table-button = तालिका चुनें…
+    .starting-table = प्रारंभिक तालिका
+    .table-direction = तालिका दिशा
+
+table-cells =
+    .borders-title = सेल सीमाएँ
+    .contents-title = सेल सामग्री
+    .line = रेखा
+    .lineweight = लाइन की मोटाई
+    .linetype = लाइनटाइप
+    .color = रंग
+    .double = दोहरी रेखा
+    .spacing = रिक्ति
+    .apply-to = इन पर लागू करें
+    .all = सभी
+    .outside = बाहरी
+    .inside = भीतरी
+    .none = कोई नहीं
+    .top = ऊपर
+    .bottom = नीचे
+    .left = बाएँ
+    .right = दाएँ
+    .inside-horizontal = भीतरी क्षैतिज
+    .inside-vertical = भीतरी ऊर्ध्वाधर
+    .contents = सामग्री
+    .empty = सेल खाली है।
+    .move-up = ऊपर ले जाएँ
+    .move-down = नीचे ले जाएँ
+    .delete = हटाएँ
+    .layout = विन्यास
+    .flow = प्रवाह
+    .stack-horizontal = क्षैतिज रूप से स्टैक
+    .stack-vertical = ऊर्ध्वाधर रूप से स्टैक
+    .content-spacing = रिक्ति
+    .block-item = ब्लॉक: { $name }
+    .text-item = टेक्स्ट: { $text }
+    .text-content = तालिका सेल टेक्स्ट
+    .borders-help = चुने गए सेलों की सीमाओं की लाइन मोटाई, लाइनटाइप और रंग सेट करता है; जिन किनारों पर लागू हों उन्हें चुनें।
+    .contents-help = चुने गए सेल की सामग्री को क्रमबद्ध करता है, हटाता है और व्यवस्थित करता है।
+    .block-title = सेल ब्लॉक
+    .format-title = सेल डेटा प्रारूप
+    .block = ब्लॉक
+    .block-name = नाम
+    .browse = ब्राउज़ करें...
+    .block-path = पथ
+    .placement = स्थान
+    .alignment = सेल संरेखण
+    .scale = स्केल
+    .autofit = स्वतः फ़िट
+    .rotation = घूर्णन कोण
+    .format = प्रारूप
+    .current-precision = वर्तमान प्रेसिजन
+    .precision = प्रेसिजन
+    .symbol = प्रतीक
+    .append-symbol = प्रतीक अंत में जोड़ें
+    .negative-parens = ऋणात्मक कोष्ठक में
+    .list-separator = सूची विभाजक
+    .date-format = दिनांक प्रारूप
+    .no-format-settings = इस डेटा प्रकार की कोई प्रारूप सेटिंग नहीं है।
+    .data-type = डेटा प्रकार
+    .format-settings = प्रारूप
+    .currency = मुद्रा
+    .decimal-number = दशमलव संख्या
+    .percentage = प्रतिशत
+    .whole-number = पूर्ण संख्या
+    .grads = ग्रेड
+    .sample-text = नमूना टेक्स्ट
+    .block-help = चुने गए सेलों में ब्लॉक रखता है: उसका स्थान, स्केल (या सेल में फ़िट) और घूर्णन।
+    .format-help = चुने गए सेलों के मान जिस डेटा प्रकार और प्रारूप में पढ़े जाते हैं, उसे सेट करता है।
+    .additional-format = अतिरिक्त प्रारूप
+    .conversion = रूपांतरण गुणक
+    .prefix = उपसर्ग
+    .suffix = प्रत्यय
+    .decimal-separator = दशमलव विभाजक
+    .thousands-separator = हज़ार विभाजक
+    .space = स्पेस
+    .separator-none = (कोई नहीं)
+    .zero-leading = आगे के शून्य
+    .zero-trailing = पीछे के शून्य
+    .zero-feet = 0 फ़ुट
+    .zero-inches = 0 इंच
+    .warning-title = डेटा प्रकार मेल नहीं खाता
+    .warning-heading = इन सेलों में ऐसे मान हैं जो चुने गए डेटा प्रकार के नहीं हैं।
+    .warning-note = रूपांतरण हर मान को नए प्रकार में पढ़ता है; जो मान पढ़ा न जा सके वह साफ़ हो जाता है। रद्द करने पर सेल अपरिवर्तित रहते हैं।
+    .warning-ok = रूपांतरित करें
+    .warning-cancel = रद्द करें

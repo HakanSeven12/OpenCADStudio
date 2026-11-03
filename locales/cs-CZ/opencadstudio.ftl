@@ -3973,6 +3973,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Určete úhel otočení <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE Zadejte bod vložení:
+    .tcell-row-above =
+        Vložit řádek
+        nad
+    .tcell-row-below =
+        Vložit řádek
+        pod
+    .tcell-delete-rows =
+        Odstranit
+        řádky
+    .tcell-col-left =
+        Vložit sloupec
+        vlevo
+    .tcell-col-right =
+        Vložit sloupec
+        vpravo
+    .tcell-delete-cols =
+        Odstranit
+        sloupce
+    .tcell-merge =
+        Sloučit
+        buňky
+    .tcell-unmerge =
+        Zrušit
+        sloučení
+    .tcell-lock =
+        Zamknutí
+        buněk
+    .tcell-edit =
+        Upravit
+        text
+    .tcell-match =
+        Přizpůsobit
+        buňku
+    .tcell-borders =
+        Ohraničení
+        buněk
+    .tcell-format =
+        Formát
+        dat
+    .tcell-block =
+        Vložit
+        blok
+    .tcell-field =
+        Vložit
+        pole
+    .tcell-contents =
+        Spravovat obsah
+        buňky
+    .tcell-link =
+        Propojit
+        buňku
+    .tcell-download =
+        Stáhnout
+        ze zdroje
+    .tcell-row-style = Styl řádku
+    .tcell-column-style = Styl sloupce
+    .tcell-width = Šířka buňky
+    .tcell-height = Výška buňky
+    .tcell-border-color = Barva ohraničení
+    .tcell-border-lineweight = Tloušťka čáry ohraničení
+    .tcell-border-linetype = Typ čáry ohraničení
+    .tcell-locking = Zamknutí buňky
+    .tcell-data-link = Datové propojení buňky
+    .tcell-select-destination = Vyberte cílovou buňku:
+    .tcell-select-cell = Vyberte buňku tabulky:
+    .tcell-range-first = Vyberte první roh rozsahu buněk tabulky:
+    .tcell-range-second = Vyberte druhý roh rozsahu buněk tabulky:
+    .tcell-align-prompt = Zadejte zarovnání buňky [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Zadejte formát dat [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Zadejte název bloku nebo [?]:
+    .tcell-formula-prompt = Zadejte vzorec [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Podle řádku/sloupce
+    .tcell-unlocked = Odemčeno
+    .tcell-content-locked = Obsah zamčen
+    .tcell-format-locked = Formát zamčen
+    .tcell-content-format-locked = Obsah i formát zamčen
+    .tcell-not-linked = Nepropojeno
+    .tcell-invalid-cell = Neplatná buňka.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Zadejte bod vložení:
@@ -6570,6 +6648,7 @@ dimstyle =
     .move-text-outside-first = Nejprve přesuňte text ven
     .period = Období
     .space = Mezerník
+    .separator-none = (Žádný)
     .surveyors-units = Zeměměřické jednotky
 
 style-manager =
@@ -8235,3 +8314,133 @@ block-value-set =
     .title = Sada hodnot
     .x-distance = Vzdálenost X
     .y-distance = Vzdálenost Y
+
+table-style-cells =
+    .tbl-start-from-style = Začít ze stylu tabulky
+    .tbl-extra-columns = Další sloupce
+    .tbl-extra-rows = Další řádky
+    .tbl-keep-from-template = Zachovat z výchozí tabulky:
+    .tbl-keep-label-text = Text buněk popisků
+    .tbl-keep-data-text = Text datových buněk
+    .tbl-keep-overrides = Přepsání stylu buňky
+    .tbl-keep-links = Datová propojení
+    .tbl-keep-fields = Pole
+    .tbl-keep-formulas = Vzorce
+    .tbl-extra-whole = Počet dalších řádků a sloupců musí být celé číslo.
+    .from-style-insertion = __ocs_arg_n__  Určete bod vložení nebo [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Zadejte název stylu tabulky nebo [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Zadejte počet dalších řádků <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Zadejte počet dalších sloupců <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Zadejte možnost vložení [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Zahrnout __ocs_arg_what__ do vložené tabulky? [Yes/No] <__ocs_arg_current__>:
+    .label-text = text popisků
+    .data-text = datový text
+    .formulas = vzorce
+    .fields = pole
+    .data-links = datová propojení
+    .blocks = bloky
+    .cell-style-overrides = přepsání stylu buňky
+    .style-name-header = Název stylu tabulky
+    .no-starting-table = Styl tabulky neobsahuje tabulku.
+    .select-table = Vyberte tabulku:
+    .not-a-table = Objekt není tabulka.
+    .cell-style-exists = Styl buňky s tímto názvem již existuje.
+    .cell-style-in-use = Styl buňky se používá a nelze jej odstranit.
+    .template-size = __ocs_arg_rows__ řádků × __ocs_arg_columns__ sloupců
+    .cell-properties = Vlastnosti buňky
+    .cell-text = Text buňky
+    .cell-borders = Ohraničení buněk
+    .cell-styles = Styly buněk
+    .label = Popisek
+    .margins = Okraje
+    .merge-on-create = Sloučit buňky při vytváření řádků/sloupců
+    .new-from-this = Nový z tohoto
+    .new-name = Nový název
+    .real-number = Reálné číslo
+    .whole-number = Celé číslo
+    .select-table-button = Vybrat tabulku…
+    .starting-table = Výchozí tabulka
+    .table-direction = Směr tabulky
+
+table-cells =
+    .borders-title = Ohraničení buněk
+    .contents-title = Obsah buňky
+    .line = Čára
+    .lineweight = Tloušťka čáry
+    .linetype = Typ čáry
+    .color = Barva
+    .double = Dvojitá čára
+    .spacing = Rozestup
+    .apply-to = Použít na
+    .all = Vše
+    .outside = Vnější
+    .inside = Vnitřní
+    .none = Žádné
+    .top = Horní
+    .bottom = Dolní
+    .left = Levé
+    .right = Pravé
+    .inside-horizontal = Vnitřní vodorovné
+    .inside-vertical = Vnitřní svislé
+    .contents = Obsah
+    .empty = Buňka je prázdná.
+    .move-up = Posunout nahoru
+    .move-down = Posunout dolů
+    .delete = Odstranit
+    .layout = Rozvržení
+    .flow = Tok
+    .stack-horizontal = Skládané vodorovně
+    .stack-vertical = Skládané svisle
+    .content-spacing = Rozestup
+    .block-item = Blok: { $name }
+    .text-item = Text: { $text }
+    .text-content = Text buňky tabulky
+    .borders-help = Nastaví tloušťku čáry, typ čáry a barvu ohraničení vybraných buněk; zvolte hrany, na které se použijí.
+    .contents-help = Seřadí, odstraní a rozvrhne obsah vybrané buňky.
+    .block-title = Blok buňky
+    .format-title = Formát dat buňky
+    .block = Blok
+    .block-name = Název
+    .browse = Procházet...
+    .block-path = Cesta
+    .placement = Umístění
+    .alignment = Zarovnání buňky
+    .scale = Měřítko
+    .autofit = Přizpůsobit automaticky
+    .rotation = Úhel natočení
+    .format = Formát
+    .current-precision = Aktuální přesnost
+    .precision = Přesnost
+    .symbol = Symbol
+    .append-symbol = Připojit symbol
+    .negative-parens = Záporná čísla v závorkách
+    .list-separator = Oddělovač seznamu
+    .date-format = Formát data
+    .no-format-settings = Tento datový typ nemá nastavení formátu.
+    .data-type = Datový typ
+    .format-settings = Formát
+    .currency = Měna
+    .decimal-number = Desetinné číslo
+    .percentage = Procenta
+    .whole-number = Celé číslo
+    .grads = Grady
+    .sample-text = ukázkový text
+    .block-help = Vloží blok do vybraných buněk: jeho umístění, měřítko (nebo přizpůsobení buňce) a natočení.
+    .format-help = Nastaví datový typ a formát, se kterým se čtou hodnoty vybraných buněk.
+    .additional-format = Další formát
+    .conversion = Převodní faktor
+    .prefix = Předpona
+    .suffix = Přípona
+    .decimal-separator = Desetinný oddělovač
+    .thousands-separator = Oddělovač tisíců
+    .space = Mezera
+    .separator-none = (Žádný)
+    .zero-leading = Úvodní nuly
+    .zero-trailing = Koncové nuly
+    .zero-feet = 0 stop
+    .zero-inches = 0 palců
+    .warning-title = Datový typ neodpovídá
+    .warning-heading = Tyto buňky obsahují hodnoty, které nejsou zvoleného datového typu.
+    .warning-note = Převod přečte každou hodnotu jako nový typ; hodnota, kterou nelze přečíst, se vymaže. Zrušit ponechá buňky beze změny.
+    .warning-ok = Převést
+    .warning-cancel = Zrušit

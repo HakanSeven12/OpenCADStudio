@@ -3976,6 +3976,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Drehwinkel angeben <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE Einführstelle angeben:
+    .tcell-row-above =
+        Zeile oben
+        einfügen
+    .tcell-row-below =
+        Zeile unten
+        einfügen
+    .tcell-delete-rows =
+        Zeilen
+        löschen
+    .tcell-col-left =
+        Spalte links
+        einfügen
+    .tcell-col-right =
+        Spalte rechts
+        einfügen
+    .tcell-delete-cols =
+        Spalten
+        löschen
+    .tcell-merge =
+        Zellen
+        verbinden
+    .tcell-unmerge =
+        Verbindung
+        aufheben
+    .tcell-lock =
+        Zellen-
+        sperre
+    .tcell-edit =
+        Text
+        bearbeiten
+    .tcell-match =
+        Zelle
+        angleichen
+    .tcell-borders =
+        Zellen-
+        rahmen
+    .tcell-format =
+        Daten-
+        format
+    .tcell-block =
+        Block
+        einfügen
+    .tcell-field =
+        Feld
+        einfügen
+    .tcell-contents =
+        Zellinhalt
+        verwalten
+    .tcell-link =
+        Zelle
+        verknüpfen
+    .tcell-download =
+        Aus Quelle
+        herunterladen
+    .tcell-row-style = Zeilenstil
+    .tcell-column-style = Spaltenstil
+    .tcell-width = Zellenbreite
+    .tcell-height = Zellenhöhe
+    .tcell-border-color = Rahmenfarbe
+    .tcell-border-lineweight = Rahmen-Linienstärke
+    .tcell-border-linetype = Rahmen-Linientyp
+    .tcell-locking = Zellensperre
+    .tcell-data-link = Zellen-Datenverknüpfung
+    .tcell-select-destination = Zielzelle wählen:
+    .tcell-select-cell = Tabellenzelle wählen:
+    .tcell-range-first = Erste Ecke des Tabellenzellenbereichs wählen:
+    .tcell-range-second = Zweite Ecke des Tabellenzellenbereichs wählen:
+    .tcell-align-prompt = Zellausrichtung eingeben [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Datenformat eingeben [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Blocknamen eingeben oder [?]:
+    .tcell-formula-prompt = Formel eingeben [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Nach Zeile/Spalte
+    .tcell-unlocked = Entsperrt
+    .tcell-content-locked = Inhalt gesperrt
+    .tcell-format-locked = Format gesperrt
+    .tcell-content-format-locked = Inhalt und Format gesperrt
+    .tcell-not-linked = Nicht verknüpft
+    .tcell-invalid-cell = Ungültige Zelle.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Einfügepunkt angeben:
@@ -6571,6 +6649,7 @@ dimstyle =
     .move-text-outside-first = Zuerst Text nach außen verschieben
     .period = Punkt
     .space = Leerzeichen
+    .separator-none = (Keine)
     .surveyors-units = Vermessungseinheiten
 
 style-manager =
@@ -8233,3 +8312,133 @@ block-value-set =
     .title = Wertesatz
     .x-distance = X-Abstand
     .y-distance = Y-Abstand
+
+table-style-cells =
+    .tbl-start-from-style = Von Tabellenstil beginnen
+    .tbl-extra-columns = Zusätzliche Spalten
+    .tbl-extra-rows = Zusätzliche Zeilen
+    .tbl-keep-from-template = Aus der Starttabelle übernehmen:
+    .tbl-keep-label-text = Text der Beschriftungszellen
+    .tbl-keep-data-text = Text der Datenzellen
+    .tbl-keep-overrides = Zellstil-Überschreibungen
+    .tbl-keep-links = Datenverknüpfungen
+    .tbl-keep-fields = Felder
+    .tbl-keep-formulas = Formeln
+    .tbl-extra-whole = Zusätzliche Zeilen und Spalten müssen ganze Zahlen sein.
+    .from-style-insertion = __ocs_arg_n__  Einfügepunkt angeben oder [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Namen eines Tabellenstils eingeben oder [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Anzahl zusätzlicher Zeilen eingeben <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Anzahl zusätzlicher Spalten eingeben <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Einfügeoption eingeben [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  __ocs_arg_what__ in eingefügte Tabelle übernehmen? [Yes/No] <__ocs_arg_current__>:
+    .label-text = Beschriftungstext
+    .data-text = Datentext
+    .formulas = Formeln
+    .fields = Felder
+    .data-links = Datenverknüpfungen
+    .blocks = Blöcke
+    .cell-style-overrides = Zellstil-Überschreibungen
+    .style-name-header = Tabellenstilname
+    .no-starting-table = Der Tabellenstil enthält keine Tabelle.
+    .select-table = Tabelle wählen:
+    .not-a-table = Das Objekt ist keine Tabelle.
+    .cell-style-exists = Ein Zellstil mit diesem Namen existiert bereits.
+    .cell-style-in-use = Der Zellstil wird verwendet und kann nicht gelöscht werden.
+    .template-size = __ocs_arg_rows__ Zeilen × __ocs_arg_columns__ Spalten
+    .cell-properties = Zelleigenschaften
+    .cell-text = Zelltext
+    .cell-borders = Zellrahmen
+    .cell-styles = Zellstile
+    .label = Beschriftung
+    .margins = Ränder
+    .merge-on-create = Zellen beim Erstellen von Zeilen/Spalten verbinden
+    .new-from-this = Neu aus diesem
+    .new-name = Neuer Name
+    .real-number = Reelle Zahl
+    .whole-number = Ganze Zahl
+    .select-table-button = Tabelle wählen…
+    .starting-table = Starttabelle
+    .table-direction = Tabellenrichtung
+
+table-cells =
+    .borders-title = Zellrahmen
+    .contents-title = Zellinhalt
+    .line = Linie
+    .lineweight = Linienstärke
+    .linetype = Linientyp
+    .color = Farbe
+    .double = Doppellinie
+    .spacing = Abstand
+    .apply-to = Anwenden auf
+    .all = Alle
+    .outside = Außen
+    .inside = Innen
+    .none = Keine
+    .top = Oben
+    .bottom = Unten
+    .left = Links
+    .right = Rechts
+    .inside-horizontal = Innen horizontal
+    .inside-vertical = Innen vertikal
+    .contents = Inhalt
+    .empty = Die Zelle ist leer.
+    .move-up = Nach oben
+    .move-down = Nach unten
+    .delete = Löschen
+    .layout = Layout
+    .flow = Fließend
+    .stack-horizontal = Horizontal gestapelt
+    .stack-vertical = Vertikal gestapelt
+    .content-spacing = Abstand
+    .block-item = Block: { $name }
+    .text-item = Text: { $text }
+    .text-content = Tabellenzellentext
+    .borders-help = Legt Linienstärke, Linientyp und Farbe der Rahmen der gewählten Zellen fest; wählen Sie die betroffenen Kanten.
+    .contents-help = Ordnet, entfernt und gestaltet den Inhalt der gewählten Zelle.
+    .block-title = Zellenblock
+    .format-title = Zellendatenformat
+    .block = Block
+    .block-name = Name
+    .browse = Durchsuchen...
+    .block-path = Pfad
+    .placement = Platzierung
+    .alignment = Zellausrichtung
+    .scale = Maßstab
+    .autofit = Automatisch anpassen
+    .rotation = Drehwinkel
+    .format = Format
+    .current-precision = Aktuelle Genauigkeit
+    .precision = Genauigkeit
+    .symbol = Symbol
+    .append-symbol = Symbol anhängen
+    .negative-parens = Negative Werte in Klammern
+    .list-separator = Listentrennzeichen
+    .date-format = Datumsformat
+    .no-format-settings = Dieser Datentyp hat keine Formateinstellungen.
+    .data-type = Datentyp
+    .format-settings = Format
+    .currency = Währung
+    .decimal-number = Dezimalzahl
+    .percentage = Prozent
+    .whole-number = Ganze Zahl
+    .grads = Neugrad
+    .sample-text = Beispieltext
+    .block-help = Fügt einen Block in die gewählten Zellen ein: Position, Maßstab (oder an die Zelle angepasst) und Drehung.
+    .format-help = Legt Datentyp und Format fest, mit denen die Werte der gewählten Zellen gelesen werden.
+    .additional-format = Zusätzliches Format
+    .conversion = Umrechnungsfaktor
+    .prefix = Präfix
+    .suffix = Suffix
+    .decimal-separator = Dezimaltrennzeichen
+    .thousands-separator = Tausendertrennzeichen
+    .space = Leerzeichen
+    .separator-none = (Keine)
+    .zero-leading = Führende Nullen
+    .zero-trailing = Nachgestellte Nullen
+    .zero-feet = 0 Fuß
+    .zero-inches = 0 Zoll
+    .warning-title = Datentyp stimmt nicht überein
+    .warning-heading = Diese Zellen enthalten Werte, die nicht dem gewählten Datentyp entsprechen.
+    .warning-note = Beim Konvertieren wird jeder Wert als neuer Typ gelesen; nicht lesbare Werte werden gelöscht. Abbrechen lässt die Zellen unverändert.
+    .warning-ok = Konvertieren
+    .warning-cancel = Abbrechen

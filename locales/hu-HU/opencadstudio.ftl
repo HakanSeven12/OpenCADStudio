@@ -3968,6 +3968,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Adja meg az elforgatási szöget <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE Beszúrási pont megadása:
+    .tcell-row-above =
+        Sor beszúrása
+        fölé
+    .tcell-row-below =
+        Sor beszúrása
+        alá
+    .tcell-delete-rows =
+        Sorok
+        törlése
+    .tcell-col-left =
+        Oszlop beszúrása
+        balra
+    .tcell-col-right =
+        Oszlop beszúrása
+        jobbra
+    .tcell-delete-cols =
+        Oszlopok
+        törlése
+    .tcell-merge =
+        Cellák
+        egyesítése
+    .tcell-unmerge =
+        Egyesítés
+        megszüntetése
+    .tcell-lock =
+        Cella
+        zárolása
+    .tcell-edit =
+        Szöveg
+        szerkesztése
+    .tcell-match =
+        Cella
+        megfeleltetése
+    .tcell-borders =
+        Cella
+        szegélyei
+    .tcell-format =
+        Adat
+        formátuma
+    .tcell-block =
+        Blokk
+        beszúrása
+    .tcell-field =
+        Mező
+        beszúrása
+    .tcell-contents =
+        Cellatartalom
+        kezelése
+    .tcell-link =
+        Cella
+        csatolása
+    .tcell-download =
+        Letöltés
+        a forrásból
+    .tcell-row-style = Sorstílus
+    .tcell-column-style = Oszlopstílus
+    .tcell-width = Cellaszélesség
+    .tcell-height = Cellamagasság
+    .tcell-border-color = Szegély színe
+    .tcell-border-lineweight = Szegély vonalvastagsága
+    .tcell-border-linetype = Szegély vonaltípusa
+    .tcell-locking = Cellazárolás
+    .tcell-data-link = Cella adatkapcsolata
+    .tcell-select-destination = Válassza ki a célcellát:
+    .tcell-select-cell = Válassza ki a táblázatcellát:
+    .tcell-range-first = Válassza ki a cellatartomány első sarkát:
+    .tcell-range-second = Válassza ki a cellatartomány második sarkát:
+    .tcell-align-prompt = Adja meg a cella igazítását [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Adja meg az adatformátumot [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Adja meg a blokk nevét vagy [?]:
+    .tcell-formula-prompt = Adjon meg egy képletet [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Sor/oszlop szerint
+    .tcell-unlocked = Nem zárolt
+    .tcell-content-locked = Tartalom zárolva
+    .tcell-format-locked = Formátum zárolva
+    .tcell-content-format-locked = Tartalom és formátum zárolva
+    .tcell-not-linked = Nincs csatolva
+    .tcell-invalid-cell = Érvénytelen cella.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Adja meg a beszúrási pontot:
@@ -6551,6 +6629,7 @@ dimstyle =
     .move-text-outside-first = Először a szöveg kívülre
     .period = Pont
     .space = Szóköz
+    .separator-none = (Nincs)
     .surveyors-units = Földmérési egységek
 
 style-manager =
@@ -8213,3 +8292,133 @@ block-value-set =
     .title = Értékkészlet
     .x-distance = X távolság
     .y-distance = Y távolság
+
+table-style-cells =
+    .tbl-start-from-style = Kezdés táblázatstílusból
+    .tbl-extra-columns = További oszlopok
+    .tbl-extra-rows = További sorok
+    .tbl-keep-from-template = Megtartás a kezdő táblázatból:
+    .tbl-keep-label-text = Címkecellák szövege
+    .tbl-keep-data-text = Adatcellák szövege
+    .tbl-keep-overrides = Cellastílus-felülbírálások
+    .tbl-keep-links = Adatkapcsolatok
+    .tbl-keep-fields = Mezők
+    .tbl-keep-formulas = Képletek
+    .tbl-extra-whole = A további sorok és oszlopok számának egész számnak kell lennie.
+    .from-style-insertion = __ocs_arg_n__  Adja meg a beszúrási pontot vagy [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Adja meg egy táblázatstílus nevét vagy [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Adja meg a további sorok számát <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Adja meg a további oszlopok számát <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Adjon meg egy beszúrási opciót [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Kerüljön __ocs_arg_what__ a beszúrt táblázatba? [Yes/No] <__ocs_arg_current__>:
+    .label-text = címkeszöveg
+    .data-text = adatszöveg
+    .formulas = képletek
+    .fields = mezők
+    .data-links = adatkapcsolatok
+    .blocks = blokkok
+    .cell-style-overrides = cellastílus-felülbírálások
+    .style-name-header = Táblázatstílus neve
+    .no-starting-table = A táblázatstílus nem tartalmaz táblázatot.
+    .select-table = Válasszon ki egy táblázatot:
+    .not-a-table = Az objektum nem táblázat.
+    .cell-style-exists = Már létezik ilyen nevű cellastílus.
+    .cell-style-in-use = A cellastílus használatban van, nem törölhető.
+    .template-size = __ocs_arg_rows__ sor × __ocs_arg_columns__ oszlop
+    .cell-properties = Cella tulajdonságai
+    .cell-text = Cella szövege
+    .cell-borders = Cella szegélyei
+    .cell-styles = Cellastílusok
+    .label = Címke
+    .margins = Margók
+    .merge-on-create = Cellák egyesítése sor/oszlop létrehozásakor
+    .new-from-this = Új ebből
+    .new-name = Új név
+    .real-number = Valós szám
+    .whole-number = Egész szám
+    .select-table-button = Táblázat kiválasztása…
+    .starting-table = Kezdő táblázat
+    .table-direction = Táblázat iránya
+
+table-cells =
+    .borders-title = Cella szegélyei
+    .contents-title = Cella tartalma
+    .line = Vonal
+    .lineweight = Vonalvastagság
+    .linetype = Vonaltípus
+    .color = Szín
+    .double = Dupla vonal
+    .spacing = Térköz
+    .apply-to = Alkalmazás
+    .all = Mind
+    .outside = Külső
+    .inside = Belső
+    .none = Nincs
+    .top = Felső
+    .bottom = Alsó
+    .left = Bal
+    .right = Jobb
+    .inside-horizontal = Belső vízszintes
+    .inside-vertical = Belső függőleges
+    .contents = Tartalom
+    .empty = A cella üres.
+    .move-up = Feljebb
+    .move-down = Lejjebb
+    .delete = Törlés
+    .layout = Elrendezés
+    .flow = Folyamatos
+    .stack-horizontal = Vízszintesen egymás mellett
+    .stack-vertical = Függőlegesen egymás alatt
+    .content-spacing = Térköz
+    .block-item = Blokk: { $name }
+    .text-item = Szöveg: { $text }
+    .text-content = Táblázatcella szövege
+    .borders-help = Beállítja a kijelölt cellák szegélyeinek vonalvastagságát, vonaltípusát és színét; válassza ki, mely éleken legyenek.
+    .contents-help = Sorba rendezi, eltávolítja és elrendezi a kijelölt cella tartalmát.
+    .block-title = Cellablokk
+    .format-title = Cella adatformátuma
+    .block = Blokk
+    .block-name = Név
+    .browse = Tallózás...
+    .block-path = Elérési út
+    .placement = Elhelyezés
+    .alignment = Cellaigazítás
+    .scale = Lépték
+    .autofit = Automatikus illesztés
+    .rotation = Forgatási szög
+    .format = Formátum
+    .current-precision = Aktuális pontosság
+    .precision = Pontosság
+    .symbol = Szimbólum
+    .append-symbol = Szimbólum utána
+    .negative-parens = Negatív értékek zárójelben
+    .list-separator = Listaelválasztó
+    .date-format = Dátumformátum
+    .no-format-settings = Ennek az adattípusnak nincsenek formátumbeállításai.
+    .data-type = Adattípus
+    .format-settings = Formátum
+    .currency = Pénznem
+    .decimal-number = Tizedes szám
+    .percentage = Százalék
+    .whole-number = Egész szám
+    .grads = Újfok
+    .sample-text = mintaszöveg
+    .block-help = Blokkot helyez a kijelölt cellákba: a helyét, a léptékét (vagy cellához illesztve) és az elforgatását.
+    .format-help = Beállítja, milyen adattípussal és formátummal olvasódnak a kijelölt cellák értékei.
+    .additional-format = További formátum
+    .conversion = Átváltási tényező
+    .prefix = Előtag
+    .suffix = Utótag
+    .decimal-separator = Tizedesjel
+    .thousands-separator = Ezreselválasztó
+    .space = Szóköz
+    .separator-none = (Nincs)
+    .zero-leading = Kezdő nullák
+    .zero-trailing = Záró nullák
+    .zero-feet = 0 láb
+    .zero-inches = 0 hüvelyk
+    .warning-title = Az adattípus nem egyezik
+    .warning-heading = Ezek a cellák a választott adattípustól eltérő értékeket tartalmaznak.
+    .warning-note = Az átalakítás minden értéket az új típusként olvas; a nem olvasható érték törlődik. A Mégse változatlanul hagyja a cellákat.
+    .warning-ok = Átalakítás
+    .warning-cancel = Mégse

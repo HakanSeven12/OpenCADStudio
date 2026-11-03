@@ -3963,6 +3963,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  指定旋转角度 <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE  指定插入点：
+    .tcell-row-above =
+        在上方
+        插入行
+    .tcell-row-below =
+        在下方
+        插入行
+    .tcell-delete-rows =
+        删除
+        行
+    .tcell-col-left =
+        在左侧
+        插入列
+    .tcell-col-right =
+        在右侧
+        插入列
+    .tcell-delete-cols =
+        删除
+        列
+    .tcell-merge =
+        合并
+        单元格
+    .tcell-unmerge =
+        取消合并
+        单元格
+    .tcell-lock =
+        单元格
+        锁定
+    .tcell-edit =
+        编辑
+        文字
+    .tcell-match =
+        匹配
+        单元格
+    .tcell-borders =
+        单元格
+        边框
+    .tcell-format =
+        数据
+        格式
+    .tcell-block =
+        插入
+        块
+    .tcell-field =
+        插入
+        字段
+    .tcell-contents =
+        管理单元格
+        内容
+    .tcell-link =
+        链接
+        单元格
+    .tcell-download =
+        从源
+        下载
+    .tcell-row-style = 行样式
+    .tcell-column-style = 列样式
+    .tcell-width = 单元格宽度
+    .tcell-height = 单元格高度
+    .tcell-border-color = 边框颜色
+    .tcell-border-lineweight = 边框线宽
+    .tcell-border-linetype = 边框线型
+    .tcell-locking = 单元格锁定
+    .tcell-data-link = 单元格数据链接
+    .tcell-select-destination = 选择目标单元格:
+    .tcell-select-cell = 选择表格单元格:
+    .tcell-range-first = 选择表格单元格范围的第一个角点:
+    .tcell-range-second = 选择表格单元格范围的第二个角点:
+    .tcell-align-prompt = 输入单元格对齐方式 [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = 输入数据格式 [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = 输入块名或 [?]:
+    .tcell-formula-prompt = 输入公式 [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = 按行/列
+    .tcell-unlocked = 未锁定
+    .tcell-content-locked = 内容已锁定
+    .tcell-format-locked = 格式已锁定
+    .tcell-content-format-locked = 内容和格式已锁定
+    .tcell-not-linked = 未链接
+    .tcell-invalid-cell = 无效的单元格。
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  指定插入点:
@@ -6556,6 +6634,7 @@ dimstyle =
     .move-text-outside-first = 优先将文字移到外部
     .period = 句点
     .space = 空格
+    .separator-none = (无)
     .surveyors-units = 测量单位
 
 style-manager =
@@ -8208,3 +8287,133 @@ block-value-set =
     .title = 值集
     .x-distance = X 距离
     .y-distance = Y 距离
+
+table-style-cells =
+    .tbl-start-from-style = 从表格样式开始
+    .tbl-extra-columns = 附加列
+    .tbl-extra-rows = 附加行
+    .tbl-keep-from-template = 从起始表格保留:
+    .tbl-keep-label-text = 标签单元格文字
+    .tbl-keep-data-text = 数据单元格文字
+    .tbl-keep-overrides = 单元格样式替代
+    .tbl-keep-links = 数据链接
+    .tbl-keep-fields = 字段
+    .tbl-keep-formulas = 公式
+    .tbl-extra-whole = 附加行数和列数必须为整数。
+    .from-style-insertion = __ocs_arg_n__  指定插入点或 [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  输入表格样式名称或 [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  输入附加行数 <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  输入附加列数 <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  输入插入选项 [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  在插入的表格中包含__ocs_arg_what__? [Yes/No] <__ocs_arg_current__>:
+    .label-text = 标签文字
+    .data-text = 数据文字
+    .formulas = 公式
+    .fields = 字段
+    .data-links = 数据链接
+    .blocks = 块
+    .cell-style-overrides = 单元格样式替代
+    .style-name-header = 表格样式名称
+    .no-starting-table = 表格样式不包含表格。
+    .select-table = 选择表格:
+    .not-a-table = 该对象不是表格。
+    .cell-style-exists = 已存在同名的单元格样式。
+    .cell-style-in-use = 该单元格样式正在使用中，无法删除。
+    .template-size = __ocs_arg_rows__ 行 × __ocs_arg_columns__ 列
+    .cell-properties = 单元格特性
+    .cell-text = 单元格文字
+    .cell-borders = 单元格边框
+    .cell-styles = 单元格样式
+    .label = 标签
+    .margins = 页边距
+    .merge-on-create = 创建行/列时合并单元格
+    .new-from-this = 基于此新建
+    .new-name = 新名称
+    .real-number = 实数
+    .whole-number = 整数
+    .select-table-button = 选择表格…
+    .starting-table = 起始表格
+    .table-direction = 表格方向
+
+table-cells =
+    .borders-title = 单元格边框
+    .contents-title = 单元格内容
+    .line = 线
+    .lineweight = 线宽
+    .linetype = 线型
+    .color = 颜色
+    .double = 双线
+    .spacing = 间距
+    .apply-to = 应用于
+    .all = 全部
+    .outside = 外部
+    .inside = 内部
+    .none = 无
+    .top = 上
+    .bottom = 下
+    .left = 左
+    .right = 右
+    .inside-horizontal = 内部水平
+    .inside-vertical = 内部垂直
+    .contents = 内容
+    .empty = 单元格为空。
+    .move-up = 上移
+    .move-down = 下移
+    .delete = 删除
+    .layout = 布局
+    .flow = 流动
+    .stack-horizontal = 水平堆叠
+    .stack-vertical = 垂直堆叠
+    .content-spacing = 间距
+    .block-item = 块: { $name }
+    .text-item = 文字: { $text }
+    .text-content = 表格单元格文字
+    .borders-help = 设置所选单元格边框的线宽、线型和颜色；选择应用的边。
+    .contents-help = 排序、删除并布置所选单元格的内容。
+    .block-title = 单元格块
+    .format-title = 单元格数据格式
+    .block = 块
+    .block-name = 名称
+    .browse = 浏览...
+    .block-path = 路径
+    .placement = 放置
+    .alignment = 单元格对齐
+    .scale = 比例
+    .autofit = 自动调整
+    .rotation = 旋转角度
+    .format = 格式
+    .current-precision = 当前精度
+    .precision = 精度
+    .symbol = 符号
+    .append-symbol = 符号后置
+    .negative-parens = 负数加括号
+    .list-separator = 列表分隔符
+    .date-format = 日期格式
+    .no-format-settings = 此数据类型没有格式设置。
+    .data-type = 数据类型
+    .format-settings = 格式
+    .currency = 货币
+    .decimal-number = 十进制数
+    .percentage = 百分比
+    .whole-number = 整数
+    .grads = 百分度
+    .sample-text = 示例文字
+    .block-help = 将块放入所选单元格：设置其位置、比例（或适应单元格）和旋转。
+    .format-help = 设置读取所选单元格值时使用的数据类型和格式。
+    .additional-format = 附加格式
+    .conversion = 转换系数
+    .prefix = 前缀
+    .suffix = 后缀
+    .decimal-separator = 小数分隔符
+    .thousands-separator = 千位分隔符
+    .space = 空格
+    .separator-none = (无)
+    .zero-leading = 前导零
+    .zero-trailing = 后续零
+    .zero-feet = 0 英尺
+    .zero-inches = 0 英寸
+    .warning-title = 数据类型不匹配
+    .warning-heading = 这些单元格包含不属于所选数据类型的值。
+    .warning-note = 转换会将每个值按新类型读取；无法读取的值将被清除。取消则保持单元格不变。
+    .warning-ok = 转换
+    .warning-cancel = 取消

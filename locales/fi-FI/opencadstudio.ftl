@@ -3975,6 +3975,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Määritä kiertokulma <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE Määritä lisäyskohta:
+    .tcell-row-above =
+        Lisää rivi
+        yläpuolelle
+    .tcell-row-below =
+        Lisää rivi
+        alapuolelle
+    .tcell-delete-rows =
+        Poista
+        rivit
+    .tcell-col-left =
+        Lisää sarake
+        vasemmalle
+    .tcell-col-right =
+        Lisää sarake
+        oikealle
+    .tcell-delete-cols =
+        Poista
+        sarakkeet
+    .tcell-merge =
+        Yhdistä
+        solut
+    .tcell-unmerge =
+        Pura
+        yhdistäminen
+    .tcell-lock =
+        Solun
+        lukitus
+    .tcell-edit =
+        Muokkaa
+        tekstiä
+    .tcell-match =
+        Täsmää
+        solu
+    .tcell-borders =
+        Solun
+        reunat
+    .tcell-format =
+        Tietojen
+        muoto
+    .tcell-block =
+        Lisää
+        lohko
+    .tcell-field =
+        Lisää
+        kenttä
+    .tcell-contents =
+        Hallitse solun
+        sisältöä
+    .tcell-link =
+        Linkitä
+        solu
+    .tcell-download =
+        Lataa
+        lähteestä
+    .tcell-row-style = Rivityyli
+    .tcell-column-style = Saraketyyli
+    .tcell-width = Solun leveys
+    .tcell-height = Solun korkeus
+    .tcell-border-color = Reunan väri
+    .tcell-border-lineweight = Reunan viivanpaksuus
+    .tcell-border-linetype = Reunan viivatyyppi
+    .tcell-locking = Solun lukitus
+    .tcell-data-link = Solun tietolinkki
+    .tcell-select-destination = Valitse kohdesolu:
+    .tcell-select-cell = Valitse taulukon solu:
+    .tcell-range-first = Valitse solualueen ensimmäinen kulma:
+    .tcell-range-second = Valitse solualueen toinen kulma:
+    .tcell-align-prompt = Anna solun tasaus [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Anna tietomuoto [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Anna lohkon nimi tai [?]:
+    .tcell-formula-prompt = Anna kaava [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Riveittäin/sarakkeittain
+    .tcell-unlocked = Lukitsematon
+    .tcell-content-locked = Sisältö lukittu
+    .tcell-format-locked = Muotoilu lukittu
+    .tcell-content-format-locked = Sisältö ja muotoilu lukittu
+    .tcell-not-linked = Ei linkitetty
+    .tcell-invalid-cell = Virheellinen solu.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Määritä lisäyspiste:
@@ -6570,6 +6648,7 @@ dimstyle =
     .move-text-outside-first = Siirrä teksti ensin ulos
     .period = Kausi
     .space = Välilyönti
+    .separator-none = (Ei mitään)
     .surveyors-units = Maanmittausyksiköt
 
 style-manager =
@@ -8232,3 +8311,133 @@ block-value-set =
     .title = Arvojoukko
     .x-distance = X-etäisyys
     .y-distance = Y-etäisyys
+
+table-style-cells =
+    .tbl-start-from-style = Aloita taulukkotyylistä
+    .tbl-extra-columns = Lisäsarakkeet
+    .tbl-extra-rows = Lisärivit
+    .tbl-keep-from-template = Säilytä aloitustaulukosta:
+    .tbl-keep-label-text = Otsikkosolujen teksti
+    .tbl-keep-data-text = Tietosolujen teksti
+    .tbl-keep-overrides = Solutyylin ohitukset
+    .tbl-keep-links = Tietolinkit
+    .tbl-keep-fields = Kentät
+    .tbl-keep-formulas = Kaavat
+    .tbl-extra-whole = Lisärivien ja -sarakkeiden määrän on oltava kokonaisluku.
+    .from-style-insertion = __ocs_arg_n__  Määritä lisäyspiste tai [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Anna taulukkotyylin nimi tai [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Anna lisärivien määrä <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Anna lisäsarakkeiden määrä <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Anna lisäysvalinta [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Sisällytetäänkö __ocs_arg_what__ lisättyyn taulukkoon? [Yes/No] <__ocs_arg_current__>:
+    .label-text = otsikkoteksti
+    .data-text = tietoteksti
+    .formulas = kaavat
+    .fields = kentät
+    .data-links = tietolinkit
+    .blocks = lohkot
+    .cell-style-overrides = solutyylin ohitukset
+    .style-name-header = Taulukkotyylin nimi
+    .no-starting-table = Taulukkotyyli ei sisällä taulukkoa.
+    .select-table = Valitse taulukko:
+    .not-a-table = Objekti ei ole taulukko.
+    .cell-style-exists = Samanniminen solutyyli on jo olemassa.
+    .cell-style-in-use = Solutyyli on käytössä, eikä sitä voi poistaa.
+    .template-size = __ocs_arg_rows__ riviä × __ocs_arg_columns__ saraketta
+    .cell-properties = Solun ominaisuudet
+    .cell-text = Solun teksti
+    .cell-borders = Solun reunat
+    .cell-styles = Solutyylit
+    .label = Otsikko
+    .margins = Marginaalit
+    .merge-on-create = Yhdistä solut rivejä/sarakkeita luotaessa
+    .new-from-this = Uusi tästä
+    .new-name = Uusi nimi
+    .real-number = Reaaliluku
+    .whole-number = Kokonaisluku
+    .select-table-button = Valitse taulukko…
+    .starting-table = Aloitustaulukko
+    .table-direction = Taulukon suunta
+
+table-cells =
+    .borders-title = Solun reunat
+    .contents-title = Solun sisältö
+    .line = Viiva
+    .lineweight = Viivanpaksuus
+    .linetype = Viivatyyppi
+    .color = Väri
+    .double = Kaksoisviiva
+    .spacing = Väli
+    .apply-to = Käytä kohteeseen
+    .all = Kaikki
+    .outside = Ulkoreunat
+    .inside = Sisäreunat
+    .none = Ei mitään
+    .top = Ylä
+    .bottom = Ala
+    .left = Vasen
+    .right = Oikea
+    .inside-horizontal = Sisä vaaka
+    .inside-vertical = Sisä pysty
+    .contents = Sisältö
+    .empty = Solu on tyhjä.
+    .move-up = Siirrä ylös
+    .move-down = Siirrä alas
+    .delete = Poista
+    .layout = Asettelu
+    .flow = Rivitys
+    .stack-horizontal = Pinottu vaakasuunnassa
+    .stack-vertical = Pinottu pystysuunnassa
+    .content-spacing = Väli
+    .block-item = Lohko: { $name }
+    .text-item = Teksti: { $text }
+    .text-content = Taulukon solun teksti
+    .borders-help = Asettaa valittujen solujen reunojen viivanpaksuuden, viivatyypin ja värin; valitse reunat, joihin ne tulevat.
+    .contents-help = Järjestää, poistaa ja asettelee valitun solun sisällön.
+    .block-title = Solun lohko
+    .format-title = Solun tietomuoto
+    .block = Lohko
+    .block-name = Nimi
+    .browse = Selaa...
+    .block-path = Polku
+    .placement = Sijoitus
+    .alignment = Solun tasaus
+    .scale = Mittakaava
+    .autofit = Automaattinen sovitus
+    .rotation = Kiertokulma
+    .format = Muoto
+    .current-precision = Nykyinen tarkkuus
+    .precision = Tarkkuus
+    .symbol = Symboli
+    .append-symbol = Lisää symboli loppuun
+    .negative-parens = Negatiiviset sulkeissa
+    .list-separator = Luettelon erotin
+    .date-format = Päivämäärän muoto
+    .no-format-settings = Tällä tietotyypillä ei ole muotoiluasetuksia.
+    .data-type = Tietotyyppi
+    .format-settings = Muoto
+    .currency = Valuutta
+    .decimal-number = Desimaaliluku
+    .percentage = Prosentti
+    .whole-number = Kokonaisluku
+    .grads = Goonit
+    .sample-text = esimerkkiteksti
+    .block-help = Lisää lohkon valittuihin soluihin: sen sijainnin, mittakaavan (tai soluun sovituksen) ja kierron.
+    .format-help = Asettaa tietotyypin ja muodon, jolla valittujen solujen arvot luetaan.
+    .additional-format = Lisämuotoilu
+    .conversion = Muuntokerroin
+    .prefix = Etuliite
+    .suffix = Jälkiliite
+    .decimal-separator = Desimaalierotin
+    .thousands-separator = Tuhaterotin
+    .space = Välilyönti
+    .separator-none = (Ei mitään)
+    .zero-leading = Alkunollat
+    .zero-trailing = Loppunollat
+    .zero-feet = 0 jalkaa
+    .zero-inches = 0 tuumaa
+    .warning-title = Tietotyyppi ei täsmää
+    .warning-heading = Näissä soluissa on arvoja, jotka eivät ole valittua tietotyyppiä.
+    .warning-note = Muunnos lukee jokaisen arvon uutena tyyppinä; arvo, jota ei voi lukea, tyhjennetään. Peruuta jättää solut ennalleen.
+    .warning-ok = Muunna
+    .warning-cancel = Peruuta

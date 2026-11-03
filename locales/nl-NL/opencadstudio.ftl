@@ -3974,6 +3974,84 @@ annotate =
     .dimordinate-enter-dimension-text-blank-measured = DIMORDINATE  Voer maattekst in (leeg = gemeten waarde):
     .dimordinate-specify-text-angle-degrees = DIMORDINATE  Geef de teksthoek op (graden):
     .dimradius-select-arc-circle-or-polyline-arc = DIMRADIUS  Selecteer een boog, cirkel of polylijnboog:
+    .tcell-row-above =
+        Rij invoegen
+        Boven
+    .tcell-row-below =
+        Rij invoegen
+        Onder
+    .tcell-delete-rows =
+        Rijen
+        verwijderen
+    .tcell-col-left =
+        Kolom invoegen
+        Links
+    .tcell-col-right =
+        Kolom invoegen
+        Rechts
+    .tcell-delete-cols =
+        Kolommen
+        verwijderen
+    .tcell-merge =
+        Cellen
+        samenvoegen
+    .tcell-unmerge =
+        Cellen
+        splitsen
+    .tcell-lock =
+        Cel
+        vergrendelen
+    .tcell-edit =
+        Tekst
+        bewerken
+    .tcell-match =
+        Cel
+        afstemmen
+    .tcell-borders =
+        Cel-
+        randen
+    .tcell-format =
+        Gegevens-
+        opmaak
+    .tcell-block =
+        Symbool
+        invoegen
+    .tcell-field =
+        Veld
+        invoegen
+    .tcell-contents =
+        Celinhoud
+        beheren
+    .tcell-link =
+        Cel
+        koppelen
+    .tcell-download =
+        Downloaden
+        van bron
+    .tcell-row-style = Rijstijl
+    .tcell-column-style = Kolomstijl
+    .tcell-width = Celbreedte
+    .tcell-height = Celhoogte
+    .tcell-border-color = Randkleur
+    .tcell-border-lineweight = Lijndikte rand
+    .tcell-border-linetype = Lijntype rand
+    .tcell-locking = Celvergrendeling
+    .tcell-data-link = Gegevenskoppeling cel
+    .tcell-select-destination = Selecteer doelcel:
+    .tcell-select-cell = Selecteer tabelcel:
+    .tcell-range-first = Selecteer eerste hoek van tabelcelbereik:
+    .tcell-range-second = Selecteer tweede hoek van tabelcelbereik:
+    .tcell-align-prompt = Voer celuitlijning in [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Voer gegevensopmaak in [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Voer symboolnaam in of [?]:
+    .tcell-formula-prompt = Voer een formule in [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Per rij/kolom
+    .tcell-unlocked = Ontgrendeld
+    .tcell-content-locked = Inhoud vergrendeld
+    .tcell-format-locked = Opmaak vergrendeld
+    .tcell-content-format-locked = Inhoud en opmaak vergrendeld
+    .tcell-not-linked = Niet gekoppeld
+    .tcell-invalid-cell = Ongeldige cel.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Geef invoegpunt op:
@@ -6571,6 +6649,7 @@ dimstyle =
     .move-text-outside-first = Eerst tekst naar buiten verplaatsen
     .period = Punt
     .space = Spatie
+    .separator-none = (Geen)
     .surveyors-units = Landmeeteenheden
 
 style-manager =
@@ -8233,3 +8312,133 @@ block-value-set =
     .title = Waardenset
     .x-distance = X-afstand
     .y-distance = Y-afstand
+
+table-style-cells =
+    .tbl-start-from-style = Beginnen vanuit tabelstijl
+    .tbl-extra-columns = Extra kolommen
+    .tbl-extra-rows = Extra rijen
+    .tbl-keep-from-template = Behouden uit de begintabel:
+    .tbl-keep-label-text = Tekst van labelcellen
+    .tbl-keep-data-text = Tekst van gegevenscellen
+    .tbl-keep-overrides = Celstijl-overschrijvingen
+    .tbl-keep-links = Gegevenskoppelingen
+    .tbl-keep-fields = Velden
+    .tbl-keep-formulas = Formules
+    .tbl-extra-whole = Extra rijen en kolommen moeten gehele getallen zijn.
+    .from-style-insertion = __ocs_arg_n__  Geef invoegpunt op of [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Voer de naam van een tabelstijl in of [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Voer aantal extra rijen in <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Voer aantal extra kolommen in <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Voer een invoegoptie in [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  __ocs_arg_what__ opnemen in ingevoegde tabel? [Yes/No] <__ocs_arg_current__>:
+    .label-text = labeltekst
+    .data-text = gegevenstekst
+    .formulas = formules
+    .fields = velden
+    .data-links = gegevenskoppelingen
+    .blocks = symbolen
+    .cell-style-overrides = celstijl-overschrijvingen
+    .style-name-header = Naam tabelstijl
+    .no-starting-table = Tabelstijl bevat geen tabel.
+    .select-table = Selecteer een tabel:
+    .not-a-table = Het object is geen tabel.
+    .cell-style-exists = Er bestaat al een celstijl met deze naam.
+    .cell-style-in-use = De celstijl is in gebruik en kan niet worden verwijderd.
+    .template-size = __ocs_arg_rows__ rijen × __ocs_arg_columns__ kolommen
+    .cell-properties = Celeigenschappen
+    .cell-text = Celtekst
+    .cell-borders = Celranden
+    .cell-styles = Celstijlen
+    .label = Label
+    .margins = Marges
+    .merge-on-create = Cellen samenvoegen bij maken van rij/kolom
+    .new-from-this = Nieuw op basis hiervan
+    .new-name = Nieuwe naam
+    .real-number = Reëel getal
+    .whole-number = Geheel getal
+    .select-table-button = Tabel selecteren…
+    .starting-table = Begintabel
+    .table-direction = Tabelrichting
+
+table-cells =
+    .borders-title = Celranden
+    .contents-title = Celinhoud
+    .line = Lijn
+    .lineweight = Lijndikte
+    .linetype = Lijntype
+    .color = Kleur
+    .double = Dubbele lijn
+    .spacing = Afstand
+    .apply-to = Toepassen op
+    .all = Alle
+    .outside = Buiten
+    .inside = Binnen
+    .none = Geen
+    .top = Boven
+    .bottom = Onder
+    .left = Links
+    .right = Rechts
+    .inside-horizontal = Binnen horizontaal
+    .inside-vertical = Binnen verticaal
+    .contents = Inhoud
+    .empty = De cel is leeg.
+    .move-up = Omhoog
+    .move-down = Omlaag
+    .delete = Verwijderen
+    .layout = Indeling
+    .flow = Doorlopend
+    .stack-horizontal = Horizontaal gestapeld
+    .stack-vertical = Verticaal gestapeld
+    .content-spacing = Afstand
+    .block-item = Symbool: { $name }
+    .text-item = Tekst: { $text }
+    .text-content = Tekst tabelcel
+    .borders-help = Stelt de lijndikte, het lijntype en de kleur van de randen van de gekozen cellen in; kies op welke zijden ze komen.
+    .contents-help = Ordent, verwijdert en schikt de inhoud van de gekozen cel.
+    .block-title = Celsymbool
+    .format-title = Gegevensopmaak cel
+    .block = Symbool
+    .block-name = Naam
+    .browse = Bladeren...
+    .block-path = Pad
+    .placement = Plaatsing
+    .alignment = Celuitlijning
+    .scale = Schaal
+    .autofit = Automatisch passen
+    .rotation = Rotatiehoek
+    .format = Opmaak
+    .current-precision = Huidige precisie
+    .precision = Precisie
+    .symbol = Teken
+    .append-symbol = Teken achteraan
+    .negative-parens = Negatieve waarden tussen haakjes
+    .list-separator = Lijstscheidingsteken
+    .date-format = Datumnotatie
+    .no-format-settings = Dit gegevenstype heeft geen opmaakinstellingen.
+    .data-type = Gegevenstype
+    .format-settings = Opmaak
+    .currency = Valuta
+    .decimal-number = Decimaal getal
+    .percentage = Percentage
+    .whole-number = Geheel getal
+    .grads = Gon
+    .sample-text = voorbeeldtekst
+    .block-help = Plaatst een symbool in de gekozen cellen: de positie, de schaal (of passend in de cel) en de rotatie.
+    .format-help = Stelt het gegevenstype en de opmaak in waarmee de waarden van de gekozen cellen worden gelezen.
+    .additional-format = Aanvullende opmaak
+    .conversion = Conversiefactor
+    .prefix = Voorvoegsel
+    .suffix = Achtervoegsel
+    .decimal-separator = Decimaalscheidingsteken
+    .thousands-separator = Scheidingsteken duizendtallen
+    .space = Spatie
+    .separator-none = (Geen)
+    .zero-leading = Voorloopnullen
+    .zero-trailing = Volgnullen
+    .zero-feet = 0 voet
+    .zero-inches = 0 inch
+    .warning-title = Gegevenstype komt niet overeen
+    .warning-heading = Deze cellen bevatten waarden die niet van het gekozen gegevenstype zijn.
+    .warning-note = Bij converteren wordt elke waarde als het nieuwe type gelezen; een waarde die zo niet gelezen kan worden, wordt gewist. Annuleren laat de cellen ongewijzigd.
+    .warning-ok = Converteren
+    .warning-cancel = Annuleren

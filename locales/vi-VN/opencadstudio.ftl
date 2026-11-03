@@ -3983,6 +3983,84 @@ annotate =
     .text-specify-rotation-angle = TEXT Chỉ định góc quay <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT Chỉ định điểm cuối thứ hai:
     .tolerance-specify-insertion-point = TOLERANCE Xác định điểm chèn:
+    .tcell-row-above =
+        Chèn hàng
+        phía trên
+    .tcell-row-below =
+        Chèn hàng
+        phía dưới
+    .tcell-delete-rows =
+        Xóa
+        hàng
+    .tcell-col-left =
+        Chèn cột
+        bên trái
+    .tcell-col-right =
+        Chèn cột
+        bên phải
+    .tcell-delete-cols =
+        Xóa
+        cột
+    .tcell-merge =
+        Gộp
+        ô
+    .tcell-unmerge =
+        Tách
+        ô
+    .tcell-lock =
+        Khóa
+        ô
+    .tcell-edit =
+        Sửa
+        văn bản
+    .tcell-match =
+        Khớp
+        ô
+    .tcell-borders =
+        Viền
+        ô
+    .tcell-format =
+        Định dạng
+        dữ liệu
+    .tcell-block =
+        Chèn
+        khối
+    .tcell-field =
+        Chèn
+        trường
+    .tcell-contents =
+        Quản lý
+        nội dung ô
+    .tcell-link =
+        Liên kết
+        ô
+    .tcell-download =
+        Tải xuống
+        từ nguồn
+    .tcell-row-style = Kiểu hàng
+    .tcell-column-style = Kiểu cột
+    .tcell-width = Chiều rộng ô
+    .tcell-height = Chiều cao ô
+    .tcell-border-color = Màu viền
+    .tcell-border-lineweight = Độ dày nét viền
+    .tcell-border-linetype = Kiểu đường viền
+    .tcell-locking = Khóa ô
+    .tcell-data-link = Liên kết dữ liệu ô
+    .tcell-select-destination = Chọn ô đích:
+    .tcell-select-cell = Chọn ô bảng:
+    .tcell-range-first = Chọn góc thứ nhất của vùng ô bảng:
+    .tcell-range-second = Chọn góc thứ hai của vùng ô bảng:
+    .tcell-align-prompt = Nhập căn chỉnh ô [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Nhập định dạng dữ liệu [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Nhập tên khối hoặc [?]:
+    .tcell-formula-prompt = Nhập công thức [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Theo hàng/cột
+    .tcell-unlocked = Không khóa
+    .tcell-content-locked = Khóa nội dung
+    .tcell-format-locked = Khóa định dạng
+    .tcell-content-format-locked = Khóa nội dung và định dạng
+    .tcell-not-linked = Chưa liên kết
+    .tcell-invalid-cell = Ô không hợp lệ.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC Chỉ định điểm chèn:
@@ -6580,6 +6658,7 @@ dimstyle =
     .move-text-outside-first = Di chuyển văn bản ra bên ngoài trước
     .period = Dấu chấm
     .space = Dấu cách
+    .separator-none = (Không có)
     .surveyors-units = Các đơn vị khảo sát
 
 style-manager =
@@ -8232,3 +8311,133 @@ block-value-set =
     .title = Tập giá trị
     .x-distance = Khoảng cách X
     .y-distance = Khoảng cách Y
+
+table-style-cells =
+    .tbl-start-from-style = Bắt đầu từ kiểu bảng
+    .tbl-extra-columns = Cột bổ sung
+    .tbl-extra-rows = Hàng bổ sung
+    .tbl-keep-from-template = Giữ lại từ bảng ban đầu:
+    .tbl-keep-label-text = Văn bản ô nhãn
+    .tbl-keep-data-text = Văn bản ô dữ liệu
+    .tbl-keep-overrides = Ghi đè kiểu ô
+    .tbl-keep-links = Liên kết dữ liệu
+    .tbl-keep-fields = Trường
+    .tbl-keep-formulas = Công thức
+    .tbl-extra-whole = Số hàng và cột bổ sung phải là số nguyên.
+    .from-style-insertion = __ocs_arg_n__  Chỉ định điểm chèn hoặc [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Nhập tên kiểu bảng hoặc [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Nhập số hàng bổ sung <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Nhập số cột bổ sung <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Nhập tùy chọn chèn [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Đưa __ocs_arg_what__ vào bảng được chèn? [Yes/No] <__ocs_arg_current__>:
+    .label-text = văn bản nhãn
+    .data-text = văn bản dữ liệu
+    .formulas = công thức
+    .fields = trường
+    .data-links = liên kết dữ liệu
+    .blocks = khối
+    .cell-style-overrides = ghi đè kiểu ô
+    .style-name-header = Tên kiểu bảng
+    .no-starting-table = Kiểu bảng không chứa bảng nào.
+    .select-table = Chọn một bảng:
+    .not-a-table = Đối tượng không phải là bảng.
+    .cell-style-exists = Đã tồn tại kiểu ô có tên này.
+    .cell-style-in-use = Kiểu ô đang được sử dụng và không thể xóa.
+    .template-size = __ocs_arg_rows__ hàng × __ocs_arg_columns__ cột
+    .cell-properties = Thuộc tính ô
+    .cell-text = Văn bản ô
+    .cell-borders = Viền ô
+    .cell-styles = Kiểu ô
+    .label = Nhãn
+    .margins = Lề
+    .merge-on-create = Gộp ô khi tạo hàng/cột
+    .new-from-this = Tạo mới từ kiểu này
+    .new-name = Tên mới
+    .real-number = Số thực
+    .whole-number = Số nguyên
+    .select-table-button = Chọn bảng…
+    .starting-table = Bảng ban đầu
+    .table-direction = Hướng bảng
+
+table-cells =
+    .borders-title = Viền ô
+    .contents-title = Nội dung ô
+    .line = Đường
+    .lineweight = Độ dày nét
+    .linetype = Kiểu đường
+    .color = Màu sắc
+    .double = Đường đôi
+    .spacing = Khoảng cách
+    .apply-to = Áp dụng cho
+    .all = Tất cả
+    .outside = Bên ngoài
+    .inside = Bên trong
+    .none = Không có
+    .top = Trên
+    .bottom = Dưới
+    .left = Trái
+    .right = Phải
+    .inside-horizontal = Bên trong ngang
+    .inside-vertical = Bên trong dọc
+    .contents = Nội dung
+    .empty = Ô trống.
+    .move-up = Lên
+    .move-down = Xuống
+    .delete = Xóa
+    .layout = Bố trí
+    .flow = Liền mạch
+    .stack-horizontal = Xếp theo chiều ngang
+    .stack-vertical = Xếp theo chiều dọc
+    .content-spacing = Khoảng cách
+    .block-item = Khối: { $name }
+    .text-item = Văn bản: { $text }
+    .text-content = Văn bản ô bảng
+    .borders-help = Đặt độ dày nét, kiểu đường và màu của viền các ô đã chọn; chọn các cạnh áp dụng.
+    .contents-help = Sắp xếp, xóa và bố trí nội dung của ô đã chọn.
+    .block-title = Khối trong ô
+    .format-title = Định dạng dữ liệu ô
+    .block = Khối
+    .block-name = Tên
+    .browse = Duyệt...
+    .block-path = Đường dẫn
+    .placement = Vị trí
+    .alignment = Căn chỉnh ô
+    .scale = Tỷ lệ
+    .autofit = Tự động khớp
+    .rotation = Góc xoay
+    .format = Định dạng
+    .current-precision = Độ chính xác hiện tại
+    .precision = Độ chính xác
+    .symbol = Ký hiệu
+    .append-symbol = Ký hiệu ở cuối
+    .negative-parens = Số âm trong ngoặc đơn
+    .list-separator = Dấu phân cách danh sách
+    .date-format = Định dạng ngày
+    .no-format-settings = Kiểu dữ liệu này không có thiết lập định dạng.
+    .data-type = Kiểu dữ liệu
+    .format-settings = Định dạng
+    .currency = Tiền tệ
+    .decimal-number = Số thập phân
+    .percentage = Phần trăm
+    .whole-number = Số nguyên
+    .grads = Grad
+    .sample-text = văn bản mẫu
+    .block-help = Đặt một khối vào các ô đã chọn: vị trí, tỷ lệ (hoặc vừa khít ô) và góc xoay của khối.
+    .format-help = Đặt kiểu dữ liệu và định dạng dùng để đọc giá trị của các ô đã chọn.
+    .additional-format = Định dạng bổ sung
+    .conversion = Hệ số chuyển đổi
+    .prefix = Tiền tố
+    .suffix = Hậu tố
+    .decimal-separator = Dấu phân cách thập phân
+    .thousands-separator = Dấu phân cách hàng nghìn
+    .space = Dấu cách
+    .separator-none = (Không có)
+    .zero-leading = Số 0 ở đầu
+    .zero-trailing = Số 0 ở cuối
+    .zero-feet = 0 feet
+    .zero-inches = 0 inch
+    .warning-title = Kiểu dữ liệu không khớp
+    .warning-heading = Các ô này chứa giá trị không thuộc kiểu dữ liệu đã chọn.
+    .warning-note = Chuyển đổi sẽ đọc từng giá trị theo kiểu mới; giá trị không đọc được theo kiểu đó sẽ bị xóa. Hủy bỏ giữ nguyên các ô.
+    .warning-ok = Chuyển đổi
+    .warning-cancel = Hủy bỏ

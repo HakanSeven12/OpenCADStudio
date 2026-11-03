@@ -3977,6 +3977,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  ກໍານົດມຸມໝູນ <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  ກໍານົດຈຸດປາຍທີສອງ:
     .tolerance-specify-insertion-point = TOLERANCE  ກໍານົດຈຸດແຊກ:
+    .tcell-row-above =
+        ແຊກແຖວ
+        ດ້ານເທິງ
+    .tcell-row-below =
+        ແຊກແຖວ
+        ດ້ານລຸ່ມ
+    .tcell-delete-rows =
+        ລຶບ
+        ແຖວ
+    .tcell-col-left =
+        ແຊກຖັນ
+        ດ້ານຊ້າຍ
+    .tcell-col-right =
+        ແຊກຖັນ
+        ດ້ານຂວາ
+    .tcell-delete-cols =
+        ລຶບ
+        ຖັນ
+    .tcell-merge =
+        ຮວມ
+        ຫ້ອງ
+    .tcell-unmerge =
+        ຍົກເລີກ
+        ການຮວມ
+    .tcell-lock =
+        ລັອກ
+        ຫ້ອງ
+    .tcell-edit =
+        ແກ້ໄຂ
+        ຂໍ້ຄວາມ
+    .tcell-match =
+        ຈັບຄູ່
+        ຫ້ອງ
+    .tcell-borders =
+        ເສັ້ນຂອບ
+        ຫ້ອງ
+    .tcell-format =
+        ຮູບແບບ
+        ຂໍ້ມູນ
+    .tcell-block =
+        ແຊກ
+        ບລັອກ
+    .tcell-field =
+        ແຊກ
+        ຟີລດ໌
+    .tcell-contents =
+        ຈັດການເນື້ອໃນ
+        ຫ້ອງ
+    .tcell-link =
+        ລິ້ງ
+        ຫ້ອງ
+    .tcell-download =
+        ດາວໂຫຼດ
+        ຈາກແຫຼ່ງ
+    .tcell-row-style = ຮູບແບບແຖວ
+    .tcell-column-style = ຮູບແບບຖັນ
+    .tcell-width = ຄວາມກວ້າງຫ້ອງ
+    .tcell-height = ຄວາມສູງຫ້ອງ
+    .tcell-border-color = ສີເສັ້ນຂອບ
+    .tcell-border-lineweight = ຄວາມໜາເສັ້ນຂອບ
+    .tcell-border-linetype = ປະເພດເສັ້ນຂອບ
+    .tcell-locking = ການລັອກຫ້ອງ
+    .tcell-data-link = ລິ້ງຂໍ້ມູນຫ້ອງ
+    .tcell-select-destination = ເລືອກຫ້ອງປາຍທາງ:
+    .tcell-select-cell = ເລືອກຫ້ອງຕາຕະລາງ:
+    .tcell-range-first = ເລືອກມຸມທຳອິດຂອງຂອບເຂດຫ້ອງຕາຕະລາງ:
+    .tcell-range-second = ເລືອກມຸມທີສອງຂອງຂອບເຂດຫ້ອງຕາຕະລາງ:
+    .tcell-align-prompt = ປ້ອນການຈັດແນວຫ້ອງ [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = ປ້ອນຮູບແບບຂໍ້ມູນ [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = ປ້ອນຊື່ບລັອກ ຫຼື [?]:
+    .tcell-formula-prompt = ປ້ອນສູດຄິດໄລ່ [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = ຕາມແຖວ/ຖັນ
+    .tcell-unlocked = ບໍ່ໄດ້ລັອກ
+    .tcell-content-locked = ລັອກເນື້ອໃນ
+    .tcell-format-locked = ລັອກຮູບແບບ
+    .tcell-content-format-locked = ລັອກເນື້ອໃນ ແລະ ຮູບແບບ
+    .tcell-not-linked = ບໍ່ໄດ້ລິ້ງ
+    .tcell-invalid-cell = ຫ້ອງບໍ່ຖືກຕ້ອງ.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  ກຳນົດຈຸດແຊກ:
@@ -6574,6 +6652,7 @@ dimstyle =
     .move-text-outside-first = ຍ້າຍຂໍ້ຄວາມອອກດ້ານນອກກ່ອນ
     .period = ຈຸດຈ້ຳ (Period)
     .space = ຍະຫວ່າງ
+    .separator-none = (ບໍ່ມີ)
     .surveyors-units = ຫົວໜ່ວຍການສຳຫຼວດ
 
 style-manager =
@@ -8226,3 +8305,133 @@ block-value-set =
     .title = ຊຸດຄ່າ
     .x-distance = ໄລຍະຫ່າງ X
     .y-distance = ໄລຍະຫ່າງ Y
+
+table-style-cells =
+    .tbl-start-from-style = ເລີ່ມຈາກຮູບແບບຕາຕະລາງ
+    .tbl-extra-columns = ຖັນເພີ່ມເຕີມ
+    .tbl-extra-rows = ແຖວເພີ່ມເຕີມ
+    .tbl-keep-from-template = ເກັບໄວ້ຈາກຕາຕະລາງເລີ່ມຕົ້ນ:
+    .tbl-keep-label-text = ຂໍ້ຄວາມຫ້ອງປ້າຍກຳກັບ
+    .tbl-keep-data-text = ຂໍ້ຄວາມຫ້ອງຂໍ້ມູນ
+    .tbl-keep-overrides = ການແທນທີ່ຮູບແບບຫ້ອງ
+    .tbl-keep-links = ລິ້ງຂໍ້ມູນ
+    .tbl-keep-fields = ຟີລດ໌
+    .tbl-keep-formulas = ສູດຄິດໄລ່
+    .tbl-extra-whole = ແຖວ ແລະ ຖັນເພີ່ມເຕີມຕ້ອງເປັນຈຳນວນເຕັມ.
+    .from-style-insertion = __ocs_arg_n__  ກຳນົດຈຸດແຊກ ຫຼື [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  ປ້ອນຊື່ຮູບແບບຕາຕະລາງ ຫຼື [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  ປ້ອນຈຳນວນແຖວເພີ່ມເຕີມ <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  ປ້ອນຈຳນວນຖັນເພີ່ມເຕີມ <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  ປ້ອນຕົວເລືອກການແຊກ [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  ລວມ __ocs_arg_what__ ໃນຕາຕະລາງທີ່ແຊກບໍ? [Yes/No] <__ocs_arg_current__>:
+    .label-text = ຂໍ້ຄວາມປ້າຍກຳກັບ
+    .data-text = ຂໍ້ຄວາມຂໍ້ມູນ
+    .formulas = ສູດຄິດໄລ່
+    .fields = ຟີລດ໌
+    .data-links = ລິ້ງຂໍ້ມູນ
+    .blocks = ບລັອກ
+    .cell-style-overrides = ການແທນທີ່ຮູບແບບຫ້ອງ
+    .style-name-header = ຊື່ຮູບແບບຕາຕະລາງ
+    .no-starting-table = ຮູບແບບຕາຕະລາງບໍ່ມີຕາຕະລາງ.
+    .select-table = ເລືອກຕາຕະລາງ:
+    .not-a-table = ວັດຖຸນີ້ບໍ່ແມ່ນຕາຕະລາງ.
+    .cell-style-exists = ມີຮູບແບບຫ້ອງຊື່ນີ້ຢູ່ແລ້ວ.
+    .cell-style-in-use = ຮູບແບບຫ້ອງກຳລັງຖືກໃຊ້ ແລະ ລຶບບໍ່ໄດ້.
+    .template-size = __ocs_arg_rows__ ແຖວ × __ocs_arg_columns__ ຖັນ
+    .cell-properties = ຄຸນສົມບັດຫ້ອງ
+    .cell-text = ຂໍ້ຄວາມຫ້ອງ
+    .cell-borders = ເສັ້ນຂອບຫ້ອງ
+    .cell-styles = ຮູບແບບຫ້ອງ
+    .label = ປ້າຍກຳກັບ
+    .margins = ໄລຍະຂອບ
+    .merge-on-create = ຮວມຫ້ອງເມື່ອສ້າງແຖວ/ຖັນ
+    .new-from-this = ສ້າງໃໝ່ຈາກອັນນີ້
+    .new-name = ຊື່ໃໝ່
+    .real-number = ຈຳນວນຈິງ
+    .whole-number = ຈຳນວນເຕັມ
+    .select-table-button = ເລືອກຕາຕະລາງ…
+    .starting-table = ຕາຕະລາງເລີ່ມຕົ້ນ
+    .table-direction = ທິດທາງຕາຕະລາງ
+
+table-cells =
+    .borders-title = ເສັ້ນຂອບຫ້ອງ
+    .contents-title = ເນື້ອໃນຫ້ອງ
+    .line = ເສັ້ນ
+    .lineweight = ຄວາມໜາເສັ້ນ
+    .linetype = ປະເພດເສັ້ນ
+    .color = ສີ
+    .double = ເສັ້ນຄູ່
+    .spacing = ໄລຍະຫ່າງ
+    .apply-to = ນຳໃຊ້ກັບ
+    .all = ທັງໝົດ
+    .outside = ດ້ານນອກ
+    .inside = ດ້ານໃນ
+    .none = ບໍ່ມີ
+    .top = ເທິງ
+    .bottom = ລຸ່ມ
+    .left = ຊ້າຍ
+    .right = ຂວາ
+    .inside-horizontal = ດ້ານໃນລວງນອນ
+    .inside-vertical = ດ້ານໃນລວງຕັ້ງ
+    .contents = ເນື້ອໃນ
+    .empty = ຫ້ອງນີ້ຫວ່າງເປົ່າ.
+    .move-up = ຍ້າຍຂຶ້ນ
+    .move-down = ຍ້າຍລົງ
+    .delete = ລຶບ
+    .layout = ການຈັດວາງ
+    .flow = ໄຫຼຕໍ່ເນື່ອງ
+    .stack-horizontal = ຊ້ອນລວງນອນ
+    .stack-vertical = ຊ້ອນລວງຕັ້ງ
+    .content-spacing = ໄລຍະຫ່າງ
+    .block-item = ບລັອກ: { $name }
+    .text-item = ຂໍ້ຄວາມ: { $text }
+    .text-content = ຂໍ້ຄວາມຫ້ອງຕາຕະລາງ
+    .borders-help = ກຳນົດຄວາມໜາເສັ້ນ, ປະເພດເສັ້ນ ແລະ ສີຂອງເສັ້ນຂອບຫ້ອງທີ່ເລືອກ; ເລືອກຂອບທີ່ຈະນຳໃຊ້.
+    .contents-help = ຈັດລຳດັບ, ລຶບ ແລະ ຈັດວາງເນື້ອໃນຂອງຫ້ອງທີ່ເລືອກ.
+    .block-title = ບລັອກຫ້ອງ
+    .format-title = ຮູບແບບຂໍ້ມູນຫ້ອງ
+    .block = ບລັອກ
+    .block-name = ຊື່
+    .browse = ເລືອກໄຟລ໌...
+    .block-path = ເສັ້ນທາງ
+    .placement = ການວາງ
+    .alignment = ການຈັດແນວຫ້ອງ
+    .scale = ມາດຕາສ່ວນ
+    .autofit = ປັບພໍດີອັດຕະໂນມັດ
+    .rotation = ມຸມໝູນ
+    .format = ຮູບແບບ
+    .current-precision = ຄວາມລະອຽດປັດຈຸບັນ
+    .precision = ຄວາມລະອຽດ
+    .symbol = ສັນຍາລັກ
+    .append-symbol = ຕໍ່ສັນຍາລັກທາງຫຼັງ
+    .negative-parens = ຄ່າລົບໃນວົງເລັບ
+    .list-separator = ຕົວຂັ້ນລາຍການ
+    .date-format = ຮູບແບບວັນທີ
+    .no-format-settings = ປະເພດຂໍ້ມູນນີ້ບໍ່ມີການຕັ້ງຄ່າຮູບແບບ.
+    .data-type = ປະເພດຂໍ້ມູນ
+    .format-settings = ຮູບແບບ
+    .currency = ສະກຸນເງິນ
+    .decimal-number = ຈຳນວນທົດສະນິຍົມ
+    .percentage = ເປີເຊັນ
+    .whole-number = ຈຳນວນເຕັມ
+    .grads = ກຣາດ
+    .sample-text = ຂໍ້ຄວາມຕົວຢ່າງ
+    .block-help = ວາງບລັອກໃນຫ້ອງທີ່ເລືອກ: ຕຳແໜ່ງ, ມາດຕາສ່ວນ (ຫຼື ປັບພໍດີຫ້ອງ) ແລະ ການໝູນ.
+    .format-help = ກຳນົດປະເພດຂໍ້ມູນ ແລະ ຮູບແບບທີ່ໃຊ້ອ່ານຄ່າຂອງຫ້ອງທີ່ເລືອກ.
+    .additional-format = ຮູບແບບເພີ່ມເຕີມ
+    .conversion = ຕົວຄູນການແປງ
+    .prefix = ຄຳນຳໜ້າ
+    .suffix = ຄຳຕໍ່ທ້າຍ
+    .decimal-separator = ຕົວຂັ້ນທົດສະນິຍົມ
+    .thousands-separator = ຕົວຂັ້ນຫຼັກພັນ
+    .space = ຍະຫວ່າງ
+    .separator-none = (ບໍ່ມີ)
+    .zero-leading = ສູນນຳໜ້າ
+    .zero-trailing = ສູນທາງທ້າຍ
+    .zero-feet = 0 ຟຸດ
+    .zero-inches = 0 ນິ້ວ
+    .warning-title = ປະເພດຂໍ້ມູນບໍ່ກົງກັນ
+    .warning-heading = ຫ້ອງເຫຼົ່ານີ້ມີຄ່າທີ່ບໍ່ແມ່ນປະເພດຂໍ້ມູນທີ່ເລືອກ.
+    .warning-note = ການແປງຈະອ່ານແຕ່ລະຄ່າເປັນປະເພດໃໝ່; ຄ່າທີ່ອ່ານບໍ່ໄດ້ຈະຖືກລ້າງ. ຍົກເລີກຈະບໍ່ປ່ຽນແປງຫ້ອງ.
+    .warning-ok = ແປງ
+    .warning-cancel = ຍົກເລີກ

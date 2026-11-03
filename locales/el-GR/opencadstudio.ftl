@@ -3976,6 +3976,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Ορίστε γωνία περιστροφής <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE  Ορίστε σημείο εισαγωγής:
+    .tcell-row-above =
+        Εισαγωγή γραμμής
+        από πάνω
+    .tcell-row-below =
+        Εισαγωγή γραμμής
+        από κάτω
+    .tcell-delete-rows =
+        Διαγραφή
+        γραμμών
+    .tcell-col-left =
+        Εισαγωγή στήλης
+        αριστερά
+    .tcell-col-right =
+        Εισαγωγή στήλης
+        δεξιά
+    .tcell-delete-cols =
+        Διαγραφή
+        στηλών
+    .tcell-merge =
+        Συγχώνευση
+        κελιών
+    .tcell-unmerge =
+        Κατάργηση
+        συγχώνευσης
+    .tcell-lock =
+        Κλείδωμα
+        κελιού
+    .tcell-edit =
+        Επεξεργασία
+        κειμένου
+    .tcell-match =
+        Αντιστοίχιση
+        κελιού
+    .tcell-borders =
+        Περιγράμματα
+        κελιού
+    .tcell-format =
+        Μορφή
+        δεδομένων
+    .tcell-block =
+        Εισαγωγή
+        μπλοκ
+    .tcell-field =
+        Εισαγωγή
+        πεδίου
+    .tcell-contents =
+        Διαχείριση
+        περιεχομένου κελιού
+    .tcell-link =
+        Σύνδεση
+        κελιού
+    .tcell-download =
+        Λήψη
+        από πηγή
+    .tcell-row-style = Στυλ γραμμής
+    .tcell-column-style = Στυλ στήλης
+    .tcell-width = Πλάτος κελιού
+    .tcell-height = Ύψος κελιού
+    .tcell-border-color = Χρώμα περιγράμματος
+    .tcell-border-lineweight = Πάχος γραμμής περιγράμματος
+    .tcell-border-linetype = Τύπος γραμμής περιγράμματος
+    .tcell-locking = Κλείδωμα κελιού
+    .tcell-data-link = Σύνδεση δεδομένων κελιού
+    .tcell-select-destination = Επιλέξτε κελί προορισμού:
+    .tcell-select-cell = Επιλέξτε κελί πίνακα:
+    .tcell-range-first = Επιλέξτε την πρώτη γωνία της περιοχής κελιών:
+    .tcell-range-second = Επιλέξτε τη δεύτερη γωνία της περιοχής κελιών:
+    .tcell-align-prompt = Εισαγάγετε στοίχιση κελιού [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Εισαγάγετε μορφή δεδομένων [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Εισαγάγετε όνομα μπλοκ ή [?]:
+    .tcell-formula-prompt = Εισαγάγετε τύπο [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Ανά γραμμή/στήλη
+    .tcell-unlocked = Ξεκλείδωτο
+    .tcell-content-locked = Κλειδωμένο περιεχόμενο
+    .tcell-format-locked = Κλειδωμένη μορφή
+    .tcell-content-format-locked = Κλειδωμένο περιεχόμενο και μορφή
+    .tcell-not-linked = Χωρίς σύνδεση
+    .tcell-invalid-cell = Μη έγκυρο κελί.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Καθορίστε σημείο εισαγωγής:
@@ -6573,6 +6651,7 @@ dimstyle =
     .move-text-outside-first = Μετακίνηση του κειμένου εκτός πρώτα
     .period = Τελεία
     .space = Κενό
+    .separator-none = (Κανένα)
     .surveyors-units = Τοπογραφικές μονάδες
 
 style-manager =
@@ -8235,3 +8314,133 @@ block-value-set =
     .title = Σύνολο τιμών
     .x-distance = Απόσταση X
     .y-distance = Απόσταση Y
+
+table-style-cells =
+    .tbl-start-from-style = Έναρξη από στυλ πίνακα
+    .tbl-extra-columns = Πρόσθετες στήλες
+    .tbl-extra-rows = Πρόσθετες γραμμές
+    .tbl-keep-from-template = Διατήρηση από τον αρχικό πίνακα:
+    .tbl-keep-label-text = Κείμενο κελιών ετικέτας
+    .tbl-keep-data-text = Κείμενο κελιών δεδομένων
+    .tbl-keep-overrides = Παρακάμψεις στυλ κελιού
+    .tbl-keep-links = Συνδέσεις δεδομένων
+    .tbl-keep-fields = Πεδία
+    .tbl-keep-formulas = Τύποι
+    .tbl-extra-whole = Οι πρόσθετες γραμμές και στήλες πρέπει να είναι ακέραιοι αριθμοί.
+    .from-style-insertion = __ocs_arg_n__  Καθορίστε σημείο εισαγωγής ή [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Εισαγάγετε όνομα στυλ πίνακα ή [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Εισαγάγετε πλήθος πρόσθετων γραμμών <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Εισαγάγετε πλήθος πρόσθετων στηλών <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Εισαγάγετε επιλογή εισαγωγής [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Συμπερίληψη __ocs_arg_what__ στον εισαγόμενο πίνακα; [Yes/No] <__ocs_arg_current__>:
+    .label-text = κείμενο ετικέτας
+    .data-text = κείμενο δεδομένων
+    .formulas = τύποι
+    .fields = πεδία
+    .data-links = συνδέσεις δεδομένων
+    .blocks = μπλοκ
+    .cell-style-overrides = παρακάμψεις στυλ κελιού
+    .style-name-header = Όνομα στυλ πίνακα
+    .no-starting-table = Το στυλ πίνακα δεν περιέχει πίνακα.
+    .select-table = Επιλέξτε πίνακα:
+    .not-a-table = Το αντικείμενο δεν είναι πίνακας.
+    .cell-style-exists = Υπάρχει ήδη στυλ κελιού με αυτό το όνομα.
+    .cell-style-in-use = Το στυλ κελιού χρησιμοποιείται και δεν μπορεί να διαγραφεί.
+    .template-size = __ocs_arg_rows__ γραμμές × __ocs_arg_columns__ στήλες
+    .cell-properties = Ιδιότητες κελιού
+    .cell-text = Κείμενο κελιού
+    .cell-borders = Περιγράμματα κελιού
+    .cell-styles = Στυλ κελιών
+    .label = Ετικέτα
+    .margins = Περιθώρια
+    .merge-on-create = Συγχώνευση κελιών κατά τη δημιουργία γραμμών/στηλών
+    .new-from-this = Νέο από αυτό
+    .new-name = Νέο όνομα
+    .real-number = Πραγματικός αριθμός
+    .whole-number = Ακέραιος αριθμός
+    .select-table-button = Επιλογή πίνακα…
+    .starting-table = Αρχικός πίνακας
+    .table-direction = Κατεύθυνση πίνακα
+
+table-cells =
+    .borders-title = Περιγράμματα κελιού
+    .contents-title = Περιεχόμενο κελιού
+    .line = Γραμμή
+    .lineweight = Πάχος γραμμής
+    .linetype = Τύπος γραμμής
+    .color = Χρώμα
+    .double = Διπλή γραμμή
+    .spacing = Απόσταση
+    .apply-to = Εφαρμογή σε
+    .all = Όλα
+    .outside = Εξωτερικά
+    .inside = Εσωτερικά
+    .none = Κανένα
+    .top = Πάνω
+    .bottom = Κάτω
+    .left = Αριστερά
+    .right = Δεξιά
+    .inside-horizontal = Εσωτερικά οριζόντια
+    .inside-vertical = Εσωτερικά κατακόρυφα
+    .contents = Περιεχόμενο
+    .empty = Το κελί είναι κενό.
+    .move-up = Μετακίνηση πάνω
+    .move-down = Μετακίνηση κάτω
+    .delete = Διαγραφή
+    .layout = Διάταξη
+    .flow = Ροή
+    .stack-horizontal = Στοίβαξη οριζόντια
+    .stack-vertical = Στοίβαξη κατακόρυφα
+    .content-spacing = Απόσταση
+    .block-item = Μπλοκ: { $name }
+    .text-item = Κείμενο: { $text }
+    .text-content = Κείμενο κελιού πίνακα
+    .borders-help = Ορίζει πάχος γραμμής, τύπο γραμμής και χρώμα στα περιγράμματα των επιλεγμένων κελιών· επιλέξτε τις πλευρές εφαρμογής.
+    .contents-help = Ταξινομεί, αφαιρεί και διατάσσει το περιεχόμενο του επιλεγμένου κελιού.
+    .block-title = Μπλοκ κελιού
+    .format-title = Μορφή δεδομένων κελιού
+    .block = Μπλοκ
+    .block-name = Όνομα
+    .browse = Αναζήτηση...
+    .block-path = Διαδρομή
+    .placement = Τοποθέτηση
+    .alignment = Στοίχιση κελιού
+    .scale = Κλίμακα
+    .autofit = Αυτόματη προσαρμογή
+    .rotation = Γωνία περιστροφής
+    .format = Μορφή
+    .current-precision = Τρέχουσα ακρίβεια
+    .precision = Ακρίβεια
+    .symbol = Σύμβολο
+    .append-symbol = Προσάρτηση συμβόλου
+    .negative-parens = Αρνητικοί σε παρενθέσεις
+    .list-separator = Διαχωριστικό λίστας
+    .date-format = Μορφή ημερομηνίας
+    .no-format-settings = Αυτός ο τύπος δεδομένων δεν έχει ρυθμίσεις μορφής.
+    .data-type = Τύπος δεδομένων
+    .format-settings = Μορφή
+    .currency = Νόμισμα
+    .decimal-number = Δεκαδικός αριθμός
+    .percentage = Ποσοστό
+    .whole-number = Ακέραιος αριθμός
+    .grads = Βαθμοί grad
+    .sample-text = δείγμα κειμένου
+    .block-help = Τοποθετεί μπλοκ στα επιλεγμένα κελιά: θέση, κλίμακα (ή προσαρμογή στο κελί) και περιστροφή.
+    .format-help = Ορίζει τον τύπο δεδομένων και τη μορφή με την οποία διαβάζονται οι τιμές των επιλεγμένων κελιών.
+    .additional-format = Πρόσθετη μορφή
+    .conversion = Συντελεστής μετατροπής
+    .prefix = Πρόθεμα
+    .suffix = Επίθημα
+    .decimal-separator = Δεκαδικό διαχωριστικό
+    .thousands-separator = Διαχωριστικό χιλιάδων
+    .space = Κενό
+    .separator-none = (Κανένα)
+    .zero-leading = Αρχικά μηδενικά
+    .zero-trailing = Τελικά μηδενικά
+    .zero-feet = 0 πόδια
+    .zero-inches = 0 ίντσες
+    .warning-title = Ο τύπος δεδομένων δεν ταιριάζει
+    .warning-heading = Αυτά τα κελιά περιέχουν τιμές που δεν είναι του επιλεγμένου τύπου δεδομένων.
+    .warning-note = Η μετατροπή διαβάζει κάθε τιμή ως τον νέο τύπο· μια τιμή που δεν διαβάζεται διαγράφεται. Το Άκυρο αφήνει τα κελιά αμετάβλητα.
+    .warning-ok = Μετατροπή
+    .warning-cancel = Άκυρο

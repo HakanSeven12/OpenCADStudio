@@ -3975,6 +3975,84 @@ annotate =
     .text-specify-rotation-angle = TEXT  Określ kąt obrotu <__ocs_fmt_0__>:
     .text-specify-second-endpoint = TEXT  { common.specify }: { common.endpoint-2 }:
     .tolerance-specify-insertion-point = TOLERANCE Określ punkt wstawienia:
+    .tcell-row-above =
+        Wstaw wiersz
+        powyżej
+    .tcell-row-below =
+        Wstaw wiersz
+        poniżej
+    .tcell-delete-rows =
+        Usuń
+        wiersze
+    .tcell-col-left =
+        Wstaw kolumnę
+        z lewej
+    .tcell-col-right =
+        Wstaw kolumnę
+        z prawej
+    .tcell-delete-cols =
+        Usuń
+        kolumny
+    .tcell-merge =
+        Scal
+        komórki
+    .tcell-unmerge =
+        Rozdziel
+        komórki
+    .tcell-lock =
+        Blokowanie
+        komórek
+    .tcell-edit =
+        Edytuj
+        tekst
+    .tcell-match =
+        Dopasuj
+        komórkę
+    .tcell-borders =
+        Obramowanie
+        komórek
+    .tcell-format =
+        Format
+        danych
+    .tcell-block =
+        Wstaw
+        blok
+    .tcell-field =
+        Wstaw
+        pole
+    .tcell-contents =
+        Zarządzaj
+        zawartością
+    .tcell-link =
+        Połącz
+        komórkę
+    .tcell-download =
+        Pobierz
+        ze źródła
+    .tcell-row-style = Styl wiersza
+    .tcell-column-style = Styl kolumny
+    .tcell-width = Szerokość komórki
+    .tcell-height = Wysokość komórki
+    .tcell-border-color = Kolor obramowania
+    .tcell-border-lineweight = Szerokość linii obramowania
+    .tcell-border-linetype = Rodzaj linii obramowania
+    .tcell-locking = Blokowanie komórki
+    .tcell-data-link = Łącze danych komórki
+    .tcell-select-destination = Wybierz komórkę docelową:
+    .tcell-select-cell = Wybierz komórkę tabeli:
+    .tcell-range-first = Wybierz pierwszy narożnik zakresu komórek tabeli:
+    .tcell-range-second = Wybierz drugi narożnik zakresu komórek tabeli:
+    .tcell-align-prompt = Podaj wyrównanie komórki [TL/TC/TR/ML/MC/MR/BL/BC/BR]:
+    .tcell-format-prompt = Podaj format danych [Angle/Currency/Date/Decimal/General/Percentage/Point/Text/Whole]:
+    .tcell-block-prompt = Podaj nazwę bloku lub [?]:
+    .tcell-formula-prompt = Podaj formułę [Sum/Average/Count/Cell/Equation]:
+    .tcell-by-row-column = Według wiersza/kolumny
+    .tcell-unlocked = Odblokowana
+    .tcell-content-locked = Zawartość zablokowana
+    .tcell-format-locked = Format zablokowany
+    .tcell-content-format-locked = Zawartość i format zablokowane
+    .tcell-not-linked = Niepołączona
+    .tcell-invalid-cell = Nieprawidłowa komórka.
 
 insert =
     .pastespec-specify-insertion-point = PASTESPEC  Określ punkt wstawienia:
@@ -6572,6 +6650,7 @@ dimstyle =
     .move-text-outside-first = Najpierw przenieś tekst na zewnątrz
     .period = Okres
     .space = Spacja
+    .separator-none = (Brak)
     .surveyors-units = Jednostki geodezyjne
 
 style-manager =
@@ -8237,3 +8316,133 @@ block-value-set =
     .title = Zestaw wartości
     .x-distance = Odległość X
     .y-distance = Odległość Y
+
+table-style-cells =
+    .tbl-start-from-style = Zacznij od stylu tabeli
+    .tbl-extra-columns = Dodatkowe kolumny
+    .tbl-extra-rows = Dodatkowe wiersze
+    .tbl-keep-from-template = Zachowaj z tabeli początkowej:
+    .tbl-keep-label-text = Tekst komórek etykiet
+    .tbl-keep-data-text = Tekst komórek danych
+    .tbl-keep-overrides = Nadpisania stylu komórek
+    .tbl-keep-links = Łącza danych
+    .tbl-keep-fields = Pola
+    .tbl-keep-formulas = Formuły
+    .tbl-extra-whole = Liczba dodatkowych wierszy i kolumn musi być liczbą całkowitą.
+    .from-style-insertion = __ocs_arg_n__  Określ punkt wstawienia lub [Style/Rows/Columns/Options]:
+    .from-style-name = __ocs_arg_n__  Podaj nazwę stylu tabeli lub [?] <__ocs_arg_style__>:
+    .from-style-rows = __ocs_arg_n__  Podaj liczbę dodatkowych wierszy <__ocs_arg_rows__>:
+    .from-style-columns = __ocs_arg_n__  Podaj liczbę dodatkowych kolumn <__ocs_arg_columns__>:
+    .from-style-options = __ocs_arg_n__  Podaj opcję wstawiania [Label text/Data text/Formulas/fIelds/data liNks/Blocks/cell style Overrides] <exit>:
+    .from-style-option = __ocs_arg_n__  Uwzględnić __ocs_arg_what__ we wstawionej tabeli? [Yes/No] <__ocs_arg_current__>:
+    .label-text = tekst etykiet
+    .data-text = tekst danych
+    .formulas = formuły
+    .fields = pola
+    .data-links = łącza danych
+    .blocks = bloki
+    .cell-style-overrides = nadpisania stylu komórek
+    .style-name-header = Nazwa stylu tabeli
+    .no-starting-table = Styl tabeli nie zawiera tabeli.
+    .select-table = Wybierz tabelę:
+    .not-a-table = Obiekt nie jest tabelą.
+    .cell-style-exists = Styl komórki o tej nazwie już istnieje.
+    .cell-style-in-use = Styl komórki jest używany i nie można go usunąć.
+    .template-size = __ocs_arg_rows__ wierszy × __ocs_arg_columns__ kolumn
+    .cell-properties = Właściwości komórki
+    .cell-text = Tekst komórki
+    .cell-borders = Obramowanie komórek
+    .cell-styles = Style komórek
+    .label = Etykieta
+    .margins = Marginesy
+    .merge-on-create = Scalaj komórki przy tworzeniu wiersza/kolumny
+    .new-from-this = Nowy na podstawie tego
+    .new-name = Nowa nazwa
+    .real-number = Liczba rzeczywista
+    .whole-number = Liczba całkowita
+    .select-table-button = Wybierz tabelę…
+    .starting-table = Tabela początkowa
+    .table-direction = Kierunek tabeli
+
+table-cells =
+    .borders-title = Obramowanie komórek
+    .contents-title = Zawartość komórki
+    .line = Linia
+    .lineweight = Szerokość linii
+    .linetype = Rodzaj linii
+    .color = Kolor
+    .double = Linia podwójna
+    .spacing = Odstęp
+    .apply-to = Zastosuj do
+    .all = Wszystkie
+    .outside = Zewnętrzne
+    .inside = Wewnętrzne
+    .none = Brak
+    .top = Górne
+    .bottom = Dolne
+    .left = Lewe
+    .right = Prawe
+    .inside-horizontal = Wewnętrzne poziome
+    .inside-vertical = Wewnętrzne pionowe
+    .contents = Zawartość
+    .empty = Komórka jest pusta.
+    .move-up = Przesuń w górę
+    .move-down = Przesuń w dół
+    .delete = Usuń
+    .layout = Układ
+    .flow = Przepływ
+    .stack-horizontal = Ułożone poziomo
+    .stack-vertical = Ułożone pionowo
+    .content-spacing = Odstęp
+    .block-item = Blok: { $name }
+    .text-item = Tekst: { $text }
+    .text-content = Tekst komórki tabeli
+    .borders-help = Ustawia szerokość linii, rodzaj linii i kolor obramowania wybranych komórek; wybierz krawędzie, których dotyczy.
+    .contents-help = Porządkuje, usuwa i rozmieszcza zawartość wybranej komórki.
+    .block-title = Blok komórki
+    .format-title = Format danych komórki
+    .block = Blok
+    .block-name = Nazwa
+    .browse = Przeglądaj...
+    .block-path = Ścieżka
+    .placement = Umieszczenie
+    .alignment = Wyrównanie komórki
+    .scale = Skala
+    .autofit = Autodopasowanie
+    .rotation = Kąt obrotu
+    .format = Format
+    .current-precision = Bieżąca precyzja
+    .precision = Precyzja
+    .symbol = Symbol
+    .append-symbol = Symbol na końcu
+    .negative-parens = Liczby ujemne w nawiasach
+    .list-separator = Separator listy
+    .date-format = Format daty
+    .no-format-settings = Ten typ danych nie ma ustawień formatu.
+    .data-type = Typ danych
+    .format-settings = Format
+    .currency = Waluta
+    .decimal-number = Liczba dziesiętna
+    .percentage = Procent
+    .whole-number = Liczba całkowita
+    .grads = Grady
+    .sample-text = przykładowy tekst
+    .block-help = Umieszcza blok w wybranych komórkach: jego położenie, skalę (lub dopasowanie do komórki) i obrót.
+    .format-help = Ustawia typ danych i format, w jakim odczytywane są wartości wybranych komórek.
+    .additional-format = Dodatkowy format
+    .conversion = Współczynnik konwersji
+    .prefix = Przedrostek
+    .suffix = Przyrostek
+    .decimal-separator = Separator dziesiętny
+    .thousands-separator = Separator tysięcy
+    .space = Spacja
+    .separator-none = (Brak)
+    .zero-leading = Zera wiodące
+    .zero-trailing = Zera końcowe
+    .zero-feet = 0 stóp
+    .zero-inches = 0 cali
+    .warning-title = Niezgodny typ danych
+    .warning-heading = Te komórki zawierają wartości innego typu niż wybrany typ danych.
+    .warning-note = Konwersja odczytuje każdą wartość jako nowy typ; wartość, której nie da się tak odczytać, zostaje wyczyszczona. Anuluj pozostawia komórki bez zmian.
+    .warning-ok = Konwertuj
+    .warning-cancel = Anuluj

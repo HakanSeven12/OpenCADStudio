@@ -1480,8 +1480,15 @@ impl OpenCADStudio {
                                 .or_else(|| document_row_style.map(|style| style.fill_enabled))
                                 .unwrap_or(false),
                         );
-                        let format = local(CellStylePropertyFlags::DATA_FORMAT)
-                            .map(|style| style.value_format.clone())
+                        let format = Some(crate::entities::table::cell_value_picture(
+                            row,
+                            column_index,
+                            table,
+                            cell,
+                        ))
+                        .filter(|picture| {
+                            !picture.is_empty() || local(CellStylePropertyFlags::DATA_FORMAT).is_some()
+                        })
                             .or_else(|| document_row_style.map(|style| style.format_string.clone()))
                             .unwrap_or_default();
                         update_row_text(&mut sections, "tbl_cell_format", format);
@@ -1715,7 +1722,9 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             );
-                            if local(CellStylePropertyFlags::DATA_TYPE).is_none() {
+                            if crate::entities::table::cell_value_type(row, column_index, table, cell)
+                                .is_none()
+                            {
                                 if let Some(style) = document_row_style {
                                     update_row_text(
                                         &mut sections,

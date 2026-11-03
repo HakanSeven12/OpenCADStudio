@@ -1835,6 +1835,59 @@ impl Ribbon {
         dropdown_backdrop(position_ribbon_dropdown(panel.into(), align_right, h_pad, top))
     }
 
+    /// Align the displayed layer with the top of the list when it opens.
+    /// The scrollable clamps the offset near the end of the list.
+    pub(crate) fn scroll_to_active_layer(&self) -> iced::Task<Message> {
+        use iced::advanced::widget::{
+            operation::{Outcome, Scrollable},
+            Id, Operation,
+        };
+
+        #[derive(Default)]
+        struct RowOffset {
+            list_y: f32,
+            row_y: Option<f32>,
+        }
+
+        impl Operation<f32> for RowOffset {
+            fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation<f32>)) {
+                operate(self);
+            }
+
+            fn scrollable(
+                &mut self,
+                id: Option<&Id>,
+                _: iced::Rectangle,
+                content: iced::Rectangle,
+                _: iced::Vector,
+                _: &mut dyn Scrollable,
+            ) {
+                if id == Some(&Id::new(LAYER_LIST_SCROLL_ID)) {
+                    self.list_y = content.y;
+                }
+            }
+
+            fn container(&mut self, id: Option<&Id>, bounds: iced::Rectangle) {
+                if id == Some(&Id::new(LAYER_ACTIVE_ROW_ID)) {
+                    self.row_y = Some(bounds.y);
+                }
+            }
+
+            fn finish(&self) -> Outcome<f32> {
+                Outcome::Some(self.row_y.map_or(0.0, |y| y - self.list_y))
+            }
+        }
+
+        // Measure the existing rows so scrolling does not change their layout
+        // or depend on a particular font's line height.
+        iced_runtime::task::widget(RowOffset::default()).then(|y| {
+            iced::widget::operation::scroll_to(
+                Id::new(LAYER_LIST_SCROLL_ID),
+                iced::widget::scrollable::AbsoluteOffset { x: 0.0, y },
+            )
+        })
+    }
+
     /// The layer list under the layer combo `id` (the ribbon's or the Quick
     /// Access Toolbar's).
     fn layer_combo_overlay(&self, id: &str, win: (f32, f32)) -> Option<Element<'_, Message>> {
@@ -1911,7 +1964,7 @@ impl Ribbon {
                     .width(Fill)
                     .padding([4, 4]);
 
-                container(
+                let item = container(
                     row![checkmark, vis, freeze]
                         .push(vp_freeze)
                         .push(lock)
@@ -1920,8 +1973,12 @@ impl Ribbon {
                         .spacing(5)
                         .align_y(iced::Center),
                 )
-                .padding([0, 4])
-                .into()
+                .padding([0, 4]);
+                if is_active {
+                    item.id(iced::widget::Id::new(LAYER_ACTIVE_ROW_ID)).into()
+                } else {
+                    item.into()
+                }
             })
             .collect();
 
@@ -1968,7 +2025,9 @@ impl Ribbon {
         let panel = container(
             column![
                 container(search).padding([4, 4]),
-                scrollable(column(rows)).height(Length::Fixed(list_h)),
+                scrollable(column(rows))
+                    .id(iced::widget::Id::new(LAYER_LIST_SCROLL_ID))
+                    .height(Length::Fixed(list_h)),
                 states,
                 container(state_manager)
                     .width(Fill)

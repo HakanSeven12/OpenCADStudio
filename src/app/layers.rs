@@ -275,3 +275,209 @@ pub(super) fn catalog_linetype_items(
             art: crate::io::linetypes::extract_pattern(&description),
         })
 }
+
+#[cfg(test)]
+mod layer_dropdown_tests {
+    use super::*;
+    use crate::app::Message;
+    use iced::advanced::widget::{operation::Scrollable, Id, Operation};
+    use iced::futures::{executor::block_on, StreamExt};
+    use iced::{Rectangle, Task, Vector};
+    use iced_test::core::{renderer::Headless, shell, window};
+    use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+    #[derive(Default)]
+    struct ListProbe {
+        bounds: Rectangle,
+        offset: Vector,
+        content_height: f32,
+        active_row: Rectangle,
+        labels: Vec<(String, Rectangle)>,
+    }
+
+    impl Operation for ListProbe {
+        fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn Operation)) {
+            operate(self);
+        }
+
+        fn scrollable(
+            &mut self,
+            id: Option<&Id>,
+            bounds: Rectangle,
+            content: Rectangle,
+            translation: Vector,
+            _: &mut dyn Scrollable,
+        ) {
+            if id == Some(&Id::new(ui::ribbon::widgets::LAYER_LIST_SCROLL_ID)) {
+                self.bounds = bounds;
+                self.offset = translation;
+                self.content_height = content.height;
+            }
+        }
+
+        fn container(&mut self, id: Option<&Id>, bounds: Rectangle) {
+            if id == Some(&Id::new(ui::ribbon::widgets::LAYER_ACTIVE_ROW_ID)) {
+                self.active_row = bounds;
+            }
+        }
+
+        fn text(&mut self, _: Option<&Id>, bounds: Rectangle, text: &str) {
+            self.labels.push((text.to_owned(), bounds));
+        }
+    }
+
+    fn inspect(
+        app: &OpenCADStudio,
+        renderer: &mut iced::Renderer,
+        cache: &mut Cache,
+        task: Task<Message>,
+        toggle_visibility: Option<&str>,
+    ) -> (ListProbe, Vec<Message>) {
+        let mut view = UserInterface::build(
+            app.ribbon
+                .dropdown_overlay(&[], &[], (1024., 768.), false, &[], &[], &[])
+                .unwrap(),
+            iced::Size::new(1024., 768.),
+            std::mem::take(cache),
+            renderer,
+        );
+        if let Some(mut actions) = iced_runtime::task::into_stream(task) {
+            while let Some(action) = block_on(actions.next()) {
+                if let iced_runtime::Action::Widget(mut operation) = action {
+                    view.operate(renderer, operation.as_mut());
+                    let _ = operation.finish();
+                }
+            }
+        }
+        let mut probe = ListProbe::default();
+        view.operate(renderer, &mut probe);
+        let mut messages = Vec::new();
+        if let Some(name) = toggle_visibility {
+            let label = probe
+                .labels
+                .iter()
+                .find(|(text, _)| text == name)
+                .unwrap()
+                .1;
+            let visible_y = label.center_y() - probe.offset.y;
+            assert!(visible_y >= probe.bounds.y && visible_y < probe.bounds.y + 26.);
+            // The visibility icon follows the checkmark column.
+            let cursor =
+                iced::mouse::Cursor::Available(iced::Point::new(probe.bounds.x + 36., visible_y));
+            let events: Vec<_> = iced_test::simulator::click().collect();
+            view.update(
+                &window::Headless,
+                &shell::Waker::noop(),
+                &events,
+                cursor,
+                renderer,
+                &mut messages,
+            );
+        }
+        *cache = view.into_cache();
+        (probe, messages)
+    }
+
+    #[test]
+    fn layer_dropdown_scrolls_to_selection_without_changing_layer_order_or_current_layer() {
+        let _one = crate::headless_ui_lock();
+        let mut renderer = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .unwrap();
+        for id in [ui::ribbon::widgets::LAYER_COMBO_ID, "QAT_LAYER_COMBO"] {
+            let mut app = OpenCADStudio::new_for_test();
+            app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            for n in 0..80 {
+                let mut layer = codec::tables::Layer::new(format!("L{n:03}"));
+                layer.handle = app.tabs[i].scene.document.allocate_handle();
+                app.tabs[i].scene.document.layers.add(layer).unwrap();
+            }
+            let mut line = codec::entities::Line::new();
+            line.common.layer = "L040".into();
+            let handles = app.tabs[i]
+                .scene
+                .add_entities(vec![codec::EntityType::Line(line)]);
+            app.tabs[i].scene.select_entities(&handles);
+            app.refresh_layer_panel();
+            app.sync_ribbon_from_selection();
+            let original_order: Vec<_> = app
+                .ribbon
+                .layer_infos
+                .iter()
+                .map(|l| l.name.clone())
+                .collect();
+            let mut cache = Cache::default();
+
+            let task = app.update(Message::ToggleRibbonDropdown(id.into()));
+            assert_eq!(app.ribbon.active_layer, "L040");
+            let (probe, messages) = inspect(&app, &mut renderer, &mut cache, task, Some("L040"));
+            let initial_offset = probe.offset.y;
+            assert!(initial_offset > 420.);
+            // Iced rounds the scroll translation to whole pixels.
+            assert!(
+                (probe.active_row.y - probe.offset.y - probe.bounds.y).abs() <= 0.5,
+                "row={:?}, offset={:?}, list={:?}",
+                probe.active_row,
+                probe.offset,
+                probe.bounds,
+            );
+            let drawn_order: Vec<_> = probe
+                .labels
+                .iter()
+                .filter(|(name, _)| original_order.contains(name))
+                .map(|(name, _)| name.clone())
+                .collect();
+            assert_eq!(drawn_order, original_order);
+            assert!(
+                matches!(messages.as_slice(), [Message::LayerToggleVisible(name)] if name == "L040")
+            );
+            assert_eq!(app.tabs[i].active_layer, "0");
+
+            // Searching a long list starts at the first match, even after an
+            // initial jump far down the unfiltered list.
+            let task = app.update(Message::RibbonLayerFilterChanged("L0".into()));
+            let (probe, _) = inspect(&app, &mut renderer, &mut cache, task, None);
+            assert_eq!(probe.offset.y, 0.);
+            let _ = app.update(Message::ToggleRibbonDropdown(id.into()));
+            let task = app.update(Message::ToggleRibbonDropdown(id.into()));
+            assert!(app.ribbon.layer_filter.is_empty());
+            let (probe, _) = inspect(&app, &mut renderer, &mut cache, task, None);
+            assert_eq!(probe.offset.y, initial_offset);
+
+            for message in messages {
+                let _ = app.update(message);
+            }
+            assert!(
+                app.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .get("L040")
+                    .unwrap()
+                    .flags
+                    .off
+            );
+            assert!(app.tabs[i].scene.selected.is_empty());
+            assert_eq!(app.tabs[i].active_layer, "0");
+
+            // Without a selection, use the current drawing layer. At the
+            // end, ordinary scrolling stops at the bottom of the content.
+            app.set_current_layer_name(i, "L079").unwrap();
+            let _ = app.update(Message::CloseRibbonDropdown);
+            let task = app.update(Message::ToggleRibbonDropdown(id.into()));
+            let (probe, _) = inspect(&app, &mut renderer, &mut cache, task, None);
+            assert_eq!(
+                probe.offset.y,
+                (probe.content_height - probe.bounds.height).round()
+            );
+            app.set_current_layer_name(i, "0").unwrap();
+            let _ = app.update(Message::CloseRibbonDropdown);
+            let task = app.update(Message::ToggleRibbonDropdown(id.into()));
+            let (probe, _) = inspect(&app, &mut renderer, &mut cache, task, None);
+            assert_eq!(probe.offset.y, 0.);
+        }
+    }
+}

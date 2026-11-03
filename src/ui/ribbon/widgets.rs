@@ -383,6 +383,8 @@ pub(crate) const REDO_HISTORY_ID: &str = "REDO_HISTORY";
 pub(crate) const LAYER_COMBO_ID: &str = "LAYER_COMBO";
 /// The layer list's search box, focused when the list opens.
 pub(crate) const LAYER_SEARCH_ID: &str = "LAYER_SEARCH";
+pub(crate) const LAYER_LIST_SCROLL_ID: &str = "LAYER_LIST_SCROLL";
+pub(crate) const LAYER_ACTIVE_ROW_ID: &str = "LAYER_ACTIVE_ROW";
 pub(super) const PROP_COLOR_ID: &str = "PROP_COLOR";
 pub(super) const PROP_LINETYPE_ID: &str = "PROP_LINETYPE";
 pub(super) const PROP_LW_ID: &str = "PROP_LW";

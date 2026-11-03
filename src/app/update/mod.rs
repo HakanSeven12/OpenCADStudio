@@ -7833,6 +7833,12 @@ impl OpenCADStudio {
                         == crate::ui::ribbon::widgets::LAYER_COMBO_ID
                     {
                         self.refresh_layer_panel();
+                        // Refreshing the table restores creation defaults;
+                        // the combo must still show the selected object's layer.
+                        self.sync_ribbon_from_selection();
+                        if self.ribbon.open_dropdown.as_deref() != Some(id.as_str()) {
+                            self.ribbon.layer_filter.clear();
+                        }
                     }
                     self.ribbon.toggle_dropdown(&id);
                     // Typing goes straight to the layer list's search box.
@@ -7840,9 +7846,11 @@ impl OpenCADStudio {
                         crate::ui::ribbon::qat_list_source(open).unwrap_or(open)
                             == crate::ui::ribbon::widgets::LAYER_COMBO_ID
                     }) {
-                        task = task.chain(iced::widget::operation::focus(iced::widget::Id::new(
-                            crate::ui::ribbon::widgets::LAYER_SEARCH_ID,
-                        )));
+                        task = task
+                            .chain(self.ribbon.scroll_to_active_layer())
+                            .chain(iced::widget::operation::focus(iced::widget::Id::new(
+                                crate::ui::ribbon::widgets::LAYER_SEARCH_ID,
+                            )));
                     }
                 }
                 task
@@ -11774,7 +11782,10 @@ impl OpenCADStudio {
             }
             Message::RibbonLayerFilterChanged(f) => {
                 self.ribbon.layer_filter = f;
-                Task::none()
+                iced::widget::operation::scroll_to(
+                    iced::widget::Id::new(crate::ui::ribbon::widgets::LAYER_LIST_SCROLL_ID),
+                    iced::widget::scrollable::AbsoluteOffset { x: 0.0, y: 0.0 },
+                )
             }
             Message::LayerManagerFilterChanged(f) => {
                 let i = self.active_tab;

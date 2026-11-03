@@ -372,10 +372,13 @@ pub fn whole_text_field(document: &Document, host: Handle) -> Option<(String, Ve
         .values()
         .filter(|field| field.owner == container.handle);
     let child = children.next()?;
-    children
-        .next()
-        .is_none()
-        .then(|| (child.code.clone(), child.objects.clone()))
+    if children.next().is_some() {
+        return None;
+    }
+    // Operands the field holds as fields of their own come back written in
+    // its code.
+    codec::fields::inline_code(document, child.handle)
+        .or_else(|| Some((child.code.clone(), child.objects.clone())))
 }
 
 /// Attach `field` (its code and referenced objects) to `host`, showing

@@ -4627,6 +4627,7 @@ insert =
     .field-help = Bir alan ekler: çizimden, tarihten veya başka bir kaynaktan güncellenen metin.
     .field-average = Ortalama
     .field-sum = Toplam
+    .field-insert = Alan Ekle
     .field-object-name = Nesne adı
     .field-block-placeholder = Blok yer tutucusu
     .field-block-editor-only = Yalnız blok düzenleyicide kullanılabilir

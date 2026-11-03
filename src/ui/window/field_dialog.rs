@@ -26,6 +26,8 @@ pub enum FieldTarget {
     EditText(codec::Handle),
     /// A picked table cell (table, row, column).
     TableCell(codec::Handle, usize, usize),
+    /// An operand of the formula of the Field dialog beneath this one.
+    FormulaOperand,
 }
 
 /// The categories the dialog offers, with their fields (only the ones the
@@ -1006,7 +1008,7 @@ impl FieldDialogState {
 /// code numbers them (`%<\_ObjIdx n>%`) and lists the objects.
 /// The stored, numbered object references of a formula (`%<\_ObjIdx 0>%`)
 /// back as the typed ones the dialog edits (`%<\_ObjId 2A>%`).
-fn typed_object_ids(formula: &str, objects: &[codec::Handle]) -> String {
+pub fn typed_object_ids(formula: &str, objects: &[codec::Handle]) -> String {
     let mut out = String::new();
     let mut rest = formula;
     while let Some(start) = rest.find("%<\\_ObjIdx ") {
@@ -1109,6 +1111,8 @@ pub enum FieldDialogMsg {
     Evaluate,
     /// Sum / Average / Count of a cell range, or one Cell, picked in a table.
     TableFunction(&'static str),
+    /// Insert Field: another field, as an operand of the formula.
+    InsertField,
     PlaceholderProperty(usize),
     HyperlinkText(String),
     HyperlinkUrl(String),
@@ -1195,6 +1199,18 @@ fn table_button<'a>(label: String, function: &'static str) -> Element<'a, Messag
         .style(button_style(false))
         .padding([5, 10])
         .into()
+}
+
+/// Insert Field adds a field to the formula; the dialog that picks it
+/// takes no further operands.
+fn insert_field_button<'a>(state: &FieldDialogState) -> Element<'a, Message> {
+    let button = button(text(t!("Insert Field")).size(12))
+        .style(button_style(false))
+        .padding([5, 10]);
+    if state.target == FieldTarget::FormulaOperand {
+        return button.into();
+    }
+    button.on_press(msg(FieldDialogMsg::InsertField)).into()
 }
 
 fn case_list<'a>(state: &FieldDialogState) -> Element<'a, Message> {
@@ -1853,6 +1869,7 @@ pub fn view<'a>(
                         table_button(t!("Sum").into_owned(), "Sum"),
                         table_button(t!("Count").into_owned(), "Count"),
                         table_button(t!("Cell").into_owned(), "Cell"),
+                        insert_field_button(state),
                         Space::new().width(Fill),
                         button(text(t!("Evaluate")).size(12))
                             .on_press(msg(FieldDialogMsg::Evaluate))

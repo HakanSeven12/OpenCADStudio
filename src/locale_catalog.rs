@@ -839,6 +839,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Inserts a field: text that updates from the drawing, the date or another source." => Some(("insert", "field-help")),
         "Average" => Some(("insert", "field-average")),
         "Sum" => Some(("insert", "field-sum")),
+        "Insert Field" => Some(("insert", "field-insert")),
         "Object name" => Some(("insert", "field-object-name")),
         "Block placeholder" => Some(("insert", "field-block-placeholder")),
         "Only accessible in the block editor" => Some(("insert", "field-block-editor-only")),

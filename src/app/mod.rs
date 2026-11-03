@@ -783,6 +783,8 @@ pub(super) struct OpenCADStudio {
     attman: Option<crate::ui::window::attman_dialog::AttManState>,
     /// Field dialog working copy; `None` while closed.
     field_dialog: Option<crate::ui::window::field_dialog::FieldDialogState>,
+    /// The Formula dialog kept while Insert Field has another one open.
+    field_formula_parent: Option<crate::ui::window::field_dialog::FieldDialogState>,
     point_cloud_color_map: Option<crate::ui::window::pdf_dialogs::PointCloudColorMapState>,
     pc_section: Option<crate::ui::window::pdf_dialogs::PcSectionState>,
     /// -VIEW sEttings Background dialog.
@@ -5711,6 +5713,7 @@ impl OpenCADStudio {
             attman: None,
             attdef_edit: None,
             field_dialog: None,
+            field_formula_parent: None,
             point_cloud_color_map: None,
             pc_section: None,
             view_background: None,

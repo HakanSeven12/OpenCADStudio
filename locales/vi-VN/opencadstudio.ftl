@@ -4674,6 +4674,7 @@ insert =
     .field-help = Chèn một trường: văn bản cập nhật từ bản vẽ, ngày tháng hoặc nguồn khác.
     .field-average = Trung bình
     .field-sum = Tổng
+    .field-insert = Chèn trường
     .field-object-name = Tên đối tượng
     .field-block-placeholder = Chỗ giữ chỗ của khối
     .field-block-editor-only = Chỉ có thể truy cập trong trình chỉnh sửa khối

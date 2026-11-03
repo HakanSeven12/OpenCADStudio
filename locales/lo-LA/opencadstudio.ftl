@@ -4668,6 +4668,7 @@ insert =
     .field-help = ແຊກຟິວ: ຂໍ້ຄວາມທີ່ອັບເດດຈາກຮູບແຕ້ມ, ວັນທີ ຫຼື ແຫຼ່ງຂໍ້ມູນອື່ນໆ.
     .field-average = ຄ່າສະເລ່ຍ
     .field-sum = ຜົນລວມ
+    .field-insert = Insert Field
     .field-object-name = ຊື່ວັດຖຸ
     .field-block-placeholder = ຕົວຍຶດຕໍາແໜ່ງບລັອກ
     .field-block-editor-only = ເຂົ້າເຖິງໄດ້ສະເພາະໃນຕົວແກ້ໄຂບລັອກເທົ່ານັ້ນ

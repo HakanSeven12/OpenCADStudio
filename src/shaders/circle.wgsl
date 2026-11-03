@@ -214,12 +214,12 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
     if in.is_world > 0.5 {
         let is_full = sweep >= TAU - 1e-5;
         if is_full {
-            let eff_hw = max(in.hw_ends.x, 0.5 * fw);
+            let eff_hw = in.hw_ends.x + 0.5 * fw;
             let d_world = abs(r - in.radius);
             let delta_px = (eff_hw - d_world) / fw;
-            let cov = clamp(0.5 + delta_px, 0.0, 1.0);
-            let subpixel_fade = min(1.0, (2.0 * in.hw_ends.x) / fw);
-            alpha_cov = cov * subpixel_fade;
+            // A band is drawn one pixel wider than its width (a zero width
+            // still shows as a full pixel), as the reference draws it.
+            alpha_cov = clamp(0.5 + delta_px, 0.0, 1.0);
             arc_dist = in.radius * d_theta;
         } else {
             // Flat (radial) end caps perpendicular to arc tangent at start_angle and end_angle.
@@ -247,12 +247,11 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>) -> bool {
             }
 
             if cov_angular > 0.0 {
-                let eff_hw = max(world_hw, 0.5 * fw);
+                let eff_hw = world_hw + 0.5 * fw;
                 let d_world = abs(r - in.radius);
                 let delta_px = (eff_hw - d_world) / fw;
                 let cov_radial = clamp(0.5 + delta_px, 0.0, 1.0);
-                let subpixel_fade = min(1.0, (2.0 * world_hw) / fw);
-                alpha_cov = cov_radial * cov_angular * subpixel_fade;
+                alpha_cov = cov_radial * cov_angular;
             }
         }
     } else {

@@ -191,7 +191,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
         let world_hw_a = select(wire_const.world_half_width, seg_taper_ratio.x * wire_const.world_half_width, is_tapered);
         let world_hw_b = select(wire_const.world_half_width, seg_taper_ratio.y * wire_const.world_half_width, is_tapered);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
-        let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
+        let eff_hw = cur_world_hw + 0.5 * u.world_per_pixel;
 
         let world_delta = rel_b - rel_a;
         let world_len = length(world_delta);

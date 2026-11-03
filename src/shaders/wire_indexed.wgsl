@@ -167,7 +167,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         let world_hw_a = select(c.world_half_width, in.taper_ratio.x * c.world_half_width, is_tapered);
         let world_hw_b = select(c.world_half_width, in.taper_ratio.y * c.world_half_width, is_tapered);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
-        let eff_hw = max(cur_world_hw, 0.5 * u.world_per_pixel);
+        let eff_hw = cur_world_hw + 0.5 * u.world_per_pixel;
 
         let world_delta = rel_b - rel_a;
         let world_len = length(world_delta);

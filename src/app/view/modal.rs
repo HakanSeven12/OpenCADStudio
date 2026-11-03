@@ -2267,7 +2267,7 @@ fn save_as_dialog_window<'a>(
     items.push(
         row![
             label(t!("Format:")).width(70),
-            iced::widget::pick_list(sel_fmt, options, |value| value.clone())
+            crate::ui::dropdown_list::pick_list(sel_fmt, options, |value| value.clone())
                 .on_select(Message::SaveDialogFormatChanged)
             .width(field_width),
         ]

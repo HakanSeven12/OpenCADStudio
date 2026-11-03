@@ -138,6 +138,33 @@ impl OpenCADStudio {
         None
     }
 
+    /// A constraint's solve covers its whole space, so it can move geometry
+    /// the command never named. Say so: the drawing has changed somewhere
+    /// the operator was not working, and nothing else would tell them.
+    pub(crate) fn report_pending_network_moves(&mut self, i: usize) {
+        let moved = std::mem::take(&mut self.tabs[i].scene.constraint_network_moves);
+        self.report_network_moves(moved);
+    }
+
+    fn report_network_moves(&mut self, mut moved: Vec<Handle>) {
+        moved.sort_unstable();
+        moved.dedup();
+        if moved.is_empty() {
+            return;
+        }
+        let noun = if moved.len() == 1 {
+            "entity"
+        } else {
+            "entities"
+        };
+        let handles: Vec<String> = moved.iter().map(|handle| handle.to_string()).collect();
+        self.command_line.push_output(&format!(
+            "The constraint network moved {} {noun} the command did not name: {}.",
+            moved.len(),
+            handles.join(", ")
+        ));
+    }
+
     /// The prompt names the first object as the reference, and a line pair
     /// that starts exactly perpendicular gives the cross-product relation no
     /// angular gradient — the first solve would stretch the second line
@@ -2051,7 +2078,9 @@ impl OpenCADStudio {
                 .copied()
                 .map(|handle| (handle, crate::scene::ChangeKind::Modified))
                 .collect();
-            self.tabs[i].scene.bump_entities(&changes);
+            self.tabs[i]
+                .scene
+                .bump_entities_after_constraint_added(&changes, &[], false, &[]);
             self.tabs[i].dirty = true;
             self.refresh_properties();
             if let Some(pd) = pending {

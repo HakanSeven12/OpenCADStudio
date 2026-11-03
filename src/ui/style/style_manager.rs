@@ -332,7 +332,7 @@ pub fn comparison_row<'a>(comparison: Option<EditorComparison>) -> Element<'a, M
     match comparison {
         Some(comparison) if !comparison.options.is_empty() => row![
             text(t!("Compare with")).size(10).style(muted_text_style),
-            iced::widget::pick_list(Some(comparison.selected), comparison.options, |value| value
+            crate::ui::dropdown_list::pick_list(Some(comparison.selected), comparison.options, |value| value
                 .to_string(),)
             .on_select(comparison.on_select)
             .text_size(11)

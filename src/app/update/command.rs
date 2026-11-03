@@ -2803,6 +2803,14 @@ impl OpenCADStudio {
             return Task::none();
         }
         let handles = self.property_target_handles(i);
+        if crate::app::properties::field_moves_geometry(field)
+            && self.any_entity_is_fixed(i, &handles)
+        {
+            self.command_line
+                .push_error(crate::app::properties::HELD_BY_FIXED);
+            self.tabs[i].properties.edit_choice_open = false;
+            return Task::none();
+        }
         // The Annotative Yes/No list drives the per-object annotative toggle
         // (MTEXT's own flag, the annotation context for the rest).
         if field == "annotative" {
@@ -4172,6 +4180,17 @@ impl OpenCADStudio {
         let i = self.active_tab;
         self.tabs[i].properties.active_field = None;
         let handles = self.property_target_handles(i);
+        if crate::app::properties::field_moves_geometry(field)
+            && self.any_entity_is_fixed(i, &handles)
+        {
+            self.tabs[i]
+                .properties
+                .edit_buf
+                .remove(&crate::ui::properties::FieldKey::Geom(field));
+            self.command_line
+                .push_error(crate::app::properties::HELD_BY_FIXED);
+            return Task::none();
+        }
         if field.starts_with("assoc_array_") {
             self.on_assoc_array_field_commit(i, field, &handles);
             return Task::none();

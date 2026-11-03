@@ -348,7 +348,7 @@ fn properties<'a>(v: &TextStyleView<'a>) -> Element<'a, Message> {
     let ttf = !v.ttf_buf.trim().is_empty();
     let face = FaceStyle::of(v.bold, v.italic);
     let face_style: Element<'a, Message> = if ttf && !v.read_only {
-        iced::widget::pick_list(
+        crate::ui::dropdown_list::pick_list(
             Some(face),
             FaceStyle::offered(v.ttf_buf, face),
             |face: &FaceStyle| face.to_string(),

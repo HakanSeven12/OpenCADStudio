@@ -505,7 +505,7 @@ pub fn view_window<'a>(
         let choice: Element<'a, Message> = if vals.read_only {
             crate::ui::read_only::field(cur.to_string().as_str(), 11.0, Length::Fixed(150.0))
         } else {
-            iced::widget::pick_list(Some(cur), options, |value| value.to_string())
+            crate::ui::dropdown_list::pick_list(Some(cur), options, |value| value.to_string())
                 .on_select(move |chosen: DimEnumChoice| Message::DsEdit(fld.clone(), chosen.code))
                 .text_size(11)
                 .width(150)
@@ -614,7 +614,7 @@ pub fn view_window<'a>(
         ];
         let feet_current = feet_modes[(raw & 3) as usize].clone();
         let feet: Element<'a, Message> = if show_feet_inches {
-            let list = iced::widget::pick_list(Some(feet_current.clone()), feet_modes, |choice| {
+            let list = crate::ui::dropdown_list::pick_list(Some(feet_current.clone()), feet_modes, |choice| {
                 choice.to_string()
             })
             .text_size(11)
@@ -719,7 +719,7 @@ pub fn view_window<'a>(
         } else if user_arrow_field == Some(field) {
             user_arrow_list(user_arrow_blocks.clone(), field)
         } else {
-            iced::widget::pick_list(Some(selected), options, |value| value.to_string())
+            crate::ui::dropdown_list::pick_list(Some(selected), options, |value| value.to_string())
                 .on_select(move |value| Message::DsSetHandle { field, value })
                 .text_size(11)
                 .width(150)
@@ -738,7 +738,7 @@ pub fn view_window<'a>(
                              enabled: bool|
           -> Element<'a, Message> {
         let list =
-            iced::widget::pick_list(Some(selected.clone()), options, |value| value.to_string())
+            crate::ui::dropdown_list::pick_list(Some(selected.clone()), options, |value| value.to_string())
                 .text_size(11)
                 .width(150);
         let list: Element<'a, Message> = if enabled
@@ -761,7 +761,7 @@ pub fn view_window<'a>(
     let text_style_field: Element<'a, Message> = if vals.read_only {
         crate::ui::read_only::field(&vals.dimtxsty, 11.0, Length::Fixed(150.0))
     } else {
-        iced::widget::pick_list(
+        crate::ui::dropdown_list::pick_list(
             Some(vals.dimtxsty.to_string()),
             vals.text_style_opts.clone(),
             |value| value.to_string(),
@@ -813,7 +813,7 @@ pub fn view_window<'a>(
             Length::Fixed(150.0),
         )
     } else {
-        iced::widget::pick_list(Some(center_current), center_choices, |choice| {
+        crate::ui::dropdown_list::pick_list(Some(center_current), center_choices, |choice| {
             choice.to_string()
         })
         .on_select(|choice| Message::DsCenterMarkMode(choice.code))
@@ -861,7 +861,7 @@ pub fn view_window<'a>(
             Length::Fixed(150.0),
         )
     } else {
-        iced::widget::pick_list(Some(tolerance_current), tolerance_choices, |choice| {
+        crate::ui::dropdown_list::pick_list(Some(tolerance_current), tolerance_choices, |choice| {
             choice.to_string()
         })
         .on_select(|choice| Message::DsToleranceMode(choice.code))
@@ -1393,7 +1393,7 @@ pub fn view_window<'a>(
         };
         row![
             text(t!("Compare with")).size(10).style(muted_style),
-            iced::widget::pick_list(
+            crate::ui::dropdown_list::pick_list(
                 Some(vals.compare_name.clone()),
                 vals.compare_opts.clone(),
                 |value| value.to_string(),
@@ -1484,7 +1484,7 @@ mod preview_arrow_tests {
 
 /// The drawing's blocks, offered once User Arrow… is picked for `field`.
 fn user_arrow_list<'a>(blocks: Vec<String>, field: &'static str) -> Element<'a, Message> {
-    iced::widget::pick_list(None::<String>, blocks, |value| value.to_string())
+    crate::ui::dropdown_list::pick_list(None::<String>, blocks, |value| value.to_string())
         .placeholder(t!("Select Block").into_owned())
         .on_select(move |value| Message::DsSetHandle { field, value })
         .text_size(11)

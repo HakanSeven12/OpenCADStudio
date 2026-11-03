@@ -95,6 +95,16 @@ pub struct TableInsertState {
     pub first_row_style: String,
     pub second_row_style: String,
     pub other_row_style: String,
+    /// The selected table style's own cell styles, offered for the rows.
+    pub cell_styles: Vec<String>,
+    /// The selected style's starting table: its first column width and
+    /// first row height (lines), shown fixed; rows and columns are added
+    /// to it.
+    pub template: Option<(String, String)>,
+    pub extra_columns: String,
+    pub extra_rows: String,
+    /// What the placed table keeps from the starting table.
+    pub template_options: crate::modules::annotate::table_cmd::TemplateOptions,
     pub error: String,
 }
 
@@ -117,6 +127,11 @@ impl Default for TableInsertState {
             first_row_style: "Title".into(),
             second_row_style: "Header".into(),
             other_row_style: "Data".into(),
+            cell_styles: Vec::new(),
+            template: None,
+            extra_columns: "0".into(),
+            extra_rows: "0".into(),
+            template_options: Default::default(),
             error: String::new(),
         }
     }
@@ -138,6 +153,10 @@ pub enum TableInsertField {
     FirstRowStyle(String),
     SecondRowStyle(String),
     OtherRowStyle(String),
+    ExtraColumns(String),
+    ExtraRows(String),
+    /// One of the starting table options (prompt order) and its new state.
+    TemplateOption(usize, bool),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -490,15 +509,24 @@ fn cell_style_picker<'a>(
     selected: &'a str,
     msg: fn(String) -> Message,
 ) -> Element<'a, Message> {
+    cell_style_picker_from(label, selected, Vec::new(), msg)
+}
+
+/// The cell style a row takes: Title, Header, Data or one of `extra` (the
+/// table style's own cell styles).
+fn cell_style_picker_from<'a>(
+    label: impl Into<String>,
+    selected: &'a str,
+    extra: Vec<String>,
+    msg: fn(String) -> Message,
+) -> Element<'a, Message> {
+    let mut options = vec!["Title".to_string(), "Header".to_string(), "Data".to_string()];
+    options.extend(extra);
     row![
         text(label.into()).size(11).style(muted).width(118),
         pick_list(
             Some(selected.to_string()),
-            vec![
-                "Title".to_string(),
-                "Header".to_string(),
-                "Data".to_string()
-            ],
+            options,
             |value| value.clone(),
         )
         .on_select(msg)
@@ -620,7 +648,11 @@ pub fn table_insert_view<'a>(
     let source = column![
         radio_button(
             state.source == TableSource::Empty,
-            t!("Start from empty table"),
+            if state.template.is_some() {
+                t!("Start from table style")
+            } else {
+                t!("Start from empty table")
+            },
             Message::TableInsertField(TableInsertField::Source(TableSource::Empty))
         ),
         radio_button(
@@ -660,11 +692,20 @@ pub fn table_insert_view<'a>(
             t!("Specify insertion point"),
             Message::TableInsertField(TableInsertField::Insertion(TableInsertion::Point))
         ),
-        radio_button(
-            state.insertion == TableInsertion::Window,
-            t!("Specify window"),
-            Message::TableInsertField(TableInsertField::Insertion(TableInsertion::Window))
-        ),
+        if state.template.is_some() && state.source == TableSource::Empty {
+            // A starting table keeps its own sizes: no window.
+            Element::from(
+                text(format!("○  {}", t!("Specify window")))
+                    .size(12)
+                    .style(muted),
+            )
+        } else {
+            radio_button(
+                state.insertion == TableInsertion::Window,
+                t!("Specify window"),
+                Message::TableInsertField(TableInsertField::Insertion(TableInsertion::Window)),
+            )
+        },
     ];
     // In window mode one value of each pair comes from the window ("Auto");
     // the dot marks the one kept.
@@ -736,13 +777,13 @@ pub fn table_insert_view<'a>(
     ]
     .spacing(5);
     let cell_styles = column![
-        cell_style_picker(t!("First row"), &state.first_row_style, |v| {
+        cell_style_picker_from(t!("First row"), &state.first_row_style, state.cell_styles.clone(), |v| {
             Message::TableInsertField(TableInsertField::FirstRowStyle(v))
         }),
-        cell_style_picker(t!("Second row"), &state.second_row_style, |v| {
+        cell_style_picker_from(t!("Second row"), &state.second_row_style, state.cell_styles.clone(), |v| {
             Message::TableInsertField(TableInsertField::SecondRowStyle(v))
         }),
-        cell_style_picker(t!("All other rows"), &state.other_row_style, |v| {
+        cell_style_picker_from(t!("All other rows"), &state.other_row_style, state.cell_styles.clone(), |v| {
             Message::TableInsertField(TableInsertField::OtherRowStyle(v))
         }),
     ]
@@ -782,11 +823,77 @@ pub fn table_insert_view<'a>(
     ]
     .spacing(8)
     .width(Fill);
-    let right = column![
-        group(t!("Insertion behavior"), insertion.into()),
-        group(t!("Column & row settings"), settings.into()),
-        group(t!("Set cell styles"), cell_styles.into()),
-    ]
+    let right = match (&state.template, state.source) {
+        (Some((width, lines)), TableSource::Empty) => {
+            let fixed = |label: Cow<'static, str>, value: &str, suffix: Option<Cow<'static, str>>| {
+                let mut line = row![
+                    text(label).size(11).style(muted).width(118),
+                    text(value.to_string()).size(12).style(muted).width(Fill),
+                ]
+                .spacing(6)
+                .align_y(iced::Center);
+                if let Some(suffix) = suffix {
+                    line = line.push(text(suffix).size(11).style(muted));
+                }
+                Element::from(line)
+            };
+            let sizes = column![
+                labeled_input(t!("Additional columns"), &state.extra_columns, |v| {
+                    Message::TableInsertField(TableInsertField::ExtraColumns(v))
+                }),
+                fixed(t!("Column width"), width, None),
+                labeled_input(t!("Additional rows"), &state.extra_rows, |v| {
+                    Message::TableInsertField(TableInsertField::ExtraRows(v))
+                }),
+                fixed(t!("Row height"), lines, Some(t!("Line(s)"))),
+            ]
+            .spacing(5);
+            let o = state.template_options;
+            let option = |label: Cow<'static, str>, index: usize, on: bool| {
+                Element::from(
+                    checkbox(on)
+                        .label(label)
+                        .on_toggle(move |v| {
+                            Message::TableInsertField(TableInsertField::TemplateOption(index, v))
+                        })
+                        .size(14)
+                        .text_size(12),
+                )
+            };
+            let options = column![
+                text(t!("Keep from the starting table:")).size(11).style(muted),
+                row![
+                    column![
+                        option(t!("Label cell text"), 0, o.label_text),
+                        option(t!("Data cell text"), 1, o.data_text),
+                        option(t!("Blocks"), 5, o.blocks),
+                        option(t!("Cell style overrides"), 6, o.cell_style_overrides),
+                    ]
+                    .spacing(4)
+                    .width(Fill),
+                    column![
+                        option(t!("Data links"), 4, o.data_links),
+                        option(t!("Fields"), 3, o.fields),
+                        option(t!("Formulas"), 2, o.formulas),
+                    ]
+                    .spacing(4)
+                    .width(Fill),
+                ]
+                .spacing(8),
+            ]
+            .spacing(6);
+            column![
+                group(t!("Insertion behavior"), insertion.into()),
+                group(t!("Column & row settings"), sizes.into()),
+                group(t!("Starting table"), options.into()),
+            ]
+        }
+        _ => column![
+            group(t!("Insertion behavior"), insertion.into()),
+            group(t!("Column & row settings"), settings.into()),
+            group(t!("Set cell styles"), cell_styles.into()),
+        ],
+    }
     .spacing(8)
     .width(Fill);
     column![

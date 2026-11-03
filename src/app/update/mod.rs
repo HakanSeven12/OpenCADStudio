@@ -13409,9 +13409,6 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::TableStyleDialogSelect(name) => {
-                for row in 0..3 {
-                    let _ = self.on_table_style_cell_apply(row);
-                }
                 self.stage_tablestyle_bufs();
                 self.tablestyle_selected = name;
                 let i = self.active_tab;
@@ -13428,19 +13425,13 @@ impl OpenCADStudio {
             }
 
             Message::TableStyleEdit { field, value } => {
-                match field {
-                    "hmargin" => self.ts_hmargin = value,
-                    "vmargin" => self.ts_vmargin = value,
-                    "description" => self.ts_description = value,
-                    _ => {}
+                if field == "description" {
+                    self.ts_description = value;
                 }
                 Task::none()
             }
 
             Message::TableStyleApply => {
-                for row in 0..3 {
-                    let _ = self.on_table_style_cell_apply(row);
-                }
                 self.stage_tablestyle_bufs();
                 self.style_stage_commit();
                 Task::none()
@@ -13454,118 +13445,38 @@ impl OpenCADStudio {
                         "Up" => TableFlowDirection::Up,
                         _ => TableFlowDirection::Down,
                     };
+                    s.sync_rows_from_cell_styles();
                 }
                 Task::none()
             }
 
-            Message::TableColorMore(row, field) => {
-                self.ts_color_open = if self.ts_color_open == Some((row, field)) {
+            Message::TableColorMore(field) => {
+                self.ts_color_open = if self.ts_color_open == Some(field) {
                     None
                 } else {
-                    Some((row, field))
+                    Some(field)
                 };
                 Task::none()
             }
-            Message::TableStyleCellEdit { row, field, value } => {
+            Message::TableStyleCellSelect(name) => {
+                self.ts_cell = name;
                 self.ts_color_open = None;
-                let r = row as usize;
-                if r < 3 {
-                    match field {
-                        "textstyle" => self.ts_cell_textstyle[r] = value,
-                        "height" => self.ts_cell_height[r] = value,
-                        "textcolor" => self.ts_cell_textcolor[r] = value,
-                        "fillcolor" => self.ts_cell_fillcolor[r] = value,
-                        "datatype" => self.ts_cell_datatype[r] = value,
-                        "unittype" => self.ts_cell_unittype[r] = value,
-                        "format" => self.ts_cell_format[r] = value,
-                        _ => {}
-                    }
-                }
-                Task::none()
-            }
-
-            Message::TableStyleBorderEdit {
-                cell,
-                border,
-                field,
-                value,
-            } => {
-                let (c, b) = (cell as usize, border as usize);
-                if c < 3 && b < 6 {
-                    match field {
-                        "lw" => self.ts_border_lw[c][b] = value,
-                        "color" => self.ts_border_color[c][b] = value,
-                        "spacing" => self.ts_border_spacing[c][b] = value,
-                        _ => {}
-                    }
-                }
-                Task::none()
-            }
-
-            Message::TableStyleBorderSetType {
-                cell,
-                border,
-                value,
-            } => {
-                use codec::objects::TableBorderType;
                 let i = self.active_tab;
-                if let Some(s) = self.tablestyle_mut(i) {
-                    if let Some(bd) =
-                        Self::ts_cell_of(s, cell).and_then(|c| Self::ts_border_of(c, border))
-                    {
-                        bd.border_type = match value.as_str() {
-                            "Double" => TableBorderType::Double,
-                            _ => TableBorderType::Single,
-                        };
-                    }
-                }
+                self.load_tablestyle_bufs(i);
                 Task::none()
             }
-
-            Message::TableStyleBorderToggleInvisible { cell, border } => {
-                let i = self.active_tab;
-                if let Some(s) = self.tablestyle_mut(i) {
-                    if let Some(bd) =
-                        Self::ts_cell_of(s, cell).and_then(|c| Self::ts_border_of(c, border))
-                    {
-                        bd.is_invisible = !bd.is_invisible;
-                    }
-                }
-                Task::none()
+            Message::TableStyleCellNew => self.on_table_cell_style_new(),
+            Message::TableStyleCellRename => self.on_table_cell_style_rename(),
+            Message::TableStyleCellDelete => self.on_table_cell_style_delete(),
+            Message::TableStyleCellEdit { field, value } => {
+                self.ts_color_open = None;
+                self.on_table_cell_style_edit(field, value)
             }
-
-            Message::TableStyleCellToggleFill(row) => {
-                let i = self.active_tab;
-                if let Some(s) = self.tablestyle_mut(i) {
-                    if let Some(c) = Self::ts_cell_of(s, row) {
-                        c.fill_enabled = !c.fill_enabled;
-                    }
-                }
-                Task::none()
+            Message::TableStyleEdgeEdit { edge, field, value } => {
+                self.on_table_cell_edge_edit(edge, field, value)
             }
-
-            Message::TableStyleCellSetAlign { row, value } => {
-                use codec::objects::CellAlignment;
-                let i = self.active_tab;
-                if let Some(s) = self.tablestyle_mut(i) {
-                    if let Some(c) = Self::ts_cell_of(s, row) {
-                        c.alignment = match value.as_str() {
-                            "TopLeft" => CellAlignment::TopLeft,
-                            "TopCenter" => CellAlignment::TopCenter,
-                            "TopRight" => CellAlignment::TopRight,
-                            "MiddleLeft" => CellAlignment::MiddleLeft,
-                            "MiddleRight" => CellAlignment::MiddleRight,
-                            "BottomLeft" => CellAlignment::BottomLeft,
-                            "BottomCenter" => CellAlignment::BottomCenter,
-                            "BottomRight" => CellAlignment::BottomRight,
-                            _ => CellAlignment::MiddleCenter,
-                        };
-                    }
-                }
-                Task::none()
-            }
-
-            Message::TableStyleCellApply(row) => self.on_table_style_cell_apply(row),
+            Message::TableStyleTemplatePick => self.on_table_style_template_pick(),
+            Message::TableStyleTemplateRemove => self.on_table_style_template_remove(),
 
             Message::TableStyleToggle(field) => {
                 use codec::objects::ObjectType;
@@ -14324,26 +14235,19 @@ impl OpenCADStudio {
         }
     }
 
-    /// Write the table-style editor buffers (margins / description) into the
+    /// Write the table-style editor buffer (description) into the
     /// selected style (staged, no commit), so edits survive switching as well
     /// as Apply.
     fn stage_tablestyle_bufs(&mut self) {
         use codec::objects::ObjectType;
         let i = self.active_tab;
         let name = self.tablestyle_selected.clone();
-        let h: Option<f64> = self.ts_hmargin.trim().parse().ok();
-        let v: Option<f64> = self.ts_vmargin.trim().parse().ok();
         let desc = self.ts_description.clone();
         for obj in self.tabs[i].scene.document.objects.values_mut() {
             if let ObjectType::TableStyle(s) = obj {
-                if s.name == name {
-                    if let Some(h) = h {
-                        s.horizontal_margin = h;
-                    }
-                    if let Some(v) = v {
-                        s.vertical_margin = v;
-                    }
+                if s.name == name && s.description != desc {
                     s.description = desc.clone();
+                    s.raw_dxf_codes = None;
                 }
             }
         }

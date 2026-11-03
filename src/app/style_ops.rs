@@ -376,6 +376,22 @@ impl OpenCADStudio {
                 }) {
                     s.name = name.to_string();
                     s.handle = handle;
+                    s.raw_dxf_codes = None;
+                    // The copy gets its own starting table.
+                    let template = s.template().and_then(|template| match doc.objects.get(&template) {
+                        Some(ObjectType::TableTemplate(table)) => Some(table.clone()),
+                        _ => None,
+                    });
+                    s.modern_cell_style_handle = codec::Handle::NULL;
+                    if let Some(mut table) = template {
+                        let copy = doc.allocate_handle();
+                        table.common.handle = copy;
+                        table.common.owner_handle = handle;
+                        table.common.reactors = vec![handle];
+                        table.table_style_handle = Some(handle);
+                        doc.objects.insert(copy, ObjectType::TableTemplate(table));
+                        s.modern_cell_style_handle = copy;
+                    }
                     doc.objects.insert(handle, ObjectType::TableStyle(s));
                     return true;
                 }
@@ -414,6 +430,12 @@ impl OpenCADStudio {
             StyleKind::Table | StyleKind::MLeader | StyleKind::MLine => {
                 let kind2 = kind;
                 if let Some(h) = object_handle(doc, name, kind2) {
+                    // A table style takes its starting table with it.
+                    if let Some(ObjectType::TableStyle(style)) = doc.objects.get(&h) {
+                        if let Some(template) = style.template() {
+                            doc.objects.remove(&template);
+                        }
+                    }
                     doc.objects.remove(&h).is_some()
                 } else {
                     false
@@ -921,6 +943,7 @@ impl OpenCADStudio {
                 matches!(
                     o,
                     ObjectType::TableStyle(_)
+                        | ObjectType::TableTemplate(_)
                         | ObjectType::MLineStyle(_)
                         | ObjectType::MultiLeaderStyle(_)
                 )
@@ -952,6 +975,7 @@ impl OpenCADStudio {
             !matches!(
                 o,
                 ObjectType::TableStyle(_)
+                    | ObjectType::TableTemplate(_)
                     | ObjectType::MLineStyle(_)
                     | ObjectType::MultiLeaderStyle(_)
             )

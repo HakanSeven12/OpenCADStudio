@@ -5763,53 +5763,11 @@ mod tablestyle_buffer_tests {
     fn table_new_reloads_cell_buffers() {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
-        app.ts_cell_textstyle[0] = "STALE_SENTINEL".to_string();
+        app.ts_cell_height = "STALE_SENTINEL".to_string();
         let _ = app.style_new(StyleKind::Table);
         assert_ne!(
-            app.ts_cell_textstyle[0], "STALE_SENTINEL",
+            app.ts_cell_height, "STALE_SENTINEL",
             "buffers must reload from the fresh style"
-        );
-    }
-
-    #[test]
-    fn table_cell_unknown_text_style_is_rejected() {
-        let mut app = OpenCADStudio::new_for_test();
-        app.automation_op(r#"{"op":"new"}"#);
-        let i = app.active_tab;
-        let style_name = app.tabs[i]
-            .scene
-            .document
-            .objects
-            .values()
-            .find_map(|o| match o {
-                codec::objects::ObjectType::TableStyle(s) => Some(s.name.clone()),
-                _ => None,
-            })
-            .expect("fresh doc ships a table style");
-        app.tablestyle_selected = style_name.clone();
-        app.ts_cell_textstyle[0] = "NOPE".to_string();
-        let before = app.command_line.history.len();
-        let _ = app.on_table_style_cell_apply(0);
-        let cell_name = app.tabs[i]
-            .scene
-            .document
-            .objects
-            .values()
-            .find_map(|o| match o {
-                codec::objects::ObjectType::TableStyle(s) if s.name == style_name => {
-                    Some(s.data_row_style.text_style_name.clone())
-                }
-                _ => None,
-            })
-            .unwrap();
-        assert_ne!(cell_name, "NOPE", "dangling name must not persist");
-        assert_eq!(
-            app.ts_cell_textstyle[0], "NOPE",
-            "rejected text stays in the buffer for correction"
-        );
-        assert!(
-            app.command_line.history.len() > before,
-            "rejection must say something"
         );
     }
 }

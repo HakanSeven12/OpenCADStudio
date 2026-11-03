@@ -3550,7 +3550,7 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
     let _ = app.dispatch_command("BPARAMETER LINEAR");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Linear  Specify base point or [Chain/Description/Palette]:"
+        "BPARAMETER Linear  Specify start point or [Chain/Description/Palette]:"
     );
     feed(&mut app, "C");
     assert_eq!(

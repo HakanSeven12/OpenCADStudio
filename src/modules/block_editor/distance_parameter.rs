@@ -124,7 +124,11 @@ impl CadCommand for DistanceParameterCommand {
             return crate::t!(asking.question()).into_owned();
         }
         let step = if self.base.is_none() {
-            "Specify base point or [Chain/Description/Palette]:"
+            if self.kind == Kind::Linear {
+                "Specify start point or [Chain/Description/Palette]:"
+            } else {
+                "Specify base point or [Chain/Description/Palette]:"
+            }
         } else if self.end.is_none() {
             "Specify parameter endpoint:"
         } else if self.asking_grips() {
@@ -308,12 +312,16 @@ mod tests {
 
     #[test]
     fn a_distance_base_prompt_lists_the_options_it_accepts() {
-        for kind in [Kind::Linear, Kind::Polar, Kind::XY] {
+        for (kind, noun) in [
+            (Kind::Linear, "start"),
+            (Kind::Polar, "base"),
+            (Kind::XY, "base"),
+        ] {
             let command = DistanceParameterCommand::new(0, Handle::new(1), kind);
             assert_eq!(
                 command.prompt(),
                 format!(
-                    "BPARAMETER {}  Specify base point or [Chain/Description/Palette]:",
+                    "BPARAMETER {}  Specify {noun} point or [Chain/Description/Palette]:",
                     kind.name()
                 )
             );
@@ -338,7 +346,7 @@ mod tests {
         assert_eq!(command.options.chain, Some(true));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Linear  Specify base point or [Chain/Description/Palette]:"
+            "BPARAMETER Linear  Specify start point or [Chain/Description/Palette]:"
         );
     }
 

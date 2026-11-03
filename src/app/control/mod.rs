@@ -1679,6 +1679,14 @@ impl OpenCADStudio {
         }
         self.control_settle();
     }
+    /// Whether a control client drives the command running in tab `i`.
+    pub(in crate::app) fn control_owns_command(&self, i: usize) -> bool {
+        self.control
+            .owner
+            .as_ref()
+            .is_some_and(|(tab, _)| self.tabs.get(i).is_some_and(|t| t.id == *tab))
+    }
+
     pub(super) fn control_observe_user_message(&mut self, message: &Message) {
         if self.control.routing || self.control.owner.is_none() {
             return;

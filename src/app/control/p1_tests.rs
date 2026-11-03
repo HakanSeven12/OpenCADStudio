@@ -1578,3 +1578,384 @@ fn a_fixed_entity_resists_a_stretch() {
         "a fixed line stays put through a stretch: {q}"
     );
 }
+
+/// A constraint command solves the whole network, so a command can move
+/// geometry it never named. The completion says so and names the entity,
+/// instead of leaving the operator to find the movement on the drawing.
+#[test]
+fn a_constraint_command_names_geometry_the_network_moves() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 10,50"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut short = None;
+    for entity in drawn["entities"].as_array().expect("the two lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").0 > 100.0 {
+            long = Some(handle);
+        } else {
+            short = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let short = short.expect("the other line");
+    // A span that no longer matches its line: the next solve has work to do,
+    // and the line is not a participant of the constraint being added.
+    app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::DistanceX,
+            vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+            Some(DrivingValue::Literal(100.0)),
+        );
+
+    let before = app.command_line.history.len();
+    let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
+        kind: ConstraintKind::Horizontal,
+        refs: vec![ParametricRef::whole(short)],
+        driving_param: None,
+        label: "Horizontal constraint",
+    });
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    assert!(
+        q["entities"].as_array().unwrap().iter().any(|entity| {
+            (line_point(entity, "end").0 - line_point(entity, "start").0 - 100.0).abs() < 1e-6
+        }),
+        "the network corrected the line nobody named: {q}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {long}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// The dedicated Horizontal command solves the same network, so it owes the
+/// operator the same warning when the solve lands on geometry it never named.
+#[test]
+fn a_horizontal_command_names_geometry_the_network_moves() {
+    use crate::command::{CmdResult, HorizontalConstraintSelection};
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 30,60"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the two lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").0 > 100.0 {
+            long = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let slanted = slanted.expect("the slanted line");
+    app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::DistanceX,
+            vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+            Some(DrivingValue::Literal(100.0)),
+        );
+
+    let before = app.command_line.history.len();
+    let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
+        kind: ConstraintKind::Horizontal,
+        selection: HorizontalConstraintSelection::Reference(ParametricRef::whole(slanted)),
+        direction: codec::types::Vector3::new(1.0, 0.0, 0.0),
+        label: "Horizontal",
+    });
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.contains(&"Horizontal constraint applied.".to_string()),
+        "the command completes: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {long}."
+        )),
+        "the dedicated command reports the line the network moved: {said:?}"
+    );
+}
+
+/// A command that runs the solve for its own edit stays quiet about the
+/// geometry that solve moves; the report belongs to constraint additions.
+#[test]
+fn a_move_command_does_not_report_geometry_the_solve_moves() {
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,50 30,60"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the two lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").0 > 100.0 {
+            long = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let slanted = slanted.expect("the slanted line");
+    let set = app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::DistanceX,
+        vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+        Some(DrivingValue::Literal(100.0)),
+    );
+    set.add(
+        ConstraintKind::Horizontal,
+        vec![ParametricRef::whole(slanted)],
+        None,
+    );
+
+    app.automation_op(&format!(r#"{{"op":"select","handles":["{long:X}"]}}"#));
+    let before = app.command_line.history.len();
+    let moved = app.automation_op(r#"{"op":"run","cmd":"MOVE 0,0,0 0,10,0"}"#);
+    assert_eq!(moved["ok"], json!(true), "{moved}");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        !said
+            .iter()
+            .any(|text| text.contains("constraint network moved")),
+        "a move command does not report the network's work: {said:?}"
+    );
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let levelled = q["entities"].as_array().unwrap().iter().any(|entity| {
+        let start = line_point(entity, "start");
+        let end = line_point(entity, "end");
+        (start.1 - end.1).abs() < 1e-6 && (start.0 - end.0).abs() < 50.0
+    });
+    assert!(
+        levelled,
+        "the solve ran and levelled the slanted line the command never named: {q}"
+    );
+}
+
+/// Auto-constraining a selection adds constraints the same way, so its
+/// completion reports the geometry its solve moves outside the selection.
+#[test]
+fn auto_coincident_names_geometry_the_network_moves() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 0,80"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,200 30,210"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut upright = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the three lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let end = line_point(entity, "end");
+        if end.0 > 100.0 {
+            long = Some(handle);
+        } else if end.0.abs() < 1e-6 {
+            upright = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let upright = upright.expect("the upright line");
+    let slanted = slanted.expect("the slanted line");
+    let set = app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::DistanceX,
+        vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+        Some(DrivingValue::Literal(100.0)),
+    );
+    set.add(
+        ConstraintKind::Horizontal,
+        vec![ParametricRef::whole(slanted)],
+        None,
+    );
+
+    let before = app.command_line.history.len();
+    let _ = app.apply_cmd_result(CmdResult::AddAutoCoincidentConstraints {
+        handles: vec![long, upright],
+    });
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.iter()
+            .any(|text| text.contains("coincident constraint(s) applied.")),
+        "the command completes: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {slanted}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// The parallel command applies a follow-up result of its own once its second
+/// line is placed. That result must not swallow the report the constraint
+/// addition just queued.
+#[test]
+fn a_parallel_command_names_geometry_the_network_moves() {
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 100,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,20 100,40"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,200 30,210"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the three lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        if line_point(entity, "end").1 > 100.0 {
+            slanted = Some(handle);
+        }
+    }
+    let slanted = slanted.expect("the far slanted line");
+    app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace)
+        .add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(slanted)],
+            None,
+        );
+
+    let before = app.command_line.history.len();
+    let _ = app.automation_op(r#"{"op":"run","cmd":"DCALIGNED"}"#);
+    let _ = app.feed_active_cmd("2L");
+    let _ = app.feed_active_cmd("50,0");
+    let _ = app.feed_active_cmd("50,30");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.iter()
+            .any(|text| text.contains("Specify dimension line location")),
+        "the command reaches its own placement prompt: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {slanted}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}
+
+/// The inference command adds constraints without a result, so it drains its
+/// own report instead of leaving it for a later command to print.
+#[test]
+fn auto_constrain_names_geometry_the_network_moves() {
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 200,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 0,80"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,200 30,210"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let mut long = None;
+    let mut upright = None;
+    let mut slanted = None;
+    for entity in drawn["entities"].as_array().expect("the three lines") {
+        let handle = codec::Handle::new(
+            u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+        );
+        let end = line_point(entity, "end");
+        if end.0 > 100.0 {
+            long = Some(handle);
+        } else if end.0.abs() < 1e-6 {
+            upright = Some(handle);
+        } else {
+            slanted = Some(handle);
+        }
+    }
+    let long = long.expect("the 200-long line");
+    let upright = upright.expect("the upright line");
+    let slanted = slanted.expect("the slanted line");
+    let set = app.tabs[app.active_tab]
+        .scene
+        .parametric_constraint_set_mut(ParametricScope::ModelSpace);
+    set.add(
+        ConstraintKind::DistanceX,
+        vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+        Some(DrivingValue::Literal(100.0)),
+    );
+    set.add(
+        ConstraintKind::Horizontal,
+        vec![ParametricRef::whole(slanted)],
+        None,
+    );
+
+    app.automation_op(&format!(
+        r#"{{"op":"select","handles":["{long:X}","{upright:X}"]}}"#
+    ));
+    let before = app.command_line.history.len();
+    let inferred = app.automation_op(r#"{"op":"run","cmd":"AUTOCONSTRAIN"}"#);
+    assert_eq!(inferred["ok"], json!(true), "{inferred}");
+    let said: Vec<String> = app.command_line.history[before..]
+        .iter()
+        .map(|entry| entry.text.clone())
+        .collect();
+    assert!(
+        said.iter()
+            .any(|text| text.contains("constraint(s) applied")),
+        "the command completes: {said:?}"
+    );
+    assert!(
+        said.contains(&format!(
+            "The constraint network moved 1 entity the command did not name: {slanted}."
+        )),
+        "the completion names the line the network moved, and only it: {said:?}"
+    );
+}

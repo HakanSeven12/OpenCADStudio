@@ -3860,7 +3860,11 @@ impl Scene {
         &mut self,
         changes: &[(Handle, ChangeKind)],
     ) -> Vec<(Handle, ChangeKind)> {
-        self.refresh_parametric_constraints_with_policy(changes, &[], false)
+        let refreshed = self.refresh_parametric_constraints_with_policy(changes, &[], false);
+        // This entry point reports nothing, so it leaves no moved record for
+        // a later solve to inherit.
+        self.solve_moved.clear();
+        refreshed
     }
 
     #[allow(dead_code)]
@@ -3908,6 +3912,7 @@ impl Scene {
         retained_originals: &[(Handle, EntityType)],
         initial_fixed_refs: &[ParametricRef],
     ) -> Vec<(Handle, ChangeKind)> {
+        self.solve_moved.clear();
         // An erased entity takes its constraints with it instead of leaving
         // dangling references. Done first,
         // and unconditionally over every scope (not just ones a `touched`
@@ -4096,11 +4101,20 @@ impl Scene {
                     }
                     _ => new_entity,
                 };
-                if let Some(before) = self.document.get_entity_arc(handle) {
+                let before = self.document.get_entity_arc(handle);
+                // A handle the solve names but the document no longer holds is
+                // not geometry the solve moved.
+                let moved = before
+                    .as_deref()
+                    .is_some_and(|before| before != &new_entity);
+                if let Some(before) = before {
                     self.record_undo_before(handle, Some(before));
                 }
                 if let Some(slot) = self.document.get_entity_mut(handle) {
                     *slot = new_entity;
+                }
+                if moved {
+                    self.solve_moved.push(handle);
                 }
                 result.push((handle, ChangeKind::Modified));
             }
@@ -5241,5 +5255,78 @@ mod tests {
             };
             assert!((circle.center_wcs() - driven_center).length() < 1.0e-9);
         }
+    }
+
+    /// A constraint addition's solve can move geometry the command never
+    /// named. The scene records exactly that geometry: never the command's own
+    /// entities, and never an annotation whose label merely refreshed.
+    #[test]
+    fn a_constraint_add_records_only_the_geometry_it_moves_outside_the_command() {
+        use crate::modules::annotate::linear_dim::linear_dimension_entity;
+
+        let long = codec::Handle::new(1);
+        let label = codec::Handle::new(2);
+        let constrained = codec::Handle::new(3);
+        let mut scene = Scene::new();
+        let mut line = codec::entities::Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(200.0, 0.0, 0.0),
+        );
+        line.common.handle = long;
+        scene.document.add_entity(EntityType::Line(line)).unwrap();
+        let mut other = codec::entities::Line::from_points(
+            Vector3::new(0.0, 50.0, 0.0),
+            Vector3::new(10.0, 60.0, 0.0),
+        );
+        other.common.handle = constrained;
+        scene.document.add_entity(EntityType::Line(other)).unwrap();
+        // A dynamic dimension on the long line. The solve refreshes its label,
+        // but a label is not geometry the solve moved.
+        let dimension = linear_dimension_entity(
+            glam::DVec3::new(0.0, 0.0, 0.0),
+            glam::DVec3::new(200.0, 0.0, 0.0),
+            glam::DVec3::new(100.0, -10.0, 0.0),
+            glam::DVec3::Y,
+            None,
+        );
+        let mut dimension = match dimension {
+            EntityType::Dimension(dimension) => dimension,
+            _ => panic!("the builder must return a dimension"),
+        };
+        dimension.base_mut().common.handle = label;
+        dimension.base_mut().common.layer =
+            super::super::parametric_constraints::DYNAMIC_DIMENSION_LAYER.to_string();
+        scene
+            .document
+            .add_entity(EntityType::Dimension(dimension))
+            .unwrap();
+        let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
+        let id = set.add(
+            ConstraintKind::DistanceX,
+            vec![ParametricRef::point(long, 0), ParametricRef::point(long, 1)],
+            Some(DrivingValue::Literal(100.0)),
+        );
+        set.dimensions.insert(id, label);
+        let set = scene.parametric_constraint_set_mut(ParametricScope::ModelSpace);
+        set.add(
+            ConstraintKind::Horizontal,
+            vec![ParametricRef::whole(constrained)],
+            None,
+        );
+
+        scene.bump_entities_after_constraint_added(
+            &[(constrained, super::ChangeKind::Modified)],
+            &[],
+            false,
+            &[],
+        );
+
+        // The horizontal constraint moves the named, slanted line as well;
+        // only the line nobody named may be reported.
+        assert_eq!(
+            scene.constraint_network_moves,
+            vec![long],
+            "only the line nobody named is reported"
+        );
     }
 }

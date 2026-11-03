@@ -113,6 +113,13 @@ impl OpenCADStudio {
     /// command, so `was_active` is false and their selection is preserved.
     pub(super) fn apply_cmd_result(&mut self, mut result: CmdResult) -> Task<Message> {
         let i = self.active_tab;
+        // A constraint addition records the geometry its solve moved outside
+        // the command's own list. Only the outermost result owns the record:
+        // a handler that applies a follow-up result must not wipe it.
+        let outermost = self.result_depth == 0;
+        if outermost {
+            self.tabs[i].scene.constraint_network_moves.clear();
+        }
         let panel_updates = self.tabs[i]
             .active_cmd
             .as_mut()
@@ -211,7 +218,15 @@ impl OpenCADStudio {
                 // An array arrow keeps the array selected for the next arrow.
                 | CmdResult::EditAssocArray { .. }
         );
+        self.result_depth += 1;
         let task = self.apply_cmd_result_inner(result);
+        self.result_depth -= 1;
+        // An unwinding panic skips the decrement, but nothing here catches
+        // it: the process ends instead of applying another result with the
+        // counter left high.
+        if outermost {
+            self.report_pending_network_moves(i);
+        }
         let i = self.active_tab;
         // A typed `<angle` does not outlive the command it was typed in.
         if self.tabs[i].active_cmd.is_none() {

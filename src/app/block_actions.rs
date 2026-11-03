@@ -426,6 +426,7 @@ impl OpenCADStudio {
                 definition,
                 action,
                 expected,
+                point_choices,
                 targets,
                 frame,
                 rotate_only,
@@ -434,6 +435,12 @@ impl OpenCADStudio {
                 if tab.id != document
                     || tab.active_block_edit_session().map(|s| s.br_handle) != Some(definition)
                     || tab.scene.document.objects.get(&action) != Some(expected.as_ref())
+                    || point_choices.as_ref().is_some_and(|(source, expected)| {
+                        let current = actions::all_parameters(&tab.scene.document, definition)
+                            .into_iter().filter(|p| p.point && p.id != *source)
+                            .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
+                        current != *expected
+                    })
                 {
                     self.command_line.push_error(
                         crate::t!(
@@ -452,7 +459,11 @@ impl OpenCADStudio {
                         };
                         let changed = changed || rotation_changed;
                         if changed {
-                            staged = actions::instance::refresh(&staged, definition)?;
+                            staged = actions::instance::refresh_after_edit(
+                                &staged,
+                                &tab.scene.document,
+                                definition,
+                            )?;
                         }
                         Ok(changed)
                     });
@@ -480,6 +491,7 @@ impl OpenCADStudio {
                 kind,
                 parameter,
                 xy_key_point,
+                point_choices,
                 targets,
                 location,
                 frame,
@@ -497,6 +509,16 @@ impl OpenCADStudio {
                         crate::t!("The action's Block Editor session is no longer active.")
                             .as_ref(),
                     );
+                    return Task::none();
+                }
+                if point_choices.as_ref().is_some_and(|(source, expected)| {
+                    let current = actions::all_parameters(&self.tabs[i].scene.document, definition)
+                        .into_iter().filter(|p| p.point && p.id != *source)
+                        .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
+                    current != *expected || !actions::all_parameters(&self.tabs[i].scene.document, definition)
+                        .iter().any(|p| p.handle == parameter && p.id == *source)
+                }) {
+                    self.command_line.push_error(crate::tr!("block-action-targets", "create-stale").as_str());
                     return Task::none();
                 }
                 let mut staged = self.tabs[i].scene.document.clone();
@@ -518,6 +540,9 @@ impl OpenCADStudio {
                         actions::options::set_rotate_only(&mut staged, definition, handle, &rotate_only)?;
                     } else if !rotate_only.is_empty() {
                         return Err("Rotate-only objects require a Polar Stretch action.");
+                    }
+                    if kind == Kind::Move && targets.iter().any(|h| staged.get_entity(*h).is_none()) {
+                        staged = actions::instance::refresh_after_edit(&staged, &self.tabs[i].scene.document, definition)?;
                     }
                     Ok(handle)
                 }) {

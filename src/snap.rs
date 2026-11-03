@@ -734,13 +734,19 @@ impl Snapper {
                         && elapsed >= DWELL_MS
                     {
                         self.dwell_acquired = true;
-                        // Do not toggle off an acquired point just because
-                        // the cursor rests over it again. In dense drawings
-                        // repeated dwell passes were silently dropping a
-                        // source while the user tried to construct its crossing.
-                        // A point remains acquired until command reset or the
-                        // four-point capacity replaces the oldest reference.
-                        self.acquire_tracking_point(p, wires, endpoints_only);
+                        // Coming back to an acquired point and pausing on it
+                        // releases it; otherwise the pause acquires it. Staying
+                        // on the point (jitter inside the aperture) does
+                        // neither, as `dwell_acquired` latches until the cursor
+                        // leaves.
+                        let existing = self
+                            .tracking_points
+                            .iter()
+                            .position(|t| (*t - p).length() <= tracking_point_tolerance(p));
+                        match existing {
+                            Some(index) => self.release_tracking_point(index),
+                            None => self.acquire_tracking_point(p, wires, endpoints_only),
+                        }
                     }
                 } else {
                     // Moved to a different snap point: capture the previous one
@@ -755,6 +761,30 @@ impl Snapper {
             }
         }
     }
+    /// A pointer move the snap pass did not sample: when the cursor is
+    /// farther than the snap aperture from the point it was dwelling on, that
+    /// dwell ends as a sampled move off the point would end it, so coming back
+    /// and pausing again acquires or releases afresh. Smaller moves keep it.
+    pub fn note_unsampled_move<W: WireSource + ?Sized>(
+        &mut self,
+        cursor: iced::Point,
+        wires: &W,
+        view_rot: glam::Mat4,
+        eye: glam::DVec3,
+        bounds: iced::Rectangle,
+        now: Instant,
+    ) {
+        let Some(point) = self.last_snap_world else {
+            return;
+        };
+        let screen = world_to_screen(point, view_rot, eye, bounds);
+        let (dx, dy) = (screen.x - cursor.x, screen.y - cursor.y);
+        if dx * dx + dy * dy <= self.osnap_radius_px.powi(2) {
+            return;
+        }
+        self.update_otrack_dwell(None, wires, view_rot, eye, bounds, now);
+    }
+
     /// Return whether this acquisition point has already been captured.
     /// Used when the fast cursor preview needs to preserve dwell state without
     /// repeatedly scanning geometric directions for an already acquired point.
@@ -782,6 +812,17 @@ impl Snapper {
 
         self.acquire_tracking_point(p, wires, endpoints_only);
     }
+    /// Drop the tracking point at `index` with its edge directions.
+    fn release_tracking_point(&mut self, index: usize) {
+        self.tracking_points.remove(index);
+        if index < self.tracking_dirs.len() {
+            self.tracking_dirs.remove(index);
+        }
+        if index < self.tracking_perp_dirs.len() {
+            self.tracking_perp_dirs.remove(index);
+        }
+    }
+
     /// Add `p` as a tracking point (capturing its corner edge directions) unless
     /// it is already tracked; drops the oldest when the 4-point cap is reached.
     /// Edge directions are scanned once here, at acquisition, so OTRACK can align

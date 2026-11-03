@@ -473,7 +473,7 @@ impl OpenCADStudio {
     /// references of that definition are rebuilt from the new values, so the
     /// staged document goes back into the live one the way an action commit does.
     fn apply_parameters_manager_edit(&mut self, i: usize, staged: codec::Document) {
-        self.push_undo_snapshot(i, "Parameters Manager edit");
+        self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Parameters Manager edit"));
         self.apply_action_document(i, staged);
         self.tabs[i].dirty = true;
         self.tabs[i].scene.bump_geometry();

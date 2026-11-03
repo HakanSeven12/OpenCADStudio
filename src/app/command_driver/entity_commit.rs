@@ -1201,7 +1201,10 @@ impl OpenCADStudio {
             if let Some(cmd) = self.tabs[i].active_cmd.as_mut() {
                 cmd.attreq_set_block_base(block_base);
             }
+            // A control client answers the attribute prompts itself; a form
+            // would sit over the command it feeds.
             let asks = self.tabs[i].scene.document.header.attribute_dialog
+                && !self.control_owns_command(i)
                 && attdefs
                     .iter()
                     .any(|ad| !ad.flags.constant && !ad.flags.preset);

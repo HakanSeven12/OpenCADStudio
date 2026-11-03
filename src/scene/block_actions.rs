@@ -572,14 +572,17 @@ pub(crate) fn create_with_frame_points(
         .ok_or("The block definition is unavailable.")?
         .entity_handles;
     if targets.iter().any(|h| {
-        !members.contains(h)
-            || doc
-                .get_entity(*h)
-                .is_none_or(|e| !supported(e) || e.common().owner_handle != definition)
+        if let Some(entity) = doc.get_entity(*h) {
+            !members.contains(h) || !supported(entity) || entity.common().owner_handle != definition
+        } else {
+            kind != Kind::Move || chains::point_target(doc, definition, p.id, *h).is_none()
+        }
     }) {
-        return Err(
-            "Select lines, lightweight polylines, arcs, circles, ellipses, points or text belonging to this block.",
-        );
+        return Err(if kind == Kind::Move {
+            "Select supported targets belonging to this block."
+        } else {
+            "Select lines, lightweight polylines, arcs, circles, ellipses, points or text belonging to this block."
+        });
     }
     let (column_offset, row_offset) = if kind == Kind::Array {
         let (col, row) = array_offsets.unwrap_or((1.0, 1.0));
@@ -743,6 +746,9 @@ pub(crate) fn create_with_frame_points(
     );
     authoring::append_single(&mut staged, graph, slots, handle);
     authoring::graph::bind_ids(&mut staged, graph, slots.eval, &[p.id])?;
+    if kind == Kind::Move {
+        chains::Graph::new(&staged, definition)?;
+    }
     *doc = staged;
     Ok(handle)
 }
@@ -812,6 +818,30 @@ pub(crate) fn validate_frame_points(points: &[DVec3]) -> Result<(), &'static str
     stretch::native_frame(points, plane).map(|_| ())
 }
 
+/// User-editable targets, with owned Point/grip aliases represented once.
+pub(crate) fn editable_action_targets(
+    doc: &Document,
+    definition: Handle,
+    kind: Kind,
+    parameter_id: i32,
+    dependencies: &[Handle],
+) -> Vec<Handle> {
+    let mut seen = std::collections::BTreeSet::new();
+    dependencies
+        .iter()
+        .filter_map(|handle| {
+            if doc.get_entity(*handle).is_some() {
+                Some(*handle)
+            } else if kind == Kind::Move {
+                chains::point_target(doc, definition, parameter_id, *handle)
+            } else {
+                None
+            }
+        })
+        .filter(|handle| seen.insert(*handle))
+        .collect()
+}
+
 pub(crate) fn retarget_frame_points(
     doc: &mut Document,
     definition: Handle,
@@ -823,11 +853,20 @@ pub(crate) fn retarget_frame_points(
         .into_iter()
         .find(|(h, _, _, _)| *h == handle)
         .ok_or("Select an action belonging to this block.")?;
-    let mut targets = targets.to_vec();
+    let mut targets = targets
+        .iter()
+        .map(|handle| {
+            if kind == Kind::Move {
+                chains::point_target(doc, definition, id, *handle).unwrap_or(*handle)
+            } else {
+                *handle
+            }
+        })
+        .collect::<Vec<_>>();
     targets.sort();
     targets.dedup();
     if targets.is_empty() {
-        return Err("An action needs at least one object.");
+        return Err("An action needs at least one target.");
     }
     let members = &doc
         .block_records
@@ -836,16 +875,25 @@ pub(crate) fn retarget_frame_points(
         .ok_or("The definition is unavailable.")?
         .entity_handles;
     if targets.iter().any(|h| {
-        !members.contains(h)
-            || doc
-                .get_entity(*h)
-                .is_none_or(|e| e.common().owner_handle != definition || !supported(e))
+        if let Some(entity) = doc.get_entity(*h) {
+            !members.contains(h) || entity.common().owner_handle != definition || !supported(entity)
+        } else {
+            kind != Kind::Move || chains::point_target(doc, definition, id, *h).is_none()
+        }
     }) {
-        return Err("Select supported drawing objects belonging to this block.");
+        return Err("Select supported targets belonging to this block.");
     }
     let old_targets = action.dependencies.clone();
     let old_geometry = targets::geometry(doc, definition, kind, id, &old_targets)?;
-    let bookkeeping = old_targets.iter().copied().filter(|handle| !old_geometry.contains(handle)).collect::<Vec<_>>();
+    let bookkeeping = old_targets
+        .iter()
+        .copied()
+        .filter(|handle| {
+            !old_geometry.contains(handle)
+                && (kind != Kind::Move
+                    || chains::point_target(doc, definition, id, *handle).is_none())
+        })
+        .collect::<Vec<_>>();
     let requested_targets = targets.clone();
     let mut staged = doc.clone();
     let ObjectType::DynamicBlock(o) = staged.objects.get_mut(&handle).unwrap() else {
@@ -916,15 +964,35 @@ pub(crate) fn retarget_frame_points(
         DynamicBlockData::ArrayAction(a) => a.action.dependencies = targets,
         _ => return Err("This action's selection cannot be edited yet."),
     }
-    if !bookkeeping.is_empty() {
+    if !bookkeeping.is_empty() || kind == Kind::Move {
         let action = targets::action_mut(&mut o.data).unwrap();
-        action.dependencies = old_targets.iter().copied().filter(|handle| bookkeeping.contains(handle) || requested_targets.contains(handle)).collect();
+        action.dependencies = old_targets
+            .iter()
+            .copied()
+            .filter(|handle| {
+                bookkeeping.contains(handle)
+                    || requested_targets.contains(handle)
+                    || (kind == Kind::Move
+                        && chains::point_target(doc, definition, id, *handle)
+                            .is_some_and(|point| requested_targets.contains(&point)))
+            })
+            .collect();
         for handle in requested_targets {
-            if !action.dependencies.contains(&handle) { action.dependencies.push(handle); }
+            let already_present = action.dependencies.iter().any(|existing| {
+                *existing == handle
+                    || (kind == Kind::Move
+                        && chains::point_target(doc, definition, id, *existing) == Some(handle))
+            });
+            if !already_present {
+                action.dependencies.push(handle);
+            }
         }
     }
     if frame.is_some() && !needs_frame(kind) {
         return Err("Only Stretch actions have an action frame.");
+    }
+    if kind == Kind::Move {
+        chains::Graph::new(&staged, definition)?;
     }
     if staged == *doc {
         return Ok(false);
@@ -1456,7 +1524,7 @@ fn evaluate_impl(
             .into_iter()
             .find(|q| q.handle == p.handle && q.point)
         {
-            let end = autonomous[&p.handle];
+            let end = autonomous[&p.handle].end;
             set_value(&mut staged, &current, Value::Point(end))?;
             detached_points.push((current, end));
         }
@@ -1732,9 +1800,9 @@ fn evaluate_impl(
     for (p, end) in detached_points {
         set_value(&mut staged, &p, Value::Point(end))?;
     }
-    for (handle, end) in chain_values {
+    for (handle, frame) in chain_values {
         let p = chain.parameter(handle);
-        set_value(&mut staged, p, Value::Point(end))?;
+        set_value(&mut staged, p, Value::Point(frame.end))?;
     }
     *doc = staged;
     Ok(true)

@@ -639,7 +639,7 @@ fn mtext_editor_content<'a>(
     if !style_opts.contains(&ed.style) {
         style_opts.push(ed.style.clone());
     }
-    let style_pl = iced::widget::pick_list(Some(ed.style.clone()), style_opts, |value| {
+    let style_pl = crate::ui::dropdown_list::pick_list(Some(ed.style.clone()), style_opts, |value| {
         value.to_string()
     })
     .on_select(Message::MTextStyle)
@@ -1739,7 +1739,7 @@ fn qselect_content<'a>(
             crate::app::QSelectValueEditor::Choice(options) => {
                 let selected = (!state.value.is_empty()).then(|| state.value.clone());
                 let picker =
-                    iced::widget::pick_list(selected, options.clone(), |value| value.to_string())
+                    crate::ui::dropdown_list::pick_list(selected, options.clone(), |value| value.to_string())
                         .width(field_width);
                 if value_enabled {
                     picker.on_select(Message::QSelectSetValue).into()
@@ -1779,7 +1779,7 @@ fn qselect_content<'a>(
         crate::app::QSelectScope::CurrentSelection,
     ];
     let scope_picker =
-        iced::widget::pick_list(Some(state.scope), scope_options, |value| value.to_string())
+        crate::ui::dropdown_list::pick_list(Some(state.scope), scope_options, |value| value.to_string())
             .on_select(Message::QSelectSetScope)
             .width(field_width);
 
@@ -1877,7 +1877,7 @@ fn qselect_content<'a>(
         Space::new().height(5),
         row![
             label(t!("Object type:")),
-            iced::widget::pick_list(Some(type_sel), type_options, |value| {
+            crate::ui::dropdown_list::pick_list(Some(type_sel), type_options, |value| {
                 qselect_type_label(value)
             })
             .on_select(|s: String| {
@@ -1895,7 +1895,7 @@ fn qselect_content<'a>(
         Space::new().height(6),
         row![
             label(t!("Property:")),
-            iced::widget::pick_list(Some(prop_sel), prop_options, |value| value.to_string(),)
+            crate::ui::dropdown_list::pick_list(Some(prop_sel), prop_options, |value| value.to_string(),)
                 .on_select(|p: crate::app::QSelectPropertyChoice| {
                     if p.field.is_empty() {
                         Message::QSelectSetProperty(None)
@@ -1911,7 +1911,7 @@ fn qselect_content<'a>(
         Space::new().height(6),
         row![
             label(t!("Operator:")),
-            iced::widget::pick_list(Some(state.operator), op_options, |value| value.to_string(),)
+            crate::ui::dropdown_list::pick_list(Some(state.operator), op_options, |value| value.to_string(),)
                 .on_select(Message::QSelectSetOperator)
                 .width(field_width),
         ]

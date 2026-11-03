@@ -553,6 +553,9 @@ mod tests {
         {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).unwrap();
+            let created = loader.get_attr("block-action-targets", "create-prompt");
+            assert!(created.contains("Parameter") && created.contains("\"…\""), "{language:?}: {created}");
+            assert!(!loader.get_attr("block-action-targets", "create-stale").is_empty());
             let prompt = loader.get_attr("block-action-targets", "prompt");
             assert!(prompt.contains("Parameter"), "{language:?}: {prompt}");
             assert!(prompt.contains("\"…\""), "{language:?}: {prompt}");

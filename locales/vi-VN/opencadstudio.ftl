@@ -8464,7 +8464,9 @@ parameters-manager-feedback =
 
 block-action-targets =
     .prompt = BACTIONSET  Chọn đối tượng hoặc nhập Parameter rồi tên điểm, sau đó nhấn Enter (Parameter "…"):
+    .create-prompt = BACTION  Chọn đối tượng hoặc nhập Parameter rồi tên điểm, sau đó nhấn Enter (Parameter "…"):
     .unique-point = Nhập tên tham số điểm duy nhất.
     .empty = Một hành động cần ít nhất một mục tiêu.
     .invalid = Chọn các mục tiêu được hỗ trợ thuộc khối này.
     .stale = Hành động hoặc phiên trình chỉnh sửa khối đã thay đổi; hãy chạy lại BACTIONSET.
+    .create-stale = Hành động hoặc phiên trình chỉnh sửa khối đã thay đổi; hãy chạy lại BACTION.

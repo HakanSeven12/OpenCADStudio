@@ -1213,3 +1213,112 @@ fn block_action_set_rejects_stale_point_name_choices() {
     assert_eq!(app.tabs[i].scene.document, before);
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
 }
+
+#[test]
+fn block_move_creation_accepts_named_point_targets_and_undoes() {
+    let (mut app, insert, def, root, child, _) = setup_point_transport(false, true);
+    let _ = app.update(Message::CommandEscape);
+    let i = app.active_tab;
+    let offset = DVec3::new(3., 4., 0.);
+    app.tabs[i].scene.document = actions::instance::evaluate_value(
+        &app.tabs[i].scene.document,
+        insert,
+        root.handle,
+        actions::Value::Point(root.end + offset),
+    )
+    .unwrap()
+    .unwrap();
+    begin(&mut app, insert);
+    let before = app.tabs[i].scene.document.clone();
+    let count = actions::actions(&before, def).len();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.dispatch_command("BACTION MOVE");
+    feed(&mut app, &root.name);
+    feed(&mut app, "Parameter missing");
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some(crate::tr!("block-action-targets", "unique-point").as_str())
+    );
+    feed(
+        &mut app,
+        &format!("Parameter {}", serde_json::to_string(&child.name).unwrap()),
+    );
+    let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(2., 3., 0.)));
+    assert!(app.tabs[i].active_cmd.is_none());
+    let created = actions::actions(&app.tabs[i].scene.document, def);
+    assert_eq!(created.len(), count + 1);
+    assert!(created
+        .iter()
+        .any(|(_, action, _, _)| action.dependencies == vec![child.handle]));
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    assert!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &child)
+            .unwrap()
+            .end
+            .distance(child.end + offset * 2.)
+            < 1e-8
+    );
+    app.undo_steps(1);
+    assert_eq!(
+        actions::actions(&app.tabs[i].scene.document, def).len(),
+        count
+    );
+    assert!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &child)
+            .unwrap()
+            .end
+            .distance(child.end + offset)
+            < 1e-8
+    );
+    app.redo_steps(1);
+    assert_eq!(
+        actions::actions(&app.tabs[i].scene.document, def).len(),
+        count + 1
+    );
+    assert!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &child)
+            .unwrap()
+            .end
+            .distance(child.end + offset * 2.)
+            < 1e-8
+    );
+}
+
+#[test]
+fn block_move_creation_rejects_stale_point_choices() {
+    let (mut app, insert, _, root, child, _) = setup_point_transport(false, true);
+    let _ = app.update(Message::CommandEscape);
+    begin(&mut app, insert);
+    let i = app.active_tab;
+    let _ = app.dispatch_command("BACTION MOVE");
+    feed(&mut app, &root.name);
+    feed(
+        &mut app,
+        &format!("Parameter {}", serde_json::to_string(&child.name).unwrap()),
+    );
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+        .scene
+        .document
+        .objects
+        .get_mut(&child.handle)
+        .unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::PointParameter(point) = &mut object.data else {
+        panic!()
+    };
+    point.position_name = "Changed".to_owned();
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(2., 3., 0.)));
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some(crate::tr!("block-action-targets", "create-stale").as_str())
+    );
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+}

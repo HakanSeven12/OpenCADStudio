@@ -8467,7 +8467,9 @@ parameters-manager-feedback =
 
 block-action-targets =
     .prompt = BACTIONSET  Seleccione objetos o escriba Parameter seguido del nombre de un punto y pulse Intro (Parameter "…"):
+    .create-prompt = BACTION  Seleccione objetos o escriba Parameter seguido del nombre de un punto y pulse Intro (Parameter "…"):
     .unique-point = Introduzca un nombre de parámetro de punto único.
     .empty = Una acción necesita al menos un destino.
     .invalid = Seleccione destinos compatibles que pertenezcan a este bloque.
     .stale = La acción o la sesión del editor de bloques ha cambiado; reinicie BACTIONSET.
+    .create-stale = La acción o la sesión del editor de bloques ha cambiado; reinicie BACTION.

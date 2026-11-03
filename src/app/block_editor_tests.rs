@@ -2769,6 +2769,7 @@ fn block_actions_rejected_outside_editor_preserve_running_command_and_stale_resu
         kind: Kind::Move,
         parameter: p,
         xy_key_point: None,
+        point_choices: None,
         targets: members(&app),
         location: glam::DVec3::ZERO,
         frame: None,

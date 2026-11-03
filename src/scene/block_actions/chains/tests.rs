@@ -863,3 +863,56 @@ fn block_move_selection_retargets_point_aliases_and_refreshes_previous_graph() {
         "cycle rejection must not publish a partial edit"
     );
 }
+
+#[test]
+fn block_move_creation_validates_point_ownership_and_cycles_atomically() {
+    let (mut doc, definition, params, _, _, foreign_entity) = fixture(true);
+    let before = doc.clone();
+    assert!(create(
+        &mut doc,
+        definition,
+        Kind::Move,
+        params[2].handle,
+        &[params[0].handle],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert_eq!(doc, before, "cycle must not publish an action");
+    assert!(create(
+        &mut doc,
+        definition,
+        Kind::Move,
+        params[0].handle,
+        &[foreign_entity],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert_eq!(doc, before, "foreign entity must not publish an action");
+    let mut scene = crate::scene::Scene::new();
+    scene.document = doc;
+    scene.define_block_raw(
+        "FOREIGN",
+        Vector3::ZERO,
+        vec![EntityType::Line(codec::entities::Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        ))],
+    );
+    let foreign = scene.document.block_records.get("FOREIGN").unwrap().handle;
+    let point =
+        point::create(&mut scene.document, foreign, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+    let before = scene.document.clone();
+    assert!(create(
+        &mut scene.document,
+        definition,
+        Kind::Move,
+        params[0].handle,
+        &[point],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert_eq!(
+        scene.document, before,
+        "foreign parameter must not publish an action"
+    );
+}

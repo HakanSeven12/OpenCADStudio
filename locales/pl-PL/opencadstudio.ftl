@@ -8469,7 +8469,9 @@ parameters-manager-feedback =
 
 block-action-targets =
     .prompt = BACTIONSET  Wybierz obiekty lub wpisz Parameter i nazwę punktu, a następnie naciśnij Enter (Parameter "…"):
+    .create-prompt = BACTION  Wybierz obiekty lub wpisz Parameter i nazwę punktu, a następnie naciśnij Enter (Parameter "…"):
     .unique-point = Wprowadź unikatową nazwę parametru punktowego.
     .empty = Operacja wymaga co najmniej jednego celu.
     .invalid = Wybierz obsługiwane cele należące do tego bloku.
     .stale = Operacja lub sesja edytora bloków uległa zmianie; uruchom ponownie BACTIONSET.
+    .create-stale = Operacja lub sesja edytora bloków uległa zmianie; uruchom ponownie BACTION.

@@ -572,14 +572,17 @@ pub(crate) fn create_with_frame_points(
         .ok_or("The block definition is unavailable.")?
         .entity_handles;
     if targets.iter().any(|h| {
-        !members.contains(h)
-            || doc
-                .get_entity(*h)
-                .is_none_or(|e| !supported(e) || e.common().owner_handle != definition)
+        if let Some(entity) = doc.get_entity(*h) {
+            !members.contains(h) || !supported(entity) || entity.common().owner_handle != definition
+        } else {
+            kind != Kind::Move || chains::point_target(doc, definition, p.id, *h).is_none()
+        }
     }) {
-        return Err(
-            "Select lines, lightweight polylines, arcs, circles, ellipses, points or text belonging to this block.",
-        );
+        return Err(if kind == Kind::Move {
+            "Select supported targets belonging to this block."
+        } else {
+            "Select lines, lightweight polylines, arcs, circles, ellipses, points or text belonging to this block."
+        });
     }
     let (column_offset, row_offset) = if kind == Kind::Array {
         let (col, row) = array_offsets.unwrap_or((1.0, 1.0));
@@ -743,6 +746,9 @@ pub(crate) fn create_with_frame_points(
     );
     authoring::append_single(&mut staged, graph, slots, handle);
     authoring::graph::bind_ids(&mut staged, graph, slots.eval, &[p.id])?;
+    if kind == Kind::Move {
+        chains::Graph::new(&staged, definition)?;
+    }
     *doc = staged;
     Ok(handle)
 }

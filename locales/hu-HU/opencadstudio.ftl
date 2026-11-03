@@ -8445,7 +8445,9 @@ parameters-manager-feedback =
 
 block-action-targets =
     .prompt = BACTIONSET  Válasszon objektumokat, vagy írja be a Parameter szót és egy pont nevét, majd nyomjon Entert (Parameter "…"):
+    .create-prompt = BACTION  Válasszon objektumokat, vagy írja be a Parameter szót és egy pont nevét, majd nyomjon Entert (Parameter "…"):
     .unique-point = Adjon meg egyedi pontparaméter-nevet.
     .empty = Egy művelethez legalább egy cél szükséges.
     .invalid = Válasszon a blokkhoz tartozó támogatott célokat.
     .stale = A művelet vagy a blokkszerkesztő munkamenete megváltozott; indítsa újra a BACTIONSET parancsot.
+    .create-stale = A művelet vagy a blokkszerkesztő munkamenete megváltozott; indítsa újra a BACTION parancsot.

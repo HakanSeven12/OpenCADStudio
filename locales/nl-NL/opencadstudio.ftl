@@ -8465,7 +8465,9 @@ parameters-manager-feedback =
 
 block-action-targets =
     .prompt = BACTIONSET  Selecteer objecten of typ Parameter gevolgd door een puntnaam en druk op Enter (Parameter "…"):
+    .create-prompt = BACTION  Selecteer objecten of typ Parameter gevolgd door een puntnaam en druk op Enter (Parameter "…"):
     .unique-point = Voer een unieke puntparameternaam in.
     .empty = Een actie heeft ten minste één doel nodig.
     .invalid = Selecteer ondersteunde doelen in dit blok.
     .stale = De actie of blokeditorsessie is gewijzigd; start BACTIONSET opnieuw.
+    .create-stale = De actie of blokeditorsessie is gewijzigd; start BACTION opnieuw.

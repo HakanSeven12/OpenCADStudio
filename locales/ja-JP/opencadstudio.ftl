@@ -8445,7 +8445,9 @@ parameters-manager-feedback =
 
 block-action-targets =
     .prompt = BACTIONSET  オブジェクトを選択するか、Parameter に続けて点の名前を入力し、Enter を押してください (Parameter "…"):
+    .create-prompt = BACTION  オブジェクトを選択するか、Parameter に続けて点の名前を入力し、Enter を押してください (Parameter "…"):
     .unique-point = 一意の点パラメーター名を入力してください。
     .empty = アクションには少なくとも1つの対象が必要です。
     .invalid = このブロックに属するサポート対象を選択してください。
     .stale = アクションまたはブロックエディターのセッションが変更されました。BACTIONSET を再実行してください。
+    .create-stale = アクションまたはブロックエディターのセッションが変更されました。BACTION を再実行してください。

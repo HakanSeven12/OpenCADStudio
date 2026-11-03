@@ -3116,6 +3116,12 @@ impl OpenCADStudio {
                 None
             };
             let snap = crate::snap::merge_snap(snap, original_snap, p);
+            // An unsampled move far off the dwelt point still ends that dwell.
+            if !run_discrete_preview && self.snapper.tracking_active() {
+                let wires = self.tabs[i].scene.hit_test_wires();
+                self.snapper
+                    .note_unsampled_move(p, wires.as_slice(), view_rot, eye, bounds, Instant::now());
+            }
             let world = match snap {
                 Some(hit) => hit.world,
                 None => {

@@ -227,6 +227,20 @@ fn polyline2d_focused_vertex(pl: &Polyline2D) -> (usize, usize) {
     (step, frame[step])
 }
 
+/// A moved frame vertex reshapes the spline it drives: a spline-fit
+/// polyline's samples are generated again from its frame.
+fn refit_spline_polyline2d(pl: &mut Polyline2D) {
+    if pl.flags.bits() & 4 == 0 {
+        return;
+    }
+    let degree = match pl.smooth_surface {
+        codec::entities::polyline::SmoothSurfaceType::QuadraticBSpline => 2,
+        _ => 3,
+    };
+    let segments = SPLINE_SEGMENTS.with(|c| c.get()).unsigned_abs().max(1);
+    crate::modules::draw::modify::pedit::spline_fit_polyline2d(pl, degree, segments as usize);
+}
+
 /// The Fit/Smooth choice a 2D polyline shows.
 fn polyline2d_fit_smooth(pl: &Polyline2D) -> &'static str {
     use codec::entities::polyline::SmoothSurfaceType;
@@ -578,10 +592,14 @@ impl RenderConvertible for Polyline2D {
 
 impl Grippable for Polyline2D {
     fn grips(&self) -> Vec<GripDef> {
+        // A spline-fit polyline is gripped at its frame vertices, not at the
+        // samples the frame generates.
         let elev = self.elevation;
+        let spline_fit = self.flags.bits() & 4 != 0;
         self.vertices
             .iter()
             .enumerate()
+            .filter(|(_, v)| !spline_fit || v.flags.bits() & 8 == 0)
             .map(|(i, v)| square_grip(i, glam::DVec3::new(v.location.x, v.location.y, elev)))
             .collect()
     }
@@ -599,6 +617,7 @@ impl Grippable for Polyline2D {
                 }
             }
         }
+        refit_spline_polyline2d(self);
     }
 
     fn grip_menu(&self, _grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
@@ -898,19 +917,7 @@ impl PropertyEditable for Polyline2D {
                         vert.location.y = v;
                     }
                 }
-                // A moved frame vertex reshapes the spline it drives.
-                if self.flags.bits() & 4 != 0 {
-                    let degree = match self.smooth_surface {
-                        codec::entities::polyline::SmoothSurfaceType::QuadraticBSpline => 2,
-                        _ => 3,
-                    };
-                    let segments = SPLINE_SEGMENTS.with(|c| c.get()).unsigned_abs().max(1);
-                    crate::modules::draw::modify::pedit::spline_fit_polyline2d(
-                        self,
-                        degree,
-                        segments as usize,
-                    );
-                }
+                refit_spline_polyline2d(self);
             }
             "pl2_seg_start_w" => {
                 if let Some(v) = parse_f64(value) {

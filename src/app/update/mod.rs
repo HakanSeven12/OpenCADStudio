@@ -9512,7 +9512,6 @@ impl OpenCADStudio {
                         );
                     }
                 }
-                }
                 Task::none()
             }
 

@@ -7,7 +7,7 @@ use crate::modules::annotate::field_cmd::{
     FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand,
 };
 use crate::ui::window::field_dialog::{
-    fields_of, nav_props, object_properties, FieldDialogMsg, FieldDialogState, FieldTarget,
+    fields_of, nav_props, object_properties, typed_object_ids, FieldDialogMsg, FieldDialogState, FieldTarget,
     DATE_FORMATS, NAMED_TYPES,
 };
 use iced::Task;
@@ -453,7 +453,14 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(command));
                 return Task::none();
             }
-            FieldDialogMsg::InsertField => {}
+            FieldDialogMsg::InsertField => {
+                // The formula waits beneath the dialog that picks its operand.
+                if state.target != FieldTarget::FormulaOperand {
+                    self.field_formula_parent = self.field_dialog.take();
+                    self.open_field_dialog(FieldTarget::FormulaOperand);
+                }
+                return Task::none();
+            }
             FieldDialogMsg::SelectObject => {
                 // The dialog waits while one object is picked.
                 self.active_modal = None;
@@ -545,7 +552,17 @@ impl OpenCADStudio {
                 }
                 self.active_modal = Some(crate::app::ModalKind::AttDefEdit);
             }
-            FieldTarget::FormulaOperand => {}
+            FieldTarget::FormulaOperand => {
+                // The field goes into the formula as an operand, `%<code>%`.
+                let (code, objects) = field.expect("set above");
+                if let Some(mut formula) = self.field_formula_parent.take() {
+                    let operand = typed_object_ids(&code, &objects);
+                    formula.formula.push_str(&format!("%<{operand}>%"));
+                    self.field_dialog = Some(formula);
+                    self.active_modal = Some(crate::app::ModalKind::Field);
+                    self.refresh_field_preview();
+                }
+            }
         }
         Task::none()
     }
@@ -553,6 +570,14 @@ impl OpenCADStudio {
     /// The dialogs a Field dialog was opened from come back when it closes.
     pub(in crate::app) fn close_field_dialog(&mut self) {
         let target = self.field_dialog.take().map(|s| s.target);
+        if target == Some(FieldTarget::FormulaOperand) {
+            if let Some(formula) = self.field_formula_parent.take() {
+                self.field_dialog = Some(formula);
+                self.active_modal = Some(crate::app::ModalKind::Field);
+                self.refresh_field_preview();
+                return;
+            }
+        }
         self.close_active_modal();
         self.active_modal = match target {
             Some(FieldTarget::AttdefDefault) if self.attdef_dialog.is_some() => {
@@ -910,7 +935,7 @@ mod tests {
         assert_eq!(formula.target, FieldTarget::NewText);
         assert_eq!(formula.name, "Formula");
         assert_eq!(formula.formula, format!("2*{}", area_operand(room)));
-        assert_eq!(formula.preview, "8");
+        assert_eq!(formula.preview, "8.000000");
     }
 
     #[test]
@@ -951,10 +976,10 @@ mod tests {
             state.formula,
             format!("{}+{}", area_operand(first), area_operand(second))
         );
-        assert_eq!(state.preview, "7");
+        assert_eq!(state.preview, "7.000000");
 
         let _ = app.on_field_dialog(FieldDialogMsg::Ok);
-        assert_eq!(written(&app, text), (code.to_string(), "7".to_string()));
+        assert_eq!(written(&app, text), (code.to_string(), "7.000000".to_string()));
     }
 
     #[test]

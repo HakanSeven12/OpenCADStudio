@@ -4657,6 +4657,7 @@ insert =
     .field-help = Mezőt szúr be: a rajzból, a dátumból vagy más forrásból frissülő szöveget.
     .field-average = Átlag
     .field-sum = Összeg
+    .field-insert = Mező beszúrása
     .field-object-name = Objektum neve
     .field-block-placeholder = Blokkhelyőrző
     .field-block-editor-only = Csak a blokkszerkesztőben érhető el

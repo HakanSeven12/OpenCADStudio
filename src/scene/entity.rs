@@ -2574,6 +2574,11 @@ impl Scene {
                 let EntityType::Wipeout(source) = entity else {
                     return;
                 };
+                // Show image, Show clipped and Background transparency: the
+                // mask hides what is behind only when shown, clipped and opaque.
+                if !crate::entities::raster_image::wipeout_masks(source) {
+                    return;
+                }
                 let mut wipeout = source.clone();
                 if context.is_instanced() {
                     wipeout.insertion_point = context.transform.apply(source.insertion_point);

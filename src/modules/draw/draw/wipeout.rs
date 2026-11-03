@@ -127,23 +127,23 @@ impl CadCommand for WipeoutCommand {
                 t!("WIPEOUT  Specify next point or [Undo]:").into_owned()
             }
             WipeoutMode::Draw => t!("WIPEOUT  Specify next point or [Close/Undo]:").into_owned(),
-            WipeoutMode::Polyline => {
-                t!("WIPEOUT Polyline  Select a closed planar polyline:").into_owned()
-            }
+            WipeoutMode::Polyline => crate::tr!("wipeout-cmd", "select-polyline"),
             WipeoutMode::Rectangular if self.first.is_none() => {
                 t!("WIPEOUT Rectangular  Specify first corner:").into_owned()
             }
             WipeoutMode::Rectangular => {
                 t!("WIPEOUT Rectangular  Specify opposite corner:").into_owned()
             }
-            WipeoutMode::Frames => t!(
-                "WIPEOUT Frames  Enter frame mode [Off/On/DisplayButNotPlot] <%{mode}>:",
-                mode = self.frame_mode
-            )
-            .into_owned(),
-            WipeoutMode::ErasePolyline => {
-                t!("WIPEOUT Polyline  Erase source polyline? [Yes/No] <No>:").into_owned()
-            }
+            WipeoutMode::Frames => crate::tr!(
+                "wipeout-cmd",
+                "frames",
+                current = match self.frame_mode {
+                    0 => crate::tr!("wipeout-cmd", "frame-off"),
+                    2 => crate::tr!("wipeout-cmd", "frame-display"),
+                    _ => crate::tr!("wipeout-cmd", "frame-on"),
+                }
+            ),
+            WipeoutMode::ErasePolyline => crate::tr!("wipeout-cmd", "erase-polyline"),
         }
     }
 
@@ -164,8 +164,8 @@ impl CadCommand for WipeoutCommand {
                 CmdOption::new(t!("Undo").as_ref(), "U"),
             ],
             WipeoutMode::Frames => vec![
-                CmdOption::new(t!("Off").as_ref(), "OFF"),
                 CmdOption::new(t!("On").as_ref(), "ON"),
+                CmdOption::new(t!("Off").as_ref(), "OFF"),
                 CmdOption::new(t!("Display but not plot").as_ref(), "D"),
             ],
             WipeoutMode::ErasePolyline => vec![
@@ -221,7 +221,8 @@ impl CadCommand for WipeoutCommand {
             }
             WipeoutMode::Draw if self.points.len() >= 3 => self.finish_draw(),
             WipeoutMode::Draw => CmdResult::NeedPoint,
-            WipeoutMode::Frames => CmdResult::Dispatch(format!("WIPEOUTFRAME {}", self.frame_mode)),
+            // Enter keeps the frame mode.
+            WipeoutMode::Frames => CmdResult::Cancel,
             WipeoutMode::ErasePolyline => self.finish_polyline(false),
             _ => CmdResult::Cancel,
         }
@@ -243,17 +244,13 @@ impl CadCommand for WipeoutCommand {
         else {
             return CmdResult::NeedPoint;
         };
-        if !matches!(
-            entity,
-            EntityType::LwPolyline(_) | EntityType::Polyline2D(_) | EntityType::Circle(_)
-        ) {
+        // Only a polyline is taken; anything else is asked for again. A
+        // polyline that is open or has arcs ends the command.
+        if !matches!(entity, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
             return CmdResult::NeedPoint;
         }
-        if wipeout_from_polyline(&entity).is_none() {
-            return CmdResult::Measurement(
-                "WIPEOUT: select a circle or a closed planar polyline of zero-width segments."
-                    .into(),
-            );
+        if !straight_and_closed(&entity) || wipeout_from_polyline(&entity).is_none() {
+            return CmdResult::Measurement(crate::tr!("wipeout-cmd", "polyline-invalid"));
         }
         if handle.is_null() {
             CmdResult::NeedPoint
@@ -310,18 +307,18 @@ impl CadCommand for WipeoutCommand {
                 "C" | "CLOSE" if self.points.len() >= 3 => Some(self.finish_draw()),
                 _ => None,
             },
-            WipeoutMode::Frames => match text.as_str() {
-                "0" | "OFF" => Some(CmdResult::Dispatch("WIPEOUTFRAME 0".into())),
-                "1" | "ON" => Some(CmdResult::Dispatch("WIPEOUTFRAME 1".into())),
-                "2" | "D" | "DISPLAYBUTNOTPLOT" => {
+            WipeoutMode::Frames => match text.trim_start_matches('_') {
+                "OFF" | "OF" => Some(CmdResult::Dispatch("WIPEOUTFRAME 0".into())),
+                "ON" => Some(CmdResult::Dispatch("WIPEOUTFRAME 1".into())),
+                "D" | "DI" | "DISPLAY" | "DISPLAYBUTNOTPLOT" => {
                     Some(CmdResult::Dispatch("WIPEOUTFRAME 2".into()))
                 }
-                _ => None,
+                _ => Some(CmdResult::ReportError(crate::tr!("wipeout-cmd", "keyword"))),
             },
-            WipeoutMode::ErasePolyline => match text.as_str() {
+            WipeoutMode::ErasePolyline => match text.trim_start_matches('_') {
                 "Y" | "YES" => Some(self.finish_polyline(true)),
                 "N" | "NO" => Some(self.finish_polyline(false)),
-                _ => None,
+                _ => Some(CmdResult::ReportError(crate::tr!("wipeout-cmd", "keyword"))),
             },
             _ => None,
         }
@@ -399,6 +396,33 @@ impl WipeoutCommand {
                 handle,
                 erase_source,
             })
+    }
+}
+
+/// A polyline of straight segments that closes (explicitly or by its flag).
+fn straight_and_closed(entity: &EntityType) -> bool {
+    match entity {
+        EntityType::LwPolyline(polyline) => {
+            let points: Vec<[f64; 2]> = polyline
+                .vertices
+                .iter()
+                .map(|vertex| [vertex.location.x, vertex.location.y])
+                .collect();
+            let count = if polyline.is_closed { points.len() } else { points.len().saturating_sub(1) };
+            (polyline.is_closed || explicitly_closed(&points))
+                && polyline.vertices[..count].iter().all(|vertex| vertex.bulge.abs() < 1.0e-12)
+        }
+        EntityType::Polyline2D(polyline) => {
+            let points: Vec<[f64; 2]> = polyline
+                .vertices
+                .iter()
+                .map(|vertex| [vertex.location.x, vertex.location.y])
+                .collect();
+            let count = if polyline.is_closed() { points.len() } else { points.len().saturating_sub(1) };
+            (polyline.is_closed() || explicitly_closed(&points))
+                && polyline.vertices[..count].iter().all(|vertex| vertex.bulge.abs() < 1.0e-12)
+        }
+        _ => false,
     }
 }
 

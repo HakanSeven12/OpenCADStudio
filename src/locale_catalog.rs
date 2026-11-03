@@ -1132,6 +1132,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Arc Y" => Some(("properties", "arc-y")),
         "Arc Z" => Some(("properties", "arc-z")),
         "Arc length" => Some(("properties", "arc-length")),
+        "Transparency Color" => Some(("properties", "transparency-color")),
         "Arc length symbol (DIMARCSYM)" => Some(("draw", "arc-length-symbol-dimarcsym")),
         "Arc-Aligned Text" => Some(("properties", "arc-aligned-text")),
         "Arch" => Some(("common", "arch")),

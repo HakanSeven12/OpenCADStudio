@@ -34,7 +34,7 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            cmd if cmd == "WIPEOUT" || cmd == "WO" || cmd.starts_with("WIPEOUT ") => {
+            cmd if cmd == "WIPEOUT" || cmd.starts_with("WIPEOUT ") => {
                 use crate::modules::draw::draw::wipeout::WipeoutCommand;
                 let args = cmd
                     .split_once(' ')

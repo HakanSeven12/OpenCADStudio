@@ -300,6 +300,10 @@ impl CadCommand for BreakInteractiveCommand {
         self.target.is_none()
     }
 
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn options(&self) -> Vec<crate::command::CmdOption> {
         if self.target.is_some() && self.p1.is_some() {
             vec![crate::command::CmdOption::new("First point", "F")]
@@ -326,7 +330,7 @@ impl CadCommand for BreakInteractiveCommand {
 
     fn on_entity_pick(&mut self, handle: Handle, pt: DVec3) -> CmdResult {
         if handle.is_null() {
-            return CmdResult::NeedPoint;
+            return CmdResult::ReportMeasurement(t!("No object found").into_owned());
         }
         self.target = Some(handle);
         self.p1 = Some(pt);
@@ -386,9 +390,13 @@ impl CadCommand for BreakAtPointCommand {
         self.target.is_none()
     }
 
+    fn typed_point_picks_entity(&self) -> bool {
+        true
+    }
+
     fn on_entity_pick(&mut self, handle: Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
-            return CmdResult::NeedPoint;
+            return CmdResult::ReportMeasurement(t!("No object found").into_owned());
         }
         self.target = Some(handle);
         CmdResult::NeedPoint

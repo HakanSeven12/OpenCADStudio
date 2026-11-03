@@ -1483,6 +1483,28 @@ impl OpenCADStudio {
     /// as a dragged one: a box upright on the screen (so in a twisted or 3D
     /// view its sides follow the screen), window or crossing by the drag's
     /// rule, and the same filters.
+    /// Whether a world point lies inside the drawing area as it is shown.
+    /// Without a sized canvas (no window yet) every point counts as shown.
+    pub(super) fn typed_point_in_view(&self, i: usize, wcs: glam::DVec3) -> bool {
+        let canvas = self.tabs[i].scene.selection.borrow().view.vp_size;
+        if canvas.0 <= 0.0 || canvas.1 <= 0.0 {
+            return true;
+        }
+        let bounds = iced::Rectangle {
+            x: 0.0,
+            y: 0.0,
+            width: canvas.0,
+            height: canvas.1,
+        };
+        let edit_cam = self.tabs[i]
+            .scene
+            .viewport_edit_frame(canvas)
+            .map(|(cam, _)| cam);
+        let (view_rot, eye, _) = self.pick_view(i, &edit_cam, bounds);
+        crate::scene::view::projection::project_screen(view_rot, eye, bounds, wcs)
+            .is_some_and(|p| (0.0..=bounds.width).contains(&p.x) && (0.0..=bounds.height).contains(&p.y))
+    }
+
     pub(super) fn select_typed_window(
         &mut self,
         first: glam::DVec3,

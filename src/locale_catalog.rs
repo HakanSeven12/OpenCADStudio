@@ -303,6 +303,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "{found} found, {known} removed, {total} total" => Some(("selection-report", "found-removed-total")),
         "{found} found ({known} duplicate), {total} total" => Some(("selection-report", "found-duplicate-total")),
         "Invalid window specification." => Some(("selection-report", "invalid-window")),
+        "No object found" => Some(("selection-report", "no-object")),
         "The name must be at least one character long." => Some(("block-def", "name-too-short")),
         "The name contains unsupported characters. The following characters are not supported: \\ < > / ? \" : ; * | , = `" => Some(("block-def", "name-unsupported-chars")),
         "The block definition has changed. Do you want to redefine it ?" => Some(("block-def", "definition-changed-redefine")),

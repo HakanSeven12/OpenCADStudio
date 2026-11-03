@@ -455,6 +455,8 @@ impl OpenCADStudio {
                             != codec::entities::CENTERMARK_XDATA_APPLICATION
                         && rec.application_name
                             != codec::entities::CENTERLINE_XDATA_APPLICATION
+                        // A cloud's arc length is its Arc Length row.
+                        && rec.application_name != crate::entities::revcloud::APP
                 }) {
                     let value_text = rec
                         .values

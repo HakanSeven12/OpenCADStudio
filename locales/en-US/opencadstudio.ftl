@@ -8454,3 +8454,4 @@ wipeout-cmd =
     .frame-off = OFF
     .frame-display = Display but not plot
     .keyword = Invalid option keyword.
+    .point-or-keyword = 2D point or option keyword required.

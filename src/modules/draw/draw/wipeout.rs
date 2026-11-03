@@ -100,8 +100,13 @@ impl WipeoutCommand {
         }
     }
 
+    /// Undo takes back the last two points once there are three or more
+    /// (the reference does; its prompt then reads as for two fewer), and
+    /// the second point when there are two.
     fn undo_point(&mut self) -> CmdResult {
-        self.points.pop();
+        let count = if self.points.len() >= 3 { 2 } else { 1 };
+        let keep = self.points.len().saturating_sub(count).max(1);
+        self.points.truncate(keep);
         CmdResult::NeedPoint
     }
 }
@@ -220,6 +225,10 @@ impl CadCommand for WipeoutCommand {
                 CmdResult::NeedPoint
             }
             WipeoutMode::Draw if self.points.len() >= 3 => self.finish_draw(),
+            // One point: Enter is no answer to "Specify next point:".
+            WipeoutMode::Draw if self.points.len() == 1 => {
+                CmdResult::ReportError(crate::tr!("wipeout-cmd", "point-or-keyword"))
+            }
             WipeoutMode::Draw => CmdResult::NeedPoint,
             // Enter keeps the frame mode.
             WipeoutMode::Frames => CmdResult::Cancel,
@@ -299,7 +308,7 @@ impl CadCommand for WipeoutCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let text = text.trim().to_ascii_uppercase();
         match self.mode {
-            WipeoutMode::Draw => match text.as_str() {
+            WipeoutMode::Draw => match text.trim_start_matches('_') {
                 "F" | "FRAMES" if self.points.is_empty() => {
                     self.mode = WipeoutMode::Frames;
                     Some(CmdResult::NeedPoint)
@@ -310,13 +319,20 @@ impl CadCommand for WipeoutCommand {
                 }
                 "U" | "UNDO" if self.points.len() >= 2 => Some(self.undo_point()),
                 "C" | "CLOSE" if self.points.len() >= 3 => Some(self.finish_draw()),
+                // A word that is not an option of this prompt.
+                word if word
+                    .trim_start_matches('_')
+                    .starts_with(|c: char| c.is_ascii_alphabetic()) =>
+                {
+                    Some(CmdResult::ReportError(crate::tr!("wipeout-cmd", "point-or-keyword")))
+                }
                 _ => None,
             },
             WipeoutMode::Frames => match text.trim_start_matches('_') {
-                "OFF" | "OF" => Some(CmdResult::Dispatch("WIPEOUTFRAME 0".into())),
-                "ON" => Some(CmdResult::Dispatch("WIPEOUTFRAME 1".into())),
+                "OFF" | "OF" => Some(CmdResult::Dispatch("_WIPEOUT_FRAMES 0".into())),
+                "ON" => Some(CmdResult::Dispatch("_WIPEOUT_FRAMES 1".into())),
                 "D" | "DI" | "DISPLAY" | "DISPLAYBUTNOTPLOT" => {
-                    Some(CmdResult::Dispatch("WIPEOUTFRAME 2".into()))
+                    Some(CmdResult::Dispatch("_WIPEOUT_FRAMES 2".into()))
                 }
                 _ => Some(CmdResult::ReportError(crate::tr!("wipeout-cmd", "keyword"))),
             },

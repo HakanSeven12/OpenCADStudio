@@ -669,10 +669,12 @@ impl PropertyEditable for Wipeout {
         let width = self.width();
         let height = self.height();
         let rotation = self.u_vector.y.atan2(self.u_vector.x).to_degrees();
+        // The reference shows a wipeout's image adjustment but does not
+        // let it be edited (the palette's fields are read-only).
         let whole = |label: &str, field: &'static str, value: u8| Property {
             label: t!(label).into_owned(),
             field,
-            value: PropValue::EditText(value.to_string()),
+            value: PropValue::ReadOnly(value.to_string()),
         };
         let toggle = |label: &str, field: &'static str, value: bool| Property {
             label: t!(label).into_owned(),
@@ -729,18 +731,6 @@ impl PropertyEditable for Wipeout {
             self.flags.set(flag, on);
             if flag == Flags::USE_CLIPPING_BOUNDARY {
                 self.clipping_enabled = on;
-            }
-            return;
-        }
-        if matches!(field, "wo_brightness" | "wo_contrast" | "wo_fade") {
-            // 0 to 100; anything else is ignored.
-            let Some(level) = value.trim().parse::<u8>().ok().filter(|level| *level <= 100) else {
-                return;
-            };
-            match field {
-                "wo_brightness" => self.brightness = level,
-                "wo_contrast" => self.contrast = level,
-                _ => self.fade = level,
             }
             return;
         }

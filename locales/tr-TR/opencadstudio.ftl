@@ -8374,3 +8374,4 @@ wipeout-cmd =
     .frame-off = KAPALI
     .frame-display = Göster ama çizdirme
     .keyword = Geçersiz seçenek anahtar sözcüğü.
+    .point-or-keyword = 2B nokta veya seçenek anahtar sözcüğü gerekli.

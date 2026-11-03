@@ -802,20 +802,22 @@ impl OpenCADStudio {
                 return task;
             }
         }
-        // An open dynamic-value list owns Escape, Enter and the arrows: without
+        // An open property list owns Escape, Enter and the arrows: without
         // this they reach the command line or the viewport and dismiss the
         // selection the list was opened for. A list whose panel is hidden is
         // not on screen, so it must not keep the guard on.
-        let picker = self.tabs[self.active_tab].properties.open_block_picker;
-        let picker_shown = picker.is_some_and(|(_, quick)| {
+        let panel = &self.tabs[self.active_tab].properties;
+        let shown = |quick: bool| {
             if quick {
                 self.quick_properties
             } else {
                 self.dock_panel_visible(crate::ui::dock::PanelId::Properties)
             }
-        });
+        };
+        let picker_shown = panel.open_block_picker.is_some_and(|(_, quick)| shown(quick))
+            || panel.open_choice.is_some_and(|(_, quick)| shown(quick));
         if picker_shown || self.block_picker_dismissed {
-            if let Some(task) = self.intercept_block_picker_key(&msg) {
+            if let Some(task) = self.intercept_property_list_key(&msg) {
                 return task;
             }
         }
@@ -3444,6 +3446,7 @@ impl OpenCADStudio {
                 self.layout_rename_state = None;
                 for tab in &mut self.tabs {
                     tab.properties.open_block_picker = None;
+                    tab.properties.open_choice = None;
                 }
                 self.block_picker_dismissed = false;
                 if idx < self.tabs.len() {
@@ -6219,6 +6222,7 @@ impl OpenCADStudio {
                 // Hiding the panel takes its lists with it; a flag left behind
                 // would keep the keyboard guard swallowing keys.
                 self.tabs[self.active_tab].properties.open_block_picker = None;
+                self.tabs[self.active_tab].properties.open_choice = None;
                 if self.clean_screen {
                     // Shown over clean screen without changing the panel's
                     // normal state.
@@ -6726,6 +6730,7 @@ impl OpenCADStudio {
                 if self.clean_screen {
                     // The panel goes with the chrome; its list cannot stay open.
                     self.tabs[self.active_tab].properties.open_block_picker = None;
+                    self.tabs[self.active_tab].properties.open_choice = None;
                 }
                 Task::none()
             }
@@ -6742,6 +6747,7 @@ impl OpenCADStudio {
                 // The Quick Properties copy of the row, and its list, go with
                 // the panel.
                 self.tabs[self.active_tab].properties.open_block_picker = None;
+                self.tabs[self.active_tab].properties.open_choice = None;
                 if self.quick_properties {
                     self.quick_properties_anchor = self.tabs[self.active_tab].last_cursor_screen;
                 }
@@ -9082,22 +9088,23 @@ impl OpenCADStudio {
 
             Message::PropHatchPatternPickerToggle(current) => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                panel.hatch_pattern_picker_open = !panel.hatch_pattern_picker_open;
-                if panel.hatch_pattern_picker_open {
-                    panel.color_picker_open = false;
-                    panel.open_color_field = None;
-                    panel.edit_choice_open = false;
+                let opening = !panel.hatch_pattern_picker_open;
+                if opening {
+                    panel.close_popups();
                     panel.hatch_pattern_focus = crate::ui::properties::filtered_hatch_patterns("")
                         .iter()
                         .position(|entry| entry.name.eq_ignore_ascii_case(&current))
                         .unwrap_or(0);
+                }
+                panel.hatch_pattern_picker_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
                     return iced::widget::operation::focus(iced::widget::Id::new(
                         "hatch-pattern-search",
                     ));
-                } else {
-                    panel.hatch_pattern_search.clear();
-                    panel.hatch_pattern_focus = 0;
                 }
+                panel.hatch_pattern_search.clear();
+                panel.hatch_pattern_focus = 0;
                 Task::none()
             }
 
@@ -9354,7 +9361,45 @@ impl OpenCADStudio {
             }
 
             Message::PropGeomChoiceChanged { field, value } => {
+                // Picking a row closes the list it came from, whichever panel
+                // rendered it.
+                for tab in &mut self.tabs {
+                    if tab
+                        .properties
+                        .open_choice
+                        .is_some_and(|(open, _)| open == field)
+                    {
+                        tab.properties.open_choice = None;
+                    }
+                }
                 self.on_prop_geom_choice_changed(field, value)
+            }
+
+            Message::PropChoiceToggle { field, quick } => {
+                let panel = &mut self.tabs[self.active_tab].properties;
+                let opening = panel.open_choice != Some((field, quick));
+                if opening {
+                    // One list at a time: another list left open behind this
+                    // row would stack two overlays.
+                    panel.close_popups();
+                }
+                panel.open_choice = if opening { Some((field, quick)) } else { None };
+                self.block_picker_dismissed = false;
+                Task::none()
+            }
+
+            Message::PropChoiceDismiss { field, quick } => {
+                for tab in &mut self.tabs {
+                    if tab
+                        .properties
+                        .open_choice
+                        .is_some_and(|open| open == (field, quick))
+                    {
+                        tab.properties.open_choice = None;
+                    }
+                }
+                self.block_picker_dismissed = true;
+                Task::none()
             }
 
             Message::PropGeomInput { field, value } => {
@@ -9387,11 +9432,12 @@ impl OpenCADStudio {
             }
             Message::PropBlockPickerToggle { key, quick } => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                panel.open_block_picker = if panel.open_block_picker == Some((key, quick)) {
-                    None
+                if panel.open_block_picker == Some((key, quick)) {
+                    panel.open_block_picker = None;
                 } else {
-                    Some((key, quick))
-                };
+                    panel.close_popups();
+                    panel.open_block_picker = Some((key, quick));
+                }
                 self.block_picker_dismissed = false;
                 Task::none()
             }
@@ -9409,11 +9455,11 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-
             Message::PropGroupToggle(key) => {
                 let panel = &mut self.tabs[self.active_tab].properties;
                 // A collapsed group can take the open list's row off screen.
                 panel.open_block_picker = None;
+                panel.open_choice = None;
                 if !panel.expanded_groups.remove(&key) {
                     panel.expanded_groups.insert(key);
                 }
@@ -9431,16 +9477,20 @@ impl OpenCADStudio {
                 for tab in &mut self.tabs {
                     tab.properties.collapsed_sections = sections.clone();
                     tab.properties.open_block_picker = None;
+                    tab.properties.open_choice = None;
                 }
                 Task::none()
             }
 
             Message::PropEditChoiceToggle => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                panel.edit_choice_open = !panel.edit_choice_open;
-                if panel.edit_choice_open {
-                    panel.hatch_pattern_picker_open = false;
-                    panel.hatch_pattern_search.clear();
+                let opening = !panel.edit_choice_open;
+                if opening {
+                    panel.close_popups();
+                }
+                panel.edit_choice_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
                     let active_edit_choice = panel.active_field.as_ref().and_then(|k| match k {
                         crate::ui::properties::FieldKey::Geom(f) => Some(*f),
                         _ => None,
@@ -9461,6 +9511,7 @@ impl OpenCADStudio {
                             crate::ui::properties::prop_geom_field_id(field),
                         );
                     }
+                }
                 }
                 Task::none()
             }
@@ -9561,20 +9612,28 @@ impl OpenCADStudio {
             }
 
             Message::PropColorPickerToggle => {
-                let i = self.active_tab;
-                self.tabs[i].properties.color_picker_open =
-                    !self.tabs[i].properties.color_picker_open;
-                if self.tabs[i].properties.color_picker_open {
-                    self.tabs[i].properties.hatch_pattern_picker_open = false;
-                    self.tabs[i].properties.hatch_pattern_search.clear();
+                let panel = &mut self.tabs[self.active_tab].properties;
+                let opening = !panel.color_picker_open;
+                if opening {
+                    panel.close_popups();
+                }
+                panel.color_picker_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
                 }
                 Task::none()
             }
 
             Message::PropBgColorPickerToggle => {
-                let i = self.active_tab;
-                self.tabs[i].properties.bg_color_picker_open =
-                    !self.tabs[i].properties.bg_color_picker_open;
+                let panel = &mut self.tabs[self.active_tab].properties;
+                let opening = !panel.bg_color_picker_open;
+                if opening {
+                    panel.close_popups();
+                }
+                panel.bg_color_picker_open = opening;
+                if opening {
+                    self.block_picker_dismissed = false;
+                }
                 Task::none()
             }
 
@@ -9604,11 +9663,13 @@ impl OpenCADStudio {
             Message::PropColorFieldToggle(field) => {
                 let i = self.active_tab;
                 let p = &mut self.tabs[i].properties;
-                p.open_color_field = if p.open_color_field.as_deref() == Some(field.as_str()) {
-                    None
+                if p.open_color_field.as_deref() == Some(field.as_str()) {
+                    p.open_color_field = None;
                 } else {
-                    Some(field)
-                };
+                    p.close_popups();
+                    p.open_color_field = Some(field);
+                    self.block_picker_dismissed = false;
+                }
                 Task::none()
             }
 

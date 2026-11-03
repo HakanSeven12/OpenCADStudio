@@ -567,7 +567,6 @@ fn block_visibility_state_is_shown_once_as_the_editable_row() {
         "the row shows the current state: {:?}",
         visibility[0].value
     );
-    assert!(app.tabs[test].properties.choice_combos.contains_key("dyn_visibility"));
     for label in ["Visibility", "Visibility states"] {
         assert!(
             !rows.iter().any(|row| row.label == label),

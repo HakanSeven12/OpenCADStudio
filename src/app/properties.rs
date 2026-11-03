@@ -23,30 +23,6 @@ const PARALLEL_AGGREGATE_MIN: usize = 32;
 /// most one wave of builds is ever wasted.
 const PARALLEL_AGGREGATE_CHUNK: usize = 256;
 
-
-fn property_choice_combos(
-    sections: &[crate::scene::model::object::PropSection],
-) -> rustc_hash::FxHashMap<String, iced::widget::combo_box::State<ui::properties::LocalizedChoice>>
-{
-    sections
-        .iter()
-        .flat_map(|section| section.props.iter())
-        .filter_map(|prop| match &prop.value {
-            PropValue::Choice { options, .. } | PropValue::ChoiceWithTooltip { options, .. } => Some((
-                prop.field.to_string(),
-                iced::widget::combo_box::State::new(
-                    options
-                        .iter()
-                        .cloned()
-                        .map(ui::properties::LocalizedChoice::new)
-                        .collect(),
-                ),
-            )),
-            _ => None,
-        })
-        .collect()
-}
-
 /// Cap the total number of selection grips at
 /// [`crate::app::settings::MAX_SELECTED_GRIPS`], keeping entity order with
 /// non-midpoint (vertex/stretch) grips first. Below the cap both vecs are
@@ -2629,7 +2605,6 @@ impl OpenCADStudio {
                         block_definition: tab
                             .active_block_edit_session()
                             .map(|session| session.br_handle),
-                        choice_combos: property_choice_combos(&sections),
                         sections,
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
                         linetype_combo: iced::widget::combo_box::State::new(linetype_items.clone()),
@@ -2663,7 +2638,6 @@ impl OpenCADStudio {
                         }
                     }
                     ui::PropertiesPanel {
-                        choice_combos: property_choice_combos(&sections),
                         sections,
                         title,
                         layer_combo: iced::widget::combo_box::State::new(layer_names.clone()),
@@ -2797,7 +2771,6 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                         retain_compact_solid_sections(&mut sections);
                     }
                     ui::PropertiesPanel {
-                        choice_combos: property_choice_combos(&sections),
                         sections,
                         title: t!("%{count} objects selected", count = selected.len()).into_owned(),
                         selection_group_combo: iced::widget::combo_box::State::new(groups.clone()),
@@ -3184,22 +3157,44 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
             panel
         };
         // An open dynamic-value list belongs to the row it was opened from, so
-        // the rebuild keeps it only while that row is still on the panel.
+        // the rebuild keeps it only while that row is still shown.
         let old_panel = &self.tabs[i].properties;
         let keeps_picker = old_panel.open_block_picker.is_some_and(|(open, _)| {
             same_selection
                 && new_panel.sections.iter().any(|section| {
-                    section.props.iter().any(|property| {
-                        matches!(
-                            &property.value,
-                            crate::scene::model::object::PropValue::BlockChoice { key, .. }
-                                if *key == open
-                        )
-                    })
+                    !new_panel.collapsed_sections.contains(&section.title)
+                        && section.props.iter().any(|property| {
+                            matches!(
+                                &property.value,
+                                crate::scene::model::object::PropValue::BlockChoice { key, .. }
+                                    if *key == open
+                            )
+                        })
                 })
         });
         if keeps_picker {
             new_panel.open_block_picker = old_panel.open_block_picker;
+        }
+        // A generic choice list belongs to its row too: keep it open only while
+        // the rebuild still shows that row.
+        let keeps_choice = old_panel.open_choice.is_some_and(|(open, _)| {
+            same_selection
+                && new_panel.sections.iter().any(|section| {
+                    !new_panel.collapsed_sections.contains(&section.title)
+                        && section.props.iter().any(|property| {
+                            property.field == open
+                                && matches!(
+                                    &property.value,
+                                    crate::scene::model::object::PropValue::Choice { .. }
+                                        | crate::scene::model::object::PropValue::ChoiceWithTooltip {
+                                            ..
+                                        }
+                                )
+                        })
+                })
+        });
+        if keeps_choice {
+            new_panel.open_choice = old_panel.open_choice;
         }
 
         self.tabs[i].properties = new_panel;

@@ -53,10 +53,6 @@ fn block_visibility_reference_description_survives_state_history_and_drawing_rel
         };
         assert_eq!(tooltip, DESCRIPTION);
         assert!(options.contains(&"Alternative".to_owned()));
-        assert!(app.tabs[i]
-            .properties
-            .choice_combos
-            .contains_key("dyn_visibility"));
         let depth = app.tabs[i].history.undo_stack.len();
         let _ = app.update(Message::PropGeomChoiceChanged {
             field: "dyn_visibility",

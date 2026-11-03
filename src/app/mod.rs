@@ -716,9 +716,9 @@ pub(super) struct OpenCADStudio {
     clean_screen: bool,
     /// Properties opened on top of clean screen (Ctrl+1 while it is on).
     clean_screen_properties: bool,
-    /// The dynamic-value list closed itself a moment ago. The overlay reports
-    /// Escape before the global shortcut repeats it, so the repeat is dropped
-    /// instead of clearing the selection the list was opened for.
+    /// A property list closed itself a moment ago. The overlay reports Escape
+    /// before the global shortcut repeats it, so the repeat is dropped instead
+    /// of clearing the selection the list was opened for.
     block_picker_dismissed: bool,
     /// Quick Properties: show a compact floating property panel on selection.
     quick_properties: bool,
@@ -4540,6 +4540,19 @@ pub enum Message {
     PropGeomChoiceChanged {
         field: &'static str,
         value: String,
+    },
+    /// Open or close one generic choice row's list. It carries the surface it
+    /// was clicked on, so the docked panel and Quick Properties each keep
+    /// their own open state.
+    PropChoiceToggle {
+        field: &'static str,
+        quick: bool,
+    },
+    /// The list dismissed itself: the overlay's Escape or a click outside; the
+    /// global shortcut repeats the same Escape a moment later.
+    PropChoiceDismiss {
+        field: &'static str,
+        quick: bool,
     },
     /// User is typing in an editable geometry field (live buffer update).
     PropGeomInput {

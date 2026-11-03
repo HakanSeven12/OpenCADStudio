@@ -568,8 +568,7 @@ pub fn focused_widget_task(
     iced::advanced::widget::operate(FocusedId::default()).map(on_result)
 }
 
-/// A translated choice label paired with the unchanged value stored in the
-/// drawing and emitted by the properties panel.
+/// A translated choice label paired with the unchanged value it stands for.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalizedChoice {
     pub raw: String,
@@ -605,7 +604,6 @@ pub struct PropertiesPanel {
     /// Linetype items (name + ASCII art) from the document — used for combo_box options.
     pub linetype_items: Vec<LinetypeItem>,
     pub selection_group_combo: combo_box::State<SelectionGroup>,
-    pub choice_combos: HashMap<String, combo_box::State<LocalizedChoice>>,
     pub layer_combo: combo_box::State<String>,
     pub lineweight_combo: combo_box::State<LwItem>,
     pub linetype_combo: combo_box::State<LinetypeItem>,
@@ -656,6 +654,11 @@ pub struct PropertiesPanel {
     /// and whether it belongs to the Quick Properties surface — the same row
     /// is instantiated on both surfaces, so the pair tells them apart.
     pub open_block_picker: Option<(crate::scene::model::object::BlockParameterKey, bool)>,
+    /// The open generic-choice row, as its field and whether it belongs to the
+    /// Quick Properties surface. The open state lives in the panel, not in
+    /// widget state, so the list opens under its own cell and its height
+    /// follows the options it holds.
+    pub open_choice: Option<(&'static str, bool)>,
     /// The open dropdown belongs to Quick Properties, not the docked panel:
     /// both render these rows, and two open copies swallow each other's
     /// clicks (#1766).
@@ -683,7 +686,6 @@ impl Default for PropertiesPanel {
             selected_group: None,
             linetype_items: vec![],
             selection_group_combo: combo_box::State::new(vec![]),
-            choice_combos: HashMap::default(),
             layer_combo: combo_box::State::new(vec![]),
             lineweight_combo: combo_box::State::new(lw_options()),
             linetype_combo: combo_box::State::new(vec![]),
@@ -702,6 +704,7 @@ impl Default for PropertiesPanel {
             collapsed_sections: HashSet::default(),
             edit_choice_open: false,
             open_block_picker: None,
+            open_choice: None,
             picker_in_quick: false,
             rendering_quick: std::cell::Cell::new(false),
             active_field: None,
@@ -728,6 +731,19 @@ impl PropertiesPanel {
     /// Whether the open dropdown belongs to the surface being built.
     fn picker_here(&self) -> bool {
         self.picker_in_quick == self.rendering_quick.get()
+    }
+
+    /// Close every list or picker the panel can leave open. A caller that is
+    /// about to open one of them clears the rest, so two overlays never stack.
+    pub fn close_popups(&mut self) {
+        self.color_picker_open = false;
+        self.bg_color_picker_open = false;
+        self.open_color_field = None;
+        self.hatch_pattern_picker_open = false;
+        self.hatch_pattern_search.clear();
+        self.edit_choice_open = false;
+        self.open_block_picker = None;
+        self.open_choice = None;
     }
 
     pub fn selected_handles(&self) -> Vec<Handle> {
@@ -1431,35 +1447,71 @@ impl PropertiesPanel {
         label: &'a str,
         field: &'static str,
         current: &'a str,
-        _options: &'a [String],
+        options: &'a [String],
     ) -> Element<'a, Message> {
-        let Some(state) = self.choice_combos.get(field) else {
-            return render_ro_row(label, current);
-        };
-
-        let selected = if current == VARIES_LABEL {
-            None
+        let quick = self.rendering_quick.get();
+        let open = self.open_choice == Some((field, quick));
+        let varies = current == VARIES_LABEL;
+        let shown = if varies {
+            VARIES_LABEL.to_string()
         } else {
-            Some(LocalizedChoice::new(current.to_string()))
+            LocalizedChoice::new(current.to_string()).to_string()
         };
-        let combo = combo_box(state, VARIES_LABEL, selected.as_ref(), move |choice| {
-            Message::PropGeomChoiceChanged {
-                field,
-                value: choice.raw,
-            }
-        })
-        .size(FONT_SZ)
-        .padding(Padding {
-            top: COMBO_PAD_V,
-            bottom: COMBO_PAD_V,
-            left: 6.0,
-            right: 6.0,
-        })
-        .input_style(combo_input_style)
-        .on_open(Message::PropColorPickerClose)
-        .width(Length::Fill);
+        let caret = button(
+            container(if open {
+                crate::ui::icons::themed_arrow_up(9.0)
+            } else {
+                crate::ui::icons::themed_arrow_down(9.0)
+            })
+            .align_y(iced::Center),
+        )
+        .on_press(Message::PropChoiceToggle { field, quick })
+        .style(button::subtle)
+        .padding([2, 6]);
+        let label_text = text(shown).size(FONT_SZ).width(Length::Fill);
+        let label_text = if varies {
+            label_text.style(hint_text_style)
+        } else {
+            label_text
+        };
+        let head = container(row![label_text, caret].align_y(iced::Center))
+            .style(container::bordered_box)
+            .padding([2, 6])
+            .width(Length::Fill);
+        // A click anywhere in the cell opens the list, not only on the caret.
+        let head = mouse_area(head).on_press(Message::PropChoiceToggle { field, quick });
 
-        prop_row_widget(label, combo.into())
+        let mut list = column![].spacing(1);
+        for option in options {
+            let is_current = !varies && option.as_str() == current;
+            list = list.push(
+                button(text(LocalizedChoice::new(option.clone()).to_string()).size(FONT_SZ))
+                    .on_press(Message::PropGeomChoiceChanged {
+                        field,
+                        value: option.clone(),
+                    })
+                    .style(if is_current {
+                        button::secondary
+                    } else {
+                        button::subtle
+                    })
+                    .padding([2, 6])
+                    .width(Length::Fill),
+            );
+        }
+        let popup = container(scrollable(list).height(Length::Shrink))
+            .style(container::bordered_box)
+            .padding(2);
+
+        let value = crate::ui::color_select::editable_drop_down_below(
+            head.into(),
+            popup.into(),
+            None,
+            Length::Shrink,
+            Message::PropChoiceDismiss { field, quick },
+            open,
+        );
+        prop_row_widget(label, value)
     }
 
     // ── Editable geometry row (text_input) ────────────────────────────────

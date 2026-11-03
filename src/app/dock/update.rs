@@ -472,13 +472,18 @@ impl OpenCADStudio {
     }
 
     /// Whether a popup a pallet opened is showing: a colour dropdown in the
-    /// Layer Manager or Properties, or the Select Color window.
+    /// Layer Manager or Properties, one of the Properties lists, or the
+    /// Select Color window.
     fn dock_popup_open(&self) -> bool {
         let tab = &self.tabs[self.active_tab];
         tab.layers.color_picker_row.is_some()
             || tab.properties.color_picker_open
             || tab.properties.bg_color_picker_open
             || tab.properties.open_color_field.is_some()
+            || tab.properties.hatch_pattern_picker_open
+            || tab.properties.edit_choice_open
+            || tab.properties.open_block_picker.is_some()
+            || tab.properties.open_choice.is_some()
             || self.color_picker.is_some()
     }
 
@@ -624,6 +629,7 @@ impl OpenCADStudio {
                 // A hidden panel must not leave its list behind to keep the
                 // keyboard guard swallowing keys.
                 self.tabs[self.active_tab].properties.open_block_picker = None;
+                self.tabs[self.active_tab].properties.open_choice = None;
             }
             PanelId::Layers => {
                 self.show_layers = false;

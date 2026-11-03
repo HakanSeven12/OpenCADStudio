@@ -1282,7 +1282,8 @@ pub fn tessellate(
                 {
                     let a = pattern[0];
                     let p = pattern_length;
-                    let k = ((ref_total - a) / p).round().max(1.0);
+                    // Every whole period the centre line holds.
+                    let k = (ref_total / p).floor().max(1.0);
                     Some(((ref_total - k * p + a) * 0.5).max(1e-4))
                 } else {
                     None

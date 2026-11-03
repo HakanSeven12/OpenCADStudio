@@ -673,8 +673,9 @@ pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
         // "A" alignment for a dash-first pattern of period P laid out as
         //   [D] [gap] ([dash] [gap])*(k-1) [D]
         // gives  L = 2D + (k-1)a + k(P-a)  =>  D = (L - k*P + a) / 2.
-        // Pick the interior period count k so the end dash D stays near nominal a.
-        let mut k = ((total - a) / p).round().max(1.0);
+        // k is every whole period the length holds, so each end dash keeps
+        // at least half the first dash: D = a/2 + (L mod P)/2.
+        let mut k = (total / p).floor().max(1.0);
         let mut d_end = (total - k * p + a) * 0.5;
         if d_end <= 1e-4 {
             // End dash underflowed (period ≫ first dash); drop one period so the

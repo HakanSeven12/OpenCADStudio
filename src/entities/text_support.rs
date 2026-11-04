@@ -1340,6 +1340,27 @@ pub fn next_tab_position(
     indent_left + n * default_interval
 }
 
+/// Where the word that `next` continues begins in `line`: the trailing words
+/// of `line` that meet `next` with no space and no break between them, as
+/// when a format change splits one word into runs. `line.len()` when `next`
+/// starts a word of its own.
+fn joined_word_start(line: &[LayoutAtom], next: &LayoutAtom) -> usize {
+    let joins = |left: &LayoutAtom, right: &LayoutAtom| match (&left.kind, &right.kind) {
+        (AtomKind::Word(a), AtomKind::Word(b)) => match (a.chars().last(), b.chars().next()) {
+            (Some(prev), Some(first)) => !cjk_break_between(prev, first),
+            _ => false,
+        },
+        _ => false,
+    };
+    let mut start = line.len();
+    let mut right = next;
+    while start > 0 && joins(&line[start - 1], right) {
+        start -= 1;
+        right = &line[start];
+    }
+    start
+}
+
 /// Break a flat MText paragraph atom stream into wrap-fit sub-lines.
 pub fn wrap_paragraph(
     atoms: Vec<LayoutAtom>,
@@ -1416,16 +1437,30 @@ pub fn wrap_paragraph(
             AtomKind::Word(_) | AtomKind::Stack { .. } => {
                 let w = atom_width(&atom, entity_h, base_wf, base_font);
                 let max_w = line_max_w(subline_idx);
-                let has_content = cur.iter().any(|a| !matches!(a.kind, AtomKind::Space));
+                // Runs that meet with no space between (a font or colour change
+                // inside a word) are one word: a wrap moves them together.
+                let word_start = if break_long_words {
+                    cur.len()
+                } else {
+                    joined_word_start(&cur, &atom)
+                };
+                let has_content = cur[..word_start]
+                    .iter()
+                    .any(|a| !matches!(a.kind, AtomKind::Space));
                 // A word fits when its ink does: the letter spacing after its
                 // last glyph may run past the edge.
                 let ink_w = w - trailing_letter_gap(&atom, entity_h, base_wf, base_font);
                 if has_content && cur_w + ink_w > max_w && !after_align_tab {
+                    let word = cur.split_off(word_start);
                     while matches!(cur.last().map(|a| &a.kind), Some(AtomKind::Space)) {
                         cur.pop();
                     }
                     sublines.push(std::mem::take(&mut cur));
-                    cur_w = 0.0;
+                    cur_w = word
+                        .iter()
+                        .map(|a| atom_width(a, entity_h, base_wf, base_font))
+                        .sum();
+                    cur = word;
                     subline_idx += 1;
                 }
                 after_align_tab = false;
@@ -1754,6 +1789,9 @@ pub struct MTextLayout {
     pub local_bounds: [f32; 4],
 }
 
+/// Widths up to this fraction of the text height do not wrap an MTEXT.
+const NO_WRAP_WIDTH_RATIO: f32 = 0.1;
+
 /// Lay out and render an MText-formatted value, returning the stroke
 /// groups plus the layout metrics needed by callers that draw chrome
 /// (text frame, background fill, low-detail LOD substitutes) around the
@@ -1777,7 +1815,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
     };
     let base_oblique = opts.style.oblique_angle;
     let entity_h = opts.height;
-    let rect_w = opts.rect_w;
+    // A horizontal MTEXT whose width is at most a tenth of its text height
+    // lays out as if it had no width: each paragraph stays on one line.
+    let rect_w = if !opts.vertical_text && opts.rect_w <= NO_WRAP_WIDTH_RATIO * entity_h {
+        0.0
+    } else {
+        opts.rect_w
+    };
 
     // ── 1. Parse ─────────────────────────────────────────────────────────
     // The editor (want_glyph_boxes) keeps blank edges so a freshly typed
@@ -3713,6 +3757,104 @@ mod v_anchor_tests {
         );
         // A word starting with multi-byte punctuation ends the run whole.
         assert_eq!(reorder(&["שלום", " ", "«x"]), vec![" ", "שלום", "«x"]);
+    }
+
+    /// A width up to a tenth of the text height does not wrap: the title
+    /// block of #2470 stores widths of 1.0 to 1.4 for 25 to 40 high text.
+    /// Past that it wraps word by word, at any height.
+    #[test]
+    fn a_width_up_to_a_tenth_of_the_height_does_not_wrap() {
+        use crate::entities::text_support::{
+            layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
+        };
+        let style = ResolvedTextStyle {
+            font_name: "Standard".to_string(),
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            is_backward: false,
+            is_upside_down: false,
+            is_vertical: false,
+        };
+        let lines = |height: f32, rect_w: f32| {
+            layout_mtext(&MTextRenderOpts {
+                layer_color: None,
+                columns: Default::default(),
+                value: "AAA BBB CCC",
+                insertion: [0.0, 0.0, 0.0],
+                height,
+                rect_w,
+                rotation: 0.0,
+                style: &style,
+                attach_h_anchor: 0.5,
+                v_anchor: MTextVAnchor::Top,
+                line_spacing_factor: 1.0,
+                exact_line_spacing: false,
+                rectangle_height: 0.0,
+                vertical_text: false,
+                want_glyph_boxes: false,
+                break_long_words: false,
+            })
+            .line_count
+        };
+        for height in [4.0, 40.0, 400.0] {
+            assert_eq!(lines(height, 0.0), 1, "h {height}, no width");
+            assert_eq!(lines(height, 0.032 * height), 1, "h {height}, title block");
+            assert_eq!(lines(height, 0.1 * height), 1, "h {height}, a tenth");
+            assert_eq!(lines(height, 0.11 * height), 3, "h {height}, past a tenth");
+            assert_eq!(lines(height, 0.15 * height), 3, "h {height}");
+        }
+        // A width that holds the line keeps it whole, as before.
+        assert_eq!(lines(40.0, 1000.0), 1);
+    }
+
+    /// A word split into runs by a format change wraps as one word: the
+    /// title block of #2470 stores "BİLGİLERİ" as "B", a font change, then
+    /// "İLGİLERİ", and it was cut between the two.
+    #[test]
+    fn a_word_split_by_a_format_change_wraps_whole() {
+        use crate::entities::text_support::{
+            layout_mtext, MTextLayout, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
+        };
+        let style = ResolvedTextStyle {
+            font_name: "Standard".to_string(),
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            is_backward: false,
+            is_upside_down: false,
+            is_vertical: false,
+        };
+        let layout = |value: &str, rect_w: f32| -> MTextLayout {
+            layout_mtext(&MTextRenderOpts {
+                layer_color: None,
+                columns: Default::default(),
+                value,
+                insertion: [0.0, 0.0, 0.0],
+                height: 17.5,
+                rect_w,
+                rotation: 0.0,
+                style: &style,
+                attach_h_anchor: 0.0,
+                v_anchor: MTextVAnchor::Top,
+                line_spacing_factor: 1.0,
+                exact_line_spacing: false,
+                rectangle_height: 0.0,
+                vertical_text: false,
+                want_glyph_boxes: false,
+                break_long_words: false,
+            })
+        };
+        // One word, narrower box: it stays on one line.
+        assert_eq!(layout("B\\C1;ILGILERI", 8.44).line_count, 1);
+        assert_eq!(layout("{\\C2;B}ILGILERI", 8.44).line_count, 1);
+        // The word moves to the next line whole, as the same word without
+        // the change does.
+        let plain = layout("AAA BBB", 80.0);
+        let split = layout("AAA B\\C1;BB", 80.0);
+        assert_eq!(plain.line_count, 2);
+        assert_eq!(split.line_count, 2);
+        for (a, b) in plain.line_widths.iter().zip(&split.line_widths) {
+            assert!((a - b).abs() < 1e-3, "{a} vs {b}");
+        }
     }
 
     #[test]

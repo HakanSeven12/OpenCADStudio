@@ -1350,8 +1350,6 @@ common =
 
     .crossing-specify-first-corner = Crossing: ກຳນົດມຸມທຳອິດ.
     .window-specify-first-corner = Window: ກຳນົດມຸມທຳອິດ.
-    .add-mode-picks-join-the-selection = ໂໝດເພີ່ມ: ການເລືອກຈະຖືກເພີ່ມເຂົ້າຊຸດທີ່ເລືອກ.
-    .remove-mode-picks-leave-the-selection = ໂໝດລົບ: ການເລືອກຈະຖືກນຳອອກຈາກຊຸດທີ່ເລືອກ.
     .no-editable-objects-selected = ບໍ່ມີວັດຖຸທີ່ແກ້ໄຂໄດ້ຖືກເລືອກ.
     .object-s-found = ພົບ __ocs_fmt_0__ ວັດຖຸ.
     .the-cell-is-content-locked = ຫ້ອງນີ້ຖືກລັອກເນື້ອໃນໄວ້.
@@ -2272,7 +2270,6 @@ common =
     .choose-at-least-one-output = ເລືອກຢ່າງໜ້ອຍ 1 ຜົນອອກ.
     .data-extraction-settings = ການຕັ້ງຄ່າການສະກັດຂໍ້ມູນ
     .add-drawings = ເພີ່ມຮູບແຕ້ມ
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  ເລືອກວັດຖຸ ຫຼື [Settings] (ເລືອກແລ້ວ __ocs_arg_count__ ອັນ, ກົດ Enter ເພື່ອນຳໃຊ້):
     .select-objects-or-settings = __ocs_arg_cmd__  ເລືອກວັດຖຸ ຫຼື [Settings]:
     .add-parameter = + ເພີ່ມພາຣາມີເຕີ
     .object-snap-3d = ການເກາະຈຸດວັດຖຸ 3D
@@ -2841,8 +2838,9 @@ file =
     .opening-a-drawing-by-path-is-not-available-in = ການເປີດແບບແຕ້ມດ້ວຍທີ່ຢູ່ໄຟລ໌ບໍ່ສາມາດໃຊ້ງານໄດ້ເທິງເວັບບຣາວເຊີ.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  ເລືອກວັດຖຸ (ເລືອກແລ້ວ __ocs_arg_count__ ອັນ, ກົດ Enter ເພື່ອນຳໃຊ້):
     .cmd-select-objects = __ocs_arg_cmd__  ເລືອກວັດຖຸ:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = ເພີ່ມໃສ່ສ່ວນທີ່ເລືອກປັດຈຸບັນ
     .last = ຫຼ້າສຸດ
 

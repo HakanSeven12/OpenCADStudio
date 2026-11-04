@@ -1330,8 +1330,6 @@ common =
 
     .crossing-specify-first-corner = Crossing: specify first corner.
     .window-specify-first-corner = Window: specify first corner.
-    .add-mode-picks-join-the-selection = Add mode: picks join the selection.
-    .remove-mode-picks-leave-the-selection = Remove mode: picks leave the selection.
     .no-editable-objects-selected = No editable objects selected.
     .object-s-found = __ocs_fmt_0__ object(s) found.
     .the-cell-is-content-locked = The cell is content locked.
@@ -2271,7 +2269,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .select-objects-or-settings-short = Select objects or [Settings]:
     .add-parameter = + Add parameter
@@ -2841,8 +2838,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" is __ocs_fmt_1__×__ocs_fmt_2__ px and would decode to __ocs_fmt_3__ MB, over the __ocs_fmt_4__ MB image limit of this build — it cannot be attached. Images within the limit are attached at a reduced display resolution when needed.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Select objects (__ocs_arg_count__ selected, Enter to apply):
     .cmd-select-objects = __ocs_arg_cmd__  Select objects:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Append to current selection
     .last = Last
 

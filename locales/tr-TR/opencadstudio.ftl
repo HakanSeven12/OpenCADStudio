@@ -1319,8 +1319,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Ekleme modu: tıklananlar seçime eklenir.
-    .remove-mode-picks-leave-the-selection = Çıkarma modu: tıklananlar seçimden çıkarılır.
     .no-editable-objects-selected = Düzenlenebilir nesne seçilmedi.
     .object-s-found = __ocs_fmt_0__ nesne bulundu.
     .the-cell-is-content-locked = Hücrenin içeriği kilitli.
@@ -2256,7 +2254,6 @@ common =
     .choose-at-least-one-output = En az bir çıktı seçin.
     .data-extraction-settings = Veri Çıkarma Ayarları
     .add-drawings = Çizim Ekle
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2824,8 +2821,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" __ocs_fmt_1__×__ocs_fmt_2__ px boyutunda ve çözümlendiğinde __ocs_fmt_3__ MB gerektirir; bu sürümün __ocs_fmt_4__ MB görsel sınırını aştığından eklenemez. Sınır içindeki görseller gerektiğinde otomatik olarak düşürülmüş görüntü çözünürlüğüyle eklenir.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Nesneleri seçin (__ocs_arg_count__ seçili, uygulamak için Enter):
     .cmd-select-objects = __ocs_arg_cmd__  Nesneleri seçin:
+    .cmd-remove-objects = __ocs_arg_cmd__  Nesneleri çıkarın:
+    .remove-objects = Nesneleri çıkarın:
     .append-to-current-selection = Geçerli seçime ekle
     .last = Son
 

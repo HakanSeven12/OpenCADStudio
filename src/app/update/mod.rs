@@ -888,6 +888,23 @@ impl OpenCADStudio {
             .map(|c| c.prompt())
             .or_else(|| self.graphic_attributes.fill_close_prompt())
             .or_else(|| self.pending_pick_label());
+        // In Remove mode a selection step asks "Remove objects:" in place of
+        // its own wording, whatever the command, until Add turns it back.
+        let gathering = self.tabs[self.active_tab]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|c| c.is_selection_gathering());
+        let prompt = match prompt {
+            Some(p) if gathering && self.select_remove_mode => Some(match p.split_once("  ") {
+                Some((cmd, _)) => crate::t!("%{cmd}  Remove objects:", cmd = cmd).into_owned(),
+                None => crate::t!("Remove objects:").into_owned(),
+            }),
+            other => other,
+        };
+        // After each "N found" line the selection step asks again, under it.
+        if std::mem::take(&mut self.selection_reprompt) && gathering {
+            self.command_line.set_step_prompt(None);
+        }
         self.command_line.set_step_prompt(prompt);
         // Mirror the step's clickable options so they render as buttons (#304).
         let opts = self.tabs[self.active_tab]

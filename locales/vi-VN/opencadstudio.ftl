@@ -1343,8 +1343,6 @@ common =
 
     .crossing-specify-first-corner = Cắt ngang: chỉ định góc thứ nhất.
     .window-specify-first-corner = Cửa sổ: chỉ định góc đầu tiên.
-    .add-mode-picks-join-the-selection = Chế độ thêm: đối tượng được chọn sẽ thêm vào vùng chọn.
-    .remove-mode-picks-leave-the-selection = Chế độ bớt: đối tượng được chọn sẽ rời khỏi vùng chọn.
     .no-editable-objects-selected = Không có đối tượng có thể chỉnh sửa nào được chọn.
     .object-s-found = Đã tìm thấy __ocs_fmt_0__ đối tượng.
     .the-cell-is-content-locked = Ô này đã bị khóa nội dung.
@@ -2275,7 +2273,6 @@ common =
     .choose-at-least-one-output = Chọn ít nhất một đầu ra.
     .data-extraction-settings = Cài đặt trích xuất dữ liệu
     .add-drawings = Thêm bản vẽ
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__ Chọn đối tượng hoặc [Cài đặt] (__ocs_arg_count__ đã chọn, Enter để áp dụng):
     .select-objects-or-settings = __ocs_arg_cmd__ Chọn đối tượng hoặc [Cài đặt]:
     .add-parameter = + Thêm tham số
     .object-snap-3d = Truy bắt đối tượng 3D
@@ -2845,8 +2842,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" là __ocs_fmt_1__×__ocs_fmt_2__ px và sẽ giải mã thành __ocs_fmt_3__ MB, vượt quá giới hạn hình ảnh __ocs_fmt_4__ MB của bản dựng này — không thể đính kèm được. Hình ảnh trong giới hạn sẽ được đính kèm ở độ phân giải màn hình giảm khi cần.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Chọn đối tượng (__ocs_arg_count__ đã chọn, Enter để áp dụng):
     .cmd-select-objects = __ocs_arg_cmd__ Chọn đối tượng:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Thêm vào lựa chọn hiện tại
     .last = Cuối cùng
 

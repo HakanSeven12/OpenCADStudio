@@ -1346,8 +1346,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Λειτουργία προσθήκης: τα αντικείμενα που πατάτε προστίθενται στην επιλογή.
-    .remove-mode-picks-leave-the-selection = Λειτουργία αφαίρεσης: τα αντικείμενα που πατάτε αφαιρούνται από την επιλογή.
     .no-editable-objects-selected = Δεν έχουν επιλεγεί επεξεργάσιμα αντικείμενα.
     .object-s-found = Βρέθηκαν __ocs_fmt_0__ αντικείμενα.
     .the-cell-is-content-locked = Το περιεχόμενο του κελιού είναι κλειδωμένο.
@@ -2271,7 +2269,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2840,8 +2837,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = Το "__ocs_fmt_0__" είναι __ocs_fmt_1__×__ocs_fmt_2__ px και η αποκωδικοποίησή του θα απαιτούσε __ocs_fmt_3__ MB, πάνω από το όριο __ocs_fmt_4__ MB για εικόνες σε αυτή την έκδοση — δεν μπορεί να επισυναφθεί. Οι εικόνες εντός του ορίου επισυνάπτονται κατά ανάγκη αυτόματα σε μειωμένη ανάλυση εμφάνισης.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Επιλέξτε αντικείμενα (__ocs_arg_count__ επιλεγμένα, Enter για εφαρμογή):
     .cmd-select-objects = __ocs_arg_cmd__  Επιλέξτε αντικείμενα:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Προσθήκη στην τρέχουσα επιλογή
     .last = Τελευταίο
 

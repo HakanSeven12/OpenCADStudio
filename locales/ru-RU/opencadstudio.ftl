@@ -1348,8 +1348,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Режим добавления: выбранные щелчком объекты добавляются в набор.
-    .remove-mode-picks-leave-the-selection = Режим удаления: выбранные щелчком объекты удаляются из набора.
     .no-editable-objects-selected = Редактируемые объекты не выбраны.
     .object-s-found = Найдено объектов: __ocs_fmt_0__.
     .the-cell-is-content-locked = Содержимое ячейки заблокировано.
@@ -2275,7 +2273,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2844,8 +2841,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" — __ocs_fmt_1__×__ocs_fmt_2__ px; для декодирования потребовалось бы __ocs_fmt_3__ МБ, что превышает ограничение __ocs_fmt_4__ МБ на изображение в этой сборке, поэтому вложить его нельзя. Изображения в пределах ограничения при необходимости вкладываются автоматически с пониженным разрешением отображения.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Выберите объекты (__ocs_arg_count__ Выберите, Введите для применения):
     .cmd-select-objects = __ocs_arg_cmd__ Выберите объекты:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Добавить к текущему выбору
     .last = Последний
 

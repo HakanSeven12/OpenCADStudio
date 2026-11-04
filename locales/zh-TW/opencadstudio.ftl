@@ -1344,8 +1344,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = 加入模式：按一下的物件會加入選取集。
-    .remove-mode-picks-leave-the-selection = 移除模式：按一下的物件會移出選取集。
     .no-editable-objects-selected = 未選取可編輯物件。
     .object-s-found = 找到 __ocs_fmt_0__ 個物件。
     .the-cell-is-content-locked = 儲存格內容已鎖定。
@@ -2271,7 +2269,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2840,8 +2837,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__"為 __ocs_fmt_1__×__ocs_fmt_2__ 像素，解碼需要 __ocs_fmt_3__ MB，超過此組建的 __ocs_fmt_4__ MB 影像上限，因此無法貼附。上限內的影像會在需要時自動以降低的顯示解析度貼附。
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  選擇物件（已選擇 __ocs_arg_count__ 個，按 Enter 套用）：
     .cmd-select-objects = __ocs_arg_cmd__  選擇物件：
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = 追加到目前選擇
     .last = 最後
 

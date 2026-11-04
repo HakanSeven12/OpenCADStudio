@@ -769,6 +769,8 @@ pub(super) struct OpenCADStudio {
     /// a pick *replaces* the set, so borrowing it here would wipe everything
     /// gathered so far rather than subtract one thing. (#596)
     select_remove_mode: bool,
+    /// A selection count was just reported: the step's prompt is shown again.
+    selection_reprompt: bool,
     /// What the last layer translation did, kept so the log can be written
     /// after the fact rather than forcing a path out of the user up front.
     last_layer_translation: Option<crate::modules::draw::layers::laytrans::Report>,
@@ -5798,6 +5800,7 @@ impl OpenCADStudio {
             select_similar_mode: crate::scene::SELECT_SIMILAR_DEFAULT,
             pick_add: true,
             select_remove_mode: false,
+            selection_reprompt: false,
             last_layer_translation: None,
             layer_translator: None,
             drawing_units: None,

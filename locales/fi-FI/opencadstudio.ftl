@@ -1344,8 +1344,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Lisäystila: napsautetut objektit lisätään valintaan.
-    .remove-mode-picks-leave-the-selection = Poistotila: napsautetut objektit poistetaan valinnasta.
     .no-editable-objects-selected = Muokattavia objekteja ei ole valittu.
     .object-s-found = Löydettyjä objekteja: __ocs_fmt_0__.
     .the-cell-is-content-locked = Solun sisältö on lukittu.
@@ -2271,7 +2269,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2840,8 +2837,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" on __ocs_fmt_1__×__ocs_fmt_2__ px ja sen purkaminen veisi __ocs_fmt_3__ MB, yli tämän version __ocs_fmt_4__ MB:n kuvarajan — sitä ei voi liittää. Rajan sisällä olevat kuvat liitetään tarvittaessa automaattisesti pienemmällä näyttötarkkuudella.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Valitse objektit (__ocs_arg_count__ valittu, Enter käytettäväksi):
     .cmd-select-objects = __ocs_arg_cmd__ Valitse objektit:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Liitä nykyiseen valintaan
     .last = Viimeinen
 

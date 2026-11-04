@@ -1343,8 +1343,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Toevoegmodus: aangeklikte objecten worden aan de selectie toegevoegd.
-    .remove-mode-picks-leave-the-selection = Verwijdermodus: aangeklikte objecten worden uit de selectie verwijderd.
     .no-editable-objects-selected = Geen bewerkbare objecten geselecteerd.
     .object-s-found = __ocs_fmt_0__ object(en) gevonden.
     .the-cell-is-content-locked = De celinhoud is vergrendeld.
@@ -2272,7 +2270,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2841,8 +2838,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" is __ocs_fmt_1__×__ocs_fmt_2__ px en zou bij het decoderen __ocs_fmt_3__ MB nodig hebben, boven de __ocs_fmt_4__ MB afbeeldingslimiet van deze build — het kan niet worden bijgevoegd. Afbeeldingen binnen de limiet worden zo nodig automatisch met een verlaagde weergaveresolutie bijgevoegd.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ Selecteer objecten (__ocs_arg_count__ geselecteerd, Voer in om toe te passen):
     .cmd-select-objects = __ocs_arg_cmd__ Selecteer objecten:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Aan huidige selectie toevoegen
     .last = Laatste
 

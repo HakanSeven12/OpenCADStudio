@@ -1357,8 +1357,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = وضع الإضافة: تُضاف العناصر المنقور عليها إلى التحديد.
-    .remove-mode-picks-leave-the-selection = وضع الإزالة: تُزال العناصر المنقور عليها من التحديد.
     .no-editable-objects-selected = لم يتم تحديد عناصر قابلة للتحرير.
     .object-s-found = العناصر التي تم العثور عليها: __ocs_fmt_0__.
     .the-cell-is-content-locked = محتوى الخلية مقفل.
@@ -2284,7 +2282,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2853,8 +2850,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" بأبعاد __ocs_fmt_1__×__ocs_fmt_2__ بكسل ويتطلب فك ترميزه __ocs_fmt_3__ ميغابايت، وهو فوق حد __ocs_fmt_4__ ميغابايت للصور في هذا الإصدار — لا يمكن إرفاقه. تُرفَق الصور ضمن الحد تلقائيًا بدقة عرض مخفَّضة عند الحاجة.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  حدد الكائنات (__ocs_arg_count__ محدد، Enter للتطبيق):
     .cmd-select-objects = __ocs_arg_cmd__  حدد الكائنات:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = إلحاق بالتحديد الحالي
     .last = الأخير
 

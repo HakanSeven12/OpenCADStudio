@@ -1335,8 +1335,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = 追加モード：クリックしたオブジェクトを選択に追加します。
-    .remove-mode-picks-leave-the-selection = 除外モード：クリックしたオブジェクトを選択から除外します。
     .no-editable-objects-selected = 編集可能なオブジェクトが選択されていません。
     .object-s-found = __ocs_fmt_0__ 個のオブジェクトが見つかりました。
     .the-cell-is-content-locked = セルの内容はロックされています。
@@ -2262,7 +2260,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2831,8 +2828,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" は __ocs_fmt_1__×__ocs_fmt_2__ px で、デコードすると __ocs_fmt_3__ MB 必要となり、このビルドの __ocs_fmt_4__ MB の画像上限を超えるため添付できません。上限内の画像は、必要に応じて自動的に低下させた表示解像度で添付されます。
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  オブジェクトを選択（__ocs_arg_count__ 個選択、Enter で適用）:
     .cmd-select-objects = __ocs_arg_cmd__  オブジェクトを選択:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = 現在の選択に追加
     .last = 最後
 

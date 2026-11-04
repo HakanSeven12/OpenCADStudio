@@ -1342,8 +1342,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Hozzáadás mód: a kattintott objektumok bekerülnek a kijelölésbe.
-    .remove-mode-picks-leave-the-selection = Eltávolítás mód: a kattintott objektumok kikerülnek a kijelölésből.
     .no-editable-objects-selected = Nincs kijelölt szerkeszthető objektum.
     .object-s-found = Talált objektumok: __ocs_fmt_0__.
     .the-cell-is-content-locked = A cella tartalma zárolva van.
@@ -2271,7 +2269,6 @@ common =
     .choose-at-least-one-output = Válasszon legalább egy kimenetet.
     .data-extraction-settings = Adatkinyerési beállítások
     .add-drawings = Rajzok hozzáadása
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Válasszon objektumokat vagy [Beállítások] (__ocs_arg_count__ kijelölve, Enter az alkalmazáshoz):
     .select-objects-or-settings = __ocs_arg_cmd__  Válasszon objektumokat vagy [Beállítások]:
     .select-objects-or-settings-short = Válasszon objektumokat vagy [Beállítások]:
     .add-parameter = + Paraméter hozzáadása
@@ -2834,8 +2831,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = A(z) "__ocs_fmt_0__" __ocs_fmt_1__×__ocs_fmt_2__ px felbontású, és a dekódolása __ocs_fmt_3__ MB-ot igényelne — ez meghaladja e build __ocs_fmt_4__ MB-os képhatárát, ezért nem csatolható. A határon belüli képek szükség esetén automatikusan csökkentett megjelenítési felbontással csatolódnak.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Válasszon objektumokat (__ocs_arg_count__ kijelölve, Enter az alkalmazáshoz):
     .cmd-select-objects = __ocs_arg_cmd__ Objektumok kiválasztása:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Hozzáfűzés az aktuális kijelöléshez
     .last = Utolsó
 

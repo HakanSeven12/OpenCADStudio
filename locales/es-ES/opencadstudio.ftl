@@ -1345,8 +1345,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = Modo añadir: los objetos pulsados se añaden a la selección.
-    .remove-mode-picks-leave-the-selection = Modo quitar: los objetos pulsados se eliminan de la selección.
     .no-editable-objects-selected = No se seleccionaron objetos editables.
     .object-s-found = Se encontraron __ocs_fmt_0__ objetos.
     .the-cell-is-content-locked = El contenido de la celda está bloqueado.
@@ -2272,7 +2270,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2841,8 +2838,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" tiene __ocs_fmt_1__×__ocs_fmt_2__ px y al decodificarse ocuparía __ocs_fmt_3__ MB, por encima del límite de __ocs_fmt_4__ MB por imagen de esta versión; no se puede adjuntar. Las imágenes dentro del límite se adjuntan automáticamente con una resolución de visualización reducida cuando es necesario.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__  Seleccione objetos (__ocs_arg_count__ seleccionados, Enter para aplicar):
     .cmd-select-objects = __ocs_arg_cmd__  Seleccione objetos:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = Añadir a la selección actual
     .last = Último
 

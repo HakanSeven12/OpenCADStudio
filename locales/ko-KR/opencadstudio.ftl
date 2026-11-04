@@ -1344,8 +1344,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = 추가 모드: 클릭한 객체가 선택에 추가됩니다.
-    .remove-mode-picks-leave-the-selection = 제거 모드: 클릭한 객체가 선택에서 제거됩니다.
     .no-editable-objects-selected = 편집 가능한 객체가 선택되지 않았습니다.
     .object-s-found = 객체 __ocs_fmt_0__개를 찾았습니다.
     .the-cell-is-content-locked = 셀 내용이 잠겨 있습니다.
@@ -2271,7 +2269,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2840,8 +2837,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__"은(는) __ocs_fmt_1__×__ocs_fmt_2__ px이며 디코딩 시 __ocs_fmt_3__ MB가 필요해 이 빌드의 __ocs_fmt_4__ MB 이미지 한도를 초과하므로 첨부할 수 없습니다. 한도 이내의 이미지는 필요할 때 자동으로 낮춘 표시 해상도로 첨부됩니다.
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ 객체 선택(__ocs_arg_count__ 선택, Enter 적용):
     .cmd-select-objects = __ocs_arg_cmd__ 객체 선택:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = 현재 선택 항목에 추가
     .last = 마지막
 

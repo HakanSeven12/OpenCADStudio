@@ -1333,8 +1333,6 @@ common =
 
     .crossing-specify-first-corner = { common.crossing }: { common.specify } · { common.first-corner }.
     .window-specify-first-corner = { common.window }: { common.specify } · { common.first-corner }.
-    .add-mode-picks-join-the-selection = जोड़ने का मोड: क्लिक किए गए ऑब्जेक्ट चयन में जुड़ते हैं।
-    .remove-mode-picks-leave-the-selection = हटाने का मोड: क्लिक किए गए ऑब्जेक्ट चयन से हटते हैं।
     .no-editable-objects-selected = कोई संपादन योग्य ऑब्जेक्ट चयनित नहीं है।
     .object-s-found = __ocs_fmt_0__ ऑब्जेक्ट मिले।
     .the-cell-is-content-locked = सेल की सामग्री लॉक है।
@@ -2260,7 +2258,6 @@ common =
     .choose-at-least-one-output = Choose at least one output.
     .data-extraction-settings = Data Extraction Settings
     .add-drawings = Add Drawings
-    .select-objects-or-settings-selected-enter-to-apply = __ocs_arg_cmd__  Select objects or [Settings] (__ocs_arg_count__ selected, Enter to apply):
     .select-objects-or-settings = __ocs_arg_cmd__  Select objects or [Settings]:
     .add-parameter = + Add parameter
     .object-snap-3d = 3D Object Snap
@@ -2829,8 +2826,9 @@ file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" __ocs_fmt_1__×__ocs_fmt_2__ px है और इसे डिकोड करने पर __ocs_fmt_3__ MB लगेगा, जो इस बिल्ड की __ocs_fmt_4__ MB छवि सीमा से अधिक है — इसे संलग्न नहीं किया जा सकता। सीमा के भीतर की छवियाँ आवश्यकता पड़ने पर स्वचालित रूप से घटी हुई डिस्प्ले रिज़ॉल्यूशन पर संलग्न की जाती हैं।
 
 selection =
-    .cmd-select-objects-count-selected-enter-to-app = __ocs_arg_cmd__ ऑब्जेक्ट चुनें (__ocs_arg_count__ चयनित, लागू करने के लिए Enter दबाएँ):
     .cmd-select-objects = __ocs_arg_cmd__ ऑब्जेक्ट चुनें:
+    .cmd-remove-objects = __ocs_arg_cmd__  Remove objects:
+    .remove-objects = Remove objects:
     .append-to-current-selection = वर्तमान चयन में जोड़ें
     .last = अंतिम
 

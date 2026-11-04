@@ -782,6 +782,7 @@ impl OpenCADStudio {
             crate::tf!("{found} found, {total} total")
         };
         self.command_line.push_info(line.as_ref());
+        self.selection_reprompt = true;
         Some(key)
     }
 
@@ -1478,15 +1479,10 @@ impl OpenCADStudio {
 
         // Whether a pick adds to the set or takes away from it, for the rest of
         // this selection. Mirrors PICKADD, which the pick paths already read.
+        // The step's prompt turns to "Remove objects:" and back (the
+        // per-message prompt mirror shows it); no separate mode line.
         if let "R" | "REMOVE" | "A" | "ADD" = kw.as_str() {
-            let adding = matches!(kw.as_str(), "A" | "ADD");
-            self.select_remove_mode = !adding;
-            let hint = if adding {
-                crate::t!("Add mode: picks join the selection.")
-            } else {
-                crate::t!("Remove mode: picks leave the selection.")
-            };
-            self.command_line.push_info(hint.as_ref());
+            self.select_remove_mode = !matches!(kw.as_str(), "A" | "ADD");
             return Some(Task::none());
         }
 
@@ -1528,11 +1524,17 @@ impl OpenCADStudio {
             );
             return Some(Task::none());
         }
-        // ALL / Previous / Last report a count without groups.
-        self.selection_group_named = true;
-        self.last_pick = Some((add.clone(), false));
+        // ALL and Previous report a count without groups; Last takes the
+        // last object's whole group and counts it, as a pick does.
+        self.selection_group_named = !matches!(kw.as_str(), "L" | "LAST");
+        let remove = self.select_remove_mode;
+        self.last_pick = Some((add.clone(), remove));
         for h in add {
-            self.tabs[i].scene.select_entity(h, false);
+            if remove {
+                self.tabs[i].scene.deselect_entity(h);
+            } else {
+                self.tabs[i].scene.select_entity(h, false);
+            }
         }
         self.refresh_properties();
         let handles: Vec<Handle> = self.tabs[i]

@@ -677,6 +677,45 @@ fn a_value_list_is_not_painted_when_its_grip_is_gone() {
     );
 }
 
+/// Opening the editor for the reference a value list is open on takes the list
+/// down with the grip it belonged to: the editing context draws no grip for a
+/// placed reference, so a list that outlived the entry would hang over a drawing
+/// whose selection no longer means the same thing.
+#[test]
+fn a_value_list_is_not_painted_while_its_reference_is_being_edited() {
+    let (mut app, _, def, insert, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    let bounds = iced::Rectangle {
+        x: 0.,
+        y: 0.,
+        width: 1600.,
+        height: 900.,
+    };
+    assert!(
+        app.table_popup_anchor(i, bounds).is_some(),
+        "the list hangs from the grip while the drawing shows it"
+    );
+    begin(&mut app, insert);
+    let i = app.active_tab;
+    app.refresh_properties();
+    assert!(
+        app.tabs[i].table_grip.is_none(),
+        "the editing context takes the grip down"
+    );
+    assert!(
+        app.table_popup.is_none(),
+        "and the list that hung from it goes too"
+    );
+    assert!(
+        app.table_popup_anchor(i, bounds).is_none(),
+        "so nothing paints a value list over the editor"
+    );
+}
+
 #[test]
 fn the_value_list_follows_its_grip_when_the_view_moves() {
     let (mut app, _, def, _, _, table) = table_fixture(false);

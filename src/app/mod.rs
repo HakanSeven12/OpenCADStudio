@@ -1166,6 +1166,11 @@ pub(super) struct OpenCADStudio {
     pub(crate) selection_undoing: bool,
     /// Group at a Select objects: prompt is waiting for the group's name.
     pub(crate) selection_group_pending: bool,
+    /// The selection step being reported came from Group (a named group):
+    /// its count carries no group total.
+    pub(crate) selection_group_named: bool,
+    /// Selectable groups the reported selection step touched.
+    pub(crate) last_pick_groups: usize,
     /// SUbobject mode at the Select objects: prompt of this gathering
     /// command (keyed like `selection_undo`); Object ends it.
     pub(crate) selection_subobject: Option<usize>,
@@ -5974,6 +5979,8 @@ impl OpenCADStudio {
             selection_undo: (0, Vec::new()),
             selection_undoing: false,
             selection_group_pending: false,
+            selection_group_named: false,
+            last_pick_groups: 0,
             selection_subobject: None,
             typed_window_corner: None,
             refedit_options: Default::default(),

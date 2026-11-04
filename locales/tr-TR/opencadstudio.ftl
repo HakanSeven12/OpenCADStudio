@@ -6926,6 +6926,12 @@ keytips =
     .hint-items = Öğe harfini yazın · Esc bir düzey geri
 
 selection-report =
+    .group-one = __ocs_fmt_0__ grup
+    .group-many = __ocs_fmt_0__ grup
+    .found-groups = __ocs_fmt_0__ bulundu, __ocs_fmt_1__
+    .found-groups-total = __ocs_fmt_0__ bulundu, __ocs_fmt_1__, toplam __ocs_fmt_2__
+    .found-removed-groups-total = __ocs_fmt_0__ bulundu, __ocs_fmt_1__ çıkarıldı, __ocs_fmt_2__, toplam __ocs_fmt_3__
+    .found-duplicate-groups-total = __ocs_fmt_0__ bulundu (__ocs_fmt_1__ yinelenen), __ocs_fmt_2__, toplam __ocs_fmt_3__
     .invalid-selection = *Geçersiz seçim*
     .selection-methods = Bir nokta veya Pencere/Son/Kesişen/KUTU/TÜMÜ/Çit/PÇokgen/KÇokgen/Grup/Ekle/Kaldır/Çoklu/Önceki/Geri al/OTomatik/TEk/ALtnesne/Nesne bekleniyor
     .selections-undone = Tüm seçimler geri alındı.

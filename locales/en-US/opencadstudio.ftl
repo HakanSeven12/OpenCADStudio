@@ -7004,6 +7004,12 @@ keytips =
     .hint-items = Type an item letter · Esc goes back one level
 
 selection-report =
+    .group-one = __ocs_fmt_0__ group
+    .group-many = __ocs_fmt_0__ groups
+    .found-groups = __ocs_fmt_0__ found, __ocs_fmt_1__
+    .found-groups-total = __ocs_fmt_0__ found, __ocs_fmt_1__, __ocs_fmt_2__ total
+    .found-removed-groups-total = __ocs_fmt_0__ found, __ocs_fmt_1__ removed, __ocs_fmt_2__, __ocs_fmt_3__ total
+    .found-duplicate-groups-total = __ocs_fmt_0__ found (__ocs_fmt_1__ duplicate), __ocs_fmt_2__, __ocs_fmt_3__ total
     .invalid-selection = *Invalid selection*
     .selection-methods = Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object
     .selections-undone = All selections have been undone.

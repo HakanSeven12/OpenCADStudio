@@ -670,6 +670,44 @@ impl OpenCADStudio {
     /// for the first step, `N found, M total`, `N found (D duplicate), M
     /// total` when some were chosen already, `N found, R removed, M total` in
     /// remove mode. Returns the command's key while it gathers.
+    /// Group selection: a pick or window of a gathering prompt takes every
+    /// member of each selectable group it touches, when removing too, and
+    /// the report counts those groups. Group by name is reported without.
+    fn apply_group_pick(&mut self, input: StepInput) -> StepInput {
+        self.last_pick_groups = 0;
+        let named = std::mem::take(&mut self.selection_group_named);
+        let i = self.active_tab;
+        let (StepInput::SelectionComplete(_), Some((picked, remove))) = (&input, self.last_pick.as_ref())
+        else {
+            return input;
+        };
+        if named
+            || !self.tabs[i].active_cmd.as_ref().is_some_and(|c| c.is_selection_gathering())
+        {
+            return input;
+        }
+        let remove = *remove;
+        let groups = self.tabs[i].scene.selectable_groups_touching(picked);
+        if groups == 0 {
+            return input;
+        }
+        let expanded: Vec<Handle> = self.tabs[i]
+            .scene
+            .handles_expanded_for_selectable_groups(picked)
+            .into_iter()
+            .collect();
+        if remove {
+            self.tabs[i].scene.deselect_entities(&expanded);
+        } else {
+            self.tabs[i].scene.select_entities(&expanded);
+        }
+        self.last_pick = Some((expanded, remove));
+        self.last_pick_groups = groups;
+        StepInput::SelectionComplete(
+            self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect(),
+        )
+    }
+
     fn report_selection_found(&mut self, input: &StepInput) -> Option<usize> {
         let StepInput::SelectionComplete(handles) = input else {
             return None;
@@ -717,7 +755,23 @@ impl OpenCADStudio {
                 .collect(),
             remove,
         ));
-        let line = if found == 0 || previous.is_empty() && !remove {
+        let groups = std::mem::take(&mut self.last_pick_groups);
+        let line = if groups > 0 && found > 0 {
+            let groups = if groups == 1 {
+                crate::tf!("{groups} group")
+            } else {
+                crate::tf!("{groups} groups")
+            };
+            if previous.is_empty() && !remove {
+                crate::tf!("{found} found, {groups}")
+            } else if remove && known > 0 {
+                crate::tf!("{found} found, {known} removed, {groups}, {total} total")
+            } else if !remove && known > 0 {
+                crate::tf!("{found} found ({known} duplicate), {groups}, {total} total")
+            } else {
+                crate::tf!("{found} found, {groups}, {total} total")
+            }
+        } else if found == 0 || previous.is_empty() && !remove {
             crate::tf!("{found} found")
         } else if remove && known > 0 {
             crate::tf!("{found} found, {known} removed, {total} total")
@@ -788,6 +842,7 @@ impl OpenCADStudio {
         if let Some((_, first)) = self.typed_window_corner.take() {
             self.close_typed_window_box(self.active_tab, first);
         }
+        let input = self.apply_group_pick(input);
         let gathering = self.report_selection_found(&input);
         // A command that takes associative dimensions only keeps just those:
         // the rest leave the selection and the count of what went is reported,
@@ -1273,6 +1328,7 @@ impl OpenCADStudio {
                 return Some(Task::none());
             };
             let remove = self.select_remove_mode;
+            self.selection_group_named = true;
             self.last_pick = Some((add.clone(), remove));
             for handle in add {
                 if remove {
@@ -1309,8 +1365,10 @@ impl OpenCADStudio {
             if let (Ok(distance), Some(anchor)) = (kw.parse::<f64>(), self.last_point) {
                 let toward = self.tabs[i].last_cursor_world - anchor;
                 let toward = glam::DVec3::new(toward.x, toward.y, 0.0);
-                if distance.is_finite() && toward.length() > 1e-12 {
-                    let world = anchor + toward.normalize() * distance;
+                if distance.is_finite() {
+                    // With the cursor on the last point the distance has no
+                    // direction: the pick is the last point itself.
+                    let world = anchor + toward.normalize_or_zero() * distance;
                     let typed = self.tabs[i].ucs_xform().to_ucs(world);
                     return self.typed_object_pick(&format!("{},{},{}", typed.x, typed.y, typed.z));
                 }

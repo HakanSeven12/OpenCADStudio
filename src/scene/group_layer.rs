@@ -221,8 +221,12 @@ impl Scene {
     /// Return `handles` plus every member of a selectable group containing one
     /// of them. Selection and rollover highlighting share this expansion so the
     /// preview matches what a click will select.
+    /// With PICKSTYLE group selection off a pick takes the object alone.
     pub fn handles_expanded_for_selectable_groups(&self, handles: &[Handle]) -> HashSet<Handle> {
         let mut expanded: HashSet<Handle> = handles.iter().copied().collect();
+        if self.document.header.pick_style & 1 == 0 {
+            return expanded;
+        }
         let wanted: HashSet<Handle> = handles.iter().copied().collect();
         for obj in self.document.objects.values() {
             if let ObjectType::Group(g) = obj {
@@ -232,6 +236,18 @@ impl Scene {
             }
         }
         expanded
+    }
+
+    /// How many selectable groups have a member among `handles`, under
+    /// PICKSTYLE group selection (0 when it is off).
+    pub fn selectable_groups_touching(&self, handles: &[Handle]) -> usize {
+        if self.document.header.pick_style & 1 == 0 {
+            return 0;
+        }
+        let wanted: HashSet<Handle> = handles.iter().copied().collect();
+        self.groups()
+            .filter(|group| group.selectable && group.entities.iter().any(|e| wanted.contains(e)))
+            .count()
     }
 
     /// If any handle belongs to a selectable group, also select every member.

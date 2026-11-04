@@ -3073,3 +3073,56 @@ mod selection_history_tests {
         assert_eq!(selected(&app), vec![h[2]]);
     }
 }
+
+#[cfg(test)]
+mod dash_layer_properties_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+
+    fn app_with_layer() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("-LAYER NEW WALLS");
+        app
+    }
+
+    fn layer(app: &OpenCADStudio) -> &codec::tables::Layer {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get("WALLS")
+            .expect("WALLS layer")
+    }
+
+    #[test]
+    fn dash_layer_sets_transparency_and_description() {
+        let mut app = app_with_layer();
+        let _ = app.run_command_line("-LAYER TR 50 WALLS");
+        let _ = app.run_command_line("-LAYER D walls WALLS");
+
+        assert_eq!(
+            layer(&app).transparency,
+            codec::types::Transparency::from_percent(0.5)
+        );
+        assert_eq!(layer(&app).description, "walls");
+    }
+
+    #[test]
+    fn dash_layer_plot_flag_is_visible_in_the_layer_list() {
+        let mut app = app_with_layer();
+        let _ = app.run_command_line("-LAYER PLOT NOPLOT WALLS");
+        assert!(!layer(&app).is_plottable);
+
+        let listed = app.automation_op(r#"{"op":"layers"}"#);
+        let walls = listed["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["name"] == "WALLS")
+            .expect("WALLS listed");
+        assert_eq!(walls["plottable"], false);
+        assert_eq!(walls["transparency"], 0);
+        assert_eq!(walls["description"], "");
+    }
+}

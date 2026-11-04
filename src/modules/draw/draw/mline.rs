@@ -426,15 +426,9 @@ pub(crate) fn sync_mline_element_parameters(mline: &mut MLine, style: &MLineStyl
         MLineJustification::Zero => 0.0,
         MLineJustification::Bottom => -minimum,
     };
-    let normal = glam::DVec3::new(mline.normal.x, mline.normal.y, mline.normal.z)
-        .normalize_or(glam::DVec3::Z);
+    let normal = mline.normal;
     for vertex in &mut mline.vertices {
-        let direction =
-            glam::DVec3::new(vertex.direction.x, vertex.direction.y, vertex.direction.z)
-                .normalize_or(glam::DVec3::X);
-        let miter = glam::DVec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
-            .normalize_or(glam::DVec3::Y);
-        let factor = miter.dot(normal.cross(direction)).abs().max(1.0e-9);
+        let factor = crate::entities::mline::mline_miter_factor(vertex, normal);
         vertex
             .segments
             .resize_with(offsets.len(), MLineSegment::new);

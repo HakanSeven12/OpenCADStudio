@@ -1,4 +1,4 @@
-use codec::entities::{MLine, MLineFlags, MLineSegment};
+use codec::entities::{MLine, MLineFlags, MLineSegment, MLineVertex};
 use codec::types::Vector3;
 use kernel::geom2d::{intersect::line_line, Vec2};
 use kernel::space::Plane;
@@ -125,6 +125,17 @@ pub(crate) fn rebuild_mline_geometry(mline: &mut MLine) -> bool {
         mline.vertices[index].miter = Vector3::new(miter[0], miter[1], miter[2]);
     }
     true
+}
+
+/// What an element's perpendicular offset is divided by to give its distance
+/// along the vertex miter: cos of half the turn there, 1 at an open end.
+pub(crate) fn mline_miter_factor(vertex: &MLineVertex, normal: Vector3) -> f64 {
+    let normal = glam::DVec3::new(normal.x, normal.y, normal.z).normalize_or(glam::DVec3::Z);
+    let direction = glam::DVec3::new(vertex.direction.x, vertex.direction.y, vertex.direction.z)
+        .normalize_or(glam::DVec3::X);
+    let miter = glam::DVec3::new(vertex.miter.x, vertex.miter.y, vertex.miter.z)
+        .normalize_or(glam::DVec3::Y);
+    miter.dot(normal.cross(direction)).abs().max(1.0e-9)
 }
 
 fn adjusted_mline_endpoint(
@@ -510,7 +521,8 @@ fn mline_lines_resolved(m: &MLine, style: Option<&codec::objects::MLineStyle>) -
         ],
     };
 
-    // Stored parameters already include justification; this shift is the fallback.
+    // Stored parameters already include justification and the miter factor;
+    // without them, derive the same distance `sync_mline_element_parameters` stores.
     let mut lo = f64::INFINITY;
     let mut hi = f64::NEG_INFINITY;
     for (o, _, _) in &elems {
@@ -533,7 +545,9 @@ fn mline_lines_resolved(m: &MLine, style: Option<&codec::objects::MLineStyle>) -
             .segments
             .get(ei)
             .and_then(|sg| sg.parameters.first().copied())
-            .unwrap_or_else(|| (elems[ei].0 + shift) * scale)
+            .unwrap_or_else(|| {
+                (elems[ei].0 + shift) * scale / mline_miter_factor(&m.vertices[vi], m.normal)
+            })
     };
     let off_pt = |vi: usize, d: f64| -> [f64; 3] {
         let v = &m.vertices[vi];
@@ -790,7 +804,10 @@ pub fn mline_fill_triangles_with_style(
             .get(element)
             .and_then(|segment| segment.parameters.first())
             .copied()
-            .unwrap_or((style.elements[element].offset + shift) * m.scale_factor);
+            .unwrap_or_else(|| {
+                (style.elements[element].offset + shift) * m.scale_factor
+                    / mline_miter_factor(item, m.normal)
+            });
         let point = (kernel::space::Vec3::new(item.position.x, item.position.y, item.position.z)
             + kernel::space::Vec3::new(item.miter.x, item.miter.y, item.miter.z) * distance)
             .to_array();
@@ -1348,5 +1365,291 @@ impl Transformable for MLine {
                 );
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use codec::entities::{MLineJustification, MLineVertex};
+    use codec::objects::{MLineStyle, MLineStyleElement};
+
+    const TOLERANCE: f64 = 1.0e-9;
+
+    /// (name, centre-line points, closed)
+    type Shape = (&'static str, Vec<(f64, f64)>, bool);
+
+    /// Centre lines covering acute, right, obtuse and reflex turns, open and
+    /// closed, none of them axis-aligned throughout.
+    fn shapes() -> Vec<Shape> {
+        let (sin, cos) = 30f64.to_radians().sin_cos();
+        vec![
+            (
+                "L rotated 30°",
+                vec![
+                    (0.0, 0.0),
+                    (20.0 * cos, 20.0 * sin),
+                    (20.0 * cos - 20.0 * sin, 20.0 * sin + 20.0 * cos),
+                ],
+                false,
+            ),
+            (
+                "open 60° turn",
+                vec![(0.0, 0.0), (20.0, 0.0), (10.0, 20.0 * cos)],
+                false,
+            ),
+            (
+                "open 150° turn",
+                vec![(0.0, 0.0), (20.0, 0.0), (20.0 + 20.0 * cos, 20.0 * sin)],
+                false,
+            ),
+            (
+                "zigzag",
+                vec![(0.0, 0.0), (20.0, 10.0), (40.0, 0.0), (60.0, 10.0)],
+                false,
+            ),
+            (
+                "closed quadrilateral (acute, right, obtuse)",
+                vec![(0.0, 0.0), (40.0, 0.0), (40.0, 16.0), (16.0, 32.0)],
+                true,
+            ),
+            (
+                "closed triangle",
+                vec![(0.0, 0.0), (40.0, 0.0), (20.0, 40.0 * cos)],
+                true,
+            ),
+            (
+                "closed concave arrow",
+                vec![
+                    (0.0, 0.0),
+                    (40.0, 0.0),
+                    (40.0, 24.0),
+                    (20.0, 12.0),
+                    (0.0, 24.0),
+                ],
+                true,
+            ),
+        ]
+    }
+
+    /// No style (the ±0.5 default), unequal elements listed out of order, and
+    /// elements all on one side of the centre line.
+    fn styles() -> Vec<(&'static str, Option<MLineStyle>)> {
+        let filled = |name: &str, offsets: &[f64]| {
+            let mut style = MLineStyle::new(name);
+            for offset in offsets {
+                style.add_element(MLineStyleElement::new(*offset));
+            }
+            style.flags.fill_on = true;
+            Some(style)
+        };
+        vec![
+            ("no style", None),
+            (
+                "unequal 0.25/1/-0.75",
+                filled("UNEQUAL", &[0.25, 1.0, -0.75]),
+            ),
+            ("one-sided 2/0.5", filled("ONE_SIDED", &[2.0, 0.5])),
+        ]
+    }
+
+    struct Case {
+        name: String,
+        points: Vec<(f64, f64)>,
+        closed: bool,
+        style: Option<MLineStyle>,
+        /// Signed distance of each element left of the centre line.
+        distances: Vec<f64>,
+        /// A multiline with no stored element distances, as
+        /// `MLine::from_points` or a file without them leaves it.
+        bare: MLine,
+        /// The same multiline after the MLINE command's parameter sync.
+        stored: MLine,
+    }
+
+    impl Case {
+        fn segment_count(&self) -> usize {
+            if self.closed {
+                self.points.len()
+            } else {
+                self.points.len() - 1
+            }
+        }
+
+        /// Signed distance of `point` left of centre-line segment `segment`.
+        fn side_distance(&self, point: [f64; 3], segment: usize) -> f64 {
+            let (ax, ay) = self.points[segment];
+            let (bx, by) = self.points[(segment + 1) % self.points.len()];
+            let length = (bx - ax).hypot(by - ay);
+            ((point[0] - ax) * -(by - ay) + (point[1] - ay) * (bx - ax)) / length
+        }
+    }
+
+    fn cases() -> Vec<Case> {
+        let mut cases = Vec::new();
+        for (shape, points, closed) in shapes() {
+            for (style_name, style) in styles() {
+                for justification in [
+                    MLineJustification::Top,
+                    MLineJustification::Zero,
+                    MLineJustification::Bottom,
+                ] {
+                    for scale in [1.0, 2.0] {
+                        let offsets: Vec<f64> = match &style {
+                            Some(style) => style.elements.iter().map(|e| e.offset).collect(),
+                            None => vec![0.5, -0.5],
+                        };
+                        let shift = match justification {
+                            MLineJustification::Top => {
+                                -offsets.iter().copied().fold(f64::MIN, f64::max)
+                            }
+                            MLineJustification::Zero => 0.0,
+                            MLineJustification::Bottom => {
+                                -offsets.iter().copied().fold(f64::MAX, f64::min)
+                            }
+                        };
+                        let mut bare = MLine::new();
+                        bare.justification = justification;
+                        bare.scale_factor = scale;
+                        bare.style_element_count = offsets.len();
+                        for &(x, y) in &points {
+                            let mut vertex = MLineVertex::new(Vector3::new(x, y, 0.0));
+                            vertex.init_segments(offsets.len());
+                            bare.vertices.push(vertex);
+                        }
+                        bare.flags.set(MLineFlags::CLOSED, closed);
+                        assert!(rebuild_mline_geometry(&mut bare), "{shape}: degenerate");
+                        let mut stored = bare.clone();
+                        crate::modules::draw::draw::mline::sync_mline_element_parameters(
+                            &mut stored,
+                            style.as_ref().unwrap_or(&MLineStyle::new("NONE")),
+                        );
+                        cases.push(Case {
+                            name: format!(
+                                "{shape}, {style_name}, {justification:?}, scale {scale}"
+                            ),
+                            points: points.clone(),
+                            closed,
+                            style: style.clone(),
+                            distances: offsets.iter().map(|o| (o + shift) * scale).collect(),
+                            bare,
+                            stored,
+                        });
+                    }
+                }
+            }
+        }
+        cases
+    }
+
+    fn assert_same_points(case: &str, what: &str, left: &[[f64; 3]], right: &[[f64; 3]]) {
+        assert_eq!(left.len(), right.len(), "{case}: {what} point count");
+        for (index, (a, b)) in left.iter().zip(right).enumerate() {
+            let apart = (0..3)
+                .map(|axis| (a[axis] - b[axis]).abs())
+                .fold(0.0, f64::max);
+            assert!(
+                apart < TOLERANCE,
+                "{case}: {what} point {index}: {a:?} vs {b:?}"
+            );
+        }
+    }
+
+    /// Without stored distances, every element still runs parallel to each
+    /// centre-line segment at its offset (times scale, after justification),
+    /// so the pieces of one element meet on the miter at each corner.
+    #[test]
+    fn mline_lines_without_stored_distances_keep_element_offsets_at_corners() {
+        for case in cases() {
+            let lines = mline_lines_resolved(&case.bare, case.style.as_ref());
+            assert!(
+                lines.len() >= case.distances.len(),
+                "{}: missing elements",
+                case.name
+            );
+            for (element, distance) in case.distances.iter().enumerate() {
+                let points = &lines[element].points;
+                assert_eq!(
+                    points.len(),
+                    case.segment_count() + 1,
+                    "{}: element {element} is one unbroken run",
+                    case.name
+                );
+                for segment in 0..case.segment_count() {
+                    for point in [points[segment], points[segment + 1]] {
+                        let actual = case.side_distance(point, segment);
+                        assert!(
+                            (actual - distance).abs() < TOLERANCE,
+                            "{}: element {element} on segment {segment} is {actual} from the centre line, expected {distance}",
+                            case.name
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The fallback draws what the MLINE command's stored distances draw.
+    #[test]
+    fn mline_lines_without_stored_distances_match_stored_distances() {
+        for case in cases() {
+            let bare = mline_lines_resolved(&case.bare, case.style.as_ref());
+            let stored = mline_lines_resolved(&case.stored, case.style.as_ref());
+            assert_eq!(bare.len(), stored.len(), "{}: line count", case.name);
+            for (index, (a, b)) in bare.iter().zip(&stored).enumerate() {
+                assert_same_points(&case.name, &format!("line {index}"), &a.points, &b.points);
+            }
+        }
+    }
+
+    /// The fill spans the lowest and highest elements at their offsets on
+    /// every segment, whichever positions those elements have in the style.
+    #[test]
+    fn mline_fill_without_stored_distances_spans_outer_elements() {
+        for case in cases() {
+            let Some(style) = &case.style else { continue };
+            let (mut low, mut high) = (0, 0);
+            for (index, distance) in case.distances.iter().enumerate() {
+                if *distance < case.distances[low] {
+                    low = index;
+                }
+                if *distance > case.distances[high] {
+                    high = index;
+                }
+            }
+            let triangles = mline_fill_triangles_with_style(&case.bare, style);
+            assert_eq!(
+                triangles.len(),
+                case.segment_count() * 6,
+                "{}: fill quads",
+                case.name
+            );
+            for segment in 0..case.segment_count() {
+                // Each segment is the quad (a, b, c, a, c, d): a, d low; b, c high.
+                let quad = &triangles[segment * 6..segment * 6 + 6];
+                for (corner, element) in [(0, low), (1, high), (2, high), (5, low)] {
+                    let actual = case.side_distance(quad[corner], segment);
+                    let expected = case.distances[element];
+                    assert!(
+                        (actual - expected).abs() < TOLERANCE,
+                        "{}: fill corner {corner} on segment {segment} is {actual} from the centre line, expected {expected}",
+                        case.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mline_fill_without_stored_distances_matches_stored_distances() {
+        for case in cases() {
+            let Some(style) = &case.style else { continue };
+            assert_same_points(
+                &case.name,
+                "fill",
+                &mline_fill_triangles_with_style(&case.bare, style),
+                &mline_fill_triangles_with_style(&case.stored, style),
+            );
+        }
     }
 }

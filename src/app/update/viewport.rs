@@ -2137,6 +2137,12 @@ impl OpenCADStudio {
                 self.cancel_active_grip_edit();
                 return Task::none();
             }
+            // Remove Vertex / Convert to Line wait for the next click; the
+            // cursor has nothing to place in the meantime.
+            if self.grip_ctrl_one_shot(i).is_some() {
+                self.tabs[i].last_cursor_screen = p_full;
+                return Task::none();
+            }
             let grip_started = Instant::now();
             let (vw, vh) = vp_size;
             let bounds = iced::Rectangle {
@@ -5616,6 +5622,7 @@ impl OpenCADStudio {
                         edit.grab = grabbed.map(|point| point - world);
                     }
                     self.tabs[i].active_grip = Some(edit);
+                    self.grip_ctrl_cycle = None;
                     self.grip_engage_press = Some(p);
                     self.grip_hover = None;
                     self.grip_popup = None;
@@ -5949,6 +5956,9 @@ impl OpenCADStudio {
                 let (dx, dy) = (p.x - press.x, p.y - press.y);
                 dx * dx + dy * dy <= 12.0 * 12.0
             });
+            if !engaging_click && self.grip_ctrl_one_shot(i).is_some() {
+                return self.commit_grip_ctrl_one_shot(i);
+            }
             let moved = grip.last_world != grip.origin_world;
             if engaging_click || (is_click && !moved) {
                 return Task::none();
@@ -9462,6 +9472,7 @@ properties={:.1}ms picked={}",
         }
         // Placement confirmed — keep the just-added leader.
         self.grip_add_provisional = None;
+        self.grip_ctrl_cycle = None;
         self.tabs[i].snap_result = None;
         if let Some(vertex_id) = added_vertex_focus {
             self.tabs[i].properties.prop_vertex = vertex_id;

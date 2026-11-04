@@ -243,6 +243,21 @@ pub enum ContextMenuNav {
     Mnemonic(char),
 }
 
+/// Where Ctrl has taken a hot polyline grip. `grip_id` and `world` describe the
+/// grip as it was picked up; `active_grip_id` is the grip the current stage
+/// holds, which differs while a new vertex is being placed.
+#[derive(Clone, Copy, Debug)]
+pub struct GripCtrlCycle {
+    pub handle: codec::Handle,
+    pub grip_id: usize,
+    pub is_translate: bool,
+    pub world: glam::DVec3,
+    pub stage: usize,
+    pub active_grip_id: usize,
+    /// Remove Vertex / Convert to Line: applied by the next click.
+    pub one_shot: Option<crate::scene::model::object::GripMenuAction>,
+}
+
 /// Open multi-functional-grip popup state.
 #[derive(Clone, Debug)]
 pub struct GripPopup {
@@ -1262,6 +1277,9 @@ pub(super) struct OpenCADStudio {
     /// being placed (follows the cursor). `(entity handle, new-arrow grip id)`.
     /// Esc before the placement click removes it again.
     grip_add_provisional: Option<(codec::Handle, usize)>,
+    /// Ctrl cycle of a hot polyline grip (Stretch, Add Vertex, and Remove
+    /// Vertex or Convert to Arc/Line).
+    grip_ctrl_cycle: Option<GripCtrlCycle>,
     /// Handles hidden from the base tessellation during an in-progress grip
     /// drag. The edited entities are shown in the overlay until commit.
     grip_preview_handles: Vec<codec::Handle>,
@@ -6001,6 +6019,7 @@ impl OpenCADStudio {
             table_popup: None,
             flip_popup: None,
             grip_add_provisional: None,
+            grip_ctrl_cycle: None,
             grip_preview_handles: Vec::new(),
             hover_dwell: None,
             snap_dwell: None,

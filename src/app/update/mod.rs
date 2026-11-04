@@ -8107,6 +8107,13 @@ impl OpenCADStudio {
                 // flip). Rebuild it at the current cursor so the flip shows
                 // without waiting for the next mouse move.
                 let i = self.active_tab;
+                if ctrl_changed
+                    && ctrl
+                    && self.tabs[i].active_cmd.is_none()
+                    && self.tabs[i].active_grip.is_some()
+                {
+                    return self.cycle_grip_ctrl_mode();
+                }
                 if ctrl_changed && self.tabs[i].active_cmd.is_some() {
                     if ctrl && self.tabs[i].active_cmd.as_mut().is_some_and(|command| command.cycle_insertion_point()) {
                         if let Some(command)=self.tabs[i].active_cmd.as_ref() {

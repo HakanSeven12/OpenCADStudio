@@ -218,6 +218,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn cancel_active_grip_edit(&mut self) -> bool {
         let i = self.active_tab;
         self.grip_engage_press = None;
+        self.grip_ctrl_cycle = None;
         // API v11/v12: a custom plugin-grip drag cancels through the same
         // lifecycle exit every other interruption uses (Esc, another command
         // starting, tab switches): the owning plugin gets the cancel phase

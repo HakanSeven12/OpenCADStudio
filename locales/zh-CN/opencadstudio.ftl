@@ -8452,9 +8452,9 @@ parameters-manager-feedback =
     .history = 参数管理器编辑
 
 block-action-targets =
-    .prompt = BACTIONSET  选择对象，或输入 Parameter 后跟点名称，然后按 Enter (Parameter "…"):
-    .create-prompt = BACTION  选择对象，或输入 Parameter 后跟点名称，然后按 Enter (Parameter "…"):
-    .unique-point = 请输入唯一的点参数名称。
+    .prompt = BACTIONSET  选择对象，或输入 Parameter 后跟参数名称，然后按 Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  选择对象，或输入 Parameter 后跟参数名称，然后按 Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = 请输入唯一的参数名称。
     .empty = 动作至少需要一个目标。
     .invalid = 请选择属于此块的受支持目标。
     .stale = 动作或块编辑器会话已更改；请重新运行 BACTIONSET。

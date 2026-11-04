@@ -559,6 +559,11 @@ mod tests {
             let prompt = loader.get_attr("block-action-targets", "prompt");
             assert!(prompt.contains("Parameter"), "{language:?}: {prompt}");
             assert!(prompt.contains("\"…\""), "{language:?}: {prompt}");
+            let point = loader.get_attr("common", "point");
+            let linear = loader.get_attr("common", "linear");
+            for rendered in [&prompt, &created] {
+                assert!(rendered.contains(&point) && rendered.contains(&linear), "{language:?}: {rendered}");
+            }
             assert!(!loader.get_attr("block-action-targets", "unique-point").is_empty());
         }
     }

@@ -95,7 +95,7 @@ impl ActionCommand {
             source,
             self.candidates
                 .iter()
-                .filter(|p| p.point && p.id != source)
+                .filter(|p| (p.point || p.linear) && p.id != source)
                 .map(|p| (p.handle, p.id, p.name.clone()))
                 .collect(),
         ))
@@ -113,7 +113,7 @@ impl ActionCommand {
             source,
             self.candidates
                 .iter()
-                .filter(|p| p.point && p.id != source)
+                .filter(|p| (p.point || p.linear) && p.id != source)
                 .map(|p| (p.handle, p.id, p.name.clone()))
                 .collect(),
         ))
@@ -679,7 +679,7 @@ impl CadCommand for ActionCommand {
             |h| {
                 self.candidates
                     .iter()
-                    .any(|p| p.point && p.id != source && p.handle == h)
+                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == h)
             },
             position,
             context,
@@ -689,7 +689,7 @@ impl CadCommand for ActionCommand {
                 !self
                     .candidates
                     .iter()
-                    .any(|p| p.point && p.id != source && p.handle == *h)
+                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == *h)
             });
         }
         if remove {
@@ -705,11 +705,15 @@ impl CadCommand for ActionCommand {
             && self
                 .candidates
                 .iter()
-                .any(|p| p.point && p.handle == handle)
+                .any(|p| (p.point || p.linear) && p.handle == handle)
     }
     fn clear_selection_markers(&mut self) {
-        self.targets
-            .retain(|h| !self.candidates.iter().any(|p| p.point && p.handle == *h));
+        self.targets.retain(|h| {
+            !self
+                .candidates
+                .iter()
+                .any(|p| (p.point || p.linear) && p.handle == *h)
+        });
     }
     fn on_selection_marker_region(
         &mut self,
@@ -730,7 +734,7 @@ impl CadCommand for ActionCommand {
             |h| {
                 self.candidates
                     .iter()
-                    .any(|p| p.point && p.id != source && p.handle == h)
+                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == h)
             },
             polygon,
             context,
@@ -741,7 +745,7 @@ impl CadCommand for ActionCommand {
                 !self
                     .candidates
                     .iter()
-                    .any(|p| p.point && p.id != source && p.handle == *h)
+                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == *h)
             });
         }
         for (handle, _) in &hits {

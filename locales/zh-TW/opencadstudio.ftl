@@ -8464,9 +8464,9 @@ parameters-manager-feedback =
     .history = 參數管理員編輯
 
 block-action-targets =
-    .prompt = BACTIONSET  選取物件，或輸入 Parameter 後接點名稱，然後按 Enter (Parameter "…"):
-    .create-prompt = BACTION  選取物件，或輸入 Parameter 後接點名稱，然後按 Enter (Parameter "…"):
-    .unique-point = 請輸入唯一的點參數名稱。
+    .prompt = BACTIONSET  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = 請輸入唯一的參數名稱。
     .empty = 動作至少需要一個目標。
     .invalid = 請選取屬於此圖塊的受支援目標。
     .stale = 動作或圖塊編輯器工作階段已變更；請重新執行 BACTIONSET。

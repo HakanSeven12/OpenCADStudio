@@ -1508,7 +1508,8 @@ bg={bg_ms:.1}ms n={view_count}"
                             })
                             .collect::<Option<Vec<_>>>()?;
                         Some(crate::ui::overlay::AuthoringDimension {
-                            selected: tab.selected_authoring == Some(handle),
+                            selected: tab.selected_authoring == Some(handle)
+                                || tab.active_cmd.as_ref().is_some_and(|command| command.selection_marker_selected(handle)),
                             is_action: action_handles.contains(&handle),
                             lines,
                             base_grips: graphic

@@ -162,7 +162,7 @@ impl ActionSetCommand {
     ) -> Self {
         let points = actions::all_parameters(doc, definition)
             .into_iter()
-            .filter(|p| p.point)
+            .filter(|p| p.point || p.linear)
             .map(|p| (p.name, p.handle, p.id))
             .collect::<Vec<_>>();
         let candidates = actions::actions(doc, definition)

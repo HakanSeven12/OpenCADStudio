@@ -437,7 +437,7 @@ impl OpenCADStudio {
                     || tab.scene.document.objects.get(&action) != Some(expected.as_ref())
                     || point_choices.as_ref().is_some_and(|(source, expected)| {
                         let current = actions::all_parameters(&tab.scene.document, definition)
-                            .into_iter().filter(|p| p.point && p.id != *source)
+                            .into_iter().filter(|p| (p.point || p.linear) && p.id != *source)
                             .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                         current != *expected
                     })
@@ -513,7 +513,7 @@ impl OpenCADStudio {
                 }
                 if point_choices.as_ref().is_some_and(|(source, expected)| {
                     let current = actions::all_parameters(&self.tabs[i].scene.document, definition)
-                        .into_iter().filter(|p| p.point && p.id != *source)
+                        .into_iter().filter(|p| (p.point || p.linear) && p.id != *source)
                         .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                     current != *expected || !actions::all_parameters(&self.tabs[i].scene.document, definition)
                         .iter().any(|p| p.handle == parameter && p.id == *source)

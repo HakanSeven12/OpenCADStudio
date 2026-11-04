@@ -8482,9 +8482,9 @@ parameters-manager-feedback =
     .history = تحرير مدير المعلمات
 
 block-action-targets =
-    .prompt = BACTIONSET  حدد كائنات أو اكتب Parameter متبوعًا باسم نقطة، ثم اضغط Enter (Parameter "…"):
-    .create-prompt = BACTION  حدد كائنات أو اكتب Parameter متبوعًا باسم نقطة، ثم اضغط Enter (Parameter "…"):
-    .unique-point = أدخل اسم معلمة نقطة فريدًا.
+    .prompt = BACTIONSET  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = أدخل اسم معلمة فريداً.
     .empty = يحتاج الإجراء إلى هدف واحد على الأقل.
     .invalid = حدد أهدافًا مدعومة تنتمي إلى هذه الكتلة.
     .stale = تغير الإجراء أو جلسة محرر الكتل؛ أعد تشغيل BACTIONSET.

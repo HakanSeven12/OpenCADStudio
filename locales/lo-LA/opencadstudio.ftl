@@ -8470,9 +8470,9 @@ parameters-manager-feedback =
     .history = ແກ້ໄຂຕົວຈັດການພາຣາມິເຕີ
 
 block-action-targets =
-    .prompt = BACTIONSET  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ຈຸດ ແລ້ວກົດ Enter (Parameter "…"):
-    .create-prompt = BACTION  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ຈຸດ ແລ້ວກົດ Enter (Parameter "…"):
-    .unique-point = ປ້ອນຊື່ພາຣາມິເຕີຈຸດທີ່ບໍ່ຊ້ຳກັນ.
+    .prompt = BACTIONSET  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = ປ້ອນຊື່ພາຣາມິເຕີທີ່ບໍ່ຊ້ຳ.
     .empty = ການກະທຳຕ້ອງມີເປົ້າໝາຍຢ່າງໜ້ອຍໜຶ່ງລາຍການ.
     .invalid = ເລືອກເປົ້າໝາຍທີ່ຮອງຮັບຂອງບລັອກນີ້.
     .stale = ການກະທຳ ຫຼື ເຊດຊັນຕົວແກ້ໄຂບລັອກປ່ຽນແປງແລ້ວ; ເລີ່ມ BACTIONSET ໃໝ່.

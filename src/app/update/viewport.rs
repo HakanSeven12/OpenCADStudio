@@ -5476,6 +5476,47 @@ impl OpenCADStudio {
             }
         }
 
+        // STRETCH: Shift+click on an object (away from its grips) takes the
+        // whole object out, which also works where vertices of several
+        // objects coincide and a Shift+window would catch them all.
+        if self.shift_down
+            && self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.name() == "STRETCH")
+        {
+            let (view_rot, eye) = match &edit_cam {
+                Some(cam) => (cam.view_proj_rte(bounds), cam.eye()),
+                None => {
+                    let cam = self.tabs[i].scene.camera.borrow();
+                    (cam.view_proj_rte(bounds), cam.eye())
+                }
+            };
+            let wires = self.tabs[i].scene.hit_test_wires();
+            let hit = scene::pick::hit_test::click_hit(
+                p,
+                &*wires,
+                view_rot,
+                eye,
+                bounds,
+                self.tabs[i].scene.document.header.lineweight_display,
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+                &self.tabs[i].scene.draw_depth_map(),
+            )
+            .and_then(Scene::handle_from_wire_name);
+            drop(wires);
+            if let Some(handle) = hit {
+                let removed = self.tabs[i]
+                    .active_cmd
+                    .as_mut()
+                    .is_some_and(|command| command.remove_stretch_entity(handle));
+                if removed {
+                    self.remove_stretch_object_feedback(i, handle);
+                    return Task::none();
+                }
+            }
+        }
+
         if self.tabs[i].active_cmd.is_none()
             && self.tabs[i].active_grip.is_none()
             && !self.tabs[i].selected_grips.is_empty()
@@ -12093,5 +12134,53 @@ impl OpenCADStudio {
             let elevation = self.tabs[i].scene.document.header.elevation;
             (origin + normal * elevation, normal)
         });
+    }
+}
+
+#[cfg(test)]
+mod stretch_shift_click_tests {
+    use crate::app::OpenCADStudio;
+    use codec::EntityType;
+    use glam::DVec3;
+
+    #[test]
+    fn shift_click_takes_a_whole_object_out_of_stretch() {
+        use crate::modules::draw::modify::stretch::StretchCommand;
+        use codec::entities::Line;
+        use codec::types::Vector3;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.show_ucs_icon = false;
+        let line = Line::from_points(Vector3::new(-10.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        let handle = app.tabs[i].scene.add_entity(EntityType::Line(line));
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        app.tabs[i].scene.selection.borrow_mut().input.last_move_pos =
+            Some(iced::Point::new(400.0, 300.0));
+        let window = (DVec3::new(-11.0, -1.0, -1.0), DVec3::new(-9.0, 1.0, 1.0));
+        app.tabs[i].active_cmd = Some(Box::new(StretchCommand::with_windows(
+            vec![handle],
+            vec![],
+            vec![window],
+            Vec::new(),
+        )));
+        app.tabs[i].scene.selected.insert(handle);
+        app.shift_down = true;
+
+        let _ = app.on_viewport_left_press();
+        assert!(
+            !app.tabs[i].scene.selected.contains(&handle),
+            "the highlight is dropped"
+        );
+        // Enter has nothing left to stretch.
+        let command = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .expect("STRETCH stays active");
+        assert!(matches!(
+            command.on_enter(),
+            crate::command::CmdResult::Cancel
+        ));
     }
 }

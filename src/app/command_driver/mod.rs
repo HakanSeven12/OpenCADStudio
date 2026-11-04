@@ -1203,8 +1203,15 @@ impl OpenCADStudio {
                 windows,
                 excluded_points,
                 subtract_window,
+                removed_handles,
             } => {
-                self.handle_stretch_window(handles, windows, excluded_points, subtract_window);
+                self.handle_stretch_window(
+                    handles,
+                    windows,
+                    excluded_points,
+                    subtract_window,
+                    removed_handles,
+                );
             }
             CmdResult::StretchEntities {
                 handles,

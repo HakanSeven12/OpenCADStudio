@@ -11504,6 +11504,10 @@ impl OpenCADStudio {
             Message::ShowConstraintValuesChanged(enabled) => {
                 self.show_constraint_values = enabled;
                 self.persist_settings_if_changed();
+                // The no-selection Properties page caches this flag in its
+                // On/Off row; rebuild it so the button shows the new state
+                // and its next press sends the opposite value.
+                self.refresh_properties();
                 Task::none()
             }
             Message::LanguageChanged(language) => {

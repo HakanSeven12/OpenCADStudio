@@ -934,6 +934,38 @@ mod parametric_constraint_undo_tests {
             )));
     }
 
+    /// The Parameters On/Off button flips: after each press the panel row
+    /// shows the new state, so the next press sends the opposite value.
+    #[test]
+    fn params_visibility_toggle_flips_on_each_press() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.refresh_properties();
+        let shown = |app: &OpenCADStudio| {
+            app.tabs[app.active_tab]
+                .properties
+                .sections
+                .iter()
+                .flat_map(|section| &section.props)
+                .find_map(|property| match property.value {
+                    crate::scene::model::object::PropValue::ParamsVisibilityToggle(v) => Some(v),
+                    _ => None,
+                })
+                .expect("no-selection page has the On/Off row")
+        };
+        let start = shown(&app);
+        assert_eq!(start, app.show_constraint_values);
+
+        // What a click on the button sends: the opposite of what it shows.
+        let _ = app.update(Message::ShowConstraintValuesChanged(!shown(&app)));
+        assert_eq!(app.show_constraint_values, !start);
+        assert_eq!(shown(&app), !start, "button must show the new state");
+
+        let _ = app.update(Message::ShowConstraintValuesChanged(!shown(&app)));
+        assert_eq!(app.show_constraint_values, start, "second press turns it back");
+        assert_eq!(shown(&app), start);
+    }
+
     /// End-to-end through the actual `Message` handlers a Properties-panel
     /// click/keystroke would fire — not `apply_named_parameter_editor_rows`
     /// directly — covering the whole Parameters-section lifecycle: add,

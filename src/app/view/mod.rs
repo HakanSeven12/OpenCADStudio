@@ -962,11 +962,26 @@ bg={bg_ms:.1}ms n={view_count}"
                 grips
             };
             let control_polygon = tab.selected_handle.and_then(|handle| {
-                let spline = match tab.scene.document.get_entity(handle) {
+                // A CV spline's control frame, or a spline-fit 2D polyline's
+                // frame (its grips sit on the frame vertices, in order).
+                let (closed, dotted, grip_shape) = match tab.scene.document.get_entity(handle) {
                     Some(codec::EntityType::Spline(spline))
                         if crate::entities::spline::shows_control_vertices(spline) =>
                     {
-                        spline
+                        (
+                            spline.flags.closed || spline.flags.periodic,
+                            false,
+                            crate::scene::model::object::GripShape::Circle,
+                        )
+                    }
+                    Some(codec::EntityType::Polyline2D(polyline))
+                        if polyline.flags.bits() & 4 != 0 =>
+                    {
+                        (
+                            polyline.is_closed(),
+                            true,
+                            crate::scene::model::object::GripShape::Square,
+                        )
                     }
                     _ => return None,
                 };
@@ -979,11 +994,10 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
                 let points: Vec<_> = grips
                     .iter()
-                    .filter(|grip| grip.shape == crate::scene::model::object::GripShape::Circle)
+                    .filter(|grip| grip.shape == grip_shape)
                     .map(|grip| grip.pos)
                     .collect();
-                (points.len() >= 2)
-                    .then_some((points, spline.flags.closed || spline.flags.periodic))
+                (points.len() >= 2).then_some((points, closed, dotted))
             });
             let grip_clip = if grips.is_empty() {
                 None

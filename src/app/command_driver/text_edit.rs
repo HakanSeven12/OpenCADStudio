@@ -15,6 +15,7 @@ impl OpenCADStudio {
         };
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
         self.open_mtext_editor(pos, handle, &initial, height, template.map(|m| *m));
     }
 

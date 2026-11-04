@@ -91,6 +91,8 @@ mod solid3d;
 mod tests;
 mod autolisp_tests;
 mod text_edit;
+#[cfg(test)]
+mod mtext_preview_tests;
 mod transform;
 mod utilities;
 mod viewport;

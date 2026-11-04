@@ -4,7 +4,7 @@ use codec::entities::hatch::{
     BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, LineEdge, PolylineEdge, SplineEdge,
 };
 use codec::types::{Vector2, Vector3};
-use kernel::geom2d::{refine_spline_boundary, triangulate_rings, Curve, NurbsCurve};
+use kernel::geom2d::{refine_spline_boundary, Curve, NurbsCurve};
 use kernel::tessellation::DEFAULT_ANGLE;
 
 #[test]
@@ -165,7 +165,8 @@ fn narrow_fill_preserves_corners_holes_and_shared_origin() {
             .into_iter()
             .map(|p| project(p).map(f64::from))
             .collect();
-        assert!(triangulate_rings(&[original]).1.is_empty());
+        // The plain sampling crosses itself: as one polygon it has no inside.
+        assert!(kernel::geom2d::triangulate(&original, &[]).1.is_empty());
         for i in 0..=6 {
             assert!(model
                 .boundary
@@ -217,7 +218,9 @@ fn valid_samples_are_unchanged_and_invalid_samples_stay_rejected() {
             })
             .collect();
         assert_eq!(model.boundary.as_ref(), &expected);
-        assert_eq!(model.fill_mesh().1.is_empty(), clearance < 0.01);
+        // A sample that crosses itself is kept as it is and fills by the
+        // even-odd rule, its lobes (kernel #106), like a crossing loop.
+        assert!(!model.fill_mesh().1.is_empty(), "clearance {clearance}");
     }
     let curve = Curve::Nurbs(narrow(0.01, [0.0; 2]));
     assert!(refine_spline_boundary(

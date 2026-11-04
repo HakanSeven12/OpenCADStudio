@@ -129,3 +129,136 @@ fn transported_flip_grip_uses_reference_frame_in_drawing_and_test_block() {
         assert!((toggled.dir.unwrap() + moved.dir.unwrap()).length() < 1e-6);
     }
 }
+
+#[test]
+fn flipped_linear_grip_edits_along_its_reflected_axis_with_history() {
+    for testing in [false, true] {
+        let (mut app, reference) = fixture();
+        let source = app.active_tab;
+        begin(&mut app, reference);
+        let def = app.tabs[source]
+            .active_block_edit_session()
+            .unwrap()
+            .br_handle;
+        let member = members(&app)[0];
+        let doc = &mut app.tabs[source].scene.document;
+        let linear = distance::create(
+            doc,
+            def,
+            distance::Kind::Linear,
+            Vector3::new(0., 2., 0.),
+            Vector3::new(10., 7., 0.),
+            Vector3::new(5., 7., 0.),
+        )
+        .unwrap();
+        let move_action = actions::create(
+            doc,
+            def,
+            actions::Kind::Move,
+            linear,
+            &[member],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        let flip = orientation::create(
+            doc,
+            def,
+            orientation::Kind::Flip,
+            Vector3::ZERO,
+            Vector3::new(10., 0., 0.),
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let flip_action =
+            actions::create(doc, def, actions::Kind::Flip, flip, &[member], DVec3::ZERO).unwrap();
+        let codec::objects::ObjectType::DynamicBlock(o) =
+            doc.objects.get_mut(&flip_action).unwrap()
+        else {
+            panic!()
+        };
+        let codec::objects::DynamicBlockData::FlipAction(action) = &mut o.data else {
+            panic!()
+        };
+        action.action.dependencies.extend([linear, move_action]);
+        let parameter = actions::all_parameters(doc, def)
+            .into_iter()
+            .find(|p| p.handle == linear)
+            .unwrap();
+        let flip_parameter = actions::all_parameters(doc, def)
+            .into_iter()
+            .find(|p| p.handle == flip)
+            .unwrap();
+        if testing {
+            let _ = app.open_block_test(source);
+        } else {
+            let _ = app.dispatch_command("BSAVE");
+            let _ = app.dispatch_command("BCLOSE");
+        }
+        let i = app.active_tab;
+        let insert = app.tabs[i]
+            .block_test
+            .as_ref()
+            .map_or(reference, |test| test.insert);
+        let select = |app: &mut OpenCADStudio| {
+            app.tabs[i].scene.selected.insert(insert);
+            app.tabs[i].selected_handle = Some(insert);
+            app.refresh_properties();
+        };
+        let grip = |app: &OpenCADStudio, node| {
+            app.tabs[i]
+                .selected_grips
+                .iter()
+                .find(|g| {
+                    crate::scene::block_grips::runtime::decode(g.id)
+                        .is_some_and(|(id, _)| id == node)
+                })
+                .unwrap()
+                .clone()
+        };
+        select(&mut app);
+        let flip_grip = grip(&app, flip_parameter.id);
+        assert!(app.start_test_action_grip(insert, flip_grip.id));
+        assert_eq!(
+            actions::instance::value(&app.tabs[i].scene.document, insert, &flip_parameter).unwrap(),
+            actions::Value::Flip(true)
+        );
+        select(&mut app);
+        let linear_grip = grip(&app, parameter.id);
+        let before =
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &parameter).unwrap();
+        assert_eq!(before.base, DVec3::new(0., -2., 0.));
+        assert_eq!(before.end, DVec3::new(10., -7., 0.));
+        let axis = (before.end - before.base).normalize();
+        let direction = linear_grip.dir.unwrap().normalize();
+        assert!(direction.dot(axis).abs() > 0.999);
+        let EntityType::Insert(reference) = app.tabs[i].scene.document.get_entity(insert).unwrap()
+        else {
+            panic!()
+        };
+        let transform =
+            crate::scene::render_graph::insert_transform(&app.tabs[i].scene.document, reference);
+        let world_delta = actions::v(transform.apply_rotation(actions::native(axis * 5.)));
+        assert!(app.start_test_action_grip(insert, linear_grip.id));
+        let _ = app.feed_command(crate::command::StepInput::Point(
+            linear_grip.world + world_delta,
+        ));
+        assert!(
+            app.command_line.last_error.is_none(),
+            "{:?}",
+            app.command_line.last_error
+        );
+        let after =
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &parameter).unwrap();
+        assert!((after.end - before.end - axis * 5.).length() < 1e-7);
+        app.undo_steps(1);
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &parameter).unwrap(),
+            before
+        );
+        app.redo_steps(1);
+        assert_eq!(
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &parameter).unwrap(),
+            after
+        );
+    }
+}

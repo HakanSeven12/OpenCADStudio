@@ -767,7 +767,7 @@ impl OpenCADStudio {
         let Ok(frame) = actions::instance::test_frame(&tab.scene.document, test.insert, &p) else { return false };
         let command = crate::modules::block_editor::action::TestParameterCommand {
             grip_input: Some(crate::scene::block_grips::runtime::Input { id, role, frame, offset: grip.offset,
-                point: p.point, linear_axis: p.linear.then(|| (p.end - p.base).normalize()),
+                point: p.point, linear_axis: p.linear.then(|| (frame.end - frame.base).normalize()),
                 limits: crate::scene::block_grips::runtime::Limits::read(&test.baseline, test.definition, &p), to_world, to_local }),
             display_offset: glam::DVec3::ZERO,
             insert: None,
@@ -857,7 +857,7 @@ impl OpenCADStudio {
         let Ok(frame) = actions::instance::frame(&tab.scene.document, handle, &p) else { return false };
         let command = crate::modules::block_editor::action::TestParameterCommand {
             grip_input: Some(crate::scene::block_grips::runtime::Input { id, role, frame, offset: grip.offset,
-                point: p.point, linear_axis: p.linear.then(|| (p.end - p.base).normalize()),
+                point: p.point, linear_axis: p.linear.then(|| (frame.end - frame.base).normalize()),
                 limits: crate::scene::block_grips::runtime::Limits::read(&tab.scene.document, def, &p), to_world, to_local }),
             display_offset: glam::DVec3::ZERO,
             insert: Some(handle),

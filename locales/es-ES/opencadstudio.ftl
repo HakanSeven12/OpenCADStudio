@@ -8549,3 +8549,6 @@ quad-menu =
     .width = Quad width
     .launch = Right-click over an object launches its default command directly (QUADCOMMANDLAUNCH)
     .about = The Quad cursor menu appears at the cursor: default commands for what it points at, recent and creation commands otherwise (QUAD, QUADWIDTH).
+
+block-flip-frame-feedback =
+    .unavailable = El marco del parámetro del bloque no está disponible.

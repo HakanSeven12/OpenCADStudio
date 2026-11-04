@@ -62,6 +62,18 @@ pub fn grips(doc: &Document, definition: Handle, p: &Parameter, value: Value) ->
                 offset,
                 direction: if p.flip {
                     actions::grip_direction(p, value)
+                } else if p.linear {
+                    native.direction.map(actions::v).and_then(|direction| {
+                        let original = (p.end - p.base).try_normalize()?;
+                        let current = (frame.end - frame.base).try_normalize()?;
+                        let cosine = original.x * current.x + original.y * current.y;
+                        let sine = original.x * current.y - original.y * current.x;
+                        Some(DVec3::new(
+                            direction.x * cosine - direction.y * sine,
+                            direction.x * sine + direction.y * cosine,
+                            direction.z,
+                        ))
+                    })
                 } else {
                     native.direction.map(actions::v)
                 },

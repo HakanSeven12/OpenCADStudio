@@ -8468,3 +8468,6 @@ quad-menu =
     .width = Menü genişliği
     .launch = Nesne üzerinde sağ tık varsayılan komutunu doğrudan başlatır (QUADCOMMANDLAUNCH)
     .about = Dörtlü imleç menüsü imlecin yanında açılır: gösterdiği nesnenin varsayılan komutlarını, aksi halde son kullanılan ve oluşturma komutlarını sunar (QUAD, QUADWIDTH).
+
+block-flip-frame-feedback =
+    .unavailable = Blok parametresi çerçevesi kullanılamıyor.

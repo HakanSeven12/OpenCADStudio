@@ -12,6 +12,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "The Block Editor session is no longer active." => Some(("parameters-manager-feedback", "stale-session")),
         "Specify a positive parameter length." => Some(("parameters-manager-feedback", "positive-length")),
         "The parameter direction is unavailable." => Some(("parameters-manager-feedback", "no-direction")),
+        "The block parameter frame is unavailable." => Some(("block-flip-frame-feedback", "unavailable")),
         "Parameters Manager edit" => Some(("parameters-manager-feedback", "history")),
         "Show in Properties" => Some(("block-parameter-properties", "show-properties")),
         "Parameter name" => Some(("block-parameter-properties", "parameter-name")),

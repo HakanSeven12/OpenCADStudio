@@ -39,6 +39,11 @@ pub(super) fn geometry(
         if grips.as_ref().unwrap().contains(handle) {
             continue;
         }
+        // Flip-linked parameters need frame transport; silently treating them
+        // as bookkeeping would leave later grips and edits in the old frame.
+        if kind == Kind::Flip {
+            return Err("This action targets another parameter or an unsupported native object.");
+        }
         let all_params = all_parameters(doc, definition);
         let is_block_param_or_grip = all_params.iter().any(|p| {
             // Linear grip aliases are not yet transport targets. The driving

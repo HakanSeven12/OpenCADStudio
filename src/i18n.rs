@@ -546,6 +546,30 @@ mod tests {
     use std::collections::BTreeSet;
 
     #[test]
+    fn flip_frame_error_uses_each_locale_catalog() {
+        let source = "The block parameter frame is unavailable.";
+        assert_eq!(
+            catalog_ids(source),
+            Some(("block-flip-frame-feedback", "unavailable"))
+        );
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
+            let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
+            load_language(&loader, language).unwrap();
+            let message = loader.get_attr("block-flip-frame-feedback", "unavailable");
+            assert!(!message.is_empty(), "{language:?}");
+            if language != Language::EnUs {
+                assert_ne!(
+                    message, source,
+                    "{language:?} must not fall back to English"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn action_target_prompt_preserves_the_parameter_keyword_in_every_locale() {
         for language in Language::ALL
             .into_iter()

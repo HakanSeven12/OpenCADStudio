@@ -17,6 +17,7 @@ mod stretch;
 mod targets;
 mod array;
 mod chains;
+mod flip_frames;
 pub(crate) mod options;
 pub(crate) mod chain;
 
@@ -1298,6 +1299,7 @@ struct Evaluation<'a> {
     requested: Option<&'a std::collections::BTreeSet<Handle>>,
     resolved_frames: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     frames: Option<&'a std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
+    managed_flip: Option<Handle>,
 }
 
 pub(crate) fn evaluate_framed(
@@ -1310,6 +1312,7 @@ pub(crate) fn evaluate_framed(
     base_changed: bool,
     previous_frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     resolved_frames: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    managed_flip: Option<Handle>,
 ) -> Result<bool, &'static str> {
     let bases = frames
         .iter()
@@ -1336,6 +1339,7 @@ pub(crate) fn evaluate_framed(
             base_changed,
             resolved_frames: Some(resolved_frames),
             frames: Some(frames),
+            managed_flip,
             rebuild: false,
             ..Evaluation::default()
         },
@@ -1383,6 +1387,7 @@ pub(crate) fn rebuild_framed(
             previous_values: previous.map(|p| p.values),
             requested: previous.map(|p| p.requested),
             resolved_frames: Some(&mut resolved_frames),
+            managed_flip: None,
         },
     )?;
     Ok(resolved_frames)
@@ -1619,7 +1624,7 @@ fn evaluate_impl(
                 .find(|p| p.id == *id)
                 .is_some_and(|p| value(&staged, &p) == Ok(Value::Flip(false)));
         let active_dependencies;
-        let dependencies = if inactive_flip {
+        let dependencies = if inactive_flip || evaluation.managed_flip == Some(*action_handle) {
             active_dependencies = a.dependencies.iter().copied()
                 .filter(|h| baseline.get_entity(*h).is_some())
                 .collect::<Vec<_>>();

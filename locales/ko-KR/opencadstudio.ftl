@@ -8538,3 +8538,6 @@ quad-menu =
     .width = Quad width
     .launch = Right-click over an object launches its default command directly (QUADCOMMANDLAUNCH)
     .about = The Quad cursor menu appears at the cursor: default commands for what it points at, recent and creation commands otherwise (QUAD, QUADWIDTH).
+
+block-flip-frame-feedback =
+    .unavailable = 블록 매개변수 프레임을 사용할 수 없습니다.

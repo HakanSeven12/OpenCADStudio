@@ -6884,7 +6884,7 @@ impl OpenCADStudio {
             return Task::none();
         }
 
-        let (is_down2, is_dragging, box_anchor, box_crossing, _vp_size, poly_drag) = {
+        let (is_down2, is_dragging, box_anchor, box_crossing, _vp_size, poly_drag, poly_crossing) = {
             let sel = self.tabs[i].scene.selection.borrow();
             (
                 sel.input.left_down,
@@ -6893,6 +6893,7 @@ impl OpenCADStudio {
                 sel.gesture.box_crossing,
                 sel.view.vp_size,
                 sel.gesture.poly_active,
+                sel.gesture.poly_crossing,
             )
         };
 
@@ -6944,7 +6945,20 @@ impl OpenCADStudio {
                             [world.x, world.y]
                         })
                         .collect::<Vec<_>>();
-                    Some((fence, None))
+                    let (min, max) = fence.iter().fold(
+                        (
+                            [f64::INFINITY, f64::INFINITY],
+                            [f64::NEG_INFINITY, f64::NEG_INFINITY],
+                        ),
+                        |(mut min, mut max), point| {
+                            min[0] = min[0].min(point[0]);
+                            min[1] = min[1].min(point[1]);
+                            max[0] = max[0].max(point[0]);
+                            max[1] = max[1].max(point[1]);
+                            (min, max)
+                        },
+                    );
+                    Some((fence, Some((min, max))))
                 } else if let Some(anchor) = box_anchor {
                     let points = [
                         anchor,
@@ -6980,7 +6994,7 @@ impl OpenCADStudio {
 
                 if let Some((fence, window)) = drag_geometry {
                     if self.tabs[i].active_cmd.is_none() {
-                        self.tabs[i].last_crossing_window = window.filter(|_| box_crossing);
+                        self.tabs[i].last_crossing_window = window.filter(|_| if poly_drag { poly_crossing } else { box_crossing });
                     }
                     let result = self.tabs[i].active_cmd.as_mut().and_then(|command| {
                         command.set_shift(self.shift_down);
@@ -7409,6 +7423,7 @@ properties={:.1}ms picked={}",
                                             if let Some(command) = self.tabs[i].active_cmd.as_mut() {
                                                 command.clear_selection_markers();
                                             }
+                                            self.tabs[i].last_crossing_window = None;
                                         }
                                         self.tabs[i]
                                             .scene
@@ -7431,6 +7446,7 @@ properties={:.1}ms picked={}",
                                         command.clear_selection_markers();
                                     }
                                     self.tabs[i].scene.deselect_all();
+                                    self.tabs[i].last_crossing_window = None;
                                     self.refresh_properties();
                                 }
                                 // Pin the anchor to the world point under it
@@ -7515,6 +7531,15 @@ was_selected={}",
                     }
 
                     let crossing = box_crossing;
+                    if self.tabs[i].active_cmd.is_none() {
+                        if !self.shift_down && !self.select_remove_mode {
+                            self.tabs[i].last_crossing_window = if crossing {
+                                Some((command_min, command_max))
+                            } else {
+                                None
+                            };
+                        }
+                    }
                     let (mut handles, timing) =
                         self.box_selection_handles(i, &edit_cam, bounds, a, p, crossing);
                     let (cand_ms, hit_ms) = (timing.candidates, timing.hit);

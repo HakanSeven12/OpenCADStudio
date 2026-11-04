@@ -451,7 +451,32 @@ pub struct StretchCommand {
 
 impl StretchCommand {
     pub fn new(handles: Vec<Handle>, wire_models: Vec<WireModel>) -> Self {
-        Self {
+        if !handles.is_empty() {
+            Self::preselected_with_windows(handles, wire_models, Vec::new())
+        } else {
+            Self {
+                handles,
+                wire_models,
+                windows: Vec::new(),
+                excluded_points: Vec::new(),
+                moving: None,
+                remove_release_pending: false,
+                shift_down: false,
+                step: Step::WindowCorner1,
+            }
+        }
+    }
+
+    /// A selection made before the command: that window (or windows)
+    /// marks what moves, so the command goes straight to the base point.
+    /// If windows is empty, the entire selection bounds are used so
+    /// all preselected entities move rigidly.
+    pub fn preselected_with_windows(
+        handles: Vec<Handle>,
+        wire_models: Vec<WireModel>,
+        mut windows: Vec<(DVec3, DVec3)>,
+    ) -> Self {
+        let mut cmd = Self {
             handles,
             wire_models,
             windows: Vec::new(),
@@ -459,8 +484,20 @@ impl StretchCommand {
             moving: None,
             remove_release_pending: false,
             shift_down: false,
-            step: Step::WindowCorner1,
+            step: Step::Base,
+        };
+        if windows.is_empty() {
+            if let Some(bounds) = cmd.selection_bounds() {
+                windows.push(bounds);
+            } else {
+                windows.push((
+                    DVec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY),
+                    DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY),
+                ));
+            }
         }
+        cmd.windows = windows;
+        cmd
     }
 
     /// A selection made by a crossing window before the command: that window
@@ -470,16 +507,7 @@ impl StretchCommand {
         wire_models: Vec<WireModel>,
         window: (DVec3, DVec3),
     ) -> Self {
-        Self {
-            handles,
-            wire_models,
-            windows: vec![window],
-            excluded_points: Vec::new(),
-            moving: None,
-            remove_release_pending: false,
-            shift_down: false,
-            step: Step::Base,
-        }
+        Self::preselected_with_windows(handles, wire_models, vec![window])
     }
 
     /// Continue gathering crossing windows after the host has resolved the
@@ -504,7 +532,7 @@ impl StretchCommand {
     /// A window enclosing every vertex of the current selection, or `None`
     /// when nothing is selected. Padded so a vertex exactly on the boundary
     /// counts as inside rather than depending on the comparison's edge.
-    fn selection_bounds(&self) -> Option<(DVec3, DVec3)> {
+    pub(crate) fn selection_bounds(&self) -> Option<(DVec3, DVec3)> {
         let mut min = DVec3::splat(f64::INFINITY);
         let mut max = DVec3::splat(f64::NEG_INFINITY);
         let mut any = false;
@@ -517,6 +545,14 @@ impl StretchCommand {
                 min = min.min(point);
                 max = max.max(point);
                 any = true;
+            }
+            if wire.points.is_empty() {
+                let [x0, y0, x1, y1] = wire.aabb.map(f64::from);
+                if x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite() {
+                    min = min.min(DVec3::new(x0, y0, 0.0));
+                    max = max.max(DVec3::new(x1, y1, 0.0));
+                    any = true;
+                }
             }
         }
         if !any {
@@ -886,5 +922,52 @@ mod shift_stretch_tests {
         let preview = cmd.preview_entities(&document, DVec3::new(0.0, 3.0, 0.0));
         assert_eq!(preview.len(), 1);
         assert_eq!(cmd.preview_hidden_handles(), &[moved]);
+    }
+
+    #[test]
+    fn preselected_with_crossing_window_goes_straight_to_base_point() {
+        let handle = Handle::new(10);
+        let window = (DVec3::new(5.0, -1.0, -1.0), DVec3::new(15.0, 1.0, 1.0));
+        let mut cmd = StretchCommand::preselected(vec![handle], vec![], window);
+        assert_eq!(cmd.prompt(), "STRETCH  Specify base point:");
+        assert!(matches!(cmd.on_point(DVec3::new(10.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        assert!(cmd.prompt().starts_with("STRETCH  Specify new point"));
+        let result = cmd.on_point(DVec3::new(15.0, 0.0, 0.0));
+        let CmdResult::StretchEntities { handles, windows, delta, .. } = result else {
+            panic!("expected StretchEntities");
+        };
+        assert_eq!(handles, vec![handle]);
+        assert_eq!(windows, vec![window]);
+        assert_eq!(delta, DVec3::new(5.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn preselected_without_windows_uses_selection_bounds_and_moves_all_vertices() {
+        let handle = Handle::new(20);
+        let wire = WireModel::solid_f64(
+            "test".into(),
+            vec![[0.0, 0.0, 0.0], [10.0, 0.0, 0.0]],
+            WireModel::WHITE,
+            false,
+        );
+        let mut cmd = StretchCommand::new(vec![handle], vec![wire]);
+        assert_eq!(cmd.prompt(), "STRETCH  Specify base point:");
+        assert!(matches!(cmd.on_point(DVec3::new(0.0, 0.0, 0.0)), CmdResult::NeedPoint));
+        let result = cmd.on_point(DVec3::new(5.0, 5.0, 0.0));
+        let CmdResult::StretchEntities { handles, windows, delta, .. } = result else {
+            panic!("expected StretchEntities");
+        };
+        assert_eq!(handles, vec![handle]);
+        assert_eq!(windows.len(), 1);
+        // Verify both vertices fall inside the window
+        let (win_min, win_max) = windows[0];
+        assert!(win_min.x <= 0.0 && win_max.x >= 10.0);
+        assert_eq!(delta, DVec3::new(5.0, 5.0, 0.0));
+    }
+
+    #[test]
+    fn empty_selection_starts_in_crossing_window_step() {
+        let cmd = StretchCommand::new(vec![], vec![]);
+        assert_eq!(cmd.prompt(), "STRETCH  Specify first corner of crossing window:");
     }
 }

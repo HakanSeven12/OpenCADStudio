@@ -1920,3 +1920,94 @@ mod ribbon_highlight_tests {
         assert_eq!(app.ribbon.active_tool(), None);
     }
 }
+
+#[cfg(test)]
+mod stretch_preselection_tests {
+    use super::*;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+    use glam::DVec3;
+
+    fn fresh() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn preselected_crossing_window_stretches_only_contained_endpoints() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        let line = codec::EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        ));
+        let handle = app.tabs[i].scene.document.add_entity(line).unwrap();
+        app.tabs[i].scene.select_entities(&[handle]);
+        app.tabs[i].last_crossing_window = Some(([5.0, -2.0], [15.0, 2.0]));
+
+        let _ = app.dispatch_command("STRETCH");
+
+        assert!(app.tabs[i].active_cmd.is_some());
+        let cmd_prompt = app.tabs[i].active_cmd.as_ref().unwrap().prompt();
+        assert_eq!(cmd_prompt, "STRETCH  Specify base point:");
+
+        // Pick base point
+        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(10.0, 0.0, 0.0));
+        let _ = app.apply_cmd_result(res);
+
+        // Pick destination point
+        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(15.0, 0.0, 0.0));
+        let _ = app.apply_cmd_result(res);
+
+        // Check line: start (0,0,0) didn't move; end (10,0,0) moved to (15,0,0)
+        let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
+        let codec::EntityType::Line(l) = ent else { panic!("expected line"); };
+        assert_eq!(l.start, Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(l.end, Vector3::new(15.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn preselected_without_crossing_window_moves_rigidly() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        let line = codec::EntityType::Line(Line::from_points(
+            Vector3::new(0.0, 0.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        ));
+        let handle = app.tabs[i].scene.document.add_entity(line).unwrap();
+        app.tabs[i].scene.select_entities(&[handle]);
+        app.tabs[i].last_crossing_window = None;
+
+        let _ = app.dispatch_command("S");
+
+        assert!(app.tabs[i].active_cmd.is_some());
+        let cmd_prompt = app.tabs[i].active_cmd.as_ref().unwrap().prompt();
+        assert_eq!(cmd_prompt, "STRETCH  Specify base point:");
+
+        // Pick base point
+        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(0.0, 0.0, 0.0));
+        let _ = app.apply_cmd_result(res);
+
+        // Pick destination point
+        let res = app.tabs[i].active_cmd.as_mut().unwrap().on_point(DVec3::new(5.0, 3.0, 0.0));
+        let _ = app.apply_cmd_result(res);
+
+        // Check line: start moved to (5,3,0); end moved to (15,3,0)
+        let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
+        let codec::EntityType::Line(l) = ent else { panic!("expected line"); };
+        assert_eq!(l.start, Vector3::new(5.0, 3.0, 0.0));
+        assert_eq!(l.end, Vector3::new(15.0, 3.0, 0.0));
+    }
+
+    #[test]
+    fn stretch_without_preselection_starts_in_crossing_window_step() {
+        let mut app = fresh();
+        let i = app.active_tab;
+        app.tabs[i].scene.deselect_all();
+        let _ = app.dispatch_command("STRETCH");
+        assert!(app.tabs[i].active_cmd.is_some());
+        let cmd_prompt = app.tabs[i].active_cmd.as_ref().unwrap().prompt();
+        assert_eq!(cmd_prompt, "STRETCH  Specify first corner of crossing window:");
+    }
+}

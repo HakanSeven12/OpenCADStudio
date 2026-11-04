@@ -442,6 +442,7 @@ impl OpenCADStudio {
         }
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
+        self.tabs[i].last_crossing_window = None;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();

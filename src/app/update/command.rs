@@ -1512,6 +1512,7 @@ impl OpenCADStudio {
             // stays active: PSPACE, or a double-click outside it, leaves it.
             self.tabs[i].selected_authoring = None;
             self.tabs[i].scene.deselect_all();
+            self.tabs[i].last_crossing_window = None;
             self.refresh_properties();
             self.tabs[i].scene.set_box_hover_highlights(&[]);
             let mut sel = self.tabs[i].scene.selection.borrow_mut();

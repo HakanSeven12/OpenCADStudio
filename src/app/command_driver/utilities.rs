@@ -723,6 +723,9 @@ impl OpenCADStudio {
         if std::mem::take(&mut self.selection_undoing) {
             return Some(key);
         }
+        // The first count of a prompt has no total; every later one has,
+        // even when the set has emptied.
+        let first = !matches!(&self.selection_report, Some((k, _)) if *k == key);
         let previous: rustc_hash::FxHashSet<Handle> = match &self.selection_report {
             Some((k, previous)) if *k == key => previous.iter().copied().collect(),
             _ => Default::default(),
@@ -763,7 +766,7 @@ impl OpenCADStudio {
             } else {
                 crate::tf!("{groups} groups")
             };
-            if previous.is_empty() && !remove {
+            if first && !remove {
                 crate::tf!("{found} found, {groups}")
             } else if remove && known > 0 {
                 crate::tf!("{found} found, {known} removed, {groups}, {total} total")
@@ -772,7 +775,7 @@ impl OpenCADStudio {
             } else {
                 crate::tf!("{found} found, {groups}, {total} total")
             }
-        } else if found == 0 || previous.is_empty() && !remove {
+        } else if found == 0 || first && !remove {
             crate::tf!("{found} found")
         } else if remove && known > 0 {
             crate::tf!("{found} found, {known} removed, {total} total")

@@ -871,27 +871,41 @@ bg={bg_ms:.1}ms n={view_count}"
                 // viewport camera so they sit on the wire the GPU draws.
                 // Paper entities use the 2-D paper transform; the model tab
                 // uses the model camera.
-                let screen_grips = if let Some((cam, _)) = &edit_frame {
-                    grips_to_screen_rte(
-                        &tab.selected_grips,
-                        cam.view_proj_rte(bounds),
-                        cam.eye(),
-                        bounds,
-                    )
-                } else if is_paper {
-                    let cam = tab.scene.camera.borrow();
-                    let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
-                    let half_h = cam.ortho_size();
-                    let half_w = half_h * aspect;
-                    let tx = cam.target.x as f32;
-                    let ty = cam.target.y as f32;
-                    drop(cam);
-                    grips_to_screen_paper(&tab.selected_grips, tx, ty, half_w, half_h, bounds)
-                } else {
-                    let cam = tab.scene.camera.borrow();
-                    grips_to_screen(&tab.selected_grips, &cam, bounds)
+                let project = |list: &[crate::scene::model::object::GripDef]| {
+                    if let Some((cam, _)) = &edit_frame {
+                        grips_to_screen_rte(list, cam.view_proj_rte(bounds), cam.eye(), bounds)
+                    } else if is_paper {
+                        let cam = tab.scene.camera.borrow();
+                        let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
+                        let half_h = cam.ortho_size();
+                        let half_w = half_h * aspect;
+                        let tx = cam.target.x as f32;
+                        let ty = cam.target.y as f32;
+                        drop(cam);
+                        grips_to_screen_paper(list, tx, ty, half_w, half_h, bounds)
+                    } else {
+                        let cam = tab.scene.camera.borrow();
+                        grips_to_screen(list, &cam, bounds)
+                    }
                 };
-                owned_grips = screen_grips
+                let screen_grips = project(&tab.selected_grips);
+                // A frame keeps the vertices the drag started from: the
+                // dragged grip counts at its starting point.
+                let frame_grips = match tab.active_grip.as_ref() {
+                    Some(edit) => {
+                        let mut list = tab.selected_grips.clone();
+                        for (index, grip) in list.iter_mut().enumerate() {
+                            if tab.selected_grip_handles.get(index) == Some(&edit.handle)
+                                && grip.id == edit.grip_id
+                            {
+                                grip.world = edit.origin_world;
+                            }
+                        }
+                        project(&list)
+                    }
+                    None => screen_grips.clone(),
+                };
+                owned_grips = frame_grips
                     .iter()
                     .enumerate()
                     .filter_map(|(index, (_, screen, _, shape, _))| {

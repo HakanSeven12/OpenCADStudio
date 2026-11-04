@@ -1087,6 +1087,8 @@ impl OpenCADStudio {
             // LAYERFILTER takes its whole argument list on one line.
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
+            // DIMUPDATE takes its KEEP / CLEAR answer on the same line.
+            || tokens[0].eq_ignore_ascii_case("DIMUPDATE")
         {
             return self.dispatch_command(cmd);
         }

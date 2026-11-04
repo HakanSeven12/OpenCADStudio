@@ -1399,6 +1399,76 @@ impl OpenCADStudio {
                 );
             }
 
+            // Apply the current dimension style to the selected dimensions.
+            // Overrides are cleared by default, as the reference asks; KEEP
+            // leaves them in place.
+            cmd if cmd == "DIMUPDATE" || cmd.starts_with("DIMUPDATE ") => {
+                let argument = cmd
+                    .strip_prefix("DIMUPDATE")
+                    .unwrap_or("")
+                    .trim()
+                    .to_ascii_uppercase();
+                let keep = matches!(argument.as_str(), "KEEP" | "YES" | "Y");
+                let handles = self.selected_editable_dimensions(i);
+                if self.tabs[i].scene.selected_handles_in_order().is_empty() {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let sel = SelectObjectsCommand::routed("DIMUPDATE", cmd);
+                    self.command_line.push_info(&sel.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(sel));
+                } else if handles.is_empty() {
+                    self.command_line.push_error(
+                        crate::t!("DIMUPDATE: no editable dimensions were selected.").as_ref(),
+                    );
+                } else {
+                    use crate::entities::dim_override as dov;
+                    let style = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_dimstyle_name
+                        .clone();
+                    self.push_undo_snapshot(i, "DIMUPDATE");
+                    let mut updated = 0usize;
+                    let mut current = 0usize;
+                    for handle in &handles {
+                        if !keep {
+                            dov::replace(&mut self.tabs[i].scene.document, *handle, Vec::new());
+                        }
+                        let already = matches!(
+                            self.tabs[i].scene.document.get_entity(*handle),
+                            Some(codec::EntityType::Dimension(dimension))
+                                if dimension.base().style_name.eq_ignore_ascii_case(&style)
+                        );
+                        if let Some(codec::EntityType::Dimension(dimension)) =
+                            self.tabs[i].scene.document.get_entity_mut(*handle)
+                        {
+                            dimension.base_mut().style_name = style.clone();
+                            crate::entities::dimension::reset_automatic_text_position(
+                                dimension.base_mut(),
+                            );
+                        }
+                        self.tabs[i].scene.invalidate_dim_block_recorded(*handle);
+                        if already {
+                            current += 1;
+                        } else {
+                            updated += 1;
+                        }
+                    }
+                    self.tabs[i].dirty = true;
+                    self.refresh_properties();
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "DIMUPDATE: applied '{}' to {} dimension(s), {} already current; overrides {}.",
+                            style,
+                            updated,
+                            current,
+                            if keep { "kept" } else { "cleared" }
+                        )
+                        .as_ref(),
+                    );
+                }
+            }
+
             "DIMOVERRIDE" => {
                 use crate::modules::annotate::dimoverride::DimOverrideCommand;
                 let document = &self.tabs[i].scene.document;
@@ -1578,31 +1648,93 @@ impl OpenCADStudio {
                 return Some(self.dispatch_command("DIMREASSOCIATE"));
             }
 
-            // DIMREGEN: every dimension draws its picture afresh, and the
-            // next save writes the new pictures.
+            // DIMREGEN: solve every association against the current geometry,
+            // drop each generated picture, and report what could not be solved.
             "DIMREGEN" => {
-                let handles: Vec<_> = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .filter(|entity| {
-                        matches!(entity, codec::EntityType::Dimension(d)
-                            if !d.base().block_name.is_empty())
-                    })
-                    .map(|entity| entity.common().handle)
-                    .collect();
-                if !handles.is_empty() {
+                use crate::scene::ChangeKind;
+                let (refreshed, broken, pictures, total, associated) = {
+                    let scene = &mut self.tabs[i].scene;
+                    let dimensions: Vec<codec::Handle> = scene
+                        .document
+                        .entities()
+                        .filter_map(|entity| match entity {
+                            codec::EntityType::Dimension(dimension) => {
+                                Some(dimension.base().common.handle)
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    let associated: Vec<codec::Handle> = dimensions
+                        .iter()
+                        .copied()
+                        .filter(|handle| scene.dimension_association(*handle).is_some())
+                        .collect();
+                    // Every entity counts as changed: DIMREGEN is the explicit
+                    // "solve the associations again" pass. Entities live in
+                    // their own table, not in `objects` (which holds the
+                    // association records themselves), so walking objects
+                    // would never match a source handle.
+                    let changes: Vec<(codec::Handle, ChangeKind)> = scene
+                        .document
+                        .entities()
+                        .map(|entity| (entity.common().handle, ChangeKind::Modified))
+                        .collect();
+                    let refreshed = scene.refresh_associative_dimensions(&changes);
+                    let mut broken = Vec::new();
+                    for handle in &associated {
+                        let status = scene.dimension_association_status(*handle);
+                        if status.iter().any(|(_, state)| {
+                            !matches!(state, crate::scene::ReferenceStatus::Resolved)
+                        }) {
+                            broken.push(*handle);
+                        }
+                    }
+                    // Pictures saved with a dimension bypass generated
+                    // rendering, so they are dropped after a resolved solve.
+                    let pictures: Vec<codec::Handle> = scene
+                        .document
+                        .entities()
+                        .filter(|entity| {
+                            matches!(entity, codec::EntityType::Dimension(d)
+                                if !d.base().block_name.is_empty())
+                        })
+                        .map(|entity| entity.common().handle)
+                        .collect();
+                    (
+                        refreshed,
+                        broken,
+                        pictures,
+                        dimensions.len(),
+                        associated.len(),
+                    )
+                };
+                if !refreshed.is_empty() || !pictures.is_empty() {
                     self.push_undo_snapshot(i, "DIMREGEN");
-                    for &handle in &handles {
+                    for &handle in &pictures {
                         self.tabs[i].scene.invalidate_dim_block_recorded(handle);
                     }
-                    let changes: Vec<_> = handles
-                        .iter()
-                        .map(|&handle| (handle, crate::scene::ChangeKind::Modified))
-                        .collect();
-                    self.tabs[i].scene.bump_entities(&changes);
+                    self.tabs[i].scene.bump_entities(&refreshed);
                     self.tabs[i].dirty = true;
                 }
+                self.command_line.push_output(
+                    crate::tf!(
+                        "DIMREGEN: {} updated, {} broken, {} without association.",
+                        refreshed.len(),
+                        broken.len(),
+                        total.saturating_sub(associated)
+                    )
+                    .as_ref(),
+                );
+                for handle in broken {
+                    self.command_line.push_output(
+                        crate::tf!(
+                            "  Dimension {:X} has a reference that no longer resolves.",
+                            handle.value()
+                        )
+                        .as_ref(),
+                    );
+                }
+                self.refresh_properties();
             }
 
             "DIMDISASSOCIATE" | "DIMREASSOCIATE" => {

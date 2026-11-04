@@ -3,7 +3,9 @@
 #[cfg(not(target_arch = "wasm32"))]
 const RELEASES_API: &str =
     "https://api.github.com/repos/HakanSeven12/OpenCADStudio/releases/latest";
-pub const RELEASES_PAGE: &str = "https://github.com/HakanSeven12/OpenCADStudio/releases/latest";
+/// Where the update notice sends the user: the site's download page, whose
+/// links always name the latest release's files.
+pub const DOWNLOAD_PAGE: &str = "https://www.opencadstudio.com/download/";
 
 /// Give release assets time to propagate before offering an update.
 #[cfg(not(target_arch = "wasm32"))]

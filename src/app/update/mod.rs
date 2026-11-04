@@ -1612,6 +1612,13 @@ impl OpenCADStudio {
                 if matches!(ext.as_str(), "svg" | "svgz") {
                     return self.dispatch_command(&format!("_SVGINFILE {}", path.display()));
                 }
+                // A picture is attached as IMAGEATTACH attaches it.
+                if matches!(
+                    ext.as_str(),
+                    "png" | "jpg" | "jpeg" | "bmp" | "tif" | "tiff" | "webp" | "gif"
+                ) {
+                    return self.update(Message::ImagePickResult(crate::io::image_file_size(path)));
+                }
                 if !matches!(ext.as_str(), "dwg" | "dxf" | "bak" | "sv$")
                     && ocs_save::external_format(&ext).is_none()
                 {
@@ -12896,7 +12903,7 @@ impl OpenCADStudio {
             }
             Message::UpdateNoticeOpenRelease => {
                 let open =
-                    crate::sys::open_url(crate::io::update_check::RELEASES_PAGE, self.main_window);
+                    crate::sys::open_url(crate::io::update_check::DOWNLOAD_PAGE, self.main_window);
                 self.close_active_modal();
                 open
             }

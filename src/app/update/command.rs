@@ -1504,10 +1504,9 @@ impl OpenCADStudio {
             if let Some(r) = result {
                 return self.apply_cmd_result(r);
             }
-        } else if self.tabs[i].scene.active_viewport.is_some() {
-            // ESC while in MSPACE → exit back to paper space.
-            return Task::done(Message::ExitViewport);
         } else {
+            // In a viewport's model space Esc deselects too and the viewport
+            // stays active: PSPACE, or a double-click outside it, leaves it.
             self.tabs[i].selected_authoring = None;
             self.tabs[i].scene.deselect_all();
             self.refresh_properties();

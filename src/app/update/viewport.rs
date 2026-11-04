@@ -7623,178 +7623,8 @@ properties={:.1}ms picked={}",
                     width: vw,
                     height: vh,
                 };
-                let (view_rot, eye) = {
-                    let c = self.tabs[i].scene.camera.borrow();
-                    (c.view_proj_rte(bounds), c.eye())
-                };
-                let all_wires = self.tabs[i].scene.hit_test_wires();
-                let click_world = self.cursor_model_point(i, &edit_cam, p, bounds);
-                let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(
-                    all_wires,
-                    click_world,
-                    view_rot,
-                    eye,
-                    bounds,
-                    crate::ui::overlay::pick_box_aperture_px(self.pick_box) * 2.0,
-                );
-                let candidate_handles = self.tabs[i]
-                    .scene
-                    .interaction_candidate_handles(&click_candidates);
-                // Resolve the double-clicked object the way a single click
-                // picks it — its wire, then a hatch by its fill (a hatch has
-                // no boundary wire), then a block's hatch (its INSERT), or
-                // for a block/solid with no wire under the cursor its shaded
-                // body, which maps to the parent INSERT.
-                let hit = scene::pick::hit_test::click_hit(
-                    p,
-                    &click_candidates,
-                    view_rot,
-                    eye,
-                    bounds,
-                    self.tabs[i].scene.document.header.lineweight_display,
-                    crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-                    &self.tabs[i].scene.draw_depth_map(),
-                )
-                .and_then(|s| Scene::handle_from_wire_name(s))
-                .or_else(|| {
-                    let hatches = self.tabs[i]
-                        .scene
-                        .visible_hatches_for_click(candidate_handles.as_ref());
-                    scene::pick::hit_test::click_hit_hatch(
-                        p,
-                        &hatches,
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    )
-                })
-                .or_else(|| {
-                    scene::pick::hit_test::click_hit_insert_hatch(
-                        p,
-                        self.tabs[i].scene.insert_hatches_for_click().as_ref(),
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                    )
-                })
-                .or_else(|| {
-                    self.tabs[i].scene.solid_edge_click_hit(
-                        p,
-                        view_rot,
-                        eye,
-                        bounds,
-                        candidate_handles.as_ref(),
-                        crate::ui::overlay::pick_box_aperture_px(self.pick_box),
-                    )
-                })
-                // Inside an empty table cell nothing is drawn to hit: the
-                // cell under the cursor takes the double-click.
-                .or_else(|| {
-                    self.tabs[i]
-                        .scene
-                        .table_cell_pick(click_world, 0.0)
-                        .map(|(table, _)| table)
-                });
-                if let Some(handle) = hit {
-                    // Locked layer: double-click must not open any editor
-                    // (text / attribute / in-place block edit).
-                    if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
-                        self.command_line.push_info(
-                            crate::tf!(
-                            "Object is on locked layer \"{layer}\" — unlock the layer to edit it."
-                        )
-                            .as_ref(),
-                        );
-                        return Task::none();
-                    }
-                    // Table double-click: shared TABLEDIT editor setup. A
-                    // grid miss returns NoCell and falls through to the
-                    // other text/entity editors below; an editable cell or
-                    // a locked cell (indicator armed, no editor) ends the
-                    // double-click handling here.
-                    if self.begin_table_cell_edit(i, handle, click_world)
-                        != crate::modules::annotate::table_cmd::TableCellEditStart::NoCell
-                    {
-                        return Task::none();
-                    }
-                    // A constraint dimension edits its parameter from the
-                    // command line, standing in for the reference's in-place
-                    // value editor.
-                    if let Some(prompt) = self.dynamic_dimension_value_command(i, handle) {
-                        use crate::command::CadCommand;
-                        self.command_line.push_info(&prompt.prompt());
-                        self.tabs[i].active_cmd = Some(Box::new(prompt));
-                        return Task::none();
-                    }
-                    // Any text-bearing entity opens its in-place editor
-                    // (plain box or rich MText editor, per type). A
-                    // Leader resolves to the entity it annotates.
-                    let is_editable_text = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handle)
-                        .is_some_and(|e| {
-                            crate::app::text_inline::read_text_field(e).is_some()
-                                || matches!(e, AcadEntityType::Leader(_))
-                        });
-                    if is_editable_text {
-                        return self.begin_text_edit(handle);
-                    }
-                    // A hatch starts HATCHEDIT on itself; selected, the
-                    // command skips its pick. (The reference program's
-                    // default double-click action for a hatch is Quick
-                    // Properties, but Properties already follows a single
-                    // click here, so the double-click edits.)
-                    if matches!(
-                        self.tabs[i].scene.document.get_entity(handle),
-                        Some(AcadEntityType::Hatch(_))
-                    ) {
-                        self.tabs[i].scene.deselect_all();
-                        self.tabs[i].scene.select_entity(handle, true);
-                        self.tabs[i].selected_handle = Some(handle);
-                        self.refresh_properties();
-                        return self.dispatch_command("HATCHEDIT");
-                    }
-                    // Double-clicking a block with attributes opens the
-                    // attribute editor (edit its values). For blocks without
-                    // attributes, Options > Drawing chooses BEDIT (default)
-                    // or in-place REFEDIT. (#136, #192, #261)
-                    let insert_has_attrs = matches!(
-                        self.tabs[i].scene.document.get_entity(handle),
-                        Some(AcadEntityType::Insert(ins)) if !ins.attributes.is_empty()
-                    );
-                    if insert_has_attrs
-                        && self.double_click_block_attedit
-                        && self.tabs[i].active_block_edit.is_none()
-                    {
-                        return Task::done(Message::AttrEditorOpen(handle));
-                    }
-                    let is_insert = matches!(
-                        self.tabs[i].scene.document.get_entity(handle),
-                        Some(AcadEntityType::Insert(_))
-                    );
-                    if is_insert && self.tabs[i].refedit_session.is_none() {
-                        if self.block_editor_preferences.locked && !self.double_click_block_refedit
-                        {
-                            self.tabs[i].scene.deselect_all();
-                            self.tabs[i].scene.select_entity(handle, true);
-                            self.tabs[i].selected_handle = Some(handle);
-                            self.refresh_properties();
-                            return self.dock_set_open(crate::ui::dock::PanelId::Properties, true);
-                        }
-                        let command = if self.double_click_block_refedit {
-                            "REFEDIT_BEGIN"
-                        } else {
-                            "BEDIT_BEGIN"
-                        };
-                        return Task::done(Message::Command(format!(
-                            "{}:{}",
-                            command,
-                            handle.value()
-                        )));
-                    }
+                if let Some(task) = self.double_click_edit(i, p, &edit_cam, bounds) {
+                    return task;
                 }
             }
         }
@@ -7829,6 +7659,23 @@ properties={:.1}ms picked={}",
                     height: vh,
                 };
 
+                // An object with an editor takes the double-click before the
+                // viewport it lies in, as in model space: a paper-space
+                // object, or in an active viewport a model object, picked
+                // through that viewport's view.
+                let edit_bounds = match edit_cam {
+                    Some(_) => iced::Rectangle {
+                        x: 0.0,
+                        y: 0.0,
+                        width: tile_vw,
+                        height: tile_vh,
+                    },
+                    None => bounds,
+                };
+                if let Some(task) = self.double_click_edit(i, p, &edit_cam, edit_bounds) {
+                    return task;
+                }
+
                 let (view_rot, eye) = {
                     let c = self.tabs[i].scene.camera.borrow();
                     (c.view_proj_rte(bounds), c.eye())
@@ -7857,35 +7704,8 @@ properties={:.1}ms picked={}",
                 )
                 .and_then(|s| Scene::handle_from_wire_name(s));
 
-                // In paper space, text editing takes precedence over entering MSPACE.
-                // This mirrors the model-space double-click behaviour.
-                if let Some(handle) = raw_wire_hit {
-                    let is_editable_text = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handle)
-                        .is_some_and(|entity| {
-                            crate::app::text_inline::read_text_field(entity).is_some()
-                                || matches!(entity, AcadEntityType::Leader(_))
-                        });
-
-                    if is_editable_text {
-                        if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
-                            self.command_line.push_info(
-                                crate::tf!(
-                                    "Object is on locked layer \"{layer}\" — unlock the layer to edit it."
-                                )
-                                .as_ref(),
-                            );
-                            return Task::none();
-                        }
-
-                        return self.begin_text_edit(handle);
-                    }
-                }
-
-                // If the double-click was not on editable text, keep the existing
-                // paper-space behaviour and try to enter the clicked viewport.
+                // Nothing with an editor was double-clicked: enter the
+                // clicked viewport.
                 let wire_hit: Option<codec::Handle> = raw_wire_hit.and_then(|h| {
                     if let Some(AcadEntityType::Viewport(vp)) =
                         self.tabs[i].scene.document.get_entity(h)
@@ -7939,6 +7759,186 @@ properties={:.1}ms picked={}",
         }
 
         Task::none()
+    }
+
+    /// What a double-click on an object opens: a table cell, a constraint
+    /// value, a text editor, HATCHEDIT, the attribute editor, or BEDIT /
+    /// REFEDIT for a block. `None` when nothing under the cursor has an
+    /// editor. Shared by model space, paper space and a viewport's model
+    /// space, which picks through the viewport's own view.
+    fn double_click_edit(
+        &mut self,
+        i: usize,
+        p: Point,
+        edit_cam: &Option<crate::scene::view::camera::Camera>,
+        bounds: iced::Rectangle,
+    ) -> Option<Task<Message>> {
+        let (view_rot, eye, all_wires) = self.pick_view(i, edit_cam, bounds);
+        let click_world = self.cursor_model_point(i, edit_cam, p, bounds);
+        let click_candidates = self.tabs[i].scene.interaction_pick_candidates_near(
+            all_wires,
+            click_world,
+            view_rot,
+            eye,
+            bounds,
+            crate::ui::overlay::pick_box_aperture_px(self.pick_box) * 2.0,
+        );
+        let candidate_handles = self.tabs[i]
+            .scene
+            .interaction_candidate_handles(&click_candidates);
+        // Resolve the double-clicked object the way a single click
+        // picks it — its wire, then a hatch by its fill (a hatch has
+        // no boundary wire), then a block's hatch (its INSERT), or
+        // for a block/solid with no wire under the cursor its shaded
+        // body, which maps to the parent INSERT.
+        let hit = scene::pick::hit_test::click_hit(
+            p,
+            &click_candidates,
+            view_rot,
+            eye,
+            bounds,
+            self.tabs[i].scene.document.header.lineweight_display,
+            crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+            &self.tabs[i].scene.draw_depth_map(),
+        )
+        .and_then(|s| Scene::handle_from_wire_name(s))
+        .or_else(|| {
+            let hatches = self.tabs[i]
+                .scene
+                .visible_hatches_for_click(candidate_handles.as_ref());
+            scene::pick::hit_test::click_hit_hatch(
+                p,
+                &hatches,
+                view_rot,
+                eye,
+                bounds,
+                candidate_handles.as_ref(),
+            )
+        })
+        .or_else(|| {
+            scene::pick::hit_test::click_hit_insert_hatch(
+                p,
+                self.tabs[i].scene.insert_hatches_for_click().as_ref(),
+                view_rot,
+                eye,
+                bounds,
+                candidate_handles.as_ref(),
+            )
+        })
+        .or_else(|| {
+            self.tabs[i].scene.solid_edge_click_hit(
+                p,
+                view_rot,
+                eye,
+                bounds,
+                candidate_handles.as_ref(),
+                crate::ui::overlay::pick_box_aperture_px(self.pick_box),
+            )
+        })
+        // Inside an empty table cell nothing is drawn to hit: the
+        // cell under the cursor takes the double-click.
+        .or_else(|| {
+            self.tabs[i]
+                .scene
+                .table_cell_pick(click_world, 0.0)
+                .map(|(table, _)| table)
+        });
+        let handle = hit?;
+        // Locked layer: double-click must not open any editor
+        // (text / attribute / in-place block edit).
+        if let Some(layer) = self.tabs[i].scene.locked_layer_name(handle) {
+            self.command_line.push_info(
+                crate::tf!("Object is on locked layer \"{layer}\" — unlock the layer to edit it.")
+                    .as_ref(),
+            );
+            return Some(Task::none());
+        }
+        // Table double-click: shared TABLEDIT editor setup. A
+        // grid miss returns NoCell and falls through to the
+        // other text/entity editors below; an editable cell or
+        // a locked cell (indicator armed, no editor) ends the
+        // double-click handling here.
+        if self.begin_table_cell_edit(i, handle, click_world)
+            != crate::modules::annotate::table_cmd::TableCellEditStart::NoCell
+        {
+            return Some(Task::none());
+        }
+        // A constraint dimension edits its parameter from the
+        // command line, standing in for the reference's in-place
+        // value editor.
+        if let Some(prompt) = self.dynamic_dimension_value_command(i, handle) {
+            use crate::command::CadCommand;
+            self.command_line.push_info(&prompt.prompt());
+            self.tabs[i].active_cmd = Some(Box::new(prompt));
+            return Some(Task::none());
+        }
+        // Any text-bearing entity opens its in-place editor
+        // (plain box or rich MText editor, per type). A
+        // Leader resolves to the entity it annotates.
+        let is_editable_text = self.tabs[i]
+            .scene
+            .document
+            .get_entity(handle)
+            .is_some_and(|e| {
+                crate::app::text_inline::read_text_field(e).is_some()
+                    || matches!(e, AcadEntityType::Leader(_))
+            });
+        if is_editable_text {
+            return Some(self.begin_text_edit(handle));
+        }
+        // A hatch starts HATCHEDIT on itself; selected, the
+        // command skips its pick. (The reference program's
+        // default double-click action for a hatch is Quick
+        // Properties, but Properties already follows a single
+        // click here, so the double-click edits.)
+        if matches!(
+            self.tabs[i].scene.document.get_entity(handle),
+            Some(AcadEntityType::Hatch(_))
+        ) {
+            self.tabs[i].scene.deselect_all();
+            self.tabs[i].scene.select_entity(handle, true);
+            self.tabs[i].selected_handle = Some(handle);
+            self.refresh_properties();
+            return Some(self.dispatch_command("HATCHEDIT"));
+        }
+        // Double-clicking a block with attributes opens the
+        // attribute editor (edit its values). For blocks without
+        // attributes, Options > Drawing chooses BEDIT (default)
+        // or in-place REFEDIT. (#136, #192, #261)
+        let insert_has_attrs = matches!(
+            self.tabs[i].scene.document.get_entity(handle),
+            Some(AcadEntityType::Insert(ins)) if !ins.attributes.is_empty()
+        );
+        if insert_has_attrs
+            && self.double_click_block_attedit
+            && self.tabs[i].active_block_edit.is_none()
+        {
+            return Some(Task::done(Message::AttrEditorOpen(handle)));
+        }
+        let is_insert = matches!(
+            self.tabs[i].scene.document.get_entity(handle),
+            Some(AcadEntityType::Insert(_))
+        );
+        if is_insert && self.tabs[i].refedit_session.is_none() {
+            if self.block_editor_preferences.locked && !self.double_click_block_refedit {
+                self.tabs[i].scene.deselect_all();
+                self.tabs[i].scene.select_entity(handle, true);
+                self.tabs[i].selected_handle = Some(handle);
+                self.refresh_properties();
+                return Some(self.dock_set_open(crate::ui::dock::PanelId::Properties, true));
+            }
+            let command = if self.double_click_block_refedit {
+                "REFEDIT_BEGIN"
+            } else {
+                "BEDIT_BEGIN"
+            };
+            return Some(Task::done(Message::Command(format!(
+                "{}:{}",
+                command,
+                handle.value()
+            ))));
+        }
+        None
     }
 
     /// Remove cursor-derived highlights and cancel a queued rollover pick before

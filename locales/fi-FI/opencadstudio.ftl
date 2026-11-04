@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD Määritä ensimmäinen kulmapiste tai [Objektit/Vähennysalue] <Objects>:
     .prompt-subtract = AREA SUBTRACT Määritä ensimmäinen kulmapiste tai [Objektit/Lisää alue] <Objects>:
     .prompt-next = AREA Määritä seuraava piste ({ $count } poimittu, Enter laskettava):
-    .prompt-objects = AREA Valitse objektit ({ $count } valittu, Enter laskettava):
+    .prompt-objects = AREA Valitse objektit:
     .objects-not-measurable = AREA: yhdelläkään valituista objekteista ei ole mitattavissa olevaa aluetta.
     .result = Alue = { $area }, ympärysmitta = { $perimeter }
     .result-area-only = Alue = { $area }
@@ -2422,7 +2422,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3357,7 +3357,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ objektit)
     .edge-extend-indented-title-case =  [Reuna: Laajenna]
     .align-scale-objects-based-on-alignment-points = ALIGN Skaalataanko objektit kohdistuspisteiden perusteella? [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN Valitse objektit (__ocs_arg_count__ valittuna, Enter kun valmis):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN Määritä ensimmäinen kohdepiste:
     .align-specify-1st-source-point = ALIGN Määritä ensimmäinen lähdepiste:
     .align-specify-2nd-destination-point = ALIGN Määritä toinen kohdepiste:
@@ -3441,7 +3441,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET Enter fileen säde <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET Valitse ensimmäinen objekti (Line/Arc/LwPolyline) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET Valitse toinen objekti (Line/Arc/LwPolyline) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN Valitse yhdistettävät objektit (__ocs_arg_count__ valittu, Enter käytettäväksi):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN Enter -vaihtoehto [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN Valitse kohde:
     .mirror-erase-source-objects-yes-no-no = MIRROR Poistetaanko lähdeobjektit? [Kyllä/Ei] <No>:
@@ -3466,7 +3465,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT Objekti ei ole polyline. Muutetaanko se yhdeksi?  [Kyllä/Ei] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT Valitse polyline (tai viiva/kaari muunnettavaksi):
     .pedit-specify-new-width = PEDIT Määritä uusi leveys:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Liity Valitse yhdistettävät objektit (__ocs_arg_count__ valittu), Enter yhdistettävät:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = Polku Array
     .polar-array = Napamatriisi
     .refclose-save-discard-save = REFCLOSE [Tallenna/hylkää] <Save>:
@@ -3821,7 +3820,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS Määritä tekstin kulma (asteita):
     .dimspace-enter-value-0-auto = DIMSPACE Enter-arvo (0 = automaattinen):
     .dimspace-select-base-dimension = DIMSPACE Valitse perusmitta:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE Valitse tilan mitta (__ocs_arg_count__ valittu, Enter kun valmis):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT Valitse mitta:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT Määritä mittatekstin uusi sijainti:
     .dim-break = Mittaviivan katkaisu
@@ -4243,7 +4242,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT Määritä kiertokulma <0>:
     .insert-specify-scale-factor-1 = INSERT Määritä skaalauskerroin <1>:
     .loft-select-first-cross-section = LOFT Valitse ensimmäinen poikkileikkaus:
-    .loft-select-next-cross-section-count-selected = LOFT Valitse seuraava poikkileikkaus (__ocs_arg_count__ valittu, Enter loppuun):
     .land-xml =
         Maa
         XML
@@ -4445,12 +4443,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = Valitse tuettu tasokäyrä- tai aluepoikkileikkaus.
     .add-a-curve-cross-section-between-point-ends = Lisää käyräpoikkileikkaus pistepäiden väliin.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = Normaalit
     .draft-angles = Päästökulmat

@@ -453,7 +453,7 @@ area =
     .prompt-add = AREA إضافة  حدد نقطة الزاوية الأولى أو [الكائنات/طرح مساحة] <الكائنات>:
     .prompt-subtract = AREA طرح  حدد نقطة الزاوية الأولى أو [الكائنات/إضافة مساحة] <الكائنات>:
     .prompt-next = AREA  حدد النقطة التالية (تم اختيار { $count }، Enter للحساب):
-    .prompt-objects = AREA  حدد الكائنات (تم تحديد { $count }، Enter للحساب):
+    .prompt-objects = AREA  حدد الكائنات:
     .objects-not-measurable = AREA: لا يحتوي أي من الكائنات المحددة على مساحة قابلة للقياس.
     .result = المساحة = { $area }،  المحيط = { $perimeter }
     .result-area-only = المساحة = { $area }
@@ -2435,7 +2435,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3370,7 +3370,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ كائنات)
     .edge-extend-indented-title-case =  [الحافة: تمديد]
     .align-scale-objects-based-on-alignment-points = ALIGN  هل تريد تغيير مقياس الكائنات وفق نقاط المحاذاة؟ [نعم/لا]:
-    .align-select-objects-count-selected-enter-when = ALIGN  حدد الكائنات (__ocs_arg_count__ محدد، Enter عند الانتهاء):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN  حدد نقطة الوجهة الأولى:
     .align-specify-1st-source-point = ALIGN  حدد نقطة المصدر الأولى:
     .align-specify-2nd-destination-point = ALIGN  حدد نقطة الوجهة الثانية:
@@ -3454,7 +3454,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET  أدخل نصف قطر التدوير <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET  حدد الكائن الأول (خط/قوس/خط متعدد خفيف) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET  حدد الكائن الثاني (خط/قوس/خط متعدد خفيف) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN  حدد الكائنات المراد ضمها (__ocs_arg_count__ محدد، Enter للتطبيق):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN  أدخل الخيار [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN  حدد الكائن:
     .mirror-erase-source-objects-yes-no-no = MIRROR  مسح الكائنات المصدر؟ [نعم/لا] <لا>:
@@ -3479,7 +3478,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT  الكائن ليس خطًا متعددًا. هل تريد تحويله؟ [نعم/لا] <نعم>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT  حدد خطًا متعددًا (أو خطًا/قوسًا لتحويله):
     .pedit-specify-new-width = PEDIT  حدد العرض الجديد:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT ضم  حدد الكائنات المراد ضمها (تم اختيار __ocs_arg_count__)، Enter للدمج:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = مصفوفة على مسار
     .polar-array = مصفوفة قطبية
     .refclose-save-discard-save = REFCLOSE  [حفظ/تجاهل] <حفظ>:
@@ -3834,7 +3833,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS  حدد زاوية النص (بالدرجات):
     .dimspace-enter-value-0-auto = DIMSPACE  أدخل القيمة (0 = تلقائي):
     .dimspace-select-base-dimension = DIMSPACE  حدد البُعد الأساسي:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE  حدد البُعد المراد ضبط تباعده (__ocs_arg_count__ محدد، Enter عند الانتهاء):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT  حدد البُعد:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT  حدد الموقع الجديد لنص البُعد:
     .dim-break = قطع البُعد
@@ -4256,7 +4255,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT  حدد زاوية الدوران <0>:
     .insert-specify-scale-factor-1 = INSERT  حدد معامل المقياس <1>:
     .loft-select-first-cross-section = LOFT  حدد المقطع العرضي الأول:
-    .loft-select-next-cross-section-count-selected = LOFT  حدد المقطع العرضي التالي (__ocs_arg_count__ محدد، Enter للإنهاء):
     .land-xml =
         بيانات الأراضي
         XML
@@ -4458,12 +4456,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = حدد مقطعًا مدعومًا من منحنى مستوٍ أو منطقة.
     .add-a-curve-cross-section-between-point-ends = أضف مقطعًا منحنيًا بين الطرفين النقطيين.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = المتجهات العمودية
     .draft-angles = زوايا الميل

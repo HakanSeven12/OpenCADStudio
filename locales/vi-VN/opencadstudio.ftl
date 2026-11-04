@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD  Chỉ định điểm góc đầu tiên hoặc [Đối tượng/Bớt diện tích] <Đối tượng>:
     .prompt-subtract = AREA SUBTRACT  Chỉ định điểm góc đầu tiên hoặc [Đối tượng/Thêm diện tích] <Đối tượng>:
     .prompt-next = AREA  Chỉ định điểm tiếp theo ({ $count } điểm đã chọn, Enter để tính):
-    .prompt-objects = AREA  Chọn đối tượng ({ $count } đã chọn, Enter để tính):
+    .prompt-objects = AREA  Chọn đối tượng:
     .objects-not-measurable = AREA: không có đối tượng nào được chọn có diện tích có thể đo được.
     .result = Diện tích = { $area },  Chu vi = { $perimeter }
     .result-area-only = Diện tích = { $area }
@@ -2426,7 +2426,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN Chọn một đối tượng để đo hoặc [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Nhập tùy chọn [Đường dẫn hướng/Đường dẫn/Chỉ mặt cắt ngang/Cài đặt/Liên tục/Độ phình] <Chỉ mặt cắt ngang>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Nhập tùy chọn [Đường dẫn hướng/Đường dẫn/Chỉ mặt cắt ngang/Cài đặt] <Chỉ mặt cắt ngang>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT Chọn mặt cắt theo thứ tự hoặc [Point/Join/Mode] (Enter để hoàn tất)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Tùy chọn liên kết
     .link-settings = Cài đặt liên kết
     .live-section-enabled = Đã bật mặt cắt trực tiếp
@@ -3365,7 +3365,7 @@ modify =
     .remove-vertex = Xóa đỉnh
     .weld-all = Hàn tất cả
     .align-scale-objects-based-on-alignment-points = ALIGN Chia tỷ lệ đối tượng dựa trên các điểm căn chỉnh? [Có/Không]:
-    .align-select-objects-count-selected-enter-when = ALIGN Chọn đối tượng (__ocs_arg_count__ đã chọn, Enter khi hoàn tất):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN Xác định điểm đích thứ 1:
     .align-specify-1st-source-point = ALIGN Chỉ định điểm nguồn thứ 1:
     .align-specify-2nd-destination-point = ALIGN Xác định điểm đích thứ 2:
@@ -3449,7 +3449,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET  Nhập bán kính bo tròn <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET Chọn đối tượng thứ nhất (Line/Arc/LwPolyline) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET Chọn đối tượng thứ hai (Line/Arc/LwPolyline) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN  Chọn đối tượng cần nối (__ocs_arg_count__ đã chọn, Enter để áp dụng):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN Nhập tùy chọn [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN Chọn đối tượng:
     .mirror-erase-source-objects-yes-no-no = MIRROR Xóa các đối tượng nguồn? [Có/Không] <Không>:
@@ -3474,7 +3473,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT  Đối tượng không phải polyline. Chuyển thành polyline?  [Có/Không] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT Chọn polyline (hoặc một đường/cung để chuyển đổi):
     .pedit-specify-new-width = PEDIT Chỉ định chiều rộng mới:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Join  Chọn đối tượng cần nối (__ocs_arg_count__ đã chọn), Enter để hợp nhất:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = Mảng đường dẫn
     .polar-array = Mảng cực
     .refclose-save-discard-save = REFCLOSE [Lưu/Hủy] <Lưu>:
@@ -3824,7 +3823,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS Chỉ định góc văn bản (độ):
     .dimspace-enter-value-0-auto = DIMSPACE  Nhập giá trị (0 = tự động):
     .dimspace-select-base-dimension = DIMSPACE Chọn kích thước cơ sở:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE  Chọn kích thước cần giãn cách (__ocs_arg_count__ đã chọn, Enter khi xong):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT Chọn kích thước:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT Chỉ định vị trí mới cho văn bản kích thước:
     .dim-break = Ngắt kích thước
@@ -4251,7 +4250,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT Chỉ định góc xoay <0>:
     .insert-specify-scale-factor-1 = INSERT Chỉ định hệ số tỷ lệ <1>:
     .loft-select-first-cross-section = LOFT Chọn mặt cắt ngang thứ nhất:
-    .loft-select-next-cross-section-count-selected = LOFT Chọn mặt cắt tiếp theo (__ocs_arg_count__ đã chọn, Enter để hoàn tất):
     .land-xml =
         Land
         XML
@@ -4462,12 +4460,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = Chọn một đường cong phẳng hoặc mặt cắt ngang được hỗ trợ.
     .add-a-curve-cross-section-between-point-ends = Thêm một mặt cắt đường cong giữa các điểm cuối.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  Chọn các mặt cắt theo thứ tự hoặc [Điểm/Nối/Chế độ/Hoàn tác] (Enter để kết thúc)
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  Chọn các cạnh liền nhau cho một mặt cắt hoặc [Undo] (Enter để kết thúc)
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  Chỉ định đầu là điểm:
     .loft-creation-mode-solid-surface = LOFT  Chế độ tạo [Solid/Surface]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  Nhập tùy chọn [Đường dẫn hướng/Đường dẫn/Chỉ mặt cắt ngang/Cài đặt/Liên tục/Độ phình/Chế độ/Hoàn tác] <Chỉ mặt cắt ngang>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  Nhập tùy chọn [Đường dẫn hướng/Đường dẫn/Chỉ mặt cắt ngang/Cài đặt/Chế độ/Hoàn tác] <Chỉ mặt cắt ngang>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  Chọn các đường dẫn hướng hoặc [Undo] (Enter để kết thúc)
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT Chọn đường dẫn hoặc [Hoàn tác]:
     .normals = Pháp tuyến
     .draft-angles = Góc thoát khuôn

@@ -3419,6 +3419,13 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 // of segment `k` is `n + k`; a heavy polyline has no mid grips).
                 let segment_grips: Option<rustc_hash::FxHashSet<usize>> =
                     match (entity, self.tabs[i].scene.picked_segments(handle)) {
+                        // A spline-fit polyline's segments run between generated
+                        // vertices, which carry no grips.
+                        (codec::EntityType::Polyline2D(polyline), Some(_))
+                            if polyline.flags.bits() & 4 != 0 =>
+                        {
+                            Some(Default::default())
+                        }
                         (codec::EntityType::LwPolyline(_) | codec::EntityType::Polyline2D(_), Some(segments)) => {
                             let n = match entity {
                                 codec::EntityType::LwPolyline(polyline) => polyline.vertices.len(),

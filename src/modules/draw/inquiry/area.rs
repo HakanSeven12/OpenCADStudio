@@ -246,11 +246,7 @@ impl CadCommand for AreaCommand {
 
     fn prompt(&self) -> String {
         if self.objects_gathering {
-            return crate::tr!(
-                "area",
-                "prompt-objects",
-                count = self.selected_entities.len()
-            );
+            return crate::tr!("area", "prompt-objects");
         }
         if !self.points.is_empty() {
             return crate::tr!("area", "prompt-next", count = self.points.len());

@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD Určete první rohový bod nebo [Objekty/oblast odečtení] <Objects>:
     .prompt-subtract = AREA SUBTRACT Určete první rohový bod nebo [Objekty/Přidat oblast] <Objects>:
     .prompt-next = AREA Zadejte další bod (vybráno { $count }, výpočet Enter):
-    .prompt-objects = AREA Vyberte objekty ({ $count } vybráno, Enter k výpočtu):
+    .prompt-objects = AREA Vyberte objekty:
     .objects-not-measurable = AREA: žádný z vybraných objektů nemá měřitelnou plochu.
     .result = Plocha = { $area }, obvod = { $perimeter }
     .result-area-only = Oblast = { $area }
@@ -2422,7 +2422,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3357,7 +3357,7 @@ modify =
     .count-objects =  (Objekty __ocs_arg_count__)
     .edge-extend-indented-title-case =  [Okraj: Prodloužit]
     .align-scale-objects-based-on-alignment-points = ALIGN Měřítko objektů na základě bodů zarovnání? [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN Vyberte objekty (vybráno __ocs_arg_count__, po dokončení Enter):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN Zadejte 1. cílový bod:
     .align-specify-1st-source-point = ALIGN Zadejte 1. zdrojový bod:
     .align-specify-2nd-destination-point = ALIGN Zadejte 2. cílový bod:
@@ -3441,7 +3441,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET Enter poloměr zaoblení <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET Vyberte první objekt (Line/Oblouk/LwPolyline) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET Vyberte druhý objekt (Line/Oblouk/LwPolyline) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN Vyberte objekty ke spojení (vybráno __ocs_arg_count__, použití Enter):
     .lengthen-enter-option-de-delta-to-total-p-pct = Možnost LENGTHEN Enter [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN Vyberte objekt:
     .mirror-erase-source-objects-yes-no-no = MIRROR Vymazat zdrojové objekty? [Ano/Ne] <No>:
@@ -3466,7 +3465,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT Objekt není křivka. Proměnit to v jedno?  [Ano/Ne] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT Vyberte křivku (nebo čáru/oblouk pro převod):
     .pedit-specify-new-width = PEDIT Zadejte novou šířku:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Spojit Vyberte objekty ke spojení (vybráno __ocs_arg_count__), Enter ke sloučení:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = Pole cesty
     .polar-array = Polární pole
     .refclose-save-discard-save = REFCLOSE [Uložit/Zahodit] <Save>:
@@ -3819,7 +3818,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS Zadejte úhel textu (stupně):
     .dimspace-enter-value-0-auto = Hodnota DIMSPACE Enter (0 = auto):
     .dimspace-select-base-dimension = DIMSPACE Vyberte základní rozměr:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE Vyberte rozměr k prostoru (vybráno __ocs_arg_count__, po dokončení Enter):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT Vyberte rozměr:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT Zadejte nové umístění pro text kóty:
     .dim-break = Tlumená přestávka
@@ -4241,7 +4240,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT Zadejte úhel natočení <0>:
     .insert-specify-scale-factor-1 = INSERT Zadejte měřítko <1>:
     .loft-select-first-cross-section = LOFT Vyberte první průřez:
-    .loft-select-next-cross-section-count-selected = LOFT Vyberte další průřez (vybráno __ocs_arg_count__, dokončení Enter):
     .land-xml =
         Pozemek
         XML
@@ -4443,12 +4441,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = Vyberte podporovaný průřez rovinnou křivkou nebo oblastí.
     .add-a-curve-cross-section-between-point-ends = Přidejte křivkový průřez mezi bodové konce.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = Normály
     .draft-angles = Úhly úkosu

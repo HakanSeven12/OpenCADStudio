@@ -104,13 +104,7 @@ impl CadCommand for CoincidentConstraintCommand {
                 "COINCIDENT  Select points to coincide with the first object (Enter = done):"
                     .to_string()
             }
-            Step::AutoConstrain { handles } if handles.is_empty() => {
-                "COINCIDENT  Select objects:".to_string()
-            }
-            Step::AutoConstrain { handles } => format!(
-                "COINCIDENT  Select objects ({} selected, Enter = apply):",
-                handles.len()
-            ),
+            Step::AutoConstrain { .. } => "COINCIDENT  Select objects:".to_string(),
         }
     }
 

@@ -13,13 +13,18 @@ use kernel::space::PlanarCurve;
 use super::Scene;
 use crate::command::EntityTransform;
 
-/// The polyline whose segments a pick indexes: an LWPOLYLINE, or a heavy 2D
-/// POLYLINE that is not curve- or spline-fit (its segments are its vertices).
-fn plain_polyline(entity: &EntityType) -> Option<PlanarCurve> {
+/// The polyline whose segments a pick indexes, with the entity vertex each
+/// of its vertices is: an LWPOLYLINE, or a heavy 2D POLYLINE along the curve
+/// it draws (a fit polyline's generated vertices, never its frame).
+fn plain_polyline(entity: &EntityType) -> Option<(PlanarCurve, Vec<usize>)> {
     match entity {
-        EntityType::LwPolyline(polyline) => crate::entities::curve::lwpolyline_curve(polyline),
-        EntityType::Polyline2D(polyline) if polyline.flags.bits() & (2 | 4) == 0 => {
-            crate::entities::curve::polyline2d_curve(polyline)
+        EntityType::LwPolyline(polyline) => crate::entities::curve::lwpolyline_curve(polyline)
+            .map(|curve| (curve, (0..polyline.vertices.len()).collect())),
+        EntityType::Polyline2D(polyline) => {
+            let drawn = (0..polyline.vertices.len())
+                .filter(|&i| polyline.vertices[i].flags.bits() & 16 == 0)
+                .collect();
+            crate::entities::curve::polyline2d_curve(polyline).map(|curve| (curve, drawn))
         }
         _ => None,
     }
@@ -63,7 +68,7 @@ impl Scene {
     /// and keep the polyline selected while any of its segments is. `false`
     /// when `handle` is not a polyline.
     pub fn toggle_sub_segment(&mut self, handle: Handle, point: DVec3) -> bool {
-        let Some(curve) = self.document.get_entity(handle).and_then(plain_polyline) else {
+        let Some((curve, _)) = self.document.get_entity(handle).and_then(plain_polyline) else {
             return false;
         };
         let nearest = (0..vertex_count(&curve))
@@ -114,7 +119,7 @@ impl Scene {
     /// the selection highlight.
     pub(crate) fn picked_segment_points(&self, handle: Handle) -> Option<Vec<[f64; 3]>> {
         let segments = self.picked_segments(handle)?;
-        let curve = self.document.get_entity(handle).and_then(plain_polyline)?;
+        let (curve, _) = self.document.get_entity(handle).and_then(plain_polyline)?;
         let mut points = Vec::new();
         for &index in segments {
             points.extend(segment_points(&curve, index));
@@ -133,7 +138,7 @@ impl Scene {
     ) -> Vec<Handle> {
         let mut whole = Vec::with_capacity(handles.len());
         for &handle in handles {
-            let (Some(segments), Some(curve)) = (
+            let (Some(segments), Some((curve, entity_index))) = (
                 self.picked_segments(handle),
                 self.document.get_entity(handle).and_then(plain_polyline),
             ) else {
@@ -161,7 +166,7 @@ impl Scene {
                 };
                 let location = marker.location;
                 if let Some(at) = curve.plane.project([location.x, location.y, location.z]) {
-                    moved_to.push((index, at));
+                    moved_to.push((entity_index[index], at));
                 }
             }
             let Some(mut moved) = self.document.get_entity(handle).cloned() else {

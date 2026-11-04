@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD  ກຳນົດຈຸດມຸມທຳອິດ ຫຼື [Objects/Subtract area] <Objects>:
     .prompt-subtract = AREA SUBTRACT  ກຳນົດຈຸດມຸມທຳອິດ ຫຼື [Objects/Add area] <Objects>:
     .prompt-next = AREA  ກຳນົດຈຸດຕໍ່ໄປ (ເລືອກແລ້ວ { $count } ຈຸດ, ກົດ Enter ເພື່ອຄິດໄລ່):
-    .prompt-objects = AREA  ເລືອກວັດຖຸ (ເລືອກແລ້ວ { $count } ອັນ, ກົດ Enter ເພື່ອຄິດໄລ່):
+    .prompt-objects = AREA  ເລືອກວັດຖຸ:
     .objects-not-measurable = AREA: ບໍ່ມີວັດຖຸໃດທີ່ເລືອກມີເນື້ອທີ່ທີ່ສາມາດວັດແທກໄດ້.
     .result = ເນື້ອທີ່ = { $area },  ລວງຮອບ = { $perimeter }
     .result-area-only = ເນື້ອທີ່ = { $area }
@@ -2423,7 +2423,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  ເລືອກວັດຖຸທີ່ຈະວັດແທກ ຫຼື [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  ປ້ອນຕົວເລືອກ [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  ປ້ອນຕົວເລືອກ [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  ເລືອກໜ້າຕັດຕາມລຳດັບ ຫຼື [Point/Join/Mode] (ກົດ Enter ເພື່ອສຳເລັດ)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = ຕົວເລືອກການເຊື່ອມໂຍງ
     .link-settings = ການຕັ້ງຄ່າການເຊື່ອມໂຍງ
     .live-section-enabled = ເປີດໃຊ້ງານໜ້າຕັດສົດແລ້ວ
@@ -3359,7 +3359,7 @@ modify =
     .remove-vertex = ລຶບຈຸດຍອດອອກ
     .weld-all = ເຊື່ອມທັງໝົດ
     .align-scale-objects-based-on-alignment-points = ALIGN  ປັບມາດຕາສ່ວນວັດຖຸຕາມຈຸດຈັດລຽງບໍ່? [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN  ເລືອກວັດຖຸ (ເລືອກແລ້ວ __ocs_arg_count__ ອັນ, ກົດ Enter ເມື່ອສຳເລັດ):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN  ກຳນົດຈຸດປາຍທາງທີ 1:
     .align-specify-1st-source-point = ALIGN  ກຳນົດຈຸດຕົ້ນທາງທີ 1:
     .align-specify-2nd-destination-point = ALIGN  ກຳນົດຈຸດປາຍທາງທີ 2:
@@ -3443,7 +3443,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET  ປ້ອນລັດສະໝີມຸມມົນ <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET  ເລືອກວັດຖຸທຳອິດ (Line/Arc/LwPolyline)  [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET  ເລືອກວັດຖຸທີສອງ (Line/Arc/LwPolyline)  [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN  ເລືອກວັດຖຸທີ່ຈະເຊື່ອມເຂົ້າກັນ (ເລືອກແລ້ວ __ocs_arg_count__ ອັນ, ກົດ Enter ເພື່ອນຳໃຊ້):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN  ປ້ອນຕົວເລືອກ [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN  ເລືອກວັດຖຸ:
     .mirror-erase-source-objects-yes-no-no = MIRROR  ລຶບວັດຖຸດັ້ງເດີມອອກບໍ່? [Yes/No] <No>:
@@ -3468,7 +3467,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT  ວັດຖຸບໍ່ແມ່ນໂພລີລາຍ. ຕ້ອງການປ່ຽນໃຫ້ເປັນໂພລີລາຍບໍ່?  [Yes/No] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT  ເລືອກໂພລີລາຍ (ຫຼື ເສັ້ນຊື່/ສ່ວນໂຄ້ງ ເພື່ອແປງ):
     .pedit-specify-new-width = PEDIT  ກຳນົດຄວາມກວ້າງໃໝ່:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Join  ເລືອກວັດຖຸທີ່ຈະເຊື່ອມເຂົ້າກັນ (ເລືອກແລ້ວ __ocs_arg_count__ ອັນ), ກົດ Enter ເພື່ອລວມ:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = ຈັດລຽງຕາມເສັ້ນທາງ (Path Array)
     .polar-array = ຈັດລຽງແບບວົງມົນ (Polar Array)
     .refclose-save-discard-save = REFCLOSE  [Save/Discard] <Save>:
@@ -3818,7 +3817,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS  ກຳນົດມຸມຂໍ້ຄວາມ (ອົງສາ):
     .dimspace-enter-value-0-auto = DIMSPACE  ປ້ອນຄ່າ (0 = ອັດຕະໂນມັດ):
     .dimspace-select-base-dimension = DIMSPACE  ເລືອກເສັ້ນບອກຂະໜາດຫຼັກ:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE  ເລືອກເສັ້ນບອກຂະໜາດທີ່ຈະຈັດໄລຍະຫ່າງ (ເລືອກແລ້ວ __ocs_arg_count__ ອັນ, ກົດ Enter ເມື່ອສຳເລັດ):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT  ເລືອກເສັ້ນບອກຂະໜາດ:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT  ກຳນົດຕຳແໜ່ງໃໝ່ສຳລັບຂໍ້ຄວາມບອກຂະໜາດ:
     .dim-break = ຕັດເສັ້ນບອກຂະໜາດ (Dim Break)
@@ -4246,7 +4245,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT  ກໍານົດມຸມໝູນ <0>:
     .insert-specify-scale-factor-1 = INSERT  ກໍານົດຕົວຄູນມາດຕາສ່ວນ <1>:
     .loft-select-first-cross-section = LOFT  ເລືອກໜ້າຕັດທໍາອິດ:
-    .loft-select-next-cross-section-count-selected = LOFT  ເລືອກໜ້າຕັດຖັດໄປ (ເລືອກແລ້ວ __ocs_arg_count__, ກົດ Enter ເພື່ອສໍາເລັດ):
     .land-xml =
         Land
         XML
@@ -4456,12 +4454,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = ເລືອກໜ້າຕັດເສັ້ນໂຄ້ງລະນາບ ຫຼື ພື້ນທີ່ (Region) ທີ່ຮອງຮັບ.
     .add-a-curve-cross-section-between-point-ends = ເພີ່ມໜ້າຕັດເສັ້ນໂຄ້ງລະຫວ່າງສົ້ນປາຍແບບຈຸດ.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  ເລືອກໜ້າຕັດຕາມລໍາດັບ ຫຼື [ຈຸດ/ເຊື່ອມຕໍ່/ໂໝດ/ຍ້ອນກັບ] (ກົດ Enter ເພື່ອສໍາເລັດ)
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  ເລືອກຂອບທີ່ເຊື່ອມຕໍ່ກັນສໍາລັບໜຶ່ງໜ້າຕັດ ຫຼື [ຍ້ອນກັບ] (ກົດ Enter ເພື່ອສໍາເລັດ)
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  ກໍານົດສົ້ນປາຍແບບຈຸດ:
     .loft-creation-mode-solid-surface = LOFT  ໂໝດການສ້າງ [ວັດຖຸແຂງ/ພື້ນຜິວ]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  ປ້ອນຕົວເລືອກ [ເສັ້ນນໍາ/ເສັ້ນທາງ/ສະເພາະໜ້າຕັດ/ການຕັ້ງຄ່າ/ຄວາມຕໍ່ເນື່ອງ/ຂະໜາດຄວາມໂຄ້ງປູດ/ໂໝດ/ຍ້ອນກັບ] <ສະເພາະໜ້າຕັດ>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  ປ້ອນຕົວເລືອກ [ເສັ້ນນໍາ/ເສັ້ນທາງ/ສະເພາະໜ້າຕັດ/ການຕັ້ງຄ່າ/ໂໝດ/ຍ້ອນກັບ] <ສະເພາະໜ້າຕັດ>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  ເລືອກເສັ້ນໂຄ້ງນໍາທາງ ຫຼື [ຍ້ອນກັບ] (ກົດ Enter ເພື່ອສໍາເລັດ)
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  ເລືອກເສັ້ນທາງ ຫຼື [ຍ້ອນກັບ]:
     .normals = ເວັກເຕີຕັ້ງສາກ (Normals)
     .draft-angles = ມຸມລາດອຽງ

@@ -373,7 +373,7 @@ impl CadCommand for PeditCommand {
             Mode::PickTarget => {
                 t!("PEDIT  Select polyline (or a line/arc to convert) or [Multiple]:").into_owned()
             }
-            Mode::MultipleGather => format!("PEDIT  Select objects ({} selected, Enter when done):", self.multiple.len()),
+            Mode::MultipleGather => "PEDIT  Select objects:".to_string(),
             Mode::MultipleJoin => format!("PEDIT  Join type: {:?}. Enter fuzz distance or [Jointype] <{}>:", self.join_type, self.join_fuzz),
             Mode::JoinType => format!("PEDIT  Enter join type [Extend/Add/Both] <{:?}>:", self.join_type),
             Mode::MultipleConvert => t!("PEDIT  Convert lines and arcs to polylines [Yes/No] <Yes>:").into_owned(),
@@ -383,11 +383,7 @@ impl CadCommand for PeditCommand {
             .into_owned(),
             Mode::AwaitWidth => t!("PEDIT  Specify new width:").into_owned(),
             Mode::AwaitLinetype => t!("PEDIT  Enter polyline linetype generation option [ON/OFF]:").into_owned(),
-            Mode::JoinGather(list) => t!(
-                "PEDIT Join  Select objects to join (%{count} picked), Enter to merge:",
-                count = list.len().saturating_sub(1)
-            )
-            .into_owned(),
+            Mode::JoinGather(_) => t!("PEDIT  Select objects:").into_owned(),
             Mode::MeshVertex(index) => t!(
                 "PEDIT  Edit mesh vertex %{vertex}  Enter option:",
                 vertex = index + 1

@@ -73,11 +73,7 @@ impl CadCommand for DimSpaceCommand {
         }
         match &self.step {
             Step::PickBase => t!("DIMSPACE  Select base dimension:").into_owned(),
-            Step::PickOthers { others, .. } => t!(
-                "DIMSPACE  Select dimension to space (%{count} selected, Enter when done):",
-                count = others.len()
-            )
-            .into_owned(),
+            Step::PickOthers { .. } => t!("DIMSPACE  Select dimensions to space:").into_owned(),
             Step::EnterSpacing { .. } => {
                 t!("DIMSPACE  Specify distance between dimensions or [Auto] <Auto>:").into_owned()
             }

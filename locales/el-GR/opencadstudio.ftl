@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD  Ορίστε πρώτο σημείο γωνίας ή [Αντικείμενα/Αφαίρεση εμβαδού] <Αντικείμενα>:
     .prompt-subtract = AREA SUBTRACT  Ορίστε πρώτο σημείο γωνίας ή [Αντικείμενα/Πρόσθεση εμβαδού] <Αντικείμενα>:
     .prompt-next = AREA  Ορίστε επόμενο σημείο ({ $count } επιλεγμένα, Enter για υπολογισμό):
-    .prompt-objects = AREA  Επιλέξτε αντικείμενα ({ $count } επιλεγμένα, Enter για υπολογισμό):
+    .prompt-objects = AREA  Επιλέξτε αντικείμενα:
     .objects-not-measurable = AREA: κανένα από τα επιλεγμένα αντικείμενα δεν έχει μετρήσιμο εμβαδόν.
     .result = Εμβαδόν = { $area },  Περίμετρος = { $perimeter }
     .result-area-only = Εμβαδόν = { $area }
@@ -2422,7 +2422,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3358,7 +3358,7 @@ modify =
     .remove-vertex = Αφαίρεση κορυφής
     .weld-all = Συγκόλληση όλων
     .align-scale-objects-based-on-alignment-points = ALIGN  Κλιμάκωση αντικειμένων βάσει των σημείων στοίχισης; [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN  Επιλέξτε αντικείμενα (__ocs_arg_count__ επιλεγμένα, Enter όταν τελειώσετε):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN  Ορίστε 1ο σημείο προορισμού:
     .align-specify-1st-source-point = ALIGN  Ορίστε 1ο σημείο προέλευσης:
     .align-specify-2nd-destination-point = ALIGN  Ορίστε 2ο σημείο προορισμού:
@@ -3442,7 +3442,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET  Δώστε ακτίνα στρογγυλέματος <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET  Επιλέξτε πρώτο αντικείμενο (Line/Arc/LwPolyline)  [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET  Επιλέξτε δεύτερο αντικείμενο (Line/Arc/LwPolyline)  [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN  Επιλέξτε αντικείμενα προς ένωση (__ocs_arg_count__ επιλεγμένα, Enter για εφαρμογή):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN  Δώστε επιλογή [DE <δέλτα> / TO <σύνολο> / P <ποσοστό>]:
     .lengthen-select-object = LENGTHEN  Επιλέξτε αντικείμενο:
     .mirror-erase-source-objects-yes-no-no = MIRROR  Διαγραφή αρχικών αντικειμένων; [Ναι/Όχι] <Όχι>:
@@ -3467,7 +3466,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT  Το αντικείμενο δεν είναι πολυγραμμή. Να μετατραπεί σε πολυγραμμή;  [Ναι/Όχι] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT  Επιλέξτε πολυγραμμή (ή γραμμή/τόξο προς μετατροπή):
     .pedit-specify-new-width = PEDIT  Ορίστε νέο πλάτος:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Join  Επιλέξτε αντικείμενα προς ένωση (__ocs_arg_count__ επιλεγμένα), Enter για συγχώνευση:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = Διάταξη κατά διαδρομή
     .polar-array = Πολική διάταξη
     .refclose-save-discard-save = REFCLOSE  [Αποθήκευση/Απόρριψη] <Αποθήκευση>:
@@ -3817,7 +3816,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Ορίστε γωνία κειμένου (μοίρες):
     .dimspace-enter-value-0-auto = DIMSPACE  Δώστε τιμή (0 = αυτόματο):
     .dimspace-select-base-dimension = DIMSPACE  Επιλέξτε βασική διάσταση:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE  Επιλέξτε διάσταση προς διάταξη (__ocs_arg_count__ επιλεγμένες, Enter όταν τελειώσετε):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT  Επιλέξτε διάσταση:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT  Ορίστε νέα θέση για το κείμενο της διάστασης:
     .dim-break = Διακοπή διάστασης
@@ -4251,7 +4250,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT  Ορίστε γωνία περιστροφής <0>:
     .insert-specify-scale-factor-1 = INSERT  Ορίστε συντελεστή κλίμακας <1>:
     .loft-select-first-cross-section = LOFT  Επιλέξτε πρώτη διατομή:
-    .loft-select-next-cross-section-count-selected = LOFT  Επιλέξτε επόμενη διατομή (__ocs_arg_count__ επιλεγμένες, Enter για τερματισμό):
     .land-xml =
         Land
         XML
@@ -4455,12 +4453,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = Επιλέξτε υποστηριζόμενη διατομή επίπεδης καμπύλης ή περιοχής.
     .add-a-curve-cross-section-between-point-ends = Προσθέστε καμπύλη διατομή ανάμεσα στα σημειακά άκρα.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = Κάθετα διανύσματα
     .draft-angles = Γωνίες κλίσης

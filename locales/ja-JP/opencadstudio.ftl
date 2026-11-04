@@ -453,7 +453,7 @@ area =
     .prompt-add = AREA 加算  最初のコーナー点を指定 または [オブジェクト/面積を減算] <オブジェクト>:
     .prompt-subtract = AREA 減算  最初のコーナー点を指定 または [オブジェクト/面積を加算] <オブジェクト>:
     .prompt-next = AREA  次の点を指定 ({ $count } 点選択済み、Enter で計算):
-    .prompt-objects = AREA  オブジェクトを選択 ({ $count } 個選択済み、Enter で計算):
+    .prompt-objects = AREA  オブジェクトを選択:
     .objects-not-measurable = AREA: 選択したオブジェクトに計測可能な面積がありません。
     .result = 面積 = { $area }、周長 = { $perimeter }
     .result-area-only = 面積 = { $area }
@@ -2413,7 +2413,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3348,7 +3348,7 @@ modify =
     .count-objects =  （__ocs_arg_count__ 個のオブジェクト）
     .edge-extend-indented-title-case =  [エッジ: 延長]
     .align-scale-objects-based-on-alignment-points = ALIGN  位置合わせ点に基づいてオブジェクトを尺度変更しますか？ [はい/いいえ]:
-    .align-select-objects-count-selected-enter-when = ALIGN  オブジェクトを選択（__ocs_arg_count__ 個選択、完了時 Enter）:
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN  1 番目の移動先点を指定:
     .align-specify-1st-source-point = ALIGN  1 番目の基準点を指定:
     .align-specify-2nd-destination-point = ALIGN  2 番目の移動先点を指定:
@@ -3432,7 +3432,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET  フィレット半径を入力 <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET  1 番目のオブジェクトを選択（線/円弧/軽量ポリライン）[R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET  2 番目のオブジェクトを選択（線/円弧/軽量ポリライン）[R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN  結合するオブジェクトを選択（__ocs_arg_count__ 個、Enter で適用）:
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN  オプションを入力 [DE <差分> / TO <全長> / P <割合>]:
     .lengthen-select-object = LENGTHEN  オブジェクトを選択:
     .mirror-erase-source-objects-yes-no-no = MIRROR  元のオブジェクトを削除しますか？ [はい/いいえ] <いいえ>:
@@ -3457,7 +3456,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT  オブジェクトはポリラインではありません。変換しますか？ [はい/いいえ] <はい>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT  ポリライン（または変換する線/円弧）を選択:
     .pedit-specify-new-width = PEDIT  新しい幅を指定:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT 結合  結合するオブジェクトを選択（__ocs_arg_count__ 個）、Enter で結合:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = パス配列
     .polar-array = 円形配列
     .refclose-save-discard-save = REFCLOSE  [保存/破棄] <保存>:
@@ -3812,7 +3811,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS  文字角度を指定（度）:
     .dimspace-enter-value-0-auto = DIMSPACE  値を入力（0 = 自動）:
     .dimspace-select-base-dimension = DIMSPACE  基準寸法を選択:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE  間隔調整する寸法を選択（__ocs_arg_count__ 個選択、完了時 Enter）:
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT  寸法を選択:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT  寸法値の新しい位置を指定:
     .dim-break = 寸法分割
@@ -4232,7 +4231,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT  回転角度を指定 <0>:
     .insert-specify-scale-factor-1 = INSERT  尺度係数を指定 <1>:
     .loft-select-first-cross-section = LOFT  1 番目の断面を選択:
-    .loft-select-next-cross-section-count-selected = LOFT  次の断面を選択（__ocs_arg_count__ 個、Enter で完了）:
     .land-xml =
         土地
         XML
@@ -4434,12 +4432,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = 対応する平面曲線またはリージョンの断面を選択してください。
     .add-a-curve-cross-section-between-point-ends = 点の端部の間に曲線断面を追加してください。
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = 法線
     .draft-angles = 抜き勾配角度

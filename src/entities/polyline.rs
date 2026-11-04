@@ -590,21 +590,47 @@ impl RenderConvertible for Polyline2D {
     }
 }
 
+/// A heavy 2D polyline's vertices as (position, bulge) pairs.
+fn plain_points(pl: &Polyline2D) -> Vec<([f64; 2], f64)> {
+    pl.vertices.iter().map(|v| ([v.location.x, v.location.y], v.bulge)).collect()
+}
+
 impl Grippable for Polyline2D {
     fn grips(&self) -> Vec<GripDef> {
         // A spline-fit polyline is gripped at its frame vertices, not at the
         // samples the frame generates.
         let elev = self.elevation;
         let spline_fit = self.flags.bits() & 4 != 0;
-        self.vertices
+        let mut grips: Vec<GripDef> = self
+            .vertices
             .iter()
             .enumerate()
             .filter(|(_, v)| !spline_fit || v.flags.bits() & 8 == 0)
             .map(|(i, v)| square_grip(i, glam::DVec3::new(v.location.x, v.location.y, elev)))
-            .collect()
+            .collect();
+        // A polyline that is not curve- or spline-fit has a mid grip on each
+        // segment, as a lightweight one (ids after the vertices).
+        if self.flags.bits() & (2 | 4) == 0 {
+            grips.extend(crate::entities::lwpolyline::mid_grips(
+                &plain_points(self),
+                self.flags.is_closed(),
+                elev,
+                self.vertices.len(),
+            ));
+        }
+        grips
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
+        let n = self.vertices.len();
+        if grip_id >= n && self.flags.bits() & (2 | 4) == 0 {
+            let mut points = plain_points(self);
+            crate::entities::lwpolyline::apply_mid_grip(&mut points, self.flags.is_closed(), grip_id - n, apply);
+            for (vertex, ([x, y], bulge)) in self.vertices.iter_mut().zip(points) {
+                (vertex.location.x, vertex.location.y, vertex.bulge) = (x, y, bulge);
+            }
+            return;
+        }
         if let Some(v) = self.vertices.get_mut(grip_id) {
             match apply {
                 GripApply::Translate(d) => {

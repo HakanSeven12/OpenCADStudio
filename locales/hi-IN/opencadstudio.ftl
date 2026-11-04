@@ -453,7 +453,7 @@ area =
     .prompt-add = AREA जोड़ें  पहला कोना बिंदु निर्दिष्ट करें या [वस्तुएँ/क्षेत्रफल घटाएँ] <वस्तुएँ>:
     .prompt-subtract = AREA घटाएँ  पहला कोना बिंदु निर्दिष्ट करें या [वस्तुएँ/क्षेत्रफल जोड़ें] <वस्तुएँ>:
     .prompt-next = AREA  अगला बिंदु निर्दिष्ट करें ({ $count } चुने गए, गणना के लिए Enter):
-    .prompt-objects = AREA  वस्तुएँ चुनें ({ $count } चयनित, गणना के लिए Enter):
+    .prompt-objects = AREA  वस्तुएँ चुनें:
     .objects-not-measurable = AREA: चुनी गई किसी भी वस्तु का मापने योग्य क्षेत्रफल नहीं है।
     .result = क्षेत्रफल = { $area },  परिमाप = { $perimeter }
     .result-area-only = क्षेत्रफल = { $area }
@@ -2411,7 +2411,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3346,7 +3346,7 @@ modify =
     .count-objects = (__ocs_arg_count__ ऑब्जेक्ट)
     .edge-extend-indented-title-case = [किनारा: बढ़ाएँ]
     .align-scale-objects-based-on-alignment-points = ALIGN संरेखण बिंदुओं के आधार पर ऑब्जेक्ट स्केल करें? [हाँ/नहीं]:
-    .align-select-objects-count-selected-enter-when = ALIGN ऑब्जेक्ट चुनें (__ocs_arg_count__ चयनित, पूरा होने पर Enter दबाएँ):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN 1st गंतव्य बिंदु निर्दिष्ट करें:
     .align-specify-1st-source-point = ALIGN 1st स्रोत बिंदु निर्दिष्ट करें:
     .align-specify-2nd-destination-point = ALIGN 2nd गंतव्य बिंदु निर्दिष्ट करें:
@@ -3430,7 +3430,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET फ़िलेट त्रिज्या दर्ज करें <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET पहला ऑब्जेक्ट चुनें (रेखा/आर्क/पॉलीलाइन) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET दूसरा ऑब्जेक्ट चुनें (रेखा/आर्क/पॉलीलाइन) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN जोड़ने के लिए ऑब्जेक्ट चुनें (__ocs_arg_count__ चुने गए, लागू करने के लिए Enter दबाएँ):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN विकल्प दर्ज करें [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN ऑब्जेक्ट चुनें:
     .mirror-erase-source-objects-yes-no-no = MIRROR स्रोत ऑब्जेक्ट मिटाएँ? [हाँ/नहीं] <नहीं>:
@@ -3455,7 +3454,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT ऑब्जेक्ट एक पॉलीलाइन नहीं है। इसे एक में बदल दें? [हाँ/नहीं] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT पॉलीलाइन (या एक लाइन / आरसीए) का चयन करें:
     .pedit-specify-new-width = PEDIT नई चौड़ाई निर्दिष्ट करें:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT जोड़ने के लिए ऑब्जेक्ट चुनें (__ocs_arg_count__ चयनित); पूरा होने पर Enter दबाएँ:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = पथ ऐरे
     .polar-array = ध्रुवीय सरणी
     .refclose-save-discard-save = REFCLOSE  [सहेजें/त्यागें] <सहेजें>:
@@ -3810,7 +3809,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS पाठ कोण निर्दिष्ट करें (डिग्री):
     .dimspace-enter-value-0-auto = DIMSPACE मान दर्ज करें (0 = ऑटो):
     .dimspace-select-base-dimension = DIMSPACE आधार आयाम का चयन करें:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE अंतर समायोजित करने के लिए डाइमेंशन चुनें (__ocs_arg_count__ चयनित, पूरा होने पर Enter दबाएँ):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT आयाम का चयन करें:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT आयाम पाठ के लिए नए स्थान निर्दिष्ट करें:
     .dim-break = दिम ब्रेक
@@ -4232,7 +4231,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT घूर्णन कोण निर्दिष्ट करें <0>:
     .insert-specify-scale-factor-1 = INSERT पैमाने कारक <1> निर्दिष्ट करें:
     .loft-select-first-cross-section = LOFT प्रथम क्रॉस-सेक्शन चुनें:
-    .loft-select-next-cross-section-count-selected = LOFT अगला क्रॉस-सेक्शन चुनें (__ocs_arg_count__ चुने गए, समाप्त करने के लिए Enter दबाएँ):
     .land-xml =
         भूमि
         XML
@@ -4434,12 +4432,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = समर्थित समतलीय वक्र या क्षेत्र का अनुप्रस्थ काट चुनें।
     .add-a-curve-cross-section-between-point-ends = बिंदु सिरों के बीच एक वक्र अनुप्रस्थ काट जोड़ें।
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = अभिलंब
     .draft-angles = ड्राफ्ट कोण

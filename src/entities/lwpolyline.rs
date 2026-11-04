@@ -618,12 +618,6 @@ pub(crate) fn break_at_vertex(p: &codec::LwPolyline, idx: usize) -> Option<Vec<c
 fn grips(pline: &LwPolyline) -> Vec<GripDef> {
     let elev = pline.elevation;
     let n = pline.vertices.len();
-    let seg_count = if pline.is_closed {
-        n
-    } else {
-        n.saturating_sub(1)
-    };
-
     let mut out: Vec<GripDef> = pline
         .vertices
         .iter()
@@ -631,35 +625,7 @@ fn grips(pline: &LwPolyline) -> Vec<GripDef> {
         .map(|(i, v)| square_grip(i, glam::DVec3::new(v.location.x, v.location.y, elev)))
         .collect();
 
-    // One mid-segment stretch grip per segment (straight or arc). The
-    // marker is a small box rotated along the chord direction so the
-    // shape itself signals which way the segment runs.
-    for i in 0..seg_count {
-        let v0 = &pline.vertices[i];
-        let v1 = &pline.vertices[(i + 1) % n];
-        let (mx, my) = if v0.bulge.abs() < 1e-9 {
-            (
-                (v0.location.x + v1.location.x) * 0.5,
-                (v0.location.y + v1.location.y) * 0.5,
-            )
-        } else {
-            let m = arc_midpoint(
-                [v0.location.x, v0.location.y],
-                [v1.location.x, v1.location.y],
-                v0.bulge,
-            );
-            (m[0], m[1])
-        };
-        let dx = (v1.location.x - v0.location.x) as f32;
-        let dy = (v1.location.y - v0.location.y) as f32;
-        let mut g = rectangle_grip(n + i, glam::DVec3::new(mx, my, elev), [dx, dy]);
-        // An arc's mid grip re-fits the arc THROUGH the cursor, so it must
-        // drag in Absolute mode; only a straight segment's grip translates.
-        // Feeding per-frame Translate deltas through the recomputed arc
-        // midpoint deadlocks the moment the cursor crosses the chord (#339).
-        g.is_midpoint = v0.bulge.abs() < 1e-9;
-        out.push(g);
-    }
+    out.extend(mid_grips(&segment_points(pline), pline.is_closed, elev, n));
     out
 }
 
@@ -893,58 +859,81 @@ fn apply_grip(pline: &mut LwPolyline, grip_id: usize, apply: GripApply) {
             }
         }
     } else {
-        // Mid-segment stretch grip for segment (grip_id - n).
-        // Straight segments translate both endpoints by the drag delta
-        // (the shared vertices then carry along whichever adjacent
-        // segments share them). Arc segments adjust their bulge from
-        // the new midpoint position.
-        let seg = grip_id - n;
-        let count = if pline.is_closed {
-            n
-        } else {
-            n.saturating_sub(1)
-        };
-        if seg >= count {
-            return;
+        let mut points = segment_points(pline);
+        apply_mid_grip(&mut points, pline.is_closed, grip_id - n, apply);
+        for (vertex, ([x, y], bulge)) in pline.vertices.iter_mut().zip(points) {
+            (vertex.location.x, vertex.location.y, vertex.bulge) = (x, y, bulge);
         }
-        let i0 = seg;
-        let i1 = (seg + 1) % n;
-        let is_arc = pline.vertices[i0].bulge.abs() >= 1e-9;
-        if !is_arc {
-            let d = match apply {
-                GripApply::Translate(d) => [d.x as f64, d.y as f64],
-                GripApply::Absolute(p) => {
-                    let old_mid = (
-                        (pline.vertices[i0].location.x + pline.vertices[i1].location.x) * 0.5,
-                        (pline.vertices[i0].location.y + pline.vertices[i1].location.y) * 0.5,
-                    );
-                    [p.x as f64 - old_mid.0, p.y as f64 - old_mid.1]
-                }
+    }
+}
+
+fn segment_points(pline: &LwPolyline) -> Vec<([f64; 2], f64)> {
+    pline
+        .vertices
+        .iter()
+        .map(|v| ([v.location.x, v.location.y], v.bulge))
+        .collect()
+}
+
+/// One mid-segment stretch grip per segment (straight or arc) of a polyline
+/// given as (vertex, bulge) pairs, ids from `first_id`. The marker is a small
+/// box rotated along the chord direction so the shape itself signals which
+/// way the segment runs.
+pub(crate) fn mid_grips(points: &[([f64; 2], f64)], closed: bool, elev: f64, first_id: usize) -> Vec<GripDef> {
+    let n = points.len();
+    let seg_count = if closed { n } else { n.saturating_sub(1) };
+    (0..seg_count)
+        .map(|i| {
+            let (p0, bulge) = points[i];
+            let (p1, _) = points[(i + 1) % n];
+            let [mx, my] = if bulge.abs() < 1e-9 {
+                [(p0[0] + p1[0]) * 0.5, (p0[1] + p1[1]) * 0.5]
+            } else {
+                arc_midpoint(p0, p1, bulge)
             };
-            pline.vertices[i0].location.x += d[0];
-            pline.vertices[i0].location.y += d[1];
-            pline.vertices[i1].location.x += d[0];
-            pline.vertices[i1].location.y += d[1];
-            return;
-        }
-        let new_mid: [f64; 2] = match apply {
-            GripApply::Absolute(p) => [p.x as f64, p.y as f64],
-            GripApply::Translate(d) => {
-                let v0 = &pline.vertices[i0];
-                let v1 = &pline.vertices[i1];
-                let old = arc_midpoint(
-                    [v0.location.x, v0.location.y],
-                    [v1.location.x, v1.location.y],
-                    v0.bulge,
-                );
-                [old[0] + d.x as f64, old[1] + d.y as f64]
-            }
+            let dir = [(p1[0] - p0[0]) as f32, (p1[1] - p0[1]) as f32];
+            let mut g = rectangle_grip(first_id + i, glam::DVec3::new(mx, my, elev), dir);
+            // An arc's mid grip re-fits the arc THROUGH the cursor, so it must
+            // drag in Absolute mode; only a straight segment's grip translates.
+            // Feeding per-frame Translate deltas through the recomputed arc
+            // midpoint deadlocks the moment the cursor crosses the chord (#339).
+            g.is_midpoint = bulge.abs() < 1e-9;
+            g
+        })
+        .collect()
+}
+
+/// Drag of the mid grip of segment `seg`: a straight segment translates both
+/// its endpoints (the shared vertices carry the neighbouring segments along);
+/// an arc segment takes the bulge that puts its midpoint at the new spot.
+pub(crate) fn apply_mid_grip(points: &mut [([f64; 2], f64)], closed: bool, seg: usize, apply: GripApply) {
+    let n = points.len();
+    let count = if closed { n } else { n.saturating_sub(1) };
+    if seg >= count {
+        return;
+    }
+    let (i0, i1) = (seg, (seg + 1) % n);
+    let (p0, p1, bulge) = (points[i0].0, points[i1].0, points[i0].1);
+    if bulge.abs() < 1e-9 {
+        let d = match apply {
+            GripApply::Translate(d) => [d.x, d.y],
+            GripApply::Absolute(p) => [p.x - (p0[0] + p1[0]) * 0.5, p.y - (p0[1] + p1[1]) * 0.5],
         };
-        let p0 = [pline.vertices[i0].location.x, pline.vertices[i0].location.y];
-        let p1 = [pline.vertices[i1].location.x, pline.vertices[i1].location.y];
-        if let Some(new_bulge) = bulge_from_midpoint(p0, p1, new_mid) {
-            pline.vertices[i0].bulge = new_bulge.clamp(-1e6, 1e6);
+        for i in [i0, i1] {
+            points[i].0[0] += d[0];
+            points[i].0[1] += d[1];
         }
+        return;
+    }
+    let new_mid = match apply {
+        GripApply::Absolute(p) => [p.x, p.y],
+        GripApply::Translate(d) => {
+            let old = arc_midpoint(p0, p1, bulge);
+            [old[0] + d.x, old[1] + d.y]
+        }
+    };
+    if let Some(new_bulge) = bulge_from_midpoint(p0, p1, new_mid) {
+        points[i0].1 = new_bulge.clamp(-1e6, 1e6);
     }
 }
 

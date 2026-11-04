@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD  Specify first corner point or [Objects/Subtract area] <Objects>:
     .prompt-subtract = AREA SUBTRACT  Specify first corner point or [Objects/Add area] <Objects>:
     .prompt-next = AREA  Specify next point ({ $count } picked, Enter to calculate):
-    .prompt-objects = AREA  Select objects ({ $count } selected, Enter to calculate):
+    .prompt-objects = AREA  Select objects:
     .objects-not-measurable = AREA: none of the selected objects has a measurable area.
     .result = Area = { $area },  Perimeter = { $perimeter }
     .result-area-only = Area = { $area }
@@ -2423,7 +2423,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3359,7 +3359,7 @@ modify =
     .remove-vertex = Remove Vertex
     .weld-all = Weld All
     .align-scale-objects-based-on-alignment-points = ALIGN  Scale objects based on alignment points? [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN  Select objects (__ocs_arg_count__ selected, Enter when done):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN  Specify 1st destination point:
     .align-specify-1st-source-point = ALIGN  Specify 1st source point:
     .align-specify-2nd-destination-point = ALIGN  Specify 2nd destination point:
@@ -3443,7 +3443,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET  Enter fillet radius <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET  Select first object (Line/Arc/LwPolyline)  [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET  Select second object (Line/Arc/LwPolyline)  [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN  Select objects to join (__ocs_arg_count__ selected, Enter to apply):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN  Enter option [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN  Select object:
     .mirror-erase-source-objects-yes-no-no = MIRROR  Erase source objects? [Yes/No] <No>:
@@ -3468,7 +3467,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT  Object is not a polyline. Turn it into one?  [Yes/No] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT  Select polyline (or a line/arc to convert):
     .pedit-specify-new-width = PEDIT  Specify new width:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Join  Select objects to join (__ocs_arg_count__ picked), Enter to merge:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = Path Array
     .polar-array = Polar Array
     .refclose-save-discard-save = REFCLOSE  [Save/Discard] <Save>:
@@ -3896,7 +3895,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS  Specify text angle (degrees):
     .dimspace-enter-value-0-auto = DIMSPACE  Enter value (0 = auto):
     .dimspace-select-base-dimension = DIMSPACE  Select base dimension:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE  Select dimension to space (__ocs_arg_count__ selected, Enter when done):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT  Select dimension:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT  Specify new location for dimension text:
     .dim-break = Dim Break
@@ -4245,7 +4244,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT  Specify rotation angle <0>:
     .insert-specify-scale-factor-1 = INSERT  Specify scale factor <1>:
     .loft-select-first-cross-section = LOFT  Select first cross-section:
-    .loft-select-next-cross-section-count-selected = LOFT  Select next cross-section (__ocs_arg_count__ selected, Enter to finish):
     .land-xml =
         Land
         XML
@@ -4456,12 +4454,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = Select a supported planar curve or region cross-section.
     .add-a-curve-cross-section-between-point-ends = Add a curve cross-section between point ends.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode/Undo] (Enter to finish)
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  Select connected edges for one cross-section or [Undo] (Enter to finish)
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  Specify point end:
     .loft-creation-mode-solid-surface = LOFT  Creation mode [Solid/Surface]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude/Mode/Undo] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Mode/Undo] <Cross sections only>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  Select guide curves or [Undo] (Enter to finish)
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  Select path or [Undo]:
     .normals = Normals
     .draft-angles = Draft angles

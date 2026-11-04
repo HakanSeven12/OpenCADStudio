@@ -46,16 +46,8 @@ impl CadCommand for JoinCommand {
     fn prompt(&self) -> String {
         match self.source.as_ref().map(|(_, entity)| entity) {
             None => "JOIN  Select source object:".into(),
-            Some(EntityType::Line(_)) => {
-                "JOIN  Select lines to join to source (Enter to apply):".into()
-            }
-            Some(EntityType::Arc(_)) => {
-                "JOIN  Select arcs to join to source or [cLose] (Enter to apply):".into()
-            }
-            Some(EntityType::Spline(_)) => {
-                "JOIN  Select open curves to join to source (Enter to apply):".into()
-            }
-            _ => "JOIN  Select objects to join to source (Enter to apply):".into(),
+            Some(EntityType::Arc(_)) => "JOIN  Select arcs to join to source or [cLose]:".into(),
+            _ => "JOIN  Select objects to join:".into(),
         }
     }
     fn options(&self) -> Vec<crate::command::CmdOption> {

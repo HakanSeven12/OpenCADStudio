@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD Specificare il primo punto d'angolo o [Oggetti/Sottrai area] <Objects>:
     .prompt-subtract = AREA SUBTRACT Specificare il primo punto d'angolo o [Oggetti/Aggiungi area] <Objects>:
     .prompt-next = AREA Specificare il punto successivo ({ $count } selezionato, Enter da calcolare):
-    .prompt-objects = AREA Seleziona oggetti ({ $count } selezionato, Enter per calcolare):
+    .prompt-objects = AREA Seleziona oggetti:
     .objects-not-measurable = AREA: nessuno degli oggetti selezionati ha un'area misurabile.
     .result = Area = { $area }, Perimetro = { $perimeter }
     .result-area-only = Zona = { $area }
@@ -2422,7 +2422,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3357,7 +3357,7 @@ modify =
     .count-objects =  (oggetti __ocs_arg_count__)
     .edge-extend-indented-title-case =  [Bordo: Estendi]
     .align-scale-objects-based-on-alignment-points = ALIGN Scalare gli oggetti in base ai punti di allineamento? [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN Seleziona oggetti (__ocs_arg_count__ selezionato, Enter al termine):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN Specificare il primo punto di destinazione:
     .align-specify-1st-source-point = ALIGN Specificare il primo punto sorgente:
     .align-specify-2nd-destination-point = ALIGN Specificare il 2° punto di destinazione:
@@ -3441,7 +3441,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET Enter raggio raccordo <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET Selezionare il primo oggetto (Linea/Arco/LwPolilinea) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET Selezionare il secondo oggetto (Linea/Arco/LwPolilinea) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN Seleziona gli oggetti da unire (__ocs_arg_count__ selezionato, Enter da applicare):
     .lengthen-enter-option-de-delta-to-total-p-pct = Opzione LENGTHEN Enter [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN Seleziona oggetto:
     .mirror-erase-source-objects-yes-no-no = MIRROR Cancellare gli oggetti di origine? [Sì/No] <No>:
@@ -3466,7 +3465,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT L'oggetto non è una polilinea. Trasformarlo in uno?  [Sì/No] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT Seleziona la polilinea (o una linea/arco da convertire):
     .pedit-specify-new-width = PEDIT Specificare la nuova larghezza:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT Unisci Seleziona gli oggetti da unire (__ocs_arg_count__ selezionato), Enter da unire:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = Matrice su percorso
     .polar-array = Matrice polare
     .refclose-save-discard-save = REFCLOSE [Salva/Elimina] <Save>:
@@ -3821,7 +3820,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS Specificare l'angolo del testo (gradi):
     .dimspace-enter-value-0-auto = Valore DIMSPACE Enter (0 = automatico):
     .dimspace-select-base-dimension = DIMSPACE Seleziona dimensione base:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE Seleziona la dimensione dello spazio (__ocs_arg_count__ selezionato, Enter al termine):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT Seleziona dimensione:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT Specificare la nuova posizione per il testo della quota:
     .dim-break = Interruzione quota
@@ -4243,7 +4242,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT Specificare l'angolo di rotazione <0>:
     .insert-specify-scale-factor-1 = INSERT Specificare il fattore di scala <1>:
     .loft-select-first-cross-section = LOFT Selezionare la prima sezione trasversale:
-    .loft-select-next-cross-section-count-selected = LOFT Selezionare la sezione trasversale successiva (__ocs_arg_count__ selezionato, Enter per finire):
     .land-xml =
         Terra
         XML
@@ -4445,12 +4443,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = Seleziona una sezione di curva planare o regione supportata.
     .add-a-curve-cross-section-between-point-ends = Aggiungi una sezione curva tra le estremità puntiformi.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = Normali
     .draft-angles = Angoli di sformo

@@ -452,7 +452,7 @@ area =
     .prompt-add = AREA ADD 첫 번째 꼭지점 지정 또는 [객체/빼기 영역] <Objects>:
     .prompt-subtract = AREA SUBTRACT 첫 번째 꼭지점 지정 또는 [객체/영역 추가] <Objects>:
     .prompt-next = AREA 다음 점 지정({ $count } 선택, Enter 계산):
-    .prompt-objects = AREA 객체 선택({ $count } 선택, 계산을 위한 Enter):
+    .prompt-objects = AREA 객체 선택:
     .objects-not-measurable = AREA: 선택한 개체 중 측정 가능한 영역이 없습니다.
     .result = 면적 = { $area }, 둘레 = { $perimeter }
     .result-area-only = 지역 = { $area }
@@ -2422,7 +2422,7 @@ common =
     .lengthen-select-an-object-to-measure-or-delta-percent-total-dynamic = LENGTHEN  Select an object to measure or [Delta/Percent/Total/Dynamic]:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnitude-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings/Continuity/Bulge magnitude] <Cross sections only>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-cross-sections-only = LOFT  Enter an option [Guides/Path/Cross sections only/Settings] <Cross sections only>:
-    .loft-select-cross-sections-in-order-or-point-join-mode-enter-to-finish = LOFT  Select cross-sections in order or [Point/Join/Mode] (Enter to finish)
+    .loft-select-cross-sections-lofting = LOFT  Select cross sections in lofting order or [Point/Join/Mode]:
     .link-option = Link option
     .link-settings = Link settings
     .live-section-enabled = Live Section Enabled
@@ -3357,7 +3357,7 @@ modify =
     .count-objects =  (__ocs_arg_count__ 객체)
     .edge-extend-indented-title-case =  [엣지: 확장]
     .align-scale-objects-based-on-alignment-points = ALIGN 정렬 지점을 기준으로 개체 크기를 조정하시겠습니까? [Y/N]:
-    .align-select-objects-count-selected-enter-when = ALIGN 객체 선택(__ocs_arg_count__ 선택, 완료 시 Enter):
+    .align-select-objects = ALIGN  Select objects:
     .align-specify-1st-destination-point = ALIGN 첫 번째 목적지 지정:
     .align-specify-1st-source-point = ALIGN 첫 번째 소스 포인트 지정:
     .align-specify-2nd-destination-point = ALIGN 두 번째 대상점 지정:
@@ -3441,7 +3441,6 @@ modify =
     .fillet-enter-fillet-radius-4 = FILLET Enter 필렛 반경 <__ocs_fmt_0__>:
     .fillet-select-first-object-line-arc-lwpolyline = FILLET 첫 번째 객체 선택(선/호/Lw폴리선) [R=__ocs_fmt_0__]:
     .fillet-select-second-object-line-arc-lwpolylin = FILLET 두 번째 객체 선택(선/호/Lw폴리선) [R=__ocs_fmt_0__]:
-    .join-select-objects-to-join-count-selected-ent = JOIN 결합할 개체 선택(__ocs_arg_count__ 선택, 적용할 Enter):
     .lengthen-enter-option-de-delta-to-total-p-pct = LENGTHEN Enter 옵션 [DE <delta> / TO <total> / P <pct>]:
     .lengthen-select-object = LENGTHEN 개체 선택:
     .mirror-erase-source-objects-yes-no-no = MIRROR 소스 개체를 삭제하시겠습니까? [예/아니요] <No>:
@@ -3466,7 +3465,7 @@ modify =
     .pedit-object-is-not-a-polyline-turn-it-into-on = PEDIT 객체가 폴리라인이 아닙니다. 하나로 바꾸시겠습니까?  [예/아니요] <Y>:
     .pedit-select-polyline-or-a-line-arc-to-convert = PEDIT 폴리선(또는 변환할 선/호) 선택:
     .pedit-specify-new-width = PEDIT 새 너비 지정:
-    .pedit-join-select-objects-to-join-count-picked = PEDIT 결합 결합할 객체 선택(__ocs_arg_count__ 선택), 병합할 Enter:
+    .pedit-select-objects = PEDIT  Select objects:
     .path-array = 경로 배열
     .polar-array = 극 배열
     .refclose-save-discard-save = REFCLOSE [저장/폐기] <Save>:
@@ -3821,7 +3820,7 @@ annotate =
     .dimradius-specify-text-angle-degrees = DIMRADIUS 텍스트 각도(도) 지정:
     .dimspace-enter-value-0-auto = DIMSPACE Enter 값(0 = 자동):
     .dimspace-select-base-dimension = DIMSPACE 기본 치수 선택:
-    .dimspace-select-dimension-to-space-count-selec = DIMSPACE 공간에 대한 치수 선택(__ocs_arg_count__ 선택, 완료 시 Enter):
+    .dimspace-select-dimensions-to-space = DIMSPACE  Select dimensions to space:
     .dimtedit-select-dimension = DIMTEDIT 치수 선택:
     .dimtedit-specify-new-location-for-dimension-te = DIMTEDIT 치수 문자의 새 위치를 지정합니다.
     .dim-break = 딤 브레이크
@@ -4243,7 +4242,6 @@ insert =
     .insert-specify-rotation-angle-0 = INSERT 회전 각도 <0> 지정:
     .insert-specify-scale-factor-1 = INSERT 배율 인수 <1> 지정:
     .loft-select-first-cross-section = LOFT 첫 번째 단면 선택:
-    .loft-select-next-cross-section-count-selected = LOFT 다음 횡단면 선택(__ocs_arg_count__가 선택되고 Enter가 완료됨):
     .land-xml =
         토지
         XML
@@ -4445,12 +4443,12 @@ insert =
     .select-a-supported-planar-curve-or-region-cross-section = 지원되는 평면 곡선 또는 영역 단면을 선택하세요.
     .add-a-curve-cross-section-between-point-ends = 점 끝 사이에 곡선 단면을 추가하세요.
     .loft-select-cross-sections-in-order-or-point-join-mode-undo-enter-to-finish = LOFT  { draw.select }: { common.cross-sections } (1 → 2 → …) [{ common.point }/{ common.join }/{ properties.mode }/{ common.undo }] (Enter: { common.finish })
-    .loft-select-connected-edges-for-one-cross-section-or-undo-enter-to-finish = LOFT  { draw.select }: { common.connected } · { properties.edges } ({ common.cross-sections }: 1) [{ common.undo }] (Enter: { common.finish })
+    .loft-select-connected-edges = LOFT  Select connected edges for one cross-section or [Undo]:
     .loft-specify-point-end = LOFT  { common.specify }: { common.point-end }:
     .loft-creation-mode-solid-surface = LOFT  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .loft-enter-an-option-guides-path-cross-sections-only-settings-continuity-bulge-magnit = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ modify.continuity }/{ common.bulge-magnitude }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
     .loft-enter-an-option-guides-path-cross-sections-only-settings-mode-undo-cross-section = LOFT  { common.specify }: { action.options } [{ common.guides }/{ common.path }/{ common.cross-sections-only }/{ properties.settings }/{ properties.mode }/{ common.undo }] <{ common.cross-sections-only }>:
-    .loft-select-guide-curves-or-undo-enter-to-finish = LOFT  { draw.select }: { common.guides } [{ common.undo }] (Enter: { common.finish })
+    .loft-select-guide-curves = LOFT  Select guide curves or [Undo]:
     .loft-select-path-or-undo = LOFT  { draw.select }: { common.path } [{ common.undo }]:
     .normals = 법선
     .draft-angles = 구배 각도

@@ -2159,10 +2159,14 @@ const MOVE_EPS: f64 = 1e-9;
 /// `kernel_constraints::solvers::dogleg`, the bound `solve_dl` exits on) so
 /// "already converged" means exactly what the solver itself would conclude.
 const FIXPOINT_TOLF: f64 = 1.0e-10;
+/// How far a constraint may be off after a solve and still count as held.
+const SATISFIED_TOL: f64 = 1.0e-7;
 type SolveResult = (
     Vec<(Handle, EntityType)>,
     usize,
     Vec<(ConstraintId, kernel_constraints::diagnosis::RedundancyKind)>,
+    // Whether the scope's own constraints hold after the solve.
+    bool,
 );
 
 fn retained_line_length(entity: &EntityType, segment: Option<usize>) -> Option<f64> {
@@ -3374,6 +3378,9 @@ fn solve_scope(
         (0, Vec::new())
     };
 
+    let satisfied = owner
+        .iter()
+        .all(|(constraint, _)| constraint.error(sys.store()).abs() <= SATISFIED_TOL);
     let store = sys.store();
     let mut results = Vec::new();
     for (&handle, geom) in &cache {
@@ -3759,7 +3766,7 @@ fn solve_scope(
         initial_fixed_refs,
         &mut results,
     );
-    Some((results, dof, conflicts))
+    Some((results, dof, conflicts, satisfied))
 }
 
 impl Scene {
@@ -4056,19 +4063,29 @@ impl Scene {
             }
             let view: Vec<&ParametricConstraint> =
                 self.parametric_constraints[i].constraints.iter().collect();
-            let Some((solved, dof, conflicts)) = solve_scope(
-                &self.document,
-                &self.named_parameters,
-                &self.parametric_constraints[i].local_parameters,
-                &view,
-                driven_refs,
-                retain_size,
-                true,
-                &retained_before,
-                initial_fixed_refs,
-                &originals,
-                true,
-            ) else {
+            let solve = |retain_lengths: bool| {
+                solve_scope(
+                    &self.document,
+                    &self.named_parameters,
+                    &self.parametric_constraints[i].local_parameters,
+                    &view,
+                    driven_refs,
+                    retain_size,
+                    retain_lengths,
+                    &retained_before,
+                    initial_fixed_refs,
+                    &originals,
+                    true,
+                )
+            };
+            // Kept lengths are a preference: when holding every edge length
+            // leaves the constraints unmet (a second perpendicular on a
+            // closed polyline), the edges give way rather than nothing
+            // moving at all.
+            let Some((solved, dof, conflicts, _)) = (match solve(true) {
+                Some(result) if !result.3 => solve(false).filter(|loose| loose.3).or(Some(result)),
+                other => other,
+            }) else {
                 continue;
             };
             if initial_fixed_refs.is_empty() {
@@ -4186,7 +4203,7 @@ impl Scene {
             // `diagnostics = false`: the preview discards DOF/conflicts (the
             // commit path recomputes and stores them for the badges), so the
             // per-move `diagnose`/`classify_redundant` work is skipped.
-            let Some((solved, _dof, _conflicts)) = solve_scope(
+            let Some((solved, _dof, _conflicts, _)) = solve_scope(
                 &self.document,
                 &self.named_parameters,
                 &set.local_parameters,

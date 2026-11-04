@@ -568,6 +568,46 @@ mod parametric_constraint_undo_tests {
         );
     }
 
+    /// #2300: a second Perpendicular on the same closed polyline squares the
+    /// next corner too. Keeping every edge length as well over-determines a
+    /// quadrilateral, so the edges give way instead of nothing moving.
+    #[test]
+    fn a_second_perpendicular_on_one_polyline_squares_its_corner() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let mut polyline = codec::entities::LwPolyline::new();
+        polyline.vertices = [(20.0, 0.0), (30.0, 1.0), (30.5, 6.0), (20.0, 6.0)]
+            .into_iter()
+            .map(|(x, y)| codec::entities::LwVertex::from_coords(x, y))
+            .collect();
+        polyline.is_closed = true;
+        let i = app.active_tab;
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::LwPolyline(polyline));
+        let corner = |app: &OpenCADStudio, k: usize| {
+            let Some(codec::EntityType::LwPolyline(p)) =
+                app.tabs[app.active_tab].scene.document.get_entity(handle)
+            else {
+                panic!("expected the polyline");
+            };
+            let v: Vec<_> = p.vertices.iter().map(|v| v.location).collect();
+            let (a, b, c) = (v[k - 1], v[k], v[(k + 1) % v.len()]);
+            (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y)
+        };
+        for (first, second) in [(0usize, 1usize), (1, 2)] {
+            let _ = app.apply_cmd_result(CmdResult::AddPerpendicularConstraint {
+                first: ParametricRef::segment(handle, first),
+                second: ParametricRef::segment(handle, second),
+                first_fixed: ParametricRef::segment(handle, first),
+                second_start: ParametricRef::point(handle, second as i32),
+                label: "Perpendicular constraint",
+            });
+        }
+        assert!(corner(&app, 1).abs() < 1.0e-7, "{}", corner(&app, 1));
+        assert!(corner(&app, 2).abs() < 1.0e-7, "{}", corner(&app, 2));
+    }
+
     #[test]
     fn horizontal_initial_solve_uses_the_captured_axis_in_kernel() {
         let mut app = OpenCADStudio::new_for_test();

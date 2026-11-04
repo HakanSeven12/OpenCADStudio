@@ -17,7 +17,8 @@ pub(crate) fn set_group_display_mode(mode: i16) {
 
 impl OpenCADStudio {
     /// `GROUPDISPLAYMODE [value]`: a value outside 0–2 is refused and
-    /// asked for again; a new one redraws the grips of the selection.
+    /// asked for again. Grips already shown keep their look until the
+    /// selection is next made, as in the reference.
     pub(super) fn group_display_setvar(&mut self, value: Option<&str>) {
         let ask = |app: &mut Self| {
             app.command_line.push_output(&format!(
@@ -34,7 +35,6 @@ impl OpenCADStudio {
             Ok(mode @ 0..=2) => {
                 if mode != group_display_mode() {
                     set_group_display_mode(mode);
-                    self.refresh_selected_grips();
                     self.save_config();
                 }
             }

@@ -1572,35 +1572,46 @@ impl OpenCADStudio {
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
                 if handles.is_empty() {
-                    self.command_line.push_error(
-                        crate::t!("ANNOUPDATE: select annotation objects first.").as_ref(),
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let command = SelectObjectsCommand::with_keyword(
+                        "ANNOUPDATE",
+                        "ANNOUPDATE",
+                        "Select annotation objects or [ALL]:",
+                        "ALL",
+                        "ALL",
+                        || crate::command::CmdResult::Dispatch("ANNOUPDATE ALL".to_string()),
+                    );
+                    self.command_line.push_info(&command.prompt());
+                    self.command_line.set_step_options(command.options());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    return Some(Task::none());
+                }
+                self.apply_annoupdate(i, handles);
+                return Some(Task::none());
+            }
+            cmd if cmd.eq_ignore_ascii_case("ANNOUPDATE ALL")
+                || cmd.eq_ignore_ascii_case("ANNOUPDATE A") =>
+            {
+                let handles: Vec<_> = self.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .filter(|entity| {
+                        crate::scene::annotative::is_annotative(
+                            &self.tabs[i].scene.document,
+                            entity,
+                        )
+                    })
+                    .map(|entity| entity.common().handle)
+                    .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
+                    .collect();
+                if handles.is_empty() {
+                    self.command_line.push_output(
+                        crate::t!("ANNOUPDATE: no annotative objects in this drawing.").as_ref(),
                     );
                     return Some(Task::none());
                 }
-                self.push_undo_snapshot(i, "ANNOUPDATE");
-                let scale = self.tabs[i].scene.creation_annotation_scale_handle();
-                let paper_to_model = self.tabs[i].scene.creation_annotation_multiplier();
-                let mut updated = 0usize;
-                for handle in &handles {
-                    if crate::scene::annotative::update_entity_from_annotation_style(
-                        &mut self.tabs[i].scene.document,
-                        *handle,
-                        scale,
-                        paper_to_model,
-                    ) {
-                        updated += 1;
-                    }
-                }
-                if updated > 0 {
-                    let changes: Vec<_> = handles
-                        .into_iter()
-                        .map(|handle| (handle, crate::scene::ChangeKind::Modified))
-                        .collect();
-                    self.tabs[i].scene.bump_entities(&changes);
-                    self.tabs[i].dirty = true;
-                }
-                self.command_line
-                    .push_output(crate::tf!("ANNOUPDATE: updated {updated} object(s).").as_ref());
+                self.apply_annoupdate(i, handles);
                 return Some(Task::none());
             }
             cmd if cmd.starts_with("ANNOSCALE ") || cmd.starts_with("CANNOSCALE ") => {
@@ -2141,6 +2152,46 @@ impl OpenCADStudio {
         self.command_line
             .push_info(&crate::command::CadCommand::prompt(&command));
         self.tabs[i].active_cmd = Some(Box::new(command));
+    }
+
+    /// Re-solve the selected annotative objects for the current scale. Shared
+    /// by the pick flow and `ANNOUPDATE ALL`; reports how many changed and
+    /// how many were not annotative, as the reference application does.
+    fn apply_annoupdate(&mut self, i: usize, handles: Vec<codec::Handle>) {
+        let scale = self.tabs[i].scene.creation_annotation_scale_handle();
+        let paper_to_model = self.tabs[i].scene.creation_annotation_multiplier();
+        let mut updated = 0usize;
+        let mut skipped = 0usize;
+        let mut changed = Vec::new();
+        for handle in &handles {
+            if crate::scene::annotative::update_entity_from_annotation_style(
+                &mut self.tabs[i].scene.document,
+                *handle,
+                scale,
+                paper_to_model,
+            ) {
+                updated += 1;
+                changed.push((*handle, crate::scene::ChangeKind::Modified));
+            } else {
+                skipped += 1;
+            }
+        }
+        if !changed.is_empty() {
+            self.push_undo_snapshot(i, "ANNOUPDATE");
+            self.tabs[i].scene.bump_entities(&changed);
+            self.tabs[i].dirty = true;
+        }
+        if skipped > 0 {
+            self.command_line.push_output(
+                crate::tf!(
+                    "ANNOUPDATE: updated {updated} object(s); {skipped} not annotative and left unchanged."
+                )
+                .as_ref(),
+            );
+        } else {
+            self.command_line
+                .push_output(crate::tf!("ANNOUPDATE: updated {updated} object(s).").as_ref());
+        }
     }
 }
 

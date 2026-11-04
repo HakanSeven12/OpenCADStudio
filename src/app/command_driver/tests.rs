@@ -3470,3 +3470,76 @@ mod mission_m025_tests {
         assert!(all_output(&app).contains("enter 0 or 1"));
     }
 }
+
+#[cfg(test)]
+mod mission_m027_tests {
+    use super::super::*;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn annoupdate_gathers_a_selection_instead_of_refusing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        app.tabs[tab]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )));
+
+        let _ = app.run_command_line("ANNOUPDATE");
+        assert!(
+            app.tabs[tab].active_cmd.is_some(),
+            "ANNOUPDATE must prompt for a selection, not error immediately"
+        );
+        assert!(!all_output(&app).contains("select annotation objects first"));
+
+        let _ = app.run_command_line("ALL");
+        assert!(app.tabs[tab].active_cmd.is_none());
+    }
+
+    #[test]
+    fn annoupdate_all_explains_when_nothing_is_annotative() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        app.tabs[tab]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )));
+
+        let _ = app.run_command_line("ANNOUPDATE ALL");
+        assert!(all_output(&app).contains("no annotative objects"));
+    }
+
+    #[test]
+    fn annoupdate_on_a_preselected_non_annotative_object_is_a_no_op_with_reason() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let tab = app.active_tab;
+        let line = app.tabs[tab]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )));
+        app.tabs[tab].scene.select_entity(line, false);
+
+        let _ = app.run_command_line("ANNOUPDATE");
+        let output = all_output(&app);
+        assert!(output.contains("not annotative"), "{output}");
+    }
+}

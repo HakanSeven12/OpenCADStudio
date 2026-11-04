@@ -471,7 +471,7 @@ fn evaluate_row_context(
     if !changed {
         return Ok(None);
     }
-    super::block_actions::rebuild_framed(
+    let resolved_frames = super::block_actions::rebuild_framed(
         &mut evaluated,
         baseline.unwrap_or(document),
         definition,
@@ -494,7 +494,11 @@ fn evaluate_row_context(
     let mut result =
         super::block_actions::instance::materialize(document, insert, definition, &evaluated)?;
     for (parameter, value) in parameters.into_iter().zip(values) {
-        super::block_actions::instance::save(&mut result, insert, &parameter, value)?;
+        if let Some(frame) = resolved_frames.get(&parameter.handle) {
+            super::block_actions::instance::save_frame(&mut result, insert, &parameter, *frame)?;
+        } else {
+            super::block_actions::instance::save(&mut result, insert, &parameter, value)?;
+        }
     }
     if reference_row_context(&result, baseline, insert, definition, &table) != Some(row) {
         return Err("The Lookup row values do not satisfy the parameter value sets.");

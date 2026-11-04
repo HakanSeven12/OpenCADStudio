@@ -575,7 +575,7 @@ pub(crate) fn create_with_frame_points(
         if let Some(entity) = doc.get_entity(*h) {
             !members.contains(h) || !supported(entity) || entity.common().owner_handle != definition
         } else {
-            kind != Kind::Move || chains::point_target(doc, definition, p.id, *h).is_none()
+            kind != Kind::Move || chains::frame_target(doc, definition, p.id, *h).is_none()
         }
     }) {
         return Err(if kind == Kind::Move {
@@ -833,7 +833,7 @@ pub(crate) fn editable_action_targets(
             if doc.get_entity(*handle).is_some() {
                 Some(*handle)
             } else if kind == Kind::Move {
-                chains::point_target(doc, definition, parameter_id, *handle)
+                chains::frame_target(doc, definition, parameter_id, *handle)
             } else {
                 None
             }
@@ -857,7 +857,7 @@ pub(crate) fn retarget_frame_points(
         .iter()
         .map(|handle| {
             if kind == Kind::Move {
-                chains::point_target(doc, definition, id, *handle).unwrap_or(*handle)
+                chains::frame_target(doc, definition, id, *handle).unwrap_or(*handle)
             } else {
                 *handle
             }
@@ -878,7 +878,7 @@ pub(crate) fn retarget_frame_points(
         if let Some(entity) = doc.get_entity(*h) {
             !members.contains(h) || entity.common().owner_handle != definition || !supported(entity)
         } else {
-            kind != Kind::Move || chains::point_target(doc, definition, id, *h).is_none()
+            kind != Kind::Move || chains::frame_target(doc, definition, id, *h).is_none()
         }
     }) {
         return Err("Select supported targets belonging to this block.");
@@ -891,7 +891,7 @@ pub(crate) fn retarget_frame_points(
         .filter(|handle| {
             !old_geometry.contains(handle)
                 && (kind != Kind::Move
-                    || chains::point_target(doc, definition, id, *handle).is_none())
+                    || chains::frame_target(doc, definition, id, *handle).is_none())
         })
         .collect::<Vec<_>>();
     let requested_targets = targets.clone();
@@ -973,7 +973,7 @@ pub(crate) fn retarget_frame_points(
                 bookkeeping.contains(handle)
                     || requested_targets.contains(handle)
                     || (kind == Kind::Move
-                        && chains::point_target(doc, definition, id, *handle)
+                        && chains::frame_target(doc, definition, id, *handle)
                             .is_some_and(|point| requested_targets.contains(&point)))
             })
             .collect();
@@ -981,7 +981,7 @@ pub(crate) fn retarget_frame_points(
             let already_present = action.dependencies.iter().any(|existing| {
                 *existing == handle
                     || (kind == Kind::Move
-                        && chains::point_target(doc, definition, id, *existing) == Some(handle))
+                        && chains::frame_target(doc, definition, id, *existing) == Some(handle))
             });
             if !already_present {
                 action.dependencies.push(handle);
@@ -1522,18 +1522,19 @@ fn evaluate_impl(
     };
     let mut detached_points = Vec::new();
     for p in previous_chain
-        .points()
+        .receivers()
         .filter(|p| !chain.contains(p.handle))
     {
         if let Some(current) = all_parameters(baseline, definition)
             .into_iter()
-            .find(|q| q.handle == p.handle && q.point)
+            .find(|q| q.handle == p.handle && (q.point || q.linear))
         {
-            let end = autonomous[&p.handle].end;
-            set_value(&mut staged, &current, Value::Point(end))?;
-            detached_points.push((current, end));
+            let frame = autonomous[&p.handle];
+            set_value(&mut staged, &current, Value::Point(frame.end))?;
+            detached_points.push((current, frame));
         }
     }
+    let mut active_frames = std::collections::BTreeMap::new();
     let chain_values = chain.resolve(
         doc,
         &mut staged,
@@ -1541,7 +1542,10 @@ fn evaluate_impl(
         &autonomous,
         evaluation.previous_values,
         evaluation.bases,
+        &mut active_frames,
     )?;
+    let base_for = |p: &Parameter| active_frames.get(&p.handle).map(|f| f.base)
+        .or_else(|| evaluation.bases.and_then(|bases| bases.get(&p.handle)).copied()).unwrap_or(p.base);
     let baseline_members = authoring::members(baseline, definition)
         .into_iter()
         .collect::<std::collections::BTreeSet<_>>();
@@ -1802,10 +1806,10 @@ fn evaluate_impl(
             }
         }
     }
-    for (p, end) in detached_points {
-        set_value(&mut staged, &p, Value::Point(end))?;
+    for (p, frame) in detached_points {
+        set_value(&mut staged, &p, Value::Point(frame.end))?;
         if let Some(frames) = evaluation.resolved_frames.as_deref_mut() {
-            frames.insert(p.handle, instance::ParameterFrame { base: p.base, end });
+            frames.insert(p.handle, frame);
         }
     }
     for (handle, frame) in chain_values {

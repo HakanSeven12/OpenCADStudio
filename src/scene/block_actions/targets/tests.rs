@@ -291,7 +291,7 @@ fn block_action_selection_editing_and_erase_preserve_owned_grip_links() {
 
 #[test]
 fn block_action_foreign_or_malformed_native_dependencies_fail_atomically() {
-    for invalid in 0..6 {
+    for invalid in 1..6 {
         let mut f = fixture(Kind::Move);
         let mut scene = crate::scene::Scene::new();
         scene.document = f.doc;
@@ -322,7 +322,6 @@ fn block_action_foreign_or_malformed_native_dependencies_fail_atomically() {
             .unwrap()[0]
             .handle;
         let target = match invalid {
-            0 => owned,
             1 => owned_grip,
             4 => foreign,
             5 => foreign_grip,

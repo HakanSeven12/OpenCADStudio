@@ -658,7 +658,13 @@ pub(crate) fn reset(
     };
     let unchanged = parameters
         .iter()
-        .all(|p| value(doc, insert, p).ok() == Some(default(p)))
+        .all(|p| {
+            if p.flip {
+                value(doc, insert, p).ok() == Some(default(p))
+            } else {
+                frame(doc, insert, p).ok() == Some(ParameterFrame { base: p.base, end: p.end })
+            }
+        })
         && (crate::scene::block_visibility::parameter(doc, def).is_none()
             || super::representation::visibility_state(doc, doc, def, insert) == Some(0))
         && history.is_none();
@@ -986,8 +992,8 @@ pub(crate) fn refresh_after_edit(
             _ => None,
         })
         .collect::<Vec<_>>();
-    let has_chain = super::chains::Graph::new(before, def)?.points().next().is_some()
-        || super::chains::Graph::new(doc, def)?.points().next().is_some();
+    let has_chain = super::chains::Graph::new(before, def)?.receivers().next().is_some()
+        || super::chains::Graph::new(doc, def)?.receivers().next().is_some();
     let previous_parameters = if has_chain { all_parameters(before, def) } else { Vec::new() };
     for insert in inserts {
         let mut evaluated = staged.clone();

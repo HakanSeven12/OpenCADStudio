@@ -3489,7 +3489,10 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         self.tabs[i].selected_handle = new_handle;
         self.tabs[i].selected_grips = new_grips;
         self.tabs[i].selected_grip_handles = new_grip_handles;
-        self.tabs[i].group_boxes = group_boxes;
+        // The box stays where it was while a grip drag moves the group.
+        if self.tabs[i].active_grip.is_none() {
+            self.tabs[i].group_boxes = group_boxes;
+        }
         let available: rustc_hash::FxHashSet<_> = self.tabs[i]
             .selected_grip_handles
             .iter()

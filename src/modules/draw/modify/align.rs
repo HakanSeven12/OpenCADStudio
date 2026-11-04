@@ -68,11 +68,7 @@ impl CadCommand for AlignCommand {
 
     fn prompt(&self) -> String {
         match self.state {
-            AlignState::Gathering => t!(
-                "ALIGN  Select objects (%{count} selected, Enter when done):",
-                count = self.handles.len()
-            )
-            .into_owned(),
+            AlignState::Gathering => t!("ALIGN  Select objects:").into_owned(),
             AlignState::Src1 => t!("ALIGN  Specify 1st source point:").into_owned(),
             AlignState::Dst1 => t!("ALIGN  Specify 1st destination point:").into_owned(),
             AlignState::Src2 => {

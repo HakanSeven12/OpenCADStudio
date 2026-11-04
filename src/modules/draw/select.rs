@@ -198,6 +198,16 @@ impl SelectObjectsCommand {
     }
 }
 
+thread_local! {
+    /// Remove mode of the selection being gathered (R / A at the prompt):
+    /// the prompt then reads "Remove objects:".
+    static REMOVE_MODE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn set_remove_mode(on: bool) {
+    REMOVE_MODE.with(|mode| mode.set(on));
+}
+
 impl CadCommand for SelectObjectsCommand {
     fn reveals_hidden_block_objects(&self) -> bool {
         self.pending_cmd == "_BVSHOW"
@@ -228,31 +238,15 @@ impl CadCommand for SelectObjectsCommand {
             )
             .into_owned();
         }
-        if self.commit_on_enter && !self.handles.is_empty() {
-            if self.auto_constrain_settings {
-                return t!(
-                    "%{cmd}  Select objects or [Settings] (%{count} selected, Enter to apply):",
-                    cmd = self.prompt_cmd,
-                    count = self.handles.len()
-                )
-                .into_owned();
-            }
-            t!(
-                "%{cmd}  Select objects (%{count} selected, Enter to apply):",
-                cmd = self.prompt_cmd,
-                count = self.handles.len()
-            )
-            .into_owned()
-        } else {
-            if self.auto_constrain_settings {
-                return t!(
-                    "%{cmd}  Select objects or [Settings]:",
-                    cmd = self.prompt_cmd
-                )
-                .into_owned();
-            }
-            t!("%{cmd}  Select objects:", cmd = self.prompt_cmd).into_owned()
+        if REMOVE_MODE.with(|mode| mode.get()) {
+            return t!("%{cmd}  Remove objects:", cmd = self.prompt_cmd).into_owned();
         }
+        // The reference asks the same "Select objects:" however many are
+        // picked; each pick's count is its own "N found" line.
+        if self.auto_constrain_settings {
+            return t!("%{cmd}  Select objects or [Settings]:", cmd = self.prompt_cmd).into_owned();
+        }
+        t!("%{cmd}  Select objects:", cmd = self.prompt_cmd).into_owned()
     }
 
     // Opt into the selection-gathering path; host routes clicks through
@@ -379,6 +373,11 @@ impl CadCommand for SelectObjectsCommand {
             }
         }
         match text.trim().to_uppercase().as_str() {
+            // SIngle: the next selection ends the prompt.
+            "SI" | "SINGLE" => {
+                self.commit_on_enter = false;
+                Some(CmdResult::NeedPoint)
+            }
             "S" | "SETTINGS" if self.auto_constrain_settings => {
                 Some(CmdResult::OpenAutoConstrainSettings)
             }

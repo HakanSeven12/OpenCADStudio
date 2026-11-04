@@ -3429,7 +3429,56 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 // entity_grips_for errs only for a missing tab/entity; inside
                 // the selection walk the entity exists, so a defensive empty
                 // keeps the cache build total.
+                // A polyline picked by segment shows only those segments'
+                // vertex and mid grips (vertex `k` is grip `k`, the mid grip
+                // of segment `k` is `n + k`; a heavy polyline has no mid grips).
+                let segment_grips: Option<rustc_hash::FxHashSet<usize>> =
+                    match (entity, self.tabs[i].scene.picked_segments(handle)) {
+                        // A spline-fit polyline's segments run between generated
+                        // vertices, which carry no grips.
+                        (codec::EntityType::Polyline2D(polyline), Some(_))
+                            if polyline.flags.bits() & 4 != 0 =>
+                        {
+                            Some(Default::default())
+                        }
+                        // A curve-fit polyline's picked segment shows the
+                        // original vertices around it, not the fit vertices.
+                        (codec::EntityType::Polyline2D(polyline), Some(segments))
+                            if polyline.flags.bits() & 2 != 0 =>
+                        {
+                            let n = polyline.vertices.len();
+                            let original = |i: usize| polyline.vertices[i % n].flags.bits() & 1 == 0;
+                            Some(
+                                segments
+                                    .iter()
+                                    .flat_map(|&k| {
+                                        let before = (0..=k).rev().find(|&i| original(i)).unwrap_or(k);
+                                        let after = (k + 1..k + 1 + n).find(|&i| original(i)).unwrap_or(k + 1) % n;
+                                        [before, after]
+                                    })
+                                    .collect(),
+                            )
+                        }
+                        (codec::EntityType::LwPolyline(_) | codec::EntityType::Polyline2D(_), Some(segments)) => {
+                            let n = match entity {
+                                codec::EntityType::LwPolyline(polyline) => polyline.vertices.len(),
+                                codec::EntityType::Polyline2D(polyline) => polyline.vertices.len(),
+                                _ => 0,
+                            }
+                            .max(1);
+                            Some(
+                                segments
+                                    .iter()
+                                    .flat_map(|&k| [k, (k + 1) % n, n + k])
+                                    .collect(),
+                            )
+                        }
+                        _ => None,
+                    };
                 for grip in self.entity_grips_for(i, handle).unwrap_or_default() {
+                    if segment_grips.as_ref().is_some_and(|ids| !ids.contains(&grip.id)) {
+                        continue;
+                    }
                     handles.push(handle);
                     grips.push(grip);
                 }

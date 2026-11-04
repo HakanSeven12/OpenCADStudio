@@ -5,39 +5,62 @@
 
 use std::collections::BTreeSet;
 
-use codec::entities::LwPolyline;
 use codec::{EntityType, Handle};
 use glam::DVec3;
+use kernel::geom2d::{Curve, Polyline};
+use kernel::space::PlanarCurve;
 
 use super::Scene;
 use crate::command::EntityTransform;
 
-/// Segment `index` of `polyline` on its own: its two vertices, with the
-/// bulge of the first.
-fn segment(polyline: &LwPolyline, index: usize) -> Option<LwPolyline> {
+/// The polyline whose segments a pick indexes, with the entity vertex each
+/// of its vertices is: an LWPOLYLINE, or a heavy 2D POLYLINE along the curve
+/// it draws (a fit polyline's generated vertices, never its frame).
+fn plain_polyline(entity: &EntityType) -> Option<(PlanarCurve, Vec<usize>)> {
+    match entity {
+        EntityType::LwPolyline(polyline) => crate::entities::curve::lwpolyline_curve(polyline)
+            .map(|curve| (curve, (0..polyline.vertices.len()).collect())),
+        EntityType::Polyline2D(polyline) => {
+            let drawn = (0..polyline.vertices.len())
+                .filter(|&i| polyline.vertices[i].flags.bits() & 16 == 0)
+                .collect();
+            crate::entities::curve::polyline2d_curve(polyline).map(|curve| (curve, drawn))
+        }
+        _ => None,
+    }
+}
+
+fn vertex_count(curve: &PlanarCurve) -> usize {
+    match &curve.curve {
+        Curve::Polyline(polyline) => polyline.vertices.len(),
+        _ => 0,
+    }
+}
+
+/// Points of segment `index` of `curve` on its own: its two vertices, with
+/// the bulge of the first.
+fn segment_points(curve: &PlanarCurve, index: usize) -> Vec<[f64; 3]> {
+    let Curve::Polyline(polyline) = &curve.curve else {
+        return Vec::new();
+    };
     let count = polyline.vertices.len();
     let next = if index + 1 < count {
         index + 1
-    } else if polyline.is_closed && count > 2 {
+    } else if polyline.closed && count > 2 {
         0
     } else {
-        return None;
+        return Vec::new();
     };
-    let mut part = polyline.clone();
-    part.vertices = vec![
-        polyline.vertices[index].clone(),
-        polyline.vertices[next].clone(),
-    ];
-    part.vertices[1].bulge = 0.0;
-    part.is_closed = false;
-    Some(part)
-}
-
-fn segment_points(polyline: &LwPolyline, index: usize) -> Vec<[f64; 3]> {
-    segment(polyline, index)
-        .and_then(|part| crate::entities::curve::lwpolyline_curve(&part))
-        .map(|curve| crate::entities::curve::curve_points(&curve))
-        .unwrap_or_default()
+    let mut second = polyline.vertices[next];
+    second.bulge = 0.0;
+    let part = PlanarCurve::new(
+        curve.plane,
+        Curve::Polyline(Polyline {
+            vertices: vec![polyline.vertices[index], second],
+            closed: false,
+        }),
+    );
+    crate::entities::curve::curve_points(&part)
 }
 
 impl Scene {
@@ -45,12 +68,12 @@ impl Scene {
     /// and keep the polyline selected while any of its segments is. `false`
     /// when `handle` is not a polyline.
     pub fn toggle_sub_segment(&mut self, handle: Handle, point: DVec3) -> bool {
-        let Some(EntityType::LwPolyline(polyline)) = self.document.get_entity(handle) else {
+        let Some((curve, _)) = self.document.get_entity(handle).and_then(plain_polyline) else {
             return false;
         };
-        let nearest = (0..polyline.vertices.len())
+        let nearest = (0..vertex_count(&curve))
             .filter_map(|index| {
-                let distance = segment_points(polyline, index)
+                let distance = segment_points(&curve, index)
                     .windows(2)
                     .map(|pair| {
                         let a = DVec3::from_array(pair[0]).truncate();
@@ -96,12 +119,10 @@ impl Scene {
     /// the selection highlight.
     pub(crate) fn picked_segment_points(&self, handle: Handle) -> Option<Vec<[f64; 3]>> {
         let segments = self.picked_segments(handle)?;
-        let Some(EntityType::LwPolyline(polyline)) = self.document.get_entity(handle) else {
-            return None;
-        };
+        let (curve, _) = self.document.get_entity(handle).and_then(plain_polyline)?;
         let mut points = Vec::new();
         for &index in segments {
-            points.extend(segment_points(polyline, index));
+            points.extend(segment_points(&curve, index));
             points.push([f64::NAN; 3]);
         }
         Some(points)
@@ -117,10 +138,14 @@ impl Scene {
     ) -> Vec<Handle> {
         let mut whole = Vec::with_capacity(handles.len());
         for &handle in handles {
-            let (Some(segments), Some(EntityType::LwPolyline(polyline))) = (
+            let (Some(segments), Some((curve, entity_index))) = (
                 self.picked_segments(handle),
-                self.document.get_entity(handle),
+                self.document.get_entity(handle).and_then(plain_polyline),
             ) else {
+                whole.push(handle);
+                continue;
+            };
+            let Curve::Polyline(polyline) = &curve.curve else {
                 whole.push(handle);
                 continue;
             };
@@ -129,16 +154,9 @@ impl Scene {
                 .iter()
                 .flat_map(|&index| [index, (index + 1) % count])
                 .collect();
-            let Some(plane) =
-                crate::entities::curve::lwpolyline_curve(polyline).map(|curve| curve.plane)
-            else {
-                whole.push(handle);
-                continue;
-            };
-            let mut moved = polyline.clone();
+            let mut moved_to = Vec::with_capacity(vertices.len());
             for index in vertices {
-                let vertex = &mut moved.vertices[index];
-                let world = plane.point_at([vertex.location.x, vertex.location.y]);
+                let world = curve.plane.point_at(polyline.vertices[index].position);
                 let mut marker = EntityType::Point(codec::entities::Point::at(
                     codec::types::Vector3::new(world[0], world[1], world[2]),
                 ));
@@ -147,12 +165,27 @@ impl Scene {
                     continue;
                 };
                 let location = marker.location;
-                if let Some([x, y]) = plane.project([location.x, location.y, location.z]) {
-                    vertex.location.x = x;
-                    vertex.location.y = y;
+                if let Some(at) = curve.plane.project([location.x, location.y, location.z]) {
+                    moved_to.push((entity_index[index], at));
                 }
             }
-            self.update_entity(EntityType::LwPolyline(moved));
+            let Some(mut moved) = self.document.get_entity(handle).cloned() else {
+                continue;
+            };
+            for (index, [x, y]) in moved_to {
+                match &mut moved {
+                    EntityType::LwPolyline(polyline) => {
+                        let location = &mut polyline.vertices[index].location;
+                        (location.x, location.y) = (x, y);
+                    }
+                    EntityType::Polyline2D(polyline) => {
+                        let location = &mut polyline.vertices[index].location;
+                        (location.x, location.y) = (x, y);
+                    }
+                    _ => {}
+                }
+            }
+            self.update_entity(moved);
         }
         whole
     }

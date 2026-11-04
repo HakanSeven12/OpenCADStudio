@@ -799,6 +799,8 @@ pub(super) struct OpenCADStudio {
     /// a pick *replaces* the set, so borrowing it here would wipe everything
     /// gathered so far rather than subtract one thing. (#596)
     select_remove_mode: bool,
+    /// A selection count was just reported: the step's prompt is shown again.
+    selection_reprompt: bool,
     /// What the last layer translation did, kept so the log can be written
     /// after the fact rather than forcing a path out of the user up front.
     last_layer_translation: Option<crate::modules::draw::layers::laytrans::Report>,
@@ -1192,6 +1194,25 @@ pub(super) struct OpenCADStudio {
     /// The objects the last selection step picked (a click, a window, a
     /// fence, Last / Previous / All) and whether it removed them.
     pub(crate) last_pick: Option<(Vec<codec::Handle>, bool)>,
+    /// The selection steps of the current Select objects: prompt (keyed by
+    /// the gathering command), newest last: the objects each added, or with
+    /// `true` the ones it removed. Undo takes them back one by one.
+    pub(crate) selection_undo: (usize, Vec<(Vec<codec::Handle>, bool)>),
+    /// The next completed selection is an Undo: no report, no new step.
+    pub(crate) selection_undoing: bool,
+    /// Group at a Select objects: prompt is waiting for the group's name.
+    pub(crate) selection_group_pending: bool,
+    /// The selection step being reported came from Group (a named group):
+    /// its count carries no group total.
+    pub(crate) selection_group_named: bool,
+    /// Selectable groups the reported selection step touched.
+    pub(crate) last_pick_groups: usize,
+    /// The last point entered by any command (LASTPOINT): a bare distance
+    /// at a selection prompt measures from it when the prompt has none yet.
+    pub(crate) last_entered_point: Option<glam::DVec3>,
+    /// SUbobject mode at the Select objects: prompt of this gathering
+    /// command (keyed like `selection_undo`); Object ends it.
+    pub(crate) selection_subobject: Option<usize>,
     /// The first corner of a window typed at a selection prompt, keyed by
     /// the gathering command, until the opposite corner is typed.
     pub(crate) typed_window_corner: Option<(usize, glam::DVec3)>,
@@ -5852,6 +5873,7 @@ impl OpenCADStudio {
             select_similar_mode: crate::scene::SELECT_SIMILAR_DEFAULT,
             pick_add: true,
             select_remove_mode: false,
+            selection_reprompt: false,
             last_layer_translation: None,
             layer_translator: None,
             drawing_units: None,
@@ -6038,6 +6060,13 @@ impl OpenCADStudio {
             block_mru_list: 50,
             selection_report: None,
             last_pick: None,
+            selection_undo: (0, Vec::new()),
+            selection_undoing: false,
+            selection_group_pending: false,
+            selection_group_named: false,
+            last_pick_groups: 0,
+            last_entered_point: None,
+            selection_subobject: None,
             typed_window_corner: None,
             refedit_options: Default::default(),
             block_redefine_mode: 1,

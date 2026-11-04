@@ -1800,10 +1800,10 @@ impl CadCommand for DrawOrderCommand {
                 crate::t!("DRAWORDER  [Above / Under / Front / Back] <Back>:").into_owned()
             }
             DrawOrderStep::PickReference { above: true } => {
-                format!("DRAWORDER  Select reference objects to move above ({} selected, Enter when done):", self.references.len())
+                "DRAWORDER  Select reference objects:".to_string()
             }
             DrawOrderStep::PickReference { above: false } => {
-                format!("DRAWORDER  Select reference objects to move under ({} selected, Enter when done):", self.references.len())
+                "DRAWORDER  Select reference objects:".to_string()
             }
         }
     }

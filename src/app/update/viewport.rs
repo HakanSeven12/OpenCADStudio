@@ -5739,7 +5739,9 @@ impl OpenCADStudio {
 
         // Ctrl+click on a polyline picks the segment under the cursor; the
         // edit commands then move just that part.
-        if self.ctrl_down && self.tabs[i].active_cmd.is_none() {
+        // SUbobject at a selection prompt picks segments the same way.
+        let subobject = self.subobject_mode();
+        if self.ctrl_down && self.tabs[i].active_cmd.is_none() || subobject {
             let (view_rot, eye) = {
                 let cam = self.tabs[i].scene.camera.borrow();
                 (cam.view_proj_rte(bounds), cam.eye())
@@ -5759,14 +5761,41 @@ impl OpenCADStudio {
             .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
             drop(wires);
             let point = self.tabs[i].last_cursor_world;
-            if hit.is_some_and(|handle| self.tabs[i].scene.toggle_sub_segment(handle, point)) {
+            if let Some(handle) =
+                hit.filter(|handle| self.tabs[i].scene.toggle_sub_segment(*handle, point))
+            {
                 self.tabs[i]
                     .scene
                     .selection
                     .borrow_mut()
                     .clear_left_selection_gesture();
+                if subobject {
+                    return self.feed_subobject_pick(Some(handle));
+                }
                 self.refresh_properties();
                 return Task::none();
+            }
+            let solid = |entity: Option<&codec::EntityType>| {
+                matches!(
+                    entity,
+                    Some(
+                        codec::EntityType::Solid3D(_)
+                            | codec::EntityType::Region(_)
+                            | codec::EntityType::Body(_)
+                            | codec::EntityType::Surface(_)
+                            | codec::EntityType::Mesh(_)
+                    )
+                )
+            };
+            if subobject
+                && hit.is_some_and(|handle| !solid(self.tabs[i].scene.document.get_entity(handle)))
+            {
+                self.tabs[i]
+                    .scene
+                    .selection
+                    .borrow_mut()
+                    .clear_left_selection_gesture();
+                return self.feed_subobject_pick(None);
             }
         }
 

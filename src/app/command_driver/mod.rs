@@ -1665,10 +1665,15 @@ impl OpenCADStudio {
 
     fn handle_relaunch(&mut self, cmd: String, handles: Vec<Handle>) -> Task<Message> {
         let i = self.active_tab;
+        // Polylines gathered by segment (SUbobject) keep their picked
+        // segments into the command the selection is handed to.
+        let segments = std::mem::take(&mut self.tabs[i].scene.sub_segments);
         self.tabs[i].scene.deselect_all();
         for h in &handles {
             self.tabs[i].scene.select_entity(*h, false);
         }
+        self.tabs[i].scene.sub_segments =
+            segments.into_iter().filter(|(handle, _)| handles.contains(handle)).collect();
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();

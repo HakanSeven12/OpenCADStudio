@@ -166,6 +166,25 @@ pub(crate) fn test_value(
     }
 }
 
+/// Use the reference's resolved reflection line for Flip grip presentation.
+pub(crate) fn grip_parameter(
+    doc: &Document,
+    insert: Handle,
+    p: &Parameter,
+    testing: bool,
+) -> Result<Parameter, &'static str> {
+    let mut result = p.clone();
+    if p.flip {
+        let frame = if testing { test_frame(doc, insert, p)? } else { frame(doc, insert, p)? };
+        let delta = frame.base - p.base;
+        result.base = frame.base;
+        result.end = frame.end;
+        result.reference += delta;
+        result.grip_location = result.grip_location.map(|position| position + delta);
+    }
+    Ok(result)
+}
+
 pub(crate) fn value(
     doc: &Document,
     insert: Handle,

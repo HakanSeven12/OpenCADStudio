@@ -104,6 +104,7 @@ impl OpenCADStudio {
                 .into_iter()
                 .find(|p| p.id == node)?;
             let value = actions::instance::test_value(&tab.scene.document, handle, &p).ok()?;
+            let p = actions::instance::grip_parameter(&tab.scene.document, handle, &p, true).ok()?;
             if !crate::scene::block_grips::runtime::action_grips(&test.baseline, test.definition, &p, value).iter().any(|grip| grip.id == id) { return None; }
             Some((p, value))
         } else {
@@ -112,6 +113,7 @@ impl OpenCADStudio {
                 .into_iter()
                 .find(|p| p.id == node)?;
             let value = actions::instance::value(&tab.scene.document, handle, &p).ok()?;
+            let p = actions::instance::grip_parameter(&tab.scene.document, handle, &p, false).ok()?;
             if !crate::scene::block_grips::runtime::action_grips(&tab.scene.document, definition, &p, value).iter().any(|grip| grip.id == id) { return None; }
             Some((p, value))
         }
@@ -236,6 +238,7 @@ impl OpenCADStudio {
                     let p = actions::all_parameters(source, definition).into_iter().find(|p| p.handle == parameter)?;
                     let value = if tab.block_test.is_some() { actions::instance::test_value(&tab.scene.document, handle, &p).ok()? }
                         else { actions::instance::value(&tab.scene.document, handle, &p).ok()? };
+                    let p = actions::instance::grip_parameter(&tab.scene.document, handle, &p, tab.block_test.is_some()).ok()?;
                     let active_id = tab.active_cmd.as_ref().and_then(|command| command.block_parameter_grip_id());
                     let grip = crate::scene::block_grips::runtime::action_grips(source, definition, &p, value).into_iter().find(|grip| active_id.is_none_or(|id| grip.id == id))?;
                     Some((handle, grip.id))

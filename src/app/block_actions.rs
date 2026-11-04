@@ -709,6 +709,7 @@ impl OpenCADStudio {
         for p in actions::all_parameters(&test.baseline, test.definition) {
             if !all.iter().any(|(_, _, _, id)| *id == p.id) { continue; }
             let Ok(value) = actions::instance::test_value(&tab.scene.document, test.insert, &p) else { continue; };
+            let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, test.insert, &p, true) else { continue; };
             for grip in crate::scene::block_grips::runtime::action_grips(&test.baseline, test.definition, &p, value) {
                 grips.push(crate::scene::model::object::GripDef {
                     id: grip.id,
@@ -752,6 +753,7 @@ impl OpenCADStudio {
         };
         if !actions::has_action(&test.baseline, test.definition, p.handle) { return false; }
         let Ok(value) = actions::instance::test_value(&tab.scene.document, test.insert, &p) else { return false };
+        let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, test.insert, &p, true) else { return false };
         let Some(grip) = crate::scene::block_grips::runtime::action_grips(&test.baseline, test.definition, &p, value).into_iter().find(|grip| grip.role == role) else { return false };
         if p.flip {
             let state = actions::instance::test_value(&tab.scene.document, test.insert, &p);
@@ -804,6 +806,7 @@ impl OpenCADStudio {
         for p in actions::all_parameters(&tab.scene.document, def) {
             if !all.iter().any(|(_, _, _, id)| *id == p.id) { continue; }
             let Ok(value) = actions::instance::value(&tab.scene.document, handle, &p) else { continue; };
+            let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, handle, &p, false) else { continue; };
             for grip in crate::scene::block_grips::runtime::action_grips(&tab.scene.document, def, &p, value) {
                 grips.push(crate::scene::model::object::GripDef {
                     id: grip.id,
@@ -841,6 +844,7 @@ impl OpenCADStudio {
         };
         if !actions::has_action(&tab.scene.document, def, p.handle) { return false; }
         let Ok(value) = actions::instance::value(&tab.scene.document, handle, &p) else { return false };
+        let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, handle, &p, false) else { return false };
         let Some(grip) = crate::scene::block_grips::runtime::action_grips(&tab.scene.document, def, &p, value).into_iter().find(|grip| grip.role == role) else { return false };
         if p.flip {
             let state = actions::instance::value(&tab.scene.document, handle, &p);

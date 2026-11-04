@@ -10,6 +10,7 @@ mod table_properties;
 mod lookup_properties;
 mod visibility_properties;
 mod grip_descriptions;
+mod flip_frame_grips;
 mod flip_state_labels;
 mod properties_internal_rows;
 

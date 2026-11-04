@@ -1094,12 +1094,29 @@ impl OpenCADStudio {
         }
         // Close an earlier step first so only what the probe opens is dropped below.
         self.finish_pending_history(i);
+        let pending_before = self.pending_setvar.clone();
         let Some(start_task) = self.try_dispatch_command(tokens[0], false) else {
             // The first word is no command; the whole line may still be one.
             return self.dispatch_command(cmd);
         };
         self.clear_idle_tool_highlight();
         if self.tabs[i].active_cmd.is_none() {
+            // A variable the bare word asked a value for: the next word is
+            // that answer, as Enter would send it; the rest goes on.
+            if self.pending_setvar.is_some() && self.pending_setvar != pending_before {
+                self.drop_unchanged_pending_history(i);
+                let name = self.pending_setvar.take().unwrap_or_default();
+                let answer = self.dispatch_command(&format!("SETVAR {name} {}", tokens[1]));
+                if tokens.len() == 2 {
+                    return Task::batch([start_task, answer]);
+                }
+                if !chain {
+                    self.command_line.unconsumed = tokens[2..].iter().map(|s| s.to_string()).collect();
+                    return Task::batch([start_task, answer]);
+                }
+                let rest = tokens[2..].join(" ");
+                return Task::batch([start_task, answer, self.run_command_line_impl(&rest, finish, chain)]);
+            }
             // Not an interactive tool — an inline-argument command (`PDMODE 3`).
             // The bare word only probed it: a step it kept without changing
             // anything is not an undo step of its own.

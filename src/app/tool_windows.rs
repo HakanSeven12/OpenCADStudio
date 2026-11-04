@@ -391,16 +391,34 @@ impl OpenCADStudio {
     }
 
     /// A manager pallet called up the way a dialog is (its command, a ribbon
-    /// button, a menu entry): on the desktop it opens in a window of its own.
-    /// One already showing stays where it is; the dock's own menu opens it
-    /// as a pallet.
+    /// button, a menu entry): on the desktop it opens in a window of its own,
+    /// on the web floating over the drawing like a dialog. One already
+    /// showing stays where it is; the dock's own menu opens it as a pallet.
     pub(crate) fn pallet_as_window(&mut self, id: crate::ui::dock::PanelId) {
+        if self.dock_panel_wanted(id) {
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
-        if self.main_window.is_some() && !self.dock_panel_wanted(id) && !self.dock.is_separate(id) {
+        if self.main_window.is_some() && !self.dock.is_separate(id) {
             let _ = self.detach_panel(id);
         }
         #[cfg(target_arch = "wasm32")]
-        let _ = id;
+        self.float_pallet_centred(id);
+    }
+
+    /// Float pallet `id` over the middle of the drawing (where it floated
+    /// last, when it did), out of the dock.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    pub(crate) fn float_pallet_centred(&mut self, id: crate::ui::dock::PanelId) {
+        if self.dock.float_rect(id).is_none() {
+            let (ww, wh) = self.dock_workspace_size();
+            let (w, h) = self.dock_float_size(id);
+            let (x, y) = (((ww - w) * 0.5).max(0.0), ((wh - h) * 0.5).max(0.0));
+            self.dock
+                .float(crate::ui::dock::FloatPanel::new(id, x, y, w, h));
+            self.save_config();
+        }
+        self.dock.raise_float(id);
     }
 
     /// Whether dialog `kind` is up, the active modal or an open tool.
@@ -1134,6 +1152,23 @@ mod tests {
             (placement.x, placement.y, placement.w, placement.h),
             (2400.0, 120.0, 700.0, 500.0)
         );
+    }
+
+    /// The web's "window" for a manager: it floats over the drawing; the
+    /// dock's menu docks it again.
+    #[test]
+    fn a_manager_floats_over_the_drawing_when_called_like_a_dialog() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.dock.dock(PanelId::Layers, DockSide::Right, usize::MAX);
+        app.float_pallet_centred(PanelId::Layers);
+        assert!(app.dock.float_rect(PanelId::Layers).is_some());
+        assert!(app.dock.location(PanelId::Layers).is_none());
+        let _ = app.update_root(Message::Dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Layers)));
+        assert_eq!(app.dock.location(PanelId::Layers).map(|(side, _)| side), Some(DockSide::Left));
+        assert!(app.dock.float_rect(PanelId::Layers).is_none());
     }
 
     #[cfg(not(target_arch = "wasm32"))]

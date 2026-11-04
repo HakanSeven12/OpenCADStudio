@@ -1232,6 +1232,90 @@ impl OpenCADStudio {
             return None;
         }
         let kw = text.trim().to_ascii_uppercase();
+        let key = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .map(|command| &**command as *const dyn crate::command::CadCommand as *const () as usize);
+        let reprompt = |app: &mut Self| {
+            if let Some(prompt) = app.tabs[app.active_tab].active_cmd.as_ref().map(|c| c.prompt()) {
+                app.command_line.push_info(&prompt);
+            }
+        };
+
+        // The name Group asked for: its members join the set; an unknown
+        // name asks again and Enter gives up on the group.
+        if std::mem::take(&mut self.selection_group_pending) {
+            let name = text.trim();
+            if name.is_empty() {
+                let found = 0;
+                self.command_line.push_info(crate::tf!("{found} found").as_ref());
+                reprompt(self);
+                return Some(Task::none());
+            }
+            let members: Option<Vec<Handle>> = self.tabs[i]
+                .scene
+                .groups()
+                .find(|group| group.name.eq_ignore_ascii_case(name))
+                .map(|group| {
+                    group
+                        .entities
+                        .iter()
+                        .copied()
+                        .filter(|h| self.tabs[i].scene.document.get_entity(*h).is_some())
+                        .collect()
+                });
+            let Some(add) = members else {
+                self.command_line
+                    .push_error(crate::t!("Invalid group name.").as_ref());
+                self.command_line
+                    .push_info(crate::t!("Enter group name:").as_ref());
+                self.selection_group_pending = true;
+                return Some(Task::none());
+            };
+            let remove = self.select_remove_mode;
+            self.last_pick = Some((add.clone(), remove));
+            for handle in add {
+                if remove {
+                    self.tabs[i].scene.deselect_entity(handle);
+                } else {
+                    self.tabs[i].scene.select_entity(handle, false);
+                }
+            }
+            self.refresh_properties();
+            let handles: Vec<Handle> = self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect();
+            return Some(self.feed_command(StepInput::SelectionComplete(handles)));
+        }
+        if let "G" | "GROUP" = kw.as_str() {
+            self.selection_group_pending = true;
+            self.command_line
+                .push_info(crate::t!("Enter group name:").as_ref());
+            return Some(Task::none());
+        }
+        // SUbobject: picks take faces, edges and vertices of 3D objects
+        // only; Object goes back to whole objects.
+        if let "SU" | "SUBOBJECT" | "O" | "OBJECT" = kw.as_str() {
+            self.selection_subobject = matches!(kw.as_str(), "SU" | "SUBOBJECT").then_some(key).flatten();
+            reprompt(self);
+            return Some(Task::none());
+        }
+        // A bare number is a direct distance: the point that far from the
+        // last point toward the cursor, picked like a typed point.
+        if !kw.contains(',') {
+            if let (Ok(distance), Some(anchor)) = (kw.parse::<f64>(), self.last_point) {
+                let toward = self.tabs[i].last_cursor_world - anchor;
+                let toward = glam::DVec3::new(toward.x, toward.y, 0.0);
+                if distance.is_finite() && toward.length() > 1e-12 {
+                    let world = anchor + toward.normalize() * distance;
+                    let typed = self.tabs[i].ucs_xform().to_ucs(world);
+                    return self.typed_object_pick(&format!("{},{},{}", typed.x, typed.y, typed.z));
+                }
+            }
+        }
 
         // `?` lists the ways objects can be selected and asks again.
         if kw == "?" {
@@ -1491,6 +1575,33 @@ impl OpenCADStudio {
             .flatten();
         if gathering {
             self.last_point = Some(wcs);
+            // In SUbobject mode an object with no faces, edges or vertices
+            // of its own to pick is passed over: nothing is found.
+            let found = match found {
+                Some(handle)
+                    if self.selection_subobject == Some(key)
+                        && !matches!(
+                            self.tabs[i].scene.document.get_entity(handle),
+                            Some(
+                                codec::EntityType::Solid3D(_)
+                                    | codec::EntityType::Region(_)
+                                    | codec::EntityType::Body(_)
+                                    | codec::EntityType::Surface(_)
+                                    | codec::EntityType::Mesh(_)
+                            )
+                        ) =>
+                {
+                    self.last_pick = Some((Vec::new(), false));
+                    let handles: Vec<Handle> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .into_iter()
+                        .map(|(h, _)| h)
+                        .collect();
+                    return Some(self.feed_command(StepInput::SelectionComplete(handles)));
+                }
+                other => other,
+            };
             let Some(handle) = found else {
                 self.typed_window_corner = Some((key, wcs));
                 self.open_typed_window_box(i, wcs);

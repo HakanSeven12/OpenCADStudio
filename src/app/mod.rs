@@ -1164,6 +1164,11 @@ pub(super) struct OpenCADStudio {
     pub(crate) selection_undo: (usize, Vec<(Vec<codec::Handle>, bool)>),
     /// The next completed selection is an Undo: no report, no new step.
     pub(crate) selection_undoing: bool,
+    /// Group at a Select objects: prompt is waiting for the group's name.
+    pub(crate) selection_group_pending: bool,
+    /// SUbobject mode at the Select objects: prompt of this gathering
+    /// command (keyed like `selection_undo`); Object ends it.
+    pub(crate) selection_subobject: Option<usize>,
     /// The first corner of a window typed at a selection prompt, keyed by
     /// the gathering command, until the opposite corner is typed.
     pub(crate) typed_window_corner: Option<(usize, glam::DVec3)>,
@@ -5968,6 +5973,8 @@ impl OpenCADStudio {
             last_pick: None,
             selection_undo: (0, Vec::new()),
             selection_undoing: false,
+            selection_group_pending: false,
+            selection_subobject: None,
             typed_window_corner: None,
             refedit_options: Default::default(),
             block_redefine_mode: 1,

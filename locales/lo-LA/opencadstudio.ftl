@@ -7004,6 +7004,11 @@ keytips =
     .hint-items = ພິມຕົວອັກສອນລາຍການ · Esc ກັບຄືນໜຶ່ງລະດັບ
 
 selection-report =
+    .invalid-selection = *Invalid selection*
+    .selection-methods = Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object
+    .selections-undone = All selections have been undone.
+    .invalid-group = Invalid group name.
+    .group-name = Enter group name:
     .found-duplicate-total = __ocs_fmt_0__ found (__ocs_fmt_1__ duplicate), __ocs_fmt_2__ total
     .found-removed-total = __ocs_fmt_0__ found, __ocs_fmt_1__ removed, __ocs_fmt_2__ total
     .invalid-window = Invalid window specification.

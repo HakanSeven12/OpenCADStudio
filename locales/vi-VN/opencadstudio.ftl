@@ -7010,6 +7010,11 @@ keytips =
     .hint-items = Nhập một chữ cái mục · Esc quay lại một cấp
 
 selection-report =
+    .invalid-selection = *Invalid selection*
+    .selection-methods = Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object
+    .selections-undone = All selections have been undone.
+    .invalid-group = Invalid group name.
+    .group-name = Enter group name:
     .found-duplicate-total = Tìm thấy __ocs_fmt_0__ (__ocs_fmt_1__ trùng), tổng __ocs_fmt_2__
     .found-removed-total = Tìm thấy __ocs_fmt_0__, đã bỏ __ocs_fmt_1__, tổng __ocs_fmt_2__
     .invalid-window = Invalid window specification.

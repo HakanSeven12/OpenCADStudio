@@ -6926,6 +6926,11 @@ keytips =
     .hint-items = Öğe harfini yazın · Esc bir düzey geri
 
 selection-report =
+    .invalid-selection = *Geçersiz seçim*
+    .selection-methods = Bir nokta veya Pencere/Son/Kesişen/KUTU/TÜMÜ/Çit/PÇokgen/KÇokgen/Grup/Ekle/Kaldır/Çoklu/Önceki/Geri al/OTomatik/TEk/ALtnesne/Nesne bekleniyor
+    .selections-undone = Tüm seçimler geri alındı.
+    .invalid-group = Geçersiz grup adı.
+    .group-name = Grup adını girin:
     .found-duplicate-total = __ocs_fmt_0__ bulundu (__ocs_fmt_1__ yinelenen), toplam __ocs_fmt_2__
     .found-removed-total = __ocs_fmt_0__ bulundu, __ocs_fmt_1__ çıkarıldı, toplam __ocs_fmt_2__
     .invalid-window = Geçersiz pencere belirtimi.

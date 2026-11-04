@@ -2132,6 +2132,89 @@ fn a_created_constraint_clamps_the_grip_that_moves_it() {
     );
 }
 
+/// The clamp belongs to the constraint, not to the geometry it once sized: once
+/// the constraint is deleted, the same grip on the same line answers to the
+/// point it is dragged to. The line keeps the length it had at the delete — a
+/// constraint going away does not resize what it was holding — but holding it
+/// any further would leave the line unresizable by any editing route.
+#[test]
+fn a_deleted_constraint_stops_clamping_the_grip_that_moved_it() {
+    use crate::command::CmdResult;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+        kind: ConstraintKind::DistanceX,
+        first: ParametricRef::point(line, 0),
+        second: ParametricRef::point(line, 1),
+        first_point: glam::DVec3::ZERO,
+        second_point: glam::DVec3::new(40.0, 0.0, 0.0),
+        location: glam::DVec3::new(20.0, -10.0, 0.0),
+        axis: glam::DVec3::X,
+        direction: None,
+        name: "d1".to_string(),
+        expression: "100".to_string(),
+        renamed: false,
+        label: "Linear constraint",
+    });
+    app.drive_headless_task(task).unwrap();
+    let id = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the drawing has a constraint set")
+        .constraints
+        .iter()
+        .find(|constraint| constraint.kind == ConstraintKind::DistanceX)
+        .expect("the command added a horizontal span")
+        .id;
+    let span = |app: &OpenCADStudio| {
+        let document = &app.tabs[app.active_tab].scene.document;
+        let codec::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
+            unreachable!("the participant is still a line");
+        };
+        entity.end.x - entity.start.x
+    };
+    assert!(
+        (span(&app) - 100.0).abs() < 1e-6,
+        "the constraint is live, and sizing the line, before the delete: {}",
+        span(&app)
+    );
+
+    app.delete_parametric_constraint(id);
+    assert!(
+        (span(&app) - 100.0).abs() < 1e-6,
+        "the delete leaves the line at the constrained length it had, not the one it was drawn at: {}",
+        span(&app)
+    );
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[80,10,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let end = line_point(entity, "end");
+    assert!(
+        (end.0 - 80.0).abs() < 1e-3,
+        "the deleted constraint no longer holds the line out to its own span: {q}"
+    );
+    assert!(
+        (end.1 - 10.0).abs() < 1e-3,
+        "and the end sits at the point the grip was released on: {q}"
+    );
+}
+
 /// Auto-constraining a selection adds constraints the same way, so its
 /// completion reports the geometry its solve moves outside the selection.
 #[test]

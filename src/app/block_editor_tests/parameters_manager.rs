@@ -1255,6 +1255,43 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
     }
 }
 
+/// The definition's evaluation graph — the fixture's definition holds one.
+fn evaluation_graph(document: &codec::Document) -> codec::Handle {
+    document
+        .objects
+        .values()
+        .find_map(|object| match object {
+            codec::objects::ObjectType::DynamicBlock(object) => matches!(
+                object.data,
+                codec::objects::DynamicBlockData::EvaluationGraph(_)
+            )
+            .then_some(object.handle),
+            _ => None,
+        })
+        .expect("the authored definition carries an evaluation graph")
+}
+
+/// Leave the graph naming one node twice: every parameter it held is still
+/// named, and no authoring read will edit it.
+fn duplicate_a_node(document: &mut codec::Document, graph: codec::Handle) -> bool {
+    let Some(codec::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&graph)
+    else {
+        return false;
+    };
+    match &mut object.data {
+        codec::objects::DynamicBlockData::EvaluationGraph(graph) => {
+            match graph.nodes.first().cloned() {
+                Some(node) => {
+                    graph.nodes.push(node);
+                    true
+                }
+                None => false,
+            }
+        }
+        _ => false,
+    }
+}
+
 /// A definition whose evaluation graph refuses to be edited still holds the
 /// parameters it was authored with, and the manager's rule is one row per
 /// parameter, so it has to keep printing them. Dropping the row leaves the
@@ -1262,26 +1299,18 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
 #[test]
 fn an_uneditable_graph_keeps_the_parameters_it_holds_listed() {
     let (mut app, tab, definition) = open(&["BPARAMETER VISIBILITY 0,0"], &[]);
-    let graph =
+    let graph = evaluation_graph(&app.tabs[tab].scene.document);
+    assert_eq!(
         crate::scene::block_visibility::parameter(&app.tabs[tab].scene.document, definition)
             .expect("the placed visibility parameter sits on the definition")
-            .owner;
-    let corrupted = match app.tabs[tab].scene.document.objects.get_mut(&graph) {
-        Some(codec::objects::ObjectType::DynamicBlock(object)) => {
-            match &mut object.data {
-                // A node left pointing at an object the drawing does not hold:
-                // every authoring read refuses to edit this definition's graph.
-                codec::objects::DynamicBlockData::EvaluationGraph(graph) => graph
-                    .nodes
-                    .first_mut()
-                    .map(|node| node.expression = codec::Handle::new(0x7F00))
-                    .is_some(),
-                _ => false,
-            }
-        }
-        _ => false,
-    };
-    assert!(corrupted, "the graph has a node to misplace");
+            .owner,
+        graph,
+        "and it hangs off the definition's graph"
+    );
+    assert!(
+        duplicate_a_node(&mut app.tabs[tab].scene.document, graph),
+        "the graph has a node to name twice"
+    );
     // The refusal is what makes this the uneditable case: the same row the list
     // prints is one nothing can be addressed through.
     assert!(

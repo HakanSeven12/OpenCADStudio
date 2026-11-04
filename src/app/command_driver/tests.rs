@@ -3543,3 +3543,61 @@ mod mission_m027_tests {
         assert!(output.contains("not annotative"), "{output}");
     }
 }
+
+#[cfg(test)]
+mod mission_m029_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn scale_list_reports_ratio_and_in_use_count() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("SCALELISTEDIT ADD 1:75");
+        let _ = app.run_command_line("CANNOSCALE 1:75");
+        let _ = app.run_command_line("SCALELISTEDIT LIST");
+        let output = all_output(&app);
+        assert!(output.contains("1:75"), "{output}");
+        assert!(output.contains("in use: 0"), "{output}");
+        assert!(output.contains("(current)"), "{output}");
+    }
+
+    #[test]
+    fn deleting_the_current_scale_is_refused() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("SCALELISTEDIT ADD 1:75");
+        let _ = app.run_command_line("CANNOSCALE 1:75");
+        let _ = app.run_command_line("SCALELISTEDIT DELETE 1:75");
+        let output = all_output(&app);
+        assert!(output.contains("Cannot delete the current annotation scale"));
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .document
+                .header
+                .current_annotation_scale,
+            "1:75"
+        );
+    }
+
+    #[test]
+    fn an_unused_scale_can_be_deleted_and_disappears_from_the_list() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("SCALELISTEDIT ADD 1:75");
+        let _ = app.run_command_line("SCALELISTEDIT DELETE 1:75");
+        let _ = app.run_command_line("SCALELISTEDIT LIST");
+        let output = all_output(&app);
+        assert!(output.contains("Removed annotation scale 1:75"), "{output}");
+        assert!(!output.contains("1:75  factor"), "{output}");
+    }
+}

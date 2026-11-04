@@ -1653,14 +1653,16 @@ impl OpenCADStudio {
             }
 
             // SCALELISTEDIT — list / add / delete the drawing's annotation scales.
-            //   SCALELISTEDIT              list
+            //   SCALELISTEDIT              prompt (Add / Delete)
+            //   SCALELISTEDIT LIST         every scale with ratio and in-use count
             //   SCALELISTEDIT ADD 1:50     add (name is a paper:drawing ratio)
-            //   SCALELISTEDIT DELETE 1:50  remove (not the current scale)
-            "SCALELISTEDIT" => {
+            //   SCALELISTEDIT DELETE 1:50  remove (not current and not in use)
+            //   SCALELISTEDIT DELETE FORCE 1:50  remove and drop its contexts
+            "SCALELISTEDIT" | "-SCALELISTEDIT" => {
                 use crate::command::KeywordCommand;
                 let c = KeywordCommand::new(
                     "SCALELISTEDIT",
-                    "SCALELISTEDIT  [Add / Delete]:",
+                    "SCALELISTEDIT  [Add / Delete / List]:",
                     vec![
                         (
                             "Add",
@@ -1672,13 +1674,17 @@ impl OpenCADStudio {
                             "DELETE",
                             Some("SCALELISTEDIT DELETE  scale ratio to remove:"),
                         ),
+                        ("List", "LIST", None),
                     ],
                 );
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
-            cmd if cmd.starts_with("SCALELISTEDIT ") => {
-                let rest = cmd.trim_start_matches("SCALELISTEDIT").trim();
+            cmd if cmd.starts_with("SCALELISTEDIT ") || cmd.starts_with("-SCALELISTEDIT ") => {
+                let rest = cmd
+                    .trim_start_matches('-')
+                    .trim_start_matches("SCALELISTEDIT")
+                    .trim();
                 let mut parts = rest.splitn(2, char::is_whitespace);
                 let sub = parts.next().unwrap_or("").to_uppercase();
                 let arg = parts.next().unwrap_or("").trim();
@@ -1713,47 +1719,51 @@ impl OpenCADStudio {
                             .header
                             .current_annotation_scale
                             .clone();
-                        if arg.is_empty() {
+                        let (force, name) = match arg
+                            .split_once(char::is_whitespace)
+                            .map(|(first, rest)| (first, rest.trim()))
+                        {
+                            Some((first, rest)) if first.eq_ignore_ascii_case("FORCE") => {
+                                (true, rest)
+                            }
+                            _ => (false, arg),
+                        };
+                        if name.is_empty() {
                             self.command_line.push_info(
-                                crate::t!("Usage: SCALELISTEDIT DELETE <name>").as_ref(),
+                                crate::t!("Usage: SCALELISTEDIT DELETE [FORCE] <name>").as_ref(),
                             );
-                        } else if arg.eq_ignore_ascii_case(&current) {
+                        } else if name.eq_ignore_ascii_case(&current) {
                             self.command_line.push_error(
-                                crate::tf!("Cannot delete the current annotation scale ({arg}).")
+                                crate::tf!("Cannot delete the current annotation scale ({name}).")
                                     .as_ref(),
                             );
                         } else {
-                            self.push_undo_snapshot(i, "SCALELISTEDIT");
-                            if self.tabs[i].scene.remove_scale(arg) {
-                                self.tabs[i].dirty = true;
-                                self.command_line.push_output(
-                                    crate::tf!("Removed annotation scale {arg}.").as_ref(),
+                            let in_use = self.tabs[i].scene.scale_in_use_count(name);
+                            if in_use > 0 && !force {
+                                self.command_line.push_error(
+                                    crate::tf!(
+                                        "Cannot delete {name}: {in_use} annotative object(s) use it. Use SCALELISTEDIT DELETE FORCE {name} to remove it anyway."
+                                    )
+                                    .as_ref(),
                                 );
                             } else {
-                                self.command_line.push_info(
-                                    crate::tf!("No annotation scale named {arg}.").as_ref(),
-                                );
+                                self.push_undo_snapshot(i, "SCALELISTEDIT");
+                                if self.tabs[i].scene.remove_scale(name) {
+                                    self.tabs[i].dirty = true;
+                                    self.command_line.push_output(
+                                        crate::tf!("Removed annotation scale {name}.").as_ref(),
+                                    );
+                                } else {
+                                    self.command_line.push_info(
+                                        crate::tf!("No annotation scale named {name}.").as_ref(),
+                                    );
+                                }
                             }
                         }
                     }
-                    "" => {
-                        let names: Vec<String> = self.tabs[i]
-                            .scene
-                            .scale_list()
-                            .into_iter()
-                            .map(|(n, _, _)| n)
-                            .collect();
-                        if names.is_empty() {
-                            self.command_line
-                                .push_info(crate::t!("No annotation scales defined.").as_ref());
-                        } else {
-                            self.command_line.push_output(
-                                crate::tf!("Annotation scales: {}", names.join(", ")).as_ref(),
-                            );
-                        }
-                    }
-                    _ => self.command_line.push_info(
-                        crate::t!("Usage: SCALELISTEDIT [ADD 1:50 | DELETE 1:50]").as_ref(),
+                    "LIST" | "?" | "" => self.print_scale_list(i),
+                    _ => self.command_line.push_error(
+                        crate::t!("SCALELISTEDIT: use LIST, ADD <ratio> or DELETE <ratio>.").as_ref(),
                     ),
                 }
             }
@@ -2152,6 +2162,38 @@ impl OpenCADStudio {
         self.command_line
             .push_info(&crate::command::CadCommand::prompt(&command));
         self.tabs[i].active_cmd = Some(Box::new(command));
+    }
+
+    /// Print the scale list with each ratio's factor and how many annotative
+    /// objects depend on it, marking the current scale. Shared by the command
+    /// form and `SCALELISTEDIT LIST`.
+    fn print_scale_list(&mut self, i: usize) {
+        let current = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_annotation_scale
+            .clone();
+        let rows = self.tabs[i].scene.scale_list();
+        if rows.is_empty() {
+            self.command_line
+                .push_info(crate::t!("No annotation scales defined.").as_ref());
+            return;
+        }
+        self.command_line.push_output(
+            crate::tf!("Annotation scales ({}):", rows.len()).as_ref(),
+        );
+        for (name, _inverse, factor) in rows {
+            let in_use = self.tabs[i].scene.scale_in_use_count(&name);
+            let marker = if name.eq_ignore_ascii_case(&current) {
+                "  (current)"
+            } else {
+                ""
+            };
+            self.command_line.push_output(&format!(
+                "  {name}  factor={factor:.6}  in use: {in_use}{marker}"
+            ));
+        }
     }
 
     /// Re-solve the selected annotative objects for the current scale. Shared

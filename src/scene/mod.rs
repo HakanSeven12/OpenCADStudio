@@ -7190,6 +7190,26 @@ impl Scene {
         true
     }
 
+    /// How many annotative objects reference the named scale. Counts the
+    /// object's own scale contexts; the current scale is handled separately by
+    /// the command. Used to refuse a destructive delete.
+    pub fn scale_in_use_count(&self, name: &str) -> usize {
+        let Some(handle) = self.scale_object_handle(name) else {
+            return 0;
+        };
+        self.document
+            .entities()
+            .filter(|entity| {
+                crate::scene::annotative::object_scale_memberships(
+                    &self.document,
+                    entity.common().handle,
+                )
+                .iter()
+                .any(|(_, member)| *member == handle)
+            })
+            .count()
+    }
+
     /// Remove a named annotation scale from the drawing's `ACAD_SCALELIST`
     /// (both the `Scale` object and its dictionary entry). Returns `false` if
     /// no such scale exists. The current annotation scale should not be removed

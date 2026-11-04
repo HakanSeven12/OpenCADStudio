@@ -1396,6 +1396,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) tool_windows: Vec<tool_windows::ToolWindow>,
     /// The tool swapped in as the active modal for the update running now.
     pub(crate) tool_focus: Option<ModalKind>,
+    /// The tool dialog the keyboard goes to, as it went to a modal one.
+    pub(crate) keyboard_tool: Option<ModalKind>,
     /// A tool dialog's frame being moved or resized.
     pub(crate) tool_drag: Option<tool_windows::ToolDrag>,
     /// Desktop: the windows of their own (tool dialogs and pallets).
@@ -5207,6 +5209,9 @@ pub enum Message {
     /// A message from an open tool dialog's frame or window: it runs with
     /// that tool as the active modal (see `tool_windows`).
     ToolWindow(ModalKind, Box<Message>),
+    /// What a task a tool dialog's message started answers with: it runs
+    /// with that tool swapped in again while the tool is open.
+    ToolWindowTask(ModalKind, Box<Message>),
     /// A tool dialog's title bar was pressed: start moving it.
     ToolWindowGrab(ModalKind),
     /// A tool dialog's resize grip was pressed.
@@ -6083,6 +6088,7 @@ impl OpenCADStudio {
             dock_float_menu: None,
             tool_windows: Vec::new(),
             tool_focus: None,
+            keyboard_tool: None,
             tool_drag: None,
             #[cfg(not(target_arch = "wasm32"))]
             os_windows: Vec::new(),

@@ -12,7 +12,7 @@ use iced::Task;
 /// shortcuts) while a dialog is up. `CommandEscape` is handled separately (it
 /// closes the modal); a modal's own text fields emit their own messages, which
 /// are not in this set. See [`OpenCADStudio::update`] and #126.
-fn is_modal_blocked_key_msg(msg: &Message) -> bool {
+pub(crate) fn is_modal_blocked_key_msg(msg: &Message) -> bool {
     matches!(
         msg,
         Message::CommandInput(_)
@@ -1134,7 +1134,7 @@ impl OpenCADStudio {
                 // desktop drop — and leave the rest queued, so a multi-file
                 // drop opens sequentially without its own subscription.
                 let dropped = if self.opening.is_none()
-                    && self.active_modal != Some(super::ModalKind::Recovery)
+                    && !self.dialog_open(super::ModalKind::Recovery)
                 {
                     crate::io::web_drop::take_dropped()
                         .map(|file| {
@@ -1466,7 +1466,7 @@ impl OpenCADStudio {
                     ]),
                     None => Task::none(),
                 };
-                if self.opening.is_some() || self.active_modal == Some(super::ModalKind::Recovery) {
+                if self.opening.is_some() || self.dialog_open(super::ModalKind::Recovery) {
                     self.pending_opens.push_back(path);
                     raise
                 } else if let Some(idx) = self.tab_showing(&path) {
@@ -1638,7 +1638,7 @@ impl OpenCADStudio {
                 }
                 // A load or recovery report owns the open slot; queue another
                 // drop until that state is acknowledged.
-                if self.opening.is_some() || self.active_modal == Some(super::ModalKind::Recovery) {
+                if self.opening.is_some() || self.dialog_open(super::ModalKind::Recovery) {
                     self.pending_opens.push_back(path);
                     Task::none()
                 } else if let Some(idx) = self.tab_showing(&path) {
@@ -3484,7 +3484,7 @@ impl OpenCADStudio {
             }
 
             Message::TabSwitch(idx) => {
-                if self.active_modal == Some(super::ModalKind::Recovery) {
+                if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
                 }
                 self.layout_list_open = false;
@@ -3501,7 +3501,7 @@ impl OpenCADStudio {
                         self.cancel_attr_editor();
                         // Tool dialogs working on the outgoing drawing close
                         // with it; program-wide ones (Options, …) stay.
-                        self.close_document_tools();
+                        self.close_document_tools(None);
                         // The quad is cursor UI: like the legacy menu on the
                         // disrupted transitions, it does not ride a tab
                         // switch (its per-tab window state rides
@@ -11934,12 +11934,26 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AttrEditorApply => self.on_attr_editor_apply(),
-            Message::ToolWindow(kind, inner) => self.on_tool_window_msg(kind, *inner),
-            Message::ToolWindowGrab(kind) => self.on_tool_grab(kind, false),
+            Message::ToolWindow(kind, inner) => {
+                // Working in a dialog gives it the keyboard; its own layout
+                // pass measuring it does not.
+                if !matches!(*inner, Message::ModalContentResized(_)) {
+                    self.keyboard_tool = Some(kind);
+                }
+                self.on_tool_window_msg(kind, *inner)
+            }
+            Message::ToolWindowTask(kind, inner) => self.on_tool_window_task(kind, *inner),
+            Message::ToolWindowGrab(kind) => {
+                self.keyboard_tool = Some(kind);
+                self.on_tool_grab(kind, false)
+            }
             Message::ToolWindowResizeGrab(kind) => self.on_tool_grab(kind, true),
             Message::ToolWindowDragMove(point) => self.on_tool_drag_move(point),
             Message::ToolWindowDragRelease => self.on_tool_drag_release(),
-            Message::ToolWindowRaise(kind) => self.raise_tool(kind),
+            Message::ToolWindowRaise(kind) => {
+                self.keyboard_tool = Some(kind);
+                self.raise_tool(kind)
+            }
             #[cfg(not(target_arch = "wasm32"))]
             Message::ToolWindowDetach(kind) => self.detach_tool(kind),
             #[cfg(not(target_arch = "wasm32"))]
@@ -13083,7 +13097,9 @@ impl OpenCADStudio {
                     Ok(message) => self.command_line.push_info(&message),
                     Err(error) => {
                         self.command_line.push_error(&error);
-                        if self.active_modal.is_none() {
+                        if self.active_modal.is_none()
+                            && !self.dialog_open(super::ModalKind::PrintAll)
+                        {
                             self.active_modal = Some(super::ModalKind::PrintAll);
                             self.reset_modal_geometry();
                         }
@@ -13249,7 +13265,7 @@ impl OpenCADStudio {
                     .as_ref(),
                 );
                 self.active_plot_style = Some(table);
-                if self.active_modal == Some(super::ModalKind::Plotstyle) {
+                if self.dialog_open(super::ModalKind::Plotstyle) {
                     self.plotstyle_panel_baseline = Some(self.active_plot_style.clone());
                 }
                 self.plot_dialog.plot_styles = crate::io::plot_style::available_ctb_names();

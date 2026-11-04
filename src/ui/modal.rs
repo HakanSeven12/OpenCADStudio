@@ -499,12 +499,23 @@ pub fn tool_frame<'a>(
         ));
     }
     let controls = controls.push(close);
+    // Left-aligned, clear of the buttons: a narrow dialog's title would run
+    // under them centred.
     let title_surface = mouse_area(
-        container(iced::widget::text(title).size(15))
-            .width(Length::Fill)
-            .height(Length::Fixed(24.0))
-            .align_x(iced::alignment::Horizontal::Center)
-            .align_y(iced::alignment::Vertical::Center),
+        container(
+            iced::widget::text(title)
+                .size(15)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .ellipsis(iced::advanced::text::Ellipsis::End),
+        )
+        .width(Length::Fill)
+        .height(Length::Fixed(24.0))
+        .padding(Padding {
+            left: 4.0,
+            right: 64.0,
+            ..Padding::ZERO
+        })
+        .align_y(iced::alignment::Vertical::Center),
     )
     .on_press(grab)
     .interaction(iced::mouse::Interaction::Grab);

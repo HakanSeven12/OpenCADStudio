@@ -1413,6 +1413,36 @@ impl OpenCADStudio {
         {
             return Ok(Task::none());
         }
+        // The buttons of "the open dialog" press the front-most one when no
+        // dialog is swapped in.
+        if matches!(
+            name,
+            "dialog_ok"
+                | "dialog_answer"
+                | "dialog_discard"
+                | "dialog_cancel"
+                | "pdf_dialog_ok"
+                | "pdf_layer_toggle"
+                | "table_cell_dialog"
+        ) && self.active_modal.is_none()
+        {
+            if let Some(kind) = self.tool_windows.last().map(|tool| tool.kind) {
+                self.enter_tool(kind);
+            }
+        }
+        match name {
+            "conversion_loss_save_anyway" | "conversion_loss_back" => {
+                self.focus_dialog(crate::app::ModalKind::ConversionLoss);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            "external_change_reload"
+            | "external_change_overwrite"
+            | "external_change_save_as"
+            | "external_change_cancel" => {
+                self.focus_dialog(crate::app::ModalKind::ExternalChange);
+            }
+            _ => {}
+        }
         let msg = match name {
             // With no modal dialog up, the front-most open tool dialog.
             "close_modal" => match (self.active_modal, self.tool_windows.last()) {

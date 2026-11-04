@@ -1,10 +1,8 @@
 //! Tool dialogs that stay open beside the drawing, and windows of their own.
 //!
-//! Most dialogs are modal: one at a time, over a dimmed backdrop, while the
-//! drawing waits. A *tool* dialog (Options, the style managers, Find and
-//! Replace, …) is not: it opens as a frame over the drawing that lets the
-//! drawing, the command line and other tool dialogs work while it is open,
-//! and on the desktop it — or any dock pallet — can move into a window of its
+//! Every dialog is a *tool*: it opens as a frame over the drawing that lets
+//! the drawing, the command line and other dialogs work while it is open, and
+//! on the desktop it — or any dock pallet — can move into a window of its
 //! own, onto another monitor. The web build has one canvas, so there tools and
 //! pallets stay frames inside it.
 //!
@@ -30,11 +28,11 @@ pub(crate) enum ToolScope {
 }
 
 impl ModalKind {
-    /// Whether this dialog is a tool (non-modal, detachable) and its scope.
-    /// Everything else stays modal: confirmations and warnings, file and
-    /// recovery flows, dialogs tied to a running command or a pick, and the
-    /// child dialogs other dialogs return to.
-    pub(crate) fn tool_scope(self) -> Option<ToolScope> {
+    /// Where this dialog's state lives. Every dialog is a tool: program
+    /// settings, notices and the flows that hold a file or a tab operation
+    /// half done stay open on a drawing switch; the rest work on the current
+    /// drawing and close with it.
+    pub(crate) fn tool_scope(self) -> ToolScope {
         use ModalKind as K;
         match self {
             K::About
@@ -45,33 +43,31 @@ impl ModalKind {
             | K::XrefHelp
             | K::UpdateNotice
             | K::DonationPrompt
-            | K::GpuWarning => Some(ToolScope::App),
-            K::DraftingSettings
-            | K::LayerStateManager
-            | K::LayerTranslator
-            | K::DrawingUnits
-            | K::TextStyle
-            | K::TableStyle
-            | K::MlStyle
-            | K::MLeaderStyle
-            | K::DimStyle
-            | K::PointStyle
-            | K::ScaleManager
-            | K::LayoutManager
-            | K::DrawingProperties
-            | K::Rename
-            | K::Purge
-            | K::FindReplace
-            | K::Spell
-            | K::DataLinkManager
-            | K::AttMan
-            | K::SelectSimilarSettings
-            | K::BlockEditorSettings
-            | K::AutoConstrainSettings
-            | K::Plot
-            | K::PrintAll
-            | K::MissingFonts => Some(ToolScope::Document),
-            _ => None,
+            | K::GpuWarning
+            | K::AssocPrompt
+            | K::Unsaved
+            | K::BlockEditChanges
+            | K::SaveDialog
+            | K::Recovery
+            | K::RecoveryPrompt
+            | K::ConversionLoss
+            | K::AecDropWarning
+            | K::ImportFile
+            | K::DgnImport
+            | K::TdsImport
+            | K::TdsMaterial
+            | K::TdsMissingMap
+            | K::PdfImportFile
+            | K::PdfPassword
+            | K::SheetSet
+            | K::PluginDialog
+            | K::ExtractionOutdated
+            | K::DataExtractionUnsaved => ToolScope::App,
+            #[cfg(not(target_arch = "wasm32"))]
+            K::FileInUse | K::ExternalChange => ToolScope::App,
+            #[cfg(target_arch = "wasm32")]
+            K::AutosaveRestore => ToolScope::App,
+            _ => ToolScope::Document,
         }
     }
 }
@@ -80,6 +76,8 @@ impl ModalKind {
 #[derive(Debug, Clone)]
 pub(crate) struct ToolWindow {
     pub kind: ModalKind,
+    /// The drawing it opened on (the tab id).
+    pub tab: Option<u64>,
     /// Shift from the centre of the drawing area, as a modal's.
     pub offset: Vector,
     /// Growth past the dialog's natural size (the resize grip).
@@ -179,18 +177,17 @@ pub(crate) fn is_main_window(id: iced::window::Id) -> bool {
 impl OpenCADStudio {
     /// The update iced runs: one message, then open tools parked again.
     pub fn update_root(&mut self, msg: Message) -> Task<Message> {
+        let msg = self.route_tool_keyboard(msg);
         let task = self.update(msg);
         let settled = self.settle_tool_windows();
         Task::batch([task, settled])
     }
 
-    /// Whether `kind`, the active modal now, may park as a tool: a dialog
-    /// opened from another one returns to it on close, so it stays modal.
-    fn tool_parkable(&self, kind: ModalKind) -> bool {
-        kind.tool_scope().is_some()
-            && !(kind == ModalKind::Options && self.options_parent.is_some())
-            && !(kind == ModalKind::TableStyle && self.tablestyle_parent_table)
-            && self.color_picker.is_none()
+    /// Whether the active modal may park: the colour picker is drawn over
+    /// the dialog it was opened from and answers into it, so while it is up
+    /// that dialog stays modal.
+    fn tool_parkable(&self) -> bool {
+        self.color_picker.is_none()
     }
 
     /// Whether a tool dialog of `kind` is open, active or parked.
@@ -201,24 +198,29 @@ impl OpenCADStudio {
     /// Make parked tool `kind` the active modal for the message about to run.
     /// Refused while a modal dialog (one that is not a tool) is up.
     pub(crate) fn enter_tool(&mut self, kind: ModalKind) -> bool {
+        // A tool swapped in earlier in this update and closed since is gone.
+        if let Some(focus) = self.tool_focus {
+            if self.active_modal != Some(focus) {
+                self.tool_windows.retain(|tool| tool.kind != focus);
+                self.tool_focus = None;
+            }
+        }
         match self.active_modal {
             Some(active) if active == kind => return true,
-            Some(active) if !self.tool_open(active) => return false,
+            Some(active) if !self.tool_open(active) && !self.tool_parkable() => return false,
             Some(_) => self.park_active_tool(),
             None => {}
         }
-        let Some(index) = self.tool_windows.iter().position(|tool| tool.kind == kind) else {
+        // Swapping in keeps the stacking order: only a press raises a tool.
+        let Some(tool) = self.tool_windows.iter().find(|tool| tool.kind == kind) else {
             return false;
         };
-        // Front-most: the last one drawn.
-        let tool = self.tool_windows.remove(index);
         self.modal_offset = tool.offset;
         self.modal_resize = tool.resize;
         self.modal_content_size = tool.content_size;
         self.modal_drag_last = None;
         self.modal_dragging = false;
         self.modal_resizing = false;
-        self.tool_windows.push(tool);
         self.active_modal = Some(kind);
         self.tool_focus = Some(kind);
         true
@@ -232,10 +234,16 @@ impl OpenCADStudio {
         let geometry = (self.modal_offset, self.modal_resize, self.modal_content_size);
         let cascade = self.tool_windows.iter().filter(|tool| tool.in_canvas()).count() as f32;
         match self.tool_windows.iter().position(|tool| tool.kind == kind) {
-            Some(index) => {
-                let mut tool = self.tool_windows.remove(index);
+            // Swapped in for a message: it stays where it was moved to.
+            Some(index) if self.tool_focus == Some(kind) => {
+                let tool = &mut self.tool_windows[index];
                 (tool.offset, tool.resize, tool.content_size) = geometry;
+            }
+            // Opened again while open: it comes to the front where it is.
+            Some(index) => {
+                let tool = self.tool_windows.remove(index);
                 self.tool_windows.push(tool);
+                self.keyboard_tool = Some(kind);
             }
             None => {
                 // A new tool: cascade it from the ones already open, and back
@@ -247,8 +255,12 @@ impl OpenCADStudio {
                 };
                 #[cfg(not(target_arch = "wasm32"))]
                 let wants_window = self.dock.tool_windows.contains_key(&tool_key(kind));
+                // A dialog that just opened has the keyboard, as a modal had.
+                self.keyboard_tool = Some(kind);
+                let tab = self.tabs.get(self.active_tab).map(|tab| tab.id);
                 self.tool_windows.push(ToolWindow {
                     kind,
+                    tab,
                     offset,
                     resize: geometry.1,
                     content_size: geometry.2,
@@ -272,15 +284,31 @@ impl OpenCADStudio {
     /// (or replaced by the dialog it opened); a tool left active parks. On
     /// the desktop the windows of their own follow what is open.
     pub(crate) fn settle_tool_windows(&mut self) -> Task<Message> {
-        if let Some(kind) = self.tool_focus.take() {
+        if let Some(kind) = self.tool_focus {
             if self.active_modal != Some(kind) {
                 self.tool_windows.retain(|tool| tool.kind != kind);
+                self.tool_focus = None;
             }
         }
-        if let Some(kind) = self.active_modal {
-            if self.tool_parkable(kind) {
-                self.park_active_tool();
-            }
+        // However the drawing changed (a switch, a close, a discard), tools
+        // working on the one that went close with it.
+        let tab = self.tabs.get(self.active_tab).map(|tab| tab.id);
+        if self
+            .tool_windows
+            .iter()
+            .any(|tool| tool.kind.tool_scope() == ToolScope::Document && tool.tab != tab)
+        {
+            self.close_document_tools(tab);
+        }
+        if self.active_modal.is_some() && self.tool_parkable() {
+            self.park_active_tool();
+        }
+        self.tool_focus = None;
+        if self
+            .keyboard_tool
+            .is_some_and(|kind| !self.tool_windows.iter().any(|tool| tool.kind == kind && tool.in_canvas()))
+        {
+            self.keyboard_tool = None;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -299,7 +327,53 @@ impl OpenCADStudio {
         if !self.enter_tool(kind) {
             return Task::none();
         }
+        // What the message starts (a file read, a save, a pick) answers to
+        // the same dialog, as it did while that dialog was modal.
         self.update(inner)
+            .map(move |msg| Message::ToolWindowTask(kind, Box::new(msg)))
+    }
+
+    /// The answer of a task tool `kind` started: it runs with the tool swapped
+    /// in while it is still open, and as a plain message once it is not.
+    pub(crate) fn on_tool_window_task(&mut self, kind: ModalKind, inner: Message) -> Task<Message> {
+        if self.tool_open(kind) {
+            self.on_tool_window_msg(kind, inner)
+        } else {
+            self.update(inner)
+        }
+    }
+
+    /// Keys while a dialog has the keyboard go to it, as they went to a modal
+    /// dialog: Esc closes it, Enter answers it, the rest stay out of the
+    /// command line. A press on the drawing, a pane, the ribbon or into the
+    /// command line gives the keyboard back to the drawing.
+    fn route_tool_keyboard(&mut self, msg: Message) -> Message {
+        if matches!(
+            msg,
+            Message::ViewportLeftPress
+                | Message::ViewportLeftPressAt(_)
+                | Message::ViewportRightPress
+                | Message::ViewportMiddlePress
+                | Message::PaneClicked(_)
+                | Message::PanePress(_)
+                | Message::PanePressAt(..)
+                | Message::PaneRightPress(_)
+                | Message::PaneMiddlePress(_)
+                | Message::RibbonToolClick { .. }
+                | Message::CommandInput(_)
+        ) {
+            self.keyboard_tool = None;
+        }
+        match self.keyboard_tool {
+            Some(kind)
+                if self.active_modal.is_none()
+                    && (matches!(msg, Message::CommandEscape)
+                        || super::update::is_modal_blocked_key_msg(&msg)) =>
+            {
+                Message::ToolWindow(kind, Box::new(msg))
+            }
+            _ => msg,
+        }
     }
 
     /// Automation: drive dialog `kind` whether it is the modal one or an open
@@ -308,14 +382,20 @@ impl OpenCADStudio {
         self.active_modal == Some(kind) || (self.tool_open(kind) && self.enter_tool(kind))
     }
 
+    /// Whether dialog `kind` is up, the active modal or an open tool.
+    pub(crate) fn dialog_open(&self, kind: ModalKind) -> bool {
+        self.active_modal == Some(kind) || self.tool_open(kind)
+    }
+
     /// The drawing changed: tools working on it close, as their modal forms
-    /// did when the drawing could not change under them.
-    pub(crate) fn close_document_tools(&mut self) {
+    /// did when the drawing could not change under them. Those opened on
+    /// tab `keep` stay.
+    pub(crate) fn close_document_tools(&mut self, keep: Option<u64>) {
         let kinds: Vec<ModalKind> = self
             .tool_windows
             .iter()
+            .filter(|tool| tool.kind.tool_scope() == ToolScope::Document && tool.tab != keep)
             .map(|tool| tool.kind)
-            .filter(|kind| kind.tool_scope() == Some(ToolScope::Document))
             .collect();
         for kind in kinds {
             if self.enter_tool(kind) {
@@ -889,16 +969,34 @@ mod tests {
         app.active_modal = Some(ModalKind::DraftingSettings);
         let _ = app.update_root(Message::Noop);
         assert!(app.tool_open(ModalKind::About) && app.tool_open(ModalKind::DraftingSettings));
-        // A modal dialog stays modal, and the tools wait under it.
-        app.active_modal = Some(ModalKind::Unsaved);
-        let _ = app.update_root(Message::Noop);
-        assert_eq!(app.active_modal, Some(ModalKind::Unsaved));
+        // A message for one (its layout measuring it) keeps the stacking
+        // order; opening it again brings it to the front.
+        let front = |app: &OpenCADStudio| app.tool_windows.last().map(|tool| tool.kind);
         let _ = app.update_root(Message::ToolWindow(
             ModalKind::About,
-            Box::new(Message::CloseModal),
+            Box::new(Message::ModalContentResized(Size::new(300.0, 200.0))),
         ));
-        assert!(app.tool_open(ModalKind::About), "ignored under a modal dialog");
-        app.active_modal = None;
+        assert_eq!(front(&app), Some(ModalKind::DraftingSettings));
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        assert_eq!(front(&app), Some(ModalKind::About));
+        // A question parks too, and has the keyboard as it opens: Esc
+        // answers it and leaves the others.
+        app.active_modal = Some(ModalKind::Unsaved);
+        let _ = app.update_root(Message::Noop);
+        assert_eq!(app.active_modal, None);
+        assert_eq!(app.keyboard_tool, Some(ModalKind::Unsaved));
+        let _ = app.update_root(Message::CommandEscape);
+        assert!(!app.tool_open(ModalKind::Unsaved), "Esc went to the dialog");
+        assert!(app.tool_open(ModalKind::About) && app.tool_open(ModalKind::DraftingSettings));
+        assert_eq!(app.keyboard_tool, None, "the keyboard is the drawing's again");
+        let _ = app.update_root(Message::CommandEscape);
+        assert!(app.tool_open(ModalKind::About), "Esc on the drawing leaves tools open");
+        // A press on a frame takes the keyboard; one on the drawing gives it back.
+        let _ = app.update_root(Message::ToolWindowRaise(ModalKind::About));
+        assert_eq!(app.keyboard_tool, Some(ModalKind::About));
+        let _ = app.update_root(Message::ViewportLeftPress);
+        assert_eq!(app.keyboard_tool, None);
         // Its own close closes the tool, and only that one.
         let _ = app.update_root(Message::ToolWindow(
             ModalKind::About,
@@ -912,6 +1010,14 @@ mod tests {
             .push(crate::app::document::DocumentTab::new_drawing(app.tabs.len() + 1));
         let other = app.tabs.len() - 1;
         let _ = app.update_root(Message::TabSwitch(other));
+        assert!(!app.tool_open(ModalKind::DraftingSettings));
+        // However the drawing goes (here: removed under it), its tools close.
+        app.active_modal = Some(ModalKind::DraftingSettings);
+        let _ = app.update_root(Message::Noop);
+        assert!(app.tool_open(ModalKind::DraftingSettings));
+        app.tabs.remove(other);
+        app.active_tab = 0;
+        let _ = app.update_root(Message::Noop);
         assert!(!app.tool_open(ModalKind::DraftingSettings));
     }
 }

@@ -314,7 +314,7 @@ impl OpenCADStudio {
                 // The boundary is gone (erased, undone): ask, or do what was
                 // chosen for good.
                 None => {
-                    if self.active_modal == Some(crate::app::ModalKind::CountInvalidArea) {
+                    if self.dialog_open(crate::app::ModalKind::CountInvalidArea) {
                         return;
                     }
                     match self.count_palette.invalid_choice {
@@ -386,7 +386,7 @@ impl OpenCADStudio {
     }
 
     fn close_invalid_area(&mut self, choice: u8) {
-        if self.active_modal == Some(crate::app::ModalKind::CountInvalidArea) {
+        if self.focus_dialog(crate::app::ModalKind::CountInvalidArea) {
             self.close_active_modal();
         }
         if self.count_palette.invalid_always {

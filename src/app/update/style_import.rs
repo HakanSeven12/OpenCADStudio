@@ -231,7 +231,7 @@ impl OpenCADStudio {
             StyleKind::Dim => ModalKind::DimStyle,
             _ => return Task::none(),
         };
-        if self.active_modal != Some(parent) {
+        if !self.focus_dialog(parent) {
             return Task::none();
         }
         match result {

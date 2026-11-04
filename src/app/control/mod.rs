@@ -642,7 +642,7 @@ impl OpenCADStudio {
         // may be reading it; clients close it with `close_modal`.
         if !self.control.automation_seen && self.control.enabled {
             self.control.automation_seen = true;
-            if self.active_modal != Some(super::ModalKind::DonationPrompt) {
+            if !self.dialog_open(super::ModalKind::DonationPrompt) {
                 self.pending_startup_modals
                     .retain(|kind| kind != &super::ModalKind::DonationPrompt);
             }
@@ -1056,7 +1056,7 @@ impl OpenCADStudio {
         // form covers the whole app, so any client may answer it, as any client
         // may answer the dialogs the same guard has always let through.
         let answers_attribute_form = op == "action"
-            && self.active_modal == Some(crate::app::ModalKind::InsertAttributes)
+            && self.dialog_open(crate::app::ModalKind::InsertAttributes)
             && matches!(
                 req["name"].as_str(),
                 Some("dialog_answer") | Some("dialog_ok") | Some("dialog_cancel") | Some("close_modal")

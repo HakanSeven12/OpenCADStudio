@@ -105,7 +105,7 @@ impl OpenCADStudio {
     pub(super) fn on_page_setup_import_file(&mut self, path: PathBuf) -> Task<Message> {
         // The chooser lives in the Plot dialog; open it if the import was
         // started from the command line.
-        let open = if self.active_modal == Some(crate::app::ModalKind::Plot) {
+        let open = if self.dialog_open(crate::app::ModalKind::Plot) {
             Task::none()
         } else {
             self.on_plot_dialog_open()

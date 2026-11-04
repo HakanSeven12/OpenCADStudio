@@ -131,7 +131,7 @@ impl OpenCADStudio {
             self.extraction_outdated = Some(prompt);
             return Task::none();
         }
-        if self.active_modal == Some(ModalKind::ExtractionOutdated) {
+        if self.focus_dialog(ModalKind::ExtractionOutdated) {
             self.active_modal = None;
             self.reset_modal_geometry();
         }

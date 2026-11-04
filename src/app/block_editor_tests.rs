@@ -4,6 +4,7 @@ use codec::entities::{Insert, Line};
 use codec::types::Vector3;
 use codec::{EntityType, Handle};
 
+mod construction_visibility;
 mod retained_save_as;
 mod table_properties;
 mod lookup_properties;

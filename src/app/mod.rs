@@ -5226,6 +5226,9 @@ pub enum Message {
     /// Desktop: a window of its own's "back to the main window" button.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     OsWindowReturn(window::Id),
+    /// Desktop: Esc or Enter in a window of its own, by shortcut name.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    OsWindowKey(window::Id, String),
     /// Desktop: a window other than the main one was resized or moved.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     OsWindowResized(window::Id, f32, f32),

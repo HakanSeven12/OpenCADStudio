@@ -24,10 +24,12 @@ impl OpenCADStudio {
     pub(super) fn show_next_startup_modal(&mut self) {
         // One startup prompt at a time, also while the shown one sits open
         // beside the drawing.
-        let showing = self
-            .pending_startup_modals
-            .front()
-            .is_some_and(|kind| self.tool_open(*kind));
+        let showing = self.tool_windows.iter().any(|tool| {
+            matches!(
+                tool.kind,
+                ModalKind::AssocPrompt | ModalKind::DonationPrompt | ModalKind::GpuWarning
+            )
+        }) || self.pending_startup_modals.front().is_some_and(|kind| self.tool_open(*kind));
         if self.active_modal.is_none()
             && !showing
             && self.opening.is_none()

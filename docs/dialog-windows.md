@@ -9,9 +9,15 @@ without a backdrop:
 - The drawing, the command line, the dock pallets and other dialogs keep
   working while it is open.
 - Several dialogs can be open at once. A press on one brings it to the front.
-- On the desktop, a dialog or any dock pallet can move into a **window of its
-  own**, for example onto a second monitor.
-- The web build has one canvas, so there they stay as frames inside it.
+- On the desktop every dialog opens in a **window of its own**, sized to its
+  content, so it can sit anywhere, for example on a second monitor. "Back to
+  the main window" in its header turns it into a frame inside the main
+  window, and it stays one until its frame's "Open in its own window" button
+  sends it out again.
+- Dock pallets stay in the dock. Any pallet can still move into a window of
+  its own from its title bar.
+- The web build has one canvas, so there dialogs and pallets stay as frames
+  inside it.
 
 ## Scope: what a drawing switch does
 
@@ -68,17 +74,23 @@ and the one its close path closes. Tools keep that code unchanged.
 
 ## Windows of their own (desktop)
 
+- A dialog is laid out once off screen, then its window opens at that size.
+  A dialog whose window was moved or resized opens there, at that size.
+- Esc in a dialog's window closes it. Enter answers it where Enter did before
+  in the main window, unless a field took the Enter.
+- The colour picker a dialog opens is drawn over that dialog in its window.
 - A tool frame's title bar has an "Open in its own window" button. A floating
   pallet's title-bar menu has the same entry.
 - The window's header has "Back to the main window", which returns a tool to
   its frame and floats a pallet in the main window again.
 - Closing the window from the window manager closes the tool or hides the
   pallet.
-- The next open of either comes back in its own window, where it last was.
-  Placements are kept in the dock section of the configuration
-  (`detached` for pallets, `tool_windows` for dialogs).
-- Keys typed in a window of its own stay with its widgets. They do not reach
-  the command line or the drawing's shortcuts.
+- The next open of either comes back where it last was. Placements are kept
+  in the dock section of the configuration: `detached` for pallets,
+  `tool_windows` for dialogs, and `tool_frames` for the dialogs brought back
+  into the main window.
+- Other keys typed in a window of its own stay with its widgets. They do not
+  reach the command line or the drawing's shortcuts.
 
 ## Command History pallet
 

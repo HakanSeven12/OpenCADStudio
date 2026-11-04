@@ -399,11 +399,27 @@ pub(crate) fn main_window_event(
         {
             Some(Message::OsWindowMoved(win_id, at))
         }
-        // Keys typed in a window of its own stay with its widgets.
+        // Keys typed in a window of its own stay with its widgets; only Esc
+        // and an unclaimed Enter reach its dialog.
         #[cfg(not(target_arch = "wasm32"))]
-        iced::Event::Keyboard(
-            keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. },
-        ) if !crate::app::tool_windows::is_main_window(win_id) => None,
+        iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            let name = match key {
+                keyboard::Key::Named(keyboard::key::Named::Escape) => "ESCAPE",
+                keyboard::Key::Named(keyboard::key::Named::Enter) if status == Status::Ignored => {
+                    "ENTER"
+                }
+                _ => return None,
+            };
+            Some(Message::OsWindowKey(win_id, name.to_string()))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. })
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            None
+        }
         iced::Event::Window(window::Event::Resized(sz)) => {
             Some(Message::WindowResized(sz.width as f32, sz.height as f32))
         }
@@ -3483,7 +3499,12 @@ bg={bg_ms:.1}ms n={view_count}"
         // ── In-canvas modal dialogs (Plan B) ───────────────────────────────
         // Former pop-up windows render as overlays here, so they work on both
         // the native (single main window) and web builds.
-        let base: Element<'_, Message> = match self.modal_content() {
+        // A dialog in a window of its own is drawn there, also while it is
+        // the active modal (the colour picker it opened holds it).
+        let in_own_window = self.active_modal.is_some_and(|kind| {
+            self.tool_windows.iter().any(|tool| tool.kind == kind && !tool.in_canvas())
+        });
+        let base: Element<'_, Message> = match self.modal_content().filter(|_| !in_own_window) {
             Some(content) => {
                 let modal_options = if cfg!(target_arch = "wasm32")
                     && matches!(self.active_modal, Some(super::ModalKind::PluginManager))
@@ -3536,6 +3557,9 @@ bg={bg_ms:.1}ms n={view_count}"
             // whole window can be sampled.
             if let Some(eyedropper) = picker.eyedropper_view() {
                 return iced::widget::stack![base, eyedropper].into();
+            }
+            if in_own_window {
+                return base;
             }
             crate::ui::modal::modal(
                 base,

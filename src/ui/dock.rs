@@ -526,9 +526,12 @@ pub struct DockState {
     /// Desktop: pallets shown in a window of their own, and where that window
     /// was. Out of the layout above while they are here.
     pub detached: BTreeMap<PanelId, crate::app::tool_windows::WindowPlacement>,
-    /// Desktop: tool dialogs that open in a window of their own, by dialog
-    /// name, and where that window was.
+    /// Desktop: where each dialog's window of its own last was, by dialog
+    /// name.
     pub tool_windows: BTreeMap<String, crate::app::tool_windows::WindowPlacement>,
+    /// Desktop: dialogs brought back into the main window. Every other one
+    /// opens in a window of its own.
+    pub tool_frames: std::collections::BTreeSet<String>,
 }
 
 impl Default for DockState {
@@ -542,6 +545,7 @@ impl Default for DockState {
             panels: BTreeMap::new(),
             detached: BTreeMap::new(),
             tool_windows: BTreeMap::new(),
+            tool_frames: Default::default(),
         }
     }
 }

@@ -93,7 +93,7 @@ pub(crate) struct ToolWindow {
 }
 
 impl ToolWindow {
-    fn in_canvas(&self) -> bool {
+    pub(crate) fn in_canvas(&self) -> bool {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.window.is_none() && !self.wants_window
@@ -253,8 +253,11 @@ impl OpenCADStudio {
                 } else {
                     geometry.0
                 };
+                // Desktop: a dialog opens in a window of its own, unless it
+                // was brought back into the main window.
                 #[cfg(not(target_arch = "wasm32"))]
-                let wants_window = self.dock.tool_windows.contains_key(&tool_key(kind));
+                let wants_window =
+                    self.main_window.is_some() && !self.dock.tool_frames.contains(&tool_key(kind));
                 // A dialog that just opened has the keyboard, as a modal had.
                 self.keyboard_tool = Some(kind);
                 let tab = self.tabs.get(self.active_tab).map(|tab| tab.id);
@@ -495,6 +498,31 @@ impl OpenCADStudio {
                 },
             ));
         }
+        // A dialog bound for a window of its own is laid out once off screen,
+        // so its window opens at the size it needs.
+        #[cfg(not(target_arch = "wasm32"))]
+        for tool in self.tool_windows.iter().filter(|tool| {
+            tool.wants_window && tool.window.is_none() && tool.content_size.is_none()
+        }) {
+            let kind = tool.kind;
+            let Some(content) = self.modal_content_for(kind, Vector::ZERO) else {
+                continue;
+            };
+            let (ww, wh) = self.win_size;
+            let measured = iced::widget::sensor(
+                content.map(move |msg| Message::ToolWindow(kind, Box::new(msg))),
+            )
+            .on_resize(move |size| {
+                Message::ToolWindow(kind, Box::new(Message::ModalContentResized(size)))
+            });
+            layers.push(
+                // Laid out in the window's size, drawn past its corner.
+                iced::widget::pin(iced::widget::pin(measured).width(ww).height(wh))
+                    .x(-(ww + 1000.0))
+                    .y(-(wh + 1000.0))
+                    .into(),
+            );
+        }
         if let Some(drag) = self.tool_drag {
             layers.push(
                 mouse_area(Space::new().width(Fill).height(Fill))
@@ -533,6 +561,7 @@ impl OpenCADStudio {
 impl OpenCADStudio {
     /// Move tool `kind` into a window of its own.
     pub(crate) fn detach_tool(&mut self, kind: ModalKind) -> Task<Message> {
+        self.dock.tool_frames.remove(&tool_key(kind));
         if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
             tool.wants_window = true;
             let size = tool.content_size.unwrap_or(Size::new(620.0, 460.0));
@@ -577,7 +606,7 @@ impl OpenCADStudio {
         };
         match window.content {
             Detached::Tool(kind) => {
-                self.dock.tool_windows.remove(&tool_key(kind));
+                self.dock.tool_frames.insert(tool_key(kind));
                 if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
                     tool.wants_window = false;
                     tool.window = None;
@@ -617,6 +646,17 @@ impl OpenCADStudio {
         self.os_windows.retain(|window| window.id != id);
         self.save_config();
         Task::batch([task, iced::window::close(id)])
+    }
+
+    /// Esc or Enter in a window of its own: its dialog answers it, as it
+    /// answered them while modal.
+    pub(crate) fn os_window_key(&mut self, id: iced::window::Id, key: String) -> Task<Message> {
+        match window_content(&self.os_windows, id) {
+            Some(Detached::Tool(kind)) => {
+                self.on_tool_window_msg(kind, Message::ShortcutPressed(key))
+            }
+            _ => Task::none(),
+        }
     }
 
     /// A window of its own went away (closed by us or by the system).
@@ -692,19 +732,23 @@ impl OpenCADStudio {
             return Task::batch(tasks);
         }
         // Open what should be up.
-        let tools: Vec<ModalKind> = self
+        // A dialog's window opens once its content was measured (off screen,
+        // see `with_tool_windows`), at the size it needs.
+        let tools: Vec<(ModalKind, Size, Vector)> = self
             .tool_windows
             .iter()
             .filter(|tool| tool.wants_window && tool.window.is_none())
-            .map(|tool| tool.kind)
+            .filter_map(|tool| Some((tool.kind, tool.content_size?, tool.resize)))
             .collect();
-        for kind in tools {
+        for (kind, size, resize) in tools {
             let placement = self.dock.tool_windows.get(&tool_key(kind)).copied().unwrap_or(
                 WindowPlacement {
                     x: f32::NAN,
                     y: f32::NAN,
-                    w: 640.0,
-                    h: 480.0,
+                    // Whole pixels and a little slack: text laid out a
+                    // fraction narrower than measured wraps a line lower.
+                    w: size.width.ceil() + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.x,
+                    h: size.height.ceil() + HEADER_H + 2.0 * WINDOW_PAD + WINDOW_SLACK + resize.y,
                 },
             );
             let (id, open) = open_window(placement, self.modal_title_for(kind));
@@ -776,14 +820,37 @@ impl OpenCADStudio {
                 // The dialog grows with its window, past its natural size.
                 let natural = tool.content_size.unwrap_or(Size::ZERO);
                 let extra = Vector::new(
-                    (window.placement.w - natural.width - FRAME_W).max(0.0),
-                    (window.placement.h - HEADER_H - natural.height - FRAME_H).max(0.0),
+                    (window.placement.w - natural.width.ceil() - 2.0 * WINDOW_PAD - WINDOW_SLACK)
+                        .max(0.0),
+                    (window.placement.h
+                        - HEADER_H
+                        - natural.height.ceil()
+                        - 2.0 * WINDOW_PAD
+                        - WINDOW_SLACK)
+                        .max(0.0),
                 );
                 let content = self.modal_content_for(kind, extra)?;
-                container(content.map(move |msg| Message::ToolWindow(kind, Box::new(msg))))
-                    .padding(10)
-                    .center_x(Fill)
-                    .into()
+                let body: Element<'_, Message> =
+                    container(content.map(move |msg| Message::ToolWindow(kind, Box::new(msg))))
+                        .padding(WINDOW_PAD)
+                        .center_x(Fill)
+                        .into();
+                // The colour picker a dialog opened is drawn over that dialog.
+                match self.color_picker.as_ref() {
+                    Some(picker)
+                        if self.active_modal == Some(kind) && picker.eyedropper_view().is_none() =>
+                    {
+                        crate::ui::modal::modal(
+                            body,
+                            crate::t!("Select Color"),
+                            picker.view(),
+                            Message::CloseColorPicker,
+                            Vector::ZERO,
+                            crate::ui::modal::ModalOptions::NOTICE,
+                        )
+                    }
+                    _ => body,
+                }
             }
             Detached::Panel(panel) => {
                 let tab = self.tabs.get(self.active_tab)?;
@@ -813,6 +880,14 @@ pub(crate) const BACK_BUTTON_ID: &str = "back-to-main-window";
 #[cfg(not(target_arch = "wasm32"))]
 const HEADER_H: f32 = 26.0;
 
+/// Padding around a dialog in a window of its own.
+#[cfg(not(target_arch = "wasm32"))]
+const WINDOW_PAD: f32 = 10.0;
+
+/// Room a dialog's window gets past its measured content.
+#[cfg(not(target_arch = "wasm32"))]
+const WINDOW_SLACK: f32 = 8.0;
+
 #[cfg(not(target_arch = "wasm32"))]
 fn window_content(windows: &[OsWindow], id: iced::window::Id) -> Option<Detached> {
     windows.iter().find(|window| window.id == id).map(|window| window.content)
@@ -831,6 +906,15 @@ fn open_window(placement: WindowPlacement, _title: String) -> (iced::window::Id,
         position,
         min_size: Some(Size::new(240.0, 160.0)),
         exit_on_close_request: false,
+        icon: super::helpers::build_window_icon()
+            .and_then(|rgba| iced::window::icon::from_rgba(rgba, 32, 32).ok()),
+        // The same app id as the main window: the dock groups them and shows
+        // the app's icon.
+        #[cfg(target_os = "linux")]
+        platform_specific: iced::window::settings::PlatformSpecific {
+            application_id: crate::io::file_association::APP_ID.to_string(),
+            ..Default::default()
+        },
         ..iced::window::Settings::default()
     });
     (id, open.map(|_| Message::Noop))
@@ -994,21 +1078,32 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.main_window = Some(iced::window::Id::unique());
+        // On the desktop a dialog opens in a window of its own, once its
+        // content was laid out off screen, at the size it needs.
         app.active_modal = Some(ModalKind::About);
         let _ = app.update_root(Message::Noop);
-        // The frame's button asks for a window of its own.
-        let sent = press(
-            app.with_tool_windows(Space::new().into()),
-            crate::ui::modal::DETACH_BUTTON_ID,
-        );
-        assert!(sent.iter().any(|m| matches!(m, Message::ToolWindowDetach(ModalKind::About))));
-        for msg in sent {
-            let _ = app.update_root(msg);
-        }
+        assert!(app.os_windows.is_empty(), "waits for its size");
+        assert!(!app.tool_windows[0].in_canvas());
+        let _ = app.update_root(Message::ToolWindow(
+            ModalKind::About,
+            Box::new(Message::ModalContentResized(Size::new(400.0, 300.0))),
+        ));
         let window = app.os_windows.first().copied().expect("its own window");
         assert_eq!(window.content, Detached::Tool(ModalKind::About));
+        assert_eq!((window.placement.w, window.placement.h), (428.0, 354.0));
         let tool = app.tool_windows.iter().find(|t| t.kind == ModalKind::About).unwrap();
         assert!(tool.window == Some(window.id) && !tool.in_canvas());
+        // Esc in its window closes it, as it closed the modal.
+        let _ = app.update_root(Message::OsWindowKey(window.id, "ESCAPE".into()));
+        assert!(!app.tool_open(ModalKind::About));
+        assert!(app.os_windows.is_empty());
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        let _ = app.update_root(Message::ToolWindow(
+            ModalKind::About,
+            Box::new(Message::ModalContentResized(Size::new(400.0, 300.0))),
+        ));
+        let window = app.os_windows.first().copied().expect("its own window again");
         // Its header's button brings it back into the main window.
         let sent = press(app.os_window_view(window.id).unwrap(), BACK_BUTTON_ID);
         assert!(sent.iter().any(|m| matches!(m, Message::OsWindowReturn(id) if *id == window.id)));
@@ -1017,24 +1112,46 @@ mod tests {
         }
         assert!(app.os_windows.is_empty());
         assert!(app.tool_windows.iter().any(|t| t.kind == ModalKind::About && t.in_canvas()));
+        // …and there it opens next time, until its frame's button sends it
+        // out again.
+        let _ = app.update_root(Message::ToolWindow(ModalKind::About, Box::new(Message::CloseModal)));
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        assert!(app.os_windows.is_empty() && app.tool_windows[0].in_canvas());
+        let sent = press(
+            app.with_tool_windows(Space::new().into()),
+            crate::ui::modal::DETACH_BUTTON_ID,
+        );
+        assert!(sent.iter().any(|m| matches!(m, Message::ToolWindowDetach(ModalKind::About))));
+        for msg in sent {
+            let _ = app.update_root(msg);
+        }
+        let _ = app.update_root(Message::ToolWindow(
+            ModalKind::About,
+            Box::new(Message::ModalContentResized(Size::new(400.0, 300.0))),
+        ));
+        assert_eq!(app.os_windows.len(), 1);
         // Closed from the window manager, the tool closes with its window.
-        let _ = app.update_root(Message::ToolWindowDetach(ModalKind::About));
         let window = app.os_windows.first().copied().expect("its own window again");
         let _ = app.update_root(Message::WindowCloseRequested(window.id));
         assert!(app.os_windows.is_empty());
         assert!(!app.tool_open(ModalKind::About));
-        // It was in a window when it closed: it reopens in one.
-        app.active_modal = Some(ModalKind::About);
-        let _ = app.update_root(Message::Noop);
-        assert_eq!(app.os_windows.len(), 1);
+        let measured = Message::ToolWindow(
+            ModalKind::About,
+            Box::new(Message::ModalContentResized(Size::new(400.0, 300.0))),
+        );
         // Moved onto a second monitor (right of a 1920 px one) and resized,
         // closed, reopened: it comes back there, at that size.
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        let _ = app.update_root(measured.clone());
         let window = app.os_windows[0];
         let _ = app.update_root(Message::OsWindowMoved(window.id, Point::new(2400.0, 120.0)));
         let _ = app.update_root(Message::OsWindowResized(window.id, 700.0, 500.0));
         let _ = app.update_root(Message::WindowCloseRequested(window.id));
         app.active_modal = Some(ModalKind::About);
         let _ = app.update_root(Message::Noop);
+        let _ = app.update_root(measured);
         let placement = app.os_windows.first().expect("reopened").placement;
         assert_eq!(
             (placement.x, placement.y, placement.w, placement.h),

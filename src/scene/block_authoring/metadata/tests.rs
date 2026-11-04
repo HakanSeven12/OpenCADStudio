@@ -258,3 +258,39 @@ fn a_parameter_name_is_trimmed_and_must_be_new() {
         Err("The block parameter is unavailable.")
     );
 }
+
+#[test]
+fn block_parameter_metadata_preserves_literal_backslashes_and_dwg_line_breaks() {
+    let (mut doc, def, handles) = fixture();
+    let inputs = [
+        "plain literal \\P and \\\\P",
+        "line one\nline two",
+        "line one\r\nline two",
+        "line one\rline two",
+    ];
+    for input in inputs {
+        for &handle in &handles {
+            for (field, _) in values(&doc, def, handle) {
+                if matches!(field, Field::Description | Field::SecondaryDescription) {
+                    set_text(&mut doc, def, handle, field, input).unwrap();
+                }
+            }
+        }
+        for extension in if input.contains(['\r', '\n']) {
+            &["dwg"][..]
+        } else {
+            &["dwg", "dxf"][..]
+        } {
+            let bytes = crate::io::save_to_bytes(&doc, extension, doc.version).unwrap();
+            let loaded =
+                crate::io::load_bytes(&format!("metadata-lines.{extension}"), bytes).unwrap();
+            for &handle in &handles {
+                assert_eq!(
+                    values(&loaded, def, handle),
+                    values(&doc, def, handle),
+                    "{extension}: {handle}, input={input:?}"
+                );
+            }
+        }
+    }
+}

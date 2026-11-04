@@ -1079,6 +1079,11 @@ impl OpenCADStudio {
             // Bare TABLE opens the Insert Table window; `TABLE INSERTROW 2`
             // edits the selected table.
             || tokens[0].eq_ignore_ascii_case("TABLE")
+            // Attribute editing takes a handle and tag/value on one line
+            // (`-ATTEDIT 20A TITLE new`); probing the verb alone would start
+            // the reference pick instead.
+            || tokens[0].eq_ignore_ascii_case("-ATTEDIT")
+            || tokens[0].eq_ignore_ascii_case("ATTEDIT")
         {
             return self.dispatch_command(cmd);
         }

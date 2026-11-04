@@ -119,46 +119,156 @@ impl OpenCADStudio {
                 || cmd.starts_with("-ATTEDIT ") =>
             {
                 let rest = cmd
-                    .trim_start_matches("-ATTEDIT")
-                    .trim_start_matches("ATTEDIT")
+                    .strip_prefix("-ATTEDIT")
+                    .or_else(|| cmd.strip_prefix("ATTEDIT"))
+                    .unwrap_or("")
                     .trim();
-                let parts: Vec<&str> = rest.splitn(2, char::is_whitespace).collect();
-                let selected_handles: Vec<codec::Handle> = self.tabs[i]
+                let tokens: Vec<&str> = rest.split_whitespace().collect();
+                let selection: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
                     .map(|(h, _)| *h)
                     .collect();
-                if selected_handles.is_empty() {
-                    self.command_line
-                        .push_error(crate::t!("ATTEDIT: select an Insert entity first.").as_ref());
+                // A leading token names a block reference when the drawing has
+                // an Insert with that handle; otherwise it is a tag filter.
+                let first_handle = tokens.first().and_then(|token| {
+                    let hex = token
+                        .strip_prefix("0x")
+                        .or_else(|| token.strip_prefix("0X"))
+                        .unwrap_or(token);
+                    let value = u64::from_str_radix(hex, 16).ok()?;
+                    let handle = codec::Handle::new(value);
+                    self.tabs[i]
+                        .scene
+                        .document
+                        .get_entity(handle)
+                        .filter(|entity| matches!(entity, codec::EntityType::Insert(_)))
+                        .map(|_| handle)
+                });
+                let mut targets: Vec<codec::Handle> = match first_handle {
+                    Some(handle) => vec![handle],
+                    None => selection.clone(),
+                };
+                let args: &[&str] = if first_handle.is_some() {
+                    &tokens[1..]
                 } else {
-                    let mut found_any = false;
-                    for sh in &selected_handles {
-                        if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
+                    &tokens[..]
+                };
+                let option = args.first().map(|arg| arg.to_ascii_uppercase());
+
+                if option.as_deref() == Some("RENAME") {
+                    let (Some(old), Some(new)) = (args.get(1), args.get(2)) else {
+                        self.command_line.push_error(
+                            crate::t!("ATTEDIT: usage is -ATTEDIT RENAME <old tag> <new tag>.")
+                                .as_ref(),
+                        );
+                        return Some(Task::none());
+                    };
+                    // No handle and no selection means the whole drawing: the
+                    // global rename every reference sees.
+                    if targets.is_empty() {
+                        targets = self.tabs[i]
                             .scene
                             .document
                             .entities()
-                            .find(|e| e.common().handle == *sh)
+                            .filter_map(|entity| match entity {
+                                codec::EntityType::Insert(_) => Some(entity.common().handle),
+                                _ => None,
+                            })
+                            .collect();
+                    }
+                    let old_up = old.to_uppercase();
+                    let mut reports = Vec::new();
+                    let mut changed = 0usize;
+                    let mut refs = 0usize;
+                    self.push_undo_snapshot(i, "ATTEDIT RENAME");
+                    for handle in &targets {
+                        if self.tabs[i].scene.is_layer_locked(*handle) {
+                            continue;
+                        }
+                        if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
+                            .scene
+                            .document
+                            .entities_mut()
+                            .find(|e| e.common().handle == *handle)
+                        {
+                            let mut renamed_here = 0usize;
+                            for attr in &mut ins.attributes {
+                                if attr.tag.to_uppercase() == old_up {
+                                    let previous = attr.tag.clone();
+                                    attr.tag = (*new).to_string();
+                                    reports.push(format!("  Insert {handle:x}: [{previous}] -> [{new}]"));
+                                    changed += 1;
+                                    renamed_here += 1;
+                                }
+                            }
+                            if renamed_here > 0 {
+                                refs += 1;
+                            }
+                        }
+                    }
+                    if changed > 0 {
+                        self.tabs[i].dirty = true;
+                        for line in &reports {
+                            self.command_line.push_output(line);
+                        }
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "ATTEDIT: renamed {changed} attribute(s) [{old_up}] -> [{new}] in {refs} reference(s)."
+                            )
+                            .as_ref(),
+                        );
+                    } else {
+                        self.command_line.push_error(
+                            crate::tf!("ATTEDIT: tag '{old_up}' not found.").as_ref(),
+                        );
+                    }
+                } else if targets.is_empty() {
+                    // No handle and nothing selected: ask for the reference
+                    // instead of refusing to start.
+                    if args.is_empty() {
+                        use crate::modules::draw::modify::attedit::AtteditCommand;
+                        let command = AtteditCommand::new();
+                        self.command_line.push_info(&command.prompt());
+                        self.tabs[i].active_cmd = Some(Box::new(command));
+                    } else {
+                        self.command_line.push_error(
+                            crate::t!("ATTEDIT: no Insert entities in selection.").as_ref(),
+                        );
+                    }
+                } else {
+                    let mut lines = Vec::new();
+                    let mut found_any = false;
+                    for handle in &targets {
+                        if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(*handle)
                         {
                             found_any = true;
-                            if rest.is_empty() {
-                                // List attributes.
+                            if args.is_empty() {
                                 if ins.attributes.is_empty() {
-                                    self.command_line.push_output(
-                                        crate::tf!("  Insert {:x}: no attributes.", sh.value())
-                                            .as_ref(),
-                                    );
+                                    lines.push(format!("  Insert {:x}: no attributes.", handle.value()));
                                 } else {
                                     for attr in &ins.attributes {
-                                        self.command_line.push_output(
-                                            crate::tf!(
-                                                "  [{tag}] = {val}",
-                                                tag = attr.tag,
-                                                val = attr.get_value()
-                                            )
-                                            .as_ref(),
-                                        );
+                                        lines.push(format!(
+                                            "  [{}] = {}",
+                                            attr.tag,
+                                            attr.get_value()
+                                        ));
+                                    }
+                                }
+                            } else if args.len() == 1 {
+                                // Individual mode: list the one tag asked for.
+                                let tag_up = args[0].to_uppercase();
+                                for attr in &ins.attributes {
+                                    if attr.tag.to_uppercase() == tag_up {
+                                        lines.push(format!(
+                                            "  [{}] = {}",
+                                            attr.tag,
+                                            attr.get_value()
+                                        ));
                                     }
                                 }
                             }
@@ -169,25 +279,37 @@ impl OpenCADStudio {
                             crate::t!("ATTEDIT: no Insert entities in selection.").as_ref(),
                         );
                     }
-                    // If tag + value supplied, mutate attributes.
-                    if parts.len() == 2 && !parts[0].is_empty() {
-                        let tag_up = parts[0].to_uppercase();
-                        let new_val = parts[1];
+                    for line in lines {
+                        self.command_line.push_output(&line);
+                    }
+                    // Tag and value supplied: set it on every target.
+                    if args.len() >= 2 {
+                        let tag_up = args[0].to_uppercase();
+                        let new_val = args[1];
                         let mut changed = 0usize;
+                        let mut reports = Vec::new();
                         self.push_undo_snapshot(i, "ATTEDIT");
-                        for sh in &selected_handles {
-                            if self.tabs[i].scene.is_layer_locked(*sh) {
+                        for handle in &targets {
+                            if self.tabs[i].scene.is_layer_locked(*handle) {
                                 continue;
                             }
                             if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
                                 .scene
                                 .document
                                 .entities_mut()
-                                .find(|e| e.common().handle == *sh)
+                                .find(|e| e.common().handle == *handle)
                             {
                                 for attr in &mut ins.attributes {
                                     if attr.tag.to_uppercase() == tag_up {
+                                        let previous = attr.get_value().to_string();
                                         attr.set_value(new_val);
+                                        reports.push(format!(
+                                            "  Insert {:x}: [{}] '{}' -> '{}'",
+                                            handle.value(),
+                                            attr.tag,
+                                            previous,
+                                            new_val
+                                        ));
                                         changed += 1;
                                     }
                                 }
@@ -195,6 +317,9 @@ impl OpenCADStudio {
                         }
                         if changed > 0 {
                             self.tabs[i].dirty = true;
+                            for line in &reports {
+                                self.command_line.push_output(line);
+                            }
                             self.command_line.push_output(
                                 crate::tf!(
                                 "ATTEDIT: updated {changed} attribute(s) [{tag_up}] = {new_val}."

@@ -3126,3 +3126,81 @@ mod dash_layer_properties_tests {
         assert_eq!(walls["description"], "");
     }
 }
+
+#[cfg(test)]
+mod attedit_dash_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+    use codec::entities::{AttributeEntity, Insert};
+    use codec::types::Vector3;
+
+    fn inserts_with_title() -> (OpenCADStudio, Vec<codec::Handle>) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handles = (0..3)
+            .map(|n| {
+                let mut insert =
+                    Insert::new("TITLEBLOCK", Vector3::new(n as f64 * 50.0, 0.0, 0.0));
+                insert
+                    .attributes
+                    .push(AttributeEntity::new("TITLE".into(), "old".into()));
+                app.tabs[i]
+                    .scene
+                    .add_entity(codec::EntityType::Insert(insert))
+            })
+            .collect();
+        (app, handles)
+    }
+
+    fn attribute(app: &OpenCADStudio, handle: codec::Handle) -> (String, String) {
+        let entity = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("insert");
+        let codec::EntityType::Insert(insert) = entity else {
+            panic!("not an insert");
+        };
+        let attr = insert.attributes.first().expect("attribute");
+        (attr.tag.clone(), attr.get_value().to_string())
+    }
+
+    #[test]
+    fn dash_attedit_accepts_a_handle_argument() {
+        let (mut app, handles) = inserts_with_title();
+        let line = format!("-ATTEDIT {:X} TITLE new", handles[1].value());
+        let _ = app.run_command_line(&line);
+
+        assert_eq!(attribute(&app, handles[1]), ("TITLE".into(), "new".into()));
+        assert_eq!(attribute(&app, handles[0]), ("TITLE".into(), "old".into()));
+    }
+
+    #[test]
+    fn dash_attedit_prompts_when_nothing_is_selected() {
+        let (mut app, _) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT");
+
+        let i = app.active_tab;
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("ATTEDIT must ask for a reference");
+        assert!(
+            command.prompt().contains("Select block"),
+            "prompt was {}",
+            command.prompt()
+        );
+    }
+
+    #[test]
+    fn dash_attedit_renames_a_tag_across_every_reference() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT RENAME TITLE SHEET");
+
+        for handle in handles {
+            assert_eq!(attribute(&app, handle), ("SHEET".into(), "old".into()));
+        }
+    }
+}
+

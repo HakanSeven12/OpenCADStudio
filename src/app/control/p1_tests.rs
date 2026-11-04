@@ -493,6 +493,163 @@ fn entities_copy_to_another_open_document() {
 }
 
 #[test]
+fn a_copied_block_reference_arrives_with_its_definition() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 0,6"}"#);
+    let q = app.automation_op(r#"{"op":"query","detail":"summary"}"#);
+    let joined = q["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| format!("\"{}\"", e["handle"].as_str().unwrap()))
+        .collect::<Vec<_>>()
+        .join(",");
+    let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+        .as_u64()
+        .unwrap();
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"block_define","request_id":"xd1","document_id":{doc},"name":"COPYME","base":[0,0,0],"handles":[{joined}]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let source = app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    app.tabs
+        .push(crate::app::document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"xd2","document_id":{target},"handles":["{source}"]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    assert_eq!(r["result"]["count"], 1);
+
+    app.active_tab = 1;
+    let record = app.tabs[1]
+        .scene
+        .document
+        .block_records
+        .iter()
+        .find(|record| record.name == "COPYME");
+    assert!(
+        record.is_some(),
+        "a copied reference must bring its definition: the target holds only {:?}",
+        app.tabs[1]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .map(|record| record.name.clone())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        record
+            .expect("the definition travelled")
+            .entity_handles
+            .len(),
+        2,
+        "and the definition arrives with the geometry it owns"
+    );
+
+    let copied = app.automation_op(r#"{"op":"query","type":"Insert","detail":"full"}"#);
+    assert_eq!(
+        copied["entities"][0]["block"], "COPYME",
+        "the moved reference keeps the authored name, not the source's anonymous representation"
+    );
+
+    let audit = app.automation_op(r#"{"op":"audit"}"#);
+    let dangling: Vec<&Value> = audit["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|issue| issue["code"] == "missing_block")
+        .collect();
+    assert!(
+        dangling.is_empty(),
+        "the target must not be left with a reference to a record it does not have: {audit}"
+    );
+}
+
+/// A copied raster has to arrive registered in the target the way an
+/// interactive paste registers it: the target's own definition of its file,
+/// plus the reactor that links image and definition both ways. A copy that
+/// lands only the entity leaves the target holding an image no object graph
+/// points at.
+#[test]
+fn a_copied_image_arrives_registered_in_the_target() {
+    use codec::objects::{ImageDefinition, ObjectType};
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let definition = app.tabs[0].scene.document.allocate_handle();
+    let mut image_definition = ImageDefinition::with_dimensions("fx.bmp", 8, 8);
+    image_definition.handle = definition;
+    app.tabs[0]
+        .scene
+        .document
+        .objects
+        .insert(definition, ObjectType::ImageDefinition(image_definition));
+    let mut image =
+        codec::entities::RasterImage::new("fx.bmp", codec::types::Vector3::ZERO, 8.0, 8.0);
+    image.definition_handle = Some(definition);
+    let source = app.tabs[0]
+        .scene
+        .document
+        .add_entity(codec::EntityType::RasterImage(image))
+        .expect("the seeded image");
+
+    app.tabs
+        .push(crate::app::document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"xi1","document_id":{target},"handles":["{:X}"]}}"#,
+        source.value()
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    assert_eq!(r["result"]["count"], 1);
+
+    let doc = &app.tabs[1].scene.document;
+    let pasted = doc
+        .entities()
+        .find(|entity| matches!(entity, codec::EntityType::RasterImage(_)))
+        .map(|entity| entity.common().handle)
+        .expect("the copied image is missing from the target");
+    let Some(codec::EntityType::RasterImage(image)) = doc.get_entity(pasted) else {
+        unreachable!();
+    };
+    let Some(definition) = image
+        .definition_handle
+        .and_then(|handle| doc.objects.get(&handle))
+    else {
+        panic!("the copied image points at no definition of its file");
+    };
+    assert!(
+        matches!(definition, ObjectType::ImageDefinition(found) if found.file_name == "fx.bmp"),
+        "the target must hold a definition of the copied file"
+    );
+    let Some(reactor) = image.definition_reactor_handle else {
+        panic!("the copied image is not registered with its definition");
+    };
+    let Some(ObjectType::ImageDefinitionReactor(object)) = doc.objects.get(&reactor) else {
+        panic!("the reactor object is missing from the target");
+    };
+    assert_eq!(object.owner, pasted);
+    assert_eq!(object.image_handle, pasted);
+    let Some(ObjectType::ImageDefinition(found)) =
+        doc.objects.get(&image.definition_handle.unwrap())
+    else {
+        unreachable!();
+    };
+    assert!(
+        found.reactors.contains(&reactor),
+        "the definition lists the reactor of the image that was copied in"
+    );
+}
+
+#[test]
 fn group_create_and_selection_sets() {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);

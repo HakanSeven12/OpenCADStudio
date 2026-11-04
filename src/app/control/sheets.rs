@@ -267,8 +267,13 @@ impl OpenCADStudio {
     }
 
     /// `entities_copy_to` — copy entities into another open document
-    /// Referenced layer definitions travel along;
-    /// the new handles are returned.
+    /// The dependency snapshot the interactive copy takes travels with them:
+    /// referenced layers, linetypes and styles, and every block definition the
+    /// source holds for the copied references — transitively, with its object
+    /// graph — so a moved reference keeps pointing at a record the target has.
+    /// A reference whose definition the source itself does not hold stays a
+    /// dangling reference here, as it does when the drawing is loaded, and the
+    /// audit reports it. The new handles are returned.
     pub(super) fn control_entities_copy_to(&mut self, req: &Value) -> Result<Task<Message>, Value> {
         let handles = crate::app::control::entities::hex_handles(req, "handles")?;
         let target = req["target_document_id"]
@@ -286,62 +291,51 @@ impl OpenCADStudio {
             &handles,
         )?;
 
-        // Clone out of the source first so the two tabs never borrow together.
-        let cloned: Vec<codec::EntityType> = handles
-            .iter()
-            .filter_map(|handle| self.tabs[source_index].scene.document.get_entity(*handle))
-            .map(|entity| entity.clone())
-            .collect();
-
-        // Copy the referenced layer definitions out of the source before the
-        // target borrow starts (the two tabs never borrow together).
-        let mut missing_layers: Vec<codec::tables::Layer> = Vec::new();
-        // The APPIDs their XDATA names, so it is re-pointed at the target's.
-        let deps = crate::app::ClipboardDeps {
-            app_ids: crate::app::ClipboardDeps::capture(
-                &self.tabs[source_index].scene.document,
-                &cloned,
-            )
-            .app_ids,
-            ..Default::default()
+        // Snapshot out of the source first so the two tabs never borrow together.
+        use crate::app::command_driver::clipboard::{
+            copy_to_clipboard_kernel, finish_paste_in_scene, paste_entities_kernel, PasteSpace,
         };
-        {
-            let source_document = &self.tabs[source_index].scene.document;
-            for entity in &cloned {
-                let layer = entity.common().layer.clone();
-                if layer.is_empty()
-                    || layer == "0"
-                    || missing_layers.iter().any(|l| l.name == layer)
-                {
-                    continue;
-                }
-                if let Some(source_layer) = source_document.layers.get(&layer) {
-                    missing_layers.push(source_layer.clone());
-                }
-            }
-        }
+        let (cloned, deps) =
+            copy_to_clipboard_kernel(&self.tabs[source_index].scene.document, &handles);
 
         self.push_undo_snapshot(target_index, "COPYTO");
-        let mut created = Vec::new();
-        {
+        let created: Vec<String> = {
             let scene = &mut self.tabs[target_index].scene;
-            for layer_record in &missing_layers {
-                if !scene.document.layers.contains(&layer_record.name) {
-                    let mut layer_record = layer_record.clone();
-                    layer_record.handle = scene.document.allocate_handle();
-                    let _ = scene.document.layers.add(layer_record);
+            // New geometry lands in the space the target is editing: its block
+            // editor session, a paper layout with no active viewport, or model.
+            let layout = scene.current_layout.clone();
+            let space = match scene.block_edit_block {
+                Some(block) => PasteSpace::Block(block),
+                None if layout != "Model" && scene.active_viewport.is_none() => {
+                    PasteSpace::Layout(&layout)
                 }
-            }
-            use crate::app::command_driver::clipboard::{eed_app_map, merge_app_ids, remap_eed_apps};
-            merge_app_ids(&mut scene.document, &deps);
-            let apps = eed_app_map(&scene.document, &deps);
-            for mut entity in cloned {
-                remap_eed_apps(&mut entity, &apps);
-                let linetype = entity.common().linetype.clone();
+                None => PasteSpace::Model,
+            };
+            let first_new_handle = scene.document.next_handle();
+            let records_before = scene.document.block_records.len();
+            let (by_index, handle_map) =
+                paste_entities_kernel(&mut scene.document, &cloned, &deps, None, space);
+            for linetype in cloned.iter().map(|e| e.common().linetype.clone()) {
+                // The kernel copies the records the source declares; a linetype
+                // it only names still needs this drawing's catalogue entry.
                 crate::io::linetypes::ensure_catalog_linetype(&mut scene.document, &linetype);
-                created.push(format!("{:X}", scene.add_entity_clone(entity).value()));
             }
-        }
+            // Same Scene half an interactive paste runs, so a copied image,
+            // hatch, group or constraint arrives wired the way a pasted one does.
+            finish_paste_in_scene(
+                scene,
+                &deps,
+                &by_index,
+                &handle_map,
+                records_before,
+                first_new_handle,
+            );
+            by_index
+                .iter()
+                .filter(|handle| !handle.is_null())
+                .map(|handle| format!("{:X}", handle.value()))
+                .collect()
+        };
         self.tabs[target_index].dirty = true;
         self.post_ref_op(target_index);
         let created_count = created.len();

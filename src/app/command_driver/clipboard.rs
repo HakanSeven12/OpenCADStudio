@@ -373,94 +373,14 @@ impl OpenCADStudio {
             translate.as_ref(),
             space,
         );
-        ensure_pasted_image_reactors(&mut self.tabs[i].scene, &by_index, &deps, first_new_handle);
-        // Batched equivalent of `add_entity`'s per-add bump (same pattern as
-        // `Scene::add_entities`): fresh top-level solids tessellate once here
-        // instead of once per entity. Block-definition merges (and pasted
-        // Block/BlockEnd sentinels) need the full geometry rebuild, matching
-        // the `bump_geometry` tails the Scene helpers used to run. INSERTs of
-        // blocks this drawing already defines add no definition, so they take
-        // the per-entity bump like any other pasted entity.
-        let mut needs_geometry_bump =
-            self.tabs[i].scene.document.block_records.len() != block_records_before;
-        let mut changes = Vec::new();
-        for &handle in &by_index {
-            if handle.is_null() {
-                continue;
-            }
-            // `add_entity` seeds fill and raster models; the document-level
-            // add above does not, so a pasted hatch without an association
-            // to rebuild it was never drawn. (#1807)
-            if matches!(
-                self.tabs[i].scene.document.get_entity(handle),
-                Some(
-                    codec::EntityType::Hatch(_)
-                        | codec::EntityType::Solid(_)
-                        | codec::EntityType::RasterImage(_)
-                        | codec::EntityType::Ole2Frame(_)
-                        | codec::EntityType::Underlay(_)
-                )
-            ) {
-                self.tabs[i].scene.reseed_derived_caches(handle);
-            }
-            if matches!(
-                self.tabs[i].scene.document.get_entity(handle),
-                Some(codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_))
-            ) {
-                needs_geometry_bump = true;
-            } else {
-                changes.push((handle, crate::scene::ChangeKind::Added));
-            }
-        }
-        if needs_geometry_bump {
-            self.tabs[i].scene.bump_geometry();
-        } else if !changes.is_empty() {
-            self.tabs[i].scene.bump_entities(&changes);
-        }
-        // The wires tessellated above predate the freshly attached clip object
-        // graphs; refresh the pasted entities so XCLIP-filtered inserts
-        // render clipped immediately.
-        if !deps.ext_objects.is_empty() {
-            let changes: Vec<_> = by_index
-                .iter()
-                .copied()
-                .filter(|handle| !handle.is_null())
-                .map(|handle| (handle, crate::scene::ChangeKind::Modified))
-                .collect();
-            self.tabs[i].scene.bump_entities(&changes);
-        }
-        // Source handles stored in the clipboard map one-to-one to the freshly
-        // pasted handles (see `handle_map`); refresh each pasted LEADER's
-        // displayed annotation context now that the relink ran in the kernel.
-        for &handle in by_index.iter().filter(|h| !h.is_null()) {
-            if matches!(
-                self.tabs[i].scene.document.get_entity(handle),
-                Some(codec::EntityType::Leader(_))
-            ) {
-                let _ = self.tabs[i].scene.sync_displayed_annotation_context(handle);
-            }
-        }
-        // Recreate any group whose whole membership was copied, so a pasted
-        // group stays grouped — cross-drawing too, since the groups were
-        // snapshotted into the clipboard at copy time. `by_index` is aligned
-        // with `self.clipboard`, so the kernel's `handle_map` maps each
-        // clipboard clone to its new handle. Same shared `recreate_groups`
-        // the in-drawing COPY path uses. (#440)
-        if !deps.groups.is_empty() {
-            self.tabs[i]
-                .scene
-                .recreate_groups(deps.groups.clone(), &handle_map);
-        }
-        // Constraints wholly within the pasted selection follow it.
-        self.tabs[i]
-            .scene
-            .duplicate_parametric_constraints_for(&handle_map);
-        // Incremental: fresh top-level solids already tessellated above, and
-        // existing document solids are still cached — so only newly
-        // introduced block-definition solids need building. The full rebuild
-        // would clear and re-tessellate the entire document (every solid in the
-        // drawing) on each paste, which is what made a large paste stall.
-        self.tabs[i].scene.populate_missing_meshes_from_document();
+        finish_paste_in_scene(
+            &mut self.tabs[i].scene,
+            &deps,
+            &by_index,
+            &handle_map,
+            block_records_before,
+            first_new_handle,
+        );
         by_index
     }
 
@@ -834,6 +754,106 @@ fn ensure_pasted_image_reactors(
         scene.ensure_image_definition(&mut entity);
         *scene.document.get_entity_mut(handle).expect("pasted image") = entity;
     }
+}
+
+/// The Scene half of a paste, for every path that runs
+/// [`paste_entities_kernel`]: interactive PASTECLIP/PASTEORIG and the
+/// cross-document control copy. The kernel adds entities to the document; this
+/// registers the objects they need, seeds the caches the renderer reads, bumps
+/// what changed, and re-creates the groups and constraints that travelled with
+/// them. Shared so that a wiring step added for one caller cannot be missing
+/// from another.
+pub(crate) fn finish_paste_in_scene(
+    scene: &mut crate::scene::Scene,
+    deps: &crate::app::ClipboardDeps,
+    by_index: &[Handle],
+    handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
+    block_records_before: usize,
+    first_new_handle: u64,
+) {
+    ensure_pasted_image_reactors(scene, by_index, deps, first_new_handle);
+    // Batched equivalent of `add_entity`'s per-add bump (same pattern as
+    // `Scene::add_entities`): fresh top-level solids tessellate once here
+    // instead of once per entity. Block-definition merges (and pasted
+    // Block/BlockEnd sentinels) need the full geometry rebuild, matching
+    // the `bump_geometry` tails the Scene helpers used to run. INSERTs of
+    // blocks this drawing already defines add no definition, so they take
+    // the per-entity bump like any other pasted entity.
+    let mut needs_geometry_bump = scene.document.block_records.len() != block_records_before;
+    let mut changes = Vec::new();
+    for &handle in by_index {
+        if handle.is_null() {
+            continue;
+        }
+        // `add_entity` seeds fill and raster models; the document-level
+        // add does not, so a pasted hatch without an association
+        // to rebuild it was never drawn. (#1807)
+        if matches!(
+            scene.document.get_entity(handle),
+            Some(
+                codec::EntityType::Hatch(_)
+                    | codec::EntityType::Solid(_)
+                    | codec::EntityType::RasterImage(_)
+                    | codec::EntityType::Ole2Frame(_)
+                    | codec::EntityType::Underlay(_)
+            )
+        ) {
+            scene.reseed_derived_caches(handle);
+        }
+        if matches!(
+            scene.document.get_entity(handle),
+            Some(codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_))
+        ) {
+            needs_geometry_bump = true;
+        } else {
+            changes.push((handle, crate::scene::ChangeKind::Added));
+        }
+    }
+    if needs_geometry_bump {
+        scene.bump_geometry();
+    } else if !changes.is_empty() {
+        scene.bump_entities(&changes);
+    }
+    // The wires above predate the freshly attached clip object
+    // graphs; refresh the pasted entities so XCLIP-filtered inserts
+    // render clipped immediately.
+    if !deps.ext_objects.is_empty() {
+        let changes: Vec<_> = by_index
+            .iter()
+            .copied()
+            .filter(|handle| !handle.is_null())
+            .map(|handle| (handle, crate::scene::ChangeKind::Modified))
+            .collect();
+        scene.bump_entities(&changes);
+    }
+    // Source handles stored in the clipboard map one-to-one to the freshly
+    // pasted handles (see `handle_map`); refresh each pasted LEADER's
+    // displayed annotation context now that the relink ran in the kernel.
+    for &handle in by_index.iter().filter(|h| !h.is_null()) {
+        if matches!(
+            scene.document.get_entity(handle),
+            Some(codec::EntityType::Leader(_))
+        ) {
+            let _ = scene.sync_displayed_annotation_context(handle);
+        }
+    }
+    // Recreate any group whose whole membership was copied, so a pasted
+    // group stays grouped — cross-drawing too, since the groups were
+    // snapshotted into the clipboard at copy time. `by_index` is aligned
+    // with the clipboard, so the kernel's `handle_map` maps each
+    // clipboard clone to its new handle. Same shared `recreate_groups`
+    // the in-drawing COPY path uses. (#440)
+    if !deps.groups.is_empty() {
+        scene.recreate_groups(deps.groups.clone(), handle_map);
+    }
+    // Constraints wholly within the pasted selection follow it.
+    scene.duplicate_parametric_constraints_for(handle_map);
+    // Incremental: fresh top-level solids already tessellated above, and
+    // existing document solids are still cached — so only newly
+    // introduced block-definition solids need building. The full rebuild
+    // would clear and re-tessellate the entire document (every solid in the
+    // drawing) on each paste, which is what made a large paste stall.
+    scene.populate_missing_meshes_from_document();
 }
 
 /// Source image definition → this drawing's definition of the same file (one

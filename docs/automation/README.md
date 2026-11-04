@@ -878,7 +878,12 @@ template's tables/styles instead of the source drawing's.
 Copies the entities from the active document into the open document
 addressed by `document_id`. Every handle must exist in the source
 (`entity_absent` otherwise); the target must be open (`document_closed`).
-Referenced (missing) layer definitions travel along. `result.created` lists
+The dependencies the interactive copy carries travel along: layer, linetype
+and style records the copy needs, and the block definition the source holds
+for a copied reference — transitively, with its object graph. A reference
+whose definition the source itself does not hold stays a dangling reference,
+as it does when the drawing is loaded, and the audit reports it.
+`result.created` lists
 the new handles in the target, `result.count` their number. Combined with
 an empty `POST /documents` (REST) this is the multi-document assembly
 workflow.

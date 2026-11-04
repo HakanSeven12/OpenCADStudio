@@ -22,3 +22,4 @@
 * **Attributed Marker:** Make the attributed marker follow the definition body.
 * **Visibility States:** Keep every object visible in the first state, and leave objects outside the state set alone.
 * **Explodable Flag:** Make the explodable flag decide against the explode command.
+* **Cross-document Copies:** Carry the block definition, styles and object graph the source holds for a copied reference, so the target is not left with a reference to a record it does not have.

@@ -292,7 +292,7 @@ Result: `{"handles":[…],"created":N,"layers_created":[…]}` → HTTP 201.
 |---|---|---|
 | `entities_delete` | `handles` | Every handle must exist; nothing is erased otherwise (`entity_absent` names them) |
 | `entities_transform` | `handles`, `action`, per-action params | `move`/`copy`: `vector:[dx,dy(,dz)]` (copy returns new handles in `result.created`); `rotate`: `center`, `angle_deg`; `scale`: `center`, `factor` (≠ 0); `mirror`: `axis:[[x1,y1],[x2,y2]]`, optional `copy:true`; `array`: `rows`, `columns`, `row_spacing`, `column_spacing` |
-| `entities_copy_to` | `handles`, `document_id` (target) | Cross-document clone; referenced layer definitions travel along; result `created[]` + `count` |
+| `entities_copy_to` | `handles`, `document_id` (target) | Cross-document clone; the dependencies the interactive copy carries travel along (layers, linetypes, styles, and the block definitions the source holds for the copied references); result `created[]` + `count` |
 
 ### 6.3a Node graph — `node_graph`
 

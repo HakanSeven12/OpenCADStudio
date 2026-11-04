@@ -1014,6 +1014,38 @@ impl OpenCADStudio {
             "EXPORT" => {
                 return Some(Task::done(Message::PlotExport));
             }
+            // PREVIEW [path] — render the plot page to SVG through the plot
+            // pipeline, including the plot style, and report its paper size and
+            // scale before committing to paper.
+            cmd if cmd == "PREVIEW"
+                || cmd == "-PREVIEW"
+                || cmd.starts_with("PREVIEW ")
+                || cmd.starts_with("-PREVIEW ") =>
+            {
+                let rest = cmd
+                    .trim_start_matches('-')
+                    .trim_start_matches("PREVIEW")
+                    .trim();
+                let path = if rest.is_empty() {
+                    std::env::temp_dir().join(format!("ocs-preview-{}.svg", std::process::id()))
+                } else {
+                    std::path::PathBuf::from(rest.trim_matches('"'))
+                };
+                match self.export_preview_svg(&path) {
+                    Ok((pages, bytes, (width, height), scale, style)) => {
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "Preview: {}  {pages} page(s), {width:.1}×{height:.1} mm, \
+                                 scale {scale:.4}, style {style}, {bytes} bytes",
+                                path.display()
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    Err(error) => self.command_line.push_error(&error),
+                }
+                return Some(Task::none());
+            }
             // PUBLISH <file.pdf> [sheets…] — batch publish without the dialog:
             // every named layout (or all paper layouts) into one multi-page
             // PDF, each sheet with its own page setup, with per-sheet status.

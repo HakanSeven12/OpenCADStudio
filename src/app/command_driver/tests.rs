@@ -4427,3 +4427,110 @@ mod mission_m059_tests {
         assert!(all_output(&app).contains("no setup named 'NOPE'"));
     }
 }
+
+#[cfg(test)]
+mod mission_m061_tests {
+    use super::super::*;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn temp_svg(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ocs_m061_{tag}_{unique}.svg"))
+    }
+
+    fn add_diagonal(app: &mut OpenCADStudio) {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(100.0, 60.0, 0.0),
+            )));
+    }
+
+    fn viewbox(svg: &str) -> Option<(f64, f64)> {
+        let start = svg.find("viewBox=\"")? + "viewBox=\"".len();
+        let rest = &svg[start..];
+        let end = rest.find('"')?;
+        let mut numbers = rest[..end].split_whitespace();
+        let _x = numbers.next()?.parse::<f64>().ok()?;
+        let _y = numbers.next()?.parse::<f64>().ok()?;
+        let width = numbers.next()?.parse::<f64>().ok()?;
+        let height = numbers.next()?.parse::<f64>().ok()?;
+        Some((width, height))
+    }
+
+    #[test]
+    fn preview_writes_a_real_svg_with_the_layout_paper_aspect() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        add_diagonal(&mut app);
+        let path = temp_svg("model");
+
+        let _ = app.run_command_line(&format!("PREVIEW {}", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("Preview:"), "{output}");
+        assert!(output.contains("297.0×210.0 mm"), "{output}");
+        let svg = std::fs::read_to_string(&path).expect("the preview file must exist");
+        assert!(svg.contains("<svg"), "a real SVG, not a stub");
+        let (width, height) = viewbox(&svg).expect("the SVG has a viewBox");
+        assert!((width - 297.0).abs() < 0.5, "viewBox width: {width}");
+        assert!((height - 210.0).abs() < 0.5, "viewBox height: {height}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn preview_follows_the_layout_page_setup() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        add_diagonal(&mut app);
+        app.tabs[i].scene.add_layout("Sheet1").unwrap();
+        app.tabs[i].scene.initialize_layout_page_setup("Sheet1");
+        app.tabs[i].scene.set_current_layout("Sheet1".into());
+        app.tabs[i].scene.load_current_layout_state();
+        let layout = app.tabs[i].scene.current_layout.clone();
+        let mut ps = app.tabs[i].scene.effective_plot_settings().unwrap();
+        ps.paper_size = "ISO_A3_(297.00_x_420.00_MM)".to_string();
+        ps.paper_width = 297.0;
+        ps.paper_height = 420.0;
+        ps.rotation = codec::objects::PlotRotation::Degrees90;
+        app.tabs[i].scene.set_layout_plot_settings(&layout, &ps);
+        let path = temp_svg("a3");
+
+        let _ = app.run_command_line(&format!("PREVIEW {}", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("420.0×297.0 mm"), "{output}");
+        let svg = std::fs::read_to_string(&path).expect("the preview file must exist");
+        let (width, height) = viewbox(&svg).expect("the SVG has a viewBox");
+        assert!((width / height - 420.0 / 297.0).abs() < 0.01, "{width}x{height}");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_preview_of_empty_space_is_refused() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let path = temp_svg("empty");
+
+        let _ = app.run_command_line(&format!("PREVIEW {}", path.display()));
+
+        assert!(all_output(&app).contains("Nothing to preview"));
+        assert!(!path.exists());
+    }
+}

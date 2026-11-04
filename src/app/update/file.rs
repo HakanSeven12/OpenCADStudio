@@ -5588,6 +5588,30 @@ impl OpenCADStudio {
         Ok((pages.len(), bytes, sheets))
     }
 
+    /// Write a vector preview of the current layout through the same page and
+    /// plot-style pipeline PLOT uses. Returns page count, byte size, the first
+    /// sheet's millimetres, the plot scale and the style name (if any).
+    pub(in crate::app) fn export_preview_svg(
+        &mut self,
+        path: &std::path::Path,
+    ) -> Result<(usize, u64, (f64, f64), f64, String), String> {
+        self.stamp_plot_fields();
+        self.refresh_current_plot_context();
+        let page = self.direct_plot_page().ok_or_else(|| {
+            crate::t!("Nothing to preview: the layout contains no printable geometry.").into_owned()
+        })?;
+        let style = self.dialog_plot_style(&self.plot_dialog);
+        let style_name = if self.plot_dialog.style_name.is_empty() {
+            "None".to_string()
+        } else {
+            self.plot_dialog.style_name.clone()
+        };
+        let (paper_w, paper_h, scale) = (page.paper_w, page.paper_h, page.scale as f64);
+        crate::io::svg_export::export_svg_pages(&[page], path, style.as_ref())?;
+        let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        Ok((1, bytes, (paper_w, paper_h), scale, style_name))
+    }
+
     pub(in crate::app) fn on_plot_export_path_some(
         &mut self,
         path: std::path::PathBuf,

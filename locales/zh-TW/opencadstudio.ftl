@@ -376,13 +376,13 @@ modal =
     .that-object = 該物件
     .those-objects = 這些物件
 
-    .missing-fonts-downloading = Downloading...
-    .missing-fonts-download-available = Download available
-    .missing-fonts-skip = Skip
-    .missing-fonts-title = Missing fonts
-    .missing-fonts-description = This drawing uses fonts that are not installed on this machine. OpenCADStudio can download any redistributable fonts that exist in the selected repository; unavailable fonts will keep using a substitute.
-    .missing-fonts-source = Font source — leave empty for the community repository, or point at any folder (e.g. your company's font server):
-    .missing-fonts-source-placeholder = https://server/fonts or a GitHub raw folder
+    .missing-fonts-downloading = 下載中...
+    .missing-fonts-download-available = 可供下載
+    .missing-fonts-skip = 略過
+    .missing-fonts-title = 遺失字體
+    .missing-fonts-description = 此繪圖使用了未安裝在此電腦上的字體。OpenCADStudio 可以從選定的儲存庫下載任何可轉發散布的字體；無法取得的字體將會繼續使用替代字體。
+    .missing-fonts-source = 字體來源 — 社群儲存庫請保持空白，或指向任何資料夾 (例如您公司的字體伺服器)：
+    .missing-fonts-source-placeholder = https://server/fonts 或 GitHub 原始資料夾
 
 clipboard =
     .pasted-image = 已貼上影像 "{ $name }"：{ $width }×{ $height } px

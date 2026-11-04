@@ -1404,6 +1404,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "SAVE",
         "SAVEAS",
         "SCALETEXT",
+        "SELECT",
         "SELECTALL",
         "SELECTSIMILAR",
         "SELSIM",

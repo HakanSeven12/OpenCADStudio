@@ -87,14 +87,36 @@ impl OpenCADStudio {
             let description = options.description.as_deref().map(|value| {
                 metadata::set_text(document, definition, parameter, metadata::Field::Description, value)
             });
+            let parameter_name = options
+                .name
+                .as_deref()
+                .filter(|_| kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+                .map(|value| {
+                    metadata::set_parameter_name(document, definition, parameter, value)
+                });
+            let label = options
+                .label
+                .as_deref()
+                .filter(|_| kind == crate::scene::block_orientation_parameter::Kind::Rotation)
+                .map(|value| {
+                    metadata::set_text(
+                        document,
+                        definition,
+                        parameter,
+                        metadata::Field::Name,
+                        value,
+                    )
+                });
             let chain = options
                 .chain
                 .map(|value| metadata::set_chain(document, definition, parameter, value));
             let palette = options
                 .palette
                 .map(|value| metadata::set_visible(document, definition, parameter, value));
-            description
+            parameter_name
                 .into_iter()
+                .chain(label)
+                .chain(description)
                 .chain(chain)
                 .chain(palette)
                 .find_map(Result::err)
@@ -640,7 +662,18 @@ impl OpenCADStudio {
                 if let Some(kind) =
                     crate::scene::block_orientation_parameter::Kind::parse(parameter_type)
                 {
-                    let command = crate::modules::block_editor::orientation_parameter::OrientationParameterCommand::new(self.tabs[i].id,block,kind);
+                    let mut command = crate::modules::block_editor::orientation_parameter::OrientationParameterCommand::new(self.tabs[i].id,block,kind);
+                    if kind == crate::scene::block_orientation_parameter::Kind::Rotation {
+                        let name = crate::scene::block_authoring::metadata::next_parameter_name(
+                            &self.tabs[i].scene.document,
+                            block,
+                            kind.name(),
+                        )
+                        .unwrap_or_else(|_| format!("{}1", kind.name()));
+                        // The label question shows the plain word; the created
+                        // parameter takes the next free numbered name.
+                        command = command.with_name(name).with_label("Angle".to_owned());
+                    }
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(Task::none());

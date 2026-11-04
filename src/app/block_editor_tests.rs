@@ -3465,7 +3465,7 @@ fn a_rotation_takes_its_chain_description_and_palette_answers_at_the_base_prompt
     let _ = app.dispatch_command("BPARAMETER ROTATION");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+        "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
     );
     feed(&mut app, "C");
     assert_eq!(
@@ -3595,6 +3595,91 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
 }
 
 #[test]
+fn a_rotation_takes_a_name_and_one_property_label() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Rotation1>:"
+    );
+    feed(&mut app, "Body");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter rotation property label <Angle>:"
+    );
+    feed(&mut app, "Turn");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let rotation = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| {
+            parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
+        })
+        .expect("placed rotation parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&rotation.handle).expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert_eq!(
+        native.angle_name, "Turn",
+        "the label collected at the prompt is stored on the parameter"
+    );
+    assert_eq!(
+        native.parameter.parameter.element.name, "Body",
+        "the name collected at the prompt is stored on the parameter"
+    );
+
+    // The label question shows the plain word; the parameter takes the next
+    // free numbered name, so Enter still stores a label.
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter rotation property label <Angle>:"
+    );
+    feed(&mut app, "");
+    feed(&mut app, "10,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "15,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let doc = &app.tabs[i].scene.document;
+    let labels: Vec<String> =
+        crate::scene::block_orientation_parameter::parameters(doc, definition)
+            .into_iter()
+            .filter(|parameter| {
+                parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
+            })
+            .map(|parameter| parameter.label)
+            .collect();
+    assert!(
+        labels.iter().any(|label| label == "Angle1"),
+        "Enter takes the next free numbered label: {labels:?}"
+    );
+}
+
+#[test]
 fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -3628,9 +3713,7 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
     let doc = &app.tabs[i].scene.document;
     let linear = crate::scene::block_distance_parameter::parameters(doc, definition)
         .into_iter()
-        .find(|parameter| {
-            parameter.kind == crate::scene::block_distance_parameter::Kind::Linear
-        })
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
         .expect("placed linear parameter");
     let codec::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&linear.handle).expect("linear record")

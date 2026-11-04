@@ -229,6 +229,13 @@ pub(crate) fn create_with_label(
         .map(|n| format!("{prefix}{n}"))
         .find(|name| names.iter().all(|old| !old.eq_ignore_ascii_case(name)))
         .unwrap();
+    let element_name = if kind == Kind::Rotation {
+        super::block_authoring::metadata::next_parameter_name(document, definition, kind.name())?
+    } else if kind == Kind::Alignment {
+        label.clone()
+    } else {
+        kind.name().to_owned()
+    };
     let (graph, slots) = authoring::prepare(document, definition)?;
     let (class, cpp, grip_class, grip_cpp) = kind.classes();
     register_classes(
@@ -252,14 +259,7 @@ pub(crate) fn create_with_label(
     };
     let native = BlockTwoPointParameter {
         parameter: BlockParameter {
-            element: element(
-                0,
-                if kind == Kind::Alignment {
-                    &label
-                } else {
-                    kind.name()
-                },
-            ),
+            element: element(0, &element_name),
             show_properties: true,
             chain_actions: false,
         },

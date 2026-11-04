@@ -12,6 +12,8 @@ use glam::DVec3;
 /// Values answered at the base-point prompt before the parameter exists.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
+    pub name: Option<String>,
+    pub label: Option<String>,
     pub chain: Option<bool>,
     pub description: Option<String>,
     pub palette: Option<bool>,
@@ -19,6 +21,8 @@ pub struct Options {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Asking {
+    Name,
+    Label,
     Chain,
     Description,
     Palette,
@@ -32,6 +36,7 @@ impl Asking {
             }
             Self::Description => "Enter property description:",
             Self::Palette => "Display property in Properties palette? [Yes/No] <Yes>:",
+            Self::Name | Self::Label => unreachable!("this question is printed with its default"),
         }
     }
     /// The creation default the question's Enter answer stands for.
@@ -58,6 +63,8 @@ pub struct OrientationParameterCommand {
     grips: Option<usize>,
     asking: Option<Asking>,
     options: Options,
+    name_default: String,
+    label_default: String,
 }
 
 impl OrientationParameterCommand {
@@ -77,10 +84,38 @@ impl OrientationParameterCommand {
             grips: None,
             asking: None,
             options: Options::default(),
+            name_default: String::new(),
+            label_default: String::new(),
         }
+    }
+    pub(crate) fn with_name(mut self, name: String) -> Self {
+        self.name_default = name;
+        self
+    }
+    pub(crate) fn with_label(mut self, label: String) -> Self {
+        self.label_default = label;
+        self
     }
     fn accept(&mut self, text: Option<&str>) -> CmdResult {
         let asking = self.asking.expect("an option question is open");
+        if matches!(asking, Asking::Name | Asking::Label) {
+            let value = text.unwrap_or("").trim();
+            match asking {
+                Asking::Name => {
+                    if !value.is_empty() && !value.eq_ignore_ascii_case(&self.name_default) {
+                        self.options.name = Some(value.to_owned());
+                    }
+                }
+                Asking::Label => {
+                    if !value.is_empty() && !value.eq_ignore_ascii_case(&self.label_default) {
+                        self.options.label = Some(value.to_owned());
+                    }
+                }
+                _ => unreachable!(),
+            }
+            self.asking = None;
+            return CmdResult::NeedPoint;
+        }
         if asking == Asking::Description {
             let value = text.unwrap_or("");
             if !value.is_empty() {
@@ -101,7 +136,7 @@ impl OrientationParameterCommand {
             match asking {
                 Asking::Chain => self.options.chain = Some(value),
                 Asking::Palette => self.options.palette = Some(value),
-                Asking::Description => unreachable!(),
+                Asking::Description | Asking::Name | Asking::Label => unreachable!(),
             }
         }
         self.asking = None;
@@ -185,7 +220,16 @@ impl CadCommand for OrientationParameterCommand {
     }
     fn prompt(&self) -> String {
         if let Some(asking) = self.asking {
-            return crate::t!(asking.question()).into_owned();
+            return match asking {
+                Asking::Name => {
+                    crate::tf!("Enter parameter name <{}>:", self.name_default).into_owned()
+                }
+                Asking::Label => {
+                    crate::tf!("Enter rotation property label <{}>:", self.label_default)
+                        .into_owned()
+                }
+                other => crate::t!(other.question()).into_owned(),
+            };
         }
         let step = if self.choosing_type {
             if self.perpendicular {
@@ -195,7 +239,7 @@ impl CadCommand for OrientationParameterCommand {
             }
         } else if self.base.is_none() {
             if self.kind == Kind::Rotation {
-                "Specify base point or [Chain/Description/Palette]:"
+                "Specify base point or [Name/Label/Chain/Description/Palette]:"
             } else {
                 "Specify parameter base point:"
             }
@@ -228,7 +272,7 @@ impl CadCommand for OrientationParameterCommand {
     }
     fn input_kind(&self) -> InputKind {
         match self.asking {
-            Some(Asking::Description) => InputKind::FreeText,
+            Some(Asking::Description | Asking::Name | Asking::Label) => InputKind::FreeText,
             Some(_) => InputKind::SingleToken,
             None => InputKind::Point,
         }
@@ -350,6 +394,8 @@ impl CadCommand for OrientationParameterCommand {
         }
         if self.kind == Kind::Rotation && self.base.is_none() {
             let asking = match text.trim().to_ascii_uppercase().as_str() {
+                "N" | "NAME" => Asking::Name,
+                "L" | "LABEL" => Asking::Label,
                 "C" | "CHAIN" => Asking::Chain,
                 "D" | "DESCRIPTION" => Asking::Description,
                 "P" | "PALETTE" => Asking::Palette,
@@ -360,6 +406,8 @@ impl CadCommand for OrientationParameterCommand {
                 }
             };
             match asking {
+                Asking::Name => self.options.name = None,
+                Asking::Label => self.options.label = None,
                 Asking::Chain => self.options.chain = None,
                 Asking::Description => self.options.description = None,
                 Asking::Palette => self.options.palette = None,
@@ -536,7 +584,59 @@ mod tests {
     fn a_rotation_base_point_prompt_lists_the_options_it_accepts() {
         assert_eq!(
             rotation().prompt(),
-            "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        );
+    }
+
+    #[test]
+    fn a_rotation_takes_a_name_and_a_property_label() {
+        let mut command = rotation()
+            .with_name("Rotation1".into())
+            .with_label("Angle".into());
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter parameter name <Rotation1>:");
+        assert_eq!(command.input_kind(), InputKind::FreeText);
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.options.name.as_deref(),
+            Some("L"),
+            "a keyword typed at a text question is that text"
+        );
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Body"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.name.as_deref(), Some("Body"));
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter rotation property label <Angle>:");
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.label, None, "Enter keeps the default label");
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Turn"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.label.as_deref(), Some("Turn"));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:",
+            "both questions return to the placement prompt"
         );
     }
 
@@ -568,7 +668,7 @@ mod tests {
         assert_eq!(command.options.chain, Some(true));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Rotation  Specify base point or [Chain/Description/Palette]:"
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
         );
     }
 

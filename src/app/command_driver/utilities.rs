@@ -1219,6 +1219,55 @@ impl OpenCADStudio {
         }
         let kw = text.trim().to_ascii_uppercase();
 
+        // `?` lists the ways objects can be selected and asks again.
+        if kw == "?" {
+            self.command_line
+                .push_error(crate::t!("*Invalid selection*").as_ref());
+            self.command_line.push_info(
+                crate::t!("Expects a point or Window/Last/Crossing/BOX/ALL/Fence/WPolygon/CPolygon/Group/Add/Remove/Multiple/Previous/Undo/AUto/SIngle/SUbobject/Object")
+                    .as_ref(),
+            );
+            if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+                self.command_line.push_info(&prompt);
+            }
+            return Some(Task::none());
+        }
+        // BOX / AUto / Multiple: a pick takes the object under it and a pick
+        // in empty space opens a box whose direction decides window or
+        // crossing, which is how picks already behave.
+        if let "BOX" | "AU" | "AUTO" | "M" | "MULTIPLE" = kw.as_str() {
+            self.tabs[i]
+                .scene
+                .selection
+                .borrow_mut()
+                .gesture
+                .box_crossing_locked = false;
+            if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+                self.command_line.push_info(&prompt);
+            }
+            return Some(Task::none());
+        }
+        // Undo takes back the last selection action.
+        if let "U" | "UNDO" = kw.as_str() {
+            if let Some((handles, removed)) = self.last_pick.take() {
+                for handle in handles {
+                    if removed {
+                        self.tabs[i].scene.select_entity(handle, false);
+                    } else {
+                        self.tabs[i].scene.deselect_entity(handle);
+                    }
+                }
+                self.refresh_properties();
+            }
+            let handles: Vec<Handle> = self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect();
+            return Some(self.feed_command(StepInput::SelectionComplete(handles)));
+        }
+
         // Modes that arm the next gesture rather than selecting anything now.
         // Dragging normally decides window-vs-crossing from the direction the
         // corner travels; asking for one by name has to override that, and hold

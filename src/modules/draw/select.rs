@@ -379,6 +379,11 @@ impl CadCommand for SelectObjectsCommand {
             }
         }
         match text.trim().to_uppercase().as_str() {
+            // SIngle: the next selection ends the prompt.
+            "SI" | "SINGLE" => {
+                self.commit_on_enter = false;
+                Some(CmdResult::NeedPoint)
+            }
             "S" | "SETTINGS" if self.auto_constrain_settings => {
                 Some(CmdResult::OpenAutoConstrainSettings)
             }

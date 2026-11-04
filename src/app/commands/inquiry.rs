@@ -188,6 +188,27 @@ impl OpenCADStudio {
                 }
             }
 
+            // ── SELECT — a selection set for the next command ─────────────
+            // Objects already selected are taken as they are; otherwise the
+            // prompt gathers them. Either way they stay selected and become
+            // the Previous set.
+            "SELECT" => {
+                let found = self.tabs[i].scene.selected.len();
+                if found == 0 {
+                    use crate::modules::draw::select::SelectObjectsCommand;
+                    let cmd = SelectObjectsCommand::routed("SELECT", "_SELECT_DONE");
+                    self.command_line.push_info(&cmd.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(cmd));
+                    return Some(Task::none());
+                }
+                self.command_line
+                    .push_output(crate::tf!("{found} found").as_ref());
+                self.tabs[i].prev_selection = self.tabs[i].scene.selected.iter().copied().collect();
+            }
+            "_SELECT_DONE" => {
+                self.tabs[i].prev_selection = self.tabs[i].scene.selected.iter().copied().collect();
+            }
+
             // ── LIST — entity info ────────────────────────────────────────
             "LIST" => {
                 let selected: Vec<_> = self.tabs[i].scene.selected_entities();

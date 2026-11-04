@@ -2352,6 +2352,8 @@ fn render_params_visibility_toggle_row<'a>(value: bool) -> Element<'a, Message> 
     })
     .padding([4, 8])
     .width(Length::Fill);
+    // Same side padding as a property row's label column (`prop_row_with_active`),
+    // so "Values" does not touch the panel's left edge.
     container(
         row![
             text(t!("Values").into_owned())
@@ -2361,6 +2363,12 @@ fn render_params_visibility_toggle_row<'a>(value: bool) -> Element<'a, Message> 
         ]
         .align_y(iced::Center),
     )
+    .padding(Padding {
+        top: 0.0,
+        bottom: 0.0,
+        left: 6.0,
+        right: 6.0,
+    })
     .width(Length::Fill)
     .into()
 }

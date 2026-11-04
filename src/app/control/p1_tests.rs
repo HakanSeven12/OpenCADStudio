@@ -2296,6 +2296,27 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         "and the other line is sized by its own constraint: {}",
         span(&app, other)
     );
+    // Each constraint drew its own dimension and named its own parameter, so the
+    // command's cleanup has something of both to remove — and something to spare.
+    let (deleted_dimension, surviving_dimension) = {
+        let set = app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the drawing keeps its constraint set");
+        let dimension = |entity: codec::Handle| {
+            set.constraints
+                .iter()
+                .filter(|constraint| constraint.refs.iter().any(|r| r.entity == entity))
+                .find_map(|constraint| set.dimensions.get(&constraint.id).copied())
+                .expect("a dimensional constraint draws a dimension")
+        };
+        (dimension(line), dimension(other))
+    };
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d1")
+            && app.tabs[i].scene.named_parameters().contains("d2"),
+        "both constraints drive a named parameter"
+    );
     app.tabs[i].scene.select_entity(line, false);
     let _ = app.dispatch_command("DELCONSTRAINT");
     assert!(
@@ -2324,6 +2345,30 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         (span(&app, other) - 60.0).abs() < 1e-6,
         "and the surviving constraint still sizes its line: {}",
         span(&app, other)
+    );
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(surviving_dimension)
+            .is_some(),
+        "the dimension the untouched constraint draws is not deleted with the other line's"
+    );
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d2"),
+        "and its parameter is still defined, because the constraint that reads it is still there"
+    );
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(deleted_dimension)
+            .is_none(),
+        "and the deleted constraint's dimension goes with it"
+    );
+    assert!(
+        !app.tabs[i].scene.named_parameters().contains("d1"),
+        "and its parameter goes too, since nothing reads it any more"
     );
 
     let dragged = control(

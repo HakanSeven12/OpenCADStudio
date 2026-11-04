@@ -1380,7 +1380,12 @@ impl OpenCADStudio {
                 if distance.is_finite() {
                     // With the cursor on the last point the distance has no
                     // direction: the pick is the last point itself.
-                    let world = anchor + toward.normalize_or_zero() * distance;
+                    let on_anchor = toward.length() <= 1e-6 * (1.0 + anchor.length());
+                    let world = if on_anchor {
+                        anchor
+                    } else {
+                        anchor + toward.normalize() * distance
+                    };
                     let typed = self.tabs[i].ucs_xform().to_ucs(world);
                     return self.typed_object_pick(&format!("{},{},{}", typed.x, typed.y, typed.z));
                 }

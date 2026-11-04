@@ -3426,6 +3426,24 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                         {
                             Some(Default::default())
                         }
+                        // A curve-fit polyline's picked segment shows the
+                        // original vertices around it, not the fit vertices.
+                        (codec::EntityType::Polyline2D(polyline), Some(segments))
+                            if polyline.flags.bits() & 2 != 0 =>
+                        {
+                            let n = polyline.vertices.len();
+                            let original = |i: usize| polyline.vertices[i % n].flags.bits() & 1 == 0;
+                            Some(
+                                segments
+                                    .iter()
+                                    .flat_map(|&k| {
+                                        let before = (0..=k).rev().find(|&i| original(i)).unwrap_or(k);
+                                        let after = (k + 1..k + 1 + n).find(|&i| original(i)).unwrap_or(k + 1) % n;
+                                        [before, after]
+                                    })
+                                    .collect(),
+                            )
+                        }
                         (codec::EntityType::LwPolyline(_) | codec::EntityType::Polyline2D(_), Some(segments)) => {
                             let n = match entity {
                                 codec::EntityType::LwPolyline(polyline) => polyline.vertices.len(),

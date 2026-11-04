@@ -373,7 +373,7 @@ impl CadCommand for PeditCommand {
             Mode::PickTarget => {
                 t!("PEDIT  Select polyline (or a line/arc to convert) or [Multiple]:").into_owned()
             }
-            Mode::MultipleGather => "PEDIT  Select objects:".to_string(),
+            Mode::MultipleGather => t!("PEDIT  Select objects:").into_owned(),
             Mode::MultipleJoin => format!("PEDIT  Join type: {:?}. Enter fuzz distance or [Jointype] <{}>:", self.join_type, self.join_fuzz),
             Mode::JoinType => format!("PEDIT  Enter join type [Extend/Add/Both] <{:?}>:", self.join_type),
             Mode::MultipleConvert => t!("PEDIT  Convert lines and arcs to polylines [Yes/No] <Yes>:").into_owned(),

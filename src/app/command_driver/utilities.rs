@@ -703,6 +703,7 @@ impl OpenCADStudio {
         }
         self.last_pick = Some((expanded, remove));
         self.last_pick_groups = groups;
+        self.refresh_properties();
         StepInput::SelectionComplete(
             self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect(),
         )

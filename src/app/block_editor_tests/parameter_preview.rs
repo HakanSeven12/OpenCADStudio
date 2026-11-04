@@ -650,8 +650,11 @@ fn block_move_point_chain_properties_refresh_existing_references_and_preserve_un
 }
 
 #[test]
-fn block_mixed_order_and_point_transport_grip_undo_redo() {
-    for scale_first in [false, true] {
+fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
+    for (scale_first, child_linear) in [false, true]
+        .into_iter()
+        .flat_map(|order| [false, true].map(|linear| (order, linear)))
+    {
         let (mut app, insert) = fixture();
         let i = app.active_tab;
         let other = app.tabs[i]
@@ -675,7 +678,19 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             Vector3::UNIT_Y,
         )
         .unwrap();
-        let child = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        let child = if child_linear {
+            distance::create(
+                doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::ZERO,
+                Vector3::UNIT_X * 10.,
+                Vector3::UNIT_Y,
+            )
+            .unwrap()
+        } else {
+            point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y).unwrap()
+        };
         let second_parent = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y * 2.).unwrap();
         for handle in [parent, child] {
             let codec::objects::ObjectType::DynamicBlock(object) =
@@ -786,6 +801,20 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         };
         let original = line(&before, other);
         let start = if scale_first { 20. } else { 30. };
+        let base = |app: &OpenCADStudio| {
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .base
+        };
+        let expected_base = |offset: f64| {
+            point.base
+                + if child_linear {
+                    DVec3::X * offset
+                } else {
+                    DVec3::ZERO
+                }
+        };
+
         let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(20., 0., 0.)));
         assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
         let after = &app.tabs[i].scene.document;
@@ -795,7 +824,16 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         );
         assert_eq!(line(after, other), original);
         let frame = actions::instance::frame(after, insert, &point).unwrap();
-        assert_eq!(frame.end, DVec3::X * 10.);
+        assert_eq!(frame.end, point.end + DVec3::X * 10.);
+        assert_eq!(
+            frame.base,
+            point.base
+                + if child_linear {
+                    DVec3::X * 10.
+                } else {
+                    DVec3::ZERO
+                }
+        );
         app.undo_steps(1);
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
@@ -831,7 +869,9 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             .unwrap()
             .id;
         assert!(app.start_test_action_grip(insert, child_grip));
-        let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(15., 0., 0.)));
+        let _ = app.feed_command(crate::command::StepInput::Point(
+            point.end + DVec3::new(15., 0., 0.),
+        ));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 5.), DVec3::X * (start + 7.))
@@ -840,7 +880,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 15.
+            point.end + DVec3::X * 15.
         );
         app.undo_steps(1);
         assert_eq!(
@@ -858,6 +898,8 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         );
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
 
+        assert_eq!(base(&app), expected_base(10.));
+
         // Drive a second parent after the direct child edit. Both its delta and
         // the child's autonomous input must survive subsequent parent history.
         app.tabs[i].scene.select_entity(insert, true);
@@ -871,6 +913,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             .id;
         assert!(app.start_test_action_grip(insert, second_grip));
         let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(3., 0., 0.)));
+        assert_eq!(base(&app), expected_base(13.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 8.), DVec3::X * (start + 10.))
@@ -879,9 +922,10 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 18.
+            point.end + DVec3::X * 18.
         );
         app.undo_steps(1);
+        assert_eq!(base(&app), expected_base(10.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 5.), DVec3::X * (start + 7.))
@@ -890,20 +934,21 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 15.
+            point.end + DVec3::X * 15.
         );
         app.redo_steps(1);
         assert_eq!(
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 18.
+            point.end + DVec3::X * 18.
         );
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
 
         app.tabs[i].scene.select_entity(insert, true);
         app.tabs[i].selected_handle = Some(insert);
         app.refresh_properties();
+        assert_eq!(base(&app), expected_base(13.));
         let root_grip = app.tabs[i]
             .selected_grips
             .iter()
@@ -912,6 +957,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             .id;
         assert!(app.start_test_action_grip(insert, root_grip));
         let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(10., 0., 0.)));
+        assert_eq!(base(&app), expected_base(3.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * 8., DVec3::X * 9.)
@@ -920,9 +966,10 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 8.
+            point.end + DVec3::X * 8.
         );
         app.undo_steps(1);
+        assert_eq!(base(&app), expected_base(13.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 8.), DVec3::X * (start + 10.))
@@ -931,7 +978,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 18.
+            point.end + DVec3::X * 18.
         );
         app.redo_steps(1);
         assert_eq!(
@@ -942,8 +989,9 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 8.
+            point.end + DVec3::X * 8.
         );
+        assert_eq!(base(&app), expected_base(3.));
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
     }
 }

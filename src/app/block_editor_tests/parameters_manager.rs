@@ -58,6 +58,37 @@ fn endpoints(app: &OpenCADStudio, tab: usize, definition: Handle) -> (glam::DVec
     (parameter.base, parameter.end)
 }
 
+/// A visibility parameter's row names the parameter and prints no number of its
+/// own: the state set is not a quantity the manager writes back, so both numeric
+/// cells stay empty and the row is not one it opens a field on. `Show` carries
+/// the parameter's own flag, and `Order` and `Description` stay empty because a
+/// visibility parameter carries neither.
+#[test]
+fn a_visibility_row_names_the_parameter_and_prints_no_number() {
+    let (app, tab, definition) = open(&["BPARAMETER VISIBILITY 0,0"], &[]);
+    let found = manager::rows(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Visibility")
+        .expect("the placed visibility parameter gets a row");
+    assert_eq!(found.name, "Visibility1", "the row names the parameter");
+    assert!(
+        !found.numeric,
+        "neither numeric cell is a number the manager writes back"
+    );
+    assert!(
+        found.expression.is_empty() && found.value.is_empty(),
+        "the row prints no number of its own: {found:?}"
+    );
+    assert!(
+        found.show,
+        "a freshly authored parameter is shown, and the row carries that flag"
+    );
+    assert!(
+        found.order.is_empty() && found.description.is_empty(),
+        "and the row leaves the two cells no rule is measured for empty: {found:?}"
+    );
+}
+
 #[test]
 fn typing_a_distance_in_the_manager_moves_the_parameter() {
     let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);

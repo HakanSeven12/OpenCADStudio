@@ -322,7 +322,13 @@ impl HatchModel {
             rings.push(ring);
         }
 
-        let (points, triangles) = kernel::geom2d::triangulate_rings(&rings);
+        let (mut points, mut triangles) = kernel::geom2d::triangulate_rings(&rings);
+        // The triangulator gives up on rings that cross each other, and the
+        // renderers draw nothing without a mesh (#2549). A lone ring it refuses
+        // is an invalid sampling of its curve and stays without a fill.
+        if triangles.is_empty() && rings.len() > 1 {
+            (points, triangles) = even_odd_band_mesh(&rings);
+        }
         let vertices = points
             .into_iter()
             .map(|[x, y]| [x as f32, y as f32])
@@ -1028,6 +1034,83 @@ impl<'a> EdgeQuery<'a> {
         }
         Some(self.unique.len() % 2 == 1)
     }
+}
+
+/// Above this edge count a crossing boundary is left without a mesh: finding
+/// every crossing compares each edge with all the others.
+const MAX_BAND_MESH_EDGES: usize = 4096;
+
+/// Even-odd fill of rings that may cross each other, as trapezoids between the
+/// heights of their vertices and crossings. Between two such heights no edges
+/// cross, so sorting by x and pairing them gives the filled spans.
+pub(crate) fn even_odd_band_mesh(rings: &[Vec<[f64; 2]>]) -> (Vec<[f64; 2]>, Vec<[usize; 3]>) {
+    let edges: Vec<([f64; 2], [f64; 2])> = rings
+        .iter()
+        .flat_map(|ring| {
+            (0..ring.len()).map(move |index| (ring[index], ring[(index + 1) % ring.len()]))
+        })
+        .filter(|(a, b)| a[1] != b[1])
+        .map(|(a, b)| if a[1] < b[1] { (a, b) } else { (b, a) })
+        .collect();
+    if edges.len() < 2 || edges.len() > MAX_BAND_MESH_EDGES {
+        return (Vec::new(), Vec::new());
+    }
+
+    let mut heights: Vec<f64> = edges.iter().flat_map(|(a, b)| [a[1], b[1]]).collect();
+    for (index, first) in edges.iter().enumerate() {
+        for second in &edges[index + 1..] {
+            if let Some(y) = edge_crossing_height(first, second) {
+                heights.push(y);
+            }
+        }
+    }
+    heights.sort_by(f64::total_cmp);
+    heights.dedup();
+
+    let x_at =
+        |(a, b): &([f64; 2], [f64; 2]), y: f64| a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]);
+    let mut points = Vec::new();
+    let mut triangles = Vec::new();
+    let mut active = Vec::new();
+    for band in heights.windows(2) {
+        let (low, high) = (band[0], band[1]);
+        let middle = (low + high) * 0.5;
+        if middle <= low || middle >= high {
+            continue;
+        }
+        active.clear();
+        active.extend(edges.iter().filter(|(a, b)| a[1] <= low && b[1] >= high));
+        active.sort_by(|a, b| x_at(a, middle).total_cmp(&x_at(b, middle)));
+        for span in active.chunks_exact(2) {
+            let first = points.len();
+            points.extend([
+                [x_at(&span[0], low), low],
+                [x_at(&span[1], low), low],
+                [x_at(&span[1], high), high],
+                [x_at(&span[0], high), high],
+            ]);
+            triangles.push([first, first + 1, first + 2]);
+            triangles.push([first, first + 2, first + 3]);
+        }
+    }
+    (points, triangles)
+}
+
+/// The height where two edges cross, when they do so inside both.
+fn edge_crossing_height(
+    (a, b): &([f64; 2], [f64; 2]),
+    (c, d): &([f64; 2], [f64; 2]),
+) -> Option<f64> {
+    let (ab, cd) = ([b[0] - a[0], b[1] - a[1]], [d[0] - c[0], d[1] - c[1]]);
+    let denominator = ab[0] * cd[1] - ab[1] * cd[0];
+    if denominator == 0.0 {
+        return None;
+    }
+    let (ac_x, ac_y) = (c[0] - a[0], c[1] - a[1]);
+    let along_first = (ac_x * cd[1] - ac_y * cd[0]) / denominator;
+    let along_second = (ac_x * ab[1] - ac_y * ab[0]) / denominator;
+    ((0.0..=1.0).contains(&along_first) && (0.0..=1.0).contains(&along_second))
+        .then(|| a[1] + along_first * ab[1])
 }
 
 #[cfg(test)]

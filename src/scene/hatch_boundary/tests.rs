@@ -372,3 +372,131 @@ fn loops_flagged_not_closed_stay_out_of_the_extents() {
     let (_, max) = scene.model_space_extents().unwrap();
     assert!(max.x < 10.5 && max.y < 10.5, "{max:?}");
 }
+
+/// Fraction of a grid of samples that even-odd counts as inside `rings`,
+/// scaled to the area of the grid.
+fn sampled_even_odd_area(rings: &[Vec<[f64; 2]>], min: [f64; 2], max: [f64; 2]) -> f64 {
+    const STEPS: usize = 400;
+    let (width, height) = (max[0] - min[0], max[1] - min[1]);
+    let inside = |x: f64, y: f64| {
+        rings.iter().fold(false, |odd, ring| {
+            (0..ring.len()).fold(odd, |odd, index| {
+                let (a, b) = (ring[index], ring[(index + 1) % ring.len()]);
+                let crosses = (a[1] > y) != (b[1] > y)
+                    && x < a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]);
+                odd != crosses
+            })
+        })
+    };
+    let hits = (0..STEPS * STEPS)
+        .filter(|sample| {
+            let fraction = |index: usize| (index as f64 + 0.5) / STEPS as f64;
+            inside(
+                min[0] + fraction(*sample % STEPS) * width,
+                min[1] + fraction(*sample / STEPS) * height,
+            )
+        })
+        .count();
+    hits as f64 / (STEPS * STEPS) as f64 * width * height
+}
+
+fn polygon_path(points: &[[f64; 2]]) -> BoundaryPath {
+    let mut path = BoundaryPath::new();
+    for index in 0..points.len() {
+        let (a, b) = (points[index], points[(index + 1) % points.len()]);
+        path.add_edge(BoundaryEdge::Line(LineEdge {
+            start: Vector2::new(a[0], a[1]),
+            end: Vector2::new(b[0], b[1]),
+        }));
+    }
+    path
+}
+
+// #2549: the top roof hatch of that drawing, moved near the origin. Its inner
+// rectangle crosses the outer loop, and the triangulator returns nothing.
+#[test]
+fn rings_crossing_each_other_still_get_a_fill_mesh() {
+    let rings: Vec<Vec<[f64; 2]>> = vec![
+        vec![
+            [2470.5824217175, 572.011091161],
+            [2506.4121096726, 575.847497202],
+            [2529.9941501222, 574.597867423],
+            [2449.9941501222, 574.597867423],
+        ],
+        vec![
+            [2709.9941501223, 654.597867423],
+            [2789.9941501223, 654.597867423],
+            [2784.931323676, 654.576307214],
+            [2754.8988551385, 654.99488888],
+        ],
+        vec![
+            [2570.6819239834, 387.596071898],
+            [2658.5889112501, 387.596071898],
+            [2658.5889112502, 302.445904774],
+            [2570.6819239835, 302.445904774],
+        ],
+        vec![
+            [3114.6288229527, 771.037409169],
+            [2372.9230823104, 29.597867424],
+            [1097.0652179348, 29.597867423],
+            [12.1450205024, 1114.597867423],
+            [2946.7686508113, 1114.597867423],
+        ],
+    ];
+    let mut hatch = Hatch::new();
+    hatch.is_solid = true;
+    hatch.paths = rings.iter().map(|ring| polygon_path(ring)).collect();
+    let model = Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).expect("hatch model");
+
+    // The rings fill_mesh hands to the triangulator: without the fallback
+    // this hatch has no mesh.
+    let mut local: Vec<Vec<[f64; 2]>> = vec![Vec::new()];
+    for &[x, y] in model.boundary.iter() {
+        if x.is_finite() && y.is_finite() {
+            local.last_mut().unwrap().push([x as f64, y as f64]);
+        } else {
+            local.push(Vec::new());
+        }
+    }
+    assert_eq!(local.len(), 4);
+    assert!(triangulate_rings(&local).1.is_empty());
+
+    let expected = sampled_even_odd_area(&rings, [0.0, 0.0], [3200.0, 1200.0]);
+    let area = filled_area(&model);
+    assert!(
+        (area - expected).abs() < expected * 0.01,
+        "mesh area {area}, even-odd area {expected}"
+    );
+}
+
+#[test]
+fn self_crossing_loop_fills_by_even_odd() {
+    // A bow tie: two triangles meeting where the loop crosses itself.
+    let ring = vec![[0.0, 0.0], [10.0, 10.0], [10.0, 0.0], [0.0, 10.0]];
+    let mesh = crate::scene::model::hatch_model::even_odd_band_mesh(&[ring]);
+    let area: f64 = mesh
+        .1
+        .iter()
+        .map(|t| {
+            let [a, b, c] = t.map(|i| mesh.0[i]);
+            ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs() * 0.5
+        })
+        .sum();
+    assert!((area - 50.0).abs() < 1e-6, "{area}");
+}
+
+// #2549: the outer loop of a patterned hatch may carry the not-closed flag and
+// AutoCAD still draws through it; a solid hatch leaves it out.
+#[test]
+fn not_closed_flag_only_removes_loops_of_solid_hatches() {
+    let mut outer = rectangle([0.0, 0.0], [10.0, 10.0], [0.0; 2]);
+    outer.flags = BoundaryPathFlags::from_bits(1 | 32);
+    let build = |is_solid: bool| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = is_solid;
+        hatch.paths = vec![outer.clone(), rectangle([3.0, 3.0], [7.0, 7.0], [0.0; 2])];
+        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).expect("hatch model")
+    };
+    assert!((filled_area(&build(true)) - 16.0).abs() < 1e-3);
+    assert!((filled_area(&build(false)) - 84.0).abs() < 1e-3);
+}

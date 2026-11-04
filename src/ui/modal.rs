@@ -451,8 +451,6 @@ pub struct ToolFrameMessages {
     pub grab: Message,
     pub resize: Message,
     pub raise: Message,
-    /// Desktop: the button that moves the dialog into a window of its own.
-    pub detach: Option<Message>,
     /// The content's measured size.
     pub measured: Box<dyn Fn(Size) -> Message>,
 }
@@ -471,7 +469,6 @@ pub fn tool_frame<'a>(
         grab,
         resize,
         raise,
-        detach,
         measured,
     } = messages;
     let close = button(crate::ui::icons::themed_danger(
@@ -481,24 +478,7 @@ pub fn tool_frame<'a>(
     .on_press(close)
     .padding([1, 7])
     .style(close_style);
-    let mut controls = row![].spacing(2).align_y(iced::Center);
-    if let Some(detach) = detach {
-        let button = button(crate::ui::icons::themed_secondary(
-            crate::ui::icons::DETACH,
-            13.0,
-        ))
-        .on_press(detach)
-        .padding([1, 7])
-        .style(neutral_close_style);
-        controls = controls.push(iced::widget::tooltip(
-            container(button).id(iced::widget::Id::new(DETACH_BUTTON_ID)),
-            container(iced::widget::text(crate::t!("Open in its own window")).size(11))
-                .padding([3, 6])
-                .style(container::rounded_box),
-            iced::widget::tooltip::Position::Bottom,
-        ));
-    }
-    let controls = controls.push(close);
+    let controls = row![close].align_y(iced::Center);
     // Left-aligned, clear of the buttons: a narrow dialog's title would run
     // under them centred.
     let title_surface = mouse_area(
@@ -512,7 +492,7 @@ pub fn tool_frame<'a>(
         .height(Length::Fixed(24.0))
         .padding(Padding {
             left: 4.0,
-            right: 64.0,
+            right: 34.0,
             ..Padding::ZERO
         })
         .align_y(iced::alignment::Vertical::Center),

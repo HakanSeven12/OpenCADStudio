@@ -11955,8 +11955,6 @@ impl OpenCADStudio {
                 self.raise_tool(kind)
             }
             #[cfg(not(target_arch = "wasm32"))]
-            Message::ToolWindowDetach(kind) => self.detach_tool(kind),
-            #[cfg(not(target_arch = "wasm32"))]
             Message::OsWindowReturn(id) => self.return_os_window(id),
             #[cfg(not(target_arch = "wasm32"))]
             Message::OsWindowKey(id, key) => self.os_window_key(id, key),
@@ -11971,8 +11969,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             #[cfg(target_arch = "wasm32")]
-            Message::ToolWindowDetach(_)
-            | Message::OsWindowReturn(_)
+            Message::OsWindowReturn(_)
             | Message::OsWindowKey(..)
             | Message::OsWindowResized(..)
             | Message::OsWindowMoved(..) => Task::none(),

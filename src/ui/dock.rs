@@ -529,9 +529,6 @@ pub struct DockState {
     /// Desktop: where each dialog's window of its own last was, by dialog
     /// name.
     pub tool_windows: BTreeMap<String, crate::app::tool_windows::WindowPlacement>,
-    /// Desktop: dialogs brought back into the main window. Every other one
-    /// opens in a window of its own.
-    pub tool_frames: std::collections::BTreeSet<String>,
 }
 
 impl Default for DockState {
@@ -545,7 +542,6 @@ impl Default for DockState {
             panels: BTreeMap::new(),
             detached: BTreeMap::new(),
             tool_windows: BTreeMap::new(),
-            tool_frames: Default::default(),
         }
     }
 }

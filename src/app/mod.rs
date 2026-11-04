@@ -5220,9 +5220,6 @@ pub enum Message {
     ToolWindowDragRelease,
     /// A press on a tool dialog's frame: bring it to the front.
     ToolWindowRaise(ModalKind),
-    /// Desktop: move a tool dialog into a window of its own.
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    ToolWindowDetach(ModalKind),
     /// Desktop: a window of its own's "back to the main window" button.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     OsWindowReturn(window::Id),

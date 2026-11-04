@@ -1080,6 +1080,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // Screen grips with the object they belong to, for the frames.
             let mut owned_grips: Vec<(codec::Handle, iced::Point, crate::scene::model::object::GripShape)> =
                 Vec::new();
+            let mut grip_rubber: Option<(iced::Point, iced::Point)> = None;
             let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
                 && !tab.selected_grips.is_empty()
             {
@@ -1135,24 +1136,43 @@ bg={bg_ms:.1}ms n={view_count}"
                         grips_to_screen(list, &cam, bounds)
                     }
                 };
-                let screen_grips = project(&tab.selected_grips);
-                // A frame keeps the vertices the drag started from: the
-                // dragged grip counts at its starting point.
-                let frame_grips = match tab.active_grip.as_ref() {
+                // A dragged grip stays where the drag started, and so does a
+                // frame through it; a rubber band runs from it to the cursor.
+                let screen_grips = match tab.active_grip.as_ref() {
                     Some(edit) => {
-                        let mut list = tab.selected_grips.clone();
-                        for (index, grip) in list.iter_mut().enumerate() {
-                            if tab.selected_grip_handles.get(index) == Some(&edit.handle)
-                                && grip.id == edit.grip_id
+                        // Every grip stays where it was when the drag
+                        // started; the dragged one marks its start point.
+                        let list = match &tab.drag_start_grips {
+                            Some(((handle, id, start), list, owners))
+                                if (*handle, *id, *start)
+                                    == (edit.handle, edit.grip_id, edit.origin_world)
+                                    && list.len() == tab.selected_grips.len()
+                                    && owners == &tab.selected_grip_handles =>
                             {
-                                grip.world = edit.origin_world;
+                                list.clone()
                             }
+                            _ => tab.selected_grips.clone(),
+                        };
+                        // A circle's quadrant stretches from its centre.
+                        let base = match tab.scene.document.get_entity(edit.handle) {
+                            Some(codec::EntityType::Circle(circle)) => {
+                                let centre = circle.center_wcs();
+                                glam::DVec3::new(centre.x, centre.y, centre.z)
+                            }
+                            _ => edit.origin_world,
+                        };
+                        let ends = project(&[
+                            crate::entities::common::square_grip(0, base),
+                            crate::entities::common::square_grip(1, edit.last_world),
+                        ]);
+                        if let [(_, from, ..), (_, to, ..)] = ends.as_slice() {
+                            grip_rubber = Some((*from, *to));
                         }
                         project(&list)
                     }
-                    None => screen_grips.clone(),
+                    None => project(&tab.selected_grips),
                 };
-                owned_grips = frame_grips
+                owned_grips = screen_grips
                     .iter()
                     .enumerate()
                     .filter_map(|(index, (_, screen, _, shape, _))| {
@@ -1845,6 +1865,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 snap_ext_dir,
                 grips,
                 control_polygons,
+                grip_rubber,
                 grip_clip,
                 ucs_icons,
                 ost_points,

@@ -1085,6 +1085,7 @@ pub fn selection_overlay<'a>(
     snap_ext_dir: Option<Point>,
     grips: Vec<GripMarker>,
     control_polygons: Vec<(Vec<Point>, bool, bool)>,
+    grip_rubber: Option<(Point, Point)>,
     grip_clip: Option<iced::Rectangle>,
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
@@ -1123,6 +1124,7 @@ pub fn selection_overlay<'a>(
         snap_ext_dir,
         grips,
         control_polygons,
+        grip_rubber,
         grip_clip,
         ucs_icons,
         ost_points,
@@ -1185,6 +1187,9 @@ struct SelectionCanvas {
     /// Each selected spline control polygon, its closed state, and whether it is
     /// a spline-fit polyline's frame (grey dots) rather than a CV frame.
     control_polygons: Vec<(Vec<Point>, bool, bool)>,
+    /// A grip drag's rubber band: from the grip's starting point (a circle's
+    /// centre for its quadrant) to the cursor.
+    grip_rubber: Option<(Point, Point)>,
     /// Active 3D pane / floating viewport rectangle. Grip markers are clipped
     /// here so orbiting cannot leak them into paper space or adjacent panes.
     grip_clip: Option<iced::Rectangle>,
@@ -1635,6 +1640,7 @@ pub struct GripLayerKey {
     pub palette: iced::theme::Palette,
     pub grips: Vec<GripMarker>,
     pub control_polygons: Vec<(Vec<Point>, bool, bool)>,
+    pub grip_rubber: Option<(Point, Point)>,
     pub grip_clip: Option<iced::Rectangle>,
     pub selection_visual: SelectionVisualOptions,
     pub authoring_style: AuthoringStyleKey,
@@ -2189,6 +2195,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             palette: *theme.palette(),
             grips: self.grips.clone(),
             control_polygons: self.control_polygons.clone(),
+            grip_rubber: self.grip_rubber,
             grip_clip: self.grip_clip,
             selection_visual: self.selection_visual,
             authoring_style: AuthoringStyleKey::from(&self.authoring_visual),
@@ -2257,6 +2264,20 @@ impl canvas::Program<Message> for SelectionCanvas {
                             },
                         );
                     }
+                }
+                if let Some((from, to)) = self.grip_rubber {
+                    frame.stroke(
+                        &canvas::Path::line(from, to),
+                        canvas::Stroke {
+                            width: 1.0,
+                            style: canvas::Style::Solid(Color::from_rgb8(225, 160, 30)),
+                            line_dash: canvas::LineDash {
+                                segments: &[16.0, 10.0],
+                                offset: 0,
+                            },
+                            ..Default::default()
+                        },
+                    );
                 }
                 draw_move_gizmo(frame, &self.grips);
                 for grip in &self.grips {
@@ -6375,6 +6396,7 @@ mod selection_canvas_state_tests {
                 is_dynamic: false,
             }],
             control_polygons: Vec::new(),
+            grip_rubber: None,
             grip_clip: None,
             selection_visual: SelectionVisualOptions::default(),
             authoring_style: AuthoringStyleKey {

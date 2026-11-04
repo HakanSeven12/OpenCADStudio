@@ -225,6 +225,10 @@ pub(super) struct DocumentTab {
     pub(super) selected_grips: Vec<GripDef>,
     /// Entity handle for each entry in `selected_grips`.
     pub(super) selected_grip_handles: Vec<Handle>,
+    /// The grips as they were when the active grip drag started (keyed by
+    /// the drag's handle, grip and start point): every grip stays drawn
+    /// there while the drag reshapes the object.
+    pub(super) drag_start_grips: Option<((Handle, usize, glam::DVec3), Vec<GripDef>, Vec<Handle>)>,
     /// Plugin-declared custom grip points for this tab (API v11): session
     /// display state only — never persisted, never host-interpreted.
     #[cfg(not(target_arch = "wasm32"))]
@@ -810,6 +814,7 @@ impl DocumentTab {
             active_grip: None,
             selected_grips: vec![],
             selected_grip_handles: vec![],
+            drag_start_grips: None,
             #[cfg(not(target_arch = "wasm32"))]
             plugin_grips: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]

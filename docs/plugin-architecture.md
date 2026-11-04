@@ -207,9 +207,9 @@ crate-type = ["cdylib"]
 [dependencies]
 ocs_plugin_api = { git = "https://github.com/HakanSeven12/OpenCADStudio", features = ["host"] }
 
-# Match the host's opencadcodec so the loaded library is binary-compatible.
+# Match the host's acadrust so the loaded library is binary-compatible.
 [patch.crates-io]
-opencadcodec = { git = "https://github.com/HakanSeven12/opencadcodec", branch = "main" }
+acadrust = { git = "https://github.com/hakanaktt/acadrust", branch = "main" }
 ```
 
 Your release build must also use the same `rustc` as the host. Record it in

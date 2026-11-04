@@ -3,7 +3,7 @@ use codec::entities::{AttachmentPoint, DrawingDirection, MText};
 use crate::command::EntityTransform;
 use crate::entities::common::{
     edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro,
-    square_grip, triangle_grip,
+    oriented_triangle_grip, square_grip, triangle_grip,
 };
 use crate::entities::text_support::{
     clamp_mtext_column_count, layout_mtext, resolve_text_style, GlyphBox, MTextColumns,
@@ -366,7 +366,10 @@ fn grips(t: &MText) -> Vec<GripDef> {
         t.rectangle_width.max(0.0)
     };
     let width_grip = p + dir * (k * block_width);
-    let mut result = vec![square_grip(0, p), triangle_grip(1, width_grip)];
+    let mut result = vec![
+        square_grip(0, p),
+        oriented_triangle_grip(1, width_grip, dir * k.signum()),
+    ];
 
     let height = t
         .rectangle_height
@@ -376,14 +379,18 @@ fn grips(t: &MText) -> Vec<GripDef> {
         let (sin, cos) = t.rotation.sin_cos();
         let down = glam::DVec3::new(sin, -cos, 0.0);
         let (_, vertical) = attach_anchors(t);
-        let factor = match vertical {
+        let factor: f64 = match vertical {
             MTextVAnchor::Top | MTextVAnchor::MiddleOfTopLine | MTextVAnchor::BottomOfTopLine => {
                 1.0
             }
             MTextVAnchor::Middle => 0.5,
             MTextVAnchor::Bottom | MTextVAnchor::MiddleOfBottomLine => -1.0,
         };
-        result.push(triangle_grip(2, p + down * (factor * height)));
+        result.push(oriented_triangle_grip(
+            2,
+            p + down * (factor * height),
+            down * factor.signum(),
+        ));
     }
     if columns_active {
         result.push(triangle_grip(3, p + dir * (k * t.column_data.width)));
@@ -698,7 +705,7 @@ fn apply_grip(t: &mut MText, grip_id: usize, apply: GripApply) {
             let dx = p.x as f64 - t.insertion_point.x;
             let dy = p.y as f64 - t.insertion_point.y;
             let projected = dx * dir.x + dy * dir.y;
-            let width = (projected / k).max(0.0);
+            let width = (projected / k).max(0.01);
             let column_count = clamp_mtext_column_count(t.column_data.column_count);
             if t.column_data.column_type != 0 && column_count > 1 {
                 t.column_data.column_count = column_count;

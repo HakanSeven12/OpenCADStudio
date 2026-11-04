@@ -1052,7 +1052,10 @@ bg={bg_ms:.1}ms n={view_count}"
                 color: if in_block_editor { [0.27, 0.48, 0.91] } else { [0.80, 0.80, 0.80] },
                 axes: self.grid_axes,
             };
-            crate::ui::overlay::grid_overlay(grid, grid_style)
+            // Wipeouts hide the model-space grid (the grid is an
+            // overlay above the GPU scene, so it is cut around them instead).
+            let masks = (!is_paper && !grid.is_empty()).then(|| tab.scene.wipeout_models_arc());
+            crate::ui::overlay::grid_overlay_masked(grid, grid_style, masks)
         };
 
         mark("selection_overlay");

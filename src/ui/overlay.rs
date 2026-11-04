@@ -680,6 +680,9 @@ pub struct GridKey {
     pub grids: Vec<GridParams>,
     pub bounds: iced::Rectangle,
     pub style: GridStyle,
+    /// Identity of the wipeout set that masks the grid (`Arc` address, 0 =
+    /// none). The scene hands out a new `Arc` whenever a wipeout changes.
+    pub masks: usize,
 }
 
 impl GridKey {
@@ -691,8 +694,171 @@ impl GridKey {
             grids: grids.to_vec(),
             bounds,
             style,
+            masks: 0,
         }
     }
+}
+
+/// Wipeouts drawn over the grid. A grid drawn behind the drawing would be
+/// hidden by a wipeout; here the grid is an overlay above the GPU scene,
+/// so its segments are cut where a wipeout covers them instead.
+pub type GridMasks = Option<Arc<Vec<crate::scene::model::hatch_model::HatchModel>>>;
+
+fn grid_masks_id(masks: &GridMasks) -> usize {
+    masks
+        .as_ref()
+        .filter(|m| !m.is_empty())
+        .map_or(0, |m| Arc::as_ptr(m) as usize)
+}
+
+/// Project each wipeout boundary to pane-local screen space: one entry per
+/// wipeout, each a list of rings (NaN separators split rings). Vertices are
+/// placed on the wipeout's fill plane exactly as the GPU wipeout pass does
+/// (`WipeoutGpu`); a wipeout with a vertex that cannot be projected is skipped.
+fn project_grid_masks(
+    masks: &[crate::scene::model::hatch_model::HatchModel],
+    view_rot: Mat4,
+    eye: glam::DVec3,
+    bounds: iced::Rectangle,
+) -> Vec<Vec<Vec<Point>>> {
+    let mut out = Vec::new();
+    'mask: for mask in masks {
+        let plane = mask.fill_plane.unwrap_or(crate::scene::model::hatch_model::FillPlane {
+            origin: [mask.world_origin[0], mask.world_origin[1], 0.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        });
+        let (o, ax, ay) = (
+            glam::DVec3::from(plane.origin),
+            glam::DVec3::from(plane.x_axis),
+            glam::DVec3::from(plane.y_axis),
+        );
+        let boundary = mask
+            .fill_plane_boundary
+            .as_deref()
+            .unwrap_or(mask.boundary.as_ref());
+        let mut rings: Vec<Vec<Point>> = Vec::new();
+        let mut ring: Vec<Point> = Vec::new();
+        for &[x, y] in boundary.iter() {
+            // NaN (model) or GPU_BOUNDARY_SEP (uploaded) separate rings.
+            let sep = crate::scene::model::hatch_model::GPU_BOUNDARY_SEP;
+            if !(x.is_finite() && y.is_finite()) || x.abs() >= sep || y.abs() >= sep {
+                if ring.len() >= 3 {
+                    rings.push(std::mem::take(&mut ring));
+                }
+                ring.clear();
+                continue;
+            }
+            let world = o + ax * x as f64 + ay * y as f64;
+            match project_point(view_rot, eye, bounds, world) {
+                Some(p) => ring.push(p),
+                None => continue 'mask,
+            }
+        }
+        if ring.len() >= 3 {
+            rings.push(ring);
+        }
+        // Cull: a wipeout off this pane or under a pixel cannot hide any grid
+        // line, so the cutting cost follows what is on screen, not drawing size.
+        let (x0, y0, x1, y1) = rings.iter().flatten().fold(
+            (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
+            |(x0, y0, x1, y1), p| (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)),
+        );
+        let on_pane = x1 >= 0.0 && y1 >= 0.0 && x0 <= bounds.width && y0 <= bounds.height;
+        if !rings.is_empty() && on_pane && (x1 - x0 >= 1.0 || y1 - y0 >= 1.0) {
+            out.push(rings);
+        }
+    }
+    out
+}
+
+/// Cut the parts of each screen segment that lie inside any mask (even-odd
+/// over the mask's rings) and return the visible pieces.
+#[doc(hidden)]
+pub fn mask_grid_segments(
+    segments: Vec<(Point, Point)>,
+    masks: &[Vec<Vec<Point>>],
+) -> Vec<(Point, Point)> {
+    if masks.is_empty() {
+        return segments;
+    }
+    let boxes: Vec<(f32, f32, f32, f32)> = masks
+        .iter()
+        .map(|rings| {
+            rings.iter().flatten().fold(
+                (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
+                |(x0, y0, x1, y1), p| (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)),
+            )
+        })
+        .collect();
+    let mut out = Vec::with_capacity(segments.len());
+    for (p0, p1) in segments {
+        let (sx0, sx1) = (p0.x.min(p1.x), p0.x.max(p1.x));
+        let (sy0, sy1) = (p0.y.min(p1.y), p0.y.max(p1.y));
+        let d = (p1.x - p0.x, p1.y - p0.y);
+        let at = |t: f32| Point::new(p0.x + d.0 * t, p0.y + d.1 * t);
+        let mut hidden: Vec<(f32, f32)> = Vec::new();
+        for (rings, &(bx0, by0, bx1, by1)) in masks.iter().zip(&boxes) {
+            if sx1 < bx0 || sx0 > bx1 || sy1 < by0 || sy0 > by1 {
+                continue;
+            }
+            let mut ts = vec![0.0f32, 1.0];
+            for ring in rings {
+                for (i, &a) in ring.iter().enumerate() {
+                    let b = ring[(i + 1) % ring.len()];
+                    let e = (b.x - a.x, b.y - a.y);
+                    let den = d.0 * e.1 - d.1 * e.0;
+                    if den.abs() < f32::EPSILON {
+                        continue;
+                    }
+                    let w = (a.x - p0.x, a.y - p0.y);
+                    let t = (w.0 * e.1 - w.1 * e.0) / den;
+                    let u = (w.0 * d.1 - w.1 * d.0) / den;
+                    if (0.0..=1.0).contains(&t) && (0.0..=1.0).contains(&u) {
+                        ts.push(t);
+                    }
+                }
+            }
+            ts.sort_by(f32::total_cmp);
+            for w in ts.windows(2) {
+                if w[1] - w[0] > 1e-6 && point_in_rings(at((w[0] + w[1]) * 0.5), rings) {
+                    hidden.push((w[0], w[1]));
+                }
+            }
+        }
+        if hidden.is_empty() {
+            out.push((p0, p1));
+            continue;
+        }
+        hidden.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut t = 0.0f32;
+        for (h0, h1) in hidden {
+            if h0 > t + 1e-6 {
+                out.push((at(t), at(h0)));
+            }
+            t = t.max(h1);
+        }
+        if t < 1.0 - 1e-6 {
+            out.push((at(t), p1));
+        }
+    }
+    out
+}
+
+/// Even-odd point-in-polygon over all rings of one mask.
+fn point_in_rings(p: Point, rings: &[Vec<Point>]) -> bool {
+    let mut inside = false;
+    for ring in rings {
+        let mut j = ring.len() - 1;
+        for i in 0..ring.len() {
+            let (a, b) = (ring[i], ring[j]);
+            if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+                inside = !inside;
+            }
+            j = i;
+        }
+    }
+    inside
 }
 
 /// Cache hit decision: `true` iff `cached` is `Some` and structurally equal to
@@ -787,6 +953,7 @@ impl GridCanvasState {
         params: &GridParams,
         style: GridStyle,
         key: GridKey,
+        masks: &GridMasks,
     ) -> canvas::Geometry {
         let mut panes = self.panes.borrow_mut();
         let pane = panes[index].get_or_insert_with(|| PaneCache::new(key.clone()));
@@ -805,6 +972,7 @@ impl GridCanvasState {
                 params.axes,
                 params.limits,
                 style,
+                masks.as_deref().map_or(&[], |m| &m[..]),
             )
         })
     }
@@ -1021,7 +1189,16 @@ pub struct OstTrackPoint {
 }
 
 pub fn grid_overlay<'a>(grid: Vec<GridParams>, style: GridStyle) -> Element<'a, Message> {
-    canvas(GridCanvas { grid, style })
+    grid_overlay_masked(grid, style, None)
+}
+
+/// Like [`grid_overlay`], with the grid cut where `masks` (wipeouts) cover it.
+pub fn grid_overlay_masked<'a>(
+    grid: Vec<GridParams>,
+    style: GridStyle,
+    masks: GridMasks,
+) -> Element<'a, Message> {
+    canvas(GridCanvas { grid, style, masks })
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -1030,6 +1207,7 @@ pub fn grid_overlay<'a>(grid: Vec<GridParams>, style: GridStyle) -> Element<'a, 
 struct GridCanvas {
     grid: Vec<GridParams>,
     style: GridStyle,
+    masks: GridMasks,
 }
 
 impl canvas::Program<Message> for GridCanvas {
@@ -1065,11 +1243,12 @@ impl canvas::Program<Message> for GridCanvas {
             // Hit: this pane's params, clip and the style are unchanged, so its
             // cached geometry is still valid. Other panes are unaffected by a
             // change here — that is the per-pane win.
-            let key = GridKey::from_grids(std::slice::from_ref(g), clip, self.style);
+            let mut key = GridKey::from_grids(std::slice::from_ref(g), clip, self.style);
+            key.masks = grid_masks_id(&self.masks);
             let geometry = if state.pane_reuses(index, &key) {
                 state.draw_cached(index, renderer, clip)
             } else {
-                state.draw_pane(index, renderer, clip, g, self.style, key)
+                state.draw_pane(index, renderer, clip, g, self.style, key, &self.masks)
             };
             layers.push(geometry);
         }
@@ -3348,6 +3527,7 @@ fn draw_grid(
     grid_axes: (Vec3, Vec3, Vec3),
     limits: Option<(glam::DVec2, glam::DVec2)>,
     style: GridStyle,
+    masks: &[crate::scene::model::hatch_model::HatchModel],
 ) {
     let alpha = (style.opacity as f32 / 100.0).clamp(0.02, 1.0);
     // Major lines stay subtle: ~1.5x the minor alpha with a slightly heavier
@@ -3369,7 +3549,7 @@ fn draw_grid(
         }),
         ..Default::default()
     };
-    let geometry = grid_segments(
+    let mut geometry = grid_segments(
         view_rot,
         eye,
         bounds,
@@ -3380,6 +3560,12 @@ fn draw_grid(
         grid_axes,
         limits,
     );
+    let screen_masks = project_grid_masks(masks, view_rot, eye, bounds);
+    if !screen_masks.is_empty() {
+        geometry.segments = mask_grid_segments(std::mem::take(&mut geometry.segments), &screen_masks);
+        geometry.major_segments =
+            mask_grid_segments(std::mem::take(&mut geometry.major_segments), &screen_masks);
+    }
     if !geometry.segments.is_empty() {
         let path = canvas::Path::new(|builder| {
             for (p0, p1) in &geometry.segments {
@@ -3410,6 +3596,7 @@ fn draw_grid(
             grid_origin,
             (gx, gy, gz),
             style.bg_luminance,
+            &screen_masks,
         );
     }
 }
@@ -4239,6 +4426,7 @@ fn draw_axes(
     origin: glam::DVec3,
     axes: (Vec3, Vec3, Vec3),
     bg_luminance: f32,
+    masks: &[Vec<Vec<Point>>],
 ) {
     let axis_stroke = |r: f32, g: f32, b: f32| canvas::Stroke {
         width: 1.5,
@@ -4246,7 +4434,8 @@ fn draw_axes(
         ..Default::default()
     };
     let y_green = if bg_luminance > 0.5 { 0.60 } else { 0.85 };
-    for ((a, b), (r, g, bl)) in axes_segments(view_rot, eye, bounds, extent, origin, axes)
+    let axes = axes_segments(view_rot, eye, bounds, extent, origin, axes);
+    for (pieces, (r, g, bl)) in mask_axes_segments(axes, bounds, masks)
         .into_iter()
         .zip([
             (0.90, 0.20, 0.20),
@@ -4254,14 +4443,39 @@ fn draw_axes(
             (0.20, 0.40, 0.90),
         ])
     {
+        if pieces.is_empty() {
+            continue;
+        }
         frame.stroke(
             &canvas::Path::new(|p| {
-                p.move_to(a);
-                p.line_to(b);
+                for (a, b) in &pieces {
+                    p.move_to(*a);
+                    p.line_to(*b);
+                }
             }),
             axis_stroke(r, g, bl),
         );
     }
+}
+
+/// Cut the wipeout masks out of the axis lines. Axis segments are placed with
+/// the pane offset while masks are pane-local: shift, cut, shift back. One
+/// entry per input axis (same order), so the X/Y/Z colours stay matched.
+fn mask_axes_segments(
+    axes: Vec<(Point, Point)>,
+    bounds: iced::Rectangle,
+    masks: &[Vec<Vec<Point>>],
+) -> Vec<Vec<(Point, Point)>> {
+    let local = |p: Point| Point::new(p.x - bounds.x, p.y - bounds.y);
+    let back = |p: Point| Point::new(p.x + bounds.x, p.y + bounds.y);
+    axes.into_iter()
+        .map(|(a, b)| {
+            mask_grid_segments(vec![(local(a), local(b))], masks)
+                .into_iter()
+                .map(|(a, b)| (back(a), back(b)))
+                .collect()
+        })
+        .collect()
 }
 
 /// Pure geometry for [`draw_axes`]: per-axis canvas-space segments in X/Y/Z
@@ -6578,5 +6792,176 @@ mod selection_visual_color_tests {
         assert!((selection_fill_alpha(20.0, true) - 0.27).abs() < 1e-4);
         assert!((selection_fill_alpha(50.0, true) - 0.45).abs() < 1e-5);
         assert!((selection_fill_alpha(100.0, true) - 0.45).abs() < 1e-5);
+    }
+}
+
+#[cfg(test)]
+mod grid_mask_tests {
+    use super::*;
+
+    fn square(x0: f32, y0: f32, x1: f32, y1: f32) -> Vec<Point> {
+        vec![
+            Point::new(x0, y0),
+            Point::new(x1, y0),
+            Point::new(x1, y1),
+            Point::new(x0, y1),
+        ]
+    }
+
+    #[test]
+    fn mask_cuts_the_covered_part_of_a_segment() {
+        let segs = vec![(Point::new(0.0, 5.0), Point::new(20.0, 5.0))];
+        let out = mask_grid_segments(segs, &[vec![square(5.0, 0.0, 15.0, 10.0)]]);
+        assert_eq!(out.len(), 2, "{out:?}");
+        assert!((out[0].0.x - 0.0).abs() < 1e-4 && (out[0].1.x - 5.0).abs() < 1e-4);
+        assert!((out[1].0.x - 15.0).abs() < 1e-4 && (out[1].1.x - 20.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn mask_hole_and_outside_segments_stay_visible() {
+        let mask = vec![square(0.0, 0.0, 20.0, 20.0), square(8.0, 8.0, 12.0, 12.0)];
+        let across = (Point::new(-5.0, 10.0), Point::new(25.0, 10.0));
+        let outside = (Point::new(-5.0, 30.0), Point::new(25.0, 30.0));
+        let out = mask_grid_segments(vec![across, outside], &[mask]);
+        let len: Vec<f32> = out.iter().map(|(a, b)| (b.x - a.x).abs()).collect();
+        // -5..0, the hole 8..12, 20..25, then the untouched outside line.
+        assert_eq!(len.len(), 4, "{out:?}");
+        assert!((len[0] - 5.0).abs() < 1e-4);
+        assert!((len[1] - 4.0).abs() < 1e-4);
+        assert!((len[2] - 5.0).abs() < 1e-4);
+        assert!((len[3] - 30.0).abs() < 1e-4);
+    }
+
+    /// A model-space WIPEOUT hides the grid under it: no grid
+    /// segment piece may run through the wipeout's screen area.
+    #[test]
+    fn wipeout_hides_model_grid() {
+        use crate::scene::{view::camera::Camera, Scene};
+        use codec::{entities::Wipeout, types::Vector2, EntityType};
+
+        let mut scene = Scene::new();
+        scene.add_entity(EntityType::Wipeout(Wipeout::polygonal(
+            &[
+                Vector2::new(-5.0, -5.0),
+                Vector2::new(5.0, -5.0),
+                Vector2::new(5.0, 5.0),
+                Vector2::new(-5.0, 5.0),
+            ],
+            0.0,
+        )));
+        let masks = scene.wipeout_models_arc();
+        assert_eq!(masks.len(), 1);
+
+        let cam = Camera::default();
+        let bounds = iced::Rectangle::with_size(Size::new(512.0, 512.0));
+        let (view_rot, eye) = (cam.view_proj_rte(bounds), cam.eye());
+        let grid = || {
+            grid_segments(
+                view_rot,
+                eye,
+                bounds,
+                1.0,
+                1.0,
+                5,
+                glam::DVec3::ZERO,
+                (Vec3::X, Vec3::Y, Vec3::Z),
+                None,
+            )
+        };
+        let screen = project_grid_masks(&masks, view_rot, eye, bounds);
+        assert_eq!(screen.len(), 1);
+        // Shrink the wipeout's screen box a little so pieces that stop exactly
+        // on its edge do not count as inside.
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for p in &screen[0][0] {
+            (x0, y0, x1, y1) = (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y));
+        }
+        let (x0, y0, x1, y1) = (x0 + 0.5, y0 + 0.5, x1 - 0.5, y1 - 0.5);
+        let crosses = |segs: &[(Point, Point)]| {
+            segs.iter().any(|(a, b)| {
+                (0..=20).any(|i| {
+                    let t = i as f32 / 20.0;
+                    let p = Point::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+                    p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1
+                })
+            })
+        };
+        let plain = grid();
+        assert!(crosses(&plain.segments), "grid must run under the wipeout");
+
+        let masked = mask_grid_segments(grid().segments, &screen);
+        let masked_major = mask_grid_segments(grid().major_segments, &screen);
+        assert!(!crosses(&masked), "minor grid line drawn over the wipeout");
+        assert!(!crosses(&masked_major), "major grid line drawn over the wipeout");
+        assert!(masked.len() >= plain.segments.len(), "lines outside must stay");
+
+        // Cull: the same wipeout moved far off screen, or shrunk under a
+        // pixel, is not handed to the segment cutter at all.
+        let shrink = |b: &Arc<Vec<[f32; 2]>>| Arc::new(b.iter().map(|&[x, y]| [x * 1e-4, y * 1e-4]).collect());
+        let mut far = masks[0].clone();
+        far.world_origin[0] += 10_000.0;
+        if let Some(plane) = far.fill_plane.as_mut() {
+            plane.origin[0] += 10_000.0;
+        }
+        let mut tiny = masks[0].clone();
+        tiny.boundary = shrink(&tiny.boundary);
+        tiny.fill_plane_boundary = tiny.fill_plane_boundary.as_ref().map(shrink);
+        assert!(project_grid_masks(&[far, tiny], view_rot, eye, bounds).is_empty());
+    }
+
+    #[test]
+    fn wipeout_hides_model_axes() {
+        use crate::scene::{view::camera::Camera, Scene};
+        use codec::{entities::Wipeout, types::Vector2, EntityType};
+
+        let mut scene = Scene::new();
+        scene.add_entity(EntityType::Wipeout(Wipeout::polygonal(
+            &[
+                Vector2::new(-5.0, -5.0),
+                Vector2::new(5.0, -5.0),
+                Vector2::new(5.0, 5.0),
+                Vector2::new(-5.0, 5.0),
+            ],
+            0.0,
+        )));
+        let masks = scene.wipeout_models_arc();
+        let cam = Camera::default();
+        // A pane that does not start at the canvas corner: axis segments carry
+        // this offset, the masks do not.
+        let bounds = iced::Rectangle::new(Point::new(100.0, 40.0), Size::new(512.0, 512.0));
+        let (view_rot, eye) = (cam.view_proj_rte(bounds), cam.eye());
+        let screen = project_grid_masks(&masks, view_rot, eye, bounds);
+        assert_eq!(screen.len(), 1);
+        let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for p in &screen[0][0] {
+            (x0, y0, x1, y1) = (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y));
+        }
+        // Wipeout box in canvas space, shrunk so edge stops do not count.
+        let (x0, y0) = (x0 + bounds.x + 0.5, y0 + bounds.y + 0.5);
+        let (x1, y1) = (x1 + bounds.x - 0.5, y1 + bounds.y - 0.5);
+        let crosses = |(a, b): &(Point, Point)| {
+            (0..=50).any(|i| {
+                let t = i as f32 / 50.0;
+                let p = Point::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+                p.x > x0 && p.x < x1 && p.y > y0 && p.y < y1
+            })
+        };
+        let plain = axes_segments(
+            view_rot,
+            eye,
+            bounds,
+            50.0,
+            glam::DVec3::ZERO,
+            (Vec3::X, Vec3::Y, Vec3::Z),
+        );
+        // Top view: X and Y run across the wipeout (Z is end-on or absent).
+        assert!(plain.iter().filter(|s| crosses(s)).count() >= 2);
+
+        let masked = mask_axes_segments(plain.clone(), bounds, &screen);
+        assert_eq!(masked.len(), plain.len(), "one entry per axis");
+        for (axis, pieces) in masked.iter().enumerate().take(2) {
+            assert!(!pieces.is_empty(), "axis {axis} must stay outside the wipeout");
+            assert!(!pieces.iter().any(crosses), "axis {axis} drawn over the wipeout");
+        }
     }
 }

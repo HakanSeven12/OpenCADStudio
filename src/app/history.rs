@@ -369,7 +369,10 @@ impl OpenCADStudio {
             };
             let before = find(&pending.parametric_constraints_before);
             let after = find(sets_after);
-            if before.constraints != after.constraints {
+            // A set can change without its constraint list changing: dropping
+            // the entry of a dimension that was erased on its own is exactly
+            // that, and undo has to put it back.
+            if before.constraints != after.constraints || before.dimensions != after.dimensions {
                 parametric_constraints.push(ParametricConstraintsEntryDelta {
                     scope,
                     before,
@@ -971,13 +974,16 @@ impl OpenCADStudio {
                                 scope,
                             )
                         });
-                    (before.constraints != after.constraints).then_some(
-                        ParametricConstraintsEntryDelta {
+                    // A set can change without its constraint list changing:
+                    // dropping the entry of a dimension erased on its own is
+                    // exactly that, and undo has to put it back.
+                    (before.constraints != after.constraints
+                        || before.dimensions != after.dimensions)
+                        .then_some(ParametricConstraintsEntryDelta {
                             scope,
                             before,
                             after,
-                        },
-                    )
+                        })
                 })
                 .collect();
         let named_parameters = named_parameters_before.and_then(|before| {

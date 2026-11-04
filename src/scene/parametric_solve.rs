@@ -4048,6 +4048,40 @@ impl Scene {
             }
         }
 
+        // A dimension erased on its own leaves its set pointing at a handle
+        // that is gone; a later block save rejects a dimension it cannot find.
+        if !removed_handles.is_empty() {
+            let stale: Vec<usize> = self
+                .parametric_constraints
+                .iter()
+                .enumerate()
+                .filter(|(_, set)| {
+                    set.dimensions
+                        .values()
+                        .any(|dimension| removed_handles.contains(dimension))
+                })
+                .map(|(index, _)| index)
+                .collect();
+            for index in stale {
+                let scope = self.parametric_constraints[index].scope;
+                // First-touch wins: an image recorded earlier in this
+                // transaction still holds the entry this drop removes.
+                let missing_before = self.undo_recording.as_ref().is_some_and(|recording| {
+                    !recording.parametric_constraints_before.contains_key(&scope)
+                });
+                if missing_before {
+                    let before = self.parametric_constraints[index].clone();
+                    self.record_undo_parametric_constraints_before(scope, before);
+                }
+                self.parametric_constraints[index]
+                    .dimensions
+                    .retain(|_, dimension| !removed_handles.contains(dimension));
+                // The glyph set counts constraints without a dimension, so a
+                // dropped entry changes which badges are drawn.
+                self.bump_constraints_epoch();
+            }
+        }
+
         // Pre-edit images of everything this transaction touched: what a
         // persistent Fixed pins to, and (under CONSTRAINTSOLVEMODE) what
         // sizes are retained from.

@@ -2589,6 +2589,138 @@ fn a_locked_layer_does_not_strand_the_dimension_of_an_erased_line() {
     );
 }
 
+/// A constraint's dimension can be selected and erased on its own. The
+/// constraint that sizes the line stays, but the set must stop pointing at the
+/// handle that is gone, or a later block save rejects a dimension that is not
+/// there.
+#[test]
+fn erasing_the_dimension_on_its_own_leaves_the_constraint_set_clean() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    fn constrained(
+        app: &mut OpenCADStudio,
+        line: codec::Handle,
+        y: f64,
+        name: &str,
+        expression: &str,
+    ) -> codec::Handle {
+        let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+            kind: ConstraintKind::DistanceX,
+            first: ParametricRef::point(line, 0),
+            second: ParametricRef::point(line, 1),
+            first_point: glam::DVec3::new(0.0, y, 0.0),
+            second_point: glam::DVec3::new(40.0, y, 0.0),
+            location: glam::DVec3::new(20.0, y - 10.0, 0.0),
+            axis: glam::DVec3::X,
+            direction: None,
+            name: name.to_string(),
+            expression: expression.to_string(),
+            renamed: false,
+            label: "Linear constraint",
+        });
+        app.drive_headless_task(task).unwrap();
+        let set = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the constraint was added");
+        set.constraints
+            .iter()
+            .find(|constraint| {
+                matches!(
+                    &constraint.driving_param,
+                    Some(DrivingValue::Named(driven)) if driven == name
+                )
+            })
+            .and_then(|constraint| set.dimensions.get(&constraint.id).copied())
+            .expect("the constraint draws a dimension")
+    }
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let first = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
+        [0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&first, 16).unwrap());
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,20 40,20"}"#);
+    let other = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
+        .as_array()
+        .expect("the read returns both lines")
+        .iter()
+        .find_map(|row| row["handle"].as_str().filter(|handle| **handle != first))
+        .map(|handle| codec::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+        .expect("the second line has its own handle");
+    let erased = constrained(&mut app, line, 0.0, "d1", "100");
+    let kept = constrained(&mut app, other, 20.0, "d2", "60");
+    assert!(
+        app.tabs[i].scene.document.get_entity(erased).is_some()
+            && app.tabs[i].scene.document.get_entity(kept).is_some(),
+        "both dimensions are drawn before one is erased"
+    );
+
+    app.tabs[i].scene.select_entity(erased, false);
+    let _ = app.dispatch_command("ERASE");
+
+    assert!(
+        app.tabs[i].scene.document.get_entity(erased).is_none(),
+        "the dimension goes when it is erased on its own"
+    );
+    assert!(
+        app.tabs[i].scene.document.get_entity(line).is_some()
+            && app.tabs[i].scene.document.get_entity(other).is_some(),
+        "the lines it measured stay"
+    );
+    let (constraints, remembered) = {
+        let set = app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the set stays");
+        (
+            set.constraints.len(),
+            set.dimensions.values().copied().collect::<Vec<_>>(),
+        )
+    };
+    assert_eq!(constraints, 2, "and so do the constraints that size them");
+    assert_eq!(
+        remembered,
+        vec![kept],
+        "the set stops pointing at the dimension that is gone and keeps the other"
+    );
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d1")
+            && app.tabs[i].scene.named_parameters().contains("d2"),
+        "and the parameters those constraints still read are kept"
+    );
+
+    app.automation_op(r#"{"op":"undo"}"#);
+    assert!(
+        app.tabs[i].scene.document.get_entity(erased).is_some(),
+        "undo brings the erased dimension back"
+    );
+    let restored = {
+        let set = app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the set stays");
+        set.dimensions.values().copied().collect::<Vec<_>>()
+    };
+    assert_eq!(
+        restored.len(),
+        2,
+        "and the set points at both dimensions again"
+    );
+    assert!(
+        restored.contains(&erased) && restored.contains(&kept),
+        "the restored one and the one that never left"
+    );
+}
+
 /// Auto-constraining a selection adds constraints the same way, so its
 /// completion reports the geometry its solve moves outside the selection.
 #[test]

@@ -2215,10 +2215,11 @@ fn a_deleted_constraint_stops_clamping_the_grip_that_moved_it() {
     );
 }
 
-/// The delete command works on the selection, not on one named constraint, so
-/// every constraint it deletes has to take its clamp with it: the same line, the
-/// same grip, and the drag lands where it is released instead of at the span the
-/// command just removed.
+/// The delete command works on the selection, not on one named constraint, so it
+/// takes every constraint the selection touches — and only those: a constraint on
+/// geometry the selection leaves alone still sizes it, and the clamp on the deleted
+/// one goes with it, so the drag lands where it is released instead of at the span
+/// the command just removed.
 #[test]
 fn the_delete_command_frees_the_grip_it_clamped() {
     use crate::command::CmdResult;
@@ -2250,34 +2251,81 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         label: "Linear constraint",
     });
     app.drive_headless_task(task).unwrap();
-    let span = |app: &OpenCADStudio| {
+    // A second line the selection will not touch, sized by its own constraint: the
+    // command's reach is the selection, so this one has to survive.
+    app.automation_op(r#"{"op":"run","cmd":"LINE 200,0 240,0"}"#);
+    let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let other = drawn["entities"]
+        .as_array()
+        .expect("two lines drawn")
+        .iter()
+        .find(|entity| entity["handle"].as_str() != Some(handle.as_str()))
+        .map(|entity| {
+            codec::Handle::new(
+                u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
+            )
+        })
+        .expect("the second line");
+    let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+        kind: ConstraintKind::DistanceX,
+        first: ParametricRef::point(other, 0),
+        second: ParametricRef::point(other, 1),
+        first_point: glam::DVec3::new(200.0, 0.0, 0.0),
+        second_point: glam::DVec3::new(240.0, 0.0, 0.0),
+        location: glam::DVec3::new(220.0, -10.0, 0.0),
+        axis: glam::DVec3::X,
+        direction: None,
+        name: "d2".to_string(),
+        expression: "60".to_string(),
+        renamed: false,
+        label: "Linear constraint",
+    });
+    app.drive_headless_task(task).unwrap();
+    let span = |app: &OpenCADStudio, target: codec::Handle| {
         let document = &app.tabs[app.active_tab].scene.document;
-        let codec::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
+        let codec::EntityType::Line(entity) = document.get_entity(target).unwrap() else {
             unreachable!("the participant is still a line");
         };
         entity.end.x - entity.start.x
     };
     assert!(
-        (span(&app) - 100.0).abs() < 1e-6,
+        (span(&app, line) - 100.0).abs() < 1e-6,
         "the constraint sizes the line before the command runs: {}",
-        span(&app)
+        span(&app, line)
+    );
+    assert!(
+        (span(&app, other) - 60.0).abs() < 1e-6,
+        "and the other line is sized by its own constraint: {}",
+        span(&app, other)
     );
     app.tabs[i].scene.select_entity(line, false);
     let _ = app.dispatch_command("DELCONSTRAINT");
     assert!(
-        (span(&app) - 100.0).abs() < 1e-6,
+        (span(&app, line) - 100.0).abs() < 1e-6,
         "the command leaves the line the length the constraint had set: {}",
-        span(&app)
+        span(&app, line)
     );
+    let survivors = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the drawing keeps its constraint set")
+        .constraints
+        .clone();
     assert_eq!(
-        app.tabs[i]
-            .scene
-            .parametric_constraint_set(ParametricScope::ModelSpace)
-            .expect("the drawing keeps its constraint set")
-            .constraints
-            .len(),
-        0,
+        survivors.len(),
+        1,
         "the command deleted the constraint the selection touches"
+    );
+    assert!(
+        survivors
+            .iter()
+            .all(|constraint| constraint.refs.iter().all(|r| r.entity == other)),
+        "and only it: the constraint on the line the selection left alone survives"
+    );
+    assert!(
+        (span(&app, other) - 60.0).abs() < 1e-6,
+        "and the surviving constraint still sizes its line: {}",
+        span(&app, other)
     );
 
     let dragged = control(
@@ -2286,7 +2334,13 @@ fn the_delete_command_frees_the_grip_it_clamped() {
     );
     assert_eq!(dragged["ok"], json!(true), "{dragged}");
     let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
-    let end = line_point(&q["entities"][0], "end");
+    let entity = q["entities"]
+        .as_array()
+        .expect("two lines drawn")
+        .iter()
+        .find(|line| line["handle"].as_str() == Some(handle.as_str()))
+        .expect("the dragged line is still in the read");
+    let end = line_point(entity, "end");
     assert!(
         (end.0 - 80.0).abs() < 1e-3,
         "and no deleted constraint holds the line out to its old span: {q}"

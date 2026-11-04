@@ -534,6 +534,7 @@ impl OpenCADStudio {
         // Remove or a fixed Window sense must not quietly still be in force
         // when the next command asks for objects. (#596)
         self.select_remove_mode = false;
+        crate::modules::draw::select::set_remove_mode(false);
         {
             let mut selection = self.tabs[i].scene.selection.borrow_mut();
             // Cancel the active selection gesture before the new command starts.

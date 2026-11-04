@@ -1449,6 +1449,7 @@ impl OpenCADStudio {
                 }
             }
             self.select_remove_mode = false;
+            crate::modules::draw::select::set_remove_mode(false);
             self.refresh_properties();
             self.selection_undoing = true;
             let handles: Vec<Handle> = self.tabs[i]
@@ -1486,6 +1487,7 @@ impl OpenCADStudio {
         // per-message prompt mirror shows it); no separate mode line.
         if let "R" | "REMOVE" | "A" | "ADD" = kw.as_str() {
             self.select_remove_mode = !matches!(kw.as_str(), "A" | "ADD");
+            crate::modules::draw::select::set_remove_mode(self.select_remove_mode);
             return Some(Task::none());
         }
 

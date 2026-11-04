@@ -198,6 +198,16 @@ impl SelectObjectsCommand {
     }
 }
 
+thread_local! {
+    /// Remove mode of the selection being gathered (R / A at the prompt):
+    /// the prompt then reads "Remove objects:".
+    static REMOVE_MODE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub(crate) fn set_remove_mode(on: bool) {
+    REMOVE_MODE.with(|mode| mode.set(on));
+}
+
 impl CadCommand for SelectObjectsCommand {
     fn reveals_hidden_block_objects(&self) -> bool {
         self.pending_cmd == "_BVSHOW"
@@ -227,6 +237,9 @@ impl CadCommand for SelectObjectsCommand {
                 count = pick.len()
             )
             .into_owned();
+        }
+        if REMOVE_MODE.with(|mode| mode.get()) {
+            return t!("%{cmd}  Remove objects:", cmd = self.prompt_cmd).into_owned();
         }
         // The reference asks the same "Select objects:" however many are
         // picked; each pick's count is its own "N found" line.

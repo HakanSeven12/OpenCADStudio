@@ -8047,6 +8047,38 @@ impl Scene {
         self.constraints_epoch
     }
 
+    /// Drops the named parameters in `names` that no constraint drives any more.
+    ///
+    /// A parameter declared by a constraint goes with that constraint, but a
+    /// name any constraint set still drives stays. The scan spans every set
+    /// because a block set may name a drawing-level parameter. Names that only
+    /// formulas read are not consulted, so the rule errs toward keeping.
+    pub(crate) fn drop_unread_named_parameters(&mut self, names: Vec<String>) {
+        let unread: Vec<String> = names
+            .into_iter()
+            .filter(|name| {
+                !self
+                    .parametric_constraints
+                    .iter()
+                    .flat_map(|set| set.constraints.iter())
+                    .any(|constraint| {
+                        matches!(
+                            &constraint.driving_param,
+                            Some(crate::scene::named_parameters::DrivingValue::Named(used))
+                                if used == name
+                        )
+                    })
+            })
+            .collect();
+        if unread.is_empty() {
+            return;
+        }
+        self.record_undo_named_parameters_before();
+        for name in &unread {
+            self.named_parameters_mut().remove(name);
+        }
+    }
+
     /// Invalidate constraint-glyph consumers. Call on EVERY mutation of the
     /// constraint set or its visibility overrides — a missed bump serves
     /// stale glyphs.

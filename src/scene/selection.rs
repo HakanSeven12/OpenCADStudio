@@ -1118,6 +1118,15 @@ impl Scene {
         self.remove_entities(handles, true, false, true);
     }
 
+    /// Erase entities a constraint owns, such as the dimension it draws.
+    /// Ownership, not the layer, decides: a locked layer must not keep a
+    /// measurement alive after the geometry it measured is gone. The
+    /// reference-only skip is bypassed as well; a constraint-owned dimension is
+    /// never plugin-designated.
+    pub(crate) fn erase_constraint_owned(&mut self, handles: &[Handle]) {
+        self.remove_entities(handles, false, false, true);
+    }
+
     /// Roll back entities created by the current command after a downstream
     /// registration failure. These entities were never successful command
     /// results, so locked-layer edit policy must not prevent their removal.

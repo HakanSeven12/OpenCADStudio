@@ -1459,13 +1459,23 @@ impl ParametricConstraintSet {
 
     /// Drops every constraint that references `entity` and returns the
     /// removed constraint ids.
+    ///
+    /// The dimension each removed constraint drew goes out of the map with it:
+    /// a stale handle here would make a later block save reject a dimension
+    /// that no longer exists.
     pub fn remove_all_touching(&mut self, entity: Handle) -> Vec<ConstraintId> {
         let (removed, kept): (Vec<_>, Vec<_>) = self
             .constraints
             .drain(..)
             .partition(|c| c.refs.iter().any(|r| r.entity == entity));
         self.constraints = kept;
-        removed.into_iter().map(|c| c.id).collect()
+        removed
+            .into_iter()
+            .map(|c| {
+                self.dimensions.remove(&c.id);
+                c.id
+            })
+            .collect()
     }
 
     /// Expand through enabled constraints from `seeds`. Whole-object

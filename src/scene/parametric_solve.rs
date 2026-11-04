@@ -3980,6 +3980,8 @@ impl Scene {
                     }
                 }
             }
+            let mut orphaned_dimensions: Vec<Handle> = Vec::new();
+            let mut orphaned_parameters: Vec<String> = Vec::new();
             for (handle, kind) in changes {
                 if *kind != ChangeKind::Removed {
                     continue;
@@ -3998,6 +4000,33 @@ impl Scene {
                         let before = self.parametric_constraints[index].clone();
                         self.record_undo_parametric_constraints_before(scope, before);
                     }
+                    // What this erase orphans: the dimension each constraint
+                    // drew (not a participant, so nothing else deletes it) and
+                    // the parameter it drives.
+                    {
+                        let set = &self.parametric_constraints[index];
+                        for constraint in &set.constraints {
+                            if !constraint
+                                .refs
+                                .iter()
+                                .any(|reference| reference.entity == *handle)
+                            {
+                                continue;
+                            }
+                            if let Some(dimension) = set.dimensions.get(&constraint.id).copied() {
+                                if !orphaned_dimensions.contains(&dimension) {
+                                    orphaned_dimensions.push(dimension);
+                                }
+                            }
+                            if let Some(crate::scene::named_parameters::DrivingValue::Named(name)) =
+                                &constraint.driving_param
+                            {
+                                if !orphaned_parameters.contains(name) {
+                                    orphaned_parameters.push(name.clone());
+                                }
+                            }
+                        }
+                    }
                     let removed = self.parametric_constraints[index].remove_all_touching(*handle);
                     // Erasing an entity deletes its constraints with it — the
                     // glyph set changed. Bumped exactly when the removal took
@@ -4007,6 +4036,15 @@ impl Scene {
                         self.bump_constraints_epoch();
                     }
                 }
+            }
+            // The constraint's own records go with it: its dimension is erased
+            // and its parameter is dropped only when no surviving constraint
+            // reads it. The erase re-enters this refresh, which finds no
+            // constraint naming a dimension; its `solve_moved` clear is
+            // harmless because this purge runs before the outer solve.
+            self.drop_unread_named_parameters(orphaned_parameters);
+            if !orphaned_dimensions.is_empty() {
+                self.erase_constraint_owned(&orphaned_dimensions);
             }
         }
 

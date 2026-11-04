@@ -2394,6 +2394,201 @@ fn the_delete_command_frees_the_grip_it_clamped() {
     );
 }
 
+/// Erasing geometry takes the constraints that named it, and with them the
+/// dimension each constraint drew and the parameter it declared: leaving either
+/// behind would draw a measurement over nothing and keep a name alive that
+/// nothing reads.
+#[test]
+fn erasing_a_constrained_line_takes_its_constraint_and_its_dimension() {
+    use crate::command::CmdResult;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+        kind: ConstraintKind::DistanceX,
+        first: ParametricRef::point(line, 0),
+        second: ParametricRef::point(line, 1),
+        first_point: glam::DVec3::ZERO,
+        second_point: glam::DVec3::new(40.0, 0.0, 0.0),
+        location: glam::DVec3::new(20.0, -10.0, 0.0),
+        axis: glam::DVec3::X,
+        direction: None,
+        name: "d1".to_string(),
+        expression: "100".to_string(),
+        renamed: false,
+        label: "Linear constraint",
+    });
+    app.drive_headless_task(task).unwrap();
+    let dimension = {
+        let set = app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the constraint was added");
+        set.constraints
+            .iter()
+            .find_map(|constraint| set.dimensions.get(&constraint.id).copied())
+            .expect("the constraint draws a dimension")
+    };
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d1"),
+        "and declares a parameter"
+    );
+    assert!(
+        app.tabs[i].scene.document.get_entity(dimension).is_some(),
+        "and the dimension it draws is in the drawing"
+    );
+
+    app.tabs[i].scene.select_entity(line, false);
+    let _ = app.dispatch_command("ERASE");
+
+    assert!(
+        app.tabs[i].scene.document.get_entity(line).is_none(),
+        "the line is erased"
+    );
+    let (left, remembered) = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .map_or((0, 0), |set| (set.constraints.len(), set.dimensions.len()));
+    assert_eq!(left, 0, "the constraint goes with the geometry it sized");
+    assert_eq!(
+        remembered, 0,
+        "and the set stops pointing at the dimension it no longer has"
+    );
+    assert!(
+        app.tabs[i].scene.document.get_entity(dimension).is_none(),
+        "and its dimension is not left drawn with no geometry to measure"
+    );
+    assert!(
+        !app.tabs[i].scene.named_parameters().contains("d1"),
+        "and the parameter it declared is not left behind for nothing to read"
+    );
+
+    app.automation_op(r#"{"op":"undo"}"#);
+    assert!(
+        app.tabs[i].scene.document.get_entity(line).is_some(),
+        "undo brings the line back"
+    );
+    assert!(
+        app.tabs[i].scene.document.get_entity(dimension).is_some(),
+        "with the dimension its constraint drew"
+    );
+    let (restored, remembered_again) = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .map_or((0, None), |set| {
+            (
+                set.constraints.len(),
+                set.dimensions.values().copied().next(),
+            )
+        });
+    assert_eq!(restored, 1, "and the constraint that sized it");
+    assert_eq!(
+        remembered_again,
+        Some(dimension),
+        "pointing again at the dimension it draws"
+    );
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d1"),
+        "and the parameter it declared"
+    );
+}
+
+/// The dimension a constraint draws belongs to the constraint, not to the
+/// user's layers: locking its layer does not keep it drawn over a line that is
+/// gone.
+#[test]
+fn a_locked_layer_does_not_strand_the_dimension_of_an_erased_line() {
+    use crate::command::CmdResult;
+    use crate::scene::parametric_constraints::{
+        ConstraintKind, ParametricRef, ParametricScope, DYNAMIC_DIMENSION_LAYER,
+    };
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+        kind: ConstraintKind::DistanceX,
+        first: ParametricRef::point(line, 0),
+        second: ParametricRef::point(line, 1),
+        first_point: glam::DVec3::ZERO,
+        second_point: glam::DVec3::new(40.0, 0.0, 0.0),
+        location: glam::DVec3::new(20.0, -10.0, 0.0),
+        axis: glam::DVec3::X,
+        direction: None,
+        name: "d1".to_string(),
+        expression: "100".to_string(),
+        renamed: false,
+        label: "Linear constraint",
+    });
+    app.drive_headless_task(task).unwrap();
+    let dimension = {
+        let set = app.tabs[i]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the constraint was added");
+        set.constraints
+            .iter()
+            .find_map(|constraint| set.dimensions.get(&constraint.id).copied())
+            .expect("the constraint draws a dimension")
+    };
+    let dimension_layer = app.tabs[i]
+        .scene
+        .document
+        .get_entity(dimension)
+        .map(|entity| entity.common().layer.clone())
+        .expect("the dimension is in the drawing");
+    assert!(
+        dimension_layer.eq_ignore_ascii_case(DYNAMIC_DIMENSION_LAYER),
+        "the constraint draws its dimension on its own layer"
+    );
+    app.tabs[i]
+        .scene
+        .document
+        .layers
+        .get_mut(DYNAMIC_DIMENSION_LAYER)
+        .expect("the constraint's layer exists")
+        .lock();
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get(DYNAMIC_DIMENSION_LAYER)
+            .is_some_and(|layer| layer.is_locked()),
+        "and that layer is locked"
+    );
+
+    app.tabs[i].scene.select_entity(line, false);
+    let _ = app.dispatch_command("ERASE");
+
+    assert!(
+        app.tabs[i].scene.document.get_entity(line).is_none(),
+        "the line is erased"
+    );
+    assert!(
+        app.tabs[i].scene.document.get_entity(dimension).is_none(),
+        "and its dimension goes too, though its own layer is locked"
+    );
+}
+
 /// Auto-constraining a selection adds constraints the same way, so its
 /// completion reports the geometry its solve moves outside the selection.
 #[test]

@@ -1158,6 +1158,12 @@ pub(super) struct OpenCADStudio {
     /// The objects the last selection step picked (a click, a window, a
     /// fence, Last / Previous / All) and whether it removed them.
     pub(crate) last_pick: Option<(Vec<codec::Handle>, bool)>,
+    /// The selection steps of the current Select objects: prompt (keyed by
+    /// the gathering command), newest last: the objects each added, or with
+    /// `true` the ones it removed. Undo takes them back one by one.
+    pub(crate) selection_undo: (usize, Vec<(Vec<codec::Handle>, bool)>),
+    /// The next completed selection is an Undo: no report, no new step.
+    pub(crate) selection_undoing: bool,
     /// The first corner of a window typed at a selection prompt, keyed by
     /// the gathering command, until the opposite corner is typed.
     pub(crate) typed_window_corner: Option<(usize, glam::DVec3)>,
@@ -5960,6 +5966,8 @@ impl OpenCADStudio {
             block_mru_list: 50,
             selection_report: None,
             last_pick: None,
+            selection_undo: (0, Vec::new()),
+            selection_undoing: false,
             typed_window_corner: None,
             refedit_options: Default::default(),
             block_redefine_mode: 1,

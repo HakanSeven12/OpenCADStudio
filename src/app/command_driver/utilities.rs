@@ -681,6 +681,9 @@ impl OpenCADStudio {
             return None;
         }
         let key = &**command as *const dyn crate::command::CadCommand as *const () as usize;
+        if std::mem::take(&mut self.selection_undoing) {
+            return Some(key);
+        }
         let previous: rustc_hash::FxHashSet<Handle> = match &self.selection_report {
             Some((k, previous)) if *k == key => previous.iter().copied().collect(),
             _ => Default::default(),
@@ -703,6 +706,17 @@ impl OpenCADStudio {
         };
         let found = picked.len();
         let known = picked.intersection(&previous).count();
+        if self.selection_undo.0 != key {
+            self.selection_undo = (key, Vec::new());
+        }
+        self.selection_undo.1.push((
+            picked
+                .iter()
+                .copied()
+                .filter(|handle| previous.contains(handle) == remove)
+                .collect(),
+            remove,
+        ));
         let line = if found == 0 || previous.is_empty() && !remove {
             crate::tf!("{found} found")
         } else if remove && known > 0 {
@@ -1247,18 +1261,32 @@ impl OpenCADStudio {
             }
             return Some(Task::none());
         }
-        // Undo takes back the last selection action.
+        // Undo takes back the selection steps of this prompt, newest first.
         if let "U" | "UNDO" = kw.as_str() {
-            if let Some((handles, removed)) = self.last_pick.take() {
-                for handle in handles {
-                    if removed {
-                        self.tabs[i].scene.select_entity(handle, false);
-                    } else {
-                        self.tabs[i].scene.deselect_entity(handle);
-                    }
+            let key = self.tabs[i].active_cmd.as_ref().map(|command| {
+                &**command as *const dyn crate::command::CadCommand as *const () as usize
+            });
+            let step = (Some(self.selection_undo.0) == key)
+                .then(|| self.selection_undo.1.pop())
+                .flatten();
+            let Some((handles, removed)) = step else {
+                self.command_line
+                    .push_info(crate::t!("All selections have been undone.").as_ref());
+                if let Some(prompt) = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt()) {
+                    self.command_line.push_info(&prompt);
                 }
-                self.refresh_properties();
+                return Some(Task::none());
+            };
+            for handle in handles {
+                if removed {
+                    self.tabs[i].scene.select_entity(handle, false);
+                } else {
+                    self.tabs[i].scene.deselect_entity(handle);
+                }
             }
+            self.select_remove_mode = false;
+            self.refresh_properties();
+            self.selection_undoing = true;
             let handles: Vec<Handle> = self.tabs[i]
                 .scene
                 .selected_entities()

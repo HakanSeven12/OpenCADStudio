@@ -1153,6 +1153,10 @@ fn dimension_line_grip_position(dim: &Dimension) -> Option<DVec3> {
         Dimension::Arc(d) => return Some(dv3(&d.definition_point)),
         _ => {}
     }
+    dimension_line_endpoints(dim).map(|(first, second)| (first + second) * 0.5)
+}
+
+fn dimension_line_endpoints(dim: &Dimension) -> Option<(DVec3, DVec3)> {
     let (first, second, defpt, ax, ay) = match dim {
         Dimension::Linear(d) => (
             d.first_point,
@@ -1192,7 +1196,7 @@ fn dimension_line_grip_position(dim: &Dimension) -> Option<DVec3> {
 
     let p2 = DVec3::new(second.x + px * off2, second.y + py * off2, defpt.z);
 
-    Some((p1 + p2) * 0.5)
+    Some((p1, p2))
 }
 
 impl Grippable for Dimension {
@@ -1208,7 +1212,7 @@ impl Grippable for Dimension {
                 dv3(&dimension_text_pos_f64(self, None, 2.5, 1.0, None))
             }
         };
-        match self {
+        let mut grips = match self {
             Dimension::Linear(d) => vec![
                 square_grip(0, dv3(&d.first_point)),
                 center_grip(1, dv3(&d.second_point)),
@@ -1280,7 +1284,12 @@ impl Grippable for Dimension {
                 center_grip(3, dv3(&d.jog_point)),
                 center_grip(4, text),
             ],
+        };
+        if let Some((first, second)) = dimension_line_endpoints(self) {
+            grips.push(center_grip(4, first));
+            grips.push(center_grip(5, second));
         }
+        grips
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
@@ -1297,7 +1306,7 @@ impl Grippable for Dimension {
             }
             return;
         }
-        // Last grip always moves the text.
+        // Text keeps its own grip ID even when arrow-tip grips follow it.
         let text_grip = match self {
             Dimension::Linear(_) | Dimension::Aligned(_) => 3,
             Dimension::Radius(_) | Dimension::Diameter(_) => 2,
@@ -1364,13 +1373,13 @@ impl Grippable for Dimension {
             Dimension::Linear(d) => match grip_id {
                 0 => apply_to_v3(&mut d.first_point, &apply),
                 1 => apply_to_v3(&mut d.second_point, &apply),
-                2 => apply_to_v3(&mut d.definition_point, &apply),
+                2 | 4 | 5 => apply_to_v3(&mut d.definition_point, &apply),
                 _ => {}
             },
             Dimension::Aligned(d) => match grip_id {
                 0 => apply_to_v3(&mut d.first_point, &apply),
                 1 => apply_to_v3(&mut d.second_point, &apply),
-                2 => apply_to_v3(&mut d.definition_point, &apply),
+                2 | 4 | 5 => apply_to_v3(&mut d.definition_point, &apply),
                 _ => {}
             },
             Dimension::Radius(d) => match grip_id {
@@ -5205,12 +5214,14 @@ struct DimLineParams {
     /// so the leader is drawn to it exactly and only the text is estimated.
     leader_anchor: Option<Vec3>,
 }
-/// Which arrow (1 or 2) sits at grip `grip_id`: the extension origins of a
-/// linear or aligned dimension, the two ends of a diameter.
+/// Which arrow (1 or 2) belongs to this grip: linear/aligned extension
+/// origins and arrow tips, or the two ends of a diameter.
 fn arrow_end(dim: &Dimension, grip_id: usize) -> Option<u8> {
     match (dim, grip_id) {
         (Dimension::Linear(_) | Dimension::Aligned(_) | Dimension::Diameter(_), 0) => Some(1),
         (Dimension::Linear(_) | Dimension::Aligned(_) | Dimension::Diameter(_), 1) => Some(2),
+        (Dimension::Linear(_) | Dimension::Aligned(_), 4) => Some(1),
+        (Dimension::Linear(_) | Dimension::Aligned(_), 5) => Some(2),
         _ => None,
     }
 }
@@ -9256,6 +9267,95 @@ pub(crate) fn dimension_text_grip_position(
         EntityType::Text(text) => Some(text.insertion_point),
         EntityType::MText(text) => Some(text.insertion_point),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod arrow_tip_grips_tests {
+    use super::*;
+    use crate::scene::model::object::{GripMenuAction, GripShape};
+
+    fn rotated() -> Dimension {
+        let mut d = DimensionLinear::horizontal(
+            Vector3::new(2.0, 3.0, 0.0), Vector3::new(12.0, 7.0, 0.0),
+        );
+        d.rotation = std::f64::consts::PI / 6.0;
+        d.definition_point = Vector3::new(4.0, 11.0, 0.0);
+        d.base.text_middle_point = Vector3::new(20.0, 25.0, 0.0);
+        d.base.text_user_positioned = true;
+        Dimension::Linear(d)
+    }
+
+    fn aligned() -> Dimension {
+        let mut d = DimensionAligned::new(
+            Vector3::new(2.0, 3.0, 0.0), Vector3::new(8.0, 11.0, 0.0),
+        );
+        d.definition_point = Vector3::new(1.0, 10.0, 0.0);
+        d.base.text_middle_point = Vector3::new(20.0, 25.0, 0.0);
+        d.base.text_user_positioned = true;
+        Dimension::Aligned(d)
+    }
+
+    fn assert_grips(mut dim: Dimension, second: DVec3, tips: [DVec3; 2]) {
+        let grips = dim.grips();
+        assert_eq!(grips.len(), 6, "two arrow-tip grips must be appended");
+        let expected = [DVec3::new(2.0, 3.0, 0.0), second,
+            (tips[0] + tips[1]) * 0.5, DVec3::new(20.0, 25.0, 0.0), tips[0], tips[1]];
+        for (id, point) in expected.into_iter().enumerate() {
+            assert_eq!(grips[id].id, id);
+            assert!(grips[id].world.distance(point) < 1e-9, "grip {id}: {:?}", grips[id]);
+            assert_eq!(grips[id].is_midpoint, id != 0);
+            assert_eq!(grips[id].shape, GripShape::Square);
+        }
+        for id in [4, 5] {
+            assert!(dim.grip_menu(id).iter().any(|item| item.action == GripMenuAction::FlipArrow));
+            dim.apply_grip_menu(id, GripMenuAction::FlipArrow);
+        }
+        assert!(dim.base().flip_arrow1 && dim.base().flip_arrow2);
+    }
+
+    #[test]
+    fn rotated_linear_has_projected_tips_and_keeps_ids_0_to_3() {
+        let s = 3.0_f64.sqrt();
+        assert_grips(rotated(), DVec3::new(12.0, 7.0, 0.0), [
+            DVec3::new(2.5 - 2.0 * s, 9.0 - s * 0.5, 0.0),
+            DVec3::new(10.0 - s, 10.0 + 2.0 * s, 0.0),
+        ]);
+    }
+
+    #[test]
+    fn aligned_has_projected_tips_and_keeps_ids_0_to_3() {
+        assert_grips(aligned(), DVec3::new(8.0, 11.0, 0.0), [
+            DVec3::new(-2.0, 6.0, 0.0), DVec3::new(4.0, 14.0, 0.0),
+        ]);
+    }
+
+    #[test]
+    fn dragging_either_tip_moves_the_line_through_the_target() {
+        let target = DVec3::new(9.0, 17.0, 0.0);
+        for dim in [rotated(), aligned()] {
+            for id in [4, 5] {
+                let mut moved = dim.clone();
+                moved.apply_grip(id, GripApply::Absolute(target));
+                let definition = dv3(&dimension_definition_point(&moved));
+                assert!(definition.distance(target) < 1e-9, "grip {id} did not move definition_point");
+                assert!(dv3(&moved.base().definition_point).distance(target) < 1e-9);
+                let tips = moved.grips();
+                let axis = (tips[5].world - tips[4].world).normalize();
+                assert!((target - tips[4].world).cross(axis).length() < 1e-9);
+                let mut middle = dim.clone();
+                middle.apply_grip(2, GripApply::Absolute(target));
+                assert_eq!(moved.base().text_middle_point, middle.base().text_middle_point);
+                let original_tip = dim.grips()[id].world;
+                let mut translated = dim.clone();
+                translated.apply_grip(id, GripApply::Translate(target - original_tip));
+                let tips = translated.grips();
+                let axis = (tips[5].world - tips[4].world).normalize();
+                assert!((target - tips[4].world).cross(axis).length() < 1e-9);
+                assert_eq!(translated.grips()[0].world, dim.grips()[0].world);
+                assert_eq!(translated.grips()[1].world, dim.grips()[1].world);
+            }
+        }
     }
 }
 

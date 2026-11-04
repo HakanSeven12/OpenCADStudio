@@ -8177,6 +8177,10 @@ impl OpenCADStudio {
                 self.mtext_redo();
                 Task::none()
             }
+            Message::MTextInsertField => {
+                self.mtext_insert_field_open();
+                Task::none()
+            }
             Message::MTextStack => {
                 self.mtext_stack_selection();
                 Task::none()

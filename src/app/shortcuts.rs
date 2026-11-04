@@ -388,6 +388,8 @@ impl OpenCADStudio {
             // The multiline text editor keeps its own history.
             "UNDO" if self.mtext_editor.is_some() => Message::MTextUndo,
             "REDO" if self.mtext_editor.is_some() => Message::MTextRedo,
+            // In the text editor Ctrl+F inserts a field instead of finding.
+            "FIND" if self.mtext_editor.is_some() => Message::MTextInsertField,
 
             "UNDO" => {
                 let i = self.active_tab;

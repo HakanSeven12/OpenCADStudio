@@ -137,22 +137,58 @@ fn text_around_a_field_is_edited_and_saved_as_the_codec_would() {
 }
 
 #[test]
-fn a_fields_own_text_cannot_be_typed_into_or_deleted() {
+fn a_fields_own_text_cannot_be_typed_into_or_split() {
     let (mut app, _) = host(r"a %<\_FldIdx 0>% b", &["12"]);
     let before = raw(&app);
     caret(&mut app, 3);
     app.mtext_type("x");
     assert_eq!(raw(&app), before);
-    caret(&mut app, 4);
+    select(&mut app, 3, 6);
     app.mtext_backspace();
-    assert_eq!(raw(&app), before, "backspace into the field");
+    assert_eq!(raw(&app), before, "a selection over half of the field");
     select(&mut app, 1, 5);
-    app.mtext_backspace();
-    assert_eq!(raw(&app), before, "a selection over the field");
+    app.mtext_type("x");
+    assert_eq!(raw(&app), before, "typing over the field");
     // Right next to it both sides work.
     caret(&mut app, 2);
     app.mtext_backspace();
     assert_eq!(raw(&app), "a12 b");
+}
+
+#[test]
+fn a_key_next_to_a_field_deletes_it_whole() {
+    for (at, backspace) in [(4, true), (2, false)] {
+        let (mut app, h) = host(r"a %<\_FldIdx 0>% b", &["12"]);
+        caret(&mut app, at);
+        if backspace {
+            app.mtext_backspace();
+        } else {
+            app.mtext_delete();
+        }
+        assert_eq!(raw(&app), "a  b");
+        assert!(app.mtext_commit());
+        assert_eq!(container(&app, h).1, "a  b");
+        let fields = app.tabs[1]
+            .scene
+            .document
+            .objects
+            .values()
+            .filter(|o| matches!(o, ObjectType::Field(_)))
+            .count();
+        assert_eq!(fields, 1, "only the container is left");
+    }
+}
+
+#[test]
+fn a_selection_over_a_whole_field_deletes_it_and_undo_brings_it_back() {
+    let (mut app, h) = host(r"a %<\_FldIdx 0>% b", &["12"]);
+    select(&mut app, 2, 4);
+    app.mtext_backspace();
+    assert_eq!(raw(&app), "a  b");
+    app.mtext_undo();
+    assert_eq!(raw(&app), "a 12 b");
+    assert!(app.mtext_commit());
+    assert_eq!(container(&app, h).1, r"a %<\_FldIdx 0>% b");
 }
 
 #[test]
@@ -240,4 +276,134 @@ fn an_edited_field_host_reopens_editable_after_dwg_and_dxf() {
         reopened.mtext_type("y");
         assert_eq!(raw(&reopened), "yxa 12 b", "{ext}");
     }
+}
+
+/// A drawing whose document has the custom property "Job No" = "42-7".
+fn with_job_no(app: &mut OpenCADStudio) {
+    app.tabs[1].scene.document.summary_info.custom_properties =
+        vec![("Job No".into(), "42-7".into())];
+}
+
+/// Ctrl+F in the editor, then the Document field "Job No", then OK.
+fn insert_job_no(app: &mut OpenCADStudio) {
+    use crate::ui::window::field_dialog::{FieldDialogMsg, CATEGORIES};
+    let _ = app.run_action("FIND");
+    let category = CATEGORIES
+        .iter()
+        .position(|(name, _)| *name == "Document")
+        .unwrap();
+    let _ = app.on_field_dialog(FieldDialogMsg::Category(category));
+    let pick = app
+        .field_dialog
+        .as_ref()
+        .expect("the Field dialog is open")
+        .entries()
+        .into_iter()
+        .find(|row| row.0 == "Job No")
+        .unwrap();
+    let _ = app.on_field_dialog(pick.2);
+    let _ = app.on_field_dialog(FieldDialogMsg::Ok);
+}
+
+/// A plain text "ab" opened in the editor.
+fn plain() -> (OpenCADStudio, Handle) {
+    let (mut app, h) = host("ab", &[]);
+    with_job_no(&mut app);
+    (app, h)
+}
+
+#[test]
+fn find_in_the_editor_opens_the_field_dialog_for_it() {
+    use crate::ui::window::field_dialog::FieldTarget;
+    let (mut app, _) = plain();
+    let _ = app.run_action("FIND");
+    assert_eq!(
+        app.field_dialog.as_ref().map(|s| s.target),
+        Some(FieldTarget::EditorInsert)
+    );
+    assert!(app.mtext_editor.is_some(), "the editor stays open");
+}
+
+#[test]
+fn find_outside_the_editor_does_not_open_the_field_dialog() {
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.run_action("FIND");
+    assert!(app.field_dialog.is_none());
+}
+
+#[test]
+fn a_field_inserted_at_the_caret_is_saved_between_the_texts() {
+    let (mut app, h) = plain();
+    caret(&mut app, 1);
+    insert_job_no(&mut app);
+    assert_eq!(raw(&app), "a42-7b");
+    assert!(app.mtext_commit());
+    assert_eq!(value(&app, h), "a42-7b");
+    assert_eq!(container(&app, h).1, r"a%<\_FldIdx 0>%b");
+    assert_eq!(
+        codec::fields::field_spans(&app.tabs[1].scene.document, h, "a42-7b"),
+        Some(vec![1..5])
+    );
+}
+
+#[test]
+fn an_inserted_field_keeps_the_existing_ones_and_leaves_no_orphan() {
+    let (mut app, h) = host(r"a %<\_FldIdx 0>% b", &["12"]);
+    with_job_no(&mut app);
+    let end = doc_to_cells(&ed(&app).doc).len();
+    caret(&mut app, end);
+    insert_job_no(&mut app);
+    assert_eq!(raw(&app), "a 12 b42-7");
+    assert!(app.mtext_commit());
+    let doc = &app.tabs[1].scene.document;
+    assert_eq!(container(&app, h).1, r"a %<\_FldIdx 0>% b%<\_FldIdx 1>%");
+    assert_eq!(
+        codec::fields::field_spans(doc, h, &value(&app, h)),
+        Some(vec![2..4, 6..10])
+    );
+    let fields = doc
+        .objects
+        .values()
+        .filter(|o| matches!(o, ObjectType::Field(_)))
+        .count();
+    assert_eq!(fields, 3, "the container and its two fields");
+}
+
+#[test]
+fn a_cancelled_insert_changes_nothing() {
+    let count = |app: &OpenCADStudio| {
+        app.tabs[1]
+            .scene
+            .document
+            .objects
+            .values()
+            .filter(|o| matches!(o, ObjectType::Field(_)))
+            .count()
+    };
+    let (mut app, h) = plain();
+    let before = count(&app);
+    caret(&mut app, 1);
+    insert_job_no(&mut app);
+    app.mtext_cancel();
+    assert_eq!(value(&app, h), "ab");
+    assert_eq!(count(&app), before);
+}
+
+#[test]
+fn a_field_just_inserted_can_be_deleted_whole() {
+    let (mut app, h) = plain();
+    caret(&mut app, 1);
+    insert_job_no(&mut app);
+    app.mtext_backspace();
+    assert_eq!(raw(&app), "ab");
+    assert!(app.mtext_commit());
+    assert_eq!(value(&app, h), "ab");
+    let fields = app.tabs[1]
+        .scene
+        .document
+        .objects
+        .values()
+        .filter(|o| matches!(o, ObjectType::Field(_)))
+        .count();
+    assert_eq!(fields, 1, "only the container is left");
 }

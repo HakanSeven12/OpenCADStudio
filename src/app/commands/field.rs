@@ -552,6 +552,11 @@ impl OpenCADStudio {
                 }
                 self.active_modal = Some(crate::app::ModalKind::AttDefEdit);
             }
+            FieldTarget::EditorInsert => {
+                self.close_active_modal();
+                let (code, objects) = field.expect("set above");
+                self.mtext_insert_field(code, objects, &value);
+            }
             FieldTarget::FormulaOperand => {
                 // The field goes into the formula as an operand, `%<code>%`.
                 let (code, objects) = field.expect("set above");

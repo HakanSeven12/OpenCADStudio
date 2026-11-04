@@ -3601,3 +3601,145 @@ mod mission_m029_tests {
         assert!(!output.contains("1:75  factor"), "{output}");
     }
 }
+
+#[cfg(test)]
+mod mission_m051_tests {
+    use super::super::*;
+    use codec::entities::{Line, Text};
+    use codec::types::Vector3;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn add_note(app: &mut OpenCADStudio) -> (codec::Handle, codec::Handle) {
+        let i = app.active_tab;
+        let mut text = Text::with_value("NOTE", Vector3::ZERO);
+        text.height = 2.0;
+        let text = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Text(text));
+        let line = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::new(-5.0, 0.5, 0.0),
+                Vector3::new(15.0, 0.5, 0.0),
+            )));
+        (text, line)
+    }
+
+    fn masks(app: &OpenCADStudio) -> Vec<codec::Handle> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, codec::EntityType::Wipeout(_)))
+            .map(|entity| entity.common().handle)
+            .collect()
+    }
+
+    fn bounds(app: &OpenCADStudio, handle: codec::Handle) -> ([f32; 3], [f32; 3]) {
+        let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for wire in app.tabs[app.active_tab].scene.wire_models_for(&[handle]) {
+            for point in &wire.points {
+                for k in 0..3 {
+                    min[k] = min[k].min(point[k]);
+                    max[k] = max[k].max(point[k]);
+                }
+            }
+        }
+        (min, max)
+    }
+
+    fn mask_selection(app: &mut OpenCADStudio) {
+        let _ = app.run_command_line("TEXTMASK");
+        let _ = app.feed_command(crate::command::StepInput::Enter);
+    }
+
+    #[test]
+    fn masking_text_adds_a_wipeout_and_off_removes_it_again() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let (text, _line) = add_note(&mut app);
+        let i = app.active_tab;
+
+        assert!(masks(&app).is_empty());
+        app.tabs[i].scene.select_entity(text, false);
+        mask_selection(&mut app);
+        assert_eq!(masks(&app).len(), 1, "{}", all_output(&app));
+
+        app.tabs[i].scene.select_entity(text, false);
+        let _ = app.run_command_line("TEXTMASK OFF");
+        assert!(masks(&app).is_empty(), "{}", all_output(&app));
+        app.tabs[i].scene.select_entity(text, false);
+        let record = app.tabs[i]
+            .scene
+            .document
+            .get_entity(text)
+            .unwrap()
+            .common()
+            .extended_data
+            .get_record("TEXTMASK");
+        assert!(record.is_none(), "the association must be dropped on OFF");
+    }
+
+    #[test]
+    fn a_larger_offset_grows_the_masked_area() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let (text, _line) = add_note(&mut app);
+        let i = app.active_tab;
+
+        app.tabs[i].scene.select_entity(text, false);
+        mask_selection(&mut app);
+        let before = masks(&app);
+        assert_eq!(before.len(), 1);
+        let (min_before, max_before) = bounds(&app, before[0]);
+
+        let _ = app.run_command_line("TEXTMASK OFFSET 0.5");
+        assert!(
+            all_output(&app).contains("offset = 0.5"),
+            "{}",
+            all_output(&app)
+        );
+        assert_eq!(
+            crate::io::drawing_variable(&app.tabs[i].scene.document, "TEXTMASKOFFSET").as_deref(),
+            Some("0.5")
+        );
+        app.tabs[i].scene.select_entity(text, false);
+        mask_selection(&mut app);
+        let after = masks(&app);
+        assert_eq!(after.len(), 1, "the old mask must be replaced, not stacked");
+        let (min_after, max_after) = bounds(&app, after[0]);
+
+        assert!(
+            (max_after[0] - min_after[0]) > (max_before[0] - min_before[0]) + 0.2,
+            "offset 0.5 must grow the mask: before {:?}, after {:?}",
+            (min_before, max_before),
+            (min_after, max_after)
+        );
+        assert!((min_after[0] - (min_before[0] - 0.2)).abs() < 1e-3);
+    }
+
+    #[test]
+    fn off_without_a_selection_clears_every_mask_in_the_drawing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let (text, _line) = add_note(&mut app);
+        let i = app.active_tab;
+
+        app.tabs[i].scene.select_entity(text, false);
+        mask_selection(&mut app);
+        app.tabs[i].scene.deselect_all();
+        assert_eq!(masks(&app).len(), 1);
+
+        let _ = app.run_command_line("TEXTMASK OFF");
+        assert!(masks(&app).is_empty());
+        assert!(all_output(&app).contains("removed 1 mask"));
+    }
+}

@@ -1,5 +1,12 @@
 use super::*;
 
+/// XDATA application name marking a wipeout as a text mask and naming the text
+/// object it belongs to.
+const TEXTMASK_APP: &str = "TEXTMASK";
+/// Drawing variable holding the requested mask offset in drawing units. Unset
+/// means the offset follows the text height (15% of it).
+const TEXTMASK_OFFSET_VAR: &str = "TEXTMASKOFFSET";
+
 fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<codec::Handle> {
     let scene = &app.tabs.get(tab)?.scene;
     let selected = scene.selected_handles_in_order();
@@ -216,18 +223,72 @@ impl OpenCADStudio {
             // extent and bring the text in front, so the mask hides whatever is
             // underneath while the text stays readable. (Same world-XY coordinate
             // space the WIPEOUT command uses.)
-            "TEXTMASK" => {
+            //   TEXTMASK                 mask the selection with the current offset
+            //   TEXTMASK OFFSET <n>      set the mask offset (drawing units)
+            //   TEXTMASK OFF             remove the masks from the selection (or all)
+            "TEXTMASK" | "-TEXTMASK" => {
                 use crate::command::SelectThenValueCommand;
                 let has_sel = !self.tabs[i].scene.selected_entities().is_empty();
                 let c = SelectThenValueCommand::new(
                     "TEXTMASK",
-                    "TEXTMASK  press Enter to mask the selected text:",
+                    "TEXTMASK  press Enter to mask, or OFFSET <n> / OFF:",
                     has_sel,
                 );
                 self.command_line.push_info(&c.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
-            cmd if cmd.starts_with("TEXTMASK ") => {
+            cmd if cmd.starts_with("TEXTMASK ") || cmd.starts_with("-TEXTMASK ") => {
+                let rest = cmd
+                    .trim_start_matches('-')
+                    .trim_start_matches("TEXTMASK")
+                    .trim();
+                let mut tokens = rest.split_whitespace();
+                let first = tokens.next().unwrap_or("");
+                if first.eq_ignore_ascii_case("OFF") || first.eq_ignore_ascii_case("REMOVE") {
+                    let handles: Vec<codec::Handle> = self.tabs[i]
+                        .scene
+                        .selected_entities()
+                        .iter()
+                        .filter(|(_, e)| {
+                            matches!(e, codec::EntityType::Text(_) | codec::EntityType::MText(_))
+                        })
+                        .map(|(h, _)| *h)
+                        .collect();
+                    let scope = (!handles.is_empty()).then_some(handles);
+                    let removed = self.remove_textmasks(i, scope);
+                    self.command_line.push_output(
+                        crate::tf!("TEXTMASK: removed {removed} mask(s).").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                if first.eq_ignore_ascii_case("OFFSET") {
+                    match tokens.next().and_then(|v| v.parse::<f64>().ok()) {
+                        Some(value) if value >= 0.0 && value.is_finite() => {
+                            crate::io::set_drawing_variable(
+                                &mut self.tabs[i].scene.document,
+                                TEXTMASK_OFFSET_VAR,
+                                &value.to_string(),
+                            );
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(
+                                crate::tf!("TEXTMASK offset = {value}").as_ref(),
+                            );
+                        }
+                        Some(_) => self.command_line.push_error(
+                            crate::t!("TEXTMASK OFFSET: use a positive distance.").as_ref(),
+                        ),
+                        None => {
+                            let current = self
+                                .textmask_offset(i)
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "auto".to_string());
+                            self.command_line
+                                .push_output(crate::tf!("TEXTMASK offset = {current}").as_ref());
+                        }
+                    }
+                    return Some(Task::none());
+                }
+
                 let handles: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -244,40 +305,7 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 self.push_undo_snapshot(i, "TEXTMASK");
-                let mut n = 0usize;
-                for h in &handles {
-                    let wires = self.tabs[i].scene.wire_models_for(&[*h]);
-                    let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
-                    for w in &wires {
-                        for p in &w.points {
-                            for k in 0..3 {
-                                min[k] = min[k].min(p[k]);
-                                max[k] = max[k].max(p[k]);
-                            }
-                        }
-                    }
-                    if min[0] > max[0] {
-                        continue; // no geometry for this object
-                    }
-                    let pad = ((max[1] - min[1]) * 0.15).max(0.0);
-                    let c1 = codec::types::Vector3::new(
-                        (min[0] - pad) as f64,
-                        (min[1] - pad) as f64,
-                        min[2] as f64,
-                    );
-                    let c2 = codec::types::Vector3::new(
-                        (max[0] + pad) as f64,
-                        (max[1] + pad) as f64,
-                        min[2] as f64,
-                    );
-                    self.tabs[i]
-                        .scene
-                        .add_entity_clone(codec::EntityType::Wipeout(
-                            codec::entities::Wipeout::from_corners(c1, c2),
-                        ));
-                    n += 1;
-                }
-                // Draw the text in front of its newly-added masks.
+                let n = self.apply_textmasks(i, &handles);
                 self.tabs[i]
                     .scene
                     .replace_selection(handles.iter().cloned().collect());
@@ -1935,5 +1963,202 @@ impl OpenCADStudio {
         } else {
             format!("  {removed} Text objects removed, {added} MText objects added.")
         });
+    }
+
+    /// The requested mask offset in drawing units, or `None` when the offset
+    /// follows the text height.
+    fn textmask_offset(&self, i: usize) -> Option<f64> {
+        crate::io::drawing_variable(&self.tabs[i].scene.document, TEXTMASK_OFFSET_VAR)
+            .and_then(|value| value.trim().parse::<f64>().ok())
+            .filter(|value| value.is_finite() && *value >= 0.0)
+    }
+
+    /// Screen-space bounds of one entity in the same coordinate space the
+    /// WIPEOUT command uses.
+    fn textmask_bounds(
+        &self,
+        i: usize,
+        handle: codec::Handle,
+    ) -> Option<([f32; 3], [f32; 3])> {
+        let wires = self.tabs[i].scene.wire_models_for(&[handle]);
+        let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for wire in &wires {
+            for point in &wire.points {
+                for k in 0..3 {
+                    min[k] = min[k].min(point[k]);
+                    max[k] = max[k].max(point[k]);
+                }
+            }
+        }
+        if min[0] <= max[0] {
+            return Some((min, max));
+        }
+        // Glyph wires need the font atlas, which a headless document may not
+        // have built yet. Fall back to the text's own placement so a mask can
+        // still be created and reported.
+        let entity = self.tabs[i].scene.document.get_entity(handle)?;
+        let (origin, width, height, rotation) = match entity {
+            codec::EntityType::Text(text) => {
+                let width = text.value.chars().count() as f64
+                    * text.height
+                    * 0.6
+                    * text.width_factor.abs().max(1e-6);
+                (
+                    text.insertion_point,
+                    width,
+                    text.height,
+                    text.rotation,
+                )
+            }
+            codec::EntityType::MText(text) => {
+                let width = if text.rectangle_width > 0.0 {
+                    text.rectangle_width
+                } else if text.extents_width > 0.0 {
+                    text.extents_width
+                } else {
+                    text.value.chars().count() as f64 * text.height * 0.6
+                };
+                let rows = text.value.split('\n').count().max(1) as f64;
+                let height = text
+                    .rectangle_height
+                    .filter(|height| *height > 0.0)
+                    .or((text.extents_height > 0.0).then_some(text.extents_height))
+                    .unwrap_or(rows * text.height * 1.6);
+                (text.insertion_point, width, height, text.rotation)
+            }
+            _ => return None,
+        };
+        let (sin, cos) = rotation.sin_cos();
+        for (x, y) in [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)] {
+            let wx = (origin.x + x * cos - y * sin) as f32;
+            let wy = (origin.y + x * sin + y * cos) as f32;
+            let wz = origin.z as f32;
+            min[0] = min[0].min(wx);
+            min[1] = min[1].min(wy);
+            min[2] = min[2].min(wz);
+            max[0] = max[0].max(wx);
+            max[1] = max[1].max(wy);
+            max[2] = max[2].max(wz);
+        }
+        Some((min, max))
+    }
+
+    /// The masks that belong to `text`, tracked through the TEXTMASK xdata
+    /// record so they can be replaced or removed later.
+    fn textmask_masks_for(&self, i: usize, text: codec::Handle) -> Vec<codec::Handle> {
+        use codec::xdata::XDataValue;
+        self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| matches!(entity, codec::EntityType::Wipeout(_)))
+            .filter(|entity| {
+                entity
+                    .common()
+                    .extended_data
+                    .get_record(TEXTMASK_APP)
+                    .is_some_and(|record| {
+                        matches!(
+                            record.values.first(),
+                            Some(XDataValue::Handle(owner)) if *owner == text
+                        )
+                    })
+            })
+            .map(|entity| entity.common().handle)
+            .collect()
+    }
+
+    /// (Re)create a mask for each text object with the current offset. Any
+    /// previous mask for the same text is replaced so the offset can change
+    /// without stacking wipeouts. Returns how many texts were masked.
+    fn apply_textmasks(&mut self, i: usize, handles: &[codec::Handle]) -> usize {
+        use codec::xdata::{ExtendedDataRecord, XDataValue};
+        let offset = self.textmask_offset(i);
+        let mut masked = 0usize;
+        for handle in handles {
+            let previous = self.textmask_masks_for(i, *handle);
+            if !previous.is_empty() {
+                self.tabs[i].scene.erase_entities(&previous);
+            }
+            let Some((min, max)) = self.textmask_bounds(i, *handle) else {
+                continue;
+            };
+            let height = (max[1] - min[1]) as f64;
+            let pad = offset.unwrap_or((height * 0.15).max(0.0));
+            let c1 = codec::types::Vector3::new(
+                min[0] as f64 - pad,
+                min[1] as f64 - pad,
+                min[2] as f64,
+            );
+            let c2 = codec::types::Vector3::new(
+                max[0] as f64 + pad,
+                max[1] as f64 + pad,
+                min[2] as f64,
+            );
+            let mask = self
+                .tabs[i]
+                .scene
+                .add_entity_clone(codec::EntityType::Wipeout(
+                    codec::entities::Wipeout::from_corners(c1, c2),
+                ));
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(mask) {
+                let mut record = ExtendedDataRecord::new(TEXTMASK_APP);
+                record.add_value(XDataValue::Handle(*handle));
+                entity.common_mut().extended_data.upsert_record(record);
+            }
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*handle) {
+                let mut record = ExtendedDataRecord::new(TEXTMASK_APP);
+                record.add_value(XDataValue::Real(pad));
+                entity.common_mut().extended_data.upsert_record(record);
+            }
+            masked += 1;
+        }
+        masked
+    }
+
+    /// Remove the masks for the given texts (or for every masked text when no
+    /// scope is given) and drop the association record. Returns the number of
+    /// masks removed.
+    fn remove_textmasks(
+        &mut self,
+        i: usize,
+        scope: Option<Vec<codec::Handle>>,
+    ) -> usize {
+        let texts: Vec<codec::Handle> = scope.unwrap_or_else(|| {
+            self.tabs[i]
+                .scene
+                .document
+                .entities()
+                .filter(|entity| {
+                    !matches!(entity, codec::EntityType::Wipeout(_))
+                        && entity
+                            .common()
+                            .extended_data
+                            .get_record(TEXTMASK_APP)
+                            .is_some()
+                })
+                .map(|entity| entity.common().handle)
+                .collect()
+        });
+        let masks: Vec<codec::Handle> = texts
+            .iter()
+            .flat_map(|text| self.textmask_masks_for(i, *text))
+            .collect();
+        if !masks.is_empty() {
+            self.push_undo_snapshot(i, "TEXTMASK OFF");
+            self.tabs[i].scene.erase_entities(&masks);
+        }
+        for text in &texts {
+            if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(*text) {
+                entity
+                    .common_mut()
+                    .extended_data
+                    .remove_record(TEXTMASK_APP);
+            }
+        }
+        if !masks.is_empty() {
+            self.tabs[i].dirty = true;
+        }
+        masks.len()
     }
 }

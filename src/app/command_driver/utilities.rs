@@ -1089,6 +1089,9 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
             // DIMUPDATE takes its KEEP / CLEAR answer on the same line.
             || tokens[0].eq_ignore_ascii_case("DIMUPDATE")
+            // TEXTMASK takes OFFSET <n> / OFF on the same line.
+            || tokens[0].eq_ignore_ascii_case("TEXTMASK")
+            || tokens[0].eq_ignore_ascii_case("-TEXTMASK")
         {
             return self.dispatch_command(cmd);
         }

@@ -442,6 +442,9 @@ pub fn modal<'a>(
     .into()
 }
 
+/// The "open in its own window" button of a tool frame or pallet title bar.
+pub const DETACH_BUTTON_ID: &str = "detach-to-window";
+
 /// The messages a tool dialog's frame sends (see [`tool_frame`]).
 pub struct ToolFrameMessages {
     pub close: Message,
@@ -488,7 +491,7 @@ pub fn tool_frame<'a>(
         .padding([1, 7])
         .style(neutral_close_style);
         controls = controls.push(iced::widget::tooltip(
-            button,
+            container(button).id(iced::widget::Id::new(DETACH_BUTTON_ID)),
             container(iced::widget::text(crate::t!("Open in its own window")).size(11))
                 .padding([3, 6])
                 .style(container::rounded_box),

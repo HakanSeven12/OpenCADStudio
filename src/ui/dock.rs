@@ -1322,6 +1322,8 @@ pub fn detach_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Mes
     .on_press(Message::Dock(DockMsg::Detach(id)))
     .style(button::subtle)
     .padding([3, 5]);
+    let detach =
+        container(detach).id(iced::widget::Id::new(crate::ui::modal::DETACH_BUTTON_ID));
     tooltip(detach, text(crate::t!("Open in its own window")).size(10), tip)
         .gap(4)
         .into()

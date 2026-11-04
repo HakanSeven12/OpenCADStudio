@@ -37,9 +37,15 @@ impl ModalKind {
     pub(crate) fn tool_scope(self) -> Option<ToolScope> {
         use ModalKind as K;
         match self {
-            K::About | K::Shortcuts | K::Aliases | K::PluginManager | K::Options | K::XrefHelp => {
-                Some(ToolScope::App)
-            }
+            K::About
+            | K::Shortcuts
+            | K::Aliases
+            | K::PluginManager
+            | K::Options
+            | K::XrefHelp
+            | K::UpdateNotice
+            | K::DonationPrompt
+            | K::GpuWarning => Some(ToolScope::App),
             K::DraftingSettings
             | K::LayerStateManager
             | K::LayerTranslator
@@ -61,7 +67,10 @@ impl ModalKind {
             | K::AttMan
             | K::SelectSimilarSettings
             | K::BlockEditorSettings
-            | K::AutoConstrainSettings => Some(ToolScope::Document),
+            | K::AutoConstrainSettings
+            | K::Plot
+            | K::PrintAll
+            | K::MissingFonts => Some(ToolScope::Document),
             _ => None,
         }
     }
@@ -677,6 +686,7 @@ impl OpenCADStudio {
         .on_press(Message::OsWindowReturn(id))
         .style(iced::widget::button::text)
         .padding([3, 8]);
+        let back = container(back).id(iced::widget::Id::new(BACK_BUTTON_ID));
         let header = container(row![Space::new().width(Fill), back].align_y(iced::Center))
             .width(Fill)
             .height(iced::Length::Fixed(HEADER_H));
@@ -715,6 +725,10 @@ impl OpenCADStudio {
     }
 }
 
+/// A window of its own's "back to the main window" button.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) const BACK_BUTTON_ID: &str = "back-to-main-window";
+
 /// The header strip of a window of its own.
 #[cfg(not(target_arch = "wasm32"))]
 const HEADER_H: f32 = 26.0;
@@ -745,6 +759,123 @@ fn open_window(placement: WindowPlacement, _title: String) -> (iced::window::Id,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The messages a press on widget `id` in `element` sends.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn press(element: Element<'_, Message>, id: &'static str) -> Vec<Message> {
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            iced::Settings::default(),
+            (1400.0, 900.0),
+            element,
+        );
+        ui.click(iced::widget::Id::new(id)).expect("the button is drawn");
+        ui.into_messages().collect()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_tool_moves_into_its_own_window_and_back() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.main_window = Some(iced::window::Id::unique());
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        // The frame's button asks for a window of its own.
+        let sent = press(
+            app.with_tool_windows(Space::new().into()),
+            crate::ui::modal::DETACH_BUTTON_ID,
+        );
+        assert!(sent.iter().any(|m| matches!(m, Message::ToolWindowDetach(ModalKind::About))));
+        for msg in sent {
+            let _ = app.update_root(msg);
+        }
+        let window = app.os_windows.first().copied().expect("its own window");
+        assert_eq!(window.content, Detached::Tool(ModalKind::About));
+        let tool = app.tool_windows.iter().find(|t| t.kind == ModalKind::About).unwrap();
+        assert!(tool.window == Some(window.id) && !tool.in_canvas());
+        // Its header's button brings it back into the main window.
+        let sent = press(app.os_window_view(window.id).unwrap(), BACK_BUTTON_ID);
+        assert!(sent.iter().any(|m| matches!(m, Message::OsWindowReturn(id) if *id == window.id)));
+        for msg in sent {
+            let _ = app.update_root(msg);
+        }
+        assert!(app.os_windows.is_empty());
+        assert!(app.tool_windows.iter().any(|t| t.kind == ModalKind::About && t.in_canvas()));
+        // Closed from the window manager, the tool closes with its window.
+        let _ = app.update_root(Message::ToolWindowDetach(ModalKind::About));
+        let window = app.os_windows.first().copied().expect("its own window again");
+        let _ = app.update_root(Message::WindowCloseRequested(window.id));
+        assert!(app.os_windows.is_empty());
+        assert!(!app.tool_open(ModalKind::About));
+        // It was in a window when it closed: it reopens in one.
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        assert_eq!(app.os_windows.len(), 1);
+        // Moved onto a second monitor (right of a 1920 px one) and resized,
+        // closed, reopened: it comes back there, at that size.
+        let window = app.os_windows[0];
+        let _ = app.update_root(Message::OsWindowMoved(window.id, Point::new(2400.0, 120.0)));
+        let _ = app.update_root(Message::OsWindowResized(window.id, 700.0, 500.0));
+        let _ = app.update_root(Message::WindowCloseRequested(window.id));
+        app.active_modal = Some(ModalKind::About);
+        let _ = app.update_root(Message::Noop);
+        let placement = app.os_windows.first().expect("reopened").placement;
+        assert_eq!(
+            (placement.x, placement.y, placement.w, placement.h),
+            (2400.0, 120.0, 700.0, 500.0)
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_pallet_moves_into_its_own_window_hides_and_comes_back() {
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.main_window = Some(iced::window::Id::unique());
+        let _ = app.dock_set_open(PanelId::QuickCalc, true);
+        // The docked title bar's button, shown while it is hovered.
+        app.dock_title_hover = Some(PanelId::QuickCalc);
+        let sent = {
+            let tab = &app.tabs[app.active_tab];
+            press(
+                app.panel_body(PanelId::QuickCalc, 320.0, false, tab),
+                crate::ui::modal::DETACH_BUTTON_ID,
+            )
+        };
+        assert!(sent
+            .iter()
+            .any(|m| matches!(m, Message::Dock(DockMsg::Detach(PanelId::QuickCalc)))));
+        for msg in sent {
+            let _ = app.update_root(msg);
+        }
+        assert!(app.dock.is_separate(PanelId::QuickCalc) && !app.dock.is_placed(PanelId::QuickCalc));
+        let window = app.os_windows.first().copied().expect("its own window");
+        assert_eq!(window.content, Detached::Panel(PanelId::QuickCalc));
+        // Closed from the window manager it hides, and stays a window.
+        let _ = app.update_root(Message::WindowCloseRequested(window.id));
+        assert!(app.os_windows.is_empty() && !app.dock_panel_wanted(PanelId::QuickCalc));
+        assert!(app.dock.is_separate(PanelId::QuickCalc));
+        // Opened again (QUICKCALC), it comes back in its own window.
+        let _ = app.update_root(Message::Dock(DockMsg::Close(PanelId::QuickCalc)));
+        let _ = app.dock_set_open(PanelId::QuickCalc, true);
+        let _ = app.update_root(Message::Noop);
+        let window = app.os_windows.first().copied().expect("reopened in its own window");
+        // Back into the main window, floating.
+        let _ = app.update_root(Message::OsWindowReturn(window.id));
+        assert!(app.os_windows.is_empty());
+        assert!(!app.dock.is_separate(PanelId::QuickCalc));
+        assert!(app.dock.float_rect(PanelId::QuickCalc).is_some());
+    }
+
+    #[test]
+    fn plot_stays_open_beside_the_drawing() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.update_root(Message::PlotDialogOpen);
+        assert_eq!(app.active_modal, None);
+        assert!(app.tool_open(ModalKind::Plot));
+    }
 
     #[test]
     fn tool_dialogs_park_beside_the_drawing_and_close_through_their_frame() {

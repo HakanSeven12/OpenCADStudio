@@ -14,25 +14,23 @@ the web build share one code path. Two kinds of dialog live there.
 
 ## Which dialogs are tools
 
-`ModalKind::tool_scope` decides. A tool's scope says what a drawing switch does
-to it.
+`ModalKind::tool_scope` decides. All 100 dialogs, by class:
 
-| Scope | Dialogs | On a drawing switch |
+| Class | Dialogs (`ModalKind`) | Why |
 |---|---|---|
-| Program | About, Shortcuts, Aliases, Plugin Manager, Options, Reference Manager help | stay open |
-| Drawing | Drafting Settings, Layer States Manager, Layer Translator, Drawing Units, the Text / Table / Multiline / Multileader / Dimension / Point style managers, Scale List, Layout Manager, Drawing Properties, Rename, Purge, Find and Replace, Spelling, Data Link Manager, Block Attribute Manager, Select Similar settings, Block Editor settings, AutoConstrain settings | close |
+| Tool, program | About, Shortcuts, Aliases, PluginManager, Options, XrefHelp, UpdateNotice, DonationPrompt, GpuWarning | stays open on a drawing switch |
+| Tool, drawing | DraftingSettings, LayerStateManager, LayerTranslator, DrawingUnits, TextStyle, TableStyle, MlStyle, MLeaderStyle, DimStyle, PointStyle, ScaleManager, LayoutManager, DrawingProperties, Rename, Purge, FindReplace, Spell, DataLinkManager, AttMan, SelectSimilarSettings, BlockEditorSettings, AutoConstrainSettings, Plot, PrintAll, MissingFonts | closes on a drawing switch |
+| Modal: a question | Unsaved, BlockEditChanges, LayerDeleteWarning, AecDropWarning, ConversionLoss, AssocPrompt, TableCellWarning, TableCellEntry, CountInvalidArea, DataExtractionUnsaved, ExtractionOutdated, FileInUse, ExternalChange | the next step waits for its answer |
+| Modal: file, recovery or import flow | SaveDialog, Recovery, RecoveryPrompt, AutosaveRestore, PdfPassword, PdfImportFile, ImportFile, DgnImport, TdsImport, TdsMaterial, TdsMissingMap, XrefAttach, PdfAttach, PointCloudAttach, PdfImportSettings, PdfShxSettings | it holds a file operation half done |
+| Modal: a running command or pick | BlockDefinition, WriteBlock, InsertAttributes, InsertTable, AttDef, AttDefEdit, Field, GeometricTolerance, Txt2MtxtSettings, RefEdit, BlockEditPicker, BlockSaveAs, BlockLookup, BlockVisibility, BlockPropertiesTable, BlockCycleOrder, NamedParameters, DataExtraction, SheetSet | it works on objects picked or a command in progress, which must not change under it |
+| Modal: the selected objects | Overkill, ImageAdjust, AnnoObjectScale, Hyperlink, AttributeEditor, DimInspect, UnderlayLayers, PointCloudColorMap, PcSection, TableCellBorders, TableCellContents, TableCellBlock, TableCellFormat | it holds handles of the selection, which editing beside it could delete |
+| Modal: a child dialog | Plotstyle, StyleImport, LayerStateEditor, ViewBackground | its parent dialog waits for it and comes back when it closes |
+| Modal: plugin dialog | PluginDialog | a plugin's declared modal, by its contract |
 
-Everything else stays modal:
-
-- confirmations and warnings;
-- file, recovery and save flows;
-- dialogs tied to a running command or an object pick (Plot, Insert, Block
-  Definition, table cells, attributes, …);
-- child dialogs other dialogs return to (Plot Style from Plot, Style Import
-  from a style manager, Options opened from a PDF dialog, Table Style from
-  Insert Table).
-
-A tool dialog opened as such a child stays modal for that opening.
+A tool dialog opened as a child of another (Options from a PDF dialog, Table
+Style from Insert Table) stays modal for that opening. A modal dialog opened
+from a tool (Plot Style from Plot, Style Import from a style manager) replaces
+it while it is up; closing it brings the tool back.
 
 ## How it works
 

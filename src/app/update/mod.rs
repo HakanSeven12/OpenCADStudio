@@ -7846,6 +7846,12 @@ impl OpenCADStudio {
                         == crate::ui::ribbon::widgets::LAYER_COMBO_ID
                     {
                         self.refresh_layer_panel();
+                        // Refreshing the table restores creation defaults;
+                        // the combo must still show the selected object's layer.
+                        self.sync_ribbon_from_selection();
+                        if self.ribbon.open_dropdown.as_deref() != Some(id.as_str()) {
+                            self.ribbon.layer_filter.clear();
+                        }
                     }
                     self.ribbon.toggle_dropdown(&id);
                     // Typing goes straight to the layer list's search box.

@@ -286,9 +286,6 @@ pub(crate) fn save_frame(
     p: &Parameter,
     frame: ParameterFrame,
 ) -> Result<(), &'static str> {
-    if p.flip {
-        return Err("Use the Flip state for this parameter.");
-    }
     let frame = frame.validate(p)?;
     // Validate existing metadata before allocating or modifying owned records.
     self::frame(doc, insert, p)?;
@@ -677,6 +674,7 @@ pub(crate) fn reset(
         .all(|p| {
             if p.flip {
                 value(doc, insert, p).ok() == Some(default(p))
+                    && frame(doc, insert, p).ok() == Some(ParameterFrame { base: p.base, end: p.end })
             } else {
                 frame(doc, insert, p).ok() == Some(ParameterFrame { base: p.base, end: p.end })
             }
@@ -696,6 +694,7 @@ pub(crate) fn reset(
     for p in &parameters {
         if p.flip {
             save(&mut result, insert, p, default(p))?;
+            save_frame(&mut result, insert, p, ParameterFrame { base: p.base, end: p.end })?;
         } else {
             save_frame(
                 &mut result,
@@ -738,6 +737,7 @@ pub(crate) fn reset_test(
         if cache(doc, insert, p.id)?.is_some() {
             if p.flip {
                 save(&mut result, insert, p, value)?;
+                save_frame(&mut result, insert, p, ParameterFrame { base: p.base, end: p.end })?;
             } else {
                 save_frame(
                     &mut result,

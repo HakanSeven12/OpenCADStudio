@@ -1236,3 +1236,125 @@ fn block_move_transports_linear_frame_without_reference_drift() {
         assert_eq!(line(&detached, first), DVec3::X + independent);
     }
 }
+
+#[test]
+fn move_transports_flip_axis_and_preserves_state_across_repeated_edits() {
+    use crate::scene::block_orientation_parameter as orientation;
+    for testing in [false, true] {
+        for chained in [false, true] {
+            let (mut doc, def, targets) = super::super::tests::fixture();
+            let parent = distance::create(
+                &mut doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::new(0., 10., 0.),
+                Vector3::new(0., 20., 0.),
+                Vector3::UNIT_X,
+            )
+            .unwrap();
+            let flip = orientation::create(
+                &mut doc,
+                def,
+                orientation::Kind::Flip,
+                Vector3::ZERO,
+                Vector3::new(10., 0., 0.),
+                Vector3::new(0., 2., 0.),
+            )
+            .unwrap();
+            let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&flip).unwrap() else {
+                panic!()
+            };
+            let DynamicBlockData::FlipParameter(parameter) = &mut object.data else {
+                panic!()
+            };
+            parameter.parameter.parameter.chain_actions = chained;
+            let move_action = create(
+                &mut doc,
+                def,
+                Kind::Move,
+                parent,
+                &targets[..1],
+                DVec3::ZERO,
+            )
+            .unwrap();
+            let flip_action =
+                create(&mut doc, def, Kind::Flip, flip, &targets[..1], DVec3::ZERO).unwrap();
+            let flip_param = all_parameters(&doc, def)
+                .into_iter()
+                .find(|p| p.handle == flip)
+                .unwrap();
+            set_targets(&mut doc, move_action, vec![flip, flip_param.grip]);
+            let first = doc
+                .add_entity(EntityType::Insert(Insert::new("ACTIONS", Vector3::ZERO)))
+                .unwrap();
+            let second = doc
+                .add_entity(EntityType::Insert(Insert::new(
+                    "ACTIONS",
+                    Vector3::UNIT_X * 50.,
+                )))
+                .unwrap();
+            let baseline = doc.clone();
+            let eval = |doc: &Document, h, input| {
+                if testing {
+                    instance::evaluate_test_value(doc, &baseline, def, first, h, input)
+                } else {
+                    instance::evaluate_value(doc, first, h, input)
+                }
+                .unwrap()
+                .unwrap()
+            };
+            let mut changed = eval(&doc, flip, Value::Flip(true));
+            for displacement in [2., 5., 1.] {
+                changed = eval(
+                    &changed,
+                    parent,
+                    Value::Point(DVec3::new(0., 20. + displacement, 0.)),
+                );
+                let frame = instance::frame(&changed, first, &flip_param).unwrap();
+                assert_eq!(frame.base, flip_param.base + DVec3::Y * displacement);
+                assert_eq!(frame.end, flip_param.end + DVec3::Y * displacement);
+                assert_eq!(
+                    instance::value(&changed, first, &flip_param).unwrap(),
+                    Value::Flip(true)
+                );
+                assert_eq!(
+                    line(&changed, first),
+                    DVec3::X + DVec3::Y * if chained { 2. * displacement } else { 0. }
+                );
+                assert_eq!(
+                    instance::frame(&changed, second, &flip_param).unwrap().base,
+                    flip_param.base
+                );
+            }
+            for extension in ["dwg", "dxf"] {
+                let bytes = crate::io::save_to_bytes(&changed, extension, changed.version).unwrap();
+                let saved =
+                    crate::io::load_bytes(&format!("move-flip.{extension}"), bytes).unwrap();
+                assert_eq!(
+                    instance::frame(&saved, first, &flip_param).unwrap().base,
+                    flip_param.base + DVec3::Y
+                );
+                assert_eq!(
+                    instance::value(&saved, first, &flip_param).unwrap(),
+                    Value::Flip(true)
+                );
+                let reset = if testing {
+                    instance::reset_test(&saved, &baseline, def, first)
+                } else {
+                    instance::reset(&saved, first)
+                }
+                .unwrap()
+                .unwrap();
+                assert_eq!(
+                    instance::frame(&reset, first, &flip_param).unwrap().base,
+                    flip_param.base
+                );
+                assert_eq!(
+                    instance::value(&reset, first, &flip_param).unwrap(),
+                    Value::Flip(false)
+                );
+            }
+            let _ = flip_action;
+        }
+    }
+}

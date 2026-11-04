@@ -13,8 +13,8 @@ fn frame_index(
 ) -> Result<BTreeMap<Handle, (Handle, i32)>, &'static str> {
     let owner = authoring::graph(doc, definition).ok().flatten();
     let mut index = BTreeMap::new();
-    for p in parameters.iter().filter(|p| p.point || p.linear) {
-        for h in [p.handle, if p.point { p.grip } else { Handle::NULL }] {
+    for p in parameters.iter().filter(|p| p.point || p.linear || p.flip) {
+        for h in [p.handle, if p.point || p.flip { p.grip } else { Handle::NULL }] {
             if h != Handle::NULL && doc.object_owner(h) == owner {
                 if index
                     .get(&h)
@@ -110,6 +110,7 @@ impl<'a> Graph<'a> {
                         matches!(&object.data,
                         DynamicBlockData::PointParameter(p) if p.parameter.parameter.chain_actions)
                             || matches!(&object.data, DynamicBlockData::LinearParameter(p) if p.parameter.parameter.chain_actions)
+                            || matches!(&object.data, DynamicBlockData::FlipParameter(p) if p.parameter.parameter.chain_actions)
                     }
                     _ => false,
                 };
@@ -166,7 +167,7 @@ impl<'a> Graph<'a> {
         self.nodes
             .values()
             .map(|n| &n.parameter)
-            .filter(|p| p.point || p.linear)
+            .filter(|p| p.point || p.linear || p.flip)
     }
 
     pub(super) fn autonomous(
@@ -196,7 +197,7 @@ impl<'a> Graph<'a> {
                 -incoming.get(handle).copied().unwrap_or(DVec3::ZERO),
             );
             autonomous.insert(*handle, raw);
-            let active = if (p.point || p.linear) && !node.chained {
+            let active = if (p.point || p.linear || p.flip) && !node.chained {
                 raw
             } else {
                 effective
@@ -226,7 +227,7 @@ impl<'a> Graph<'a> {
             let node = &self.nodes[handle];
             let p = &node.parameter;
             let offset = incoming.get(handle).copied().unwrap_or(DVec3::ZERO);
-            let mut raw = if selected.contains(handle) {
+            let mut raw = if selected.contains(handle) && !p.flip {
                 translated(
                     p,
                     ParameterFrame {
@@ -254,7 +255,7 @@ impl<'a> Graph<'a> {
                 raw.base = bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base);
             }
             let effective = translated(p, raw, offset);
-            let active = if (p.point || p.linear) && !node.chained {
+            let active = if (p.point || p.linear || p.flip) && !node.chained {
                 raw
             } else {
                 effective
@@ -267,8 +268,10 @@ impl<'a> Graph<'a> {
                 return Err("The parameter value produces non-finite geometry.");
             }
             active_frames.insert(*handle, active);
-            if p.point || p.linear {
-                set_value(staged, p, Value::Point(active.end))?;
+            if p.point || p.linear || p.flip {
+                if !p.flip {
+                    set_value(staged, p, Value::Point(active.end))?;
+                }
                 final_frames.insert(*handle, effective);
             }
             Self::propagate(node, active, &mut incoming)?;

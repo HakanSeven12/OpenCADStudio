@@ -1319,6 +1319,10 @@ pub(crate) fn evaluate_framed(
         .iter()
         .map(|(handle, frame)| (*handle, frame.base))
         .collect();
+    let previous_values = previous_frames
+        .iter()
+        .map(|(handle, frame)| (*handle, frame.end))
+        .collect();
     evaluate_impl(
         doc,
         baseline,
@@ -1328,6 +1332,7 @@ pub(crate) fn evaluate_framed(
         Evaluation {
             bases: Some(&bases),
             previous_bases: Some(&previous_bases),
+            previous_values: Some(&previous_values),
             base_changed,
             resolved_frames: Some(resolved_frames),
             frames: Some(frames),
@@ -1535,10 +1540,12 @@ fn evaluate_impl(
     {
         if let Some(current) = all_parameters(baseline, definition)
             .into_iter()
-            .find(|q| q.handle == p.handle && (q.point || q.linear))
+            .find(|q| q.handle == p.handle && (q.point || q.linear || q.flip))
         {
             let frame = autonomous[&p.handle];
-            set_value(&mut staged, &current, Value::Point(frame.end))?;
+            if !current.flip {
+                set_value(&mut staged, &current, Value::Point(frame.end))?;
+            }
             detached_points.push((current, frame));
         }
     }
@@ -1694,8 +1701,8 @@ fn evaluate_impl(
                 if value(&staged, &q)? == Value::Flip(false) {
                     crate::command::EntityTransform::Translate(DVec3::ZERO)
                 } else {
-                    let (p1, p2) = if let Some(frame) =
-                        evaluation.frames.and_then(|f| f.get(&q.handle))
+                    let (p1, p2) = if let Some(frame) = active_frames.get(&q.handle)
+                        .or_else(|| evaluation.frames.and_then(|f| f.get(&q.handle)))
                     {
                         (frame.base, frame.end)
                     } else {
@@ -1839,7 +1846,9 @@ fn evaluate_impl(
         }
     }
     for (p, frame) in detached_points {
-        set_value(&mut staged, &p, Value::Point(frame.end))?;
+        if !p.flip {
+            set_value(&mut staged, &p, Value::Point(frame.end))?;
+        }
         if let Some(frames) = evaluation.resolved_frames.as_deref_mut() {
             frames.insert(p.handle, frame);
         }
@@ -1849,7 +1858,9 @@ fn evaluate_impl(
             frames.insert(handle, frame);
         }
         let p = chain.parameter(handle);
-        set_value(&mut staged, p, Value::Point(frame.end))?;
+        if !p.flip {
+            set_value(&mut staged, p, Value::Point(frame.end))?;
+        }
     }
     *doc = staged;
     Ok(true)

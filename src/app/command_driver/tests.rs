@@ -3054,10 +3054,11 @@ mod selection_history_tests {
         let i = app.active_tab;
         app.tabs[i].scene.select_entity(h[0], false);
 
+        // Objects already selected are taken at once.
         let _ = app.run_command_line("SELECT");
+        assert!(app.tabs[i].active_cmd.is_none());
         app.tabs[i].scene.deselect_all();
-        pick(&mut app, h[1]);
-        let _ = app.feed_command(StepInput::Enter);
+        app.tabs[i].scene.select_entity(h[1], false);
         assert_eq!(selected(&app), vec![h[1]]);
 
         let _ = app.run_command_line("SELECTPREVIOUS");

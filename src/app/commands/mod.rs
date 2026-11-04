@@ -101,7 +101,9 @@ impl OpenCADStudio {
         self.tabs[i].zoom_dynamic_mode = false;
         // Reset the last committed point so the first click of the new command
         // is not constrained by ortho/polar relative to a previous command's endpoint.
-        self.last_point = None;
+        if let Some(point) = self.last_point.take() {
+            self.last_entered_point = Some(point);
+        }
         // A new command collects its own points, so the previous command's
         // accepted snaps must not leak into it.
         self.clear_accepted_snaps();

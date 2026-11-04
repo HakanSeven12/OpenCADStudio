@@ -1175,6 +1175,9 @@ pub(super) struct OpenCADStudio {
     pub(crate) selection_group_named: bool,
     /// Selectable groups the reported selection step touched.
     pub(crate) last_pick_groups: usize,
+    /// The last point entered by any command (LASTPOINT): a bare distance
+    /// at a selection prompt measures from it when the prompt has none yet.
+    pub(crate) last_entered_point: Option<glam::DVec3>,
     /// SUbobject mode at the Select objects: prompt of this gathering
     /// command (keyed like `selection_undo`); Object ends it.
     pub(crate) selection_subobject: Option<usize>,
@@ -5986,6 +5989,7 @@ impl OpenCADStudio {
             selection_group_pending: false,
             selection_group_named: false,
             last_pick_groups: 0,
+            last_entered_point: None,
             selection_subobject: None,
             typed_window_corner: None,
             refedit_options: Default::default(),

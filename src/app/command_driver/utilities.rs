@@ -1372,7 +1372,9 @@ impl OpenCADStudio {
         // A bare number is a direct distance: the point that far from the
         // last point toward the cursor, picked like a typed point.
         if !kw.contains(',') {
-            if let (Ok(distance), Some(anchor)) = (kw.parse::<f64>(), self.last_point) {
+            if let (Ok(distance), Some(anchor)) =
+                (kw.parse::<f64>(), self.last_point.or(self.last_entered_point))
+            {
                 let toward = self.tabs[i].last_cursor_world - anchor;
                 let toward = glam::DVec3::new(toward.x, toward.y, 0.0);
                 if distance.is_finite() {
@@ -1520,6 +1522,8 @@ impl OpenCADStudio {
             );
             return Some(Task::none());
         }
+        // ALL / Previous / Last report a count without groups.
+        self.selection_group_named = true;
         self.last_pick = Some((add.clone(), false));
         for h in add {
             self.tabs[i].scene.select_entity(h, false);
@@ -1595,6 +1599,28 @@ impl OpenCADStudio {
     /// that takes no points it is the pick itself. `None` when the token is
     /// no coordinate or the prompt reads it some other way. Shared by the
     /// command line and the token feeder so both read a typed point the same.
+    /// SUbobject mode of the running gathering prompt.
+    pub(in crate::app) fn subobject_mode(&self) -> bool {
+        let i = self.active_tab;
+        self.tabs[i].active_cmd.as_ref().is_some_and(|command| {
+            command.is_selection_gathering()
+                && self.selection_subobject
+                    == Some(&**command as *const dyn crate::command::CadCommand as *const () as usize)
+        })
+    }
+
+    /// A segment of polyline `handle` just picked as a sub-object (`None`:
+    /// an object without sub-objects, so nothing): report it and hand the
+    /// selection to the prompt.
+    pub(in crate::app) fn feed_subobject_pick(&mut self, handle: Option<Handle>) -> Task<Message> {
+        let i = self.active_tab;
+        self.last_pick = Some((handle.into_iter().collect(), false));
+        self.refresh_properties();
+        let handles: Vec<Handle> =
+            self.tabs[i].scene.selected_entities().into_iter().map(|(h, _)| h).collect();
+        self.feed_command(StepInput::SelectionComplete(handles))
+    }
+
     pub(in crate::app) fn typed_object_pick(&mut self, token: &str) -> Option<Task<Message>> {
         let i = self.active_tab;
         let (gathering, picks_entity, key) = self.tabs[i].active_cmd.as_ref().map(|command| {
@@ -1643,8 +1669,14 @@ impl OpenCADStudio {
             .flatten();
         if gathering {
             self.last_point = Some(wcs);
-            // In SUbobject mode an object with no faces, edges or vertices
-            // of its own to pick is passed over: nothing is found.
+            // In SUbobject mode a polyline gives the segment under the
+            // point; an object with no sub-objects of its own to pick is
+            // passed over: nothing is found.
+            if let Some(handle) = found.filter(|_| self.selection_subobject == Some(key)) {
+                if self.tabs[i].scene.toggle_sub_segment(handle, wcs) {
+                    return Some(self.feed_subobject_pick(Some(handle)));
+                }
+            }
             let found = match found {
                 Some(handle)
                     if self.selection_subobject == Some(key)

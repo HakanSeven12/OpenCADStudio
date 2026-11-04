@@ -1579,7 +1579,7 @@ fn evaluate_impl(
         });
     }
     let all = actions(baseline, definition);
-    let order = chain_order(&all)?;
+    let order = chain_order(baseline, definition, &all)?;
     let mut affected = std::collections::BTreeSet::new();
     let mut geometric_targets = std::collections::BTreeMap::new();
     let mut prepared = std::collections::BTreeMap::new();
@@ -1603,7 +1603,24 @@ fn evaluate_impl(
             };
             stretch::validate_polar(baseline, definition, s)?;
         }
-        let geometric = targets::geometry(baseline, definition, *kind, *id, &a.dependencies)?;
+        // An inactive Flip has no effect on its targets. Retained drawings may
+        // include action/parameter dependencies we cannot transform yet; do not
+        // let those inactive links prevent another parameter from evaluating.
+        let inactive_flip = *kind == Kind::Flip
+            && parameters(baseline, definition, *kind)
+                .into_iter()
+                .find(|p| p.id == *id)
+                .is_some_and(|p| value(&staged, &p) == Ok(Value::Flip(false)));
+        let active_dependencies;
+        let dependencies = if inactive_flip {
+            active_dependencies = a.dependencies.iter().copied()
+                .filter(|h| baseline.get_entity(*h).is_some())
+                .collect::<Vec<_>>();
+            &active_dependencies
+        } else {
+            &a.dependencies
+        };
+        let geometric = targets::geometry(baseline, definition, *kind, *id, dependencies)?;
         affected.extend(geometric.iter().copied());
         let target_count = geometric.len();
         geometric_targets.insert(*action_handle, geometric);
@@ -1875,13 +1892,18 @@ fn supported_parameter(doc: &Document, handle: Handle) -> bool {
 /// order the operator chose and has to decide the sequence. A chain names its
 /// follow-up by the node the evaluation graph gives that action, the same id
 /// space the parameter's own element lists are read in. Actions no chain points
-/// at keep the order the evaluation graph lists. Every name is checked against
-/// this definition's actions before any ordering happens, so a chain that
+/// at keep the order the evaluation graph lists. Known non-action nodes and
+/// actions of other parameters are retained connections rather than follow-ups.
+/// Other names are checked before any ordering happens, so a chain that
 /// resolves to nothing, that two actions answer to, that names more than one
 /// follow-up, that joins two sequences, or that runs into an array action is
 /// refused. A chain that loops back on itself has no first action, so the loop is
 /// left in the order the graph lists rather than guessed at.
-fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, &'static str> {
+fn chain_order(
+    doc: &Document,
+    definition: Handle,
+    all: &[(Handle, &BlockAction, Kind, i32)],
+) -> Result<Vec<usize>, &'static str> {
     let mut by_chain_id = std::collections::BTreeMap::new();
     let mut shared_chain_ids = std::collections::BTreeSet::new();
     let mut listed = std::collections::BTreeSet::new();
@@ -1896,21 +1918,79 @@ fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, 
             shared_chain_ids.insert(node);
         }
     }
+    let graph_nodes: std::collections::BTreeSet<_> = authoring::graph(doc, definition)?
+        .and_then(|h| match doc.objects.get(&h) {
+            Some(ObjectType::DynamicBlock(o)) => match &o.data {
+                DynamicBlockData::EvaluationGraph(g) => Some(
+                    g.nodes
+                        .iter()
+                        .filter_map(|n| match doc.objects.get(&n.expression)? {
+                            ObjectType::BlockVisibilityParameter(p) => Some(p.eval_node_id),
+                            ObjectType::DynamicBlock(o) => match &o.data {
+                                DynamicBlockData::ProxyNode(p) => Some(p.node_id),
+                                DynamicBlockData::BasePointParameter(p) => {
+                                    Some(p.parameter.parameter.element.eval.node_id)
+                                }
+                                DynamicBlockData::AlignmentParameter(p) => {
+                                    Some(p.parameter.parameter.element.eval.node_id)
+                                }
+                                DynamicBlockData::LookupParameter(p) => {
+                                    Some(p.parameter.parameter.element.eval.node_id)
+                                }
+                                DynamicBlockData::UserParameter(p) => {
+                                    Some(p.parameter.parameter.element.eval.node_id)
+                                }
+                                DynamicBlockData::LookupAction(p) => {
+                                    Some(p.action.element.eval.node_id)
+                                }
+                                DynamicBlockData::GripLocationComponent(p) => Some(p.eval.node_id),
+                                DynamicBlockData::AlignmentGrip(p)
+                                | DynamicBlockData::LinearGrip(p) => {
+                                    Some(p.grip.element.eval.node_id)
+                                }
+                                DynamicBlockData::FlipGrip(p) => Some(p.grip.element.eval.node_id),
+                                DynamicBlockData::LookupGrip(p)
+                                | DynamicBlockData::PolarGrip(p)
+                                | DynamicBlockData::RotationGrip(p)
+                                | DynamicBlockData::VisibilityGrip(p)
+                                | DynamicBlockData::XYGrip(p)
+                                | DynamicBlockData::PropertiesTableGrip(p) => {
+                                    Some(p.element.eval.node_id)
+                                }
+                                _ => None,
+                            },
+                            _ => None,
+                        })
+                        .chain(all_parameters(doc, definition).into_iter().map(|p| p.id))
+                        .collect(),
+                ),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or_default();
     let mut followed_by = std::collections::BTreeMap::new();
-    for (index, (_, action, kind, _)) in all.iter().enumerate() {
+    let mut next_action = std::collections::BTreeMap::new();
+    for (index, (_, action, kind, owner)) in all.iter().enumerate() {
         if matches!(*kind, Kind::Stretch | Kind::PolarStretch | Kind::Array) {
             continue;
-        }
-        if action.action_ids.len() > 1 {
-            return Err("An action chain cannot name more than one follow-up action yet.");
         }
         for id in &action.action_ids {
             if shared_chain_ids.contains(id) {
                 return Err("An action chain names more than one action.");
             }
             let Some(&next) = by_chain_id.get(id) else {
+                if graph_nodes.contains(id) {
+                    continue;
+                }
                 return Err("An action chain names an object outside this block.");
             };
+            if all[next].3 != *owner {
+                continue;
+            }
+            if next_action.insert(index, next).is_some() {
+                return Err("An action chain cannot name more than one follow-up action yet.");
+            }
             if all[next].2 == Kind::Array {
                 return Err("An Array action cannot be the follow-up of a chain yet.");
             }
@@ -1931,12 +2011,8 @@ fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, 
                 continue;
             }
             order.push(index);
-            if !matches!(all[index].2, Kind::Stretch | Kind::PolarStretch | Kind::Array) {
-                for id in &all[index].1.action_ids {
-                    if let Some(&next) = by_chain_id.get(id) {
-                        queue.push_back(next);
-                    }
-                }
+            if let Some(&next) = next_action.get(&index) {
+                queue.push_back(next);
             }
         }
     }

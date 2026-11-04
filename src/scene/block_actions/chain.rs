@@ -130,7 +130,7 @@ pub(crate) fn set(
     if follow_up.is_some() {
         // A chain the order cannot run is not one the operator can write. Clearing
         // one only ever shortens a sequence, so the order has nothing to refuse.
-        chain_order(&actions(&staged, definition))?;
+        chain_order(&staged, definition, &actions(&staged, definition))?;
         if loops(&staged, definition, action) {
             return Err("An action chain cannot loop back to the action that started it.");
         }

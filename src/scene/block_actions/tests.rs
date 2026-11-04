@@ -3310,3 +3310,63 @@ fn actions_are_named_for_their_kind_and_numbered_within_the_definition() {
         "a number another action already carries is skipped"
     );
 }
+
+#[test]
+fn chain_order_distinguishes_same_parameter_actions_from_other_graph_nodes() {
+    let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
+    let other = linear(&mut doc, def);
+    let other_action = add_action(&mut doc, def, other, member, Kind::Move);
+    let other_id = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == other)
+        .unwrap()
+        .id;
+    let base = crate::scene::block_basepoint::create(&mut doc, def, Vector3::ZERO).unwrap();
+    let lookup = crate::scene::block_lookup::create(&mut doc, def, Vector3::ZERO).unwrap();
+    let ObjectType::DynamicBlock(base) = &doc.objects[&base] else {
+        panic!()
+    };
+    let DynamicBlockData::BasePointParameter(base) = &base.data else {
+        panic!()
+    };
+    let base_id = base.parameter.parameter.element.eval.node_id;
+    let ObjectType::DynamicBlock(lookup) = &doc.objects[&lookup] else {
+        panic!()
+    };
+    let DynamicBlockData::LookupParameter(lookup) = &lookup.data else {
+        panic!()
+    };
+    let lookup_id = lookup.parameter.parameter.element.eval.node_id;
+    let other_action_id = chain_id(&doc, other_action);
+    let follow_up = chain_id(&doc, move_action);
+    action_object_mut(&mut doc, scale_action).action_ids =
+        vec![base_id, lookup_id, other_id, other_action_id, follow_up];
+    let links = action_object_mut(&mut doc, scale_action).action_ids.clone();
+    assert_eq!(
+        drive(&mut doc, def, parameter, member),
+        (DVec3::new(18., 6., 0.), 4.)
+    );
+    assert_eq!(action_object_mut(&mut doc, scale_action).action_ids, links);
+}
+
+#[test]
+fn inactive_flip_with_retained_action_targets_does_not_block_other_parameters() {
+    use super::super::block_orientation_parameter::Kind as O;
+    let (mut doc, def, parameter, member, move_action, _) = chained_pair();
+    let flip = orientation(&mut doc, def, O::Flip);
+    let flip_action = create(&mut doc, def, Kind::Flip, flip, &[member], DVec3::ZERO).unwrap();
+    action_object_mut(&mut doc, flip_action)
+        .dependencies
+        .push(move_action);
+    let baseline = doc.clone();
+    assert_eq!(
+        drive(&mut doc, def, parameter, member),
+        (DVec3::new(28., 6., 0.), 4.)
+    );
+    let mut active = baseline.clone();
+    assert_eq!(
+        evaluate_value(&mut active, &baseline, def, flip, Value::Flip(true)).unwrap_err(),
+        "This action targets another parameter or an unsupported native object."
+    );
+    assert_eq!(active, baseline);
+}

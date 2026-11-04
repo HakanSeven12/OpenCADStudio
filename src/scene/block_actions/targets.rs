@@ -41,11 +41,15 @@ pub(super) fn geometry(
         }
         let all_params = all_parameters(doc, definition);
         let is_block_param_or_grip = all_params.iter().any(|p| {
-            p.handle == *handle
-                || p.grip == *handle
-                || super::super::block_grips::config::locations(doc, definition, p.handle)
-                    .map(|locs| locs.iter().any(|g| g.handle == *handle))
-                    .unwrap_or(false)
+            // Linear grip aliases are not yet transport targets. The driving
+            // parameter's own grips and supported whole-parameter links were
+            // handled above; accepting another Linear grip would drop its move.
+            !(kind == Kind::Move && p.linear)
+                && (p.handle == *handle
+                    || p.grip == *handle
+                    || super::super::block_grips::config::locations(doc, definition, p.handle)
+                        .map(|locs| locs.iter().any(|g| g.handle == *handle))
+                        .unwrap_or(false))
         });
         if is_block_param_or_grip {
             continue;

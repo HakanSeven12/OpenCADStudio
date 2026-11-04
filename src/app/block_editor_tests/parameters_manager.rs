@@ -1052,12 +1052,15 @@ fn closing_the_pane_applies_the_number_typed_in_its_open_cell() {
 }
 
 #[test]
-fn manager_edit_refreshes_ordered_actions_and_transported_point_with_undo() {
+fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo() {
     use crate::scene::block_actions::{self as actions, instance, Kind, Value};
     use crate::scene::{block_distance_parameter as distance, block_point_parameter as point};
     use glam::DVec3;
 
-    for scale_first in [false, true] {
+    for (scale_first, child_linear) in [false, true]
+        .into_iter()
+        .flat_map(|order| [false, true].map(|linear| (order, linear)))
+    {
         let (mut app, insert) = fixture();
         let tab = app.active_tab;
         let other = app.tabs[tab]
@@ -1081,7 +1084,19 @@ fn manager_edit_refreshes_ordered_actions_and_transported_point_with_undo() {
             Vector3::UNIT_Y,
         )
         .unwrap();
-        let child = point::create(doc, definition, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        let child = if child_linear {
+            distance::create(
+                doc,
+                definition,
+                distance::Kind::Linear,
+                Vector3::ZERO,
+                Vector3::UNIT_X * 10.,
+                Vector3::UNIT_Y,
+            )
+            .unwrap()
+        } else {
+            point::create(doc, definition, Vector3::ZERO, Vector3::UNIT_Y).unwrap()
+        };
         for handle in [parent, child] {
             let codec::objects::ObjectType::DynamicBlock(object) =
                 doc.objects.get_mut(&handle).unwrap()
@@ -1135,7 +1150,7 @@ fn manager_edit_refreshes_ordered_actions_and_transported_point_with_undo() {
             &changed,
             insert,
             child,
-            Value::Point(DVec3::new(15., 0., 0.)),
+            Value::Point(point.end + DVec3::new(15., 0., 0.)),
         )
         .unwrap()
         .unwrap();
@@ -1166,7 +1181,18 @@ fn manager_edit_refreshes_ordered_actions_and_transported_point_with_undo() {
         assert_eq!(app.tabs[tab].history.undo_stack.len(), depth + 1);
         let after = &app.tabs[tab].scene.document;
         let frame = instance::frame(after, insert, &point).unwrap();
-        assert!((frame.end - DVec3::X * 10.).length() < 1e-9);
+        assert!((frame.end - (point.end + DVec3::X * 10.)).length() < 1e-9);
+        assert!(
+            (frame.base
+                - (point.base
+                    + if child_linear {
+                        DVec3::X * 5.
+                    } else {
+                        DVec3::ZERO
+                    }))
+            .length()
+                < 1e-9
+        );
         let start = if scale_first { 15. } else { 10. + 20. / 3. };
         let expected = (DVec3::X * start, DVec3::X * (start + 4. / 3.));
         let actual = line(after, insert);

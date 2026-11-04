@@ -659,3 +659,48 @@ fn lookup_rows_publish_transported_linear_frames() {
         }
     }
 }
+
+
+#[test]
+fn property_table_rows_preserve_independent_transported_linear_input() {
+    use crate::scene::{block_actions as actions, block_properties_table as table};
+    use glam::DVec3;
+    for testing in [false, true] {
+        for chained in [false, true] {
+            let (mut document, definition) = fixture();
+            add_distance(&mut document, definition);
+            let parent = actions::all_parameters(&document, definition)[0].handle;
+            let child = distance::create(&mut document, definition, distance::Kind::Linear,
+                Vector3::new(0., 5., 0.), Vector3::new(10., 5., 0.), Vector3::new(5., 7., 0.)).unwrap();
+            let ObjectType::DynamicBlock(object) = document.objects.get_mut(&child).unwrap() else { panic!() };
+            let DynamicBlockData::LinearParameter(parameter) = &mut object.data else { panic!() };
+            parameter.parameter.parameter.chain_actions = chained;
+            let line = document.block_records.get("LOOKUP").unwrap().entity_handles[0];
+            actions::create(&mut document, definition, actions::Kind::Move, parent, &[child], DVec3::ZERO).unwrap();
+            actions::create(&mut document, definition, actions::Kind::Move, child, &[line], DVec3::ZERO).unwrap();
+            let columns = table::columns(&document, definition).into_iter().filter(|column| column.handle == parent).collect::<Vec<_>>();
+            assert_eq!(columns.len(), 1);
+            table::apply(&mut document, definition, &columns, &[vec![2.], vec![4.]], false).unwrap();
+            let target = actions::all_parameters(&document, definition).into_iter().find(|p| p.handle == child).unwrap();
+            let first = document.add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO))).unwrap();
+            let second = document.add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::UNIT_X * 50.))).unwrap();
+            let baseline = document.clone();
+            let input = actions::Value::Point(target.end + DVec3::X * 3.);
+            document = if testing { actions::instance::evaluate_test_value(&document, &baseline, definition, first, child, input) }
+                else { actions::instance::evaluate_value(&document, first, child, input) }.unwrap().unwrap();
+            for (row, offset) in [(1, DVec3::X * 2.), (0, DVec3::ZERO)] {
+                let columns = table::table(&document, definition).unwrap().unwrap().columns;
+                document = if testing { actions::instance::evaluate_test_table_row(&document, &baseline, first, &columns, row) }
+                    else { actions::instance::evaluate_table_row(&document, first, &columns, row) }.unwrap().unwrap();
+                let frame = actions::instance::frame(&document, first, &target).unwrap();
+                assert_eq!(frame.base, target.base + offset);
+                assert_eq!(frame.end, target.end + offset + DVec3::X * 3.);
+                assert_eq!(actions::instance::frame(&document, second, &target).unwrap(), actions::instance::ParameterFrame { base: target.base, end: target.end });
+                let EntityType::Insert(reference) = document.get_entity(first).unwrap() else { panic!() };
+                let member = document.block_records.get(&reference.block_name).unwrap().entity_handles[0];
+                let EntityType::Line(line) = document.get_entity(member).unwrap() else { panic!() };
+                assert_eq!(line.start, Vector3::new(3. + if chained { offset.x } else { 0. }, 0., 0.));
+            }
+        }
+    }
+}

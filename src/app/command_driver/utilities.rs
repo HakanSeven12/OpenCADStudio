@@ -1103,6 +1103,12 @@ impl OpenCADStudio {
             // XBIND takes its reference, symbol type and names on one line.
             || tokens[0].eq_ignore_ascii_case("XBIND")
             || tokens[0].eq_ignore_ascii_case("-XBIND")
+            // -LAYERSTATE takes SAVE/RESTORE/EXPORT and names on one line.
+            || tokens[0].eq_ignore_ascii_case("-LAYERSTATE")
+            // LAYERSTATE SAVE … must not probe the manager dialog first.
+            || tokens[0].eq_ignore_ascii_case("LAYERSTATE")
+            || tokens[0].eq_ignore_ascii_case("LAS")
+            || tokens[0].eq_ignore_ascii_case("LMAN")
         {
             return self.dispatch_command(cmd);
         }

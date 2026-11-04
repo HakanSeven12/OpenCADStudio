@@ -4684,3 +4684,180 @@ mod mission_m070_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[cfg(test)]
+mod mission_m076_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// A layer state keys each row by layer handle, so a test layer needs a
+    /// real one — exactly what the LAYER command does when it creates a row.
+    fn add_layer(app: &mut OpenCADStudio, name: &str) {
+        let i = app.active_tab;
+        let mut layer = codec::tables::Layer::new(name);
+        layer.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .add(layer)
+            .unwrap();
+    }
+
+    fn layer_off(app: &OpenCADStudio, name: &str) -> bool {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get(name)
+            .expect("layer")
+            .flags
+            .off
+    }
+
+    fn set_off(app: &mut OpenCADStudio, name: &str, off: bool) {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get_mut(name)
+            .expect("layer")
+            .flags
+            .off = off;
+    }
+
+    fn set_color(app: &mut OpenCADStudio, name: &str, index: u8) {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get_mut(name)
+            .expect("layer")
+            .color = codec::types::Color::Index(index);
+    }
+
+    fn layer_color(app: &OpenCADStudio, name: &str) -> codec::types::Color {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get(name)
+            .expect("layer")
+            .color
+    }
+
+    fn temp_las(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ocs_m076_{tag}_{unique}.las"))
+    }
+
+    #[test]
+    fn three_layers_turned_off_come_back_on() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        for name in ["WALLS", "DOORS", "WINDOWS"] {
+            add_layer(&mut app, name);
+        }
+
+        let _ = app.run_command_line("-LAYERSTATE SAVE ALL-ON");
+        assert!(all_output(&app).contains("saved \"ALL-ON\""));
+
+        for name in ["WALLS", "DOORS", "WINDOWS"] {
+            set_off(&mut app, name, true);
+        }
+        let _ = app.run_command_line("-LAYERSTATE RESTORE ALL-ON");
+
+        for name in ["WALLS", "DOORS", "WINDOWS"] {
+            assert!(!layer_off(&app, name), "{name} must come back on");
+        }
+        let output = all_output(&app);
+        assert!(output.contains("restored \"ALL-ON\""), "{output}");
+        assert!(app.active_modal.is_none(), "-LAYERSTATE must not open the dialog");
+    }
+
+    #[test]
+    fn a_restore_filter_touches_only_the_named_properties() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        add_layer(&mut app, "WALLS");
+        set_color(&mut app, "WALLS", 1);
+        let _ = app.run_command_line("-LAYERSTATE SAVE PALETTE");
+
+        set_color(&mut app, "WALLS", 5);
+        set_off(&mut app, "WALLS", true);
+
+        let _ = app.run_command_line("-LAYERSTATE RESTORE PALETTE ON");
+        assert!(!layer_off(&app, "WALLS"));
+        assert_eq!(layer_color(&app, "WALLS"), codec::types::Color::Index(5));
+
+        let _ = app.run_command_line("-LAYERSTATE RESTORE PALETTE COLOR");
+        assert_eq!(layer_color(&app, "WALLS"), codec::types::Color::Index(1));
+        assert!(!layer_off(&app, "WALLS"));
+
+        let _ = app.run_command_line("-LAYERSTATE RESTORE PALETTE NONSENSE");
+        assert!(all_output(&app).contains("unknown restore property 'NONSENSE'"));
+    }
+
+    #[test]
+    fn a_state_can_be_renamed_and_round_tripped_through_a_las_file() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        add_layer(&mut app, "WALLS");
+        set_off(&mut app, "WALLS", true);
+        let _ = app.run_command_line("-LAYERSTATE SAVE OLD-NAME");
+        let path = temp_las("roundtrip");
+
+        let _ = app.run_command_line(&format!(
+            "-LAYERSTATE EXPORT OLD-NAME {}",
+            path.display()
+        ));
+        assert!(path.exists(), "{}", all_output(&app));
+        let _ = app.run_command_line("-LAYERSTATE RENAME OLD-NAME NEW-NAME");
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .document
+            .layer_state("NEW-NAME")
+            .is_some());
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .document
+            .layer_state("OLD-NAME")
+            .is_none());
+
+        let _ = app.run_command_line("-LAYERSTATE DELETE NEW-NAME");
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .document
+            .layer_state("NEW-NAME")
+            .is_none());
+        let _ = app.run_command_line(&format!("-LAYERSTATE IMPORT {}", path.display()));
+        let imported = app.tabs[app.active_tab]
+            .scene
+            .document
+            .layer_state("OLD-NAME")
+            .expect("the exported state returns from the file");
+        assert_eq!(imported.layers.len(), 2, "layer 0 and WALLS");
+        assert!(imported
+            .layers
+            .iter()
+            .any(|layer| layer.layer_name == "WALLS" && layer.off));
+
+        set_off(&mut app, "WALLS", false);
+        let _ = app.run_command_line("-LAYERSTATE RESTORE OLD-NAME");
+        assert!(layer_off(&app, "WALLS"), "{}", all_output(&app));
+        std::fs::remove_file(&path).ok();
+    }
+}

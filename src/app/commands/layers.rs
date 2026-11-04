@@ -318,22 +318,32 @@ impl OpenCADStudio {
 
             // LAYERSTATE — save / restore named snapshots of all layer states
             // in the drawing's native ACAD_LAYERSTATES dictionary.
-            // LAYERSTATE SAVE <name> | RESTORE <name> | DELETE <name> | ? (list)
+            // LAYERSTATE SAVE <name> | RESTORE <name> [filter] | RENAME <old> <new>
+            //            DELETE <name> | EXPORT <name> <file.las> | IMPORT <file.las>
+            // The `-LAYERSTATE` spelling is the scriptable one and never opens
+            // the manager dialog.
             "LAYERSTATE" | "LAS" | "LMAN" => {
                 return Some(Task::done(Message::LayerStateManagerOpen));
             }
-            cmd if cmd.starts_with("LAYERSTATE ")
+            cmd if cmd.eq_ignore_ascii_case("-LAYERSTATE")
+                || cmd.to_ascii_uppercase().starts_with("-LAYERSTATE ")
+                || cmd.starts_with("LAYERSTATE ")
                 || cmd.starts_with("LAS ")
                 || cmd.starts_with("LMAN ") =>
             {
-                let rest = cmd
+                let line = cmd.trim_start_matches('-');
+                let rest = line
                     .trim_start_matches("LAYERSTATE")
                     .trim_start_matches("LMAN")
                     .trim_start_matches("LAS")
                     .trim();
                 let mut parts = rest.splitn(2, char::is_whitespace);
                 let sub = parts.next().unwrap_or("").to_uppercase();
-                let arg = parts.next().unwrap_or("").trim();
+                let arg_text = parts.next().unwrap_or("").trim();
+                let (arg, tail) = match arg_text.split_once(char::is_whitespace) {
+                    Some((head, tail)) => (head, tail.trim()),
+                    None => (arg_text, ""),
+                };
                 match sub.as_str() {
                     "" | "?" | "LIST" => {
                         let states = self.tabs[i].scene.document.layer_states();
@@ -377,12 +387,19 @@ impl OpenCADStudio {
                     "RESTORE" | "R" => {
                         if arg.is_empty() {
                             self.command_line
-                                .push_info(crate::t!("Usage: LAYERSTATE RESTORE <name>").as_ref());
+                                .push_info(crate::t!("Usage: LAYERSTATE RESTORE <name> [filter]").as_ref());
                         } else if self.tabs[i].scene.document.layer_state(arg).is_none() {
                             self.command_line.push_error(
                                 crate::tf!("LAYERSTATE: no saved state named \"{arg}\".").as_ref(),
                             );
                         } else {
+                            let mask = match parse_layer_state_filter(tail) {
+                                Ok(mask) => mask,
+                                Err(error) => {
+                                    self.command_line.push_error(&error);
+                                    return Some(self.finish_dispatch(cmd));
+                                }
+                            };
                             let names: Vec<String> = self.tabs[i]
                                 .scene
                                 .document
@@ -391,7 +408,7 @@ impl OpenCADStudio {
                                 .map(|layer| layer.name.clone())
                                 .collect();
                             self.push_undo_snapshot(i, "LAYERSTATE RESTORE");
-                            let n = self.restore_layer_state_here(i, arg);
+                            let n = self.restore_layer_state_filtered(i, arg, mask);
                             self.tabs[i].active_layer = self.tabs[i]
                                 .scene
                                 .document
@@ -401,10 +418,53 @@ impl OpenCADStudio {
                             self.tabs[i].scene.invalidate_layer_dependencies(&names);
                             self.tabs[i].dirty = true;
                             self.refresh_layer_panel();
+                            let filtered = if mask.is_some() { " [filtered]" } else { "" };
                             self.command_line.push_output(
-                                crate::tf!("LAYERSTATE: restored \"{arg}\" ({n} layer(s)).")
+                                crate::tf!(
+                                    "LAYERSTATE: restored \"{arg}\" ({n} layer(s)){filtered}."
+                                )
+                                .as_ref(),
+                            );
+                        }
+                    }
+                    "RENAME" | "REN" => {
+                        let new_name = tail.trim_matches('"');
+                        if arg.is_empty() || new_name.is_empty() {
+                            self.command_line.push_info(
+                                crate::t!("Usage: LAYERSTATE RENAME <old> <new>").as_ref(),
+                            );
+                        } else if self.tabs[i].scene.document.layer_state(arg).is_none() {
+                            self.command_line.push_error(
+                                crate::tf!("LAYERSTATE: no saved state named \"{arg}\".").as_ref(),
+                            );
+                        } else if self.tabs[i]
+                            .scene
+                            .document
+                            .layer_state(new_name)
+                            .is_some()
+                        {
+                            self.command_line.push_error(
+                                crate::tf!("LAYERSTATE: a state named \"{new_name}\" already exists.")
                                     .as_ref(),
                             );
+                        } else {
+                            self.push_undo_snapshot(i, "LAYERSTATE RENAME");
+                            if self
+                                .tabs[i]
+                                .scene
+                                .document
+                                .rename_layer_state(arg, new_name)
+                            {
+                                self.tabs[i].dirty = true;
+                                self.command_line.push_output(
+                                    crate::tf!("LAYERSTATE: renamed \"{arg}\" to \"{new_name}\".")
+                                        .as_ref(),
+                                );
+                            } else {
+                                self.command_line.push_error(
+                                    crate::tf!("LAYERSTATE: could not rename \"{arg}\".").as_ref(),
+                                );
+                            }
                         }
                     }
                     "DELETE" | "D" => {
@@ -423,10 +483,64 @@ impl OpenCADStudio {
                                 .push_output(crate::tf!("LAYERSTATE: deleted \"{arg}\".").as_ref());
                         }
                     }
+                    "EXPORT" | "E" => {
+                        let path_text = tail.trim().trim_matches('"');
+                        if arg.is_empty() || path_text.is_empty() {
+                            self.command_line.push_info(
+                                crate::t!("Usage: LAYERSTATE EXPORT <name> <file.las>").as_ref(),
+                            );
+                        } else {
+                            match self.tabs[i].scene.document.layer_state(arg) {
+                                Some(state) => {
+                                    match std::fs::write(path_text, layer_state_to_las(&state)) {
+                                        Ok(()) => self.command_line.push_output(
+                                            crate::tf!("LAYERSTATE: exported \"{arg}\" to {path_text}.")
+                                                .as_ref(),
+                                        ),
+                                        Err(error) => self.command_line.push_error(
+                                            crate::tf!("LAYERSTATE: {error}").as_ref(),
+                                        ),
+                                    }
+                                }
+                                None => self.command_line.push_error(
+                                    crate::tf!("LAYERSTATE: no saved state named \"{arg}\".").as_ref(),
+                                ),
+                            }
+                        }
+                    }
+                    "IMPORT" | "I" => {
+                        let path_text = arg_text.trim().trim_matches('"');
+                        if path_text.is_empty() {
+                            self.command_line.push_info(
+                                crate::t!("Usage: LAYERSTATE IMPORT <file.las>").as_ref(),
+                            );
+                        } else {
+                            match std::fs::read_to_string(path_text)
+                                .map_err(|error| error.to_string())
+                                .and_then(|text| layer_state_from_las(&text))
+                            {
+                                Ok(state) => {
+                                    let name = state.name.clone();
+                                    self.push_undo_snapshot(i, "LAYERSTATE IMPORT");
+                                    self.tabs[i].scene.document.store_layer_state(state);
+                                    self.tabs[i].dirty = true;
+                                    self.command_line.push_output(
+                                        crate::tf!("LAYERSTATE: imported \"{name}\" from {path_text}.")
+                                            .as_ref(),
+                                    );
+                                }
+                                Err(error) => self.command_line.push_error(
+                                    crate::tf!("LAYERSTATE: {error}").as_ref(),
+                                ),
+                            }
+                        }
+                    }
                     _ => {
                         self.command_line.push_info(
-                            crate::t!("Usage: LAYERSTATE SAVE|RESTORE|DELETE <name> | ? (list)")
-                                .as_ref(),
+                            crate::t!(
+                                "Usage: LAYERSTATE SAVE|RESTORE|RENAME|DELETE|EXPORT|IMPORT <name> | ? (list)"
+                            )
+                            .as_ref(),
                         );
                     }
                 }
@@ -1530,6 +1644,19 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn restore_layer_state_here(&mut self, i: usize, name: &str) -> usize {
+        self.restore_layer_state_filtered(i, name, None)
+    }
+
+    /// Restore a named layer state, optionally limited to a property mask
+    /// (`None` uses the properties the state itself captured). Inside a paper
+    /// viewport the same properties become viewport overrides, so a state can
+    /// drive one sheet without touching the others.
+    pub(in crate::app) fn restore_layer_state_filtered(
+        &mut self,
+        i: usize,
+        name: &str,
+        only: Option<codec::layer_state::LayerStateMask>,
+    ) -> usize {
         use codec::layer_state::LayerStateMask as Mask;
         use codec::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
         use codec::EntityType;
@@ -1543,11 +1670,79 @@ impl OpenCADStudio {
         });
         let document = &mut scene.document;
         let Some(viewport) = viewport else {
-            return document.restore_layer_state(name).unwrap_or(0);
+            let Some(mask) = only else {
+                return document.restore_layer_state(name).unwrap_or(0);
+            };
+            let Some(state) = document.layer_state(name) else {
+                return 0;
+            };
+            let mut restored = 0;
+            for saved in &state.layers {
+                let layer_name = if !saved.layer_handle.is_null() {
+                    document
+                        .layers
+                        .iter()
+                        .find(|layer| layer.handle == saved.layer_handle)
+                        .map(|layer| layer.name.clone())
+                } else {
+                    None
+                }
+                .unwrap_or_else(|| saved.layer_name.clone());
+                let Some(layer) = document.layers.get_mut(&layer_name) else {
+                    continue;
+                };
+                if mask.contains(Mask::ON) {
+                    layer.flags.off = saved.off;
+                }
+                if mask.contains(Mask::FROZEN) {
+                    layer.flags.frozen = saved.frozen;
+                }
+                if mask.contains(Mask::LOCKED) {
+                    layer.flags.locked = saved.locked;
+                }
+                if mask.contains(Mask::PLOT) {
+                    layer.is_plottable = saved.plottable;
+                }
+                if mask.contains(Mask::NEW_VIEWPORT) {
+                    layer.flags.frozen_in_new_viewport = saved.new_viewport_frozen;
+                }
+                if mask.contains(Mask::COLOR) {
+                    layer.color = saved.color;
+                    layer.color_name.clone_from(&saved.color_name);
+                    layer.book_name.clone_from(&saved.book_name);
+                }
+                if mask.contains(Mask::LINE_TYPE) && !saved.line_type.is_empty() {
+                    layer.line_type.clone_from(&saved.line_type);
+                }
+                if mask.contains(Mask::LINE_WEIGHT) {
+                    layer.line_weight = saved.line_weight;
+                }
+                if mask.contains(Mask::PLOT_STYLE) {
+                    layer.plot_style.clone_from(&saved.plot_style);
+                }
+                if mask.contains(Mask::TRANSPARENCY) {
+                    if let Some(transparency) = saved.transparency {
+                        layer.transparency = transparency;
+                    }
+                }
+                restored += 1;
+            }
+            if mask.contains(Mask::CURRENT_VIEWPORT) {
+                if let Some((handle, name)) = document
+                    .layers
+                    .get(&state.current_layer)
+                    .map(|layer| (layer.handle, layer.name.clone()))
+                {
+                    document.header.current_layer_handle = handle;
+                    document.header.current_layer_name = name;
+                }
+            }
+            return restored;
         };
         let Some(state) = document.layer_state(name) else {
             return 0;
         };
+        let mask = only.unwrap_or(state.mask);
         let mut restored = 0;
         let (mut freeze, mut thaw) = (Vec::new(), Vec::new());
         for saved in &state.layers {
@@ -1569,13 +1764,13 @@ impl OpenCADStudio {
                 continue;
             };
             restored += 1;
-            if state.mask.contains(Mask::LOCKED) {
+            if mask.contains(Mask::LOCKED) {
                 layer.flags.locked = saved.locked;
             }
-            if state.mask.contains(Mask::PLOT) {
+            if mask.contains(Mask::PLOT) {
                 layer.is_plottable = saved.plottable;
             }
-            if state.mask.contains(Mask::NEW_VIEWPORT) {
+            if mask.contains(Mask::NEW_VIEWPORT) {
                 layer.flags.frozen_in_new_viewport = saved.new_viewport_frozen;
             }
             let layer = layer.clone();
@@ -1583,14 +1778,14 @@ impl OpenCADStudio {
             // is frozen in this viewport instead, so other viewports keep
             // their own visibility.
             let (by_freeze, by_off) =
-                (state.mask.contains(Mask::FROZEN), state.mask.contains(Mask::ON));
+                (mask.contains(Mask::FROZEN), mask.contains(Mask::ON));
             if by_freeze || by_off {
                 let hidden = (by_freeze && saved.frozen) || (by_off && saved.off);
                 if hidden { &mut freeze } else { &mut thaw }.push(layer.handle);
             }
             // (kind, saved value, whether it differs from the layer's own)
             let mut overrides: Vec<(Kind, Option<Value>, bool)> = Vec::new();
-            if state.mask.contains(Mask::COLOR) {
+            if mask.contains(Mask::COLOR) {
                 let packed = crate::scene::view::render::pack_layer_override_color(&saved.color);
                 overrides.push((
                     Kind::LayerViewportColorOverride,
@@ -1598,14 +1793,14 @@ impl OpenCADStudio {
                     saved.color != layer.color,
                 ));
             }
-            if state.mask.contains(Mask::LINE_TYPE) {
+            if mask.contains(Mask::LINE_TYPE) {
                 overrides.push((
                     Kind::LayerViewportLinetypeOverride,
                     line_type_handle.map(Value::Handle),
                     !saved.line_type.eq_ignore_ascii_case(&layer.line_type),
                 ));
             }
-            if state.mask.contains(Mask::LINE_WEIGHT) {
+            if mask.contains(Mask::LINE_WEIGHT) {
                 overrides.push((
                     Kind::LayerViewportLineweightOverride,
                     Some(Value::Int32(saved.line_weight.value() as i32)),
@@ -1613,7 +1808,7 @@ impl OpenCADStudio {
                 ));
             }
             if let (true, Some(transparency)) =
-                (state.mask.contains(Mask::TRANSPARENCY), saved.transparency)
+                (mask.contains(Mask::TRANSPARENCY), saved.transparency)
             {
                 // The opacity byte under the "by alpha" method, as the format packs it.
                 let packed = 0x0200_0000u32 | (255 - transparency.alpha()) as u32;
@@ -1660,3 +1855,191 @@ impl OpenCADStudio {
     }
 }
 
+
+/// Parse the optional property filter of `-LAYERSTATE RESTORE <name> <filter>`.
+/// `None` means "every property the state captured".
+fn parse_layer_state_filter(
+    text: &str,
+) -> Result<Option<codec::layer_state::LayerStateMask>, String> {
+    use codec::layer_state::LayerStateMask as Mask;
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let mut mask = Mask::NONE;
+    for token in text.split(|c: char| c == ',' || c.is_whitespace()) {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let bit = match token.to_ascii_uppercase().as_str() {
+            "ALL" => return Ok(None),
+            "ON" | "OFF" => Mask::ON,
+            "FROZEN" | "FREEZE" => Mask::FROZEN,
+            "LOCKED" | "LOCK" => Mask::LOCKED,
+            "PLOT" | "PLOTTABLE" => Mask::PLOT,
+            "NEWVIEWPORT" | "NEWVP" => Mask::NEW_VIEWPORT,
+            "COLOR" | "COLOUR" => Mask::COLOR,
+            "LINETYPE" | "LTYPE" => Mask::LINE_TYPE,
+            "LINEWEIGHT" | "LWEIGHT" => Mask::LINE_WEIGHT,
+            "PLOTSTYLE" => Mask::PLOT_STYLE,
+            "TRANSPARENCY" | "ALPHA" => Mask::TRANSPARENCY,
+            "CURRENT" | "CURRENTLAYER" => Mask::CURRENT_VIEWPORT,
+            other => {
+                return Err(crate::tf!(
+                    "LAYERSTATE: unknown restore property '{other}' (use ON, FROZEN, LOCKED, COLOR, LINETYPE, LINEWEIGHT, PLOT, PLOTSTYLE, TRANSPARENCY or ALL)."
+                )
+                .to_string())
+            }
+        };
+        mask |= bit;
+    }
+    Ok(if mask == Mask::NONE { None } else { Some(mask) })
+}
+
+fn las_text(value: &str) -> String {
+    value.replace(['\t', '\n', '\r'], " ")
+}
+
+fn las_color(color: codec::types::Color) -> String {
+    use codec::types::Color;
+    match color {
+        Color::ByLayer => "bylayer".to_string(),
+        Color::ByBlock => "byblock".to_string(),
+        Color::None => "none".to_string(),
+        Color::Index(index) => format!("index:{index}"),
+        Color::Rgb { r, g, b } => format!("rgb:{r},{g},{b}"),
+    }
+}
+
+fn las_parse_color(text: &str) -> codec::types::Color {
+    use codec::types::Color;
+    if let Some(rest) = text.strip_prefix("index:") {
+        return rest.parse::<u8>().map(Color::Index).unwrap_or(Color::Index(7));
+    }
+    if let Some(rest) = text.strip_prefix("rgb:") {
+        let parts: Vec<&str> = rest.split(',').collect();
+        if parts.len() == 3 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                parts[0].parse::<u8>(),
+                parts[1].parse::<u8>(),
+                parts[2].parse::<u8>(),
+            ) {
+                return Color::Rgb { r, g, b };
+            }
+        }
+    }
+    match text {
+        "bylayer" => Color::ByLayer,
+        "byblock" => Color::ByBlock,
+        "none" => Color::None,
+        _ => Color::Index(7),
+    }
+}
+
+fn las_alpha(transparency: Option<codec::types::Transparency>) -> String {
+    use codec::types::Transparency;
+    match transparency {
+        Some(Transparency::ByLayer) => "bylayer".to_string(),
+        Some(Transparency::ByBlock) => "byblock".to_string(),
+        Some(Transparency::Explicit(alpha)) => format!("explicit:{alpha}"),
+        None => "byblock".to_string(),
+    }
+}
+
+fn las_parse_alpha(text: &str) -> Option<codec::types::Transparency> {
+    use codec::types::Transparency;
+    if let Some(rest) = text.strip_prefix("explicit:") {
+        return rest.parse::<u8>().ok().map(Transparency::Explicit);
+    }
+    match text {
+        "bylayer" => Some(Transparency::ByLayer),
+        "byblock" => Some(Transparency::ByBlock),
+        _ => None,
+    }
+}
+
+/// Write a layer state as the line-oriented `.las` interchange text. Every
+/// property the state captured round-trips, including the current layer.
+fn layer_state_to_las(state: &codec::layer_state::LayerState) -> String {
+    let mut out = String::from("OCSLAS\t1\n");
+    out.push_str(&format!("NAME\t{}\n", las_text(&state.name)));
+    out.push_str(&format!("DESC\t{}\n", las_text(&state.description)));
+    out.push_str(&format!("MASK\t{}\n", state.mask.bits()));
+    out.push_str(&format!("CURRENT\t{}\n", las_text(&state.current_layer)));
+    for layer in &state.layers {
+        out.push_str(&format!(
+            "LAYER\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            las_text(&layer.layer_name),
+            u8::from(layer.off),
+            u8::from(layer.frozen),
+            u8::from(layer.locked),
+            u8::from(layer.plottable),
+            u8::from(layer.new_viewport_frozen),
+            las_color(layer.color),
+            las_text(&layer.line_type),
+            layer.line_weight.value(),
+            las_text(&layer.plot_style),
+            las_alpha(layer.transparency),
+        ));
+    }
+    out.push_str("END\n");
+    out
+}
+
+fn layer_state_from_las(text: &str) -> Result<codec::layer_state::LayerState, String> {
+    use codec::layer_state::{LayerState, LayerStateLayer, LayerStateMask};
+    let mut state = LayerState {
+        name: String::new(),
+        description: String::new(),
+        mask: LayerStateMask::SUPPORTED,
+        hidden: false,
+        current_layer: "0".to_string(),
+        layers: Vec::new(),
+    };
+    for line in text.lines() {
+        let mut fields = line.split('\t');
+        match fields.next().unwrap_or("") {
+            "NAME" => state.name = fields.next().unwrap_or("").to_string(),
+            "DESC" => state.description = fields.next().unwrap_or("").to_string(),
+            "MASK" => {
+                if let Some(bits) = fields.next().and_then(|value| value.parse::<u32>().ok()) {
+                    state.mask = LayerStateMask::from_bits(bits);
+                }
+            }
+            "CURRENT" => {
+                state.current_layer = fields.next().unwrap_or("0").to_string();
+            }
+            "LAYER" => {
+                let values: Vec<&str> = fields.collect();
+                if values.len() < 10 {
+                    continue;
+                }
+                state.layers.push(LayerStateLayer {
+                    layer_handle: codec::types::Handle::NULL,
+                    layer_name: values[0].to_string(),
+                    off: values[1] == "1",
+                    frozen: values[2] == "1",
+                    locked: values[3] == "1",
+                    plottable: values[4] == "1",
+                    new_viewport_frozen: values[5] == "1",
+                    color: las_parse_color(values[6]),
+                    color_name: None,
+                    book_name: None,
+                    line_type: values[7].to_string(),
+                    line_weight: values[8]
+                        .parse::<i16>()
+                        .map(codec::types::LineWeight::from_value)
+                        .unwrap_or_default(),
+                    plot_style: values[9].to_string(),
+                    transparency: values.get(10).and_then(|value| las_parse_alpha(value)),
+                });
+            }
+            _ => {}
+        }
+    }
+    if state.name.is_empty() {
+        return Err(crate::t!("LAYERSTATE: the file holds no named layer state.").to_string());
+    }
+    Ok(state)
+}

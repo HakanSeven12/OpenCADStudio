@@ -30,6 +30,47 @@ pub struct Mapping {
     pub to: String,
 }
 
+impl Mapping {
+    /// Read one `from=to` (or `from->to`) argument. A mapping file uses the
+    /// same two spellings, so what a command line accepts can also be written
+    /// to a file and read back unchanged.
+    pub fn parse(token: &str) -> Option<Mapping> {
+        let (from, to) = token
+            .split_once('=')
+            .or_else(|| token.split_once("->"))?;
+        let (from, to) = (from.trim(), to.trim());
+        (!from.is_empty() && !to.is_empty()).then(|| Mapping {
+            from: from.to_string(),
+            to: to.to_string(),
+        })
+    }
+}
+
+/// Write a mapping list as plain `from -> to` lines.
+///
+/// A drawing standards file is where the reference application keeps these,
+/// but writing them there would mean inventing a place inside the drawing for
+/// something no other application reads back. A small text file beside the
+/// drawing carries the same information without touching the drawing's own
+/// structure.
+pub fn save_mappings(path: &Path, mappings: &[Mapping]) -> Result<(), String> {
+    let body: String = mappings
+        .iter()
+        .map(|mapping| format!("{} -> {}\n", mapping.from, mapping.to))
+        .collect();
+    std::fs::write(path, body).map_err(|error| error.to_string())
+}
+
+/// Read a mapping list written by [`save_mappings`]. Blank and unparsable
+/// lines are ignored, so a hand-edited file with a comment still loads.
+pub fn load_mappings(path: &Path) -> Result<Vec<Mapping>, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    Ok(text
+        .lines()
+        .filter_map(|line| Mapping::parse(line.trim()))
+        .collect())
+}
+
 /// What a translation should do beyond moving the objects.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Options {

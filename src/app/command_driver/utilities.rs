@@ -1109,6 +1109,9 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("LAYERSTATE")
             || tokens[0].eq_ignore_ascii_case("LAS")
             || tokens[0].eq_ignore_ascii_case("LMAN")
+            // LAYTRANS takes its standards file and FROM=TO pairs on one line.
+            || tokens[0].eq_ignore_ascii_case("LAYTRANS")
+            || tokens[0].eq_ignore_ascii_case("-LAYTRANS")
         {
             return self.dispatch_command(cmd);
         }

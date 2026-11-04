@@ -4861,3 +4861,166 @@ mod mission_m076_tests {
         std::fs::remove_file(&path).ok();
     }
 }
+
+#[cfg(test)]
+mod mission_m078_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ocs_m078_{tag}_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// A layer a translation can act on needs a real handle.
+    fn add_layer(app: &mut OpenCADStudio, name: &str) {
+        let i = app.active_tab;
+        let mut layer = codec::tables::Layer::new(name);
+        layer.handle = app.tabs[i].scene.document.allocate_handle();
+        app.tabs[i].scene.document.layers.add(layer).unwrap();
+    }
+
+    fn add_line(app: &mut OpenCADStudio, layer: &str) {
+        let i = app.active_tab;
+        let mut line = codec::entities::Line::new();
+        line.common.layer = layer.to_string();
+        app.tabs[i].scene.add_entity(codec::EntityType::Line(line));
+    }
+
+    fn line_layers(app: &OpenCADStudio) -> Vec<String> {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                codec::EntityType::Line(_) => Some(entity.common().layer.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A standards drawing holding the office layer names.
+    fn write_standards(dir: &std::path::Path, layers: &[&str]) -> std::path::PathBuf {
+        let mut document = codec::Document::new();
+        for name in layers {
+            document
+                .layers
+                .add(codec::tables::Layer::new(*name))
+                .unwrap();
+        }
+        let bytes = crate::io::save_to_bytes(&document, "dwg", document.version).unwrap();
+        let path = dir.join("office.dwg");
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_mapping_moves_objects_and_purges_the_source() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+        let dir = temp_dir("apply");
+        let standards = write_standards(&dir, &["WALLS"]);
+        let i = app.active_tab;
+        add_layer(&mut app, "A-WALL");
+        add_line(&mut app, "A-WALL");
+        add_line(&mut app, "0");
+
+        let _ = app.run_command_line(&format!(
+            "-LAYTRANS {} A-WALL=WALLS",
+            standards.display()
+        ));
+
+        let output = all_output(&app);
+        assert!(output.contains("LAYTRANS: \"A-WALL\" -> \"WALLS\" (1 object(s))."), "{output}");
+        assert!(output.contains("translated 1 layer(s), 1 object(s)"), "{output}");
+        assert_eq!(line_layers(&app), vec!["WALLS".to_string(), "0".to_string()]);
+        assert!(app.tabs[i].scene.document.layers.get("WALLS").is_some());
+        assert!(
+            app.tabs[i].scene.document.layers.get("A-WALL").is_none(),
+            "the empty source layer is purged"
+        );
+        assert!(app.active_modal.is_none(), "-LAYTRANS must not open the dialog");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_saved_mapping_list_can_be_reused_on_another_drawing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+        let dir = temp_dir("reuse");
+        let standards = write_standards(&dir, &["WALLS", "DOORS"]);
+        let map_file = dir.join("office.map");
+
+        let _ = app.run_command_line(&format!(
+            "-LAYTRANS SAVE {} A-WALL=WALLS A-DOOR=DOORS",
+            map_file.display()
+        ));
+        assert!(map_file.exists(), "{}", all_output(&app));
+        let text = std::fs::read_to_string(&map_file).unwrap();
+        assert!(text.contains("A-WALL -> WALLS"), "{text}");
+
+        let _ = app.run_command_line(&format!("-LAYTRANS LIST {}", standards.display()));
+        let output = all_output(&app);
+        assert!(output.contains("target layer(s)"), "{output}");
+        assert!(output.contains("  WALLS"), "{output}");
+        assert!(output.contains("  DOORS"), "{output}");
+
+        // Another drawing, same mapping list, no dialog in the way.
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+        add_layer(&mut app, "A-WALL");
+        add_layer(&mut app, "A-DOOR");
+        add_line(&mut app, "A-WALL");
+        add_line(&mut app, "A-DOOR");
+
+        let _ = app.run_command_line(&format!(
+            "-LAYTRANS LOAD {} {}",
+            map_file.display(),
+            standards.display()
+        ));
+        let output = all_output(&app);
+        assert!(output.contains("translated 2 layer(s), 2 object(s)"), "{output}");
+        let mut layers = line_layers(&app);
+        layers.sort();
+        assert_eq!(layers, vec!["DOORS".to_string(), "WALLS".to_string()]);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_target_the_standards_do_not_define_is_reported_and_nothing_moves() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+        let dir = temp_dir("missing");
+        let standards = write_standards(&dir, &["WALLS"]);
+        add_layer(&mut app, "A-WALL");
+        add_line(&mut app, "A-WALL");
+
+        let _ = app.run_command_line(&format!(
+            "-LAYTRANS {} A-WALL=GHOST",
+            standards.display()
+        ));
+
+        let output = all_output(&app);
+        assert!(output.contains("target layer is not in the loaded set"), "{output}");
+        assert_eq!(line_layers(&app), vec!["A-WALL".to_string()]);
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get("A-WALL")
+            .is_some());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

@@ -177,6 +177,23 @@ impl OpenCADStudio {
                 let path = std::path::PathBuf::from(cmd.trim_start_matches("LAYTRANS").trim());
                 return Some(self.layer_translate_same(&path));
             }
+            // -LAYTRANS — the scriptable translator. It never opens the
+            // dialog, so a script can map source layers onto a standards file
+            // (or a saved mapping list) and finish in one line.
+            //   -LAYTRANS <standards> [FROM=TO …]   translate (same names when no pairs)
+            //   -LAYTRANS SAVE <file> FROM=TO …     write a mapping list
+            //   -LAYTRANS LOAD <file> [<standards>] read a list and translate
+            //   -LAYTRANS LIST <standards>          show the target layers
+            cmd if cmd.eq_ignore_ascii_case("-LAYTRANS")
+                || cmd.to_ascii_uppercase().starts_with("-LAYTRANS ") =>
+            {
+                let rest = cmd
+                    .trim_start_matches('-')
+                    .split_once(char::is_whitespace)
+                    .map(|(_, tail)| tail.trim())
+                    .unwrap_or("");
+                return Some(self.layer_translate_scripted(rest));
+            }
 
             // LAYDEL <name> — delete a layer and erase the objects on it.
             "LAYDEL" => {
@@ -1194,6 +1211,257 @@ impl OpenCADStudio {
         self.finish_layer_translation(i, report)
     }
 
+    /// Apply a mapping list against an optional standards set.
+    ///
+    /// Names are resolved to the drawing's own spelling before the move, so a
+    /// mapping typed in lower case still hits the layer it names. A target
+    /// that neither the drawing nor the standards set has is left for
+    /// `translate` to report instead of silently guessing a new layer.
+    pub(in crate::app) fn apply_layer_translation(
+        &mut self,
+        i: usize,
+        targets: Vec<crate::modules::draw::layers::laytrans::TargetLayer>,
+        mappings: &[crate::modules::draw::layers::laytrans::Mapping],
+    ) -> Task<Message> {
+        use crate::modules::draw::layers::laytrans;
+        let resolved: Vec<laytrans::Mapping> = mappings
+            .iter()
+            .map(|mapping| {
+                let from = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .names()
+                    .find(|name| name.eq_ignore_ascii_case(&mapping.from))
+                    .map(str::to_string)
+                    .unwrap_or_else(|| mapping.from.clone());
+                let to = if let Some(target) = targets
+                    .iter()
+                    .find(|target| target.name.eq_ignore_ascii_case(&mapping.to))
+                {
+                    target.name.clone()
+                } else if let Some(layer) = self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .find(|layer| layer.name.eq_ignore_ascii_case(&mapping.to))
+                {
+                    layer.name.clone()
+                } else {
+                    mapping.to.clone()
+                };
+                laytrans::Mapping { from, to }
+            })
+            .collect();
+        let current = self.tabs[i].active_layer.clone();
+        let sources: Vec<String> = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .names()
+            .map(str::to_string)
+            .collect();
+        let mut runnable = Vec::new();
+        for mapping in resolved {
+            if !sources
+                .iter()
+                .any(|name| name.eq_ignore_ascii_case(&mapping.from))
+            {
+                self.command_line.push_error(
+                    crate::tf!(
+                        "LAYTRANS: no layer named \"{}\" in this drawing.",
+                        mapping.from
+                    )
+                    .as_ref(),
+                );
+                continue;
+            }
+            runnable.push(mapping);
+        }
+        if runnable.is_empty() {
+            self.command_line
+                .push_info(crate::t!("LAYTRANS: nothing to translate.").as_ref());
+            return Task::none();
+        }
+        self.push_undo_snapshot(i, "LAYTRANS");
+        let report = laytrans::translate(
+            &mut self.tabs[i].scene,
+            &runnable,
+            &targets,
+            &current,
+            laytrans::Options::default(),
+        );
+        for (from, to, moved) in &report.translated {
+            self.command_line.push_output(
+                crate::tf!("LAYTRANS: \"{from}\" -> \"{to}\" ({moved} object(s)).").as_ref(),
+            );
+        }
+        self.finish_layer_translation(i, report)
+    }
+
+    /// The `-LAYTRANS` line parser: translate, save a mapping list, load one,
+    /// or list the standards layers.
+    pub(in crate::app) fn layer_translate_scripted(&mut self, rest: &str) -> Task<Message> {
+        use crate::modules::draw::layers::laytrans;
+        let i = self.active_tab;
+        let mut words = rest.split_whitespace();
+        let Some(first) = words.next() else {
+            self.command_line.push_info(
+                crate::t!(
+                    "Usage: -LAYTRANS <standards> [FROM=TO …] | -LAYTRANS SAVE <file> FROM=TO … | -LAYTRANS LOAD <file> [<standards>] | -LAYTRANS LIST <standards>"
+                )
+                .as_ref(),
+            );
+            return Task::none();
+        };
+        match first.to_ascii_uppercase().as_str() {
+            "SAVE" => {
+                let Some(path) = words.next() else {
+                    self.command_line.push_info(
+                        crate::t!("Usage: -LAYTRANS SAVE <file> FROM=TO …").as_ref(),
+                    );
+                    return Task::none();
+                };
+                let mut mappings = Vec::new();
+                for token in words {
+                    match laytrans::Mapping::parse(token) {
+                        Some(mapping) => mappings.push(mapping),
+                        None => {
+                            self.command_line.push_error(
+                                crate::tf!(
+                                    "LAYTRANS: '{}' is not a FROM=TO mapping.",
+                                    token
+                                )
+                                .as_ref(),
+                            );
+                            return Task::none();
+                        }
+                    }
+                }
+                if mappings.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("LAYTRANS: name at least one FROM=TO mapping to save.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                match laytrans::save_mappings(std::path::Path::new(path), &mappings) {
+                    Ok(()) => self.command_line.push_output(
+                        crate::tf!("LAYTRANS: saved {} mapping(s) to {path}.", mappings.len())
+                            .as_ref(),
+                    ),
+                    Err(why) => self
+                        .command_line
+                        .push_error(crate::tf!("LAYTRANS: could not save — {why}.").as_ref()),
+                }
+                Task::none()
+            }
+            "LOAD" => {
+                let Some(path) = words.next() else {
+                    self.command_line.push_info(
+                        crate::t!("Usage: -LAYTRANS LOAD <file> [<standards>]").as_ref(),
+                    );
+                    return Task::none();
+                };
+                let mappings = match laytrans::load_mappings(std::path::Path::new(path)) {
+                    Ok(mappings) => mappings,
+                    Err(why) => {
+                        self.command_line.push_error(
+                            crate::tf!("LAYTRANS: could not read — {why}.").as_ref(),
+                        );
+                        return Task::none();
+                    }
+                };
+                if mappings.is_empty() {
+                    self.command_line.push_error(
+                        crate::tf!("LAYTRANS: no mappings in {path}.").as_ref(),
+                    );
+                    return Task::none();
+                }
+                let targets = match words.next() {
+                    Some(standards) => match laytrans::load_targets(std::path::Path::new(standards))
+                    {
+                        Ok(targets) => targets,
+                        Err(why) => {
+                            self.command_line.push_error(
+                                crate::tf!("LAYTRANS: {why}.").as_ref(),
+                            );
+                            return Task::none();
+                        }
+                    },
+                    None => Vec::new(),
+                };
+                self.apply_layer_translation(i, targets, &mappings)
+            }
+            "LIST" => {
+                let Some(path) = words.next() else {
+                    self.command_line.push_info(
+                        crate::t!("Usage: -LAYTRANS LIST <standards>").as_ref(),
+                    );
+                    return Task::none();
+                };
+                match laytrans::load_targets(std::path::Path::new(path)) {
+                    Ok(targets) => {
+                        self.command_line.push_output(
+                            crate::tf!("LAYTRANS: {n} target layer(s) in {path}:", n = targets.len())
+                                .as_ref(),
+                        );
+                        for target in targets {
+                            self.command_line.push_output(
+                                crate::tf!("  {}", target.name).as_ref(),
+                            );
+                        }
+                    }
+                    Err(why) => self
+                        .command_line
+                        .push_error(crate::tf!("LAYTRANS: {why}.").as_ref()),
+                }
+                Task::none()
+            }
+            _ => {
+                let targets = match laytrans::load_targets(std::path::Path::new(first)) {
+                    Ok(targets) => targets,
+                    Err(why) => {
+                        self.command_line
+                            .push_error(crate::tf!("LAYTRANS: {why}.").as_ref());
+                        return Task::none();
+                    }
+                };
+                let mut mappings = Vec::new();
+                for token in words {
+                    match laytrans::Mapping::parse(token) {
+                        Some(mapping) => mappings.push(mapping),
+                        None => {
+                            self.command_line.push_error(
+                                crate::tf!(
+                                    "LAYTRANS: '{}' is not a FROM=TO mapping.",
+                                    token
+                                )
+                                .as_ref(),
+                            );
+                            return Task::none();
+                        }
+                    }
+                }
+                if mappings.is_empty() {
+                    let current = self.tabs[i].active_layer.clone();
+                    let sources = laytrans::source_layers(&self.tabs[i].scene, &current);
+                    mappings = laytrans::map_same(&sources, &targets);
+                    if mappings.is_empty() {
+                        self.command_line.push_info(
+                            crate::t!(
+                                "LAYTRANS: no layer names in common — name the pairs as FROM=TO."
+                            )
+                            .as_ref(),
+                        );
+                        return Task::none();
+                    }
+                }
+                self.apply_layer_translation(i, targets, &mappings)
+            }
+        }
+    }
+
     /// Relabel the drawing's unit and convert the model to suit.
     ///
     /// The label always changes — that is what was asked for. The geometry
@@ -1386,12 +1654,7 @@ impl OpenCADStudio {
             let Some(state) = self.layer_translator.as_ref() else {
                 return;
             };
-            let body: String = state
-                .mappings
-                .iter()
-                .map(|m| format!("{} -> {}\n", m.from, m.to))
-                .collect();
-            match std::fs::write(path, body) {
+            match crate::modules::draw::layers::laytrans::save_mappings(path, &state.mappings) {
                 Ok(()) => self.command_line.push_output(
                     crate::tf!("LAYTRANS: saved {n} mapping(s).", n = state.mappings.len())
                         .as_ref(),
@@ -1402,25 +1665,15 @@ impl OpenCADStudio {
             }
             return;
         }
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
+        let parsed: Vec<Mapping> = match crate::modules::draw::layers::laytrans::load_mappings(path)
+        {
+            Ok(parsed) => parsed,
             Err(why) => {
                 self.command_line
                     .push_error(crate::tf!("LAYTRANS: could not read — {why}.").as_ref());
                 return;
             }
         };
-        let parsed: Vec<Mapping> = text
-            .lines()
-            .filter_map(|line| {
-                let (from, to) = line.split_once("->")?;
-                let (from, to) = (from.trim(), to.trim());
-                (!from.is_empty() && !to.is_empty()).then(|| Mapping {
-                    from: from.to_string(),
-                    to: to.to_string(),
-                })
-            })
-            .collect();
         let count = parsed.len();
         if let Some(state) = self.layer_translator.as_mut() {
             state.mappings = parsed;

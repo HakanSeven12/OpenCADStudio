@@ -4042,3 +4042,130 @@ mod mission_m042_tests {
         assert_eq!(text_value(&app, text), before);
     }
 }
+
+#[cfg(test)]
+mod mission_m055_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn enter_layout(app: &mut OpenCADStudio) {
+        let i = app.active_tab;
+        let name = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        app.tabs[i].scene.set_current_layout(name);
+        app.tabs[i].scene.load_current_layout_state();
+    }
+
+    fn viewport_rects(app: &OpenCADStudio) -> Vec<(i64, i64, i64, i64)> {
+        let i = app.active_tab;
+        let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
+        let mut rects: Vec<(i64, i64, i64, i64)> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(vp)
+                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                {
+                    Some((
+                        (vp.center.x * 1000.0).round() as i64,
+                        (vp.center.z * 1000.0).round() as i64,
+                        (vp.width * 1000.0).round() as i64,
+                        (vp.height * 1000.0).round() as i64,
+                    ))
+                }
+                _ => None,
+            })
+            .collect();
+        rects.sort();
+        rects
+    }
+
+    #[test]
+    fn four_viewports_can_be_saved_and_restored_after_deleting_two() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+
+        let _ = app.run_command_line("VPORTS 4");
+        assert_eq!(viewport_rects(&app).len(), 4, "{}", all_output(&app));
+        let saved = viewport_rects(&app);
+
+        let _ = app.run_command_line("VPORTS SAVE FOUR");
+        assert!(all_output(&app).contains("saved configuration 'FOUR'"));
+        let i = app.active_tab;
+        let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
+        let two: Vec<codec::Handle> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(vp)
+                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .take(2)
+            .collect();
+        app.tabs[i].scene.erase_entities(&two);
+        assert_eq!(viewport_rects(&app).len(), 2);
+
+        let _ = app.run_command_line("VPORTS RESTORE FOUR");
+        assert!(all_output(&app).contains("restored 'FOUR' with 4 viewport(s)"));
+        assert_eq!(viewport_rects(&app), saved, "restore must recreate the same rectangles");
+    }
+
+    #[test]
+    fn saved_configurations_are_listed_and_can_be_deleted() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS 2V");
+        let _ = app.run_command_line("VPORTS SAVE TWO");
+
+        let _ = app.run_command_line("VPORTS LIST");
+        let output = all_output(&app);
+        assert!(output.contains("TWO  (2 viewport(s))"), "{output}");
+
+        let _ = app.run_command_line("VPORTS DELETE TWO");
+        let output = all_output(&app);
+        assert!(output.contains("deleted 'TWO'"), "{output}");
+        let before = app.command_line.history.len();
+        let _ = app.run_command_line("VPORTS LIST");
+        let listed = app.command_line.history[before..]
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!listed.contains("TWO  (2 viewport(s))"), "{listed}");
+        assert!(listed.contains("No saved viewport configurations."), "{listed}");
+
+        let _ = app.run_command_line("VPORTS RESTORE TWO");
+        assert!(all_output(&app).contains("no saved configuration named 'TWO'"));
+    }
+
+    #[test]
+    fn restoring_an_unknown_configuration_names_the_missing_one() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+
+        let _ = app.run_command_line("VPORTS RESTORE NOPE");
+
+        assert!(all_output(&app).contains("no saved configuration named 'NOPE'"));
+    }
+}

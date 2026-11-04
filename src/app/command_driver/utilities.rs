@@ -1095,6 +1095,9 @@ impl OpenCADStudio {
             // PUBLISH <path> [sheets…] must not open the batch dialog first.
             || tokens[0].eq_ignore_ascii_case("PUBLISH")
             || tokens[0].eq_ignore_ascii_case("-PUBLISH")
+            // VPORTS SAVE/RESTORE take their name on the same line.
+            || tokens[0].eq_ignore_ascii_case("VPORTS")
+            || tokens[0].eq_ignore_ascii_case("-VPORTS")
         {
             return self.dispatch_command(cmd);
         }

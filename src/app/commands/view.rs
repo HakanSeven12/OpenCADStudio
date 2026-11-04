@@ -659,9 +659,170 @@ impl OpenCADStudio {
             "CASCADE" => return self.dispatch_view("VPORTS 4", i),
 
             // ── VPORTS — list or create preset viewport configurations ────
-            cmd if cmd == "VPORTS" || cmd.starts_with("VPORTS ") => {
-                let sub = cmd.split_whitespace().nth(1).unwrap_or("").to_uppercase();
+            //   VPORTS                    list the viewports in this layout
+            //   VPORTS 2H|2V|4|SINGLE     apply a preset arrangement
+            //   VPORTS SAVE <name>        save the current rectangles
+            //   VPORTS RESTORE <name>     re-create them
+            //   VPORTS LIST / DELETE <n>  manage the saved configurations
+            // -VPORTS is the scriptable alias.
+            cmd if cmd == "VPORTS"
+                || cmd.starts_with("VPORTS ")
+                || cmd == "-VPORTS"
+                || cmd.starts_with("-VPORTS ") =>
+            {
+                let line = cmd.trim_start_matches('-');
+                let mut words = line.split_whitespace();
+                words.next(); // VPORTS
+                let sub = words.next().unwrap_or("").to_uppercase();
+                let tail: Vec<&str> = words.collect();
                 let scene = &self.tabs[i].scene;
+                match sub.as_str() {
+                    "SAVE" => {
+                        let Some(name) = tail.first() else {
+                            self.command_line
+                                .push_error(crate::t!("VPORTS SAVE: name the configuration.").as_ref());
+                            return Some(Task::none());
+                        };
+                        if scene.current_layout == "Model" {
+                            self.command_line.push_error(
+                                crate::t!("VPORTS SAVE: switch to a paper layout first.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        let layout_block = scene.current_layout_block_handle_pub();
+                        let rects: Vec<(f64, f64, f64, f64)> = scene
+                            .document
+                            .entities()
+                            .filter_map(|e| match e {
+                                codec::EntityType::Viewport(vp)
+                                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                                {
+                                    Some((vp.center.x, vp.center.z, vp.width, vp.height))
+                                }
+                                _ => None,
+                            })
+                            .collect();
+                        if rects.is_empty() {
+                            self.command_line
+                                .push_error(crate::t!("VPORTS SAVE: this layout has no viewports.").as_ref());
+                            return Some(Task::none());
+                        }
+                        let value = rects
+                            .iter()
+                            .map(|(x, z, w, h)| {
+                                format!("{x:.9},{z:.9},{w:.9},{h:.9}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(";");
+                        let key = vports_config_key(name);
+                        crate::io::set_drawing_variable(
+                            &mut self.tabs[i].scene.document,
+                            &key,
+                            &value,
+                        );
+                        vports_config_remember(&mut self.tabs[i].scene.document, name);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "VPORTS: saved configuration '{}' with {} viewport(s).",
+                                name,
+                                rects.len()
+                            )
+                            .as_ref(),
+                        );
+                        return Some(Task::none());
+                    }
+                    "RESTORE" => {
+                        let Some(name) = tail.first() else {
+                            self.command_line.push_error(
+                                crate::t!("VPORTS RESTORE: name the configuration.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        if scene.current_layout == "Model" {
+                            self.command_line.push_error(
+                                crate::t!("VPORTS RESTORE: switch to a paper layout first.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        let key = vports_config_key(name);
+                        let Some(value) = crate::io::drawing_variable(&scene.document, &key)
+                            .filter(|value| !value.trim().is_empty())
+                        else {
+                            self.command_line.push_error(
+                                crate::tf!("VPORTS: no saved configuration named '{name}'.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        let rects = parse_vport_rects(&value);
+                        if rects.is_empty() {
+                            self.command_line.push_error(
+                                crate::tf!("VPORTS: configuration '{name}' holds no rectangles.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        let n = self.apply_viewport_rects(i, &rects, "RESTORE");
+                        self.command_line.push_output(
+                            crate::tf!("VPORTS: restored '{name}' with {n} viewport(s).").as_ref(),
+                        );
+                        return Some(Task::none());
+                    }
+                    "LIST" => {
+                        let names = vports_config_names(&scene.document);
+                        if names.is_empty() {
+                            self.command_line
+                                .push_info(crate::t!("No saved viewport configurations.").as_ref());
+                        } else {
+                            self.command_line
+                                .push_output(crate::t!("Saved viewport configurations:").as_ref());
+                            for name in names {
+                                let rects = crate::io::drawing_variable(
+                                    &scene.document,
+                                    &vports_config_key(&name),
+                                )
+                                .map(|value| parse_vport_rects(&value).len())
+                                .unwrap_or(0);
+                                self.command_line.push_output(
+                                    crate::tf!("  {name}  ({rects} viewport(s))").as_ref(),
+                                );
+                            }
+                        }
+                        return Some(Task::none());
+                    }
+                    "DELETE" | "DEL" => {
+                        let Some(name) = tail.first() else {
+                            self.command_line
+                                .push_error(crate::t!("VPORTS DELETE: name the configuration.").as_ref());
+                            return Some(Task::none());
+                        };
+                        let key = vports_config_key(name);
+                        if crate::io::drawing_variable(&scene.document, &key)
+                            .filter(|value| !value.trim().is_empty())
+                            .is_none()
+                        {
+                            self.command_line.push_error(
+                                crate::tf!("VPORTS: no saved configuration named '{name}'.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        self.push_undo_snapshot(i, "VPORTS DELETE");
+                        crate::io::set_drawing_variable(
+                            &mut self.tabs[i].scene.document,
+                            &key,
+                            "",
+                        );
+                        vports_config_forget(&mut self.tabs[i].scene.document, name);
+                        self.tabs[i].dirty = true;
+                        self.command_line
+                            .push_output(crate::tf!("VPORTS: deleted '{name}'.").as_ref());
+                        return Some(Task::none());
+                    }
+                    _ => {}
+                }
                 if scene.current_layout == "Model" {
                     // Bare VPORTS → ask for the configuration interactively;
                     // the next command-line entry supplies it.
@@ -762,7 +923,6 @@ impl OpenCADStudio {
                     }
                 } else {
                     // ── Preset viewport layout ───────────────────────────
-                    let layout_name = scene.current_layout.clone();
                     let ((x0, y0), (x1, y1)) = scene
                         .printable_area_limits()
                         .unwrap_or(((0.0, 0.0), (297.0, 210.0)));
@@ -812,91 +972,9 @@ impl OpenCADStudio {
                         }
                     };
                     if !rects.is_empty() {
-                        // Remove existing user viewports in this layout first.
-                        let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
-                        let to_erase: Vec<codec::Handle> = self.tabs[i]
-                            .scene
-                            .document
-                            .entities()
-                            .filter_map(|e| {
-                                if let codec::EntityType::Viewport(vp) = e {
-                                    if vp.id > 1 && vp.common.owner_handle == layout_block {
-                                        Some(vp.common.handle)
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        if to_erase
-                            .iter()
-                            .any(|handle| self.tabs[i].scene.is_layer_locked(*handle))
-                        {
-                            self.command_line.push_error(
-                                crate::t!("VPORTS: unlock existing viewport layers first.")
-                                    .as_ref(),
-                            );
-                            return Some(Task::none());
-                        }
-                        self.push_undo_snapshot(i, "VPORTS");
-                        self.tabs[i].scene.erase_entities(&to_erase);
-                        // Create new viewports.
-                        for (cx, cz, w, h) in &rects {
-                            let mut vp = codec::entities::Viewport::new();
-                            vp.center = codec::types::Vector3::new(*cx, 0.0, *cz);
-                            vp.width = *w;
-                            vp.height = *h;
-                            vp.id = 2; // commit_entity will assign unique IDs
-                            match self.tabs[i]
-                                .scene
-                                .document
-                                .add_entity_to_layout(
-                                    codec::EntityType::Viewport(Box::new(vp)),
-                                    &layout_name,
-                                )
-                            {
-                                Ok(handle) => {
-                                    self.tabs[i].scene.auto_fit_viewport(handle);
-                                }
-                                Err(e) => {
-                                    self.command_line
-                                        .push_error(crate::tf!("VPORTS: {e}").as_ref());
-                                }
-                            }
-                        }
-                        // Re-assign unique IDs (1 + existing max per viewport).
-                        let layout_block2 = self.tabs[i].scene.current_layout_block_handle_pub();
-                        let mut id_counter = 2_i16;
-                        let handles: Vec<codec::Handle> = self.tabs[i]
-                            .scene
-                            .document
-                            .entities()
-                            .filter_map(|e| {
-                                if let codec::EntityType::Viewport(vp) = e {
-                                    if vp.id >= 2 && vp.common.owner_handle == layout_block2 {
-                                        Some(vp.common.handle)
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-                        for h in handles {
-                            if let Some(codec::EntityType::Viewport(vp)) =
-                                self.tabs[i].scene.document.get_entity_mut(h)
-                            {
-                                vp.id = id_counter;
-                                id_counter += 1;
-                            }
-                        }
-                        self.tabs[i].dirty = true;
+                        let n = self.apply_viewport_rects(i, &rects, &sub);
                         self.command_line.push_output(
-                            crate::tf!("VPORTS: created {} viewport(s) [{}].", rects.len(), sub)
-                                .as_ref(),
+                            crate::tf!("VPORTS: created {n} viewport(s) [{}].", sub).as_ref(),
                         );
                     }
                 }
@@ -1392,6 +1470,142 @@ impl OpenCADStudio {
         }
         Some(self.finish_dispatch(cmd))
     }
+
+    /// Replace the current layout's user viewports with `rects`
+    /// (`cx, cz, width, height`), returning how many were created.
+    fn apply_viewport_rects(
+        &mut self,
+        i: usize,
+        rects: &[(f64, f64, f64, f64)],
+        label: &str,
+    ) -> usize {
+        let layout_name = self.tabs[i].scene.current_layout.clone();
+        let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
+        let to_erase: Vec<codec::Handle> = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(vp)
+                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect();
+        if to_erase
+            .iter()
+            .any(|handle| self.tabs[i].scene.is_layer_locked(*handle))
+        {
+            self.command_line.push_error(
+                crate::t!("VPORTS: unlock existing viewport layers first.").as_ref(),
+            );
+            return 0;
+        }
+        self.push_undo_snapshot(i, label);
+        self.tabs[i].scene.erase_entities(&to_erase);
+        let mut created = 0usize;
+        for (cx, cz, w, h) in rects {
+            let mut vp = codec::entities::Viewport::new();
+            vp.center = codec::types::Vector3::new(*cx, 0.0, *cz);
+            vp.width = *w;
+            vp.height = *h;
+            vp.id = 2; // re-numbered below
+            match self.tabs[i].scene.document.add_entity_to_layout(
+                codec::EntityType::Viewport(Box::new(vp)),
+                &layout_name,
+            ) {
+                Ok(handle) => {
+                    self.tabs[i].scene.auto_fit_viewport(handle);
+                    created += 1;
+                }
+                Err(e) => {
+                    self.command_line
+                        .push_error(crate::tf!("VPORTS: {e}").as_ref());
+                }
+            }
+        }
+        let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
+        let mut id_counter = 2_i16;
+        let handles: Vec<codec::Handle> = self.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(vp)
+                    if vp.id >= 2 && vp.common.owner_handle == layout_block =>
+                {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect();
+        for h in handles {
+            if let Some(codec::EntityType::Viewport(vp)) =
+                self.tabs[i].scene.document.get_entity_mut(h)
+            {
+                vp.id = id_counter;
+                id_counter += 1;
+            }
+        }
+        self.tabs[i].dirty = true;
+        created
+    }
+}
+
+/// Drawing variable holding the saved viewport-configuration names, one per
+/// line, so LIST can enumerate them.
+const VPORTSCONFIG_INDEX: &str = "VPORTSCONFIGS";
+
+fn vports_config_key(name: &str) -> String {
+    format!("VPORTSCONFIG:{}", name.trim().to_uppercase())
+}
+
+fn vports_config_names(doc: &codec::Document) -> Vec<String> {
+    crate::io::drawing_variable(doc, VPORTSCONFIG_INDEX)
+        .map(|value| {
+            value
+                .lines()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn vports_config_remember(doc: &mut codec::Document, name: &str) {
+    let mut names = vports_config_names(doc);
+    if names.iter().any(|n| n.eq_ignore_ascii_case(name.trim())) {
+        return;
+    }
+    names.push(name.trim().to_string());
+    crate::io::set_drawing_variable(doc, VPORTSCONFIG_INDEX, &names.join("\n"));
+}
+
+fn vports_config_forget(doc: &mut codec::Document, name: &str) {
+    let names: Vec<String> = vports_config_names(doc)
+        .into_iter()
+        .filter(|n| !n.eq_ignore_ascii_case(name.trim()))
+        .collect();
+    crate::io::set_drawing_variable(doc, VPORTSCONFIG_INDEX, &names.join("\n"));
+}
+
+fn parse_vport_rects(value: &str) -> Vec<(f64, f64, f64, f64)> {
+    value
+        .split(';')
+        .filter_map(|entry| {
+            let mut parts = entry.split(',');
+            let rect = (
+                parts.next()?.trim().parse::<f64>().ok()?,
+                parts.next()?.trim().parse::<f64>().ok()?,
+                parts.next()?.trim().parse::<f64>().ok()?,
+                parts.next()?.trim().parse::<f64>().ok()?,
+            );
+            (rect.2 > 0.0 && rect.3 > 0.0).then_some(rect)
+        })
+        .collect()
 }
 
 // ── Draw Order: interactive command ──────────────────────────

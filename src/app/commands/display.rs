@@ -1372,7 +1372,158 @@ impl OpenCADStudio {
                 }
             }
 
-            // PAGESETUP is folded into the unified plot dialog.
+            // PAGESETUP is folded into the unified plot dialog. Its scriptable
+            // form manages the named page setups the drawing already stores in
+            // its ACAD_PLOTSETTINGS dictionary:
+            //   -PAGESETUP SAVE <name>    capture the current layout's setup
+            //   -PAGESETUP APPLY <name>   apply it to the current layout
+            //   -PAGESETUP RENAME <old> <new>
+            //   -PAGESETUP LIST
+            //   -PAGESETUP DELETE <name>
+            cmd if cmd == "-PAGESETUP" || cmd.starts_with("-PAGESETUP ") => {
+                let rest = cmd.trim_start_matches("-PAGESETUP").trim();
+                let mut words = rest.split_whitespace();
+                let action = words.next().unwrap_or("").to_uppercase();
+                let name = words.next().unwrap_or("");
+                match action.as_str() {
+                    "" => self.command_line.push_info(
+                        crate::t!(
+                            "Usage: -PAGESETUP SAVE <name> | APPLY <name> | RENAME <old> <new> | DELETE <name> | LIST"
+                        )
+                        .as_ref(),
+                    ),
+                    "SAVE" => {
+                        if name.is_empty() {
+                            self.command_line.push_error(
+                                crate::t!("-PAGESETUP SAVE: name the setup.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        if self.tabs[i].scene.current_layout == "Model" {
+                            self.command_line.push_error(
+                                crate::t!("-PAGESETUP: switch to a paper layout first.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        let Some(ps) = self.tabs[i].scene.effective_plot_settings() else {
+                            self.command_line.push_error(
+                                crate::t!("-PAGESETUP: this layout has no plot settings.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        self.push_undo_snapshot(i, "-PAGESETUP SAVE");
+                        self.tabs[i].scene.page_setup_save(name, ps);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::tf!("PAGESETUP: saved '{name}'.").as_ref(),
+                        );
+                    }
+                    "APPLY" | "SET" => {
+                        let Some(mut ps) = self.tabs[i].scene.page_setup_get(name) else {
+                            self.command_line.push_error(
+                                crate::tf!("-PAGESETUP: no setup named '{name}'.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        };
+                        if self.tabs[i].scene.current_layout == "Model" {
+                            self.command_line.push_error(
+                                crate::t!("-PAGESETUP: switch to a paper layout first.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        let layout = self.tabs[i].scene.current_layout.clone();
+                        ps.page_name = name.to_string();
+                        self.push_undo_snapshot(i, "-PAGESETUP APPLY");
+                        self.tabs[i]
+                            .scene
+                            .set_layout_plot_settings(&layout, &ps);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "PAGESETUP: applied '{name}' to {layout}: {:.1}×{:.1} mm, style {}",
+                                ps.paper_width,
+                                ps.paper_height,
+                                if ps.current_style_sheet.is_empty() {
+                                    "None"
+                                } else {
+                                    ps.current_style_sheet.as_str()
+                                }
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    "RENAME" => {
+                        let new = words.next().unwrap_or("");
+                        if name.is_empty() || new.is_empty() {
+                            self.command_line.push_error(
+                                crate::t!("-PAGESETUP RENAME: give the old and new names.")
+                                    .as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        if self.tabs[i].scene.page_setup_get(name).is_none() {
+                            self.command_line.push_error(
+                                crate::tf!("-PAGESETUP: no setup named '{name}'.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        self.push_undo_snapshot(i, "-PAGESETUP RENAME");
+                        self.tabs[i].scene.page_setup_rename(name, new);
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::tf!("PAGESETUP: renamed '{name}' to '{new}'.").as_ref(),
+                        );
+                    }
+                    "DELETE" | "DEL" => {
+                        if self.tabs[i].scene.page_setup_get(name).is_none() {
+                            self.command_line.push_error(
+                                crate::tf!("-PAGESETUP: no setup named '{name}'.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                        self.push_undo_snapshot(i, "-PAGESETUP DELETE");
+                        self.tabs[i].scene.page_setup_delete(name);
+                        self.tabs[i].dirty = true;
+                        self.command_line
+                            .push_output(crate::tf!("PAGESETUP: deleted '{name}'.").as_ref());
+                    }
+                    "LIST" => {
+                        let names = self.tabs[i].scene.page_setup_names();
+                        if names.is_empty() {
+                            self.command_line
+                                .push_info(crate::t!("No named page setups.").as_ref());
+                        } else {
+                            self.command_line
+                                .push_output(crate::t!("Named page setups:").as_ref());
+                            for name in names {
+                                let Some(ps) = self.tabs[i].scene.page_setup_get(&name) else {
+                                    continue;
+                                };
+                                let style = if ps.current_style_sheet.is_empty() {
+                                    "None".to_string()
+                                } else {
+                                    ps.current_style_sheet.clone()
+                                };
+                                self.command_line.push_output(
+                                    crate::tf!(
+                                        "  {name}: {:.1}×{:.1} mm  style={style}",
+                                        ps.paper_width,
+                                        ps.paper_height
+                                    )
+                                    .as_ref(),
+                                );
+                            }
+                        }
+                    }
+                    other => {
+                        self.command_line.push_error(
+                            crate::tf!("-PAGESETUP: unknown option '{other}'.").as_ref(),
+                        );
+                    }
+                }
+                return Some(Task::none());
+            }
             "PAGESETUP" => {
                 return Some(Task::done(Message::PlotDialogOpen));
             }

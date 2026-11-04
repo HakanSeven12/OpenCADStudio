@@ -4313,3 +4313,117 @@ mod mission_m058_tests {
         assert!(all_output(&app).contains("switch to a paper layout first"));
     }
 }
+
+#[cfg(test)]
+mod mission_m059_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn open_layout(app: &mut OpenCADStudio, name: &str) {
+        let i = app.active_tab;
+        app.tabs[i].scene.set_current_layout(name.to_string());
+        app.tabs[i].scene.load_current_layout_state();
+    }
+
+    fn set_sheet(app: &mut OpenCADStudio, width: f64, height: f64, style: &str) {
+        let i = app.active_tab;
+        let layout = app.tabs[i].scene.current_layout.clone();
+        let mut ps = app.tabs[i]
+            .scene
+            .effective_plot_settings()
+            .expect("the layout has plot settings");
+        ps.paper_width = width;
+        ps.paper_height = height;
+        ps.current_style_sheet = style.to_string();
+        ps.paper_size = format!("TEST_{width}x{height}");
+        app.tabs[i].scene.set_layout_plot_settings(&layout, &ps);
+    }
+
+    #[test]
+    fn two_named_setups_can_be_saved_listed_and_applied() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let first = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        app.tabs[i].scene.add_layout("Sheet2").unwrap();
+        app.tabs[i].scene.initialize_layout_page_setup("Sheet2");
+        open_layout(&mut app, &first);
+        set_sheet(&mut app, 420.0, 297.0, "mono.ctb");
+        let _ = app.run_command_line("-PAGESETUP SAVE A3-MONO");
+
+        open_layout(&mut app, "Sheet2");
+        set_sheet(&mut app, 841.0, 594.0, "colour.ctb");
+        let _ = app.run_command_line("-PAGESETUP SAVE A1-COLOUR");
+
+        let _ = app.run_command_line("-PAGESETUP LIST");
+        let output = all_output(&app);
+        assert!(output.contains("A3-MONO: 420.0×297.0 mm  style=mono.ctb"), "{output}");
+        assert!(output.contains("A1-COLOUR: 841.0×594.0 mm  style=colour.ctb"), "{output}");
+
+        let _ = app.run_command_line("-PAGESETUP APPLY A3-MONO");
+        let applied = app.tabs[i]
+            .scene
+            .effective_plot_settings()
+            .unwrap();
+        assert!((applied.paper_width - 420.0).abs() < 1e-9, "{applied:?}");
+        assert!((applied.paper_height - 297.0).abs() < 1e-9, "{applied:?}");
+        assert_eq!(applied.current_style_sheet, "mono.ctb");
+        let output = all_output(&app);
+        assert!(output.contains("applied 'A3-MONO' to Sheet2"), "{output}");
+    }
+
+    #[test]
+    fn a_setup_can_be_renamed_and_deleted() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let first = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        open_layout(&mut app, &first);
+        set_sheet(&mut app, 420.0, 297.0, "mono.ctb");
+        let _ = app.run_command_line("-PAGESETUP SAVE OLD");
+
+        let _ = app.run_command_line("-PAGESETUP RENAME OLD NEW");
+        assert_eq!(app.tabs[i].scene.page_setup_names(), vec!["NEW".to_string()]);
+        assert!(app.tabs[i].scene.page_setup_get("NEW").is_some());
+
+        let _ = app.run_command_line("-PAGESETUP DELETE NEW");
+        assert!(app.tabs[i].scene.page_setup_get("NEW").is_none());
+        assert!(all_output(&app).contains("deleted 'NEW'"));
+    }
+
+    #[test]
+    fn applying_an_unknown_setup_is_refused() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let first = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        open_layout(&mut app, &first);
+
+        let _ = app.run_command_line("-PAGESETUP APPLY NOPE");
+
+        assert!(all_output(&app).contains("no setup named 'NOPE'"));
+    }
+}

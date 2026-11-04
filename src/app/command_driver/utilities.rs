@@ -1098,6 +1098,8 @@ impl OpenCADStudio {
             // VPORTS SAVE/RESTORE take their name on the same line.
             || tokens[0].eq_ignore_ascii_case("VPORTS")
             || tokens[0].eq_ignore_ascii_case("-VPORTS")
+            // -PAGESETUP takes SAVE/APPLY/RENAME and names on one line.
+            || tokens[0].eq_ignore_ascii_case("-PAGESETUP")
         {
             return self.dispatch_command(cmd);
         }

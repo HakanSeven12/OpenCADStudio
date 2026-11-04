@@ -46,6 +46,9 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_layers(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+        if let Some(task) = self.dispatch_layer_filter(cmd, i) {
+            return Some(task);
+        }
         match cmd {
             cmd if cmd.starts_with("GRAPHICATTRIBUTELAYER ") => {
                 let name = cmd.trim_start_matches("GRAPHICATTRIBUTELAYER").trim();

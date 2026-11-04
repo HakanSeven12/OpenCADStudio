@@ -1073,6 +1073,11 @@ impl OpenCADStudio {
                             "off": l.is_off(),
                             "frozen": l.is_frozen(),
                             "locked": l.is_locked(),
+                            "plottable": l.is_plottable,
+                            "transparency": (l.transparency.as_percent() * 100.0).round() as u64,
+                            "description": l.description,
+                            "linetype": l.line_type,
+                            "plot_style": l.plot_style,
                         });
                         let m = o.as_object_mut().expect("json object");
                         if let Some(aci) = l.color.index() {

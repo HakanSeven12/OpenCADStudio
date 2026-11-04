@@ -8490,9 +8490,9 @@ parameters-manager-feedback =
     .history = Edição do gerenciador de parâmetros
 
 block-action-targets =
-    .prompt = BACTIONSET  Selecione objetos ou digite Parameter seguido do nome de um ponto e pressione Enter (Parameter "…"):
-    .create-prompt = BACTION  Selecione objetos ou digite Parameter seguido do nome de um ponto e pressione Enter (Parameter "…"):
-    .unique-point = Insira um nome único de parâmetro de ponto.
+    .prompt = BACTIONSET  Selecione objetos ou digite Parameter seguido do nome do parâmetro e pressione Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  Selecione objetos ou digite Parameter seguido do nome do parâmetro e pressione Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = Insira um nome de parâmetro exclusivo.
     .empty = Uma ação precisa de pelo menos um destino.
     .invalid = Selecione destinos compatíveis pertencentes a este bloco.
     .stale = A ação ou a sessão do editor de blocos mudou; reinicie BACTIONSET.

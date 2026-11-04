@@ -650,8 +650,11 @@ fn block_move_point_chain_properties_refresh_existing_references_and_preserve_un
 }
 
 #[test]
-fn block_mixed_order_and_point_transport_grip_undo_redo() {
-    for scale_first in [false, true] {
+fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
+    for (scale_first, child_linear) in [false, true]
+        .into_iter()
+        .flat_map(|order| [false, true].map(|linear| (order, linear)))
+    {
         let (mut app, insert) = fixture();
         let i = app.active_tab;
         let other = app.tabs[i]
@@ -675,7 +678,19 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             Vector3::UNIT_Y,
         )
         .unwrap();
-        let child = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y).unwrap();
+        let child = if child_linear {
+            distance::create(
+                doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::ZERO,
+                Vector3::UNIT_X * 10.,
+                Vector3::UNIT_Y,
+            )
+            .unwrap()
+        } else {
+            point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y).unwrap()
+        };
         let second_parent = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y * 2.).unwrap();
         for handle in [parent, child] {
             let codec::objects::ObjectType::DynamicBlock(object) =
@@ -786,6 +801,20 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         };
         let original = line(&before, other);
         let start = if scale_first { 20. } else { 30. };
+        let base = |app: &OpenCADStudio| {
+            actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
+                .unwrap()
+                .base
+        };
+        let expected_base = |offset: f64| {
+            point.base
+                + if child_linear {
+                    DVec3::X * offset
+                } else {
+                    DVec3::ZERO
+                }
+        };
+
         let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(20., 0., 0.)));
         assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
         let after = &app.tabs[i].scene.document;
@@ -795,7 +824,16 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         );
         assert_eq!(line(after, other), original);
         let frame = actions::instance::frame(after, insert, &point).unwrap();
-        assert_eq!(frame.end, DVec3::X * 10.);
+        assert_eq!(frame.end, point.end + DVec3::X * 10.);
+        assert_eq!(
+            frame.base,
+            point.base
+                + if child_linear {
+                    DVec3::X * 10.
+                } else {
+                    DVec3::ZERO
+                }
+        );
         app.undo_steps(1);
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
@@ -831,7 +869,9 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             .unwrap()
             .id;
         assert!(app.start_test_action_grip(insert, child_grip));
-        let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(15., 0., 0.)));
+        let _ = app.feed_command(crate::command::StepInput::Point(
+            point.end + DVec3::new(15., 0., 0.),
+        ));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 5.), DVec3::X * (start + 7.))
@@ -840,7 +880,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 15.
+            point.end + DVec3::X * 15.
         );
         app.undo_steps(1);
         assert_eq!(
@@ -858,6 +898,8 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
         );
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
 
+        assert_eq!(base(&app), expected_base(10.));
+
         // Drive a second parent after the direct child edit. Both its delta and
         // the child's autonomous input must survive subsequent parent history.
         app.tabs[i].scene.select_entity(insert, true);
@@ -871,6 +913,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             .id;
         assert!(app.start_test_action_grip(insert, second_grip));
         let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(3., 0., 0.)));
+        assert_eq!(base(&app), expected_base(13.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 8.), DVec3::X * (start + 10.))
@@ -879,9 +922,10 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 18.
+            point.end + DVec3::X * 18.
         );
         app.undo_steps(1);
+        assert_eq!(base(&app), expected_base(10.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 5.), DVec3::X * (start + 7.))
@@ -890,20 +934,21 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 15.
+            point.end + DVec3::X * 15.
         );
         app.redo_steps(1);
         assert_eq!(
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 18.
+            point.end + DVec3::X * 18.
         );
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
 
         app.tabs[i].scene.select_entity(insert, true);
         app.tabs[i].selected_handle = Some(insert);
         app.refresh_properties();
+        assert_eq!(base(&app), expected_base(13.));
         let root_grip = app.tabs[i]
             .selected_grips
             .iter()
@@ -912,6 +957,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             .id;
         assert!(app.start_test_action_grip(insert, root_grip));
         let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(10., 0., 0.)));
+        assert_eq!(base(&app), expected_base(3.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * 8., DVec3::X * 9.)
@@ -920,9 +966,10 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 8.
+            point.end + DVec3::X * 8.
         );
         app.undo_steps(1);
+        assert_eq!(base(&app), expected_base(13.));
         assert_eq!(
             line(&app.tabs[i].scene.document, insert),
             (DVec3::X * (start + 8.), DVec3::X * (start + 10.))
@@ -931,7 +978,7 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 18.
+            point.end + DVec3::X * 18.
         );
         app.redo_steps(1);
         assert_eq!(
@@ -942,8 +989,9 @@ fn block_mixed_order_and_point_transport_grip_undo_redo() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &point)
                 .unwrap()
                 .end,
-            DVec3::X * 8.
+            point.end + DVec3::X * 8.
         );
+        assert_eq!(base(&app), expected_base(3.));
         assert_eq!(line(&app.tabs[i].scene.document, other), original);
     }
 }
@@ -1706,4 +1754,264 @@ fn block_move_marker_click_respects_pickadd_replacement() {
     assert!(actions::actions(&app.tabs[i].scene.document, def)
         .iter()
         .any(|(_, action, _, _)| action.dependencies == vec![other]));
+}
+
+#[test]
+fn block_move_linear_targets_support_names_markers_and_history() {
+    let (mut app, insert, def, root, _, action) = setup_point_transport(false, true);
+    let _ = app.update(Message::CommandEscape);
+    let i = app.active_tab;
+    let delta = DVec3::new(3., 4., 0.);
+    app.tabs[i].scene.document = actions::instance::evaluate_value(
+        &app.tabs[i].scene.document,
+        insert,
+        root.handle,
+        actions::Value::Point(root.end + delta),
+    )
+    .unwrap()
+    .unwrap();
+    begin(&mut app, insert);
+    let linear = distance::create(
+        &mut app.tabs[i].scene.document,
+        def,
+        distance::Kind::Linear,
+        Vector3::new(2., 10., 0.),
+        Vector3::new(12., 10., 0.),
+        Vector3::new(7., 12., 0.),
+    )
+    .unwrap();
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        app.tabs[i].scene.document.objects.get_mut(&linear).unwrap()
+    else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
+        panic!()
+    };
+    parameter.distance_name = "Door \"width\"".into();
+    let target = actions::all_parameters(&app.tabs[i].scene.document, def)
+        .into_iter()
+        .find(|p| p.handle == linear)
+        .unwrap();
+    let _ = app.dispatch_command("BACTIONBARMODE 0");
+    app.tabs[i].selected_authoring = Some(action);
+    let _ = app.dispatch_command("BACTIONSET");
+    feed(&mut app, "Add");
+    feed(
+        &mut app,
+        &format!("Parameter {}", serde_json::to_string(&target.name).unwrap()),
+    );
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(linear));
+    let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    assert!(app.tabs[i].active_cmd.is_none());
+    let moved = actions::instance::frame(&app.tabs[i].scene.document, insert, &target).unwrap();
+    assert_eq!(moved.base, target.base + delta);
+    assert_eq!(moved.end, target.end + delta);
+    app.undo_steps(1);
+    assert_eq!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &target)
+            .unwrap()
+            .base,
+        target.base
+    );
+    app.redo_steps(1);
+    assert_eq!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &target).unwrap(),
+        moved
+    );
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600., 900.);
+    app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
+        DVec3::new(-2., -2., 0.),
+        DVec3::new(15., 15., 0.),
+        1600. / 900.,
+    );
+    let bounds = iced::Rectangle {
+        x: 0.,
+        y: 0.,
+        width: 1600.,
+        height: 900.,
+    };
+    let camera = app.tabs[i].scene.camera.borrow();
+    let context = crate::command::PointPickContext {
+        view: camera.view_proj_rte(bounds),
+        eye: camera.eye(),
+        bounds,
+        aperture_px: 10.,
+    };
+    let region = [
+        iced::Point::new(1., 1.),
+        iced::Point::new(1599., 1.),
+        iced::Point::new(1599., 899.),
+        iced::Point::new(1., 899.),
+    ];
+    assert!(
+        crate::modules::block_editor::action_set::point_markers_in_region(
+            &app.tabs[i].scene,
+            def,
+            |h| h == linear,
+            &region,
+            context,
+            false,
+        )
+        .iter()
+        .any(|(h, _)| *h == linear)
+    );
+    drop(camera);
+    let click = |app: &mut OpenCADStudio| {
+        let scene = &app.tabs[app.active_tab].scene;
+        let (w, h) = scene.selection.borrow().view.vp_size;
+        let tile = scene.active_model_tile_bounds(w, h);
+        let at = scene
+            .camera
+            .borrow()
+            .project(
+                target.end,
+                iced::Rectangle {
+                    x: 0.,
+                    y: 0.,
+                    width: tile.width,
+                    height: tile.height,
+                },
+            )
+            .unwrap();
+        let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(
+            at.x + tile.x,
+            at.y + tile.y,
+        )));
+        let _ = app.update(Message::ViewportLeftRelease);
+    };
+    app.tabs[i].selected_authoring = Some(action);
+    let _ = app.dispatch_command("BACTIONSET");
+    feed(&mut app, "Remove");
+    click(&mut app);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(linear));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    assert_eq!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &target)
+            .unwrap()
+            .base,
+        target.base
+    );
+    let count = actions::actions(&app.tabs[i].scene.document, def).len();
+    let _ = app.dispatch_command("BACTION MOVE");
+    feed(&mut app, &root.name);
+    click(&mut app);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(linear));
+    let _ = app.feed_command(crate::command::StepInput::Enter);
+    let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(1., 1., 0.)));
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert_eq!(
+        actions::actions(&app.tabs[i].scene.document, def).len(),
+        count + 1
+    );
+    assert!(actions::actions(&app.tabs[i].scene.document, def)
+        .iter()
+        .any(|(h, a, _, _)| *h != action && a.dependencies == vec![linear]));
+    assert_eq!(
+        actions::instance::frame(&app.tabs[i].scene.document, insert, &target)
+            .unwrap()
+            .base,
+        target.base + delta
+    );
+}
+
+#[test]
+fn block_move_linear_target_choices_reject_ambiguity_and_stale_names() {
+    for creation in [false, true] {
+        let (mut app, insert, def, root, child, action) = setup_point_transport(false, true);
+        let _ = app.update(Message::CommandEscape);
+        begin(&mut app, insert);
+        let i = app.active_tab;
+        let linear = distance::create(
+            &mut app.tabs[i].scene.document,
+            def,
+            distance::Kind::Linear,
+            Vector3::new(2., 10., 0.),
+            Vector3::new(12., 10., 0.),
+            Vector3::new(7., 12., 0.),
+        )
+        .unwrap();
+        let rename = |app: &mut OpenCADStudio, name: &str| {
+            let codec::objects::ObjectType::DynamicBlock(object) =
+                app.tabs[i].scene.document.objects.get_mut(&linear).unwrap()
+            else {
+                panic!()
+            };
+            let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
+            else {
+                panic!()
+            };
+            parameter.distance_name = name.to_owned();
+        };
+        let start = |app: &mut OpenCADStudio| {
+            if creation {
+                let _ = app.dispatch_command("BACTION MOVE");
+                feed(app, &root.name);
+            } else {
+                app.tabs[i].selected_authoring = Some(action);
+                let _ = app.dispatch_command("BACTIONSET");
+                feed(app, "Add");
+            }
+        };
+        let _ = app.dispatch_command("BACTIONBARMODE 0");
+        rename(&mut app, &child.name);
+        start(&mut app);
+        feed(
+            &mut app,
+            &format!("Parameter {}", serde_json::to_string(&child.name).unwrap()),
+        );
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(crate::tr!("block-action-targets", "unique-point").as_str())
+        );
+        assert!(!app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .selection_marker_selected(linear));
+        let _ = app.update(Message::CommandEscape);
+        rename(&mut app, "Door width");
+        start(&mut app);
+        feed(&mut app, "Parameter Door width");
+        assert!(app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .selection_marker_selected(linear));
+        if creation {
+            let _ = app.feed_command(crate::command::StepInput::Enter);
+        }
+        rename(&mut app, "Changed width");
+        let before = app.tabs[i].scene.document.clone();
+        let depth = app.tabs[i].history.undo_stack.len();
+        if creation {
+            let _ = app.feed_command(crate::command::StepInput::Point(DVec3::ZERO));
+        } else {
+            let _ = app.feed_command(crate::command::StepInput::Enter);
+        }
+        let expected = if creation {
+            crate::tr!("block-action-targets", "create-stale")
+        } else {
+            crate::tr!("block-action-targets", "stale")
+        };
+        assert_eq!(
+            app.command_line.last_error.as_deref(),
+            Some(expected.as_str())
+        );
+        assert_eq!(app.tabs[i].scene.document, before);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+    }
 }

@@ -8490,9 +8490,9 @@ parameters-manager-feedback =
     .history = Редактиране в диспечера на параметри
 
 block-action-targets =
-    .prompt = BACTIONSET  Изберете обекти или въведете Parameter и име на точка, после натиснете Enter (Parameter "…"):
-    .create-prompt = BACTION  Изберете обекти или въведете Parameter и име на точка, после натиснете Enter (Parameter "…"):
-    .unique-point = Въведете уникално име на параметър за точка.
+    .prompt = BACTIONSET  Изберете обекти или въведете Parameter и име на параметър, след което натиснете Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  Изберете обекти или въведете Parameter и име на параметър, след което натиснете Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = Въведете уникално име на параметър.
     .empty = Действието се нуждае от поне една цел.
     .invalid = Изберете поддържани цели в този блок.
     .stale = Действието или сесията на редактора на блокове е променена; стартирайте BACTIONSET отново.

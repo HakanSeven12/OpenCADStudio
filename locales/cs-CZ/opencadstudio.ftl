@@ -8490,9 +8490,9 @@ parameters-manager-feedback =
     .history = Úprava ve správci parametrů
 
 block-action-targets =
-    .prompt = BACTIONSET  Vyberte objekty nebo zadejte Parameter a název bodu, poté stiskněte Enter (Parameter "…"):
-    .create-prompt = BACTION  Vyberte objekty nebo zadejte Parameter a název bodu, poté stiskněte Enter (Parameter "…"):
-    .unique-point = Zadejte jedinečný název bodového parametru.
+    .prompt = BACTIONSET  Vyberte objekty nebo zadejte Parameter a název parametru a stiskněte Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  Vyberte objekty nebo zadejte Parameter a název parametru a stiskněte Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = Zadejte jedinečný název parametru.
     .empty = Akce potřebuje alespoň jeden cíl.
     .invalid = Vyberte podporované cíle patřící do tohoto bloku.
     .stale = Akce nebo relace editoru bloků se změnila; spusťte BACTIONSET znovu.

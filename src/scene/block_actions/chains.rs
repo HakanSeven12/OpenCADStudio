@@ -1,20 +1,20 @@
-//! Deterministic Move-to-Point parameter propagation. Reference caches retain
-//! effective endpoints; recover autonomous input before replaying the graph.
+//! Deterministic Move-to-parameter propagation. Reference caches retain
+//! effective frames; recover autonomous input before replaying the graph.
 use super::instance::ParameterFrame;
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) const CYCLE_ERROR: &str = "The block action chain contains a cycle.";
 
-fn point_index(
+fn frame_index(
     doc: &Document,
     definition: Handle,
     parameters: &[Parameter],
 ) -> Result<BTreeMap<Handle, (Handle, i32)>, &'static str> {
     let owner = authoring::graph(doc, definition).ok().flatten();
     let mut index = BTreeMap::new();
-    for p in parameters.iter().filter(|p| p.point) {
-        for h in [p.handle, p.grip] {
+    for p in parameters.iter().filter(|p| p.point || p.linear) {
+        for h in [p.handle, if p.point { p.grip } else { Handle::NULL }] {
             if h != Handle::NULL && doc.object_owner(h) == owner {
                 if index
                     .get(&h)
@@ -29,14 +29,14 @@ fn point_index(
     Ok(index)
 }
 
-pub(super) fn point_target(
+pub(super) fn frame_target(
     doc: &Document,
     definition: Handle,
     source_id: i32,
     handle: Handle,
 ) -> Option<Handle> {
     let parameters = all_parameters(doc, definition);
-    let index = point_index(doc, definition, &parameters).ok()?;
+    let index = frame_index(doc, definition, &parameters).ok()?;
     index.get(&handle).and_then(|(parameter, id)| {
         (*id != source_id || *parameter == handle).then_some(*parameter)
     })
@@ -68,7 +68,7 @@ pub(super) struct Graph<'a> {
 impl<'a> Graph<'a> {
     pub(super) fn new(doc: &'a Document, definition: Handle) -> Result<Self, &'static str> {
         let parameters = all_parameters(doc, definition);
-        let index = point_index(doc, definition, &parameters)?;
+        let index = frame_index(doc, definition, &parameters)?;
         let mut graph = Self {
             nodes: BTreeMap::new(),
             order: Vec::new(),
@@ -106,8 +106,11 @@ impl<'a> Graph<'a> {
                     .map(|target| parameters.iter().find(|p| p.handle == *target).unwrap()),
             ) {
                 let chained = match &doc.objects[&p.handle] {
-                    ObjectType::DynamicBlock(object) => matches!(&object.data,
-                        DynamicBlockData::PointParameter(p) if p.parameter.parameter.chain_actions),
+                    ObjectType::DynamicBlock(object) => {
+                        matches!(&object.data,
+                        DynamicBlockData::PointParameter(p) if p.parameter.parameter.chain_actions)
+                            || matches!(&object.data, DynamicBlockData::LinearParameter(p) if p.parameter.parameter.chain_actions)
+                    }
                     _ => false,
                 };
                 graph.nodes.entry(p.handle).or_insert_with(|| Node {
@@ -159,11 +162,11 @@ impl<'a> Graph<'a> {
     pub(super) fn parameter(&self, handle: Handle) -> &Parameter {
         &self.nodes[&handle].parameter
     }
-    pub(super) fn points(&self) -> impl Iterator<Item = &Parameter> {
+    pub(super) fn receivers(&self) -> impl Iterator<Item = &Parameter> {
         self.nodes
             .values()
             .map(|n| &n.parameter)
-            .filter(|p| p.point)
+            .filter(|p| p.point || p.linear)
     }
 
     pub(super) fn autonomous(
@@ -193,7 +196,7 @@ impl<'a> Graph<'a> {
                 -incoming.get(handle).copied().unwrap_or(DVec3::ZERO),
             );
             autonomous.insert(*handle, raw);
-            let active = if p.point && !node.chained {
+            let active = if (p.point || p.linear) && !node.chained {
                 raw
             } else {
                 effective
@@ -215,9 +218,10 @@ impl<'a> Graph<'a> {
         autonomous: &BTreeMap<Handle, ParameterFrame>,
         values: Option<&BTreeMap<Handle, DVec3>>,
         bases: Option<&BTreeMap<Handle, DVec3>>,
+        active_frames: &mut BTreeMap<Handle, ParameterFrame>,
     ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
         let mut incoming = BTreeMap::<Handle, DVec3>::new();
-        let mut final_points = BTreeMap::new();
+        let mut final_frames = BTreeMap::new();
         for handle in &self.order {
             let node = &self.nodes[handle];
             let p = &node.parameter;
@@ -246,11 +250,11 @@ impl<'a> Graph<'a> {
             // Non-Point nodes are currently input sources only. Their base is
             // supplied by the current evaluation frame, independently of the
             // endpoint recovered from the previous evaluation.
-            if !p.point {
+            if !p.point && !incoming.contains_key(handle) {
                 raw.base = bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base);
             }
             let effective = translated(p, raw, offset);
-            let active = if p.point && !node.chained {
+            let active = if (p.point || p.linear) && !node.chained {
                 raw
             } else {
                 effective
@@ -262,13 +266,14 @@ impl<'a> Graph<'a> {
             {
                 return Err("The parameter value produces non-finite geometry.");
             }
-            if p.point {
+            active_frames.insert(*handle, active);
+            if p.point || p.linear {
                 set_value(staged, p, Value::Point(active.end))?;
-                final_points.insert(*handle, effective);
+                final_frames.insert(*handle, effective);
             }
             Self::propagate(node, active, &mut incoming)?;
         }
-        Ok(final_points)
+        Ok(final_frames)
     }
 
     fn propagate(

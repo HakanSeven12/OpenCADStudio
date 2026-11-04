@@ -8487,9 +8487,9 @@ parameters-manager-feedback =
     .history = Parametrien hallinnan muokkaus
 
 block-action-targets =
-    .prompt = BACTIONSET  Valitse objekteja tai kirjoita Parameter ja pisteen nimi ja paina Enter (Parameter "…"):
-    .create-prompt = BACTION  Valitse objekteja tai kirjoita Parameter ja pisteen nimi ja paina Enter (Parameter "…"):
-    .unique-point = Anna yksilöllinen pisteparametrin nimi.
+    .prompt = BACTIONSET  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .create-prompt = BACTION  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .unique-point = Anna yksilöllinen parametrin nimi.
     .empty = Toiminto tarvitsee vähintään yhden kohteen.
     .invalid = Valitse tuettuja kohteita tästä lohkosta.
     .stale = Toiminto tai lohkoeditorin istunto on muuttunut; käynnistä BACTIONSET uudelleen.

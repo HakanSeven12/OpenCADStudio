@@ -1680,7 +1680,7 @@ mod bedit_characterization_tests {
         let line = app.tabs[tab]
             .scene
             .document
-            .add_entity(EntityType::Line(Line::from_points(
+            .add_entity(codec::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )))
@@ -2985,5 +2985,428 @@ mod copytolayer_tests {
         assert_circle(&app, copy, "BLUE", DVec3::new(3.0, 4.0, 5.0));
         assert_circle(&app, src, "RED", DVec3::ZERO);
         assert_eq!(app.tabs[app.active_tab].history.undo_stack.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod selection_history_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+    use crate::command::StepInput;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    fn three_lines() -> (OpenCADStudio, Vec<codec::Handle>) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handles = (0..3)
+            .map(|n| {
+                app.tabs[i]
+                    .scene
+                    .add_entity(codec::EntityType::Line(Line::from_points(
+                        Vector3::new(n as f64 * 10.0, 0.0, 0.0),
+                        Vector3::new(n as f64 * 10.0 + 5.0, 0.0, 0.0),
+                    )))
+            })
+            .collect();
+        (app, handles)
+    }
+
+    fn selected(app: &OpenCADStudio) -> Vec<codec::Handle> {
+        app.tabs[app.active_tab]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect()
+    }
+
+    fn pick(app: &mut OpenCADStudio, handle: codec::Handle) {
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(handle, false);
+        let current = selected(app);
+        let _ = app.feed_command(StepInput::SelectionComplete(current));
+    }
+
+    #[test]
+    fn select_command_commits_the_picked_set() {
+        let (mut app, h) = three_lines();
+        let _ = app.run_command_line("SELECT");
+        let i = app.active_tab;
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.is_selection_gathering()),
+            "SELECT must gather objects"
+        );
+        pick(&mut app, h[1]);
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert_eq!(selected(&app), vec![h[1]]);
+        assert!(app.tabs[app.active_tab].active_cmd.is_none());
+    }
+
+    #[test]
+    fn select_previous_restores_the_set_before_select() {
+        let (mut app, h) = three_lines();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(h[0], false);
+
+        let _ = app.run_command_line("SELECT");
+        app.tabs[i].scene.deselect_all();
+        pick(&mut app, h[1]);
+        let _ = app.feed_command(StepInput::Enter);
+        assert_eq!(selected(&app), vec![h[1]]);
+
+        let _ = app.run_command_line("SELECTPREVIOUS");
+        assert_eq!(selected(&app), vec![h[0]]);
+    }
+
+    #[test]
+    fn select_previous_without_a_previous_set_keeps_the_selection() {
+        let (mut app, h) = three_lines();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(h[2], false);
+        let _ = app.run_command_line("SELECTPREVIOUS");
+        assert_eq!(selected(&app), vec![h[2]]);
+    }
+}
+
+#[cfg(test)]
+mod dash_layer_properties_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+
+    fn app_with_layer() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("-LAYER NEW WALLS");
+        app
+    }
+
+    fn layer(app: &OpenCADStudio) -> &codec::tables::Layer {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .get("WALLS")
+            .expect("WALLS layer")
+    }
+
+    #[test]
+    fn dash_layer_sets_transparency_and_description() {
+        let mut app = app_with_layer();
+        let _ = app.run_command_line("-LAYER TR 50 WALLS");
+        let _ = app.run_command_line("-LAYER D walls WALLS");
+
+        assert_eq!(
+            layer(&app).transparency,
+            codec::types::Transparency::from_percent(0.5)
+        );
+        assert_eq!(layer(&app).description, "walls");
+    }
+
+    #[test]
+    fn dash_layer_plot_flag_is_visible_in_the_layer_list() {
+        let mut app = app_with_layer();
+        let _ = app.run_command_line("-LAYER PLOT NOPLOT WALLS");
+        assert!(!layer(&app).is_plottable);
+
+        let listed = app.automation_op(r#"{"op":"layers"}"#);
+        let walls = listed["layers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["name"] == "WALLS")
+            .expect("WALLS listed");
+        assert_eq!(walls["plottable"], false);
+        assert_eq!(walls["transparency"], 0);
+        assert_eq!(walls["description"], "");
+    }
+}
+
+#[cfg(test)]
+mod attedit_dash_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+    use codec::entities::{AttributeEntity, Insert};
+    use codec::types::Vector3;
+
+    fn inserts_with_title() -> (OpenCADStudio, Vec<codec::Handle>) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handles = (0..3)
+            .map(|n| {
+                let mut insert =
+                    Insert::new("TITLEBLOCK", Vector3::new(n as f64 * 50.0, 0.0, 0.0));
+                insert
+                    .attributes
+                    .push(AttributeEntity::new("TITLE".into(), "old".into()));
+                app.tabs[i]
+                    .scene
+                    .add_entity(codec::EntityType::Insert(insert))
+            })
+            .collect();
+        (app, handles)
+    }
+
+    fn attribute(app: &OpenCADStudio, handle: codec::Handle) -> (String, String) {
+        let entity = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("insert");
+        let codec::EntityType::Insert(insert) = entity else {
+            panic!("not an insert");
+        };
+        let attr = insert.attributes.first().expect("attribute");
+        (attr.tag.clone(), attr.get_value().to_string())
+    }
+
+    #[test]
+    fn dash_attedit_accepts_a_handle_argument() {
+        let (mut app, handles) = inserts_with_title();
+        let line = format!("-ATTEDIT {:X} TITLE new", handles[1].value());
+        let _ = app.run_command_line(&line);
+
+        assert_eq!(attribute(&app, handles[1]), ("TITLE".into(), "new".into()));
+        assert_eq!(attribute(&app, handles[0]), ("TITLE".into(), "old".into()));
+    }
+
+    #[test]
+    fn dash_attedit_prompts_when_nothing_is_selected() {
+        let (mut app, _) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT");
+
+        let i = app.active_tab;
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("ATTEDIT must ask for a reference");
+        assert!(
+            command.prompt().contains("Select block"),
+            "prompt was {}",
+            command.prompt()
+        );
+    }
+
+    #[test]
+    fn dash_attedit_renames_a_tag_across_every_reference() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT RENAME TITLE SHEET");
+
+        for handle in handles {
+            assert_eq!(attribute(&app, handle), ("SHEET".into(), "old".into()));
+        }
+    }
+}
+
+#[cfg(test)]
+mod layer_filter_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+
+    fn app_with_layers() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        for (name, color) in [("DIMS-A", 1), ("DIMS-B", 7), ("WALLS", 1)] {
+            let _ = app.run_command_line(&format!("-LAYER NEW {name}"));
+            let _ = app.run_command_line(&format!("-LAYER COLOR {color} {name}"));
+        }
+        app
+    }
+
+    fn matching(app: &OpenCADStudio, filter: &str) -> Vec<String> {
+        let filter = app
+            .layer_filters
+            .iter()
+            .find(|f| f.name.eq_ignore_ascii_case(filter))
+            .expect("filter");
+        let mut names: Vec<String> = app.tabs[app.active_tab]
+            .scene
+            .document
+            .layers
+            .iter()
+            .filter(|layer| filter.matches(layer))
+            .map(|layer| layer.name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn headless_run_reaches_the_filter_command() {
+        let mut app = app_with_layers();
+        let reply = app.automation_op(r#"{"op":"run","cmd":"LAYERFILTER NEW DIMS DIMS*"}"#);
+        println!("DBG reply={reply}");
+        assert_eq!(matching(&app, "DIMS"), ["DIMS-A", "DIMS-B"]);
+    }
+
+    #[test]
+    fn name_wildcard_filter_selects_the_discipline() {
+        let mut app = app_with_layers();
+        let _ = app.run_command_line("LAYERFILTER NEW DIMS DIMS*");
+        assert_eq!(matching(&app, "DIMS"), ["DIMS-A", "DIMS-B"]);
+    }
+
+    #[test]
+    fn colour_predicate_narrows_the_filter_result() {
+        let mut app = app_with_layers();
+        let _ = app.run_command_line("LAYERFILTER NEW DIMS DIMS*");
+        let _ = app.run_command_line("LAYERFILTER SET DIMS COLOR 1");
+        assert_eq!(matching(&app, "DIMS"), ["DIMS-A"]);
+    }
+
+    #[test]
+    fn apply_turns_off_every_layer_in_the_filter() {
+        let mut app = app_with_layers();
+        let _ = app.run_command_line("LAYERFILTER NEW DIMS DIMS*");
+        let _ = app.run_command_line("LAYERFILTER APPLY DIMS OFF");
+
+        let layers = &app.tabs[app.active_tab].scene.document.layers;
+        assert!(layers.get("DIMS-A").unwrap().is_off());
+        assert!(layers.get("DIMS-B").unwrap().is_off());
+        assert!(!layers.get("WALLS").unwrap().is_off());
+    }
+
+    #[test]
+    fn dash_layer_accepts_a_filter_as_its_name_list() {
+        let mut app = app_with_layers();
+        let _ = app.run_command_line("LAYERFILTER NEW DIMS DIMS*");
+        let _ = app.run_command_line("-LAYER OFF FILTER:DIMS");
+
+        let layers = &app.tabs[app.active_tab].scene.document.layers;
+        assert!(layers.get("DIMS-A").unwrap().is_off());
+        assert!(layers.get("DIMS-B").unwrap().is_off());
+        assert!(!layers.get("WALLS").unwrap().is_off());
+    }
+}
+
+#[cfg(test)]
+mod dim_update_regen_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+    use crate::entities::dimension::as_dimension;
+    use codec::entities::Dimension;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    /// A line with a linear dimension associated to its two ends.
+    fn app_with_associative_dimension() -> (OpenCADStudio, codec::Handle, codec::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i].scene.add_entity(codec::EntityType::Line(
+            Line::from_points(Vector3::ZERO, Vector3::new(40.0, 0.0, 0.0)),
+        ));
+        let dimension = app.tabs[i].scene.add_entity(
+            crate::modules::annotate::linear_dim::linear_dimension_entity(
+                glam::DVec3::ZERO,
+                glam::DVec3::new(40.0, 0.0, 0.0),
+                glam::DVec3::new(20.0, 10.0, 0.0),
+                glam::DVec3::X,
+                None,
+            ),
+        );
+        app.tabs[i]
+            .scene
+            .attach_dimension_association(dimension, vec![Some(line), Some(line)]);
+        (app, line, dimension)
+    }
+
+    fn last_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .rev()
+            .find(|entry| matches!(entry.kind, crate::ui::command_line::EntryKind::Output))
+            .map(|entry| entry.text.clone())
+            .unwrap_or_default()
+    }
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .filter(|entry| matches!(entry.kind, crate::ui::command_line::EntryKind::Output))
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn dimregen_solves_the_dimension_after_an_external_geometry_change() {
+        let (mut app, line, dimension) = app_with_associative_dimension();
+        let i = app.active_tab;
+        if let Some(codec::EntityType::Line(line)) =
+            app.tabs[i].scene.document.get_entity_mut(line)
+        {
+            line.start = Vector3::new(10.0, 0.0, 0.0);
+            line.end = Vector3::new(60.0, 0.0, 0.0);
+        }
+
+        let _ = app.run_command_line("DIMREGEN");
+
+        let dimension = as_dimension(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(dimension)
+                .expect("dimension"),
+        )
+        .expect("dimension");
+        let Dimension::Linear(linear) = dimension else {
+            panic!("linear dimension");
+        };
+        assert!((linear.first_point.x - 10.0).abs() < 1e-9, "{linear:?}");
+        assert!((linear.second_point.x - 60.0).abs() < 1e-9, "{linear:?}");
+        assert!((linear.base.actual_measurement - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dimupdate_pushes_the_current_style_onto_the_selection() {
+        let (mut app, _, dimension) = app_with_associative_dimension();
+        let i = app.active_tab;
+        let mut style = codec::tables::DimStyle::new("TALL");
+        style.dimtxt = 5.0;
+        let _ = app.tabs[i].scene.document.dim_styles.add(style);
+        app.tabs[i].scene.document.header.current_dimstyle_name = "TALL".into();
+
+        app.tabs[i].scene.select_entity(dimension, false);
+        let _ = app.run_command_line("DIMUPDATE");
+
+        let dimension = as_dimension(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(dimension)
+                .expect("dimension"),
+        )
+        .expect("dimension");
+        assert_eq!(dimension.base().style_name, "TALL");
+        assert!(
+            last_output(&app).contains("applied 'TALL'"),
+            "{}",
+            last_output(&app)
+        );
+    }
+
+    #[test]
+    fn dimregen_reports_a_broken_association_instead_of_skipping_it() {
+        let (mut app, line, _) = app_with_associative_dimension();
+        let i = app.active_tab;
+        app.tabs[i].scene.document.remove_entity(line);
+
+        let _ = app.run_command_line("DIMREGEN");
+
+        let output = all_output(&app);
+        assert!(output.contains("1 broken"), "{output}");
+        assert!(
+            output.contains("no longer resolves"),
+            "a broken reference must be named: {output}"
+        );
     }
 }

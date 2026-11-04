@@ -47,12 +47,14 @@ pub struct VisibilityPopup {
 #[derive(Clone, Debug)]
 pub(super) struct TableGrip {
     pub insert_handle: Handle,
+    /// Where the grip sits in world coordinates. The value list is placed from
+    /// here every frame, so it follows its grip through the view.
+    pub world: glam::DVec3,
     pub current: Option<usize>,
 }
 #[derive(Clone, Debug)]
 pub struct TablePopup {
     pub insert_handle: Handle,
-    pub anchor: iced::Point,
     pub header: String,
     pub rows: Vec<String>,
     pub current: Option<usize>,
@@ -119,7 +121,7 @@ impl OpenCADStudio {
             Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),
         }
     }
-    pub(super) fn open_table_popup(&mut self, anchor: iced::Point) {
+    pub(super) fn open_table_popup(&mut self) {
         if let Some(grip) = &self.tabs[self.active_tab].table_grip {
             let tab = &self.tabs[self.active_tab];
             let doc = &tab.scene.document;
@@ -133,12 +135,29 @@ impl OpenCADStudio {
             let rows = view.rows.iter().map(|r| Self::table_row_label(r)).collect();
             self.table_popup = Some(TablePopup {
                 insert_handle: grip.insert_handle,
-                anchor,
                 header,
                 rows,
                 current: grip.current,
             });
         }
+    }
+
+    /// The screen point the open value list hangs from: its grip's world point
+    /// through the current view, so the list tracks the grip through pan, zoom
+    /// and any move that re-seats the grip.
+    pub(super) fn table_popup_anchor(
+        &self,
+        tab: usize,
+        bounds: iced::Rectangle,
+    ) -> Option<iced::Point> {
+        let grip = self.tabs[tab].table_grip.as_ref()?;
+        let point = self.tabs[tab]
+            .scene
+            .camera
+            .borrow()
+            .project(grip.world, bounds)?;
+        let point = iced::Point::new(bounds.x + point.x, bounds.y + point.y);
+        (point.x.is_finite() && point.y.is_finite()).then_some(point)
     }
 
     /// Column labels of a Block Properties Table, resolving each column's
@@ -298,8 +317,18 @@ impl OpenCADStudio {
         self.tabs[i].selected_grip_handles.push(handle);
         self.tabs[i].table_grip = Some(TableGrip {
             insert_handle: handle,
+            world: glam::DVec3::new(wp.x, wp.y, wp.z),
             current,
         });
+        // A list already open on this reference prints the grip's state, so the
+        // refresh reprints it rather than leaving the rows chosen before.
+        if self
+            .table_popup
+            .as_ref()
+            .is_some_and(|popup| popup.insert_handle == handle)
+        {
+            self.open_table_popup();
+        }
     }
 
     /// Compute the index sets needed to apply `state` of `param` (governing the

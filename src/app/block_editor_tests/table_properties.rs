@@ -613,7 +613,7 @@ fn the_value_list_closes_with_the_reference_it_belongs_to() {
     crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
         .unwrap();
     app.refresh_properties();
-    app.open_table_popup(iced::Point::new(100., 100.));
+    app.open_table_popup();
     assert!(
         app.table_popup.is_some(),
         "the list opens for the lone selected reference"
@@ -627,6 +627,148 @@ fn the_value_list_closes_with_the_reference_it_belongs_to() {
     assert!(
         app.table_popup.is_none(),
         "the list has nothing to hang from once that reference is not selected"
+    );
+}
+
+#[test]
+fn the_value_list_follows_its_grip_when_the_view_moves() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens for the lone selected reference"
+    );
+    let bounds = iced::Rectangle {
+        x: 120.,
+        y: 60.,
+        width: 1600.,
+        height: 900.,
+    };
+    let before = app
+        .table_popup_anchor(i, bounds)
+        .expect("the grip projects into the view the list was opened in");
+    let world = app.tabs[i].table_grip.as_ref().unwrap().world;
+    let projected = app.tabs[i]
+        .scene
+        .camera
+        .borrow()
+        .project(world, bounds)
+        .expect("the same grip point projects");
+    assert_eq!(
+        before,
+        iced::Point::new(bounds.x + projected.x, bounds.y + projected.y),
+        "the list hangs from its grip, not from the screen point it was opened at"
+    );
+    app.tabs[i].scene.camera.borrow_mut().target += glam::DVec3::new(40., 25., 0.);
+    let after = app
+        .table_popup_anchor(i, bounds)
+        .expect("the same grip still projects after the view changes");
+    let repanned = app.tabs[i]
+        .scene
+        .camera
+        .borrow()
+        .project(world, bounds)
+        .expect("the same grip point projects");
+    assert_eq!(
+        after,
+        iced::Point::new(bounds.x + repanned.x, bounds.y + repanned.y),
+        "the list is placed on the grip the view shows now, not where it was opened"
+    );
+    assert!(
+        before.distance(after) > 1.,
+        "a panned view moves the grip, so the list moves with it"
+    );
+}
+
+#[test]
+fn the_value_list_closes_when_its_drawing_tab_is_left() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let home = app.active_tab;
+    app.tabs
+        .push(crate::app::document::DocumentTab::new_drawing(1));
+    let other = app.tabs.len() - 1;
+    crate::scene::block_grips::config::set(&mut app.tabs[home].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens on the drawing that owns the reference"
+    );
+    let _ = app.update(Message::TabSwitch(other));
+    assert!(
+        app.table_popup.is_none(),
+        "the list names an insert of one drawing, so leaving that drawing drops it"
+    );
+}
+
+#[test]
+fn the_value_list_closes_when_its_drawing_tab_is_closed() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let home = app.active_tab;
+    app.tabs
+        .push(crate::app::document::DocumentTab::new_drawing(1));
+    crate::scene::block_grips::config::set(&mut app.tabs[home].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens on the drawing that owns the reference"
+    );
+    let _ = app.on_tab_close(home);
+    assert!(
+        app.table_popup.is_none(),
+        "the list names an insert of that drawing, so closing it takes the list with it"
+    );
+}
+
+#[test]
+fn an_open_value_list_marks_the_row_selected_after_it_opened() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens on the lone selected reference"
+    );
+    let key = row(&app).0;
+    let _ = app.update(Message::PropBlockChoice { key, index: 2 });
+    assert!(
+        app.table_popup.is_some(),
+        "choosing a row on the panel does not close the list belonging to that reference"
+    );
+    let (_, selected, options) = row(&app);
+    assert_eq!(
+        app.tabs[i].table_grip.as_ref().unwrap().current,
+        Some(2),
+        "the grip knows the row chosen after the list opened"
+    );
+    assert_eq!(
+        app.table_popup.as_ref().unwrap().current,
+        Some(2),
+        "and the open list marks that row, not the one chosen when it opened"
+    );
+    assert_eq!(
+        app.table_popup.as_ref().unwrap().rows.len(),
+        options.len(),
+        "the reprint still shows every row of the table"
+    );
+    assert_eq!(
+        app.table_popup.as_ref().unwrap().current,
+        Some(selected),
+        "and it marks the row the panel has selected"
+    );
+    assert!(
+        !app.table_popup.as_ref().unwrap().header.is_empty(),
+        "the reprinted list keeps its heading"
     );
 }
 
@@ -647,7 +789,7 @@ fn block_table_properties_and_grip_popup_refresh_the_same_indexed_row() {
         let _ = app.update(Message::PropBlockChoice { key, index: 2 });
         assert_eq!(row(&app).1, 2);
         assert_eq!(app.tabs[i].table_grip.as_ref().unwrap().current, Some(2));
-        app.open_table_popup(iced::Point::new(100., 100.));
+        app.open_table_popup();
         assert_eq!(app.table_popup.as_ref().unwrap().current, Some(2));
         let _ = app.update(Message::TableRowPick(1));
         assert_eq!(row(&app).1, 1);

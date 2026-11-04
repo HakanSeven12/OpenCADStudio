@@ -57,6 +57,7 @@ pub(crate) mod expr_eval;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
+mod layer_filters;
 mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
@@ -693,6 +694,9 @@ pub(super) struct OpenCADStudio {
     /// rather than an individual document tab, so the same view preference is
     /// used by every currently open drawing/project.
     collapsed_property_sections: rustc_hash::FxHashSet<String>,
+    /// Named layer filters (LAYERFILTER). A view over the layer table, so it is
+    /// kept with the app rather than written to the drawing.
+    layer_filters: Vec<layer_filters::LayerFilter>,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -5749,6 +5753,7 @@ impl OpenCADStudio {
             discussions: Vec::new(),
             discussions_loading: false,
             collapsed_property_sections: rustc_hash::FxHashSet::default(),
+            layer_filters: Vec::new(),
             start_section: StartSection::default(),
             start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             history_content: iced::widget::text_editor::Content::new(),

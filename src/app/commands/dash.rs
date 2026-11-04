@@ -28,7 +28,7 @@ fn listed(name: &str, list: &str) -> bool {
         .any(|pattern| wildcard_match(name, pattern))
 }
 
-const LAYER_OPTIONS: [(&str, &str); 15] = [
+const LAYER_OPTIONS: [(&str, &str); 19] = [
     ("?", "?"),
     ("Make", "MAKE"),
     ("Set", "SET"),
@@ -39,7 +39,11 @@ const LAYER_OPTIONS: [(&str, &str); 15] = [
     ("Color", "COLOR"),
     ("Ltype", "LTYPE"),
     ("LWeight", "LWEIGHT"),
+    ("TRansparency", "TRANSPARENCY"),
+    ("Description", "DESCRIPTION"),
+    ("MATerial", "MATERIAL"),
     ("Plot", "PLOT"),
+    ("Pstyle", "PSTYLE"),
     ("Freeze", "FREEZE"),
     ("Thaw", "THAW"),
     ("LOck", "LOCK"),
@@ -50,7 +54,7 @@ fn layer_flow(current: String) -> PromptFlow {
     flow(move |q| {
         let option = q.keyword(
             crate::t!(
-                "-LAYER  Enter an option [?/Make/Set/New/Rename/ON/OFF/Color/Ltype/LWeight/Plot/Freeze/Thaw/LOck/Unlock]:"
+                "-LAYER  Enter an option [?/Make/Set/New/Rename/ON/OFF/Color/Ltype/LWeight/TRansparency/Description/MATerial/Plot/Pstyle/Freeze/Thaw/LOck/Unlock]:"
             )
             .into_owned(),
             None,
@@ -127,6 +131,46 @@ fn layer_flow(current: String) -> PromptFlow {
                 }
                 let names = current_list(q)?;
                 run("-LAYER", &[option, &weight, &names])
+            }
+            "TRANSPARENCY" => {
+                let value = q.text(
+                    crate::t!("-LAYER  Enter transparency value (0-100):").into_owned(),
+                    None,
+                )?;
+                if value
+                    .trim()
+                    .parse::<f64>()
+                    .map(|percent| (0.0..=100.0).contains(&percent))
+                    != Ok(true)
+                {
+                    return Err(PromptStep::Retry("Invalid input."));
+                }
+                let names = current_list(q)?;
+                run("-LAYER", &[option, &value, &names])
+            }
+            "DESCRIPTION" => {
+                let description = q.text(
+                    crate::t!("-LAYER  Enter a description for the layer(s):").into_owned(),
+                    None,
+                )?;
+                let names = current_list(q)?;
+                run("-LAYER", &[option, &description, &names])
+            }
+            "MATERIAL" => {
+                let material = q.text(
+                    crate::t!("-LAYER  Enter a material name <ByLayer>:").into_owned(),
+                    Some("ByLayer".into()),
+                )?;
+                let names = current_list(q)?;
+                run("-LAYER", &[option, &material, &names])
+            }
+            "PSTYLE" => {
+                let style = q.text(
+                    crate::t!("-LAYER  Enter a plot style name <Normal>:").into_owned(),
+                    Some("Normal".into()),
+                )?;
+                let names = current_list(q)?;
+                run("-LAYER", &[option, &style, &names])
             }
             "PLOT" => {
                 let plot = q.keyword(
@@ -781,14 +825,11 @@ impl OpenCADStudio {
     /// The document's layers named by a comma-separated, wildcard list;
     /// a plain name that matches nothing is reported.
     fn listed_layers(&mut self, i: usize, list: &str) -> Vec<String> {
-        let names: Vec<String> = self.tabs[i]
-            .scene
-            .document
-            .layers
-            .iter()
-            .filter(|layer| listed(&layer.name, list))
-            .map(|layer| layer.name.clone())
-            .collect();
+        let names = crate::app::layer_filters::expand_layer_list(
+            self.tabs[i].scene.document.layers.iter(),
+            &self.layer_filters,
+            list,
+        );
         if names.is_empty() {
             self.command_line
                 .push_error(crate::tf!("LAYER: '{}' not found.", list).as_ref());
@@ -797,7 +838,7 @@ impl OpenCADStudio {
     }
 
     /// Change `names` as one undo step and repaint what the change touches.
-    fn edit_layers(
+    pub(in crate::app) fn edit_layers(
         &mut self,
         i: usize,
         label: &str,
@@ -931,6 +972,71 @@ impl OpenCADStudio {
                         layer.line_weight = weight
                     });
                 }
+            }
+            "TRANSPARENCY" => {
+                let value = arg(1);
+                let Ok(percent) = value.trim().parse::<f64>() else {
+                    self.command_line
+                        .push_error(crate::t!("LAYER: transparency must be 0-100.").as_ref());
+                    return Task::none();
+                };
+                if !(0.0..=100.0).contains(&percent) {
+                    self.command_line
+                        .push_error(crate::t!("LAYER: transparency must be 0-100.").as_ref());
+                    return Task::none();
+                }
+                let transparency = codec::types::Transparency::from_percent(percent / 100.0);
+                let names = self.listed_layers(i, &arg(2));
+                self.edit_layers(i, "LAYER TRANSPARENCY", &names, move |layer| {
+                    layer.transparency = transparency
+                });
+            }
+            "DESCRIPTION" => {
+                let description = arg(1);
+                let names = self.listed_layers(i, &arg(2));
+                self.edit_layers(i, "LAYER DESCRIPTION", &names, move |layer| {
+                    layer.description = description.clone()
+                });
+            }
+            "MATERIAL" => {
+                let name = arg(1);
+                let material = if name.is_empty() || name.eq_ignore_ascii_case("BYLAYER") {
+                    codec::Handle::NULL
+                } else {
+                    let found = self.tabs[i].scene.document.objects.iter().find_map(
+                        |(handle, object)| match object {
+                            codec::objects::ObjectType::Material(m)
+                                if m.name.eq_ignore_ascii_case(&name) =>
+                            {
+                                Some(*handle)
+                            }
+                            _ => None,
+                        },
+                    );
+                    let Some(handle) = found else {
+                        self.command_line.push_error(
+                            crate::tf!("LAYER: material '{}' not found.", name).as_ref(),
+                        );
+                        return Task::none();
+                    };
+                    handle
+                };
+                let names = self.listed_layers(i, &arg(2));
+                self.edit_layers(i, "LAYER MATERIAL", &names, move |layer| {
+                    layer.material = material
+                });
+            }
+            "PSTYLE" => {
+                let style = arg(1);
+                let style = if style.is_empty() || style.eq_ignore_ascii_case("NORMAL") {
+                    String::new()
+                } else {
+                    style
+                };
+                let names = self.listed_layers(i, &arg(2));
+                self.edit_layers(i, "LAYER PLOTSTYLE", &names, move |layer| {
+                    layer.plot_style = style.clone()
+                });
             }
             "PLOT" => {
                 let names = self.listed_layers(i, &arg(2));

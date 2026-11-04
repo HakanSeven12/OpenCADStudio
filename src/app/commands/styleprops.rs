@@ -1107,6 +1107,16 @@ impl OpenCADStudio {
                         crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION QUAD QUADWIDTH QUADCOMMANDLAUNCH CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY DYNMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
+                    // Annotation and hatch variables live with the drawing's
+                    // annotation state rather than the generic scalar table:
+                    // route them here so SETVAR can read and write them like
+                    // the variables that have their own commands (#M025).
+                    if matches!(
+                        name.as_str(),
+                        "CANNOSCALE" | "ANNOALLVISIBLE" | "ANNOAUTOSCALE" | "HPLAYER"
+                    ) {
+                        return Some(self.annotation_setvar(i, &name, value.as_deref()));
+                    }
                     if name.starts_with("REVCLOUD") {
                         if self.revcloud_setvar(&name, value.as_deref(), i) {
                             return Some(self.finish_dispatch(cmd));
@@ -4143,6 +4153,173 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+
+    /// Read or write an annotation / hatch variable through SETVAR.
+    ///
+    /// These values have typed homes outside the scalar table: the current
+    /// scale and all-visible flag live on the scene, auto-scale on the app
+    /// session, and HPLAYER in the drawing's variable dictionary. Reading is
+    /// always allowed; writes validate the same ranges as the dedicated
+    /// commands and report the canonical value back.
+    fn annotation_setvar(
+        &mut self,
+        i: usize,
+        name: &str,
+        value: Option<&str>,
+    ) -> Task<Message> {
+        match name {
+            "CANNOSCALE" => match value {
+                None => {
+                    let current = self.tabs[i]
+                        .scene
+                        .document
+                        .header
+                        .current_annotation_scale
+                        .clone();
+                    self.command_line
+                        .push_output(crate::tf!("CANNOSCALE = {current}").as_ref());
+                }
+                Some(value) => {
+                    let value = value.trim();
+                    if value.is_empty() {
+                        let current = self.tabs[i]
+                            .scene
+                            .document
+                            .header
+                            .current_annotation_scale
+                            .clone();
+                        self.command_line
+                            .push_output(crate::tf!("CANNOSCALE = {current}").as_ref());
+                        return Task::none();
+                    }
+                    match self.tabs[i].scene.set_annotation_scale_named(value) {
+                        Some(_) => {
+                            self.tabs[i].dirty = true;
+                            let current = self.tabs[i]
+                                .scene
+                                .document
+                                .header
+                                .current_annotation_scale
+                                .clone();
+                            self.command_line.push_output(
+                                crate::tf!("CANNOSCALE = {current}").as_ref(),
+                            );
+                        }
+                        None => {
+                            self.command_line.push_error(
+                                crate::t!(
+                                    "CANNOSCALE: use a scale in the list (e.g. 1:50, 2:1, or a factor)."
+                                )
+                                .as_ref(),
+                            );
+                            self.command_line.push_output("Enter new value for CANNOSCALE:");
+                            self.pending_setvar = Some("CANNOSCALE".into());
+                        }
+                    }
+                }
+            },
+            "ANNOALLVISIBLE" => match value {
+                None => {
+                    let current = u8::from(self.tabs[i].scene.annotation_all_visible());
+                    self.command_line
+                        .push_output(crate::tf!("ANNOALLVISIBLE = {current}").as_ref());
+                }
+                Some(value) => {
+                    let parsed = match value.trim().to_uppercase().as_str() {
+                        "0" | "OFF" | "FALSE" => Some(false),
+                        "1" | "ON" | "TRUE" => Some(true),
+                        _ => None,
+                    };
+                    match parsed {
+                        Some(on) => {
+                            self.tabs[i].scene.set_annotation_all_visible(on);
+                            self.tabs[i].dirty = true;
+                            self.command_line.push_output(
+                                crate::tf!("ANNOALLVISIBLE = {}", u8::from(on)).as_ref(),
+                            );
+                        }
+                        None => {
+                            self.command_line.push_error(
+                                crate::t!("ANNOALLVISIBLE: enter 0 or 1.").as_ref(),
+                            );
+                            self.command_line.push_output("Enter new value for ANNOALLVISIBLE <0>:");
+                            self.pending_setvar = Some("ANNOALLVISIBLE".into());
+                        }
+                    }
+                }
+            },
+            "ANNOAUTOSCALE" => {
+                let current = self.annotation_auto_scale;
+                match value.and_then(|v| v.trim().parse::<i8>().ok()) {
+                    Some(mode) if (-4..=4).contains(&mode) => {
+                        self.annotation_auto_scale = mode;
+                        self.command_line
+                            .push_output(crate::tf!("ANNOAUTOSCALE = {mode}").as_ref());
+                    }
+                    _ if value.is_some_and(|v| !v.trim().is_empty()) => {
+                        self.command_line.push_error(
+                            crate::t!("ANNOAUTOSCALE: enter an integer from -4 through 4.")
+                                .as_ref(),
+                        );
+                        self.command_line.push_output(&format!(
+                            "Enter new value for ANNOAUTOSCALE <{current}>:"
+                        ));
+                        self.pending_setvar = Some("ANNOAUTOSCALE".into());
+                    }
+                    _ => {
+                        self.command_line.push_output(
+                            crate::tf!("ANNOAUTOSCALE = {current}").as_ref(),
+                        );
+                    }
+                }
+            }
+            "HPLAYER" => {
+                let current = crate::io::drawing_variable(&self.tabs[i].scene.document, "HPLAYER")
+                    .unwrap_or_default();
+                match value {
+                    None => {
+                        let shown = if current.is_empty() { "." } else { &current };
+                        self.command_line
+                            .push_output(crate::tf!("HPLAYER = {shown}").as_ref());
+                    }
+                    Some(value) => {
+                        let value = value.trim();
+                        if value.is_empty() || value == "." {
+                            crate::io::set_drawing_variable(
+                                &mut self.tabs[i].scene.document,
+                                "HPLAYER",
+                                "",
+                            );
+                            self.command_line.push_output("HPLAYER = .");
+                        } else if self.tabs[i]
+                            .scene
+                            .document
+                            .layers
+                            .get(value)
+                            .is_some()
+                        {
+                            crate::io::set_drawing_variable(
+                                &mut self.tabs[i].scene.document,
+                                "HPLAYER",
+                                value,
+                            );
+                            self.tabs[i].dirty = true;
+                            self.command_line
+                                .push_output(crate::tf!("HPLAYER = {value}").as_ref());
+                        } else {
+                            self.command_line.push_error(
+                                crate::tf!("HPLAYER: no layer named \"{value}\".").as_ref(),
+                            );
+                            self.command_line.push_output("Enter new value for HPLAYER:");
+                            self.pending_setvar = Some("HPLAYER".into());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        Task::none()
     }
 }
 

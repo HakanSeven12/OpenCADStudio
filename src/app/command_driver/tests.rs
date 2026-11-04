@@ -3410,3 +3410,63 @@ mod dim_update_regen_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod mission_m025_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn annotation_and_hatch_variables_read_and_write_through_setvar() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.run_command_line("SETVAR CANNOSCALE 1:75");
+        assert_eq!(
+            app.tabs[app.active_tab]
+                .scene
+                .document
+                .header
+                .current_annotation_scale,
+            "1:75"
+        );
+        let _ = app.run_command_line("SETVAR CANNOSCALE");
+        assert!(all_output(&app).contains("CANNOSCALE = 1:75"));
+
+        let _ = app.run_command_line("SETVAR ANNOALLVISIBLE 0");
+        assert!(!app.tabs[app.active_tab].scene.annotation_all_visible());
+        let _ = app.run_command_line("SETVAR ANNOALLVISIBLE 1");
+        assert!(app.tabs[app.active_tab].scene.annotation_all_visible());
+        let _ = app.run_command_line("SETVAR ANNOALLVISIBLE");
+        assert!(all_output(&app).contains("ANNOALLVISIBLE = 1"));
+
+        let _ = app.run_command_line("SETVAR ANNOAUTOSCALE 2");
+        assert_eq!(app.annotation_auto_scale, 2);
+        let _ = app.run_command_line("SETVAR ANNOAUTOSCALE");
+        assert!(all_output(&app).contains("ANNOAUTOSCALE = 2"));
+
+        let _ = app.run_command_line("SETVAR HPLAYER");
+        assert!(all_output(&app).contains("HPLAYER = ."));
+    }
+
+    #[test]
+    fn annotation_variables_reject_out_of_range_values_with_a_typed_error() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.run_command_line("SETVAR ANNOAUTOSCALE 9");
+        assert_eq!(app.annotation_auto_scale, -4);
+        assert!(all_output(&app).contains("integer from -4 through 4"));
+
+        let _ = app.run_command_line("SETVAR ANNOALLVISIBLE 2");
+        assert!(all_output(&app).contains("enter 0 or 1"));
+    }
+}

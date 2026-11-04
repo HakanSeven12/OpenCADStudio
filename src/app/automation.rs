@@ -3617,6 +3617,73 @@ mod tests {
         assert!(starts.contains(&(5.0, 10.0)));
     }
 
+    /// A reference is measured through its definition, so the read of a scaled
+    /// and rotated one prints the box it actually draws rather than the
+    /// insertion point. The definition spans `x 0..20, y 0..13` from its base
+    /// point; ×2 about the origin makes it `x 0..40, y 0..26` and a further
+    /// 90° counter-clockwise turn makes it `x -26..0, y 0..40`.
+    #[test]
+    fn a_transformed_reference_reads_the_box_it_draws() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 20,0"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 0,13"}"#);
+        let lines = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#);
+        let joined = lines["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| format!("\"{}\"", entity["handle"].as_str().unwrap()))
+            .collect::<Vec<_>>()
+            .join(",");
+        let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+            .as_u64()
+            .unwrap();
+        let defined = app.automation_op(&format!(
+            r#"{{"protocol":1,"op":"block_define","request_id":"rb1","document_id":{doc},"name":"READBOX","base":[0,0,0],"handles":[{joined}]}}"#
+        ));
+        assert_eq!(defined["ok"], true, "{defined}");
+        let insert = app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)
+            ["entities"][0]["handle"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+
+        let scaled = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_transform","request_id":"rb2","document_id":{{doc}},"handles":["{insert}"],"action":"scale","center":[0,0],"factor":2}}"#
+            ),
+        );
+        assert_eq!(scaled["ok"], true, "{scaled}");
+        let turned = mutate(
+            &mut app,
+            &format!(
+                r#"{{"protocol":1,"op":"entities_transform","request_id":"rb3","document_id":{{doc}},"handles":["{insert}"],"action":"rotate","center":[0,0],"angle_deg":90}}"#
+            ),
+        );
+        assert_eq!(turned["ok"], true, "{turned}");
+
+        let q = app.automation_op(r#"{"op":"query","type":"Insert","detail":"full"}"#);
+        assert_eq!(q["count"], 1, "{q}");
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        let bounds = &q["entities"][0]["bounds"];
+        let (min, max) = (&bounds["min"], &bounds["max"]);
+        assert!(
+            close(min[0].as_f64().unwrap(), -26.0),
+            "the turned box starts at x -26: {bounds}"
+        );
+        assert!(close(min[1].as_f64().unwrap(), 0.0), "and y 0: {bounds}");
+        assert!(
+            close(max[0].as_f64().unwrap(), 0.0),
+            "it ends at x 0: {bounds}"
+        );
+        assert!(
+            close(max[1].as_f64().unwrap(), 40.0),
+            "and y 40: {bounds}"
+        );
+    }
+
     #[test]
     fn entities_transform_rotates_scales_and_mirrors() {
         let mut app = OpenCADStudio::new_for_test();

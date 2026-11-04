@@ -132,6 +132,12 @@ impl OpenCADStudio {
                 }
             }
             DockMsg::FloatBarPointer(p) => self.dock_float_pointer = p,
+            #[cfg(not(target_arch = "wasm32"))]
+            DockMsg::Detach(id) => {
+                let _ = self.detach_panel(id);
+            }
+            #[cfg(target_arch = "wasm32")]
+            DockMsg::Detach(_) => {}
             DockMsg::FloatDockingToggle(id) => {
                 self.dock_float_menu = None;
                 if self.dock.toggle_float_docking(id) {
@@ -570,6 +576,12 @@ impl OpenCADStudio {
                         }
                     }
                     PanelId::QuickCalc => self.quick_calc.show = true,
+                    PanelId::CommandHistory => {
+                        self.show_command_history = true;
+                        self.sync_command_history_panel();
+                        self.dock_open_at_default(id);
+                        self.save_config();
+                    }
                     PanelId::Plugin(num) => {
                         if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
                             if let Some(panel) = self.plugin_panels.get_mut(panel_id) {
@@ -637,6 +649,10 @@ impl OpenCADStudio {
             }
             PanelId::Laywalk => self.close_layer_walk(false),
             PanelId::QuickCalc => self.quick_calc.show = false,
+            PanelId::CommandHistory => {
+                self.show_command_history = false;
+                self.save_config();
+            }
             PanelId::GraphicAttributes => {
                 self.show_graphic_attributes = false;
                 self.ribbon.set_graphic_attributes(false);
@@ -710,6 +726,14 @@ impl OpenCADStudio {
         if self.clean_screen && !(id == PanelId::Properties && self.clean_screen_properties) {
             return false;
         }
+        self.dock_panel_wanted(id)
+    }
+
+    /// Whether pallet `id` is open, wherever it is shown: the main window
+    /// hides pallets on the Start page and in clean screen, a window of its
+    /// own does not.
+    pub(crate) fn dock_panel_wanted(&self, id: crate::ui::dock::PanelId) -> bool {
+        use crate::ui::dock::PanelId;
         match id {
             PanelId::Properties => self.show_properties,
             PanelId::BlockPalette => self.show_block_palette,
@@ -741,6 +765,7 @@ impl OpenCADStudio {
                     && !(tab.layer_walk_picking && tab.active_cmd.is_some())
             }
             PanelId::QuickCalc => self.quick_calc.show,
+            PanelId::CommandHistory => self.show_command_history,
             PanelId::GraphicAttributes => self.show_graphic_attributes,
             PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {

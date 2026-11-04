@@ -160,8 +160,17 @@ impl OpenCADStudio {
         self.modal_resizing = false;
     }
 
+    /// Refill the Command History pallet's log (it shows the same text the
+    /// expanded command line does).
+    pub(in crate::app) fn sync_command_history_panel(&mut self) {
+        let latest = self.command_line.history_plain_text();
+        if self.history_content.text() != latest {
+            self.history_content = iced::widget::text_editor::Content::with_text(&latest);
+        }
+    }
+
     fn sync_open_command_history(&mut self) {
-        if !self.command_line.history_open {
+        if !self.command_line.history_open && !self.show_command_history {
             return;
         }
         let latest = self.command_line.history_plain_text();
@@ -3490,6 +3499,9 @@ impl OpenCADStudio {
                         // The attribute editor is tab-scoped; leaving its tab
                         // drops it (its handle is that document's, not this one's).
                         self.cancel_attr_editor();
+                        // Tool dialogs working on the outgoing drawing close
+                        // with it; program-wide ones (Options, …) stay.
+                        self.close_document_tools();
                         // The quad is cursor UI: like the legacy menu on the
                         // disrupted transitions, it does not ride a tab
                         // switch (its per-tab window state rides
@@ -5122,15 +5134,20 @@ impl OpenCADStudio {
                 if self.main_window == Some(id) {
                     return self.request_quit_with_block_edits();
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                return self.os_window_close_requested(id);
+                #[cfg(target_arch = "wasm32")]
                 Task::none()
             }
 
             Message::OsWindowClosed(id) => {
-                // Only the main window exists now; all dialogs are in-canvas
-                // modals (Plan B). Closing it exits.
+                // Closing the main window exits; a window of its own (a tool
+                // dialog or pallet) only goes away.
                 if self.main_window == Some(id) {
                     return self.exit_app();
                 }
+                #[cfg(not(target_arch = "wasm32"))]
+                self.os_window_closed(id);
                 Task::none()
             }
 
@@ -11917,6 +11934,31 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AttrEditorApply => self.on_attr_editor_apply(),
+            Message::ToolWindow(kind, inner) => self.on_tool_window_msg(kind, *inner),
+            Message::ToolWindowGrab(kind) => self.on_tool_grab(kind, false),
+            Message::ToolWindowResizeGrab(kind) => self.on_tool_grab(kind, true),
+            Message::ToolWindowDragMove(point) => self.on_tool_drag_move(point),
+            Message::ToolWindowDragRelease => self.on_tool_drag_release(),
+            Message::ToolWindowRaise(kind) => self.raise_tool(kind),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::ToolWindowDetach(kind) => self.detach_tool(kind),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OsWindowReturn(id) => self.return_os_window(id),
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OsWindowResized(id, w, h) => {
+                self.os_window_resized(id, w, h);
+                Task::none()
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OsWindowMoved(id, at) => {
+                self.os_window_moved(id, at);
+                Task::none()
+            }
+            #[cfg(target_arch = "wasm32")]
+            Message::ToolWindowDetach(_)
+            | Message::OsWindowReturn(_)
+            | Message::OsWindowResized(..)
+            | Message::OsWindowMoved(..) => Task::none(),
             Message::ModalGrab => {
                 // Start a drag; the first ModalDragMove seeds the reference.
                 self.modal_dragging = true;

@@ -8468,3 +8468,8 @@ quad-menu =
     .width = Menü genişliği
     .launch = Nesne üzerinde sağ tık varsayılan komutunu doğrudan başlatır (QUADCOMMANDLAUNCH)
     .about = Dörtlü imleç menüsü imlecin yanında açılır: gösterdiği nesnenin varsayılan komutlarını, aksi halde son kullanılan ve oluşturma komutlarını sunar (QUAD, QUADWIDTH).
+
+tool-windows =
+    .detach = Kendi penceresinde aç
+    .back = Ana pencereye geri al
+    .command-history = Komut Geçmişi

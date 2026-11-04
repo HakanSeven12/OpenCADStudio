@@ -618,6 +618,7 @@ impl OpenCADStudio {
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
             "selection_revision":self.control.selection_revision,
             "command":command,"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
+            "tool_windows":self.tool_windows.iter().map(|t|format!("{:?}",t.kind)).collect::<Vec<_>>(),
             "layout":tab.scene.current_layout,
             "block_editor":tab.active_block_edit
                 .and_then(|index| tab.block_edits.get(index))
@@ -2104,7 +2105,25 @@ impl OpenCADStudio {
         {
             self.control.capture_frame_pending = false;
             self.control.capture_after_redraw = redrew;
-            let Some(window) = self.main_window else {
+            // `os_window` names a window of its own (by title, or by what it
+            // shows, e.g. "Options" or "CommandHistory") to capture instead.
+            let named = self
+                .control
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.request["os_window"].as_str())
+                .and_then(|name| {
+                    self.os_windows
+                        .iter()
+                        .find(|window| {
+                            format!("{:?}", window.content).contains(name)
+                                || self
+                                    .os_window_title(window.id)
+                                    .is_some_and(|title| title.contains(name))
+                        })
+                        .map(|window| window.id)
+                });
+            let Some(window) = named.or(self.main_window) else {
                 return Task::done(Message::ControlScreenshot(path, None));
             };
             // A minimized window reports a failed capture instead.

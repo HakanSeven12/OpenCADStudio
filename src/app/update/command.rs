@@ -270,6 +270,10 @@ impl OpenCADStudio {
             crate::modules::draw::draw::attdef::session().forget_place_of(closing_id);
             crate::modules::annotate::text::forget_place_of(closing_id);
         }
+        // Tool dialogs on the closing drawing go with it.
+        if idx == self.active_tab {
+            self.close_document_tools();
+        }
         // Only-tab case: when the lone non-start tab closes, fall
         // back to the Start tab if it exists; otherwise spawn a
         // fresh blank drawing (legacy behaviour).

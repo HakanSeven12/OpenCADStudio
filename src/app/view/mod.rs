@@ -481,10 +481,14 @@ impl OpenCADStudio {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         crate::sys::startup_times::view_tick();
-        // ── Floating panel windows ─────────────────────────────────────────
-        // All dialogs are in-canvas modals now (Plan B); view_main stacks the
-        // active one. `window_id` is unused — there is only the main window.
-        let _ = window_id;
+        // ── Windows of their own ──────────────────────────────────────────
+        // A tool dialog or dock pallet moved out of the main window draws
+        // its content there; every other window is the main one.
+        if Some(window_id) != self.main_window {
+            if let Some(element) = self.os_window_view(window_id) {
+                return element;
+            }
+        }
         // Pan latency on a large drawing is ~120 ms while `update`, `prepare`
         // and `encode` together account for ~1 ms of it, the GPU sits at 0-8%,
         // and encoding no scene at all changes nothing. Widget-tree
@@ -3245,6 +3249,10 @@ bg={bg_ms:.1}ms n={view_count}"
             composed.into()
         };
 
+        // Open tool dialogs float over the drawing without blocking it; a
+        // modal dialog below then covers them too.
+        let modal_underlay = self.with_tool_windows(modal_underlay);
+
         // ── In-canvas modal dialogs (Plan B) ───────────────────────────────
         // Former pop-up windows render as overlays here, so they work on both
         // the native (single main window) and web builds.
@@ -3561,6 +3569,23 @@ impl OpenCADStudio {
                     iced::Event::Window(window::Event::Closed) => {
                         Some(Message::OsWindowClosed(win_id))
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    iced::Event::Window(window::Event::Resized(sz))
+                        if !crate::app::tool_windows::is_main_window(win_id) =>
+                    {
+                        Some(Message::OsWindowResized(win_id, sz.width, sz.height))
+                    }
+                    #[cfg(not(target_arch = "wasm32"))]
+                    iced::Event::Window(window::Event::Moved(at))
+                        if !crate::app::tool_windows::is_main_window(win_id) =>
+                    {
+                        Some(Message::OsWindowMoved(win_id, at))
+                    }
+                    // Keys typed in a window of its own stay with its widgets.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    iced::Event::Keyboard(
+                        keyboard::Event::KeyPressed { .. } | keyboard::Event::KeyReleased { .. },
+                    ) if !crate::app::tool_windows::is_main_window(win_id) => None,
                     iced::Event::Window(window::Event::Resized(sz)) => {
                         Some(Message::WindowResized(sz.width as f32, sz.height as f32))
                     }

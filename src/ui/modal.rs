@@ -442,6 +442,128 @@ pub fn modal<'a>(
     .into()
 }
 
+/// The messages a tool dialog's frame sends (see [`tool_frame`]).
+pub struct ToolFrameMessages {
+    pub close: Message,
+    pub grab: Message,
+    pub resize: Message,
+    pub raise: Message,
+    /// Desktop: the button that moves the dialog into a window of its own.
+    pub detach: Option<Message>,
+    /// The content's measured size.
+    pub measured: Box<dyn Fn(Size) -> Message>,
+}
+
+/// A tool dialog: framed like [`modal`], but with no backdrop, so the drawing
+/// and everything else stay usable around it. `offset` shifts it from the
+/// centre of the area it is drawn over; only the frame takes the pointer.
+pub fn tool_frame<'a>(
+    title: impl iced::widget::text::IntoFragment<'a>,
+    content: impl Into<Element<'a, Message>>,
+    offset: Vector,
+    messages: ToolFrameMessages,
+) -> Element<'a, Message> {
+    let ToolFrameMessages {
+        close,
+        grab,
+        resize,
+        raise,
+        detach,
+        measured,
+    } = messages;
+    let close = button(crate::ui::icons::themed_danger(
+        crate::ui::icons::CLOSE,
+        13.0,
+    ))
+    .on_press(close)
+    .padding([1, 7])
+    .style(close_style);
+    let mut controls = row![].spacing(2).align_y(iced::Center);
+    if let Some(detach) = detach {
+        let button = button(crate::ui::icons::themed_secondary(
+            crate::ui::icons::DETACH,
+            13.0,
+        ))
+        .on_press(detach)
+        .padding([1, 7])
+        .style(neutral_close_style);
+        controls = controls.push(iced::widget::tooltip(
+            button,
+            container(iced::widget::text(crate::t!("Open in its own window")).size(11))
+                .padding([3, 6])
+                .style(container::rounded_box),
+            iced::widget::tooltip::Position::Bottom,
+        ));
+    }
+    let controls = controls.push(close);
+    let title_surface = mouse_area(
+        container(iced::widget::text(title).size(15))
+            .width(Length::Fill)
+            .height(Length::Fixed(24.0))
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center),
+    )
+    .on_press(grab)
+    .interaction(iced::mouse::Interaction::Grab);
+    let title_bar = stack![
+        title_surface,
+        container(controls)
+            .width(Length::Fill)
+            .height(Length::Fixed(24.0))
+            .align_x(iced::alignment::Horizontal::Right)
+            .align_y(iced::alignment::Vertical::Center),
+    ]
+    .width(Length::Fill)
+    .height(Length::Fixed(24.0));
+    let measured_content = sensor(content).on_resize(move |size| measured(size));
+    let body_base = column![Space::new().height(Length::Fixed(24.0)), measured_content].spacing(6);
+    let grip = mouse_area(
+        container(crate::ui::icons::themed_primary(
+            crate::ui::icons::RESIZE,
+            15.0,
+        ))
+        .padding([0, 2]),
+    )
+    .on_press(resize)
+    .interaction(iced::mouse::Interaction::ResizingDiagonallyDown);
+    let body = stack![
+        body_base,
+        title_bar,
+        container(grip)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Right)
+            .align_y(iced::alignment::Vertical::Bottom),
+    ];
+    let framed = container(body).padding(10).style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        border: Border {
+            color: theme.palette().background.neutral.color,
+            width: 1.0,
+            radius: 6.0.into(),
+        },
+        shadow: iced::Shadow {
+            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+            offset: Vector::new(0.0, 4.0),
+            blur_radius: 14.0,
+        },
+        ..Default::default()
+    });
+    // The frame is opaque to the pointer; around it the drawing takes it.
+    let framed = opaque(mouse_area(framed).on_press(raise));
+    let pad = Padding {
+        top: offset.y.max(0.0) * 2.0,
+        right: (-offset.x).max(0.0) * 2.0,
+        bottom: (-offset.y).max(0.0) * 2.0,
+        left: offset.x.max(0.0) * 2.0,
+    };
+    container(framed)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .padding(pad)
+        .into()
+}
+
 fn close_style(theme: &Theme, status: button::Status) -> button::Style {
     let palette = theme.palette();
     let pair = match status {

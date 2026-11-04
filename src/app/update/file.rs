@@ -1510,6 +1510,7 @@ impl OpenCADStudio {
                 dock
             },
             show_graphic_attributes: self.show_graphic_attributes,
+            show_command_history: self.show_command_history,
             graphic_fills_on_current_layer: self.graphic_attributes.fill_on_current_layer,
             annotation_auto_scale: self.annotation_auto_scale,
             ribbon: crate::app::config::RibbonConfig {
@@ -1579,6 +1580,10 @@ impl OpenCADStudio {
         dock.ensure_settings();
         self.dock = dock;
         self.show_graphic_attributes = cfg.show_graphic_attributes;
+        self.show_command_history = cfg.show_command_history;
+        if self.show_command_history {
+            self.sync_command_history_panel();
+        }
         self.graphic_attributes.fill_on_current_layer = cfg.graphic_fills_on_current_layer;
         if self.show_graphic_attributes {
             self.dock

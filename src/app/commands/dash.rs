@@ -825,14 +825,11 @@ impl OpenCADStudio {
     /// The document's layers named by a comma-separated, wildcard list;
     /// a plain name that matches nothing is reported.
     fn listed_layers(&mut self, i: usize, list: &str) -> Vec<String> {
-        let names: Vec<String> = self.tabs[i]
-            .scene
-            .document
-            .layers
-            .iter()
-            .filter(|layer| listed(&layer.name, list))
-            .map(|layer| layer.name.clone())
-            .collect();
+        let names = crate::app::layer_filters::expand_layer_list(
+            self.tabs[i].scene.document.layers.iter(),
+            &self.layer_filters,
+            list,
+        );
         if names.is_empty() {
             self.command_line
                 .push_error(crate::tf!("LAYER: '{}' not found.", list).as_ref());
@@ -841,7 +838,7 @@ impl OpenCADStudio {
     }
 
     /// Change `names` as one undo step and repaint what the change touches.
-    fn edit_layers(
+    pub(in crate::app) fn edit_layers(
         &mut self,
         i: usize,
         label: &str,

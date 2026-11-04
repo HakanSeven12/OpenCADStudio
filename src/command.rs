@@ -2654,6 +2654,9 @@ pub enum CmdResult {
         /// A Shift+window excludes points inside this area without adding a
         /// new crossing window or subtracting whole entities.
         subtract_window: Option<(DVec3, DVec3)>,
+        /// Objects taken out with Shift+click. They stay out when the crossing
+        /// windows are queried again for this command.
+        removed_handles: Vec<Handle>,
     },
     /// Stretch entities: move only vertices/endpoints inside any gathered
     /// crossing window.
@@ -3139,6 +3142,11 @@ pub trait CadCommand: Send {
     /// Remove one selected vertex in STRETCH's crossing-window collection stage.
     /// Other commands keep the normal Shift+grip behavior.
     fn remove_stretch_point(&mut self, _handle: Handle, _world: DVec3) -> bool {
+        false
+    }
+
+    /// Remove a whole object in STRETCH's crossing-window collection stage.
+    fn remove_stretch_entity(&mut self, _handle: Handle) -> bool {
         false
     }
 

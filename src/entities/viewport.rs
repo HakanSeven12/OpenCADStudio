@@ -355,18 +355,39 @@ pub(crate) fn is_clipped(vp: &Viewport) -> bool {
     !vp.clip_boundary_handle.is_null() && vp.status.non_rectangular_clipping
 }
 
+/// The corners [`stretch`] tests against the window, at the height it tests
+/// them: the points a STRETCH window can catch.
+pub fn stretch_corners(vp: &Viewport) -> [glam::DVec3; 4] {
+    let hw = vp.width * 0.5;
+    let hh = vp.height * 0.5;
+    let (left, right) = (vp.center.x - hw, vp.center.x + hw);
+    let (bottom, top) = (vp.center.y - hh, vp.center.y + hh);
+    [
+        glam::DVec3::new(left, bottom, 0.0),
+        glam::DVec3::new(right, bottom, 0.0),
+        glam::DVec3::new(left, top, 0.0),
+        glam::DVec3::new(right, top, 0.0),
+    ]
+}
+
 pub fn stretch(
     vp: &mut Viewport,
     win_min: glam::DVec3,
     win_max: glam::DVec3,
+    excluded: &dyn Fn(glam::DVec3) -> bool,
     delta: glam::DVec3,
 ) -> bool {
     let hw = vp.width * 0.5;
     let hh = vp.height * 0.5;
     let (left, right) = (vp.center.x - hw, vp.center.x + hw);
     let (bottom, top) = (vp.center.y - hh, vp.center.y + hh);
-    let inside =
-        |x: f64, y: f64| x >= win_min.x && x <= win_max.x && y >= win_min.y && y <= win_max.y;
+    let inside = |x: f64, y: f64| {
+        x >= win_min.x
+            && x <= win_max.x
+            && y >= win_min.y
+            && y <= win_max.y
+            && !excluded(glam::DVec3::new(x, y, 0.0))
+    };
 
     let bottom_left = inside(left, bottom);
     let bottom_right = inside(right, bottom);

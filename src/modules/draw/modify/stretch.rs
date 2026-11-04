@@ -207,8 +207,9 @@ pub(crate) fn stretch_entity_except(
             }
         }
         codec::EntityType::Viewport(vp) => {
+            let corner_excluded = |corner: DVec3| is_excluded(excluded, handle, corner);
             stretched = windows.iter().any(|(win_min, win_max)| {
-                crate::entities::viewport::stretch(vp, *win_min, *win_max, delta)
+                crate::entities::viewport::stretch(vp, *win_min, *win_max, &corner_excluded, delta)
             });
         }
         codec::EntityType::Dimension(dim) => {
@@ -439,6 +440,8 @@ pub struct StretchCommand {
     /// Independent crossing windows accumulated during the selection stage.
     windows: Vec<(DVec3, DVec3)>,
     excluded_points: Vec<(Handle, DVec3)>,
+    /// Objects taken out with Shift+click; later crossing windows keep them out.
+    removed: Vec<Handle>,
     /// The objects the drag really changes. A crossing window also catches
     /// objects that only pass through it; those stay drawn and snappable
     /// instead of being hidden behind the preview (#1989). Resolved on the
@@ -459,6 +462,7 @@ impl StretchCommand {
                 wire_models,
                 windows: Vec::new(),
                 excluded_points: Vec::new(),
+                removed: Vec::new(),
                 moving: None,
                 remove_release_pending: false,
                 shift_down: false,
@@ -481,6 +485,7 @@ impl StretchCommand {
             wire_models,
             windows: Vec::new(),
             excluded_points: Vec::new(),
+            removed: Vec::new(),
             moving: None,
             remove_release_pending: false,
             shift_down: false,
@@ -523,12 +528,21 @@ impl StretchCommand {
             wire_models,
             windows,
             excluded_points,
+            removed: Vec::new(),
             moving: None,
             remove_release_pending: false,
             shift_down: false,
             step: Step::WindowCorner1,
         }
     }
+
+    /// Carry the objects already removed with Shift+click into the next
+    /// collection step.
+    pub fn with_removed(mut self, removed: Vec<Handle>) -> Self {
+        self.removed = removed;
+        self
+    }
+
     /// A window enclosing every vertex of the current selection, or `None`
     /// when nothing is selected. Padded so a vertex exactly on the boundary
     /// counts as inside rather than depending on the comparison's edge.
@@ -636,6 +650,7 @@ impl CadCommand for StretchCommand {
                     windows,
                     excluded_points: self.excluded_points.clone(),
                     subtract_window,
+                    removed_handles: self.removed.clone(),
                 }
             }
 
@@ -696,6 +711,19 @@ impl CadCommand for StretchCommand {
         if !is_excluded(&self.excluded_points, handle, world) {
             self.excluded_points.push((handle, world));
         }
+        self.remove_release_pending = true;
+        true
+    }
+
+    fn remove_stretch_entity(&mut self, handle: Handle) -> bool {
+        if !matches!(self.step, Step::WindowCorner1) || !self.handles.contains(&handle) {
+            return false;
+        }
+        self.handles.retain(|owned| *owned != handle);
+        self.wire_models
+            .retain(|wire| crate::scene::Scene::handle_from_wire_name(&wire.name) != Some(handle));
+        self.excluded_points.retain(|(owner, _)| *owner != handle);
+        self.removed.push(handle);
         self.remove_release_pending = true;
         true
     }
@@ -884,6 +912,79 @@ mod shift_stretch_tests {
         let codec::EntityType::Line(line) = entity else { panic!("line expected") };
         assert_eq!(line.start, Vector3::new(0.0, 0.0, 0.0));
         assert_eq!(line.end, Vector3::new(15.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn shift_removed_object_leaves_the_stretch_and_stays_out() {
+        let (kept, removed) = (Handle::new(41), Handle::new(42));
+        let window = (DVec3::new(-1.0, -1.0, -1.0), DVec3::new(11.0, 1.0, 1.0));
+        let mut cmd =
+            StretchCommand::with_windows(vec![kept, removed], vec![], vec![window], Vec::new());
+
+        assert!(!cmd.remove_stretch_entity(Handle::new(43)));
+        assert!(cmd.remove_stretch_entity(removed));
+        assert!(cmd.consume_stretch_remove_release());
+
+        // A further window must report the object so the host can keep it out.
+        assert!(matches!(
+            cmd.on_point(DVec3::new(20.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        // Only the first corner stage removes objects.
+        assert!(!cmd.remove_stretch_entity(kept));
+        let CmdResult::StretchWindow {
+            handles,
+            removed_handles,
+            ..
+        } = cmd.on_point(DVec3::new(30.0, 5.0, 0.0))
+        else {
+            panic!("expected a crossing window")
+        };
+        assert_eq!(handles, vec![kept]);
+        assert_eq!(removed_handles, vec![removed]);
+    }
+
+    #[test]
+    fn shift_removed_viewport_corners_stay_in_place() {
+        let handle = Handle::new(7);
+        let mut viewport = codec::entities::Viewport::default();
+        viewport.center = Vector3::new(10.0, 10.0, 0.0);
+        viewport.width = 20.0;
+        viewport.height = 20.0;
+        viewport.view_height = 20.0;
+        let window = (DVec3::new(15.0, -1.0, -1.0), DVec3::new(25.0, 25.0, 1.0));
+
+        // Both right corners excluded: nothing is left to stretch.
+        let mut entity = codec::EntityType::Viewport(Box::new(viewport.clone()));
+        let excluded = vec![
+            (handle, DVec3::new(20.0, 0.0, 0.0)),
+            (handle, DVec3::new(20.0, 20.0, 0.0)),
+        ];
+        assert!(!stretch_entity_except(
+            &mut entity,
+            handle,
+            &[window],
+            &excluded,
+            DVec3::new(5.0, 0.0, 0.0),
+        ));
+        let codec::EntityType::Viewport(unchanged) = &entity else {
+            panic!("viewport")
+        };
+        assert_eq!(unchanged.width, 20.0);
+
+        // Without exclusions the same window widens it.
+        let mut entity = codec::EntityType::Viewport(Box::new(viewport));
+        assert!(stretch_entity_except(
+            &mut entity,
+            handle,
+            &[window],
+            &[],
+            DVec3::new(5.0, 0.0, 0.0),
+        ));
+        let codec::EntityType::Viewport(widened) = &entity else {
+            panic!("viewport")
+        };
+        assert_eq!(widened.width, 25.0);
     }
 
     #[test]

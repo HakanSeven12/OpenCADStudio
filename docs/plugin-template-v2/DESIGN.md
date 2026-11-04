@@ -8,6 +8,9 @@ contract:
   `write_record`).
 - **Read→write round-trips**: read an entity handle from the shared document
   view and attach XDATA to it.
+- **Quad panel (API v15)**: register a cursor-menu panel bound to `Insert`
+  entities — one host-dispatched command item, one plugin callback item, and a
+  custom SVG icon (`quad_icon.svg`).
 
 It lives under `docs/` (not `crates/`) because it is documentation/example code
 rather than a runtime dependency of the host.
@@ -71,6 +74,72 @@ selection, or any other behavior.
 The plugin registers one ribbon module (`SurveyTools`) with one group
 (`Survey`). Each tool emits a `ModuleEvent::Command(...)` carrying the command
 name. The host routes the command to `BuiltinPlugin::dispatch`.
+
+### Quad panel (API v15)
+
+The template registers one quad panel, `insert-ext` ("Insert Extras"), bound to
+`Insert` entities via `applies_to` and registered once in
+`BuiltinPlugin::on_load` through `HostApi::register_quad_panels` (passing the
+plugin's own manifest id as the `plugin_id` argument):
+
+| Item / control_id | Icon | Action | Behaviour |
+|---|---|---|---|
+| Explode — `explode` | `quad_icon.svg` (custom 24×24 `currentColor` SVG) | `QuadActionDef::Command("EXPLODE")` | The host dispatches `EXPLODE` itself with the selection aligned to the quad target — a hovered-but-unselected Insert is force-selected first, so the command edits what was pointed at. The plugin never sees the pick. |
+| Inspect — `inspect` | `IconKind::Glyph("I")` | `QuadActionDef::Callback` | The pick reaches the plugin in `BuiltinPlugin::on_quad_action` with the target's handles, type keys and pick point: it logs a line to the command line and stamps a `QUADINSPECT` XDATA record on each handle inside one `push_undo` step. (`pick_point` ships `[0.0; 3]` today — the quad is screen-space only, no world point is attached yet — so the echoed coordinates read `0.000`.) |
+
+What you see when it runs: hover an Insert with the quad enabled (Options →
+"Quad Cursor Menu" section; the master `QUAD` switch is **opt-in/off by
+default**), and the Insert's quad shows the "Insert Extras" tab next to the
+generic panels. Its two tiles sit under the panel title; `EXPLODE` runs the
+host command from the quad, while "Inspect selection" echoes
+`quad inspect: 1 entity(ies) [Insert] at x, y, z` on the command line and
+attaches `QUADINSPECT` XDATA (round-tripped on the drawing, APPID declared in
+`xdata_apps`). Unloading the plugin removes the panel; re-registering
+`insert-ext` replaces it in place.
+
+Notes on the locked API surface (read [`docs/quad-menu.md`](../quad-menu.md)
+§4 for the full contract):
+
+- **Landed**: the v15 surface is in `crates/ocs_plugin_api` (`API_VERSION`
+  is 15), so the names above are the landed signatures, not pre-landed
+  targets.
+- `QuadPanelDef` / `QuadItemDef` / `QuadActionDef` live in
+  `ocs_plugin_api::dialog`. `QuadItemDef.icon` is an
+  `OwnedIconKind` field (the owned wire shape, exactly like ribbon tools);
+  you author it with the ribbon's borrowed `IconKind` (`Glyph(&'static str)`
+  / `Svg(&'static [u8])`) and it converts with `Into` — the same
+  borrowed → owned conversion the ribbon path performs
+  (`crates/ocs_plugin_api/src/ribbon/owned.rs`).
+- Registration: `HostApi::register_quad_panels(
+  &mut self, plugin_id: &str, panels: &[QuadPanelDef]) -> Vec<bool>` — pass
+  the plugin's own manifest id as `plugin_id`; over the plugin IPC the host
+  fixes ownership from the transport (one plugin can never register in
+  another's name). Registration is per-panel and replace-if-same-owner: a
+  re-registered `insert-ext` replaces the owner's earlier declaration in
+  place, and each returned bool answers one panel in order. Panel ids are
+  namespaced by the host, visible as `plugin:<plugin_id>:<panel_id>`.
+  Budgets: 16 panels per plugin, 64 items per panel, ≤ 8 KiB of SVG per icon
+  (an oversized or malformed icon degrades to a glyph tile instead of
+  refusing).
+- Unregistering: `HostApi::unregister_quad_panels(
+  &mut self, plugin_id: &str, panel_ids: &[&str]) -> Vec<bool>` removes
+  named panels owned by `plugin_id`. The ownership law runs both ways: a
+  `plugin_id`/`panel_id` another plugin owns is refused, not removed (one
+  bool per id), and over the plugin IPC the `plugin_id` comes from the
+  transport (the protocol's `UnregisterQuadPanels` request carries only the
+  ids), exactly like `register_quad_panels`. Cleanup beyond
+  replace-on-reregister: a plugin's panels also disappear automatically
+  when the plugin unloads or its process dies (the session store reaps
+  dead owners, the same law as grips/classes) — the explicit
+  `unregister_quad_panels` call is for retiring panels while running.
+- Callback delivery: `BuiltinPlugin::on_quad_action(
+  &mut self, host: &mut dyn HostApi, panel_id: &str, control_id: &str,
+  handles: &[Handle], type_keys: &[&str], pick_point: [f64; 3])` — the
+  landed signature takes `type_keys` as `&[&str]` (the wire's owned
+  `Vec<String>`s are borrowed for the call by the runner). The example call
+  site in `src/lib.rs` matches these landed shapes: it passes
+  `MANIFEST.id` as `register_quad_panels`'s `plugin_id` and declares
+  `&[&str]` for `on_quad_action`'s `type_keys`.
 
 ---
 

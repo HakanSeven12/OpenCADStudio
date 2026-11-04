@@ -106,6 +106,9 @@ pub struct StatusBarReadout {
 pub struct StatusBar {
     #[allow(dead_code)]
     pub coord_display: String,
+    /// The quad cursor menu's display flags, mirrored from the app per
+    /// message (the bar has no other path to the app's settings).
+    pub quad: crate::ui::popup::quad_status::QuadStatusFlags,
     /// Widest coordinate readout so far, in characters, and the mode it was
     /// measured in. The pill keeps that width so the bar does not reflow,
     /// and jump the layout tabs between one and two rows, as the cursor moves.
@@ -116,6 +119,7 @@ impl StatusBar {
     pub fn new() -> Self {
         Self {
             coord_display: "MODEL".into(),
+            quad: Default::default(),
             coords_width: std::cell::Cell::new((0, 0)),
         }
     }
@@ -451,6 +455,20 @@ impl StatusBar {
                 .into(),
             );
         }
+        // ── QUAD field (docs/quad-menu.md §3.6) ──────────────────────────
+        // Not user-hideable this wave (statusbar_config's `StatusPill` list
+        // stays untouched): one mastertoggle left of the pill's caret opens
+        // the display-option popup, both wired through `Message::Quad` /
+        // `Message::QuadOption`. The mirrored flags live on `StatusBar`
+        // (refreshed per message by the app).
+        pills.push(
+            quad_pill(
+                self.quad.on,
+                tooltip_hidden,
+                crate::ui::popup::quad_status::menu_entries(self.quad),
+            )
+            .into(),
+        );
         if vis(StatusPill::Space) {
             pills.push(
                 tip(
@@ -977,6 +995,61 @@ fn polar_pill<'a>(
 // ── OSNAP pill ─────────────────────────────────────────────────────────────
 //
 // Main: toggles the global snap on/off. Caret: opens the snap-type dropdown.
+
+// ── Quad toggle pill ───────────────────────────────────────────────────
+//
+// Main: toggles the quad cursor menu on/off (`Message::Quad(Toggle)`,
+// docs/quad-menu.md §3.6). Caret: the display-option popup
+// (`quad_status::menu_entries` → `Message::QuadOption`). No SVG: the pills
+// with text labels (PAPER, scale) set the precedent, and the quad has no
+// dedicated icon file.
+
+fn quad_pill<'a>(
+    on: bool,
+    tooltip_hidden: bool,
+    entries: Vec<StatusMenuEntry<'a>>,
+) -> Element<'a, Message> {
+    let label = text(t!("QUAD")).size(11).style(move |theme: &Theme| {
+        let palette = theme.palette();
+        text::Style {
+            color: Some(if on {
+                palette.primary.weak.text
+            } else {
+                palette.background.base.text.scale_alpha(0.72)
+            }),
+        }
+    });
+    let main = mouse_area(container(label).padding([2, 0]))
+        .on_press(Message::Quad(crate::ui::popup::quad_menu::QuadMsg::Toggle));
+    let main = tooltip(
+        main,
+        container(text(t!("Quad cursor menu\nClick to toggle on/off")).size(11))
+            .style(container::bordered_box)
+            .padding([4, 8]),
+        TipPos::Top,
+    );
+
+    let caret = status_menu::menu_bar(
+        menu_tip(
+            mouse_area(
+                container(if on {
+                    crate::ui::icons::themed_primary_weak_arrow_down(9.0)
+                } else {
+                    crate::ui::icons::themed_secondary_arrow_down(9.0)
+                })
+                .padding([4, 7]),
+            )
+            .on_press(Message::StatusMenuTooltipHidden(true))
+            .into(),
+            t!("Quad display options\nClick to choose"),
+            tooltip_hidden,
+        ),
+        entries,
+        crate::ui::popup::quad_status::menu_width(),
+    );
+
+    split_pill(main.into(), caret, on)
+}
 
 fn osnap_btn<'a>(
     active: bool,

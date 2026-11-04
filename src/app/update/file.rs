@@ -821,6 +821,16 @@ impl OpenCADStudio {
             double_click_block_attedit: self.double_click_block_attedit,
             right_click_mode: self.right_click_mode,
             right_click_hold_ms: self.right_click_hold_ms,
+            quad: self.quad,
+            quad_on_hover: self.quad_on_hover,
+            quad_on_select: self.quad_on_select,
+            quad_on_right_click: self.quad_on_right_click,
+            quad_suppress_hover_when_selection: self.quad_suppress_hover_when_selection,
+            quad_width: crate::app::settings::clamp_quad_width(self.quad_width),
+            quad_command_launch: self.quad_command_launch,
+            quad_hover_delay_ms: crate::app::settings::clamp_quad_hover_delay_ms(
+                self.quad_hover_delay_ms,
+            ),
             grip_object_limit: self.grip_object_limit,
             image_frame: crate::scene::frame::profile_image_mode(),
             attdef_on_screen: crate::modules::draw::draw::attdef::session().on_screen,
@@ -1001,6 +1011,15 @@ impl OpenCADStudio {
         self.right_click_mode = s.right_click_mode;
         self.right_click_hold_ms =
             super::super::settings::clamp_right_click_hold_ms(s.right_click_hold_ms);
+        self.quad = s.quad;
+        self.quad_on_hover = s.quad_on_hover;
+        self.quad_on_select = s.quad_on_select;
+        self.quad_on_right_click = s.quad_on_right_click;
+        self.quad_suppress_hover_when_selection = s.quad_suppress_hover_when_selection;
+        self.quad_width = crate::app::settings::clamp_quad_width(s.quad_width);
+        self.quad_command_launch = s.quad_command_launch;
+        self.quad_hover_delay_ms =
+            crate::app::settings::clamp_quad_hover_delay_ms(s.quad_hover_delay_ms);
         self.grip_object_limit = s.grip_object_limit.clamp(0, 32767);
         crate::scene::frame::set_profile_image_mode(s.image_frame);
         crate::modules::draw::draw::attdef::session().on_screen = s.attdef_on_screen;
@@ -1577,6 +1596,12 @@ impl OpenCADStudio {
         self.shortcut_bindings
             .entry("SHIFT+TAB".to_string())
             .or_insert_with(|| "DYNTABPREV".to_string());
+        // A config saved before the quad cursor menu carried no SHIFT+F12
+        // row; without this backfill `run_shortcut`'s bare-base-key fallback
+        // resolves SHIFT+F12 to F12 (DYNINPUT) and the quad never toggles.
+        self.shortcut_bindings
+            .entry("SHIFT+F12".to_string())
+            .or_insert_with(|| "QUADTOGGLE".to_string());
         self.shortcut_bindings
             .entry(if cfg!(target_os = "macos") { "CMD+R" } else { "CTRL+R" }.to_string())
             .or_insert_with(|| "NEXTVIEWPORT".to_string());

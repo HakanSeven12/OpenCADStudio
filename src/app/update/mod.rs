@@ -127,7 +127,7 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 mod block_ops_tests;
 pub(super) mod blocks_palette;
 mod command;
-mod context_menu;
+pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
 mod file;
@@ -487,6 +487,7 @@ impl OpenCADStudio {
     }
 
     pub fn update(&mut self, msg: Message) -> Task<Message> {
+        crate::sys::startup_times::update_tick();
         // Whatever makes another document active (switching, opening,
         // creating or closing a tab), the contextual ribbon tab follows that
         // document's selection.
@@ -804,6 +805,15 @@ impl OpenCADStudio {
                 return task;
             }
         }
+        // The open quad cursor menu owns the keyboard the same way: Escape
+        // closes it, Enter picks the primary item, Tab cycles its panels and
+        // the digits 1–9 pick them; any other key closes it and falls
+        // through to the command line.
+        if self.quad_open() {
+            if let Some(task) = self.intercept_quad_key(&msg) {
+                return task;
+            }
+        }
         // An open property list owns Escape, Enter and the arrows: without
         // this they reach the command line or the viewport and dismiss the
         // selection the list was opened for. A list whose panel is hidden is
@@ -897,6 +907,16 @@ impl OpenCADStudio {
             })
             .unwrap_or_default();
         self.command_line.set_step_options(opts);
+        // The status bar's QUAD field mirrors the live quad display flags —
+        // the bar has no other path to the app's settings, and one message
+        // arriving is one chance too many to render a stale pill.
+        self.status_bar.quad = crate::ui::popup::quad_status::QuadStatusFlags {
+            on: self.quad,
+            on_hover: self.quad_on_hover,
+            on_select: self.quad_on_select,
+            on_right_click: self.quad_on_right_click,
+            suppress_hover_when_selection: self.quad_suppress_hover_when_selection,
+        };
         // Persist UI preferences whenever a toggle changes them (issue #68).
         self.persist_settings_if_changed();
         // The block panel watches the drawing's block list and rebuilds its
@@ -1547,7 +1567,7 @@ impl OpenCADStudio {
                     .selection
                     .borrow_mut()
                     .menu
-                    .open_at = None;
+                    .close();
                 // Same guard as typed MTP/M2P: point step, not entity pick.
                 let i = self.active_tab;
                 let allowed = self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
@@ -2900,7 +2920,7 @@ impl OpenCADStudio {
                 // drawing's context menu and the Isolate menu close.
                 self.ribbon.close_app_menu();
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.close();
                 self.isolate_popup_open = false;
                 // A single word dispatches as a ribbon button does; a line
                 // with answers runs its command and feeds them to its
@@ -3408,6 +3428,10 @@ impl OpenCADStudio {
             Message::TabNew => {
                 // Preserve the outgoing drawing's Ortho / running OSNAP.
                 self.stamp_header_sysvars(self.active_tab);
+                // The quad does not survive the switch to the fresh
+                // drawing either (same TabSwitch rule): its window state
+                // is per-tab while the panels are app-global.
+                self.close_quad();
                 self.tab_counter += 1;
                 let new_tab = super::document::DocumentTab::new_drawing(self.tab_counter);
                 self.tabs.push(new_tab);
@@ -3459,6 +3483,12 @@ impl OpenCADStudio {
                         // The attribute editor is tab-scoped; leaving its tab
                         // drops it (its handle is that document's, not this one's).
                         self.cancel_attr_editor();
+                        // The quad is cursor UI: like the legacy menu on the
+                        // disrupted transitions, it does not ride a tab
+                        // switch (its per-tab window state rides
+                        // app-global panels, so leaving it open would let a
+                        // pick re-target the outgoing drawing's handles).
+                        self.close_quad();
                         // Persist the outgoing drawing's Ortho / running OSNAP
                         // before leaving it, so switching back restores them.
                         let prev = self.active_tab;
@@ -4212,7 +4242,7 @@ impl OpenCADStudio {
                 self.ribbon.close_app_menu();
                 // Close viewport context menu if open.
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.close();
                 // Any command also dismisses the Isolate action menu.
                 self.isolate_popup_open = false;
                 // "Pick window" (PLOTWINDOW) from Page Setup needs the backdrop
@@ -5693,7 +5723,7 @@ impl OpenCADStudio {
                 let Some(p) = sel.input.last_move_pos else {
                     return Task::none();
                 };
-                sel.menu.open_at = None;
+                sel.menu.close();
                 sel.input.right_down = true;
                 sel.input.right_press_pos = Some(p);
                 sel.input.right_press_time = Some(iced::time::Instant::now());
@@ -5741,6 +5771,23 @@ impl OpenCADStudio {
                     drop(sel);
                     return self.update(Message::CommandFinalize);
                 }
+                // The Quad cursor menu, when it exists, owns the right-click
+                // like commercial solutions do (docs/quad-menu.md §3.4): the
+                // hovered default command launches, the Selection quad
+                // replaces the legacy menu on a selection, the No Selection
+                // quad appears in the void — and the legacy path below
+                // answers everything else (a command running keeps it
+                // entirely).
+                drop(sel);
+                if self.quad && self.tabs[i].active_cmd.is_none() {
+                    // The takeover needs the press duration the time-sensitive
+                    // modes use below: a quick click launches, a hold opens
+                    // the No Selection quad (docs/quad-menu.md §3.4).
+                    if let Some(task) = self.quad_right_click_takeover(click_pos, held_ms) {
+                        return task;
+                    }
+                }
+                let mut sel = self.tabs[i].scene.selection.borrow_mut();
                 // A right-click. What it does is the user's choice (Options →
                 // User Preferences, SHORTCUTMENU in commercial solutions):
                 //  • Shortcut menu — always open the context menu, whose
@@ -7978,7 +8025,7 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.close();
                 // A selected constraint-glyph pill takes Delete before entity
                 // erase — the two selections are mutually exclusive (see
                 // `Scene::selected_constraint`).
@@ -8685,9 +8732,15 @@ impl OpenCADStudio {
             Message::ContextMenuSubmenuToggle(id) => self.on_context_menu_submenu_toggle(id),
             Message::ContextMenuNavigate(nav) => self.on_context_menu_navigate(nav),
 
+            // Quad cursor menu interactions and display options
+            // (docs/quad-menu.md); the glue lives next to the context-menu
+            // router it mirrors.
+            Message::Quad(quad) => self.on_quad_msg(quad),
+            Message::QuadOption(option) => self.on_quad_option(option),
+
             Message::DrawOrderPickRef(above) => {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.close();
                 let to_move: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if to_move.is_empty() {
                     self.command_line
@@ -8703,7 +8756,7 @@ impl OpenCADStudio {
 
             Message::SelectSimilar => {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.close();
                 let added = self.tabs[i].scene.select_similar(self.select_similar_mode);
                 self.command_line
                     .push_output(crate::tf!("Select Similar: {} added.", added).as_ref());
@@ -8713,7 +8766,7 @@ impl OpenCADStudio {
 
             Message::InvertSelection => {
                 let i = self.active_tab;
-                self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+                self.tabs[i].scene.selection.borrow_mut().menu.close();
                 let count = self.tabs[i].scene.invert_selection();
                 self.command_line.push_output(
                     crate::tf!("Invert Selection: {} object(s) selected.", count).as_ref(),

@@ -2976,6 +2976,10 @@ impl OpenCADStudio {
             if self.tabs[i].scene.last_tess_wires.get() < crate::app::HOVER_DWELL_DENSE_WIRES {
                 self.tabs[i].scene.set_hover_highlight(None);
             }
+            // A cursor move is the strongest "the pick's inputs changed"
+            // signal for the quad dwell poll: bump the move count first so
+            // the recorded (or pending) settled pick is disqualified.
+            self.hover_move_seq += 1;
             self.hover_dwell = Some(crate::app::HoverDwell {
                 last_move_at: Instant::now(),
                 point: p,
@@ -2987,6 +2991,12 @@ impl OpenCADStudio {
             self.tabs[i].scene.set_hover_highlight(None);
             self.hover_dwell = None;
         }
+        // The quad cursor menu's hover dwell (docs/quad-menu.md §3.4) rides
+        // the same settled-rollover machinery: a move restarts nothing on its
+        // own clock (the set-hover step sees the live rollover highlight), a
+        // quad already open closes once the cursor drifts or leaves the
+        // entity. `rest_ms = 0`: the cursor only just moved.
+        self.quad_hover_step(i, p, 0);
 
         // Throttle: while a plain point pick is active and the cursor is still
         // settling, defer continuous / pairwise snap modes to SnapDwellTick.
@@ -8448,6 +8458,43 @@ properties={:.1}ms picked={}",
             self.hover_dwell = None;
             return Task::none();
         }
+        // While the quad's own hover dwell is counting with no quad open
+        // (its configured delay is beyond the rollover's), re-running the
+        // whole settled pick below would repeat identically: none of its
+        // inputs moved since the last completed pick. Skip the O(N) sweep
+        // and only drive the quad step / re-arm (docs/quad-menu.md §3.4) —
+        // the sweep re-runs as soon as the cursor (move count) or a scene /
+        // camera pick token changed.
+        if self.quad_hover_counting() && self.tabs[i].active_cmd.is_none() {
+            let unchanged = self.quad_dwell_pick.as_ref().is_some_and(|pick| {
+                pick.tab == i
+                    && pick.point == dwell.point
+                    && pick.move_seq == self.hover_move_seq
+                    && pick.geometry_epoch == self.tabs[i].scene.geometry_epoch
+                    && pick.camera_generation == self.tabs[i].scene.camera_generation
+                    && pick.selection_preview == self.model_space.selection_preview
+                    && pick.pick_box == self.pick_box
+            });
+            if unchanged {
+                let rest = dwell.last_move_at.elapsed().as_millis() as u64;
+                self.quad_hover_step(i, dwell.point, rest);
+                // The settled pick's re-arm discipline when it leaves the
+                // dwell counting, applied here too: keep polling at the
+                // rollover cadence until the quad opened or the rest
+                // disqualified (a further move re-arms from the move).
+                if self.quad_hover_counting() {
+                    self.hover_dwell = Some(crate::app::HoverDwell {
+                        last_move_at: Instant::now(),
+                        point: dwell.point,
+                        tile_size: dwell.tile_size,
+                        tab: dwell.tab,
+                    });
+                } else {
+                    self.hover_dwell = None;
+                }
+                return Task::none();
+            }
+        }
         self.push_ucs_to_cmd(i);
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
             command.set_ctrl(self.ctrl_down);
@@ -8648,7 +8695,43 @@ properties={:.1}ms picked={}",
         } else {
             self.tabs[i].scene.set_hover_highlight(None);
         }
-        self.hover_dwell = None;
+        // Record what this settled pick saw so this tick's quad poll can
+        // skip an identical repetition while the cursor rests (see the skip
+        // gate at the top; the tokens are the pick's own inputs).
+        self.quad_dwell_pick = Some(crate::app::QuadDwellPick {
+            tab: i,
+            point: p,
+            move_seq: self.hover_move_seq,
+            geometry_epoch: self.tabs[i].scene.geometry_epoch,
+            camera_generation: self.tabs[i].scene.camera_generation,
+            selection_preview: self.model_space.selection_preview,
+            pick_box: self.pick_box,
+        });
+        // The quad cursor menu's hover dwell (docs/quad-menu.md §3.4) feeds
+        // off this authoritative settled pick: `rest_ms` is how long the
+        // cursor has been resting, so a dwell that already crossed the
+        // configured delay opens the quad at once. While the quad's own
+        // delay is still counting, the tick re-arms itself — a cursor that
+        // rests forever generates no move events, and without the re-arm a
+        // delay beyond this tick would never be crossed.
+        self.quad_hover_step(
+            i,
+            p,
+            dwell.last_move_at.elapsed().as_millis() as u64,
+        );
+        if self.quad_hover_counting() {
+            // Restart the dwell clock so polling happens at the original
+            // rollover cadence (a tick every HOVER_DWELL_MS), not every
+            // frame; a cancellation on the next move re-arms from the move.
+            self.hover_dwell = Some(crate::app::HoverDwell {
+                last_move_at: Instant::now(),
+                point: dwell.point,
+                tile_size: dwell.tile_size,
+                tab: dwell.tab,
+            });
+        } else {
+            self.hover_dwell = None;
+        }
         let hover_ms = hover_started.elapsed().as_secs_f64() * 1000.0;
         if perf && hover_ms >= 5.0 {
             crate::perf_record!(
@@ -11216,6 +11299,75 @@ mod selection_preview_tests {
         assert!(
             !rollover_hits(2),
             "only the in-command bit: the idle rollover stays off",
+        );
+    }
+
+    /// The quad's own dwell poll (docs/quad-menu.md §3.4): with the quad's
+    /// delay beyond the rollover cadence, the re-armed `HoverDwellTick`s
+    /// must not re-run the full O(N) settled pick while cursor and scene
+    /// rest — and must re-run it once the cursor moved again, even away and
+    /// back to the same point.
+    #[test]
+    fn quad_hover_poll_skips_the_settled_pick_while_resting() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.run_command_line("LINE 0,0 10,10");
+        let _ = app.run_command_line("ZOOM EXTENTS");
+        app.quad = true;
+        app.quad_hover_delay_ms = 700; // past HOVER_DWELL_MS: the poll continues
+        app.hover_dwell = Some(HoverDwell {
+            last_move_at: Instant::now()
+                - std::time::Duration::from_millis(HOVER_DWELL_MS as u64 + 1),
+            point: iced::Point::new(400.0, 300.0),
+            tile_size: (800.0, 600.0),
+            tab: i,
+        });
+        // The first tick picks (the line under the cursor is highlighted)
+        // and arms the quad dwell — rest 501 < 700, so the quad is waiting.
+        let _ = app.on_hover_dwell_tick();
+        assert!(
+            app.tabs[i].scene.hover_highlight.is_some(),
+            "the first settled pick ran and highlighted the line"
+        );
+        assert!(
+            app.quad_hover_counting(),
+            "the quad dwell is still counting"
+        );
+        assert!(app.quad_dwell_pick.is_some(), "the settled pick is recorded");
+
+        // A repeat with nothing changed must not re-pick: a highlight
+        // dropped by hand stays dropped (a re-pick would restore it), and
+        // the disqualified counting dwell tears down like the settled tail.
+        app.tabs[i].scene.set_hover_highlight(None);
+        app.hover_dwell.as_mut().unwrap().last_move_at = Instant::now()
+            - std::time::Duration::from_millis(HOVER_DWELL_MS as u64 + 1);
+        let _ = app.on_hover_dwell_tick();
+        assert!(
+            app.tabs[i].scene.hover_highlight.is_none(),
+            "the resting poll skipped the settled pick"
+        );
+        assert!(
+            app.quad_hover_since.is_none(),
+            "the skipped tick disqualified the counting dwell with the highlight"
+        );
+
+        // A cursor move back onto the same point (the move count changed)
+        // re-runs the pick: the line is highlighted again.
+        app.quad_hover_since = Some(std::time::Instant::now());
+        app.hover_move_seq += 1;
+        app.hover_dwell = Some(HoverDwell {
+            last_move_at: Instant::now()
+                - std::time::Duration::from_millis(HOVER_DWELL_MS as u64 + 1),
+            point: iced::Point::new(400.0, 300.0),
+            tile_size: (800.0, 600.0),
+            tab: i,
+        });
+        let _ = app.on_hover_dwell_tick();
+        assert!(
+            app.tabs[i].scene.hover_highlight.is_some(),
+            "a moved cursor re-runs the settled pick"
         );
     }
 

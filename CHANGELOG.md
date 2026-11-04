@@ -8,7 +8,7 @@
 
 | Release | Date | Highlights | Details |
 | :--- | :--- | :--- | :--- |
-| **[Unreleased](changelogs/unreleased.md)** | *2026-11-01 to Present* | Chained dynamic block parameter actions, plus block attribute propagation and visibility-state fixes | [changelogs/unreleased.md](changelogs/unreleased.md) |
+| **[Unreleased](changelogs/unreleased.md)** | *2026-11-01 to Present* | Quad cursor menu with plugin quad surface, chained dynamic block parameter actions, plus block attribute propagation and visibility-state fixes | [changelogs/unreleased.md](changelogs/unreleased.md) |
 | **[v2026.44](changelogs/v2026.44.md)** | *2026-11-01* | Shared OpenCADDocument model with IFCX and converter interchange, dimension/multileader/text/table overhauls, ribbon redesign, layer tools, Plugin API 14, MCP intent tools, and plotting/import/performance fixes | [changelogs/v2026.44.md](changelogs/v2026.44.md) |
 | **[v2026.43](changelogs/v2026.43.md)** | *2026-10-25* | Dynamic block authoring, QuickCalc, HATCH editing, expanded import/export, plugin grips, drafting tools, and broad reliability improvements | [changelogs/v2026.43.md](changelogs/v2026.43.md) |
 | **[v2026.42](changelogs/v2026.42.md)** | *2026-10-18* | Dynamic block authoring, broad import support (DGN, PDF, STEP, IGES, SAT, WMF, 3DS), dockable palettes, web parity, and drafting/layout tools | [changelogs/v2026.42.md](changelogs/v2026.42.md) |
@@ -21,7 +21,7 @@
 
 ## [Unreleased] - 2026-11-01
 
-> **Summary:** Added chained action sequencing to dynamic block parameters and corrected block attribute propagation and visibility-state behavior. See the [full Unreleased notes](changelogs/unreleased.md).
+> **Summary:** Added the quad cursor menu with a plugin quad surface, chained action sequencing to dynamic block parameters, and corrected block attribute propagation and visibility-state behavior. See the [full Unreleased notes](changelogs/unreleased.md).
 
 ## [v2026.44] - 2026-11-01
 

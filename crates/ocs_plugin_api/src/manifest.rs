@@ -136,7 +136,10 @@
 /// (emitted by `export_plugin!`), so no Rust type crosses the library
 /// boundary. The host no longer matches the plugin's compiler or codec commit;
 /// it matches the codec types' wire shapes (`version_info::wire_schema`).
-pub const API_VERSION: u32 = 14;
+/// v15: quad panels + custom icons — the declarative quad-cursor-menu surface
+/// (`QuadPanelDef` / `PluginRequest::RegisterQuadPanels` /
+/// `HostNotification::QuadAction`), appending to the protocol enums only.
+pub const API_VERSION: u32 = 15;
 
 /// Oldest plugin API major the current host still loads. This keeps previously
 /// compiled cdylibs usable as long as their vtable layout is a prefix of the

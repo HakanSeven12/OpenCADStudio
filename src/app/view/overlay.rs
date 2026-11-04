@@ -7,6 +7,7 @@ use crate::t;
 use crate::ui::popup::context_menu::{
     ContextMenu, MenuIcon, MenuItem, MenuRow, MENU_PAD_TOP, MENU_ROW_H,
 };
+use crate::ui::popup::quad_menu::{QuadMsg, QuadPanel, QuadUi};
 use iced::advanced::layout;
 use iced::advanced::mouse;
 use iced::advanced::overlay;
@@ -1501,6 +1502,67 @@ fn context_menu_row_style(
     }
 }
 
+// ── Quad cursor menu ────────────────────────────────────────────────────────
+
+/// Render the quad cursor menu (panels from
+/// `ui::popup::quad_menu::quad_panels_for_target`) on its anchor and a
+/// full-viewport click catcher: collapsed the single default-command tile,
+/// expanded the panel card with its tab strip, the default icon always under
+/// the pointer, so a follow-up click in place launches the command with the
+/// same cursor discipline as the context menu. The catcher sits *below* the
+/// card: an outside press closes the quad (docs/quad-menu.md §3.5).
+pub(super) fn viewport_quad_overlay<'a>(
+    quad: &QuadUi,
+    panels: &[QuadPanel],
+    quad_width: usize,
+    bottom_inset: f32,
+) -> Element<'a, Message> {
+    use crate::ui::popup::quad_overlay;
+
+    // Collapsed the quad is one tile; expanded the pinned panel card. An
+    // empty primary panel (nothing applicable) has nothing to show.
+    let quad_element = if quad.expanded {
+        Some(quad_overlay::quad_expanded_card(quad, panels, quad_width))
+    } else {
+        panels.first().and_then(|panel| {
+            panel
+                .items
+                .first()
+                .map(|item| quad_overlay::quad_collapsed_tile(item, &panel.id))
+        })
+    };
+
+    let catcher = mouse_area(
+        container(iced::widget::Space::new().width(Fill).height(Fill))
+            .width(Fill)
+            .height(Fill),
+    )
+    .on_press(Message::Quad(QuadMsg::Close))
+    .on_right_press(Message::Quad(QuadMsg::Close));
+
+    let Some(content) = quad_element else {
+        // No commands at all: the catcher alone lets the next click close it.
+        return catcher.into();
+    };
+
+    // Keep the default icon's centre under the pointer: the grid pad plus
+    // the half tile (collapsed just the half tile).
+    let half_tile = quad_overlay::QUAD_TILE * 0.5;
+    let offset = if quad.expanded {
+        Vector::new(
+            -(quad_overlay::QUAD_PANEL_PAD + half_tile),
+            -(quad_overlay::QUAD_PANEL_PAD + half_tile),
+        )
+    } else {
+        Vector::new(-half_tile, -half_tile)
+    };
+    stack![
+        catcher,
+        position_canvas_overlay_clamped(quad.anchor, bottom_inset, offset, content)
+    ]
+    .into()
+}
+
 /// One-shot snap override menu (Shift+RMB, #337): a cursor-anchored grid of
 /// snap ICONS only — the names show as hover tooltips, with the letter that
 /// picks each from the keyboard. Picking one applies that snap to just the
@@ -2084,5 +2146,180 @@ mod measurement_tests {
                 assert!(bounds.x + bounds.width <= 796.0 && bounds.y + bounds.height <= 506.0);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod quad_view_tests {
+    use super::*;
+    use crate::ui::popup::quad_menu::{QuadIcon, QuadItem, QuadMode};
+
+    fn quad_item(label: &str, command: &str) -> QuadItem {
+        QuadItem {
+            label: label.to_string(),
+            command: command.to_string(),
+            // Distinct two-letter glyph per item so the sim can find each
+            // tile by its own text: the label itself only renders inside
+            // the bottom tooltip.
+            icon: QuadIcon::Glyph(label.chars().take(2).collect::<String>().to_uppercase()),
+        }
+    }
+
+    fn quad_panels() -> Vec<QuadPanel> {
+        vec![QuadPanel {
+            id: "quad.primary".to_string(),
+            label: String::new(),
+            items: vec![quad_item("Move", "MOVE"), quad_item("Copy", "COPY")],
+            applies_to: Vec::new(),
+        }]
+    }
+
+    fn collapsed_quad() -> Element<'static, Message> {
+        let quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Hover);
+        viewport_quad_overlay(&quad, &quad_panels(), 6, 60.0)
+    }
+
+    fn expanded_quad() -> Element<'static, Message> {
+        let mut quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Hover);
+        quad.expanded = true;
+        viewport_quad_overlay(&quad, &quad_panels(), 6, 60.0)
+    }
+
+    /// Press (down + up) at canvas point `at` over the given quad overlay on
+    /// a viewport with a passive click surface underneath.
+    fn press_at(overlay: Element<'static, Message>, at: iced::Point) -> Vec<Message> {
+        let underlay =
+            mouse_area(Space::new().width(Fill).height(Fill)).on_press(Message::ViewportLeftPress);
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            stack![underlay, overlay],
+        );
+        ui.point_at(at);
+        ui.simulate([Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Left,
+        ))]);
+        ui.simulate([Event::Mouse(iced::mouse::Event::ButtonReleased(
+            iced::mouse::Button::Left,
+        ))]);
+        ui.into_messages().collect()
+    }
+
+    /// The glyph text of a quad tile, with its visible bounds, for
+    /// geometry asserts.
+    fn find_tile(
+        ui: &mut iced_test::simulator::Simulator<'static, Message>,
+        glyph: &str,
+    ) -> iced::Rectangle {
+        ui.find(glyph)
+            .expect("tile glyph is in the tree")
+            .visible_bounds()
+            .expect("tile glyph is visible")
+    }
+
+    #[test]
+    fn collapsed_quad_default_tile_picks_in_place_and_expands_on_hover() {
+        // The collapsed tile is centred on the anchor: its glyph text sits
+        // there, and clicking through (the sim's own click; the tile's
+        // bottom tooltip never intercepts) launches the default command in
+        // place, expanding the card. Nothing leaks into the viewport.
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            collapsed_quad(),
+        );
+        let bounds = find_tile(&mut ui, "MO");
+        assert_eq!(
+            (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0),
+            (300.0, 225.0),
+            "the collapsed tile's glyph is centred on the anchor"
+        );
+        // A real cursor move at the resting anchor enters the tile first
+        // (the sim's cursor starts unavailable; point_at arms it), then the
+        // click picks the default command in place.
+        ui.point_at(iced::Point::new(300.0, 225.0));
+        ui.simulate([Event::Mouse(iced::mouse::Event::CursorMoved {
+            position: iced::Point::new(300.0, 225.0),
+        })]);
+        ui.click("MO");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::Quad(QuadMsg::Expand(true)))));
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            Message::Quad(QuadMsg::Pick { panel_id, item_index: 0 }) if panel_id == "quad.primary"
+        )));
+        assert!(!messages
+            .iter()
+            .any(|m| matches!(m, Message::ViewportLeftPress)));
+    }
+
+    #[test]
+    fn expanded_quad_grid_tiles_pick_with_panel_id_and_index() {
+        // Grid order left-to-right: the second tile sits a tile plus the
+        // gap to the right of the anchor-centred first tile. The sim clicks
+        // the second tile's own glyph text.
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            expanded_quad(),
+        );
+        let second = find_tile(&mut ui, "CO");
+        assert_eq!(
+            second.x + second.width / 2.0,
+            300.0 + crate::ui::popup::quad_overlay::QUAD_TILE
+                + crate::ui::popup::quad_overlay::QUAD_TILE_GAP,
+            "the second tile's glyph centres a tile plus a gap right of the anchor"
+        );
+        ui.click("CO");
+        let messages: Vec<_> = ui.into_messages().collect();
+        assert!(messages.iter().any(|m| matches!(
+            m,
+            Message::Quad(QuadMsg::Pick { panel_id, item_index: 1 }) if panel_id == "quad.primary"
+        )));
+    }
+
+    #[test]
+    fn quad_outside_press_closes() {
+        let messages = press_at(collapsed_quad(), iced::Point::new(40.0, 40.0));
+        assert!(messages
+            .iter()
+            .any(|m| matches!(m, Message::Quad(QuadMsg::Close))));
+        assert!(!messages
+            .iter()
+            .any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. }))));
+    }
+
+    #[test]
+    fn expanded_quad_card_hugs_the_grid() {
+        // The overlay is a full-viewport layer (click catcher + card); the
+        // card itself must be sized to its content — the grid's columns
+        // (tile + gap) plus the two panel pads — not stretch its panel
+        // background across the whole screen.
+        let items = quad_panels().first().expect("primary panel").items.len();
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(600.0, 450.0),
+            expanded_quad(),
+        );
+        let bounds = ui
+            .find(iced::widget::Id::new("quad-expanded-card"))
+            .expect("the expanded card is in the tree")
+            .visible_bounds()
+            .expect("the expanded card is visible");
+        use crate::ui::popup::quad_overlay::{QUAD_PANEL_PAD, QUAD_TILE, QUAD_TILE_GAP};
+        // One row of `min(cols, items)` tiles: widths (tile + gap) minus the
+        // trailing gap, then the two pads around the grid.
+        let expected = items.min(6) as f32 * (QUAD_TILE + QUAD_TILE_GAP) - QUAD_TILE_GAP
+            + 2.0 * QUAD_PANEL_PAD;
+        assert_eq!(
+            bounds.width, expected,
+            "the card hugs the icon grid plus padding (quad_width=6)"
+        );
+        assert!(
+            bounds.width < 300.0,
+            "the card must not stretch across the viewport"
+        );
     }
 }

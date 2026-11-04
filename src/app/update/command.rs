@@ -1470,7 +1470,7 @@ impl OpenCADStudio {
         {
             let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
             if sel.menu.open_at.is_some() {
-                sel.menu.open_at = None;
+                sel.menu.close();
                 return Task::none();
             }
         }
@@ -2410,7 +2410,7 @@ impl OpenCADStudio {
 
     pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
         let i = self.active_tab;
-        self.tabs[i].scene.selection.borrow_mut().menu.open_at = None;
+        self.tabs[i].scene.selection.borrow_mut().menu.close();
         let remembered = self.qselect_settings.clone();
         let scope = remembered
             .as_ref()

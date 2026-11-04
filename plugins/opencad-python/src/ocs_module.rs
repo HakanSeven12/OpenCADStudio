@@ -5761,6 +5761,190 @@ mod ocs {
             });
         }
     }
+
+    // ── Quad cursor menu panels (API v15) ───────────────────────────────────
+
+    /// Register declarative quad cursor menu panels (API v15). Each panel is
+    /// a dict `{"panel_id", "title", "applies_to": [...], "items": [...]}`;
+    /// an item is `{"control_id", "label", "icon", "action"}` where `icon`
+    /// is `{"glyph": "X"}` or `{"svg": "<svg…>"}` (raw bytes, ≤ 8 KiB — an
+    /// oversized or malformed icon degrades to a glyph tile, per the §4
+    /// contract) and `action` is `{"command": "LINE"}` or `{"callback":
+    /// True}`. The host attaches this plugin's identity from the transport;
+    /// the call returns one bool per panel (registration order), `False`
+    /// marking a refused panel (caps, duplicate control ids, an id another
+    /// plugin owns).
+    #[pyfunction]
+    fn register_quad_panels(
+        panels: Vec<PyObjectRef>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyObjectRef> {
+        // All parsing happens before `host_ctx::with_host`, per the module's
+        // sentinel-error discipline.
+        let defs: Vec<ocs_plugin_api::dialog::QuadPanelDef> = panels
+            .into_iter()
+            .map(|panel| py_to_quad_panel_def(panel, vm))
+            .collect::<PyResult<_>>()?;
+        let results =
+            host_ctx::with_host(|host| host.register_quad_panels(crate::PLUGIN_ID, &defs))
+                .ok_or_else(|| {
+                    vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
+                })?;
+        let items = results
+            .into_iter()
+            .map(|registered| vm.new_pyobj(registered))
+            .collect();
+        Ok(vm.ctx.new_list(items).into())
+    }
+
+    /// Remove quad panels this plugin registered earlier in the session
+    /// (API v15). One bool per id (order): `False` marks an id this plugin
+    /// does not own (another plugin's panel is refused, not removed).
+    #[pyfunction]
+    fn unregister_quad_panels(
+        panel_ids: Vec<String>,
+        vm: &VirtualMachine,
+    ) -> PyResult<PyObjectRef> {
+        let refs: Vec<&str> = panel_ids.iter().map(String::as_str).collect();
+        let results = host_ctx::with_host(|host| host.unregister_quad_panels(crate::PLUGIN_ID, &refs))
+            .ok_or_else(|| {
+                vm.new_runtime_error("ocs: not running inside a PY_ command".to_owned())
+            })?;
+        let items = results
+            .into_iter()
+            .map(|removed| vm.new_pyobj(removed))
+            .collect();
+        Ok(vm.ctx.new_list(items).into())
+    }
+
+    /// One panel dict → [`QuadPanelDef`](ocs_plugin_api::dialog::QuadPanelDef).
+    fn py_to_quad_panel_def(
+        panel: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<ocs_plugin_api::dialog::QuadPanelDef> {
+        use rustpython_vm::convert::TryFromObject;
+        let dict = panel.downcast::<rustpython_vm::builtins::PyDict>().map_err(|_| {
+            vm.new_type_error("each quad panel must be a dict".to_owned())
+        })?;
+        let panel_id = dict.get_item("panel_id", vm)?.try_into_value::<String>(vm)?;
+        let title = dict.get_item("title", vm)?.try_into_value::<String>(vm)?;
+        let mut def = ocs_plugin_api::dialog::QuadPanelDef::new(panel_id, title);
+        if let Some(applies_to) = dict.get_item_opt("applies_to", vm)? {
+            if !vm.is_none(&applies_to) {
+                let keys: Vec<String> = py_string_list(applies_to, vm)?;
+                def.applies_to = keys;
+            }
+        }
+        if let Some(items) = dict.get_item_opt("items", vm)? {
+            if !vm.is_none(&items) {
+                let raw_items: Vec<PyObjectRef> = Vec::try_from_object(vm, items)
+                    .map_err(|_| vm.new_type_error("items must be a list of dicts".to_owned()))?;
+                for item in raw_items {
+                    def.items.push(py_to_quad_item_def(item, vm)?);
+                }
+            }
+        }
+        Ok(def)
+    }
+
+    /// One item dict → [`QuadItemDef`](ocs_plugin_api::dialog::QuadItemDef).
+    fn py_to_quad_item_def(
+        item: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<ocs_plugin_api::dialog::QuadItemDef> {
+        use rustpython_vm::convert::TryFromObject;
+        let dict = item.downcast::<rustpython_vm::builtins::PyDict>().map_err(|_| {
+            vm.new_type_error("each quad item must be a dict".to_owned())
+        })?;
+        let control_id = dict.get_item("control_id", vm)?.try_into_value::<String>(vm)?;
+        let label = dict.get_item("label", vm)?.try_into_value::<String>(vm)?;
+        let icon = match dict.get_item_opt("icon", vm)? {
+            Some(icon) if !vm.is_none(&icon) => py_to_quad_icon(icon, vm)?,
+            // No icon: the glyph tile from the label (the §4 fallback).
+            _ => ocs_plugin_api::ribbon::owned::OwnedIconKind::Glyph(String::new()),
+        };
+        let action = match dict.get_item_opt("action", vm)? {
+            Some(action) if !vm.is_none(&action) => py_to_quad_action(action, vm)?,
+            _ => ocs_plugin_api::dialog::QuadActionDef::Callback,
+        };
+        Ok(ocs_plugin_api::dialog::QuadItemDef {
+            control_id,
+            label,
+            icon,
+            action,
+        })
+    }
+
+    /// `{"svg": "<svg…>"}` → raw bytes, `{"glyph": "X"}` → the glyph.
+    fn py_to_quad_icon(
+        icon: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<ocs_plugin_api::ribbon::owned::OwnedIconKind> {
+        use rustpython_vm::convert::TryFromObject;
+        let dict = icon.downcast::<rustpython_vm::builtins::PyDict>().map_err(|_| {
+            vm.new_type_error(
+                "a quad icon must be {\"svg\": \"<svg…>\"} or {\"glyph\": \"X\"}".to_owned(),
+            )
+        })?;
+        if let Some(svg) = dict.get_item_opt("svg", vm)? {
+            if !vm.is_none(&svg) {
+                let text = svg.try_into_value::<String>(vm)?;
+                return Ok(ocs_plugin_api::ribbon::owned::OwnedIconKind::Svg(
+                    text.into_bytes(),
+                ));
+            }
+        }
+        if let Some(glyph) = dict.get_item_opt("glyph", vm)? {
+            if !vm.is_none(&glyph) {
+                return Ok(ocs_plugin_api::ribbon::owned::OwnedIconKind::Glyph(
+                    glyph.try_into_value::<String>(vm)?,
+                ));
+            }
+        }
+        Err(vm.new_value_error(
+            "a quad icon must be {\"svg\": \"<svg…>\"} or {\"glyph\": \"X\"}".to_owned(),
+        ))
+    }
+
+    /// `{"command": "LINE"}` → the verb dispatch, `{"callback": True}` → the
+    /// quad-action notification. An empty dict is a callback (the simpler
+    /// default for panel buttons).
+    fn py_to_quad_action(
+        action: PyObjectRef,
+        vm: &VirtualMachine,
+    ) -> PyResult<ocs_plugin_api::dialog::QuadActionDef> {
+        use rustpython_vm::convert::TryFromObject;
+        let dict = action.downcast::<rustpython_vm::builtins::PyDict>().map_err(|_| {
+            vm.new_type_error(
+                "a quad action must be {\"command\": \"VERB\"} or {\"callback\": True}".to_owned(),
+            )
+        })?;
+        if let Some(command) = dict.get_item_opt("command", vm)? {
+            if !vm.is_none(&command) {
+                return Ok(ocs_plugin_api::dialog::QuadActionDef::Command(
+                    command.try_into_value::<String>(vm)?,
+                ));
+            }
+        }
+        if let Some(callback) = dict.get_item_opt("callback", vm)? {
+            if callback.is_true(vm)? {
+                return Ok(ocs_plugin_api::dialog::QuadActionDef::Callback);
+            }
+        }
+        Err(vm.new_value_error(
+            "a quad action must be {\"command\": \"VERB\"} or {\"callback\": True}".to_owned(),
+        ))
+    }
+
+    /// A Python list of strings → `Vec<String>` (the `applies_to` keys).
+    fn py_string_list(value: PyObjectRef, vm: &VirtualMachine) -> PyResult<Vec<String>> {
+        use rustpython_vm::convert::TryFromObject;
+        let list: Vec<PyObjectRef> = Vec::try_from_object(vm, value)
+            .map_err(|_| vm.new_type_error("applies_to must be a list of strings".to_owned()))?;
+        list.into_iter()
+            .map(|key| key.try_into_value::<String>(vm))
+            .collect()
+    }
 }
 
 /// These run a real RustPython interpreter with the `ocs` module registered

@@ -119,6 +119,52 @@ pub fn publish_panel_action(
     });
 }
 
+/// Deliver a quad cursor menu pick to the OWNING plugin only (API v15).
+///
+/// The quad is not an active command: the pick path resolves the item's
+/// `quadplugin:` triple host-side and routes it as
+/// `HostNotification::QuadAction`, owner-targeted (unlike
+/// [`publish_panel_action`], whose panels are host-owned and therefore fan
+/// out to every plugin — quad panels are plugin-owned, so only the owner may
+/// act). The notification rides the same guarded path as every other v4
+/// notification; a plugin that is mid-teardown just fails its send, which is
+/// swallowed (`broadcast`'s best-effort law — nothing prints; a dead owner's
+/// action drops silently, the store's reaper drops its panels at the same
+/// visibility boundary).
+///
+/// `handles` / `type_keys` are the quad target's selection at dispatch time;
+/// `pick_point` is a best-effort world point (the host supplies `[0.0; 3]`
+/// where none is available, see the pick path's host dispatch).
+pub fn publish_quad_action(
+    plugin_id: &str,
+    panel_id: &str,
+    control_id: &str,
+    handles: Vec<codec::Handle>,
+    type_keys: Vec<String>,
+    pick_point: [f64; 3],
+) {
+    let notification = HostNotification::QuadAction {
+        panel_id: panel_id.to_string(),
+        control_id: control_id.to_string(),
+        handles,
+        type_keys,
+        pick_point,
+    };
+    #[cfg(test)]
+    record_test_dispatch(&notification);
+    crate::plugin::external::with_manager(|mgr| {
+        if let Some((process, _api_version, alive)) = mgr.grip_endpoint(plugin_id) {
+            if alive {
+                // Best-effort send: a mid-teardown failure is swallowed like
+                // every notification send.
+                let _ = process.notify_plugin(None, notification);
+            }
+        }
+        // A dead owner's action drops silently — the same visibility
+        // boundary reaps its panels from the store.
+    });
+}
+
 /// V4 notification handler installed on the plugin manager.
 ///
 /// Forwards REPL status messages to the log; other notifications are handled
@@ -253,6 +299,14 @@ fn record_test_dispatch(notification: &HostNotification) {
             entities.len(),
             records.len()
         ),
+        // API v15: owner-targeted quad actions (one entry per delivery, not
+        // per fan-out — see publish_quad_action).
+        HostNotification::QuadAction {
+            panel_id,
+            control_id,
+            handles,
+            ..
+        } => format!("QuadAction({panel_id}.{control_id}, {} handles)", handles.len()),
         _ => "Other".to_string(),
     };
     TEST_DISPATCH_LOG.with(|log| log.borrow_mut().push(kind));

@@ -3,9 +3,9 @@
 //! Demonstrates read/write round-trips between the plugin and the host using
 //! the zero-copy `DocumentReader` API and the validated `HostApi` RPCs.
 
-use acadrust::entities::Point;
-use acadrust::xdata::{ExtendedDataRecord, XDataValue};
-use acadrust::{EntityType, Handle};
+use ocs_plugin_api::host::acadrust::entities::Point;
+use ocs_plugin_api::host::{EntityType, ExtendedDataRecord, Handle, XDataValue};
+use ocs_plugin_api::dialog::{QuadActionDef, QuadItemDef, QuadPanelDef};
 use ocs_plugin_api::export_plugin;
 use ocs_plugin_api::host::{BuiltinPlugin, HostApi, ReaderEntityKind};
 use ocs_plugin_api::manifest::{ApiVersion, EntityClasses, PluginManifest};
@@ -18,7 +18,7 @@ static MANIFEST: PluginManifest = PluginManifest {
     description: "Demonstrates read/write object round-trips with the host.",
     api_version: ApiVersion::CURRENT,
     ribbon_order: 100,
-    xdata_apps: &["SURVEYMARK"],
+    xdata_apps: &["SURVEYMARK", "QUADINSPECT"],
     command_prefixes: &[
         "COUNT_SURVEY_POINTS",
         "ADD_SURVEY_POINT",
@@ -39,11 +39,88 @@ static ENTITY_CLASSES: EntityClasses = EntityClasses {
     labels: &[("POINT", "Survey Point")],
 };
 
+/// The quad panel's custom SVG icon: raw `<svg>` bytes, 24×24 viewBox,
+/// `currentColor` strokes so the icon follows the light/dark theme. It rides
+/// the same wire encoding as ribbon icons and is parsed once at registration
+/// (≤ 8 KiB; malformed or over-budget bytes fall back to the glyph tile).
+static QUAD_ICON: &[u8] = include_bytes!("../quad_icon.svg");
+
 struct PluginTemplateV2;
 
 impl BuiltinPlugin for PluginTemplateV2 {
     fn manifest(&self) -> &'static PluginManifest {
         &MANIFEST
+    }
+
+    // API v15 quad surface: one panel bound to Insert entities, registered
+    // once at load. The host namespaces the visible panel id as
+    // `plugin:<plugin_id>:<panel_id>` and re-resolves it host-side whenever
+    // the quad target changes; registering the same panel id again would
+    // replace it, and the call reports success per panel.
+    fn on_load(&mut self, host: &mut dyn HostApi) {
+        let registered = host.register_quad_panels(MANIFEST.id, &[QuadPanelDef {
+            panel_id: "insert-ext".into(),
+            title: "Insert Extras".into(),
+            applies_to: vec!["Insert".into()],
+            items: vec![
+                QuadItemDef {
+                    control_id: "explode".into(),
+                    label: "Explode".into(),
+                    icon: IconKind::Svg(QUAD_ICON).into(),
+                    action: QuadActionDef::Command("EXPLODE".into()),
+                },
+                QuadItemDef {
+                    control_id: "inspect".into(),
+                    label: "Inspect selection".into(),
+                    icon: IconKind::Glyph("I").into(),
+                    action: QuadActionDef::Callback,
+                },
+            ],
+        }]);
+        if registered.iter().any(|ok| !ok) {
+            host.push_error("Failed to register quad panel insert-ext");
+        }
+    }
+
+    // API v15 quad callbacks: `QuadItemDef::Command` items run host-side
+    // instead (EXPLODE above dispatches the host command with the selection
+    // aligned to the quad target), so this only answers `Callback` items.
+    // The quad target's handles come in even when they were not selected.
+    fn on_quad_action(
+        &mut self,
+        host: &mut dyn HostApi,
+        panel_id: &str,
+        control_id: &str,
+        handles: &[Handle],
+        type_keys: &[&str],
+        pick_point: [f64; 3],
+    ) {
+        if panel_id != "insert-ext" || control_id != "inspect" {
+            return;
+        }
+        host.push_info(&format!(
+            "quad inspect: {} entity(ies) [{}] at {:.3}, {:.3}, {:.3}",
+            handles.len(),
+            type_keys.join(", "),
+            pick_point[0],
+            pick_point[1],
+            pick_point[2],
+        ));
+        if handles.is_empty() {
+            return;
+        }
+        // Write window: one undo step, then record what the action saw on
+        // each target handle (same write pattern as `mark_point` below).
+        host.push_undo("Insert Extras inspect");
+        for handle in handles {
+            let mut record = ExtendedDataRecord::new("QUADINSPECT");
+            record.add_value(XDataValue::String(panel_id.to_string()));
+            record.add_value(XDataValue::String(control_id.to_string()));
+            record.add_value(XDataValue::String(type_keys.join(",")));
+            if !host.write_record(*handle, record) {
+                host.push_error(&format!("Failed to stamp quad inspect on {handle}"));
+            }
+        }
     }
 
     // API v10: expose the entity-class labels declared above. The default

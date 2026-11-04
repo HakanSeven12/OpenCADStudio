@@ -96,6 +96,26 @@ pub struct AppPrefs {
     pub right_click_mode: RightClickMode,
     /// SHORTCUTMENUDURATION: time-sensitive hold threshold, ms.
     pub right_click_hold_ms: i32,
+    // ── Quad cursor menu ───────────────────────────────────────────────────
+    // The quad's own display options (docs/quad-menu.md §3.7), wired to
+    // `Message::QuadOption` like every other row of this page.
+    /// QUAD: the quad cursor menu exists at all.
+    pub quad_on: bool,
+    /// QUADDISPLAY: hovering an entity offers the quad.
+    pub quad_on_hover: bool,
+    /// QUADDISPLAY: a selection set offers the quad.
+    pub quad_on_select: bool,
+    /// QUADDISPLAY: a targetless right-click opens the No Selection quad.
+    pub quad_on_right_click: bool,
+    /// QUADDISPLAY: hovering is suppressed while something is selected.
+    pub quad_suppress_hover_when_selection: bool,
+    /// QUADWIDTH: columns of the expanded quad.
+    pub quad_width: u8,
+    /// QUADCOMMANDLAUNCH: right-click over an entity launches its default
+    /// command directly.
+    pub quad_command_launch: bool,
+    /// Hover dwell before the quad appears, ms.
+    pub quad_hover_delay_ms: u64,
     /// Open the Plot / Page Setup dialog for every new layout.
     pub page_setup_on_new_layout: bool,
 }
@@ -1530,6 +1550,136 @@ pub fn view_window<'a>(
         Space::new().height(6),
         text(crate::t!(
             "Shortcut menu: right-click always opens the menu. Time-sensitive: a quick click is Enter, holding longer opens the menu (SHORTCUTMENUDURATION)."
+        ))
+        .size(11)
+        .width(sizing.width),
+                
+        Space::new().height(24),
+        // ── Quad cursor menu ─────────────────────────────────────────────
+        // docs/quad-menu.md §3.7: the master switch, the four QUADDISPLAY
+        // bits, QUADWIDTH, the hover delay and QUADCOMMANDLAUNCH — each row
+        // reported as a `QuadOption` message like its neighbours.
+        text(crate::t!("Quad Cursor Menu")).size(15),
+        Space::new().height(10),
+        row![
+            iced::widget::checkbox(prefs.quad_on)
+                .on_toggle(|on| Message::QuadOption(crate::QuadOptionMsg::Quad(on)))
+                .size(15),
+            text(crate::t!("Show the Quad cursor menu (Shift+F12, QUAD)")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        row![
+            iced::widget::checkbox(prefs.quad_on_hover)
+                .on_toggle(|on| Message::QuadOption(crate::QuadOptionMsg::OnHover(on)))
+                .size(15),
+            text(crate::t!("Hover an object: offer its commands")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        row![
+            iced::widget::checkbox(prefs.quad_on_select)
+                .on_toggle(|on| Message::QuadOption(crate::QuadOptionMsg::OnSelect(on)))
+                .size(15),
+            text(crate::t!("A selection offers its shared commands")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        row![
+            iced::widget::checkbox(prefs.quad_on_right_click)
+                .on_toggle(|on| Message::QuadOption(crate::QuadOptionMsg::OnRightClick(on)))
+                .size(15),
+            text(crate::t!("Right-click in the void: creation commands")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(8),
+        row![
+            iced::widget::checkbox(prefs.quad_suppress_hover_when_selection)
+                .on_toggle(|on| {
+                    Message::QuadOption(crate::QuadOptionMsg::SuppressHoverWhenSelection(on))
+                })
+                .size(15),
+            text(crate::t!("Suppress the hover quad while a selection exists")).size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("Hover delay")).size(12).width(150),
+            slider(
+                0..=crate::app::settings::QUAD_HOVER_DELAY_MAX as i32,
+                prefs.quad_hover_delay_ms.clamp(
+                    0,
+                    crate::app::settings::QUAD_HOVER_DELAY_MAX,
+                ) as i32,
+                |ms| Message::QuadOption(crate::QuadOptionMsg::HoverDelay(ms as u64)),
+            )
+            .step(50)
+            .width(Fill),
+            text(format!(
+                "{} ms",
+                prefs.quad_hover_delay_ms.clamp(
+                    0,
+                    crate::app::settings::QUAD_HOVER_DELAY_MAX,
+                )
+            ))
+            .size(11)
+            .width(52),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            text(crate::t!("Quad width")).size(12).width(150),
+            slider(
+                crate::app::settings::QUAD_WIDTH_MIN as i32
+                    ..=crate::app::settings::QUAD_WIDTH_MAX as i32,
+                i32::from(prefs.quad_width.clamp(
+                    crate::app::settings::QUAD_WIDTH_MIN,
+                    crate::app::settings::QUAD_WIDTH_MAX,
+                )),
+                |cols| Message::QuadOption(crate::QuadOptionMsg::Width(
+                    cols
+                        .clamp(
+                            crate::app::settings::QUAD_WIDTH_MIN as i32,
+                            crate::app::settings::QUAD_WIDTH_MAX as i32,
+                        )
+                        as u8
+                )),
+            )
+            .step(1)
+            .width(Fill),
+            text(format!(
+                "{} columns",
+                prefs.quad_width.clamp(
+                    crate::app::settings::QUAD_WIDTH_MIN,
+                    crate::app::settings::QUAD_WIDTH_MAX,
+                )
+            ))
+            .size(11)
+            .width(52),
+        ]
+        .spacing(10)
+        .align_y(iced::Center),
+        Space::new().height(12),
+        row![
+            iced::widget::checkbox(prefs.quad_command_launch)
+                .on_toggle(|on| Message::QuadOption(crate::QuadOptionMsg::CommandLaunch(on)))
+                .size(15),
+            text(crate::t!(
+                "Right-click over an object launches its default command directly (QUADCOMMANDLAUNCH)"
+            ))
+            .size(12),
+        ]
+        .spacing(8)
+        .align_y(iced::Center),
+        Space::new().height(6),
+        text(crate::t!(
+            "The Quad cursor menu appears at the cursor: default commands for what it points at, recent and creation commands otherwise (QUAD, QUADWIDTH)."
         ))
         .size(11)
         .width(sizing.width),

@@ -4,6 +4,32 @@
 //! The rows themselves are built by `ui::popup::context_menu` (a pure model);
 //! this module is the glue between that model and the app's messages.
 
+/// Quad display-option messages, shared by the Options window, the status
+/// bar's QUAD popup and the `SETVAR` reflection of the quad sysvars. Kept
+/// here (next to the other quad glue) and re-exported via
+/// `crate::QuadOptionMsg`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuadOptionMsg {
+    /// The quad cursor menu exists at all (QUAD).
+    Quad(bool),
+    /// QUADDISPLAY: hovering an entity offers the quad.
+    OnHover(bool),
+    /// QUADDISPLAY: a selection set offers the quad.
+    OnSelect(bool),
+    /// QUADDISPLAY: a targetless right-click opens the No Selection quad.
+    OnRightClick(bool),
+    /// QUADDISPLAY: hovering is suppressed while something is selected.
+    SuppressHoverWhenSelection(bool),
+    /// QUADWIDTH: columns of the expanded quad (clamped in settings).
+    Width(u8),
+    /// QUADCOMMANDLAUNCH: right-click over an entity launches its default
+    /// command directly.
+    CommandLaunch(bool),
+    /// Milliseconds of rest before the hover quad opens (clamped in
+    /// settings).
+    HoverDelay(u64),
+}
+
 use crate::app::{ArrowKey, ContextMenuNav, Message, OpenCADStudio};
 use crate::command::StepInput;
 use crate::scene::pick::grip::GripEditMode;
@@ -11,8 +37,11 @@ use crate::ui::popup::context_menu::{
     build_context_menu, ContextMenu, GripMenuCmd, GripMenuContext, MenuAction, MenuContext,
     SubmenuId,
 };
+use crate::ui::popup::quad_menu::{
+    quad_panels_for_target, QuadMode, QuadMsg, QuadTarget, QuadUi,
+};
 use codec::Handle;
-use iced::Task;
+use iced::{Point, Task};
 
 impl OpenCADStudio {
     /// True while the viewport context menu is open on the active tab.
@@ -487,6 +516,604 @@ impl OpenCADStudio {
                 Task::none()
             }
         }
+    }
+}
+
+// ── Quad cursor menu ─────────────────────────────────────────────────────
+//
+// State, routers and dispatch glue for the quad cursor menu
+// (docs/quad-menu.md). The window itself is the parallel overlay's; this
+// side owns what it consumes: the open/close lifecycle on the selection
+// boundary, the panel model built once at open time, the pick dispatch and
+// the hover-dwell bookkeeping.
+
+/// How far the cursor may wander (px) from where a hover quad opened before
+/// the quad closes again (docs/quad-menu.md §3.4).
+pub(in crate::app) const QUAD_DRIFT_PX: f32 = 8.0;
+
+/// Commands whose line starts with this are plugin quad actions; the pick
+/// router hands them to `OpenCADStudio::quad_plugin_action` (the pick path's
+/// own host dispatch) instead of the generic dispatcher — the scheme is the
+/// pick surface's own and impossible by typed/automation input. The literal
+/// lives in `crate::plugin` (the scheme's home); this alias keeps the
+/// router's name.
+pub(crate) const QUAD_PLUGIN_PREFIX: &str = crate::plugin::QUAD_PLUGIN_PREFIX;
+
+impl OpenCADStudio {
+    /// True while the quad cursor menu is open on the active tab.
+    pub(in crate::app) fn quad_open(&self) -> bool {
+        self.tabs
+            .get(self.active_tab)
+            .is_some_and(|tab| tab.scene.selection.borrow().menu.quad.is_some())
+    }
+
+    /// True while a qualifying hover dwell is being counted but the quad has
+    /// not opened yet — the settled-rollover tick keeps re-arming itself so
+    /// the delayed open can cross even without further pointer moves.
+    pub(in crate::app) fn quad_hover_counting(&self) -> bool {
+        self.quad_hover_since.is_some() && !self.quad_open()
+    }
+
+    /// Classify what the cursor is on (docs/quad-menu.md §3.2): the hovered
+    /// entity first, else the selection set (its type keys in pick order),
+    /// else the void.
+    pub(in crate::app) fn quad_target(&self) -> QuadTarget {
+        let tab = &self.tabs[self.active_tab];
+        if let Some(handle) = tab.scene.hover_highlight {
+            if let Some(entity) = tab.scene.document.get_entity(handle) {
+                return QuadTarget::Hovered {
+                    handle,
+                    type_key: crate::entities::traits::entity_type_name(entity).to_string(),
+                };
+            }
+        }
+        self.quad_selection_target()
+    }
+
+    /// The active tab's selection set as a quad target (`QuadTarget::None`
+    /// on an empty selection) — the variant a Selection quad presents even
+    /// while its cursor still hovers one of the selected objects.
+    fn quad_selection_target(&self) -> QuadTarget {
+        let tab = &self.tabs[self.active_tab];
+        if tab.scene.selected.is_empty() {
+            return QuadTarget::None;
+        }
+        let handles = tab.scene.selected_handles_in_order();
+        let type_keys = handles
+            .iter()
+            .filter_map(|handle| {
+                tab.scene
+                    .document
+                    .get_entity(*handle)
+                    .map(|entity| crate::entities::traits::entity_type_name(entity).to_string())
+            })
+            .collect();
+        QuadTarget::Selection { handles, type_keys }
+    }
+
+    /// Resolve the target a quad of `mode` is about: a Hover quad is about
+    /// the hovered entity, a Selection quad about the selection set (even
+    /// while the cursor still hovers one of its objects), and the No
+    /// Selection quad is always the void.
+    fn quad_target_for(&self, mode: QuadMode) -> QuadTarget {
+        match mode {
+            QuadMode::Hover => self.quad_target(),
+            QuadMode::Selection => self.quad_selection_target(),
+            QuadMode::NoSelection => QuadTarget::None,
+        }
+    }
+
+    /// Open the quad cursor menu at `anchor` for `mode` (docs/quad-menu.md
+    /// §3.1): classify the target, build the panels once (per-type MRU +
+    /// curated tables + the visible plugins' registered quad panels) and open
+    /// the window state on the selection boundary. Replaces any open context
+    /// menu.
+    pub(crate) fn open_quad(&mut self, mode: QuadMode, anchor: Point) {
+        let target = self.quad_target_for(mode);
+        // API v15: the visible plugins' registered panels join after the
+        // builtin catalog (registration order; the disabled and dead drop
+        // out, the grips' visibility law). The web build has no plugin
+        // surface.
+        #[cfg(target_arch = "wasm32")]
+        let plugin_panels: Vec<crate::ui::popup::quad_menu::QuadPanel> = Vec::new();
+        #[cfg(not(target_arch = "wasm32"))]
+        let plugin_panels = crate::app::plugin_host::plugin_quad_panels(&self.disabled_plugins);
+        let panels = quad_panels_for_target(
+            &target,
+            &self.quad_mru,
+            self.quad_width as usize,
+            &plugin_panels,
+        );
+        let i = self.active_tab;
+        {
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            // A quad takes over the cursor: the legacy menu (state and all)
+            // goes away, and a pick counts as "another interaction" for the
+            // Enter-first right-click cycle.
+            sel.menu.close();
+            sel.menu.quad = Some(QuadUi::open(anchor, mode));
+            sel.input.right_click_entered = false;
+        }
+        self.quad_open_target = Some(target);
+        self.quad_panels = panels;
+        self.quad_hover_since = None;
+    }
+
+    /// Close the quad: drop the window state on the active tab's selection
+    /// boundary (the same `SelectionMenu::close` every disruptive transition
+    /// runs — quad and legacy menu are mutually exclusive) plus the built
+    /// panels and the hover dwell. The single teardown point for every quad
+    /// close, including the disrupted document tabs (`TabSwitch`): whoever
+    /// tears the quad down on an app-global level must drop the app-global
+    /// panel state with it. Leaves focus alone; see
+    /// [`Self::close_quad_refocus`].
+    pub(crate) fn close_quad(&mut self) {
+        let i = self.active_tab;
+        if let Some(tab) = self.tabs.get(i) {
+            tab.scene.selection.borrow_mut().menu.close();
+        }
+        self.quad_panels.clear();
+        self.quad_open_target = None;
+        self.quad_hover_since = None;
+    }
+
+    /// Close the quad and hand the keyboard back to the command line — the
+    /// same focus discipline `close_context_menu` applies.
+    pub(crate) fn close_quad_refocus(&mut self) -> Task<Message> {
+        self.close_quad();
+        self.focus_cmd_input()
+    }
+
+    /// Mutate the open quad's transient UI state (expand / active tab),
+    /// leaving a closed quad untouched.
+    fn with_quad_ui(&mut self, f: impl FnOnce(&mut QuadUi)) {
+        let i = self.active_tab;
+        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+        if let Some(quad) = sel.menu.quad.as_mut() {
+            f(quad);
+        }
+    }
+
+    /// Route a quad interaction (docs/quad-menu.md §3.6); the update router
+    /// forwards every `Message::Quad` here.
+    pub(crate) fn on_quad_msg(&mut self, msg: QuadMsg) -> Task<Message> {
+        match msg {
+            QuadMsg::Toggle => {
+                // Same persistence pattern as the right-click option
+                // switches: flip the mirrored setting, then the settings
+                // diff decides whether the config is rewritten.
+                self.quad = !self.quad;
+                self.persist_settings_if_changed();
+                if !self.quad && self.quad_open() {
+                    return self.close_quad_refocus();
+                }
+                Task::none()
+            }
+            QuadMsg::Expand(entered) => {
+                self.with_quad_ui(|quad| {
+                    quad.expanded = entered;
+                    if !entered {
+                        quad.active_tab = 0;
+                    }
+                });
+                Task::none()
+            }
+            QuadMsg::Tab(index) => {
+                self.with_quad_ui(|quad| {
+                    quad.active_tab = index;
+                    quad.expanded = true;
+                });
+                Task::none()
+            }
+            QuadMsg::Close => self.close_quad_refocus(),
+            QuadMsg::Pick {
+                panel_id,
+                item_index,
+            } => self.on_quad_pick(panel_id, item_index),
+        }
+    }
+
+    /// Quad display options (docs/quad-menu.md §3.7): the QUADDISPLAY bits,
+    /// `QUADWIDTH`, `QUADCOMMANDLAUNCH` and the hover delay. Every change is
+    /// clamped the way `SETVAR` clamps it and persisted like the
+    /// neighbouring option switches.
+    pub(crate) fn on_quad_option(&mut self, option: QuadOptionMsg) -> Task<Message> {
+        match option {
+            QuadOptionMsg::Quad(on) => self.quad = on,
+            QuadOptionMsg::OnHover(on) => self.quad_on_hover = on,
+            QuadOptionMsg::OnSelect(on) => self.quad_on_select = on,
+            QuadOptionMsg::OnRightClick(on) => self.quad_on_right_click = on,
+            QuadOptionMsg::SuppressHoverWhenSelection(on) => {
+                self.quad_suppress_hover_when_selection = on
+            }
+            QuadOptionMsg::Width(width) => {
+                self.quad_width = crate::app::settings::clamp_quad_width(width)
+            }
+            QuadOptionMsg::CommandLaunch(on) => self.quad_command_launch = on,
+            QuadOptionMsg::HoverDelay(ms) => {
+                self.quad_hover_delay_ms =
+                    crate::app::settings::clamp_quad_hover_delay_ms(ms)
+            }
+        }
+        // Turning the quad off must not leave an open quad behind.
+        if !self.quad && self.quad_open() {
+            self.close_quad();
+        }
+        self.persist_settings_if_changed();
+        Task::none()
+    }
+
+    /// Run a picked quad item. The quad closes first so the action sees the
+    /// same state a typed command would; plain commands launch through the
+    /// ordinary dispatch path (mirroring [`Self::on_context_menu_pick`]) and
+    /// record the per-type MRU, while `quadplugin:` items go to the pick
+    /// path's own host dispatch ([`Self::quad_plugin_action`]) — never the
+    /// generic dispatcher, and never the MRU.
+    pub(crate) fn on_quad_pick(
+        &mut self,
+        panel_id: String,
+        item_index: usize,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(item) = self
+            .quad_panels
+            .iter()
+            .find(|panel| panel.id == panel_id)
+            .and_then(|panel| panel.items.get(item_index))
+            .cloned()
+        else {
+            return Task::none();
+        };
+        // The quad opens only on an idle drawing; a command that started
+        // since (typed line, another pick) is not clobbered by a stale pick.
+        if self.tabs[i].active_cmd.is_some() {
+            self.close_quad();
+            return Task::none();
+        }
+        // The target the quad was opened for decides hover-vs-selection
+        // semantics; captured at open time so a live-hover change between
+        // open and pick cannot rewrite what this pick does.
+        let open_target = self
+            .quad_open_target
+            .clone()
+            .unwrap_or_else(|| self.quad_target());
+        // Hover quad pick on an unselected target: the command acts on the
+        // hovered entity, so align the selection first (docs/quad-menu.md §3.4).
+        if let QuadTarget::Hovered { handle, .. } = &open_target {
+            if !self.tabs[i].scene.selected.contains(handle) {
+                self.tabs[i].scene.select_entity(*handle, true);
+                self.refresh_properties();
+            }
+        }
+        // Close first, exactly like a context-menu pick — the canonical
+        // teardown drops the boundary state and the app-global panel state.
+        self.close_quad();
+        // A pick counts as "another interaction" for the Enter-first
+        // right-click cycle: the next right-click acts as Enter again.
+        self.tabs[i]
+            .scene
+            .selection
+            .borrow_mut()
+            .input
+            .right_click_entered = false;
+        // MRU: plain commands remember against the target's type key; plugin
+        // quad actions ride their own host dispatch unrecorded (they are not
+        // entity commands yet).
+        let is_plugin_action = item.command.starts_with(QUAD_PLUGIN_PREFIX);
+        if !is_plugin_action {
+            self.quad_record_mru(&open_target, &item.command);
+        }
+        let focus = self.focus_cmd_input();
+        let task = if is_plugin_action {
+            self.quad_plugin_action(&item.command)
+        } else {
+            self.update(Message::Command(item.command))
+        };
+        Task::batch(vec![focus, task])
+    }
+
+    /// Remember a plain quad command in the MRU: hovered and selection
+    /// targets record under the *last* of the target's type keys (a mixed
+    /// selection acts as a whole); the void records globally.
+    fn quad_record_mru(&mut self, target: &QuadTarget, command: &str) {
+        match target {
+            QuadTarget::Hovered { type_key, .. } => self.quad_mru.record_for(type_key, command),
+            QuadTarget::Selection { type_keys, .. } => {
+                if let Some(type_key) = type_keys.last() {
+                    self.quad_mru.record_for(type_key, command);
+                }
+            }
+            QuadTarget::None => self.quad_mru.record_global(command),
+        }
+    }
+
+    /// QUADCOMMANDLAUNCH open-and-act (docs/quad-menu.md §3.4): align the
+    /// selection to the hovered entity, remember the launch in the MRU and
+    /// run the entity type's default command — all without opening any menu.
+    /// The teardown is the canonical [`Self::close_quad`].
+    fn quad_default_launch(
+        &mut self,
+        handle: Handle,
+        type_key: &str,
+        default_cmd: &str,
+    ) -> Task<Message> {
+        let i = self.active_tab;
+        if !self.tabs[i].scene.selected.contains(&handle) {
+            self.tabs[i].scene.select_entity(handle, true);
+            self.refresh_properties();
+        }
+        // The canonical teardown; then the usual Enter-first cycle reset
+        // a right-click pick counts as.
+        self.close_quad();
+        self.tabs[i]
+            .scene
+            .selection
+            .borrow_mut()
+            .input
+            .right_click_entered = false;
+        self.quad_mru.record_for(type_key, default_cmd);
+        self.update(Message::Command(default_cmd.to_string()))
+    }
+
+    /// Quad precedence for an idle right-click (docs/quad-menu.md §3.4):
+    /// `Some(task)` replaces the legacy shortcut-menu path, `None` lets it
+    /// proceed. A command being active keeps the legacy behaviour entirely.
+    /// `held_ms` is the press duration the release path computes for the
+    /// time-sensitive right-click modes (SHORTCUTMENUDURATION): a quick
+    /// click over an entity launches the default command
+    /// (`QUADCOMMANDLAUNCH`), a held one opens the No Selection quad
+    /// instead — the way a void right-click does.
+    pub(in crate::app) fn quad_right_click_takeover(
+        &mut self,
+        at: Point,
+        held_ms: i32,
+    ) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_some() {
+            return None;
+        }
+        let target = self.quad_target();
+        // Open-and-act: QUADCOMMANDLAUNCH makes a right-click over an entity
+        // run the type's default command without offering any menu, so the
+        // launch flag itself decides (docs/quad-menu.md §3.4). A held press
+        // is not an open-and-act: like the void's, it opens the No
+        // Selection quad — quick right-click launches, hold displays.
+        if self.quad_command_launch {
+            if let QuadTarget::Hovered { handle, type_key } = &target {
+                if held_ms >= self.right_click_hold_ms {
+                    self.open_quad(QuadMode::NoSelection, at);
+                    return Some(self.unfocus_widgets());
+                }
+                // The verb resolves the same way the quad model assembles
+                // the primary tile: the type's MRU head, else the curated
+                // first (docs/quad-menu.md §3.3/§3.4).
+                let default_cmd = self
+                    .quad_mru
+                    .recent_for(type_key, 1)
+                    .first()
+                    .cloned()
+                    .or_else(|| {
+                        crate::modules::registry::quad_entity_commands(type_key)
+                            .first()
+                            .map(|cmd| (*cmd).to_string())
+                    });
+                if let Some(default_cmd) = default_cmd {
+                    return Some(self.quad_default_launch(*handle, type_key, &default_cmd));
+                }
+                // Neither an MRU head nor a curated default: the menu
+                // choices below answer.
+            }
+        }
+        let has_selection = !self.tabs[i].scene.selected.is_empty();
+        if has_selection && self.quad_on_select {
+            self.open_quad(QuadMode::Selection, at);
+            return Some(self.unfocus_widgets());
+        }
+        if target.is_none() && self.quad_on_right_click {
+            self.open_quad(QuadMode::NoSelection, at);
+            return Some(self.unfocus_widgets());
+        }
+        // Over an entity with launch off, or with the respective display
+        // option off: the legacy shortcut menu answers.
+        None
+    }
+
+    /// Hover-quad dwell step (docs/quad-menu.md §3.4, hover variant). Called
+    /// from the per-move hover block (`rest_ms = 0`: the cursor only just
+    /// moved) and from the settled-rollover tick (the dwell's own rest so
+    /// far). Qualifying rest arms and counts; past the configured delay with
+    /// no quad open, the collapsed quad appears at the cursor — without
+    /// touching the selection.
+    pub(in crate::app) fn quad_hover_step(&mut self, i: usize, pos: Point, rest_ms: u64) {
+        let Some(tab) = self.tabs.get(i) else {
+            return;
+        };
+        // A command, a grip edit or a drag owns the pointer; the hover quad
+        // counts only on the idle rollover.
+        let (running, dragging, quad_state) = {
+            let sel = tab.scene.selection.borrow();
+            (
+                tab.active_cmd.is_some() || tab.active_grip.is_some(),
+                sel.input.left_dragging || sel.input.right_dragging || sel.input.middle_down,
+                sel.menu.quad.clone(),
+            )
+        };
+        if running || dragging {
+            return;
+        }
+        // A quad that is open follows its anchor for the Hover mode only:
+        // a vanished target or a drift past [`QUAD_DRIFT_PX`] closes it, and
+        // a Selection / NoSelection quad stays out of hover accounting.
+        if let Some(quad) = &quad_state {
+            if quad.mode == QuadMode::Hover {
+                let drifted = (pos.x - quad.anchor.x).hypot(pos.y - quad.anchor.y) > QUAD_DRIFT_PX;
+                if tab.scene.hover_highlight.is_none() || drifted {
+                    self.close_quad();
+                }
+            }
+            return;
+        }
+        let qualifies = self.quad
+            && self.quad_on_hover
+            && tab.scene.hover_highlight.is_some()
+            && (tab.scene.selected.is_empty() || !self.quad_suppress_hover_when_selection);
+        if !qualifies {
+            self.quad_hover_since = None;
+            return;
+        }
+        let due = match self.quad_hover_since {
+            Some(since) => {
+                (since.elapsed().as_millis() as u64).max(rest_ms) >= self.quad_hover_delay_ms
+            }
+            // A fresh qualifying rest: the idle rollover itself only reports
+            // after its own dwell, so an already-rested cursor can be due at
+            // this first settle.
+            None => {
+                let already_due = rest_ms >= self.quad_hover_delay_ms;
+                self.quad_hover_since = Some(std::time::Instant::now());
+                already_due
+            }
+        };
+        if due {
+            self.quad_hover_since = None;
+            self.open_quad(QuadMode::Hover, pos);
+        }
+    }
+
+    /// Enter while the quad is open: pick the primary panel's first item
+    /// when it has one (`quad.primary` for hover/selection quads, the Recent
+    /// panel for the No Selection quad).
+    fn on_quad_enter_pick(&mut self) -> Task<Message> {
+        let Some(primary) = self.quad_panels.first().cloned() else {
+            return Task::none();
+        };
+        if primary.items.is_empty() {
+            return Task::none();
+        }
+        self.on_quad_pick(primary.id.clone(), 0)
+    }
+
+    /// Tab-cycle the open quad's panels (keyboard Tab support): the next /
+    /// previous panel tab becomes active, expanding the quad. `active_tab`
+    /// indexes ALL panels (0 = the primary), so the cycle wraps through the
+    /// primary panel and every group tab reaches itself; with no panel
+    /// beyond the primary there is no tab to cycle (returns `false`), so
+    /// the key falls through.
+    pub(in crate::app) fn quad_cycle_tabs(&mut self, step: isize) -> bool {
+        let count = self.quad_panels.len();
+        if count <= 1 {
+            return false;
+        }
+        let i = self.active_tab;
+        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+        let Some(quad) = sel.menu.quad.as_mut() else {
+            return false;
+        };
+        let current = if quad.expanded { quad.active_tab } else { 0 };
+        quad.expanded = true;
+        quad.active_tab = (current as isize + step).rem_euclid(count as isize) as usize;
+        true
+    }
+
+    /// Keyboard while the quad is open (docs/quad-menu.md §3.6): Escape
+    /// closes, Enter picks the primary item, Tab cycles the tabs and the
+    /// digits 1–9 pick the primary panel's items. Anything else closes the
+    /// quad and falls through, exactly as [`Self::intercept_context_menu_key`]
+    /// yields for non-menu keys.
+    pub(in crate::app) fn intercept_quad_key(&mut self, msg: &Message) -> Option<Task<Message>> {
+        let base = match msg {
+            Message::ShortcutPressed(key) => key.rsplit('+').next(),
+            _ => None,
+        };
+        if matches!(msg, Message::CommandEscape) || base == Some("ESCAPE") {
+            return Some(self.close_quad_refocus());
+        }
+        if !self.quad_open() {
+            // A quad closed since the gate tested it (a repeat of a global
+            // shortcut): nothing left to drive.
+            return None;
+        }
+        match msg {
+            Message::DynTabNext => {
+                if self.quad_cycle_tabs(1) {
+                    Some(Task::none())
+                } else {
+                    None
+                }
+            }
+            Message::DynTabPrev => {
+                if self.quad_cycle_tabs(-1) {
+                    Some(Task::none())
+                } else {
+                    None
+                }
+            }
+            Message::CommandFinalize | Message::CommandSpace => {
+                if self.command_line.input.trim().is_empty() {
+                    Some(self.on_quad_enter_pick())
+                } else {
+                    // Typed text pending: Enter runs it, the quad just
+                    // closes (mirrors the context-menu interception).
+                    let close = self.close_quad_refocus();
+                    let run = self.update(Message::CommandFinalize);
+                    Some(Task::batch(vec![close, run]))
+                }
+            }
+            Message::CommandSubmit => {
+                if self.command_line.input.trim().is_empty() {
+                    Some(self.on_quad_enter_pick())
+                } else {
+                    let _ = self.close_quad_refocus();
+                    None
+                }
+            }
+            Message::CommandAppendChar(s) => self.quad_typed(s.chars().next()),
+            Message::CommandInput(buf) => {
+                // The focused command-line field delivers the whole buffer;
+                // only a single appended character is a digit candidate.
+                let appended = buf
+                    .strip_prefix(self.command_line.input.as_str())
+                    .filter(|rest| rest.chars().count() == 1)
+                    .and_then(|rest| rest.chars().next());
+                match appended {
+                    Some(ch) => self.quad_typed(Some(ch)),
+                    None => {
+                        let _ = self.close_quad_refocus();
+                        None
+                    }
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// A printable key while the quad is open: 1–9 pick the primary panel's
+    /// items; anything else closes the quad and lets the key fall through to
+    /// the command line. Pending command-line text owns the key instead: the
+    /// quad closes and the key falls through, never swallowed by a digit
+    /// pick (the same guard the Enter branches apply).
+    fn quad_typed(&mut self, ch: Option<char>) -> Option<Task<Message>> {
+        let ch = ch?;
+        if !self.command_line.input.trim().is_empty() {
+            let _ = self.close_quad_refocus();
+            return None;
+        }
+        let digit = ch.to_digit(10)?;
+        if !(1..=9).contains(&digit) {
+            let _ = self.close_quad_refocus();
+            return None;
+        }
+        if !self.quad_open() {
+            return None;
+        }
+        let item_index = digit as usize - 1;
+        let Some(primary) = self.quad_panels.first().cloned() else {
+            return None;
+        };
+        if primary.items.is_empty() || item_index >= primary.items.len() {
+            return None;
+        }
+        Some(self.on_quad_pick(primary.id, item_index))
     }
 }
 
@@ -1272,7 +1899,481 @@ mod transparent_tests {
             assert!(
                 (lines[2].start.x - 50.0).abs() < 1e-6 && (lines[2].start.y - 25.0).abs() < 1e-6
             );
-            assert!((lines[2].end.x - 0.0).abs() < 1e-6 && (lines[2].end.y - 25.0).abs() < 1e-6);
+            assert!(
+                (lines[2].end.x - 0.0).abs() < 1e-6 && (lines[2].end.y - 25.0).abs() < 1e-6
+            );
+        });
+    }
+}
+
+// ── Quad cursor menu tests ───────────────────────────────────────────────────
+//
+// Feed-style tests for the quad glue: right-click precedence, the pick
+// dispatch, MRU recording and the hover-dwell step. Kept beside the context
+// menu's own tests; the window itself is the parallel overlay's.
+
+#[cfg(test)]
+mod quad_tests {
+    use super::*;
+    use glam::DVec3;
+
+    /// Run `f` on a thread with a production-sized stack — `update`'s
+    /// recursion through the message router can exceed the test-thread
+    /// default (same as the `tests` module above).
+    fn with_stack(f: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(f)
+            .expect("spawn test thread")
+            .join()
+            .unwrap_or_else(|e| std::panic::resume_unwind(e));
+    }
+
+    /// Idle drawing, one 2D line, quad switched on with the default
+    /// display options (hover/sel/right-click on, launch off).
+    fn quadded_line_app() -> (OpenCADStudio, Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.tabs[0].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.update(Message::ViewportMove(Point::new(200.0, 150.0)));
+        app.quad = true;
+        app.snapper.snap_enabled = false;
+        app.snapper.grid_snap_on = false;
+        app.ortho_mode = false;
+        app.polar_mode = false;
+        let _ = app.dispatch_command("LINE");
+        let _ = app.feed_command(StepInput::Point(DVec3::new(0.0, 0.0, 0.0)));
+        let _ = app.feed_command(StepInput::Point(DVec3::new(10.0, 0.0, 0.0)));
+        let _ = app.update(Message::CommandEscape);
+        let handle = app.tabs[0]
+            .scene
+            .document
+            .entities()
+            .find_map(|e| match e {
+                codec::EntityType::Line(l) => Some(l.common.handle),
+                _ => None,
+            })
+            .expect("the test line");
+        (app, handle)
+    }
+
+    fn right_click(app: &mut OpenCADStudio) {
+        let _ = app.update(Message::ViewportRightPress);
+        let _ = app.update(Message::ViewportRightRelease);
+    }
+
+    fn quad_state(app: &OpenCADStudio) -> Option<QuadUi> {
+        app.tabs[0].scene.selection.borrow().menu.quad.clone()
+    }
+
+    fn menu_open(app: &OpenCADStudio) -> bool {
+        app.tabs[0]
+            .scene
+            .selection
+            .borrow()
+            .menu
+            .open_at
+            .is_some()
+    }
+
+    fn active(app: &OpenCADStudio) -> Option<&'static str> {
+        app.tabs[0].active_cmd.as_ref().map(|c| c.name())
+    }
+
+    #[test]
+    fn void_right_click_opens_no_selection_quad_when_enabled() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            // Nothing selected, nothing hovered: the No Selection quad
+            // replaces the legacy shortcut menu.
+            right_click(&mut app);
+            let quad = quad_state(&app).expect("quad open on a void right-click");
+            assert_eq!(quad.mode, QuadMode::NoSelection);
+            assert!(!quad.expanded, "the quad opens collapsed");
+            assert!(
+                !menu_open(&app),
+                "the legacy shortcut menu must not open beside the quad"
+            );
+            // Primary panel = the Recent panel, populated from the creation
+            // groups without any MRU history.
+            assert_eq!(app.quad_panels.first().map(|p| p.id.as_str()), Some("quad.recent"));
+            assert!(!app.quad_panels[0].items.is_empty());
+        });
+    }
+
+    #[test]
+    fn selection_quad_replaces_the_shortcut_menu() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.tabs[0].scene.select_entities(&[handle]);
+            right_click(&mut app);
+            let quad = quad_state(&app).expect("quad open on a selection right-click");
+            assert_eq!(quad.mode, QuadMode::Selection);
+            assert!(
+                !menu_open(&app),
+                "quad_on_select must replace the legacy shortcut menu"
+            );
+            assert_eq!(
+                app.quad_panels.first().map(|p| p.id.as_str()),
+                Some("quad.primary")
+            );
+            // Off: the legacy menu answers instead.
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::OnSelect(false)));
+            right_click(&mut app);
+            assert!(
+                quad_state(&app).is_none(),
+                "with quad_on_select off the selection takes the legacy path"
+            );
+            assert!(menu_open(&app));
+        });
+    }
+
+    #[test]
+    fn quad_pick_runs_the_plain_command_and_records_mru() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.tabs[0].scene.select_entities(&[handle]);
+            right_click(&mut app);
+            let primary = app.quad_panels.first().cloned().expect("primary panel");
+            // The curated tables lead with MOVE ("generic modify must lead").
+            let expected = primary.items[0].command.clone();
+            let _ = app.update(Message::Quad(QuadMsg::Pick {
+                panel_id: primary.id.clone(),
+                item_index: 0,
+            }));
+            // The quad closed and the command runs through the ordinary
+            // dispatch path.
+            assert!(quad_state(&app).is_none());
+            assert!(app.quad_panels.is_empty());
+            assert_eq!(active(&app), Some(expected.as_str()));
+            // Plain quad launches remember the pick under the selection's
+            // last type key (plugin actions would not record).
+            assert_eq!(app.quad_mru.recent_for("Line", 1), vec![expected]);
+        });
+    }
+
+    #[test]
+    fn quad_launch_runs_the_default_without_any_menu() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.quad_command_launch = true;
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            right_click(&mut app);
+            // Open-and-act: no quad, no context menu, the selection became
+            // just the hovered entity and the default command is running.
+            assert!(quad_state(&app).is_none());
+            assert!(!menu_open(&app));
+            assert!(app.tabs[0].scene.selected.contains(&handle));
+            assert_eq!(app.tabs[0].scene.selected.len(), 1);
+            assert_eq!(active(&app), Some("MOVE"));
+            assert_eq!(app.quad_mru.recent_for("Line", 1), vec!["MOVE".to_string()]);
+        });
+    }
+
+    #[test]
+    fn right_click_over_entity_keeps_legacy_menu_without_launch() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            // QUADCOMMANDLAUNCH off (the default): hovering an entity with
+            // nothing selected does not offer the No Selection quad either —
+            // the legacy menu answers.
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            right_click(&mut app);
+            assert!(quad_state(&app).is_none());
+            assert!(menu_open(&app));
+            assert!(active(&app).is_none());
+        });
+    }
+
+    #[test]
+    fn quad_off_right_click_is_pure_legacy() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            app.quad = false;
+            right_click(&mut app);
+            assert!(quad_state(&app).is_none());
+            assert!(menu_open(&app), "master off: full legacy behaviour");
+            // Toggle the feature back on through the router (the
+            // Shift+F12 / status-bar path).
+            let _ = app.update(Message::Quad(QuadMsg::Toggle));
+            right_click(&mut app);
+            assert!(quad_state(&app).is_some());
+        });
+    }
+
+    #[test]
+    fn enter_picks_the_primary_default_with_no_text_pending() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            right_click(&mut app); // No Selection quad, fresh MRU
+            let first = app.quad_panels[0].items[0].command.clone();
+            let _ = app.update(Message::Quad(QuadMsg::Pick {
+                panel_id: "quad.recent".into(),
+                item_index: 99, // out of range: ignored
+            }));
+            assert_eq!(active(&app), None, "out-of-range picks are ignored");
+            // Enter with the command line empty picks the primary item.
+            let _ = app.update(Message::Quad(QuadMsg::Pick {
+                panel_id: "quad.recent".into(),
+                item_index: 0,
+            }));
+            assert_eq!(active(&app), Some(first.as_str()));
+        });
+    }
+
+    #[test]
+    fn hover_dwell_opens_the_quad_then_drift_or_loss_closes_it() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            // The settled rollover holds an entity and the cursor rests: the
+            // first step arms, a step that already rested long enough opens.
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 0);
+            assert!(app.quad_hover_since.is_some());
+            assert!(quad_state(&app).is_none());
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 320);
+            let quad = quad_state(&app).expect("the hover quad opened past the delay");
+            assert_eq!(quad.mode, QuadMode::Hover);
+            // A drift past 8px from the open anchor closes it again.
+            app.quad_hover_step(0, Point::new(130.0, 100.0), 0);
+            assert!(quad_state(&app).is_none());
+            assert!(app.quad_hover_since.is_none());
+        });
+    }
+
+    #[test]
+    fn hover_quad_suppressed_by_selection_and_by_inactive_features() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            app.tabs[0].scene.select_entities(&[handle]);
+            // Suppress-on-selection is the default: no hover quad.
+            app.quad_hover_step(0, Point::new(5.0, 5.0), 0);
+            app.quad_hover_step(0, Point::new(5.0, 5.0), 320);
+            assert!(quad_state(&app).is_none());
+            // Suppression off: the dwell counts and opens.
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::SuppressHoverWhenSelection(
+                false,
+            )));
+            app.quad_hover_step(0, Point::new(5.0, 5.0), 0);
+            app.quad_hover_step(0, Point::new(5.0, 5.0), 320);
+            assert!(quad_state(&app).is_some());
+            // Turning the quad off while it is open closes it.
+            let _ = app.update(Message::Quad(QuadMsg::Toggle));
+            assert!(quad_state(&app).is_none());
+            assert!(app.quad_panels.is_empty());
+            assert!(!app.quad, "the router flip persisted through the option");
+        });
+    }
+
+    #[test]
+    fn quad_options_clamp_and_toggle_like_their_sysvars() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::Width(99)));
+            assert_eq!(
+                app.quad_width,
+                crate::app::settings::clamp_quad_width(99)
+            );
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::HoverDelay(9_999)));
+            assert_eq!(app.quad_hover_delay_ms, 2_000);
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::Quad(false)));
+            assert!(!app.quad);
+        });
+    }
+
+    /// A quad pick on an unselected hovered target replaces the selection
+    /// with that target before the command runs (docs/quad-menu.md §3.4),
+    /// recording under the target's type key.
+    #[test]
+    fn hover_quad_pick_replaces_the_selection_with_the_hovered() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            let _ = app.run_command_line("LINE 20,0 30,0");
+            let other = app.tabs[0]
+                .scene
+                .document
+                .entities()
+                .find_map(|e| match e {
+                    codec::EntityType::Line(l) if l.common.handle != handle => {
+                        Some(l.common.handle)
+                    }
+                    _ => None,
+                })
+                .expect("the second test line");
+            // A lingering selection is replaced, and the hover quad must be
+            // allowed despite it.
+            app.tabs[0].scene.select_entities(&[other]);
+            let _ = app.update(Message::QuadOption(QuadOptionMsg::SuppressHoverWhenSelection(
+                false,
+            )));
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 0);
+            app.quad_hover_step(0, Point::new(100.0, 100.0), 320);
+            assert!(quad_state(&app).is_some(), "the hover quad opened");
+            let primary = app.quad_panels.first().cloned().expect("primary panel");
+            let expected = primary.items[0].command.clone();
+            let _ = app.update(Message::Quad(QuadMsg::Pick {
+                panel_id: primary.id.clone(),
+                item_index: 0,
+            }));
+            assert_eq!(active(&app), Some(expected.as_str()));
+            assert!(
+                app.tabs[0].scene.selected.contains(&handle) && app.tabs[0].scene.selected.len() == 1,
+                "the pick aligned the selection to the hovered entity"
+            );
+            assert_eq!(app.quad_mru.recent_for("Line", 1), vec![expected]);
+        });
+    }
+
+    /// The Close message is the canonical teardown: the window state, the
+    /// built panels, the open-target classification and the hover dwell all
+    /// drop together.
+    #[test]
+    fn quad_close_message_clears_the_app_state() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            right_click(&mut app);
+            assert!(quad_state(&app).is_some());
+            assert!(!app.quad_panels.is_empty());
+            let _ = app.update(Message::Quad(QuadMsg::Close));
+            assert!(quad_state(&app).is_none());
+            assert!(app.quad_panels.is_empty());
+            assert!(app.quad_hover_since.is_none());
+        });
+    }
+
+    /// Tab cycles modulo ALL panels: it reaches the group tab, wraps through
+    /// the primary (index 0) and lands on the last panel cycling back.
+    #[test]
+    fn quad_tab_cycle_wraps_through_the_primary_and_reaches_the_last() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.tabs[0].scene.select_entities(&[handle]);
+            right_click(&mut app); // Selection quad: primary + group tab(s)
+            let count = app.quad_panels.len();
+            assert!(count >= 2, "a wide panel set to cycle ({count})");
+            // Forward: 0 → 1 → … → count-1 → 0, the wrap passing through
+            // the primary (index 0 — the old len-1 modulus never reached 0
+            // after the first wrap and always skipped the last panel).
+            for step in 1..count {
+                assert!(app.quad_cycle_tabs(1));
+                let quad = quad_state(&app).expect("quad stays open");
+                assert!(quad.expanded, "cycling expands");
+                assert_eq!(quad.active_tab, step, "the tab panel is reachable");
+            }
+            assert!(app.quad_cycle_tabs(1));
+            assert_eq!(
+                quad_state(&app).unwrap().active_tab,
+                0,
+                "the wrap goes through the primary"
+            );
+            assert!(app.quad_cycle_tabs(-1));
+            assert_eq!(
+                quad_state(&app).unwrap().active_tab,
+                count - 1,
+                "the last panel is reachable cycling back"
+            );
+            // A quad with only the primary panel has no tabs: no cycle.
+            let (mut app, _) = quadded_line_app();
+            right_click(&mut app); // No Selection quad may hold a single panel
+            if app.quad_panels.len() == 1 {
+                assert!(!app.quad_cycle_tabs(1));
+            }
+        });
+    }
+
+    /// The launch default follows the quad model's primary: the type's MRU
+    /// head when one exists, else the curated first.
+    #[test]
+    fn quad_launch_resolves_the_mru_head_as_the_default() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.quad_command_launch = true;
+            app.quad_mru.record_for("Line", "BREAK");
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            right_click(&mut app);
+            assert!(
+                quad_state(&app).is_none() && !menu_open(&app),
+                "still open-and-act"
+            );
+            assert_eq!(active(&app), Some("BREAK"), "the MRU head leads");
+            assert_eq!(app.quad_mru.recent_for("Line", 1), vec!["BREAK".to_string()]);
+        });
+    }
+
+    /// A held right-click over an entity does not launch: like the void's,
+    /// the hold opens the No Selection quad at the cursor; a quick click
+    /// still launches (the same release the press duration guards).
+    #[test]
+    fn quad_launch_hold_opens_the_no_selection_quad() {
+        with_stack(|| {
+            let (mut app, handle) = quadded_line_app();
+            app.quad_command_launch = true;
+            app.tabs[0].scene.hover_highlight = Some(handle);
+            let _ = app.update(Message::ViewportRightPress);
+            {
+                let mut sel = app.tabs[0].scene.selection.borrow_mut();
+                sel.input.right_press_time =
+                    iced::time::Instant::now().checked_sub(std::time::Duration::from_millis(400));
+            }
+            let _ = app.update(Message::ViewportRightRelease);
+            let quad = quad_state(&app).expect("the hold opens the No Selection quad");
+            assert_eq!(quad.mode, QuadMode::NoSelection);
+            assert_eq!(active(&app), None, "no launch happened");
+            assert!(
+                app.quad_mru.recent_for("Line", 1).is_empty(),
+                "a hold records nothing"
+            );
+        });
+    }
+
+    /// A digit typed with pending command-line text is not swallowed by a
+    /// digit pick: the quad closes and the key reaches the command line.
+    #[test]
+    fn quad_digit_with_pending_text_falls_through_to_the_command_line() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            right_click(&mut app); // No Selection quad
+            assert!(quad_state(&app).is_some());
+            app.command_line.input = "3".into();
+            let _ = app.update(Message::CommandAppendChar("5".into()));
+            assert!(
+                quad_state(&app).is_none(),
+                "pending text closes the quad"
+            );
+            assert_eq!(app.command_line.input, "35", "the digit reached the line");
+            assert_eq!(active(&app), None);
+        });
+    }
+
+    /// A tab switch does not drag the quad along: its window state is
+    /// per-tab while the panels / open target are app-global (docs/
+    /// quad-menu.md §3.1), so the switch runs the canonical teardown on the
+    /// outgoing side — a later stale pick must not re-target the outgoing
+    /// drawing's handles.
+    #[test]
+    fn tab_switch_closes_the_quad() {
+        with_stack(|| {
+            let (mut app, _) = quadded_line_app();
+            right_click(&mut app); // No Selection quad on tab 0
+            assert!(quad_state(&app).is_some());
+            assert!(!app.quad_panels.is_empty());
+            let _ = app.update(Message::TabNew);
+            // TabNew is the same disruptive transition (fresh drawing):
+            // the quad is dropped with the switch to it, so no dormant
+            // window state can outlive the app-global teardown.
+            assert!(quad_state(&app).is_none(), "TabNew drops the quad");
+            let _ = app.update(Message::TabSwitch(0));
+            // The canonical teardown ran on the switch; a stale pick finds
+            // neither window state nor panels and runs nothing.
+            let _ = app.update(Message::Quad(QuadMsg::Pick {
+                panel_id: "quad.recent".into(),
+                item_index: 0,
+            }));
+            assert!(quad_state(&app).is_none());
+            assert!(app.quad_panels.is_empty());
+            assert_eq!(active(&app), None, "the stale pick ran nothing");
         });
     }
 }

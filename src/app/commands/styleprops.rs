@@ -916,6 +916,9 @@ impl OpenCADStudio {
                     | "ZOOMFACTOR"
                     | "SHORTCUTMENU"
                     | "SHORTCUTMENUDURATION"
+                    | "QUAD"
+                    | "QUADWIDTH"
+                    | "QUADCOMMANDLAUNCH"
                     | "CURSORSIZE"
                     | "PICKBOX"
                     | "APERTURE"
@@ -1101,7 +1104,7 @@ impl OpenCADStudio {
                     self.command_line
                         .push_info(&super::block_editor_vars::setvar_listing());
                     self.command_line.push_info(
-                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY DYNMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
+                        crate::t!("SETVAR: CETRANSPARENCY LTSCALE CELTSCALE PDMODE PDSIZE TEXTSIZE ORTHOMODE FILLMODE MIRRTEXT FRAME IMAGEFRAME PDFFRAME WIPEOUTFRAME XCLIPFRAME POINTCLOUDCLIPFRAME ZOOMWHEEL ZOOMFACTOR SHORTCUTMENU SHORTCUTMENUDURATION QUAD QUADWIDTH QUADCOMMANDLAUNCH CURSORSIZE PICKBOX CURSORTYPE SNAPANG TEXTFILL CLIPROMPTLINES COMMANDLINEFADETIME ATTREQ ATTDIA DIMASSOC DIMCONTINUEMODE CONSTRAINTSOLVEMODE CONSTRAINTINFER CONSTRAINTBARDISPLAY CONSTRAINTBARMODE CONSTRAINTNAMEFORMAT DYNCONSTRAINTDISPLAY DYNMODE ANGBASE ANGDIR SKETCHINC SKPOLY SKTOLERANCE DONUTID DONUTOD CENTEREXE CENTERLAYER CENTERLTYPE CENTERLTSCALE CENTERLTYPEFILE CENTERCROSSSIZE CENTERCROSSGAP CENTERMARKEXE COLORTHEME SELECTIONAREA SELECTIONAREAOPACITY SELECTIONEFFECT SELECTIONEFFECTCOLOR WINDOWSAREACOLOR CROSSINGAREACOLOR SELECTIONPREVIEW GRIPSIZE GRIPCOLOR GRIPHOT GRIPHOVER GRIPOBJLIMIT | CLAYER CELTYPE TEXTSTYLE (read-only)").as_ref(),
                     );
                 } else {
                     if name.starts_with("REVCLOUD") {
@@ -2321,6 +2324,62 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            // Master switch of the Quad cursor menu (F12 /
+                            // the status-bar QUAD field). 0/1 like any
+                            // boolean variable; the display options the menu
+                            // honours live in the settings, not the variable.
+                            "QUAD" => match &value {
+                                Some(v) => match parse_bool(v) {
+                                    Some(on) => {
+                                        self.quad = on;
+                                        Ok((format!("QUAD = {}", on as i32), true))
+                                    }
+                                    None => Err("SETVAR: 0 or 1 required.".into()),
+                                },
+                                None => Ok((format!("QUAD = {}", self.quad as i32), false)),
+                            },
+                            // Columns the expanded quad lays out. The
+                            // variable keeps 2..=12: a value from outside
+                            // that range lands on the bounds so the quad
+                            // stays renderable, a non-integer is refused.
+                            "QUADWIDTH" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(width) => {
+                                        let width = crate::app::settings::clamp_quad_width(width);
+                                        self.quad_width = width;
+                                        Ok((format!("QUADWIDTH = {width}"), true))
+                                    }
+                                    _ => Err(format!(
+                                        "SETVAR: integer from {} to {} required.",
+                                        crate::app::settings::QUAD_WIDTH_MIN,
+                                        crate::app::settings::QUAD_WIDTH_MAX
+                                    )),
+                                },
+                                None => Ok((format!("QUADWIDTH = {}", self.quad_width), false)),
+                            },
+                            // QUADCOMMANDLAUNCH: a right-click over an entity
+                            // without entering the quad launches the entity's
+                            // default command directly instead of only
+                            // clicking the icon.
+                            "QUADCOMMANDLAUNCH" => match &value {
+                                Some(v) => match parse_bool(v) {
+                                    Some(on) => {
+                                        self.quad_command_launch = on;
+                                        Ok((
+                                            format!("QUADCOMMANDLAUNCH = {}", on as i32),
+                                            true,
+                                        ))
+                                    }
+                                    None => Err("SETVAR: 0 or 1 required.".into()),
+                                },
+                                None => Ok((
+                                    format!(
+                                        "QUADCOMMANDLAUNCH = {}",
+                                        self.quad_command_launch as i32
+                                    ),
+                                    false,
+                                )),
+                            },
                             "CURSORSIZE" => match &value {
                                 Some(v) => match v.parse::<i32>() {
                                     Ok(size) if (1..=100).contains(&size) => {
@@ -3400,6 +3459,9 @@ impl OpenCADStudio {
                                         | "ZOOMFACTOR"
                                         | "SHORTCUTMENU"
                                         | "SHORTCUTMENUDURATION"
+                                        | "QUAD"
+                                        | "QUADWIDTH"
+                                        | "QUADCOMMANDLAUNCH"
                                         | "CURSORSIZE"
                                         | "PICKBOX"
                                         | "APERTURE"
@@ -4660,6 +4722,36 @@ mod tests {
         let _ = app.update(crate::app::Message::ToggleDynInput);
         assert!(app.dyn_input);
         assert_eq!(app.dyn_mode, 1);
+    }
+
+    /// The quad sysvars mirror the settings the Options window, the
+    /// status-bar field and persistent config share: 0/1 booleans map the
+    /// flags the way ORTHOMODE does, and QUADWIDTH lands any integer the
+    /// variable cannot render on its own 2..=12 bounds.
+    #[test]
+    fn setvar_quad_sysvars_map_their_settings() {
+        let mut app = fresh_app();
+
+        let _ = app.run_command_line("SETVAR QUAD 1");
+        assert!(app.quad);
+        let _ = app.run_command_line("SETVAR QUAD yes");
+        assert!(app.quad, "a non-boolean is refused");
+        let _ = app.run_command_line("QUAD OFF");
+        assert!(!app.quad);
+
+        let _ = app.run_command_line("SETVAR QUADWIDTH 9");
+        assert_eq!(app.quad_width, 9);
+        let _ = app.run_command_line("SETVAR QUADWIDTH 1");
+        assert_eq!(app.quad_width, 2, "below the range clamps to the bound");
+        let _ = app.run_command_line("SETVAR QUADWIDTH 13");
+        assert_eq!(app.quad_width, 12, "above the range clamps to the bound");
+        let _ = app.run_command_line("SETVAR QUADWIDTH 300");
+        assert_eq!(app.quad_width, 12, "an unparsable integer is refused");
+
+        let _ = app.run_command_line("SETVAR QUADCOMMANDLAUNCH 1");
+        assert!(app.quad_command_launch);
+        let _ = app.run_command_line("QUADCOMMANDLAUNCH 0");
+        assert!(!app.quad_command_launch);
     }
 }
 

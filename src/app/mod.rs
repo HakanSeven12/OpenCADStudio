@@ -118,6 +118,11 @@ mod visibility;
 
 pub use style_ops::StyleKind;
 
+/// The Quad display-option message. Defined in `update/context_menu.rs` next
+/// to the quad glue and re-exported so the whole crate reaches it as
+/// `crate::QuadOptionMsg` (Options window, status-bar popup).
+pub use update::context_menu::QuadOptionMsg;
+
 /// Re-exported `pub` (not `pub(crate)`) so the `cargo bench` harness
 /// (`benches/`, an external crate) can measure the real grip-budget helper as
 /// `ui_grip_budget`. The `properties` / `settings` modules themselves stay
@@ -169,6 +174,23 @@ pub struct HoverDwell {
     pub point: iced::Point,
     pub tile_size: (f32, f32),
     pub tab: usize,
+}
+
+/// What the last executed settled-rollover pick saw, so a re-armed tick can
+/// tell that a repeat would run identically and skip the O(N) sweep
+/// (docs/quad-menu.md §3.4). `point` is tile-local like [`HoverDwell::point`];
+/// the move count disqualifies any cursor move since — including one away
+/// and back — and the epoch / generation / user-pref tokens disqualify a
+/// scene, camera or pick-relevant preference change without a move.
+#[derive(Clone, Debug, PartialEq)]
+pub struct QuadDwellPick {
+    pub tab: usize,
+    pub point: iced::Point,
+    pub move_seq: u64,
+    pub geometry_epoch: u64,
+    pub camera_generation: u64,
+    pub selection_preview: u8,
+    pub pick_box: i32,
 }
 
 /// Cursor dwell awaiting a deferred object-snap pass while a command is
@@ -942,6 +964,55 @@ pub(super) struct OpenCADStudio {
     right_click_mode: settings::RightClickMode,
     /// Time-sensitive right-click hold threshold, ms (SHORTCUTMENUDURATION).
     right_click_hold_ms: i32,
+    // ── Quad cursor menu ───────────────────────────────────────────────────
+    // The persisted `UserSettings::quad*` fields are mirrored here like
+    // `right_click_mode` above (startup restore + save-snapshot in
+    // `update/file.rs` write both sides), so the update paths, the Options
+    // window and the status bar read plain `self.quad*` fields.
+    /// Whether the Quad cursor menu exists at all (F12, status-bar field).
+    quad: bool,
+    /// QUADDISPLAY bit: hovering an entity offers its default command quad.
+    quad_on_hover: bool,
+    /// QUADDISPLAY bit: a selection set offers its common commands.
+    quad_on_select: bool,
+    /// QUADDISPLAY bit: a targetless right-click opens the No Selection quad.
+    quad_on_right_click: bool,
+    /// QUADDISPLAY bit: hovering offers the quad only while nothing is
+    /// selected.
+    quad_suppress_hover_when_selection: bool,
+    /// QUADWIDTH: columns the expanded quad lays out (2..=12).
+    quad_width: u8,
+    /// QUADCOMMANDLAUNCH: a right-click over an entity launches its default
+    /// command directly.
+    quad_command_launch: bool,
+    /// Milliseconds the cursor must rest on an entity before the hover quad
+    /// opens (0..=2000).
+    quad_hover_delay_ms: u64,
+    /// The panels the open quad currently shows — the pure model built by
+    /// `quad_panels_for_target` when the quad opened. Cleared on close.
+    pub quad_panels: Vec<crate::ui::popup::quad_menu::QuadPanel>,
+    /// When the qualifying hover dwell began while the quad is closed
+    /// (`None` = not dwelling). The settled rollover pick arms and reads it.
+    pub quad_hover_since: Option<std::time::Instant>,
+    /// The last settled-rollover pick the quad's hover dwell ran: its
+    /// cursor point, the move sequence that had armed the dwell, and the
+    /// cheap scene tokens the pick reads. While the quad dwell is counting
+    /// and none of these changed, the dwell tick skips the O(N) pick and
+    /// only re-arms itself (docs/quad-menu.md §3.4).
+    pub(crate) quad_dwell_pick: Option<QuadDwellPick>,
+    /// Monotonic count of hover-dwell arming moves: any cursor move since
+    /// the recorded pick (including moving away and back to the same
+    /// point) invalidates the pick-skip above.
+    hover_move_seq: u64,
+    /// Per-entity-type-key most-recently-used commands launched *from the
+    /// quad* (and the global list for the No Selection quad). One shared
+    /// instance for every tab — the memory follows the user, not the file.
+    pub quad_mru: crate::ui::popup::quad_menu::QuadMru,
+    /// Target classification captured when the quad last opened. The pick
+    /// routes hover-vs-selection dispatch semantics against it, so movement
+    /// of the live hover highlight between open and pick cannot change what
+    /// a pick does.
+    quad_open_target: Option<crate::ui::popup::quad_menu::QuadTarget>,
     /// Selected-object count past which grips stop being generated
     /// (GRIPOBJLIMIT, 0..=32767; 0 = no limit).
     grip_object_limit: i32,
@@ -5071,6 +5142,13 @@ pub enum Message {
     ContextMenuSubmenuToggle(crate::ui::popup::context_menu::SubmenuId),
     /// Keyboard navigation inside the open context menu.
     ContextMenuNavigate(ContextMenuNav),
+    // ── Quad cursor menu ──────────────────────────────────────────────────
+    /// A quad cursor menu interaction (toggle / expand / tab / pick / close)
+    /// from the overlay or the keyboard while the quad is open.
+    Quad(crate::ui::popup::quad_menu::QuadMsg),
+    /// A Quad display-option change (Options window, the status-bar popup,
+    /// or `SETVAR`'s mapping). Carries the new value.
+    QuadOption(crate::QuadOptionMsg),
     /// Begin an interactive reference-object pick to move the current
     /// selection above (`true`) or below (`false`) the picked object.
     DrawOrderPickRef(bool),
@@ -5623,7 +5701,9 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn new() -> Self {
+        crate::sys::startup_times::mark("App::new: begin");
         let config = config::AppConfig::load();
+        crate::sys::startup_times::mark("App::new: config loaded");
         if let Err(error) = crate::i18n::set_language(config.settings.language) {
             eprintln!("Unable to apply saved UI language: {error}");
         }
@@ -5786,6 +5866,22 @@ impl OpenCADStudio {
             double_click_block_attedit: true,
             right_click_mode: settings::RightClickMode::ShortcutMenu,
             right_click_hold_ms: 250,
+            // Quad cursor menu defaults mirror `UserSettings::default()`; a
+            // restored config overwrites these in `apply_settings`.
+            quad: false,
+            quad_on_hover: true,
+            quad_on_select: true,
+            quad_on_right_click: true,
+            quad_suppress_hover_when_selection: true,
+            quad_width: crate::ui::popup::quad_menu::QUAD_WIDTH_DEFAULT,
+            quad_command_launch: false,
+            quad_hover_delay_ms: 300,
+            quad_panels: Vec::new(),
+            quad_hover_since: None,
+            quad_dwell_pick: None,
+            hover_move_seq: 0,
+            quad_mru: crate::ui::popup::quad_menu::QuadMru::new(),
+            quad_open_target: None,
             grip_object_limit: settings::DEFAULT_GRIP_OBJECT_LIMIT,
             ncopy_bind: false,
             cursor_type: settings::CursorType::Crosshair,
@@ -6338,20 +6434,24 @@ impl OpenCADStudio {
             ds_dimtolj: "1".to_string(),
             ds_dimtzin: "0".to_string(),
         };
+        crate::sys::startup_times::mark("App::new: struct built");
         // Restore the consolidated user config (settings.json) into live state
         // so preferences, recents, status-bar layout, ribbon density and print
         // options survive across sessions (issue #68). `last_saved_config` is
         // seeded below so the first change — not the boot — triggers a write.
         app.apply_config(config);
+        crate::sys::startup_times::mark("App::new: apply_config done");
         // Load command aliases from ocad.pgp (writes the shipped default file
         // on first launch). The hide-set keeps aliases out of autocomplete while
         // their target command still shows.
         app.command_aliases = alias::load_aliases();
         app.command_line.command_aliases = app.command_aliases.clone();
+        crate::sys::startup_times::mark("App::new: aliases loaded");
         // Load external plugin packages from the plugins folder once, then fold
         // their ribbon tabs into the ribbon. Skipped under test/wasm.
         #[cfg(all(not(target_arch = "wasm32"), not(test)))]
         {
+            crate::sys::startup_times::mark("App::new: loading external plugins");
             for (id, res) in crate::plugin::external::load_at_startup(&mut app) {
                 if let Err(e) = res {
                     app.command_line
@@ -6359,9 +6459,11 @@ impl OpenCADStudio {
                     app.plugin_load_errors.insert(id, e);
                 }
             }
+            crate::sys::startup_times::mark("App::new: external plugins loaded");
             app.loaded_plugin_ids = crate::plugin::external::loaded_ids().into_iter().collect();
             app.rebuild_ribbon_modules();
         }
+        crate::sys::startup_times::mark("App::new: done");
         app.last_saved_config = Some(app.current_config());
         app.sync_ribbon_layers();
         app
@@ -6429,7 +6531,9 @@ impl OpenCADStudio {
         // File association is no longer re-registered on every launch. It is set
         // up once via the first-launch prompt below (when the user hasn't been
         // asked yet) and afterwards managed entirely by the FILEASSOC command.
+        crate::sys::startup_times::mark("boot: begin");
         let state = Self::new();
+        crate::sys::startup_times::mark("boot: App constructed");
         let (id, open_task) = window::open(window::Settings {
             maximized: true,
             icon: build_window_icon().and_then(|rgba| window::icon::from_rgba(rgba, 32, 32).ok()),
@@ -6681,7 +6785,9 @@ use std::path::PathBuf;
 pub fn run() -> iced::Result {
     // UI text follows the desktop's interface font: generic sans-serif, iced's
     // default font, is remapped to it before the first window opens.
+    crate::sys::startup_times::mark("run: entry");
     crate::sys::ui_font::apply(crate::sys::ui_font::detect().as_ref());
+    crate::sys::startup_times::mark("run: ui_font applied");
     iced::daemon(
         OpenCADStudio::boot,
         OpenCADStudio::update,

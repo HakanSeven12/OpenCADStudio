@@ -242,6 +242,17 @@ impl OpenCADStudio {
                             ucs_icon_at_origin: self.ucs_icon_at_origin,
                             right_click_mode: self.right_click_mode,
                             right_click_hold_ms: self.right_click_hold_ms,
+                            // Quad display options (docs/quad-menu.md §3.7);
+                            // wired in update/context_menu.rs.
+                            quad_on: self.quad,
+                            quad_on_hover: self.quad_on_hover,
+                            quad_on_select: self.quad_on_select,
+                            quad_on_right_click: self.quad_on_right_click,
+                            quad_suppress_hover_when_selection: self
+                                .quad_suppress_hover_when_selection,
+                            quad_width: self.quad_width,
+                            quad_command_launch: self.quad_command_launch,
+                            quad_hover_delay_ms: self.quad_hover_delay_ms,
                         },
                         crate::ui::window::options::spacemouse::view(
                             self.spacemouse_preferences,

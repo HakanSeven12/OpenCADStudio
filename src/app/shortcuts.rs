@@ -48,6 +48,10 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         ("F10".to_string(), "POLAR"),
         ("F11".to_string(), "OTRACK"),
         ("F12".to_string(), "DYNINPUT"),
+        // F12 itself is Dynamic Input (as in the commercial solutions this
+        // application mirrors), so the quad's master toggle rides the
+        // nearest free seat beside it: Shift+F12.
+        ("SHIFT+F12".to_string(), "QUADTOGGLE"),
         (format!("{ACCEL}+0"), "CLEANSCREEN"),
         (format!("{ACCEL}+1"), "PROPERTIES"),
         (format!("{ACCEL}+K"), "HYPERLINK"),
@@ -203,6 +207,8 @@ pub(super) const INPUT_ACTIONS: &[&str] = &[
     "NEXTVIEWPORT",
     "SELECTALL",
     "PASTECLIP",
+    // The quad cursor menu's master toggle (docs/quad-menu.md §3.6).
+    "QUADTOGGLE",
 ];
 
 impl OpenCADStudio {
@@ -381,6 +387,10 @@ impl OpenCADStudio {
             "OTRACK" => Message::ToggleOTrack,
             "DYNINPUT" => Message::ToggleDynInput,
             "TOGGLESELECTIONCYCLING" => Message::ToggleSelectionCycling,
+            // Quad cursor menu master toggle (Shift+F12, Options window,
+            // status-bar field): the pure on/off flip, quad panel updates
+            // included, lives in the quad router (docs/quad-menu.md §3.6).
+            "QUADTOGGLE" => Message::Quad(crate::ui::popup::quad_menu::QuadMsg::Toggle),
             "NEXTVIEWPORT" => return self.next_viewport(),
             "SELECTALL" => Message::SelectAllShortcut,
             "PASTECLIP" => Message::PasteShortcut,
@@ -415,5 +425,40 @@ impl OpenCADStudio {
         };
 
         self.update(message)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+
+    /// Bare F12 toggles dynamic input and SHIFT+F12 toggles the quad, also
+    /// through the config-upgrade path: a settings file saved before the
+    /// quad carries no SHIFT+F12 row, and the bare-base-key fallback of
+    /// `run_shortcut` must not shadow it into F12 (DYNINPUT) — `apply_config`
+    /// backfills the row (docs/quad-menu.md §3.6).
+    #[test]
+    fn f12_is_dyn_input_and_shift_f12_is_quad_toggle() {
+        let mut app = OpenCADStudio::new_for_test();
+
+        // Stale table: exact shape of a config saved before the quad existed.
+        let mut cfg = crate::app::config::AppConfig::default();
+        cfg.shortcuts.bindings = [(normalize_key("F12"), "DYNINPUT".to_string())]
+            .into_iter()
+            .collect();
+        app.apply_config(cfg);
+
+        let dyn_before = app.dyn_input;
+        let _ = app.run_shortcut("F12");
+        assert_eq!(
+            app.dyn_input,
+            !dyn_before,
+            "bare F12 toggles dynamic input"
+        );
+        assert!(!app.quad, "bare F12 must not touch the quad");
+
+        let _ = app.run_shortcut("SHIFT+F12");
+        assert!(app.quad, "SHIFT+F12 toggles the quad via QUADTOGGLE");
     }
 }

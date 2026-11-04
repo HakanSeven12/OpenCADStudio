@@ -1310,6 +1310,60 @@ impl HostApi for V4PluginHostApi {
             }
         }
     }
+
+    fn register_quad_panels(
+        &mut self,
+        _plugin_id: &str,
+        panels: &[crate::dialog::QuadPanelDef],
+    ) -> Vec<bool> {
+        // API v15: the host stores the panels under the caller's transport
+        // identity (the plugin_id param is nominal, the RegisterPluginClass
+        // precedent), so quad panels are always registered in the plugin's
+        // own name.
+        match self.request(PluginRequest::RegisterQuadPanels {
+            panels: panels.to_vec(),
+        }) {
+            Ok(PluginResponse::QuadPanelsRegistered { ok, errors }) => {
+                // Surface the short per-reject reasons like push errors do.
+                for error in errors.iter().filter(|reason| !reason.is_empty()) {
+                    eprintln!("[plugin] quad panel registration refused: {error}");
+                }
+                ok
+            }
+            Ok(other) => {
+                eprintln!("[plugin] unexpected RegisterQuadPanels response: {other:?}");
+                vec![false; panels.len()]
+            }
+            Err(e) => {
+                eprintln!("[plugin] RegisterQuadPanels request failed: {e}");
+                vec![false; panels.len()]
+            }
+        }
+    }
+
+    fn unregister_quad_panels(&mut self, _plugin_id: &str, panel_ids: &[&str]) -> Vec<bool> {
+        // API v15: the host scopes the removal by the caller's transport
+        // identity (the plugin_id param is nominal, the register_quad_panels
+        // precedent), so a plugin only ever removes its own panels.
+        match self.request(PluginRequest::UnregisterQuadPanels {
+            panel_ids: panel_ids.iter().map(|id| id.to_string()).collect(),
+        }) {
+            Ok(PluginResponse::QuadPanelsRegistered { ok, errors }) => {
+                for error in errors.iter().filter(|reason| !reason.is_empty()) {
+                    eprintln!("[plugin] quad panel removal refused: {error}");
+                }
+                ok
+            }
+            Ok(other) => {
+                eprintln!("[plugin] unexpected UnregisterQuadPanels response: {other:?}");
+                vec![false; panel_ids.len()]
+            }
+            Err(e) => {
+                eprintln!("[plugin] UnregisterQuadPanels request failed: {e}");
+                vec![false; panel_ids.len()]
+            }
+        }
+    }
 }
 
 #[cfg(test)]

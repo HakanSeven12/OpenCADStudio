@@ -115,7 +115,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             });
         }
     }
-    let Some(graph) = graph(doc, definition).ok().flatten() else {
+    let Some(graph) = authoring::listed_graph(doc, definition) else {
         return rows;
     };
     for object in doc.objects.values() {

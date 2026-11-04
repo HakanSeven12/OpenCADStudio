@@ -94,6 +94,30 @@ pub(crate) fn definition_dictionary(document: &Document, definition: Handle) -> 
     document.extension_dictionary_handle(definition)
 }
 
+/// The definition's graph as a list needs it: the authoring object its own
+/// extension dictionary names, without the checks that decide whether the graph
+/// can be edited. A definition whose graph will not take an edit still holds the
+/// parameters that hang off the graph itself — its lookup and visibility ones —
+/// and listing those cannot wait on the checks. The links between the definition,
+/// its dictionary and the graph are still required: they are what keeps another
+/// definition's parameters off this list.
+pub(super) fn listed_graph(document: &Document, definition: Handle) -> Option<Handle> {
+    let dictionary = definition_dictionary(document, definition)?;
+    let ObjectType::Dictionary(record) = document.objects.get(&dictionary)? else {
+        return None;
+    };
+    let handle = record.get("ACAD_ENHANCEDBLOCK")?;
+    match document.objects.get(&handle) {
+        Some(ObjectType::DynamicBlock(object))
+            if object.owner == dictionary
+                && matches!(object.data, DynamicBlockData::EvaluationGraph(_)) =>
+        {
+            Some(handle)
+        }
+        _ => None,
+    }
+}
+
 /// Resolve a graph without touching it. Reject malformed/opaque relationships
 /// before opening a history transaction or allocating any new native objects.
 pub(super) fn graph(

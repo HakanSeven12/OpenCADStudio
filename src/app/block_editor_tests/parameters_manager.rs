@@ -1254,3 +1254,46 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
         assert_eq!(line(&app.tabs[tab].scene.document, other), original);
     }
 }
+
+/// A definition whose evaluation graph refuses to be edited still holds the
+/// parameters it was authored with, and the manager's rule is one row per
+/// parameter, so it has to keep printing them. Dropping the row leaves the
+/// operator with a short table and no word about why.
+#[test]
+fn an_uneditable_graph_keeps_the_parameters_it_holds_listed() {
+    let (mut app, tab, definition) = open(&["BPARAMETER VISIBILITY 0,0"], &[]);
+    let graph =
+        crate::scene::block_visibility::parameter(&app.tabs[tab].scene.document, definition)
+            .expect("the placed visibility parameter sits on the definition")
+            .owner;
+    let corrupted = match app.tabs[tab].scene.document.objects.get_mut(&graph) {
+        Some(codec::objects::ObjectType::DynamicBlock(object)) => {
+            match &mut object.data {
+                // A node left pointing at an object the drawing does not hold:
+                // every authoring read refuses to edit this definition's graph.
+                codec::objects::DynamicBlockData::EvaluationGraph(graph) => graph
+                    .nodes
+                    .first_mut()
+                    .map(|node| node.expression = codec::Handle::new(0x7F00))
+                    .is_some(),
+                _ => false,
+            }
+        }
+        _ => false,
+    };
+    assert!(corrupted, "the graph has a node to misplace");
+    // The refusal is what makes this the uneditable case: the same row the list
+    // prints is one nothing can be addressed through.
+    assert!(
+        manager::target_of(&app.tabs[tab].scene.document, definition, "Visibility1").is_none(),
+        "and the definition's graph really does refuse"
+    );
+    let names: Vec<String> = manager::rows(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .map(|row| row.name)
+        .collect();
+    assert!(
+        names.iter().any(|name| name == "Visibility1"),
+        "the parameter the definition still holds keeps its row: {names:?}"
+    );
+}

@@ -249,8 +249,10 @@ fn a_parameter_name_is_trimmed_and_must_be_new() {
         set_parameter_name(&mut doc, def, polar, "a\0b"),
         Err("Parameter text cannot contain a null character.")
     );
+    let linear_name = name_of(&doc, handles[1]);
+    assert_eq!(linear_name, "Linear1");
     assert_eq!(
-        set_parameter_name(&mut doc, def, polar, "linear"),
+        set_parameter_name(&mut doc, def, polar, &linear_name.to_ascii_uppercase()),
         Err("Parameter names must be unique.")
     );
     assert_eq!(

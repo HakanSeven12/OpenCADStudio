@@ -79,6 +79,12 @@ fn unique_label(names: &[String], prefix: &str) -> String {
         .unwrap()
 }
 
+/// The next free distance label name, the default a Linear parameter's label
+/// question shows.
+pub(crate) fn next_distance_label(document: &Document, definition: Handle) -> String {
+    unique_label(&label_names(document, definition), "Distance")
+}
+
 /// The next free distance and angle label names, the defaults a Polar
 /// placement prompt shows for its label questions.
 pub(crate) fn next_polar_labels(document: &Document, definition: Handle) -> [String; 2] {
@@ -219,7 +225,7 @@ pub(crate) fn create(
         Kind::XY => [end.x - base.x, end.y - base.y],
         _ => offsets(kind, base, end, label),
     };
-    let parameter_name = if kind == Kind::Polar {
+    let parameter_name = if matches!(kind, Kind::Linear | Kind::Polar) {
         super::block_authoring::metadata::next_parameter_name(document, definition, kind.name())?
     } else {
         kind.name().to_owned()

@@ -87,7 +87,8 @@ impl DistanceParameterCommand {
                     if !value.is_empty() && value != self.distance_label_default {
                         self.options.distance_label = Some(value.to_owned());
                     }
-                    self.asking = Some(Asking::AngleLabel);
+                    // Only a Polar parameter asks for an angle label as well.
+                    self.asking = (self.kind == Kind::Polar).then_some(Asking::AngleLabel);
                 }
                 Asking::AngleLabel => {
                     let distance = self
@@ -172,10 +173,11 @@ impl DistanceParameterCommand {
             .into_owned(),
         }
     }
-    /// The measured properties that only a Polar parameter offers: its own
-    /// name and its distance and angle labels.
+    /// The kinds that offer a name and a label: Linear and Polar. Linear asks
+    /// for a distance label only; Polar asks for a distance label then an angle
+    /// label.
     fn accepts_label(&self) -> bool {
-        self.kind == Kind::Polar
+        matches!(self.kind, Kind::Linear | Kind::Polar)
     }
     fn finish(&self, label: DVec3, grips: Option<usize>) -> CmdResult {
         CmdResult::PlaceBlockDistanceParameter {
@@ -205,7 +207,7 @@ impl CadCommand for DistanceParameterCommand {
         }
         let step = if self.base.is_none() {
             if self.kind == Kind::Linear {
-                "Specify start point or [Chain/Description/Palette]:"
+                "Specify start point or [Name/Label/Chain/Description/Palette]:"
             } else if self.accepts_label() {
                 "Specify base point or [Name/Label/Chain/Description/Palette]:"
             } else {
@@ -398,6 +400,33 @@ mod tests {
         command
     }
 
+    #[test]
+    fn a_linear_label_asks_only_for_the_distance_label() {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::Linear)
+            .with_name("Distance3".into())
+            .with_labels("Distance3".into(), "Angle3".into());
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter distance property label <Distance3>:"
+        );
+        assert!(matches!(
+            command.on_text_input("Width"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:",
+            "a Linear parameter asks for one label, not a distance and an angle"
+        );
+        assert_eq!(command.options.distance_label.as_deref(), Some("Width"));
+        assert!(command.options.angle_label.is_none());
+        assert!(command.asking.is_none(), "the label question is closed");
+    }
+
     fn linear() -> DistanceParameterCommand {
         DistanceParameterCommand::new(0, Handle::new(1), Kind::Linear)
     }
@@ -407,7 +436,7 @@ mod tests {
         for (kind, prompt) in [
             (
                 Kind::Linear,
-                "BPARAMETER Linear  Specify start point or [Chain/Description/Palette]:",
+                "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:",
             ),
             (
                 Kind::Polar,
@@ -473,18 +502,20 @@ mod tests {
 
     #[test]
     fn a_name_keyword_is_refused_on_types_without_a_name_question() {
-        for kind in [Kind::Linear, Kind::XY] {
-            let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
-            assert!(
-                matches!(
-                    command.on_text_input("N"),
-                    Some(CmdResult::ReportError(reason))
-                        if reason == "Point or option keyword required."
-                ),
-                "{}",
-                kind.name()
-            );
-        }
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY);
+        assert!(
+            matches!(
+                command.on_text_input("N"),
+                Some(CmdResult::ReportError(reason))
+                    if reason == "Point or option keyword required."
+            ),
+            "XY asks no name question"
+        );
+        let mut command = linear();
+        assert!(
+            matches!(command.on_text_input("N"), Some(CmdResult::NeedPoint)),
+            "Linear offers a name"
+        );
     }
 
     #[test]
@@ -667,18 +698,20 @@ mod tests {
 
     #[test]
     fn a_label_keyword_is_refused_on_types_without_labels() {
-        for kind in [Kind::Linear, Kind::XY] {
-            let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
-            assert!(
-                matches!(
-                    command.on_text_input("L"),
-                    Some(CmdResult::ReportError(reason))
-                        if reason == "Point or option keyword required."
-                ),
-                "{}",
-                kind.name()
-            );
-        }
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY);
+        assert!(
+            matches!(
+                command.on_text_input("L"),
+                Some(CmdResult::ReportError(reason))
+                    if reason == "Point or option keyword required."
+            ),
+            "XY asks no label question"
+        );
+        let mut command = linear();
+        assert!(
+            matches!(command.on_text_input("L"), Some(CmdResult::NeedPoint)),
+            "Linear offers a label"
+        );
     }
 
     #[test]
@@ -722,7 +755,7 @@ mod tests {
         assert_eq!(command.options.chain, Some(true));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Linear  Specify start point or [Chain/Description/Palette]:"
+            "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:"
         );
     }
 

@@ -3552,7 +3552,7 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
     let _ = app.dispatch_command("BPARAMETER LINEAR");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Linear  Specify start point or [Chain/Description/Palette]:"
+        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:"
     );
     feed(&mut app, "C");
     assert_eq!(
@@ -3591,6 +3591,62 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
     assert!(
         !native.parameter.parameter.show_properties,
         "No at the palette question hides the property"
+    );
+}
+
+#[test]
+fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Linear1>:",
+        "the name question defaults to the name the parameter is created with"
+    );
+    feed(&mut app, "Body");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter distance property label <Distance1>:"
+    );
+    feed(&mut app, "Width");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:",
+        "a Linear parameter asks one label question, not a distance and an angle"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let linear = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| {
+            parameter.kind == crate::scene::block_distance_parameter::Kind::Linear
+        })
+        .expect("placed linear parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&linear.handle).expect("linear record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+        panic!("expected a linear parameter");
+    };
+    assert_eq!(
+        native.distance_name, "Width",
+        "the label collected at the prompt is stored on the parameter"
+    );
+    assert_eq!(
+        native.parameter.parameter.element.name, "Body",
+        "the name collected at the prompt is stored on the parameter"
     );
 }
 

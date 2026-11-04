@@ -179,7 +179,11 @@ impl OpenCADStudio {
         let option_error = {
             use crate::scene::block_authoring::metadata;
             let document = &mut self.tabs[i].scene.document;
-            let labels = kind == crate::scene::block_distance_parameter::Kind::Polar;
+            let labels = matches!(
+                kind,
+                crate::scene::block_distance_parameter::Kind::Linear
+                    | crate::scene::block_distance_parameter::Kind::Polar
+            );
             let parameter_name = options.name.as_deref().filter(|_| labels);
             let parameter_name = parameter_name
                 .map(|value| metadata::set_parameter_name(document, definition, parameter, value));
@@ -202,7 +206,9 @@ impl OpenCADStudio {
                     value,
                 )
             });
-            let angle_label = options.angle_label.as_deref().filter(|_| labels);
+            let angle_label = options.angle_label.as_deref().filter(|_| {
+                kind == crate::scene::block_distance_parameter::Kind::Polar
+            });
             let angle_label = angle_label.map(|value| {
                 metadata::set_text(
                     document,
@@ -643,12 +649,27 @@ impl OpenCADStudio {
                     crate::scene::block_distance_parameter::Kind::parse(parameter_type)
                 {
                     let mut command = crate::modules::block_editor::distance_parameter::DistanceParameterCommand::new(self.tabs[i].id, block, kind);
-                    if kind == crate::scene::block_distance_parameter::Kind::Polar {
+                    if matches!(
+                        kind,
+                        crate::scene::block_distance_parameter::Kind::Linear
+                            | crate::scene::block_distance_parameter::Kind::Polar
+                    ) {
                         let [distance, angle] =
-                            crate::scene::block_distance_parameter::next_polar_labels(
-                                &self.tabs[i].scene.document,
-                                block,
-                            );
+                            if kind == crate::scene::block_distance_parameter::Kind::Polar {
+                                crate::scene::block_distance_parameter::next_polar_labels(
+                                    &self.tabs[i].scene.document,
+                                    block,
+                                )
+                            } else {
+                                // A Linear parameter asks for one label only.
+                                [
+                                    crate::scene::block_distance_parameter::next_distance_label(
+                                        &self.tabs[i].scene.document,
+                                        block,
+                                    ),
+                                    String::new(),
+                                ]
+                            };
                         let name = crate::scene::block_authoring::metadata::next_parameter_name(
                             &self.tabs[i].scene.document,
                             block,

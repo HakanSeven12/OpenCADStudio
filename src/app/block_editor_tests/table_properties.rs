@@ -728,6 +728,51 @@ fn the_value_list_closes_when_its_drawing_tab_is_closed() {
 }
 
 #[test]
+fn an_open_value_list_marks_the_row_selected_after_it_opened() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens on the lone selected reference"
+    );
+    let key = row(&app).0;
+    let _ = app.update(Message::PropBlockChoice { key, index: 2 });
+    assert!(
+        app.table_popup.is_some(),
+        "choosing a row on the panel does not close the list belonging to that reference"
+    );
+    let (_, selected, options) = row(&app);
+    assert_eq!(
+        app.tabs[i].table_grip.as_ref().unwrap().current,
+        Some(2),
+        "the grip knows the row chosen after the list opened"
+    );
+    assert_eq!(
+        app.table_popup.as_ref().unwrap().current,
+        Some(2),
+        "and the open list marks that row, not the one chosen when it opened"
+    );
+    assert_eq!(
+        app.table_popup.as_ref().unwrap().rows.len(),
+        options.len(),
+        "the reprint still shows every row of the table"
+    );
+    assert_eq!(
+        app.table_popup.as_ref().unwrap().current,
+        Some(selected),
+        "and it marks the row the panel has selected"
+    );
+    assert!(
+        !app.table_popup.as_ref().unwrap().header.is_empty(),
+        "the reprinted list keeps its heading"
+    );
+}
+
+#[test]
 fn block_table_properties_and_grip_popup_refresh_the_same_indexed_row() {
     for testing in [false, true] {
         let (mut app, _, def, _, _, table) = table_fixture(testing);

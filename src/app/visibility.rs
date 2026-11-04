@@ -320,6 +320,15 @@ impl OpenCADStudio {
             world: glam::DVec3::new(wp.x, wp.y, wp.z),
             current,
         });
+        // A list already open on this reference prints the grip's state, so the
+        // refresh reprints it rather than leaving the rows chosen before.
+        if self
+            .table_popup
+            .as_ref()
+            .is_some_and(|popup| popup.insert_handle == handle)
+        {
+            self.open_table_popup();
+        }
     }
 
     /// Compute the index sets needed to apply `state` of `param` (governing the

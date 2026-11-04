@@ -632,6 +632,51 @@ fn the_value_list_closes_with_the_reference_it_belongs_to() {
     );
 }
 
+/// The other way a list loses its grip: the refresh stops drawing it while the
+/// rows it shows stay recorded, because the table no longer binds a display grip.
+/// The list is placed from the grip, so that state cannot leave a value list on
+/// screen — recorded rows with nothing to hang them from paint nothing.
+#[test]
+fn a_value_list_is_not_painted_when_its_grip_is_gone() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    let bounds = iced::Rectangle {
+        x: 0.,
+        y: 0.,
+        width: 1600.,
+        height: 900.,
+    };
+    assert!(
+        app.table_popup_anchor(i, bounds).is_some(),
+        "the open list hangs from the grip while the grip is drawn"
+    );
+    let doc = &mut app.tabs[i].scene.document;
+    let Some(codec::objects::ObjectType::DynamicBlock(native)) = doc.objects.get_mut(&table) else {
+        panic!("the fixture's table is a dynamic block object");
+    };
+    let codec::objects::DynamicBlockData::PropertiesTable(rows) = &mut native.data else {
+        panic!("the table object holds the properties table");
+    };
+    rows.parameter.property_count = 0;
+    app.refresh_properties();
+    assert!(
+        app.tabs[i].table_grip.is_none(),
+        "the grip is gone with its binding"
+    );
+    assert!(
+        app.table_popup.is_some(),
+        "and the rows the list shows are not deleted while the drawing stops showing the grip"
+    );
+    assert!(
+        app.table_popup_anchor(i, bounds).is_none(),
+        "nothing paints a list whose grip is not drawn"
+    );
+}
+
 #[test]
 fn the_value_list_follows_its_grip_when_the_view_moves() {
     let (mut app, _, def, _, _, table) = table_fixture(false);

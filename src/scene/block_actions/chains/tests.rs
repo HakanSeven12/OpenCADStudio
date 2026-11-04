@@ -255,7 +255,7 @@ fn block_move_point_chains_rebuild_bulk_inputs_from_the_previous_effective_frame
             .unwrap();
             requested.insert(params[1].handle);
         }
-        rebuild_framed(
+        let resolved_frames = rebuild_framed(
             &mut evaluated,
             &changed,
             definition,
@@ -275,6 +275,15 @@ fn block_move_point_chains_rebuild_bulk_inputs_from_the_previous_effective_frame
         };
         assert_eq!(current(&evaluated, &params[1]), params[1].end + offset);
         assert_eq!(current(&evaluated, &params[2]), params[2].end + offset);
+        for parameter in &params[1..] {
+            assert_eq!(
+                resolved_frames[&parameter.handle],
+                ParameterFrame {
+                    base: parameter.base,
+                    end: parameter.end + offset,
+                }
+            );
+        }
     }
 }
 

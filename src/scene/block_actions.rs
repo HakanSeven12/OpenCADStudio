@@ -1291,6 +1291,7 @@ struct Evaluation<'a> {
     previous_graph: Option<&'a Document>,
     previous_values: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     requested: Option<&'a std::collections::BTreeSet<Handle>>,
+    resolved_frames: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
 }
 
 pub(crate) fn evaluate_framed(
@@ -1302,6 +1303,7 @@ pub(crate) fn evaluate_framed(
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     base_changed: bool,
     previous_frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    resolved_frames: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
 ) -> Result<bool, &'static str> {
     let bases = frames
         .iter()
@@ -1321,6 +1323,7 @@ pub(crate) fn evaluate_framed(
             bases: Some(&bases),
             previous_bases: Some(&previous_bases),
             base_changed,
+            resolved_frames: Some(resolved_frames),
             rebuild: false,
             ..Evaluation::default()
         },
@@ -1342,15 +1345,16 @@ pub(crate) fn rebuild_framed(
     definition: Handle,
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     previous: Option<RebuildInputs<'_>>,
-) -> Result<(), &'static str> {
+) -> Result<std::collections::BTreeMap<Handle, instance::ParameterFrame>, &'static str> {
     let Some(p) = all_parameters(baseline, definition).into_iter().next() else {
-        return Ok(());
+        return Ok(std::collections::BTreeMap::new());
     };
     let bases = frames
         .iter()
         .map(|(handle, frame)| (*handle, frame.base))
         .collect();
     let previous_bases = previous.map(|p| p.frames.iter().map(|(h, f)| (*h, f.base)).collect());
+    let mut resolved_frames = std::collections::BTreeMap::new();
     evaluate_impl(
         doc,
         baseline,
@@ -1365,9 +1369,10 @@ pub(crate) fn rebuild_framed(
             previous_graph: previous.map(|p| p.document),
             previous_values: previous.map(|p| p.values),
             requested: previous.map(|p| p.requested),
+            resolved_frames: Some(&mut resolved_frames),
         },
     )?;
-    Ok(())
+    Ok(resolved_frames)
 }
 
 fn evaluate_impl(
@@ -1376,7 +1381,7 @@ fn evaluate_impl(
     definition: Handle,
     parameter: Handle,
     input: Value,
-    evaluation: Evaluation<'_>,
+    mut evaluation: Evaluation<'_>,
 ) -> Result<bool, &'static str> {
     let force = evaluation.rebuild;
     let base_for = |p: &Parameter| evaluation.bases.and_then(|bases| bases.get(&p.handle)).copied().unwrap_or(p.base);
@@ -1799,8 +1804,14 @@ fn evaluate_impl(
     }
     for (p, end) in detached_points {
         set_value(&mut staged, &p, Value::Point(end))?;
+        if let Some(frames) = evaluation.resolved_frames.as_deref_mut() {
+            frames.insert(p.handle, instance::ParameterFrame { base: p.base, end });
+        }
     }
     for (handle, frame) in chain_values {
+        if let Some(frames) = evaluation.resolved_frames.as_deref_mut() {
+            frames.insert(handle, frame);
+        }
         let p = chain.parameter(handle);
         set_value(&mut staged, p, Value::Point(frame.end))?;
     }

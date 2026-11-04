@@ -852,6 +852,142 @@ mod tests {
         ui.into_messages().collect()
     }
 
+    fn press_text(element: Element<'_, Message>, label: &'static str) -> Vec<Message> {
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            iced::Settings::default(),
+            (1400.0, 900.0),
+            element,
+        );
+        ui.click(label).expect("the button is drawn");
+        ui.into_messages().collect()
+    }
+
+    /// Press the button labelled `label` in the open tool frames and run
+    /// what it sends, as iced does.
+    fn press_in_tools(app: &mut OpenCADStudio, label: &'static str) {
+        let sent = press_text(app.with_tool_windows(Space::new().into()), label);
+        assert!(!sent.is_empty(), "{label} sent nothing");
+        for msg in sent {
+            let _ = app.update_root(msg);
+        }
+    }
+
+    /// A real key press, through the app's own event listener.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn key(app: &mut OpenCADStudio, key: iced::keyboard::Key, text: &str) {
+        use iced::keyboard::{key::NativeCode, key::Physical, Event, Location, Modifiers};
+        let main = MAIN_WINDOW
+            .lock()
+            .ok()
+            .and_then(|main| *main)
+            .unwrap_or_else(iced::window::Id::unique);
+        let event = iced::Event::Keyboard(Event::KeyPressed {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: Physical::Unidentified(NativeCode::Unidentified),
+            location: Location::Standard,
+            modifiers: Modifiers::empty(),
+            text: (!text.is_empty()).then(|| text.into()),
+            repeat: false,
+        });
+        if let Some(msg) = crate::app::view::main_window_event(event, iced::event::Status::Ignored, main) {
+            let _ = app.update_root(msg);
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn keys_go_to_the_dialog_that_has_the_keyboard() {
+        use iced::keyboard::{key::Named, Key};
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.automation_op(r#"{"op":"run","cmd":"BLOCK"}"#);
+        let _ = app.update_root(Message::Noop);
+        assert!(app.tool_open(ModalKind::BlockDefinition) && app.active_modal.is_none());
+        // Typing stays out of the command line behind it.
+        key(&mut app, Key::Character("l".into()), "l");
+        assert_eq!(app.command_line.input, "");
+        // Enter answers it: no name yet, so it says so and stays.
+        key(&mut app, Key::Named(Named::Enter), "\r");
+        let state = app.block_definition.as_ref().expect("still open");
+        assert!(state.error_message.is_some(), "Enter pressed OK");
+        assert!(app.tool_open(ModalKind::BlockDefinition));
+        // A press on the drawing gives the keyboard back: typing reaches the
+        // command line and Esc does not close the dialog.
+        let _ = app.update_root(Message::ViewportLeftPress);
+        key(&mut app, Key::Character("l".into()), "l");
+        assert_eq!(app.command_line.input, "l");
+        key(&mut app, Key::Named(Named::Escape), "");
+        assert!(app.tool_open(ModalKind::BlockDefinition));
+        // A press on its frame takes it again: Esc first dismisses its
+        // warning, then closes it.
+        let _ = app.update_root(Message::ToolWindowRaise(ModalKind::BlockDefinition));
+        key(&mut app, Key::Named(Named::Escape), "");
+        assert!(app.block_definition.as_ref().unwrap().error_message.is_none());
+        assert!(app.tool_open(ModalKind::BlockDefinition));
+        key(&mut app, Key::Named(Named::Escape), "");
+        assert!(!app.tool_open(ModalKind::BlockDefinition));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_dialog_that_picks_on_the_drawing_comes_back_with_the_pick() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.add_entity(codec::EntityType::Line(
+            codec::entities::Line::from_points(
+                codec::types::Vector3::ZERO,
+                codec::types::Vector3::UNIT_X,
+            ),
+        ));
+        app.automation_op(r#"{"op":"run","cmd":"BLOCK"}"#);
+        let _ = app.update_root(Message::Noop);
+        // Its own "Select objects" button: the frame steps aside for the pick.
+        press_in_tools(&mut app, "Select objects");
+        assert!(!app.tool_open(ModalKind::BlockDefinition));
+        assert!(app.tabs[app.active_tab].active_cmd.is_some(), "picking");
+        // Answered on the command line, with real keys: the keyboard left
+        // with the frame.
+        for ch in ["A", "L", "L"] {
+            key(&mut app, iced::keyboard::Key::Character(ch.into()), ch);
+        }
+        // Enter takes "ALL", the next ends the selection.
+        for _ in 0..2 {
+            key(&mut app, iced::keyboard::Key::Named(iced::keyboard::key::Named::Enter), "\r");
+        }
+        assert!(app.tool_open(ModalKind::BlockDefinition), "back with the pick");
+        let state = app.block_definition.as_ref().unwrap();
+        assert_eq!(state.selected_handles.len(), 1);
+    }
+
+    #[test]
+    fn a_dialog_opened_from_a_dialog_replaces_it_and_gives_it_back() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        // Plot › Edit… (plot style).
+        let _ = app.update_root(Message::PlotDialogOpen);
+        press_in_tools(&mut app, "Edit…");
+        assert!(app.tool_open(ModalKind::Plotstyle) && !app.tool_open(ModalKind::Plot));
+        let _ = app.update_root(Message::ToolWindow(
+            ModalKind::Plotstyle,
+            Box::new(Message::CloseModal),
+        ));
+        assert!(app.tool_open(ModalKind::Plot) && !app.tool_open(ModalKind::Plotstyle));
+        let _ = app.update_root(Message::ToolWindow(ModalKind::Plot, Box::new(Message::CloseModal)));
+        // Insert Table › Table Style….
+        app.automation_op(r#"{"op":"run","cmd":"TABLE"}"#);
+        let _ = app.update_root(Message::Noop);
+        assert!(app.tool_open(ModalKind::InsertTable));
+        press_in_tools(&mut app, "Table Style…");
+        assert!(app.tool_open(ModalKind::TableStyle) && !app.tool_open(ModalKind::InsertTable));
+        let _ = app.update_root(Message::ToolWindow(
+            ModalKind::TableStyle,
+            Box::new(Message::CloseModal),
+        ));
+        assert!(app.tool_open(ModalKind::InsertTable) && !app.tool_open(ModalKind::TableStyle));
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn a_tool_moves_into_its_own_window_and_back() {

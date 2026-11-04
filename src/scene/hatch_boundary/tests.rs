@@ -394,21 +394,6 @@ fn island_style_keeps_loops_by_their_flags() {
     let area = |style, paths: Vec<BoundaryPath>| {
         let mut hatch = Hatch::new();
         hatch.is_solid = true;
-
-// A pattern hatch keeps its loops flagged not closed (bit 5): the flag leaves a
-// loop out of a solid fill only. The right-hand roof face of #2549 is an
-// AR-RSHKE hatch whose outer loop is flagged 33 around an island flagged 16.
-#[test]
-fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
-    let flagged = |mut path: BoundaryPath, bits: u32| {
-        path.flags = BoundaryPathFlags::from_bits(bits);
-        path
-    };
-    let square = |a: [f64; 2], b: [f64; 2]| rectangle(a, b, [0.0; 2]);
-    let area = |solid: bool, style, paths: Vec<BoundaryPath>| {
-        let mut hatch = Hatch::new();
-        hatch.is_solid = solid;
-        hatch.pattern.name = if solid { "SOLID" } else { "ANSI31" }.into();
         hatch.style = style;
         hatch.paths = paths;
         Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
@@ -428,7 +413,55 @@ fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
         ("outer 1 0 1", area(Outer, three(1, 0, 1)), 1500.0),
         ("normal 1 0 0", area(Normal, three(1, 0, 0)), 1124.0),
         ("normal 0 0", area(Normal, two(0, 0)), 1200.0),
+    ];
+    for (name, area, expected) in cases {
+        assert!(
+            (area - expected).abs() < 1e-3,
+            "{name}: {area}, expected {expected}"
+        );
+    }
+}
 
+// With no loop flagged the way the style needs, nesting depth picks the loops
+// as before: Ignore the outermost, Outer the outermost and the next.
+#[test]
+fn island_style_without_flags_falls_back_to_nesting_depth() {
+    use codec::entities::HatchStyleType::{Ignore, Outer};
+    let square = |half: f64| {
+        rectangle(
+            [20.0 - half, 20.0 - half],
+            [20.0 + half, 20.0 + half],
+            [0.0; 2],
+        )
+    };
+    let area = |style, paths: Vec<BoundaryPath>| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        hatch.style = style;
+        hatch.paths = paths;
+        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
+    };
+    let ignore = area(Ignore, vec![square(20.0), square(10.0)]);
+    let outer = area(Outer, vec![square(20.0), square(12.0), square(5.0)]);
+    assert!((ignore - 1600.0).abs() < 1e-3, "{ignore}");
+    assert!((outer - 1024.0).abs() < 1e-3, "{outer}");
+}
+
+#[test]
+fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
+    let flagged = |mut path: BoundaryPath, bits: u32| {
+        path.flags = BoundaryPathFlags::from_bits(bits);
+        path
+    };
+    let square = |a: [f64; 2], b: [f64; 2]| rectangle(a, b, [0.0; 2]);
+    let area = |solid: bool, style, paths: Vec<BoundaryPath>| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = solid;
+        hatch.pattern.name = if solid { "SOLID" } else { "ANSI31" }.into();
+        hatch.style = style;
+        hatch.paths = paths;
+        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
+    };
     use codec::entities::HatchStyleType::{Normal, Outer};
     let outer = || square([0.0, 0.0], [10.0, 10.0]);
     let island = || square([3.0, 3.0], [7.0, 7.0]);
@@ -488,29 +521,3 @@ fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
         );
     }
 }
-
-// With no loop flagged the way the style needs, nesting depth picks the loops
-// as before: Ignore the outermost, Outer the outermost and the next.
-#[test]
-fn island_style_without_flags_falls_back_to_nesting_depth() {
-    use codec::entities::HatchStyleType::{Ignore, Outer};
-    let square = |half: f64| {
-        rectangle(
-            [20.0 - half, 20.0 - half],
-            [20.0 + half, 20.0 + half],
-            [0.0; 2],
-        )
-    };
-    let area = |style, paths: Vec<BoundaryPath>| {
-        let mut hatch = Hatch::new();
-        hatch.is_solid = true;
-        hatch.style = style;
-        hatch.paths = paths;
-        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
-    };
-    let ignore = area(Ignore, vec![square(20.0), square(10.0)]);
-    let outer = area(Outer, vec![square(20.0), square(12.0), square(5.0)]);
-    assert!((ignore - 1600.0).abs() < 1e-3, "{ignore}");
-    assert!((outer - 1024.0).abs() < 1e-3, "{outer}");
-}
-

@@ -1106,6 +1106,7 @@ impl OpenCADStudio {
             if self.pending_setvar.is_some() && self.pending_setvar != pending_before {
                 self.drop_unchanged_pending_history(i);
                 let name = self.pending_setvar.take().unwrap_or_default();
+                self.command_line.answer_last_prompt(tokens[1]);
                 let answer = self.dispatch_command(&format!("SETVAR {name} {}", tokens[1]));
                 if tokens.len() == 2 {
                     return Task::batch([start_task, answer]);

@@ -432,6 +432,13 @@ impl CommandLine {
             format!("{COMMAND_PREFIX}{} {cmd}", t!("Command:")),
         );
     }
+    /// An answer given to the prompt just shown is written after it on the
+    /// same line (`Enter new value for X <1>: 0`), as the reference echoes it.
+    pub fn answer_last_prompt(&mut self, answer: &str) {
+        if let Some(entry) = self.history.last_mut().filter(|e| e.text.trim_end().ends_with(':')) {
+            entry.text = format!("{} {answer}", entry.text.trim_end());
+        }
+    }
     pub fn push_output(&mut self, msg: &str) {
         self.push(EntryKind::Output, msg.to_string());
     }

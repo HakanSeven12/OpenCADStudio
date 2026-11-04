@@ -876,6 +876,7 @@ impl OpenCADStudio {
             if val.is_empty() {
                 return Task::none();
             }
+            self.command_line.answer_last_prompt(&val);
             return self.dispatch_command(&format!("SETVAR {name} {val}"));
         }
         let i_tab = self.active_tab;

@@ -394,6 +394,21 @@ fn island_style_keeps_loops_by_their_flags() {
     let area = |style, paths: Vec<BoundaryPath>| {
         let mut hatch = Hatch::new();
         hatch.is_solid = true;
+
+// A pattern hatch keeps its loops flagged not closed (bit 5): the flag leaves a
+// loop out of a solid fill only. The right-hand roof face of #2549 is an
+// AR-RSHKE hatch whose outer loop is flagged 33 around an island flagged 16.
+#[test]
+fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
+    let flagged = |mut path: BoundaryPath, bits: u32| {
+        path.flags = BoundaryPathFlags::from_bits(bits);
+        path
+    };
+    let square = |a: [f64; 2], b: [f64; 2]| rectangle(a, b, [0.0; 2]);
+    let area = |solid: bool, style, paths: Vec<BoundaryPath>| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = solid;
+        hatch.pattern.name = if solid { "SOLID" } else { "ANSI31" }.into();
         hatch.style = style;
         hatch.paths = paths;
         Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
@@ -413,6 +428,58 @@ fn island_style_keeps_loops_by_their_flags() {
         ("outer 1 0 1", area(Outer, three(1, 0, 1)), 1500.0),
         ("normal 1 0 0", area(Normal, three(1, 0, 0)), 1124.0),
         ("normal 0 0", area(Normal, two(0, 0)), 1200.0),
+
+    use codec::entities::HatchStyleType::{Normal, Outer};
+    let outer = || square([0.0, 0.0], [10.0, 10.0]);
+    let island = || square([3.0, 3.0], [7.0, 7.0]);
+    let cases = [
+        (
+            "pattern, outer 33",
+            area(false, Normal, vec![flagged(outer(), 33)]),
+            100.0,
+        ),
+        (
+            "pattern, outer 33 round an island 16",
+            area(
+                false,
+                Outer,
+                vec![flagged(island(), 16), flagged(outer(), 33)],
+            ),
+            84.0,
+        ),
+        (
+            "pattern, outer 33, island 0",
+            area(
+                false,
+                Normal,
+                vec![flagged(outer(), 33), flagged(island(), 0)],
+            ),
+            84.0,
+        ),
+        (
+            "pattern, island 32",
+            area(
+                false,
+                Normal,
+                vec![flagged(outer(), 1), flagged(island(), 32)],
+            ),
+            84.0,
+        ),
+        // A solid fill still leaves them out.
+        (
+            "solid, outer 33",
+            area(true, Normal, vec![flagged(outer(), 33)]),
+            0.0,
+        ),
+        (
+            "solid, outer 33 round an island 16",
+            area(
+                true,
+                Outer,
+                vec![flagged(island(), 16), flagged(outer(), 33)],
+            ),
+            16.0,
+        ),
     ];
     for (name, area, expected) in cases {
         assert!(
@@ -446,3 +513,4 @@ fn island_style_without_flags_falls_back_to_nesting_depth() {
     assert!((ignore - 1600.0).abs() < 1e-3, "{ignore}");
     assert!((outer - 1024.0).abs() < 1e-3, "{outer}");
 }
+

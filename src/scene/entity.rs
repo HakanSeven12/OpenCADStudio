@@ -2968,11 +2968,12 @@ impl Scene {
             if path.flags.bits() & 8 != 0 {
                 continue;
             }
-            // Skip loops flagged not closed (flag bit 5). AutoCAD leaves such a
-            // loop out of the hatch even when its edges meet: it neither fills
-            // it nor cuts it as an island. Filling it painted areas AutoCAD
-            // never shows.
-            if path.flags.is_not_closed() {
+            // Skip loops flagged not closed (flag bit 5) in a solid or gradient
+            // fill: such a loop is left out even when its edges meet, so it
+            // neither fills nor cuts an island. A pattern hatch keeps it like
+            // any other loop.
+            let fills_area = dxf.is_solid || dxf.gradient_color.enabled;
+            if fills_area && path.flags.is_not_closed() {
                 continue;
             }
             let mut edge_polys: Vec<Vec<[f64; 2]>> = Vec::new();

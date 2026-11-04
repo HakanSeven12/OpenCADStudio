@@ -957,7 +957,7 @@ impl OpenCADStudio {
             // the front (or back) of the draw order via the DRAWORDER machinery.
             "TEXTTOFRONT" | "TEXTTOBACK" => {
                 let to_front = cmd.ends_with("FRONT");
-                let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                let block_handle = self.tabs[i].scene.interaction_block_handle();
                 let handles: rustc_hash::FxHashSet<codec::Handle> = self.tabs[i]
                     .scene
                     .document
@@ -993,7 +993,7 @@ impl OpenCADStudio {
             // HATCHTOBACK ÔÇö move every hatch object in the active space to the back of the draw order.
             "HATCHTOBACK" => {
                 use codec::objects::ObjectType;
-                let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                let block_handle = self.tabs[i].scene.interaction_block_handle();
                 let doc_ref = &self.tabs[i].scene.document;
 
                 // 1. Read existing SortEntitiesTable overrides.
@@ -1180,7 +1180,7 @@ impl OpenCADStudio {
                     let relative_assignments = relative_above.and_then(|above| {
                         assign_relative_group_keys(
                             &self.tabs[i].scene.document,
-                            self.tabs[i].scene.current_layout_block_handle_pub(),
+                            self.tabs[i].scene.interaction_block_handle(),
                             &selected,
                             &references,
                             above,
@@ -1194,7 +1194,7 @@ impl OpenCADStudio {
 
                     if relative_assignments.is_some() || to_front_opt.is_some() {
                         self.push_undo_snapshot(i, "DRAWORDER");
-                        let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
+                        let block_handle = self.tabs[i].scene.interaction_block_handle();
 
                         // For FRONT/BACK, anchor the new sort handle to the
                         // block's current effective draw-order range so the moved
@@ -2308,6 +2308,57 @@ mod tests {
                 None
             })
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn draworder_back_inside_a_viewport_reorders_model_space() {
+        // Inside a floating viewport (MSPACE) the selection is model space, so
+        // DRAWORDER must reorder the model's draw order. It used to write the
+        // layout's own table instead: the command reported the move and the
+        // viewport kept drawing the line on top.
+        let mut app = fresh_app();
+        let i = app.active_tab;
+        let h_under = app.tabs[i]
+            .scene
+            .add_entity_clone(EntityType::Line(Default::default()));
+        let h_moved = app.tabs[i]
+            .scene
+            .add_entity_clone(EntityType::Line(Default::default()));
+        let model = app.tabs[i].scene.model_space_block_handle();
+        app.tabs[i].scene.document.add_layout("Sheet").unwrap();
+        app.tabs[i].scene.set_current_layout("Sheet".into());
+        let mut viewport = codec::entities::Viewport::new();
+        viewport.id = 2;
+        viewport.turn_on();
+        let viewport = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Viewport(Box::new(viewport)));
+        app.tabs[i].scene.active_viewport = Some(viewport);
+
+        app.tabs[i]
+            .scene
+            .replace_selection(std::iter::once(h_moved).collect());
+        let _ = app.run_command_line("DRAWORDER BACK");
+
+        let order: rustc_hash::FxHashMap<u64, u64> = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|obj| match obj {
+                ObjectType::SortEntitiesTable(t) if t.block_owner_handle == model => Some(
+                    t.entries()
+                        .map(|e| (e.entity_handle.value(), e.sort_handle.value()))
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        let key = |h: codec::Handle| order.get(&h.value()).copied().unwrap_or(h.value());
+        assert!(
+            key(h_moved) < key(h_under),
+            "the moved line must sort behind the other model line: {order:?}"
+        );
     }
 
     // Regression guard for DRAWORDER BACK anchoring. Written while auditing

@@ -87,6 +87,7 @@ mod qselect_tests;
 mod recent;
 mod record_api;
 pub(crate) mod settings;
+pub(crate) mod tool_windows;
 mod shortcuts;
 mod startup;
 pub(crate) mod style_ops;
@@ -1351,6 +1352,8 @@ pub(super) struct OpenCADStudio {
     pub(crate) show_layers: bool,
     /// Whether the Graphic Attributes palette is shown (GRAPHICATTRIBUTES).
     show_graphic_attributes: bool,
+    /// The Command History pallet is open.
+    pub(crate) show_command_history: bool,
     graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
@@ -1405,6 +1408,17 @@ pub(super) struct OpenCADStudio {
     pub(crate) dock_edge_menu: Option<crate::app::config::DockSide>,
     /// Floating pallet whose title-bar right-click menu is open.
     pub(crate) dock_float_menu: Option<crate::ui::dock::PanelId>,
+    /// Open tool dialogs, back to front (see `tool_windows`).
+    pub(crate) tool_windows: Vec<tool_windows::ToolWindow>,
+    /// The tool swapped in as the active modal for the update running now.
+    pub(crate) tool_focus: Option<ModalKind>,
+    /// The tool dialog the keyboard goes to, as it went to a modal one.
+    pub(crate) keyboard_tool: Option<ModalKind>,
+    /// A tool dialog's frame being moved or resized.
+    pub(crate) tool_drag: Option<tool_windows::ToolDrag>,
+    /// Desktop: the windows of their own (tool dialogs and pallets).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) os_windows: Vec<tool_windows::OsWindow>,
     /// Pointer position over a floating title bar (bar-local), and where
     /// its open menu was asked for.
     pub(crate) dock_float_pointer: iced::Point,
@@ -5208,6 +5222,31 @@ pub enum Message {
     OsWindowClosed(window::Id),
     /// No-op — used as a fallback when a TabEvent has no host mapping.
     Noop,
+    /// A message from an open tool dialog's frame or window: it runs with
+    /// that tool as the active modal (see `tool_windows`).
+    ToolWindow(ModalKind, Box<Message>),
+    /// What a task a tool dialog's message started answers with: it runs
+    /// with that tool swapped in again while the tool is open.
+    ToolWindowTask(ModalKind, Box<Message>),
+    /// A tool dialog's title bar was pressed: start moving it.
+    ToolWindowGrab(ModalKind),
+    /// A tool dialog's resize grip was pressed.
+    ToolWindowResizeGrab(ModalKind),
+    ToolWindowDragMove(iced::Point),
+    ToolWindowDragRelease,
+    /// A press on a tool dialog's frame: bring it to the front.
+    ToolWindowRaise(ModalKind),
+    /// Desktop: a window of its own's "back to the main window" button.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    OsWindowReturn(window::Id),
+    /// Desktop: Esc or Enter in a window of its own, by shortcut name.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    OsWindowKey(window::Id, String),
+    /// Desktop: a window other than the main one was resized or moved.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    OsWindowResized(window::Id, f32, f32),
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    OsWindowMoved(window::Id, iced::Point),
     /// Suppress menu-root tooltips between clicking the root and leaving it.
     StatusMenuTooltipHidden(bool),
     /// GitHub releases API returned a result. `Some(version)` means a
@@ -6040,6 +6079,7 @@ impl OpenCADStudio {
             show_properties: true,
             show_layers: false,
             show_graphic_attributes: false,
+            show_command_history: false,
             graphic_attributes: Default::default(),
             show_block_palette: false,
             show_authoring_palettes: false,
@@ -6063,6 +6103,12 @@ impl OpenCADStudio {
             dock_hover_pending: None,
             dock_hover_gen: 0,
             dock_float_menu: None,
+            tool_windows: Vec::new(),
+            tool_focus: None,
+            keyboard_tool: None,
+            tool_drag: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            os_windows: Vec::new(),
             dock_float_pointer: iced::Point::ORIGIN,
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,
@@ -6575,6 +6621,7 @@ impl OpenCADStudio {
         });
         let mut s = state;
         s.main_window = Some(id);
+        tool_windows::set_main_window(id);
         let open_main = open_task.map(|_| Message::Noop);
         let check_update = Task::perform(
             crate::io::update_check::check_for_update(),
@@ -6812,7 +6859,7 @@ pub fn run() -> iced::Result {
     crate::sys::startup_times::mark("run: ui_font applied");
     iced::daemon(
         OpenCADStudio::boot,
-        OpenCADStudio::update,
+        OpenCADStudio::update_root,
         OpenCADStudio::view,
     )
     .settings(iced::Settings {
@@ -6822,7 +6869,10 @@ pub fn run() -> iced::Result {
     .subscription(OpenCADStudio::subscription)
     .scale_factor(|state: &OpenCADStudio, _| f32::from(state.ui_scale_percent) / 100.0)
     .title(|state: &OpenCADStudio, window_id: window::Id| {
-        let _ = window_id; // all dialogs are in-canvas modals now
+        // A tool dialog or pallet in a window of its own carries its name.
+        if let Some(title) = state.os_window_title(window_id) {
+            return title;
+        }
         if let Some(tab) = state.tabs.get(state.active_tab) {
             let dot = if tab.dirty { "● " } else { "" };
             let name = tab.tab_display_name();
@@ -6874,7 +6924,7 @@ pub fn run_web() -> iced::Result {
     });
     iced::application(
         OpenCADStudio::boot_web,
-        OpenCADStudio::update,
+        OpenCADStudio::update_root,
         OpenCADStudio::view_main,
     )
     .subscription(OpenCADStudio::subscription)

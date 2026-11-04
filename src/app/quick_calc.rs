@@ -145,6 +145,7 @@ impl OpenCADStudio {
         if self.dock_panel_visible(PanelId::QuickCalc) {
             return self.on_dock(crate::ui::dock::DockMsg::Close(PanelId::QuickCalc));
         }
+        self.pallet_as_window(PanelId::QuickCalc);
         self.quick_calc.show = true;
         self.dock_open_at_default(PanelId::QuickCalc);
         self.save_config();

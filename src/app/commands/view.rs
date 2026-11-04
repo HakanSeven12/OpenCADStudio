@@ -252,7 +252,7 @@ impl OpenCADStudio {
                         self.dock_set_open(crate::ui::dock::PanelId::ParametersManager, false),
                     );
                 }
-                if self.active_modal == Some(crate::app::ModalKind::NamedParameters) {
+                if self.focus_dialog(crate::app::ModalKind::NamedParameters) {
                     self.active_modal = None;
                     self.named_parameter_editor_rows.clear();
                     self.reset_modal_geometry();

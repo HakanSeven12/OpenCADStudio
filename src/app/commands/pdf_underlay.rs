@@ -443,6 +443,7 @@ impl OpenCADStudio {
             // References and opens expanded.
             "POINTCLOUDMANAGER" => {
                 let id = crate::ui::dock::PanelId::PointCloudManager;
+                self.pallet_as_window(id);
                 self.pc_manager.show = true;
                 self.dock_open_at_default(id);
             }

@@ -618,6 +618,7 @@ impl OpenCADStudio {
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
             "selection_revision":self.control.selection_revision,
             "command":command,"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
+            "tool_windows":self.tool_windows.iter().map(|t|format!("{:?}",t.kind)).collect::<Vec<_>>(),
             "layout":tab.scene.current_layout,
             "block_editor":tab.active_block_edit
                 .and_then(|index| tab.block_edits.get(index))
@@ -641,7 +642,7 @@ impl OpenCADStudio {
         // may be reading it; clients close it with `close_modal`.
         if !self.control.automation_seen && self.control.enabled {
             self.control.automation_seen = true;
-            if self.active_modal != Some(super::ModalKind::DonationPrompt) {
+            if !self.dialog_open(super::ModalKind::DonationPrompt) {
                 self.pending_startup_modals
                     .retain(|kind| kind != &super::ModalKind::DonationPrompt);
             }
@@ -1055,7 +1056,7 @@ impl OpenCADStudio {
         // form covers the whole app, so any client may answer it, as any client
         // may answer the dialogs the same guard has always let through.
         let answers_attribute_form = op == "action"
-            && self.active_modal == Some(crate::app::ModalKind::InsertAttributes)
+            && self.dialog_open(crate::app::ModalKind::InsertAttributes)
             && matches!(
                 req["name"].as_str(),
                 Some("dialog_answer") | Some("dialog_ok") | Some("dialog_cancel") | Some("close_modal")
@@ -2104,7 +2105,25 @@ impl OpenCADStudio {
         {
             self.control.capture_frame_pending = false;
             self.control.capture_after_redraw = redrew;
-            let Some(window) = self.main_window else {
+            // `os_window` names a window of its own (by title, or by what it
+            // shows, e.g. "Options" or "CommandHistory") to capture instead.
+            let named = self
+                .control
+                .pending
+                .as_ref()
+                .and_then(|pending| pending.request["os_window"].as_str())
+                .and_then(|name| {
+                    self.os_windows
+                        .iter()
+                        .find(|window| {
+                            format!("{:?}", window.content).contains(name)
+                                || self
+                                    .os_window_title(window.id)
+                                    .is_some_and(|title| title.contains(name))
+                        })
+                        .map(|window| window.id)
+                });
+            let Some(window) = named.or(self.main_window) else {
                 return Task::done(Message::ControlScreenshot(path, None));
             };
             // A minimized window reports a failed capture instead.

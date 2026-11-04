@@ -32,6 +32,8 @@ pub struct AppConfig {
     pub dock: crate::ui::dock::DockState,
     /// Whether the optional Graphic Attributes palette is visible.
     pub show_graphic_attributes: bool,
+    /// Whether the Command History pallet is open.
+    pub show_command_history: bool,
     /// Graphic Attributes creates fills on the current layer instead of the
     /// layer of the filled object.
     pub graphic_fills_on_current_layer: bool,
@@ -58,6 +60,7 @@ impl Default for AppConfig {
             statusbar: StatusBarConfig::default(),
             dock: crate::ui::dock::DockState::default(),
             show_graphic_attributes: false,
+            show_command_history: false,
             graphic_fills_on_current_layer: false,
             annotation_auto_scale: -4,
             ribbon: RibbonConfig::default(),

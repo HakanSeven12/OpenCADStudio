@@ -8540,3 +8540,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = ब्लॉक पैरामीटर का फ्रेम उपलब्ध नहीं है।
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

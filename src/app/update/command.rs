@@ -224,7 +224,7 @@ impl OpenCADStudio {
         self.table_popup = None;
         // The insertion attribute form parks a placement on the tab it belongs
         // to, so a closed tab has to take the form — and the placement — with it.
-        if self.active_modal == Some(crate::app::ModalKind::InsertAttributes) {
+        if self.focus_dialog(crate::app::ModalKind::InsertAttributes) {
             self.cancel_insert_attr_dialog();
             self.close_active_modal();
         }
@@ -269,6 +269,10 @@ impl OpenCADStudio {
         if let Some(closing_id) = closing_tab_id {
             crate::modules::draw::draw::attdef::session().forget_place_of(closing_id);
             crate::modules::annotate::text::forget_place_of(closing_id);
+        }
+        // Tool dialogs on the closing drawing go with it.
+        if idx == self.active_tab {
+            self.close_document_tools(None);
         }
         // Only-tab case: when the lone non-start tab closes, fall
         // back to the Start tab if it exists; otherwise spawn a
@@ -4985,7 +4989,7 @@ impl OpenCADStudio {
     /// the tab it belongs to closes or the active tab switches — its handle is
     /// document-local and must not outlive its tab.
     pub(in crate::app) fn cancel_attr_editor(&mut self) {
-        if self.active_modal == Some(crate::app::ModalKind::AttributeEditor) {
+        if self.focus_dialog(crate::app::ModalKind::AttributeEditor) {
             self.active_modal = None;
             self.reset_modal_geometry();
         }

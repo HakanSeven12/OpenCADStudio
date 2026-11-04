@@ -8550,3 +8550,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = Het kader van de blokparameter is niet beschikbaar.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

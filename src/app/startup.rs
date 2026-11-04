@@ -22,7 +22,19 @@ impl OpenCADStudio {
     }
 
     pub(super) fn show_next_startup_modal(&mut self) {
-        if self.active_modal.is_none() && self.opening.is_none() && self.pending_opens.is_empty() {
+        // One startup prompt at a time, also while the shown one sits open
+        // beside the drawing.
+        let showing = self.tool_windows.iter().any(|tool| {
+            matches!(
+                tool.kind,
+                ModalKind::AssocPrompt | ModalKind::DonationPrompt | ModalKind::GpuWarning
+            )
+        }) || self.pending_startup_modals.front().is_some_and(|kind| self.tool_open(*kind));
+        if self.active_modal.is_none()
+            && !showing
+            && self.opening.is_none()
+            && self.pending_opens.is_empty()
+        {
             // A queued AutosaveRestore can outlive its pending list when a
             // concurrent open displaces the modal and the entry is consumed
             // meanwhile; resurfacing it would show an empty prompt.
@@ -98,7 +110,7 @@ impl OpenCADStudio {
             GpuStatus::Unknown | GpuStatus::Hardware(_) => {}
         }
         // The popup: once per verdict, unless the user silenced this one.
-        let already_queued = self.active_modal == Some(ModalKind::GpuWarning)
+        let already_queued = self.dialog_open(ModalKind::GpuWarning)
             || self.pending_startup_modals.contains(&ModalKind::GpuWarning);
         if self.gpu_warning_silenced != identity && !already_queued {
             self.pending_startup_modals.push_back(ModalKind::GpuWarning);

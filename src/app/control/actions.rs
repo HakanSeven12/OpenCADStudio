@@ -1409,12 +1409,46 @@ impl OpenCADStudio {
         let name = string(req, "name")?;
         // Without a prompt there is no failed open to retry.
         if name == "recovery_accept"
-            && self.active_modal != Some(crate::app::ModalKind::RecoveryPrompt)
+            && !self.focus_dialog(crate::app::ModalKind::RecoveryPrompt)
         {
             return Ok(Task::none());
         }
+        // The buttons of "the open dialog" press the front-most one when no
+        // dialog is swapped in.
+        if matches!(
+            name,
+            "dialog_ok"
+                | "dialog_answer"
+                | "dialog_discard"
+                | "dialog_cancel"
+                | "pdf_dialog_ok"
+                | "pdf_layer_toggle"
+                | "table_cell_dialog"
+        ) && self.active_modal.is_none()
+        {
+            if let Some(kind) = self.tool_windows.last().map(|tool| tool.kind) {
+                self.enter_tool(kind);
+            }
+        }
+        match name {
+            "conversion_loss_save_anyway" | "conversion_loss_back" => {
+                self.focus_dialog(crate::app::ModalKind::ConversionLoss);
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            "external_change_reload"
+            | "external_change_overwrite"
+            | "external_change_save_as"
+            | "external_change_cancel" => {
+                self.focus_dialog(crate::app::ModalKind::ExternalChange);
+            }
+            _ => {}
+        }
         let msg = match name {
-            "close_modal" => Message::CloseModal,
+            // With no modal dialog up, the front-most open tool dialog.
+            "close_modal" => match (self.active_modal, self.tool_windows.last()) {
+                (None, Some(tool)) => Message::ToolWindow(tool.kind, Box::new(Message::CloseModal)),
+                _ => Message::CloseModal,
+            },
             // Type `value` into the command line and press Enter.
             "command_submit" => {
                 self.command_line.input = req["value"].as_str().unwrap_or("").to_string();
@@ -1773,7 +1807,7 @@ impl OpenCADStudio {
                 // "apply", "close".
                 let value = string(req, "value")?;
                 let (key, v) = value.split_once('=').unwrap_or((value, ""));
-                if key != "open" && self.active_modal != Some(crate::app::ModalKind::TableStyle) {
+                if key != "open" && !self.focus_dialog(crate::app::ModalKind::TableStyle) {
                     return Err(failure("no_dialog", "The Table Style dialog is not open"));
                 }
                 let cell = |field: &'static str| Message::TableStyleCellEdit {
@@ -1837,7 +1871,7 @@ impl OpenCADStudio {
             }
             "table_insert_dialog" => {
                 use crate::ui::window::annotation_data::{TableInsertField as F, TableInsertion};
-                if self.active_modal != Some(crate::app::ModalKind::InsertTable) {
+                if !self.focus_dialog(crate::app::ModalKind::InsertTable) {
                     return Err(failure("no_dialog", "The Insert Table dialog is not open"));
                 }
                 let value = string(req, "value")?;
@@ -1904,7 +1938,7 @@ impl OpenCADStudio {
                 let value = string(req, "value")?;
                 let (key, v) = value.split_once('=').unwrap_or((value, ""));
                 let on = v == "1";
-                let editing = self.active_modal == Some(crate::app::ModalKind::AttDefEdit);
+                let editing = self.focus_dialog(crate::app::ModalKind::AttDefEdit);
                 Message::AttdefDialog(match key {
                     "tag" if editing => M::EditTag(v.into()),
                     "prompt" if editing => M::EditPrompt(v.into()),
@@ -2389,7 +2423,7 @@ impl OpenCADStudio {
             // "help".
             "pdf_password_dialog" => {
                 use crate::ui::window::pdf_password_dialog::PdfPasswordMsg as P;
-                if self.active_modal != Some(crate::app::ModalKind::PdfPassword) {
+                if !self.focus_dialog(crate::app::ModalKind::PdfPassword) {
                     return Err(failure(
                         "no_dialog",
                         "The Password Protected PDF window is not open",
@@ -2427,7 +2461,7 @@ impl OpenCADStudio {
             // text … 7 punctuation) or "close".
             "spell_dialog" => {
                 use crate::ui::window::spell_dialog::{SpellMsg as S, SpellScope, SpellSetting};
-                if self.active_modal != Some(crate::app::ModalKind::Spell) {
+                if !self.focus_dialog(crate::app::ModalKind::Spell) {
                     return Err(failure("no_dialog", "The Check Spelling window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2557,7 +2591,7 @@ impl OpenCADStudio {
             // The invalid table cell data type warning: "ok" converts,
             // "cancel" leaves the cells as they were.
             "table_cell_warning" => {
-                if self.active_modal != Some(crate::app::ModalKind::TableCellWarning) {
+                if !self.focus_dialog(crate::app::ModalKind::TableCellWarning) {
                     return Err(failure("no_dialog", "The invalid data type warning is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2573,7 +2607,7 @@ impl OpenCADStudio {
             // changes the cell's type, "value" edits the value again,
             // "cancel" drops it.
             "table_cell_entry" => {
-                if self.active_modal != Some(crate::app::ModalKind::TableCellEntry) {
+                if !self.focus_dialog(crate::app::ModalKind::TableCellEntry) {
                     return Err(failure("no_dialog", "The cell value question is not open"));
                 }
                 use crate::ui::window::table_cell_dialog::TableCellDialogMsg as T;
@@ -2588,7 +2622,7 @@ impl OpenCADStudio {
             "dim_inspect_dialog" => {
                 use crate::entities::dim_inspect::Shape;
                 use crate::ui::window::dim_inspect_dialog::DimInspectMsg as D;
-                if self.active_modal != Some(crate::app::ModalKind::DimInspect) {
+                if !self.focus_dialog(crate::app::ModalKind::DimInspect) {
                     return Err(failure(
                         "no_dialog",
                         "The Inspection Dimension window is not open",
@@ -2633,7 +2667,7 @@ impl OpenCADStudio {
             // "browse", "ok", "remove" or "cancel".
             "hyperlink_dialog" => {
                 use crate::ui::window::hyperlink_dialog::HyperlinkMsg as H;
-                if self.active_modal != Some(crate::app::ModalKind::Hyperlink) {
+                if !self.focus_dialog(crate::app::ModalKind::Hyperlink) {
                     return Err(failure("no_dialog", "The Hyperlink window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2665,7 +2699,7 @@ impl OpenCADStudio {
             // "cancel".
             "refedit_dialog" => {
                 use crate::ui::window::refedit_dialog::RefEditDialogMsg as R;
-                if self.active_modal != Some(crate::app::ModalKind::RefEdit) {
+                if !self.focus_dialog(crate::app::ModalKind::RefEdit) {
                     return Err(failure(
                         "no_dialog",
                         "The Reference Edit dialog is not open",
@@ -2731,7 +2765,7 @@ impl OpenCADStudio {
             // "apply" or "cancel".
             "view_background" => {
                 use crate::ui::window::pdf_dialogs::{BgKind, BgPosition, PdfDialogMsg as P};
-                if self.active_modal != Some(crate::app::ModalKind::ViewBackground) {
+                if !self.focus_dialog(crate::app::ModalKind::ViewBackground) {
                     return Err(failure("no_dialog", "The Background dialog is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2815,7 +2849,7 @@ impl OpenCADStudio {
             // "rotation=0|90|180|270", "ok" or "cancel".
             "pdf_import_dialog" => {
                 use crate::ui::window::pdf_dialogs::{PdfDialogMsg as P, RotationChoice};
-                if self.active_modal != Some(crate::app::ModalKind::PdfImportFile) {
+                if !self.focus_dialog(crate::app::ModalKind::PdfImportFile) {
                     return Err(failure("no_dialog", "The Import PDF window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2843,7 +2877,7 @@ impl OpenCADStudio {
             // "recent=<n>", "ok" or "cancel".
             "import_file_dialog" => {
                 use crate::ui::window::import_dialogs::{ImportDialogMsg as I, FORMATS};
-                if self.active_modal != Some(crate::app::ModalKind::ImportFile) {
+                if !self.focus_dialog(crate::app::ModalKind::ImportFile) {
                     return Err(failure("no_dialog", "The Import File window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2880,7 +2914,7 @@ impl OpenCADStudio {
             // it), "ok" or "cancel".
             "tds_import_dialog" => {
                 use crate::ui::window::import_dialogs::ImportDialogMsg as I;
-                if self.active_modal != Some(crate::app::ModalKind::TdsImport) {
+                if !self.focus_dialog(crate::app::ModalKind::TdsImport) {
                     return Err(failure("no_dialog", "The 3D Studio Import window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2917,7 +2951,7 @@ impl OpenCADStudio {
             // choice too), "remember=on|off", "apply" or "cancel".
             "tds_material_dialog" => {
                 use crate::ui::window::import_dialogs::ImportDialogMsg as I;
-                if self.active_modal != Some(crate::app::ModalKind::TdsMaterial) {
+                if !self.focus_dialog(crate::app::ModalKind::TdsMaterial) {
                     return Err(failure("no_dialog", "The multiple-material window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -2962,7 +2996,7 @@ impl OpenCADStudio {
                 use crate::ui::window::annotation_data::{
                     DataExtractionField as F, ExtractionBegin, ExtractionSource,
                 };
-                if self.active_modal != Some(crate::app::ModalKind::DataExtraction) {
+                if !self.focus_dialog(crate::app::ModalKind::DataExtraction) {
                     return Err(failure("no_dialog", "The Data Extraction wizard is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -3033,7 +3067,7 @@ impl OpenCADStudio {
             // "select=<link name>", "edit", "delete", "insert" or "close".
             "data_link_manager" => {
                 use crate::ui::window::annotation_data::{DataLinkField as F, LinkRange};
-                if self.active_modal != Some(crate::app::ModalKind::DataLinkManager) {
+                if !self.focus_dialog(crate::app::ModalKind::DataLinkManager) {
                     return Err(failure("no_dialog", "The Data Link Manager is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -3084,7 +3118,7 @@ impl OpenCADStudio {
             // "skip", "skip_all" or "close".
             "extraction_outdated" => {
                 use crate::ui::window::extraction_outdated::OutdatedChoice as C;
-                if self.active_modal != Some(crate::app::ModalKind::ExtractionOutdated) {
+                if !self.focus_dialog(crate::app::ModalKind::ExtractionOutdated) {
                     return Err(failure(
                         "no_dialog",
                         "The outdated extraction table window is not open",
@@ -3105,7 +3139,7 @@ impl OpenCADStudio {
             // outputs run the DXEVAL publish check first.
             "print_all" => {
                 let spec = string(req, "value")?;
-                let open = self.active_modal == Some(crate::app::ModalKind::PrintAll);
+                let open = self.focus_dialog(crate::app::ModalKind::PrintAll);
                 match spec.split_once('=') {
                     _ if spec == "open" => Message::PrintAllOpen,
                     _ if !open => {
@@ -3120,7 +3154,7 @@ impl OpenCADStudio {
                 }
             }
             "tds_map_dialog" => {
-                if self.active_modal != Some(crate::app::ModalKind::TdsMissingMap) {
+                if !self.focus_dialog(crate::app::ModalKind::TdsMissingMap) {
                     return Err(failure("no_dialog", "The missing texture map window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -3136,7 +3170,7 @@ impl OpenCADStudio {
             // "mapping=layer|linetype|lineweight|color", "ok" or "cancel".
             "dgn_import_dialog" => {
                 use crate::ui::window::import_dialogs::ImportDialogMsg as I;
-                if self.active_modal != Some(crate::app::ModalKind::DgnImport) {
+                if !self.focus_dialog(crate::app::ModalKind::DgnImport) {
                     return Err(failure("no_dialog", "The DGN Import window is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -3197,7 +3231,7 @@ impl OpenCADStudio {
             // the box), "step=brightness,+1|-1", "reset", "apply" or "cancel".
             "image_adjust" => {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg as P;
-                if self.active_modal != Some(crate::app::ModalKind::ImageAdjust) {
+                if !self.focus_dialog(crate::app::ModalKind::ImageAdjust) {
                     return Err(failure("no_dialog", "The Image Adjust dialog is not open"));
                 }
                 let spec = string(req, "value")?;
@@ -3239,7 +3273,7 @@ impl OpenCADStudio {
             // "cancel".
             "txt2mtxt_settings" => {
                 use crate::ui::window::pdf_dialogs::PdfDialogMsg as M;
-                if self.active_modal != Some(crate::app::ModalKind::Txt2MtxtSettings) {
+                if !self.focus_dialog(crate::app::ModalKind::Txt2MtxtSettings) {
                     return Err(failure("no_dialog", "Text to MText Settings is not open"));
                 }
                 let value = string(req, "value")?;
@@ -3263,7 +3297,7 @@ impl OpenCADStudio {
             // "defaults", "apply" or "cancel" (rows count from 0).
             "pdf_shx_settings" => {
                 use crate::ui::window::pdf_shx_dialog::ShxDialogMsg as S;
-                if self.active_modal != Some(crate::app::ModalKind::PdfShxSettings) {
+                if !self.focus_dialog(crate::app::ModalKind::PdfShxSettings) {
                     return Err(failure(
                         "no_dialog",
                         "The PDF Text Recognition Settings dialog is not open",
@@ -3398,7 +3432,7 @@ impl OpenCADStudio {
             }
             // The attribute form's Cancel is the plain decline of the parked
             // placement, so it is the modal closing itself.
-            "dialog_cancel" if self.active_modal == Some(crate::app::ModalKind::InsertAttributes) => {
+            "dialog_cancel" if self.focus_dialog(crate::app::ModalKind::InsertAttributes) => {
                 Message::CloseModal
             }
             "dialog_discard" | "dialog_cancel" => match self.active_modal {

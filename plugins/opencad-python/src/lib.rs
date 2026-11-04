@@ -13,6 +13,7 @@ mod host_ctx;
 #[cfg(feature = "experimental-host-model")]
 mod input_cache;
 mod ocs_module;
+mod quad_scripts;
 mod selection_cache;
 
 use ocs_plugin_api::host::{BuiltinPlugin, HostApi, HostNotification};
@@ -108,6 +109,37 @@ impl BuiltinPlugin for PythonPlugin {
     /// *before* any `Dispatch` request reaches `dispatch()` — calling it from
     /// there always sees an empty queue. This callback is the only place a
     /// V4+ plugin actually observes notifications; see `selection_cache.rs`.
+    /// A Python quad item was picked: run the code it registered with, with
+    /// `handles` (ints), `type_keys` (strings) and `pick_point` ([x, y, z])
+    /// bound, as a `PY_RUN` script runs.
+    fn on_quad_action(
+        &mut self,
+        host: &mut dyn HostApi,
+        panel_id: &str,
+        control_id: &str,
+        handles: &[ocs_plugin_api::host::Handle],
+        type_keys: &[&str],
+        pick_point: [f64; 3],
+    ) {
+        let Some(code) = quad_scripts::code(panel_id, control_id) else {
+            return;
+        };
+        let handles: Vec<u64> = handles.iter().map(|handle| handle.value()).collect();
+        let type_keys: Vec<String> = type_keys.iter().map(|key| key.to_string()).collect();
+        run_code(host, "PY_QUAD", &format!("<quad {panel_id}.{control_id}>"), &code, |vm, scope| {
+            let handles = vm.ctx.new_list(handles.iter().map(|h| vm.new_pyobj(*h)).collect());
+            let keys = vm.ctx.new_list(type_keys.iter().map(|k| vm.new_pyobj(k.clone())).collect());
+            let point = vm.ctx.new_list(pick_point.iter().map(|v| vm.new_pyobj(*v)).collect());
+            for (name, value) in [("handles", handles), ("type_keys", keys), ("pick_point", point)] {
+                scope
+                    .globals
+                    .set_item(name, value.into(), vm)
+                    .map_err(|exc| exception_to_string(vm, &exc))?;
+            }
+            Ok(())
+        });
+    }
+
     fn on_notification(&mut self, _command_id: Option<u64>, notification: HostNotification) {
         #[cfg(feature = "experimental-host-model")]
         event_cache::observe(&notification);
@@ -190,7 +222,22 @@ fn run_file(host: &mut dyn HostApi, path: &str) {
         }
     };
 
-    let guard = host_ctx::HostGuard::set(host, "PY_RUN");
+    if run_code(host, "PY_RUN", path, &source, |_, _| Ok(())) {
+        host.push_output(&format!("PY_RUN: {path} completed"));
+    }
+}
+
+/// Run `source` as a `PY_` script named `name` in a fresh interpreter with
+/// `ocs` imported, after `bind` adds its own globals; print what it printed
+/// or the error. Returns whether it ran to the end.
+fn run_code(
+    host: &mut dyn HostApi,
+    command: &'static str,
+    name: &str,
+    source: &str,
+    bind: impl FnOnce(&rustpython_vm::VirtualMachine, &rustpython_vm::scope::Scope) -> Result<(), String>,
+) -> bool {
+    let guard = host_ctx::HostGuard::set(host, command);
 
     let builder = rustpython_vm::Interpreter::builder(Default::default());
     let ocs_def = ocs_module::module_def(&builder.ctx);
@@ -208,12 +255,9 @@ fn run_file(host: &mut dyn HostApi, path: &str) {
             .map_err(|exc| exception_to_string(vm, &exc))?;
         #[cfg(feature = "experimental-host-model")]
         install_document_model(vm, &scope)?;
+        bind(vm, &scope)?;
         let code_obj = vm
-            .compile(
-                &source,
-                rustpython_vm::compiler::Mode::Exec,
-                path.to_string(),
-            )
+            .compile(source, rustpython_vm::compiler::Mode::Exec, name.to_string())
             .map_err(|err| err.to_string())?;
         vm.run_code_obj(code_obj, scope)
             .map_err(|exc| exception_to_string(vm, &exc))?;
@@ -227,9 +271,12 @@ fn run_file(host: &mut dyn HostApi, path: &str) {
             if !printed.is_empty() {
                 host.push_output(&printed);
             }
-            host.push_output(&format!("PY_RUN: {path} completed"));
+            true
         }
-        Err(err) => host.push_error(&err),
+        Err(err) => {
+            host.push_error(&err);
+            false
+        }
     }
 }
 

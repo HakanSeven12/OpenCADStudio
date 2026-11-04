@@ -183,6 +183,15 @@ impl OpenCADStudio {
             //   spaces inside the expression don't end the input.
             // QUICKCALC / QC show or hide the QuickCalc pallet.
             "QUICKCALC" | "QC" => return Some(self.toggle_quick_calc()),
+            // COMMANDHISTORY shows or hides the Command History pallet.
+            "COMMANDHISTORY" => {
+                let id = crate::ui::dock::PanelId::CommandHistory;
+                let open = !self.dock_panel_wanted(id);
+                if open {
+                    self.pallet_as_window(id);
+                }
+                return Some(self.dock_set_open(id, open));
+            }
             "CAL" => {
                 use crate::command::FreeTextValuePromptCommand;
                 let c = FreeTextValuePromptCommand::new("CAL", "CAL  expression  (e.g. (2+3)*4):");

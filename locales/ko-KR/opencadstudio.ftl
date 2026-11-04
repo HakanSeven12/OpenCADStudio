@@ -8541,3 +8541,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = 블록 매개변수 프레임을 사용할 수 없습니다.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

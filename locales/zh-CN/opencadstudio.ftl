@@ -8525,3 +8525,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = 块参数坐标框不可用。
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

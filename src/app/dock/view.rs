@@ -549,6 +549,9 @@ impl OpenCADStudio {
             }
             crate::ui::dock::PanelId::Laywalk => self.layer_walk_view(tab, width, chrome),
             crate::ui::dock::PanelId::QuickCalc => self.quick_calc_view(tab, width, chrome),
+            crate::ui::dock::PanelId::CommandHistory => {
+                self.command_line.history_panel(&self.history_content, width, chrome)
+            }
             crate::ui::dock::PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
                     if let Some(state) = self.plugin_panels.get(panel_id) {
@@ -730,6 +733,17 @@ impl OpenCADStudio {
         ]
         .spacing(1)
         .padding(4);
+        // Desktop: the pallet can leave the main window, onto another monitor.
+        #[cfg(not(target_arch = "wasm32"))]
+        let menu = menu.push(item(
+            row![
+                text(t!("Open in its own window")).size(12).width(Fill),
+                crate::ui::icons::themed(crate::ui::icons::DETACH, 12.0),
+            ]
+            .align_y(iced::Center)
+            .into(),
+            DockMsg::Detach(id),
+        ));
         Some(place_at(menu_frame(menu.into()), menu_x, menu_y))
     }
 
@@ -1153,7 +1167,7 @@ fn dock_divider(id: crate::ui::dock::PanelId) -> Element<'static, Message> {
 /// Width of the icon strip's pallet menu.
 const DOCK_MENU_W: f32 = 230.0;
 /// Rough height of a floating title bar's menu, to keep it on screen.
-const FLOAT_MENU_H: f32 = 110.0;
+const FLOAT_MENU_H: f32 = 140.0;
 
 /// The pallet menu of an edge's + button, styled like the right-click menu:
 /// one row per pallet with its icon, its name and a check mark when it is

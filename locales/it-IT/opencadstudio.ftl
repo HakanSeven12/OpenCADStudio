@@ -8551,3 +8551,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = Il riferimento del parametro del blocco non è disponibile.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

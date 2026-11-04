@@ -8549,3 +8549,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = Khung tham số khối không khả dụng.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

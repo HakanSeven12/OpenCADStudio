@@ -904,7 +904,7 @@ impl OpenCADStudio {
     pub(super) fn cancel_block_edit_close(&mut self) {
         self.pending_block_close = None;
         self.pending_tab_closes.clear();
-        if self.active_modal == Some(ModalKind::BlockEditChanges) {
+        if self.focus_dialog(ModalKind::BlockEditChanges) {
             self.active_modal = None;
         }
     }

@@ -8530,3 +8530,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = A blokkparaméter kerete nem érhető el.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

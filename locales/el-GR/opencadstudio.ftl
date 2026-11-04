@@ -8552,3 +8552,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = Το πλαίσιο της παραμέτρου του μπλοκ δεν είναι διαθέσιμο.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

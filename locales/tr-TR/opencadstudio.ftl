@@ -8471,3 +8471,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = Blok parametresi çerçevesi kullanılamıyor.
+
+tool-windows =
+    .detach = Kendi penceresinde aç
+    .back = Ana pencereye geri al
+    .command-history = Komut Geçmişi

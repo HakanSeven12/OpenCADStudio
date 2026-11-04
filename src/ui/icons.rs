@@ -74,6 +74,10 @@ pub static COPY: &[u8] = include_bytes!("../../assets/icons/ui/copy.svg");
 pub static MENU: &[u8] = include_bytes!("../../assets/icons/ui/menu.svg");
 pub static MOVE: &[u8] = include_bytes!("../../assets/icons/ui/move.svg");
 pub static RESIZE: &[u8] = include_bytes!("../../assets/icons/ui/resize.svg");
+/// Move a dialog or pallet into a window of its own.
+pub static DETACH: &[u8] = include_bytes!("../../assets/icons/ui/window_detach.svg");
+/// Bring a window of its own back into the main window.
+pub static DOCK_BACK: &[u8] = include_bytes!("../../assets/icons/ui/window_dock_back.svg");
 pub static PIN: &[u8] = include_bytes!("../../assets/icons/ui/pin.svg");
 /// `PIN` tilted 30°: the pin while auto-hide is on.
 pub static PIN_ACTIVE: &[u8] = include_bytes!("../../assets/icons/ui/pin_active.svg");

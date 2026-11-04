@@ -8549,3 +8549,8 @@ quad-menu =
 
 block-flip-frame-feedback =
     .unavailable = Lohkoparametrin kehys ei ole käytettävissä.
+
+tool-windows =
+    .detach = Open in its own window
+    .back = Back to the main window
+    .command-history = Command History

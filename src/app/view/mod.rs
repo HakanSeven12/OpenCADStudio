@@ -351,6 +351,249 @@ fn viewcube_has_room(bar_w: f32, tile_w: f32) -> bool {
     bar_w + VIEWCUBE_GAP + VIEWCUBE_REGION_PX + VIEWCUBE_PAD <= tile_w
 }
 
+/// The app-wide input events: keys for the command line and shortcuts,
+/// pointer presses, window changes. Split out of `subscription` so tests
+/// can feed it real events.
+pub(crate) fn main_window_event(
+    ev: iced::Event,
+    status: iced::event::Status,
+    win_id: window::Id,
+) -> Option<Message> {
+    use iced::event::Status;
+    match ev {
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_))
+            if crate::ui::ribbon::keytips_active() =>
+        {
+            crate::ui::ribbon::keytip_pointer_pressed();
+            Some(Message::KeyTip(crate::ui::ribbon::KeyTipInput::Hide))
+        }
+        iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Left,
+        )) => {
+            crate::ui::ribbon::keytip_pointer_pressed();
+            Some(Message::PropPointerPressed)
+        }
+        iced::Event::Mouse(
+            iced::mouse::Event::ButtonPressed(_)
+            | iced::mouse::Event::ButtonReleased(_)
+            | iced::mouse::Event::WheelScrolled { .. },
+        ) => {
+            crate::ui::ribbon::keytip_pointer_pressed();
+            None
+        }
+        iced::Event::Window(window::Event::CloseRequested) => {
+            Some(Message::WindowCloseRequested(win_id))
+        }
+        iced::Event::Window(window::Event::Closed) => {
+            Some(Message::OsWindowClosed(win_id))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Window(window::Event::Resized(sz))
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            Some(Message::OsWindowResized(win_id, sz.width, sz.height))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Window(window::Event::Moved(at))
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            Some(Message::OsWindowMoved(win_id, at))
+        }
+        // Keys typed in a window of its own stay with its widgets; only Esc
+        // and an unclaimed Enter reach its dialog.
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            let name = match key {
+                keyboard::Key::Named(keyboard::key::Named::Escape) => "ESCAPE",
+                keyboard::Key::Named(keyboard::key::Named::Enter) if status == Status::Ignored => {
+                    "ENTER"
+                }
+                _ => return None,
+            };
+            Some(Message::OsWindowKey(win_id, name.to_string()))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Keyboard(keyboard::Event::KeyReleased { .. })
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            None
+        }
+        iced::Event::Window(window::Event::Resized(sz)) => {
+            Some(Message::WindowResized(sz.width as f32, sz.height as f32))
+        }
+        // The ribbon's arrows sit on whole physical pixels.
+        iced::Event::Window(window::Event::Opened {
+            scale_factor, size, ..
+        }) => {
+            crate::ui::icons::set_scale_factor(scale_factor);
+            Some(Message::WindowOpened(win_id, size.width, size.height))
+        }
+        iced::Event::Window(window::Event::Rescaled(scale_factor)) => {
+            crate::ui::icons::set_scale_factor(scale_factor);
+            None
+        }
+        iced::Event::Window(window::Event::FileDropped(path)) => {
+            Some(Message::FileDropped(path))
+        }
+        iced::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
+            crate::ui::ribbon::keytip_key_released(&key)
+        }
+        iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
+            // `command()` is Cmd on macOS, Ctrl elsewhere — the
+            // platform multi-select modifier for the layer list.
+            Some(Message::SetModifiers {
+                shift: m.shift(),
+                ctrl: m.command() || m.control(),
+                alt: m.alt(),
+            })
+        }
+        iced::Event::Keyboard(keyboard::Event::KeyPressed {
+            key,
+            physical_key,
+            modifiers,
+            text,
+            repeat,
+            ..
+        }) => {
+            if let Some(keytip) =
+                crate::ui::ribbon::keytip_key_pressed(&key, modifiers, repeat)
+            {
+                return keytip;
+            }
+            #[cfg(target_arch = "wasm32")]
+            let accel = modifiers.command();
+            // AltGr reaches Windows apps as Ctrl+Alt, and a macOS
+            // layout types some characters with Option: when such a
+            // chord produces a printable glyph (`@`, `<`, `{` on many
+            // European layouts) it is typing, not a shortcut. (#1236)
+            let types_glyph = text.as_deref().is_some_and(|value| {
+                !value.is_empty()
+                    && value
+                        .chars()
+                        .all(|ch| !ch.is_control() && !ch.is_whitespace())
+            });
+            let altgr = modifiers.control() && modifiers.alt();
+            let mac_option = cfg!(target_os = "macos")
+                && modifiers.alt()
+                && !modifiers.control()
+                && !modifiers.logo();
+            let shortcut_modifier =
+                (modifiers.control() || modifiers.alt() || modifiers.logo())
+                    && !(types_glyph && (altgr || mac_option));
+            // Any key that produces a printable glyph types it,
+            // even when its logical key resolves to navigation
+            // (NumLock-on Numpad8 / Numpad2 arrive as
+            // ArrowUp / ArrowDown but still carry text "8" /
+            // "2"). Checked before the Arrow / history arms so
+            // those numpad digits aren't swallowed as history
+            // navigation. Whitespace / control text (Space,
+            // Enter, Tab) falls through to the named handlers.
+            // The numpad decimal key emits the OS-layout separator
+            // (a comma on German/European layouts), which the
+            // coordinate parser rejects. Force it to a decimal point
+            // from the physical key, independent of layout.
+            if !shortcut_modifier
+                && status == Status::Ignored
+                && matches!(
+                    physical_key,
+                    keyboard::key::Physical::Code(
+                        keyboard::key::Code::NumpadDecimal
+                            | keyboard::key::Code::NumpadComma
+                    )
+                )
+            {
+                return Some(Message::CommandAppendChar(".".to_string()));
+            }
+            if !shortcut_modifier && status == Status::Ignored {
+                if let Some(t) = text.as_deref() {
+                    if !t.is_empty()
+                        && t.chars().all(|c| !c.is_control() && !c.is_whitespace())
+                    {
+                        return Some(Message::CommandAppendChar(t.to_string()));
+                    }
+                }
+            }
+            let has_printable_text = text.as_deref().is_some_and(|value| {
+                !value.is_empty()
+                    && value
+                        .chars()
+                        .all(|ch| !ch.is_control() && !ch.is_whitespace())
+            });
+            let arrow = match &key {
+                keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                    Some(ArrowKey::Up)
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                    Some(ArrowKey::Down)
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
+                    Some(ArrowKey::Left)
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowRight) => {
+                    Some(ArrowKey::Right)
+                }
+                _ => None,
+            };
+            if !has_printable_text && status == Status::Ignored {
+                if let Some(direction) = arrow {
+                    return Some(Message::ArrowKeyPressed {
+                        direction,
+                        shortcut: shortcut_key_name(&key, modifiers)?,
+                        extend_selection: modifiers.shift(),
+                    });
+                }
+            }
+            if !has_printable_text
+                && status == Status::Captured
+                && matches!(arrow, Some(ArrowKey::Up | ArrowKey::Down))
+                && !crate::ui::dropdown_list::take_dropdown_arrow_captured()
+            {
+                return Some(Message::CommandLineArrowProbe {
+                    direction: arrow?,
+                    extend_selection: modifiers.shift(),
+                });
+            }
+            // A focused web text field needs the browser clipboard;
+            // drawing shortcuts only run for ignored C/V events.
+            #[cfg(target_arch = "wasm32")]
+            if accel && status == Status::Captured {
+                if let keyboard::Key::Character(value) = &key {
+                    if value.eq_ignore_ascii_case("v") {
+                        return Some(Message::WebFieldPaste);
+                    }
+                    if value.eq_ignore_ascii_case("c") {
+                        return Some(Message::WebFieldCopy);
+                    }
+                }
+            }
+            let shortcut = shortcut_key_name(&key, modifiers)?;
+            if shortcut == "ESCAPE"
+                && status == Status::Captured
+                && crate::ui::dropdown_list::take_dropdown_escape_captured()
+            {
+                return None;
+            }
+            if status == Status::Ignored
+                || crate::app::shortcuts::is_global_key(&shortcut)
+            {
+                return Some(Message::ShortcutPressed(shortcut));
+            }
+            // A text field captured the key. SPACE rebound away from
+            // COMMANDSPACE still fires from the command line, but
+            // only there: other fields keep typing spaces. This
+            // closure is a plain fn, so the binding is read from a
+            // flag and the focus is asked for in update. (#1710)
+            (shortcut == "SPACE"
+                && crate::app::shortcuts::SPACE_REBOUND_OFF_COMMANDSPACE
+                    .load(std::sync::atomic::Ordering::Relaxed))
+            .then_some(Message::CommandLineSpaceProbe)
+        }
+        _ => None,
+    }
+}
+
 fn hatch_pattern_key_event(
     event: iced::Event,
     status: iced::event::Status,
@@ -481,10 +724,14 @@ impl OpenCADStudio {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn view(&self, window_id: window::Id) -> Element<'_, Message> {
         crate::sys::startup_times::view_tick();
-        // ── Floating panel windows ─────────────────────────────────────────
-        // All dialogs are in-canvas modals now (Plan B); view_main stacks the
-        // active one. `window_id` is unused — there is only the main window.
-        let _ = window_id;
+        // ── Windows of their own ──────────────────────────────────────────
+        // A tool dialog or dock pallet moved out of the main window draws
+        // its content there; every other window is the main one.
+        if Some(window_id) != self.main_window {
+            if let Some(element) = self.os_window_view(window_id) {
+                return element;
+            }
+        }
         // Pan latency on a large drawing is ~120 ms while `update`, `prepare`
         // and `encode` together account for ~1 ms of it, the GPU sits at 0-8%,
         // and encoding no scene at all changes nothing. Widget-tree
@@ -3246,10 +3493,19 @@ bg={bg_ms:.1}ms n={view_count}"
             composed.into()
         };
 
+        // Open tool dialogs float over the drawing without blocking it; a
+        // modal dialog below then covers them too.
+        let modal_underlay = self.with_tool_windows(modal_underlay);
+
         // ── In-canvas modal dialogs (Plan B) ───────────────────────────────
         // Former pop-up windows render as overlays here, so they work on both
         // the native (single main window) and web builds.
-        let base: Element<'_, Message> = match self.modal_content() {
+        // A dialog in a window of its own is drawn there, also while it is
+        // the active modal (the colour picker it opened holds it).
+        let in_own_window = self.active_modal.is_some_and(|kind| {
+            self.tool_windows.iter().any(|tool| tool.kind == kind && !tool.in_canvas())
+        });
+        let base: Element<'_, Message> = match self.modal_content().filter(|_| !in_own_window) {
             Some(content) => {
                 let modal_options = if cfg!(target_arch = "wasm32")
                     && matches!(self.active_modal, Some(super::ModalKind::PluginManager))
@@ -3302,6 +3558,9 @@ bg={bg_ms:.1}ms n={view_count}"
             // whole window can be sampled.
             if let Some(eyedropper) = picker.eyedropper_view() {
                 return iced::widget::stack![base, eyedropper].into();
+            }
+            if in_own_window {
+                return base;
             }
             crate::ui::modal::modal(
                 base,
@@ -3533,208 +3792,7 @@ impl OpenCADStudio {
         let keyboard_events = if self.shortcut_capture_row.is_some() {
             event::listen_with(shortcut_capture_key_event)
         } else {
-            event::listen_with(|ev, status, win_id| {
-                use iced::event::Status;
-                match ev {
-                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(_))
-                        if crate::ui::ribbon::keytips_active() =>
-                    {
-                        crate::ui::ribbon::keytip_pointer_pressed();
-                        Some(Message::KeyTip(crate::ui::ribbon::KeyTipInput::Hide))
-                    }
-                    iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
-                        iced::mouse::Button::Left,
-                    )) => {
-                        crate::ui::ribbon::keytip_pointer_pressed();
-                        Some(Message::PropPointerPressed)
-                    }
-                    iced::Event::Mouse(
-                        iced::mouse::Event::ButtonPressed(_)
-                        | iced::mouse::Event::ButtonReleased(_)
-                        | iced::mouse::Event::WheelScrolled { .. },
-                    ) => {
-                        crate::ui::ribbon::keytip_pointer_pressed();
-                        None
-                    }
-                    iced::Event::Window(window::Event::CloseRequested) => {
-                        Some(Message::WindowCloseRequested(win_id))
-                    }
-                    iced::Event::Window(window::Event::Closed) => {
-                        Some(Message::OsWindowClosed(win_id))
-                    }
-                    iced::Event::Window(window::Event::Resized(sz)) => {
-                        Some(Message::WindowResized(sz.width as f32, sz.height as f32))
-                    }
-                    // The ribbon's arrows sit on whole physical pixels.
-                    iced::Event::Window(window::Event::Opened {
-                        scale_factor, size, ..
-                    }) => {
-                        crate::ui::icons::set_scale_factor(scale_factor);
-                        Some(Message::WindowOpened(win_id, size.width, size.height))
-                    }
-                    iced::Event::Window(window::Event::Rescaled(scale_factor)) => {
-                        crate::ui::icons::set_scale_factor(scale_factor);
-                        None
-                    }
-                    iced::Event::Window(window::Event::FileDropped(path)) => {
-                        Some(Message::FileDropped(path))
-                    }
-                    iced::Event::Keyboard(keyboard::Event::KeyReleased { key, .. }) => {
-                        crate::ui::ribbon::keytip_key_released(&key)
-                    }
-                    iced::Event::Keyboard(keyboard::Event::ModifiersChanged(m)) => {
-                        // `command()` is Cmd on macOS, Ctrl elsewhere — the
-                        // platform multi-select modifier for the layer list.
-                        Some(Message::SetModifiers {
-                            shift: m.shift(),
-                            ctrl: m.command() || m.control(),
-                            alt: m.alt(),
-                        })
-                    }
-                    iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                        key,
-                        physical_key,
-                        modifiers,
-                        text,
-                        repeat,
-                        ..
-                    }) => {
-                        if let Some(keytip) =
-                            crate::ui::ribbon::keytip_key_pressed(&key, modifiers, repeat)
-                        {
-                            return keytip;
-                        }
-                        #[cfg(target_arch = "wasm32")]
-                        let accel = modifiers.command();
-                        // AltGr reaches Windows apps as Ctrl+Alt, and a macOS
-                        // layout types some characters with Option: when such a
-                        // chord produces a printable glyph (`@`, `<`, `{` on many
-                        // European layouts) it is typing, not a shortcut. (#1236)
-                        let types_glyph = text.as_deref().is_some_and(|value| {
-                            !value.is_empty()
-                                && value
-                                    .chars()
-                                    .all(|ch| !ch.is_control() && !ch.is_whitespace())
-                        });
-                        let altgr = modifiers.control() && modifiers.alt();
-                        let mac_option = cfg!(target_os = "macos")
-                            && modifiers.alt()
-                            && !modifiers.control()
-                            && !modifiers.logo();
-                        let shortcut_modifier =
-                            (modifiers.control() || modifiers.alt() || modifiers.logo())
-                                && !(types_glyph && (altgr || mac_option));
-                        // Any key that produces a printable glyph types it,
-                        // even when its logical key resolves to navigation
-                        // (NumLock-on Numpad8 / Numpad2 arrive as
-                        // ArrowUp / ArrowDown but still carry text "8" /
-                        // "2"). Checked before the Arrow / history arms so
-                        // those numpad digits aren't swallowed as history
-                        // navigation. Whitespace / control text (Space,
-                        // Enter, Tab) falls through to the named handlers.
-                        // The numpad decimal key emits the OS-layout separator
-                        // (a comma on German/European layouts), which the
-                        // coordinate parser rejects. Force it to a decimal point
-                        // from the physical key, independent of layout.
-                        if !shortcut_modifier
-                            && status == Status::Ignored
-                            && matches!(
-                                physical_key,
-                                keyboard::key::Physical::Code(
-                                    keyboard::key::Code::NumpadDecimal
-                                        | keyboard::key::Code::NumpadComma
-                                )
-                            )
-                        {
-                            return Some(Message::CommandAppendChar(".".to_string()));
-                        }
-                        if !shortcut_modifier && status == Status::Ignored {
-                            if let Some(t) = text.as_deref() {
-                                if !t.is_empty()
-                                    && t.chars().all(|c| !c.is_control() && !c.is_whitespace())
-                                {
-                                    return Some(Message::CommandAppendChar(t.to_string()));
-                                }
-                            }
-                        }
-                        let has_printable_text = text.as_deref().is_some_and(|value| {
-                            !value.is_empty()
-                                && value
-                                    .chars()
-                                    .all(|ch| !ch.is_control() && !ch.is_whitespace())
-                        });
-                        let arrow = match &key {
-                            keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
-                                Some(ArrowKey::Up)
-                            }
-                            keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
-                                Some(ArrowKey::Down)
-                            }
-                            keyboard::Key::Named(keyboard::key::Named::ArrowLeft) => {
-                                Some(ArrowKey::Left)
-                            }
-                            keyboard::Key::Named(keyboard::key::Named::ArrowRight) => {
-                                Some(ArrowKey::Right)
-                            }
-                            _ => None,
-                        };
-                        if !has_printable_text && status == Status::Ignored {
-                            if let Some(direction) = arrow {
-                                return Some(Message::ArrowKeyPressed {
-                                    direction,
-                                    shortcut: shortcut_key_name(&key, modifiers)?,
-                                    extend_selection: modifiers.shift(),
-                                });
-                            }
-                        }
-                        if !has_printable_text
-                            && status == Status::Captured
-                            && matches!(arrow, Some(ArrowKey::Up | ArrowKey::Down))
-                            && !crate::ui::dropdown_list::take_dropdown_arrow_captured()
-                        {
-                            return Some(Message::CommandLineArrowProbe {
-                                direction: arrow?,
-                                extend_selection: modifiers.shift(),
-                            });
-                        }
-                        // A focused web text field needs the browser clipboard;
-                        // drawing shortcuts only run for ignored C/V events.
-                        #[cfg(target_arch = "wasm32")]
-                        if accel && status == Status::Captured {
-                            if let keyboard::Key::Character(value) = &key {
-                                if value.eq_ignore_ascii_case("v") {
-                                    return Some(Message::WebFieldPaste);
-                                }
-                                if value.eq_ignore_ascii_case("c") {
-                                    return Some(Message::WebFieldCopy);
-                                }
-                            }
-                        }
-                        let shortcut = shortcut_key_name(&key, modifiers)?;
-                        if shortcut == "ESCAPE"
-                            && status == Status::Captured
-                            && crate::ui::dropdown_list::take_dropdown_escape_captured()
-                        {
-                            return None;
-                        }
-                        if status == Status::Ignored
-                            || crate::app::shortcuts::is_global_key(&shortcut)
-                        {
-                            return Some(Message::ShortcutPressed(shortcut));
-                        }
-                        // A text field captured the key. SPACE rebound away from
-                        // COMMANDSPACE still fires from the command line, but
-                        // only there: other fields keep typing spaces. This
-                        // closure is a plain fn, so the binding is read from a
-                        // flag and the focus is asked for in update. (#1710)
-                        (shortcut == "SPACE"
-                            && crate::app::shortcuts::SPACE_REBOUND_OFF_COMMANDSPACE
-                                .load(std::sync::atomic::Ordering::Relaxed))
-                        .then_some(Message::CommandLineSpaceProbe)
-                    }
-                    _ => None,
-                }
-            })
+            event::listen_with(main_window_event)
         };
         #[cfg(not(target_arch = "wasm32"))]
         let control = iced::Subscription::batch([

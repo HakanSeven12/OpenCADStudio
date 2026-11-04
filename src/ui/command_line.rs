@@ -790,6 +790,74 @@ impl CommandLine {
         )
     }
 
+    /// The Command History pallet: the whole log in one read-only editor
+    /// (select across lines, Ctrl+C), with Copy and Clear, filling the
+    /// pallet. It stays open beside the drawing or in a window of its own.
+    pub fn history_panel<'a>(
+        &'a self,
+        history_content: &'a text_editor::Content,
+        width: f32,
+        chrome: crate::ui::dock::Chrome,
+    ) -> Element<'a, Message> {
+        let title_bar = crate::ui::dock::title_bar(
+            crate::ui::dock::PanelId::CommandHistory,
+            t!("Command History").into_owned(),
+            chrome,
+        );
+        let log = text_editor(history_content)
+            .on_action(Message::CommandHistoryEdit)
+            .size(11)
+            .padding([2, 8])
+            .height(Length::Shrink)
+            .highlight_with::<HistoryHighlighter>(
+                self.history_highlight_settings(),
+                history_highlight_format,
+            )
+            .style(|theme: &Theme, _status| {
+                let palette = theme.palette();
+                text_editor::Style {
+                    background: Background::Color(palette.background.base.color),
+                    border: Border::default(),
+                    placeholder: palette.background.base.text.scale_alpha(0.72),
+                    value: palette.background.base.text,
+                    selection: palette.primary.base.color.scale_alpha(0.5),
+                }
+            });
+        let log = scrollable(log)
+            .height(Length::Fill)
+            .direction(scrollable::Direction::Vertical(
+                scrollable::Scrollbar::new().width(8).scroller_width(6),
+            ))
+            .anchor_bottom();
+        let tool = |icon: Element<'a, Message>, label: String, msg: Message| {
+            button(row![icon, text(label).size(11)].spacing(4).align_y(iced::Center))
+                .on_press(msg)
+                .style(header_btn_style)
+                .padding([2, 6])
+        };
+        let header = container(
+            row![
+                Space::new().width(Length::Fill),
+                tool(
+                    crate::ui::icons::themed_success(crate::ui::icons::COPY, 11.0),
+                    t!("Copy").into_owned(),
+                    Message::CommandHistoryCopy,
+                ),
+                tool(
+                    crate::ui::icons::themed_warning(crate::ui::icons::TRASH, 11.0),
+                    t!("Clear").into_owned(),
+                    Message::CommandHistoryClear,
+                ),
+            ]
+            .spacing(6)
+            .align_y(iced::Center),
+        )
+        .width(Length::Fill)
+        .padding([2, 8]);
+        let body = container(column![header, log]).height(Length::Fill);
+        crate::ui::dock::frame(title_bar, body, width)
+    }
+
     pub fn view<'a>(
         &'a self,
         show_autocomplete: bool,

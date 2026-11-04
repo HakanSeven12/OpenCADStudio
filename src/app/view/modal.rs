@@ -15,8 +15,15 @@ impl OpenCADStudio {
     /// Title shown in the active modal's title bar. Keep in sync with the
     /// [`Self::modal_content`] dispatch.
     pub(super) fn modal_title(&self) -> String {
+        self.active_modal
+            .map(|kind| self.modal_title_for(kind))
+            .unwrap_or_default()
+    }
+
+    /// Title of dialog `kind`'s title bar (or of its own window).
+    pub(crate) fn modal_title_for(&self, kind: super::super::ModalKind) -> String {
         use super::super::ModalKind as K;
-        match self.active_modal {
+        match Some(kind) {
             Some(K::About) => crate::tr!("modal", "about"),
             Some(K::Shortcuts) => crate::tr!("modal", "keyboard-shortcuts"),
             Some(K::Aliases) => crate::tr!("modal", "command-aliases"),
@@ -160,8 +167,17 @@ impl OpenCADStudio {
     /// Iced 0.15 measures the content first, so dialogs start at their natural
     /// size and overflowing regions become scrollable where a cap is supplied.
     pub(super) fn modal_content<'s>(&'s self) -> Option<Element<'s, Message>> {
-        let ex = self.modal_resize;
-        Some(match self.active_modal? {
+        self.modal_content_for(self.active_modal?, self.modal_resize)
+    }
+
+    /// Dialog `kind`'s content, `ex` past its natural size: the active modal,
+    /// an open tool's frame, or a window of its own.
+    pub(crate) fn modal_content_for<'s>(
+        &'s self,
+        kind: super::super::ModalKind,
+        ex: iced::Vector,
+    ) -> Option<Element<'s, Message>> {
+        Some(match kind {
             super::super::ModalKind::StyleImport => sized_flow(ex, 540, 480, |flow| {
                 crate::ui::style::style_manager::import_view(
                     self.style_import.as_ref().expect("style import dialog without draft"),

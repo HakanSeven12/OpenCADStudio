@@ -215,7 +215,7 @@ impl CadCommand for ExtrudeCommand {
     fn prompt(&self) -> String {
         match self.step {
             ExtrudeStep::Pick => {
-                t!("EXTRUDE  Select objects to extrude or [Mode] (Enter to finish):").into_owned()
+                t!("EXTRUDE  Select objects to extrude or [MOde]:").into_owned()
             }
             ExtrudeStep::Mode => format!(
                 "{} <{}>:",
@@ -850,7 +850,7 @@ impl CadCommand for PresspullCommand {
     fn prompt(&self) -> String {
         match self.step {
             PresspullStep::Pick => {
-                t!("PRESSPULL  Select object or bounded area (Enter to finish):").into_owned()
+                t!("PRESSPULL  Select object or bounded area:").into_owned()
             }
             PresspullStep::Multiple => t!(
                 "PRESSPULL  Select additional objects or bounded areas [Undo] (Enter for height):"
@@ -1377,7 +1377,7 @@ impl CadCommand for RevolveCommand {
     fn prompt(&self) -> String {
         match self.step {
             RevolveStep::Pick => {
-                t!("REVOLVE  Select objects to revolve or [Mode] (Enter to finish):").into_owned()
+                t!("REVOLVE  Select objects to revolve or [MOde]:").into_owned()
             }
             RevolveStep::Mode => format!(
                 "{} <{}>:",
@@ -1867,7 +1867,7 @@ impl CadCommand for SweepCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            SweepStep::PickProfiles => t!("SWEEP  Select objects to sweep or [Mode] (Enter to finish):").into_owned(),
+            SweepStep::PickProfiles => t!("SWEEP  Select objects to sweep or [MOde]:").into_owned(),
             SweepStep::Mode => format!(
                 "{} <{}>:",
                 t!("SWEEP  Creation mode [Solid/Surface]"),
@@ -2644,7 +2644,7 @@ impl LoftCommand {
     fn option_prompt(&self) -> String {
         match self.state.step {
             LoftStep::Sections => {
-                t!("LOFT  Select cross sections in lofting order or [Point/Join/Mode]:").into_owned()
+                t!("LOFT  Select cross sections in lofting order or [POint/Join multiple edges/MOde]:").into_owned()
             }
             LoftStep::Join => {
                 t!("LOFT  Select connected edges for one cross-section or [Undo]:").into_owned()

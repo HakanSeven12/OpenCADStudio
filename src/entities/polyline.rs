@@ -597,16 +597,15 @@ fn plain_points(pl: &Polyline2D) -> Vec<([f64; 2], f64)> {
 
 impl Grippable for Polyline2D {
     fn grips(&self) -> Vec<GripDef> {
-        // A spline-fit polyline is gripped at its frame vertices, not at the
-        // samples the frame generates.
+        // A fit polyline is gripped at its frame (spline) or original
+        // (curve fit) vertices, not at the vertices the fit generates.
         let elev = self.elevation;
-        let spline_fit = self.flags.bits() & 4 != 0;
-        let mut grips: Vec<GripDef> = self
-            .vertices
-            .iter()
-            .enumerate()
-            .filter(|(_, v)| !spline_fit || v.flags.bits() & 8 == 0)
-            .map(|(i, v)| square_grip(i, glam::DVec3::new(v.location.x, v.location.y, elev)))
+        let mut grips: Vec<GripDef> = polyline2d_frame_indices(self)
+            .into_iter()
+            .map(|i| {
+                let v = &self.vertices[i];
+                square_grip(i, glam::DVec3::new(v.location.x, v.location.y, elev))
+            })
             .collect();
         // A polyline that is not curve- or spline-fit has a mid grip on each
         // segment, as a lightweight one (ids after the vertices).

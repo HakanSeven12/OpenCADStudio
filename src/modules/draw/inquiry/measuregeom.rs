@@ -375,14 +375,9 @@ impl CadCommand for MeasureGeomCommand {
             }
             Mode::Area => {
                 if self.points.is_empty() {
-                    t!("MEASUREGEOM  Specify first corner point (Enter to cancel):").into_owned()
+                    t!("MEASUREGEOM  Specify first corner point:").into_owned()
                 } else {
-                    let n = self.points.len();
-                    t!(
-                        "MEASUREGEOM  Specify next point (%{n} picked, Enter to calculate):",
-                        n = n
-                    )
-                    .into_owned()
+                    t!("MEASUREGEOM  Specify next point:").into_owned()
                 }
             }
             Mode::Angle => match self.points.len() {

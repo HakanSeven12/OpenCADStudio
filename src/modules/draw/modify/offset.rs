@@ -659,7 +659,7 @@ impl CadCommand for OffsetCommand {
                 t!("OFFSET  Specify second reference point:").into_owned()
             }
             Step::SelectObject { .. } => {
-                t!("OFFSET  Select object to offset (Enter to finish):").into_owned()
+                t!("OFFSET  Select object to offset:").into_owned()
             }
             Step::PickSide {
                 targets,

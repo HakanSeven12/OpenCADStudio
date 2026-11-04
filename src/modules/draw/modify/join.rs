@@ -14,6 +14,7 @@ use codec::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
+use crate::t;
 
 // ── Command ────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,11 @@ pub struct JoinCommand {
     source: Option<(Handle, EntityType)>,
     picked: Option<EntityType>,
     handles: Vec<Handle>,
+    /// The objects of the selection gathered so far.
+    entities: Vec<(Handle, EntityType)>,
+    /// One unsupported object was the whole selection: ask for a supported
+    /// source instead.
+    needs_supported: bool,
 }
 impl JoinCommand {
     pub fn new() -> Self {
@@ -28,6 +34,8 @@ impl JoinCommand {
             source: None,
             picked: None,
             handles: Vec::new(),
+            entities: Vec::new(),
+            needs_supported: false,
         }
     }
     pub fn with_source(mut self, handle: Handle, entity: EntityType) -> Self {
@@ -39,15 +47,34 @@ impl JoinCommand {
         matches!(&self.source, Some((_, EntityType::Arc(_))))
     }
 }
+
+/// An object JOIN can start from.
+fn joinable_source(entity: &EntityType) -> bool {
+    match entity {
+        EntityType::Line(_) | EntityType::Arc(_) => true,
+        EntityType::LwPolyline(p) => !p.is_closed,
+        EntityType::Polyline2D(p) => !p.is_closed(),
+        EntityType::Spline(p) => !p.flags.closed && !p.flags.periodic,
+        _ => false,
+    }
+}
+
 impl CadCommand for JoinCommand {
     fn name(&self) -> &'static str {
         "JOIN"
     }
     fn prompt(&self) -> String {
         match self.source.as_ref().map(|(_, entity)| entity) {
-            None => "JOIN  Select source object:".into(),
-            Some(EntityType::Arc(_)) => "JOIN  Select arcs to join to source or [cLose]:".into(),
-            _ => "JOIN  Select objects to join:".into(),
+            None if self.needs_supported => t!(
+                "JOIN  Line, open polyline, arc, elliptical arc, or open spline expected.  Select a supported object:"
+            )
+            .into_owned(),
+            None if self.handles.is_empty() => {
+                t!("JOIN  Select source object or multiple objects to join at once:").into_owned()
+            }
+            None => t!("JOIN  Select objects to join:").into_owned(),
+            Some(EntityType::Arc(_)) => t!("JOIN  Select arcs to join to source or [cLose]:").into_owned(),
+            Some(_) => t!("JOIN  Select objects to join to source:").into_owned(),
         }
     }
     fn options(&self) -> Vec<crate::command::CmdOption> {
@@ -81,9 +108,6 @@ impl CadCommand for JoinCommand {
         }
         None
     }
-    fn needs_entity_pick(&self) -> bool {
-        self.source.is_none()
-    }
     fn inject_before_entity_pick(&self) -> bool {
         true
     }
@@ -95,23 +119,30 @@ impl CadCommand for JoinCommand {
             return CmdResult::NeedPoint;
         }
         if let Some(entity) = self.picked.take() {
-            let supported = match &entity {
-                EntityType::Line(_) | EntityType::Arc(_) => true,
-                EntityType::LwPolyline(p) => !p.is_closed,
-                EntityType::Polyline2D(p) => !p.is_closed(),
-                EntityType::Spline(p) => !p.flags.closed && !p.flags.periodic,
-                _ => false,
-            };
-            if supported {
+            if joinable_source(&entity) {
                 self.source = Some((handle, entity));
             }
         }
         CmdResult::NeedPoint
     }
+    // Both the first prompt (one source or many objects at once) and the
+    // source's own prompt gather a selection.
     fn is_selection_gathering(&self) -> bool {
-        self.source.is_some()
+        true
+    }
+    fn inject_selection_entities(&mut self, entities: Vec<crate::command::SelectionEntity>) {
+        self.entities = entities.into_iter().map(|e| (e.handle, e.entity)).collect();
     }
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
+        if self.needs_supported {
+            // The asked-for supported object becomes the source.
+            if let Some((handle, entity)) = self.entities.iter().find(|(_, e)| joinable_source(e)) {
+                self.source = Some((*handle, entity.clone()));
+                self.needs_supported = false;
+                self.handles.clear();
+            }
+            return CmdResult::NeedPoint;
+        }
         self.handles = handles
             .into_iter()
             .filter(|handle| {
@@ -127,7 +158,29 @@ impl CadCommand for JoinCommand {
     }
     fn on_enter(&mut self) -> CmdResult {
         let Some((source, _)) = self.source.as_ref() else {
-            return CmdResult::Cancel;
+            // Many objects at once are joined together; a lone one becomes
+            // the source the rest are then joined to.
+            return match self.handles.len() {
+                0 => CmdResult::Done,
+                1 => {
+                    let handle = self.handles[0];
+                    let entity = self
+                        .entities
+                        .iter()
+                        .find(|(h, _)| *h == handle)
+                        .map(|(_, e)| e.clone());
+                    match entity.filter(joinable_source) {
+                        Some(entity) => {
+                            self.source = Some((handle, entity));
+                            self.needs_supported = false;
+                        }
+                        None => self.needs_supported = true,
+                    }
+                    self.handles.clear();
+                    CmdResult::NeedPoint
+                }
+                _ => CmdResult::JoinEntities(std::mem::take(&mut self.handles)),
+            };
         };
         if self.handles.is_empty() {
             return CmdResult::Cancel;

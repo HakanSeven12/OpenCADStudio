@@ -56,7 +56,7 @@ impl CadCommand for MatchPropCommand {
         if !self.phase1_done() {
             crate::t!("MATCHPROP  Select source object:").into_owned()
         } else {
-            crate::t!("MATCHPROP  Select destination objects (Enter to finish):").into_owned()
+            crate::t!("MATCHPROP  Select destination object(s):").into_owned()
         }
     }
 

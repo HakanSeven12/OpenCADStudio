@@ -585,11 +585,7 @@ impl CadCommand for HatchCommand {
                 } else {
                     String::new()
                 };
-                t!(
-                    "HATCH  Pick internal point (%{count} regions selected; P <pattern> / A <angle> / L <scale>; Enter to apply):%{miss}",
-                    count = self.region_count(),
-                    miss = miss
-                )
+                t!("HATCH  Pick internal point:%{miss}", miss = miss)
                 .into_owned()
             }
             HatchMode::SelectObjects => {
@@ -598,12 +594,7 @@ impl CadCommand for HatchCommand {
                 } else {
                     String::new()
                 };
-                t!(
-                    "HATCH  Select boundary objects (%{objects} objects, %{count} regions; P <pattern> / A <angle> / L <scale>; Enter to apply):%{miss}",
-                    objects = self.selected_objects.len(),
-                    count = self.region_count(),
-                    miss = miss
-                )
+                t!("HATCH  Select objects:%{miss}", miss = miss)
                 .into_owned()
             }
             HatchMode::Manual => {

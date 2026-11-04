@@ -163,10 +163,13 @@ impl OpenCADStudio {
                 .scene
                 .bump_entities(&[(source, crate::scene::ChangeKind::Modified)]);
             self.tabs[i].dirty = true;
-            self.command_line.push_output(&format!(
-                "JOIN: {} objects joined to source.",
-                consumed.len()
-            ));
+            let count = consumed.len();
+            let message = match self.tabs[i].scene.document.get_entity(source) {
+                Some(codec::EntityType::Arc(_)) if count == 1 => crate::tf!("{count} arc joined to source"),
+                Some(codec::EntityType::Arc(_)) => crate::tf!("{count} arcs joined to source"),
+                _ => crate::tf!("{count} segments added to polyline"),
+            };
+            self.command_line.push_output(message.as_ref());
             self.refresh_properties();
         } else {
             self.command_line
@@ -193,13 +196,46 @@ impl OpenCADStudio {
             .iter()
             .filter_map(|&h| self.tabs[i].scene.document.get_entity(h).map(|e| (h, e)))
             .collect();
+        let discarded_note = |discarded: usize| match discarded {
+            0 => String::new(),
+            1 => crate::t!(", 1 object discarded from the operation").into_owned(),
+            count => crate::tf!(", {count} objects discarded from the operation").into_owned(),
+        };
         match join_entities(&pairs) {
             Some((to_remove, merged)) => {
+                // The reference's summary: what went in and what came out.
+                let count_in = to_remove.len();
+                let joined: Vec<&codec::EntityType> = pairs
+                    .iter()
+                    .filter(|(h, _)| to_remove.contains(h))
+                    .map(|(_, e)| *e)
+                    .collect();
+                let all = |test: fn(&codec::EntityType) -> bool| joined.iter().all(|e| test(e));
+                let polylines = joined
+                    .iter()
+                    .filter(|e| matches!(e, codec::EntityType::LwPolyline(_) | codec::EntityType::Polyline2D(_)))
+                    .count();
+                let summary = match (merged.as_slice(), merged.len()) {
+                    ([codec::EntityType::Line(_)], _) if all(|e| matches!(e, codec::EntityType::Line(_))) => {
+                        crate::tf!("{count_in} lines joined into 1 line").into_owned()
+                    }
+                    ([codec::EntityType::Arc(_)], _) if all(|e| matches!(e, codec::EntityType::Arc(_))) => {
+                        crate::tf!("{count_in} arcs joined into 1 arc").into_owned()
+                    }
+                    (_, 1) if polylines > 0 => {
+                        let count = count_in - polylines;
+                        if count == 1 {
+                            crate::t!("1 segment joined into 1 polyline").into_owned()
+                        } else {
+                            crate::tf!("{count} segments joined into 1 polyline").into_owned()
+                        }
+                    }
+                    (_, 1) => crate::tf!("{count_in} objects converted to 1 polyline").into_owned(),
+                    (_, count) => crate::tf!("{count_in} objects converted to {count} polylines").into_owned(),
+                } + &discarded_note(pairs.len() - count_in);
                 let label = self.history_label_from_active_cmd(i, "JOIN");
                 self.push_undo_snapshot(i, label);
                 self.tabs[i].scene.erase_entities(&to_remove);
-                let count_in = to_remove.len();
-                let count_out = merged.len();
                 for e in merged {
                     self.tabs[i].scene.add_entity(e);
                 }
@@ -208,18 +244,18 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
-                self.command_line.push_output(
-                    crate::tf!("JOIN: {count_in} object(s) joined into {count_out}.").as_ref(),
-                );
+                self.command_line.push_output(&summary);
                 self.refresh_properties();
             }
             None => {
-                let reason = crate::modules::draw::modify::join::join_failure_reason(&pairs);
+                let count = pairs.len();
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
-                self.command_line.push_error(reason.as_ref());
+                self.command_line.push_output(
+                    crate::tf!("0 objects joined, {count} objects discarded from the operation").as_ref(),
+                );
             }
         }
         None

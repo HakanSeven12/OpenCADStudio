@@ -371,7 +371,7 @@ impl CadCommand for PeditCommand {
     fn prompt(&self) -> String {
         match &self.mode {
             Mode::PickTarget => {
-                t!("PEDIT  Select polyline (or a line/arc to convert) or [Multiple]:").into_owned()
+                t!("PEDIT  Select polyline or [Multiple]:").into_owned()
             }
             Mode::MultipleGather => t!("PEDIT  Select objects:").into_owned(),
             Mode::MultipleJoin => format!("PEDIT  Join type: {:?}. Enter fuzz distance or [Jointype] <{}>:", self.join_type, self.join_fuzz),

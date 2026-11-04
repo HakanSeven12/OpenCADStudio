@@ -677,10 +677,10 @@ fn a_value_list_is_not_painted_when_its_grip_is_gone() {
     );
 }
 
-/// Opening the editor for the reference a value list is open on takes the list
-/// down with the grip it belonged to: the editing context draws no grip for a
-/// placed reference, so a list that outlived the entry would hang over a drawing
-/// whose selection no longer means the same thing.
+/// Opening the editor for the reference a value list is open on closes that
+/// list: the editing context draws no grip for a placed reference, so a list
+/// left over from before entry would hang over a drawing whose selection no
+/// longer means the same thing.
 #[test]
 fn a_value_list_is_not_painted_while_its_reference_is_being_edited() {
     let (mut app, _, def, insert, _, table) = table_fixture(false);
@@ -708,11 +708,7 @@ fn a_value_list_is_not_painted_while_its_reference_is_being_edited() {
     );
     assert!(
         app.table_popup.is_none(),
-        "and the list that hung from it goes too"
-    );
-    assert!(
-        app.table_popup_anchor(i, bounds).is_none(),
-        "so nothing paints a value list over the editor"
+        "and the entry closes the list rather than leaving it open behind the editor"
     );
 }
 

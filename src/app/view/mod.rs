@@ -1077,6 +1077,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .as_ref()
                     .is_some_and(|cmd| cmd.name() == "STRETCH");
 
+            // Screen grips with the object they belong to, for the frames.
+            let mut owned_grips: Vec<(codec::Handle, iced::Point, crate::scene::model::object::GripShape)> =
+                Vec::new();
             let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
                 && !tab.selected_grips.is_empty()
             {
@@ -1115,26 +1118,47 @@ bg={bg_ms:.1}ms n={view_count}"
                 // viewport camera so they sit on the wire the GPU draws.
                 // Paper entities use the 2-D paper transform; the model tab
                 // uses the model camera.
-                let screen_grips = if let Some((cam, _)) = &edit_frame {
-                    grips_to_screen_rte(
-                        &tab.selected_grips,
-                        cam.view_proj_rte(bounds),
-                        cam.eye(),
-                        bounds,
-                    )
-                } else if is_paper {
-                    let cam = tab.scene.camera.borrow();
-                    let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
-                    let half_h = cam.ortho_size();
-                    let half_w = half_h * aspect;
-                    let tx = cam.target.x as f32;
-                    let ty = cam.target.y as f32;
-                    drop(cam);
-                    grips_to_screen_paper(&tab.selected_grips, tx, ty, half_w, half_h, bounds)
-                } else {
-                    let cam = tab.scene.camera.borrow();
-                    grips_to_screen(&tab.selected_grips, &cam, bounds)
+                let project = |list: &[crate::scene::model::object::GripDef]| {
+                    if let Some((cam, _)) = &edit_frame {
+                        grips_to_screen_rte(list, cam.view_proj_rte(bounds), cam.eye(), bounds)
+                    } else if is_paper {
+                        let cam = tab.scene.camera.borrow();
+                        let aspect = if vh > 0.0 { vw / vh } else { 1.0 };
+                        let half_h = cam.ortho_size();
+                        let half_w = half_h * aspect;
+                        let tx = cam.target.x as f32;
+                        let ty = cam.target.y as f32;
+                        drop(cam);
+                        grips_to_screen_paper(list, tx, ty, half_w, half_h, bounds)
+                    } else {
+                        let cam = tab.scene.camera.borrow();
+                        grips_to_screen(list, &cam, bounds)
+                    }
                 };
+                let screen_grips = project(&tab.selected_grips);
+                // A frame keeps the vertices the drag started from: the
+                // dragged grip counts at its starting point.
+                let frame_grips = match tab.active_grip.as_ref() {
+                    Some(edit) => {
+                        let mut list = tab.selected_grips.clone();
+                        for (index, grip) in list.iter_mut().enumerate() {
+                            if tab.selected_grip_handles.get(index) == Some(&edit.handle)
+                                && grip.id == edit.grip_id
+                            {
+                                grip.world = edit.origin_world;
+                            }
+                        }
+                        project(&list)
+                    }
+                    None => screen_grips.clone(),
+                };
+                owned_grips = frame_grips
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, (_, screen, _, shape, _))| {
+                        Some((*tab.selected_grip_handles.get(index)?, *screen, *shape))
+                    })
+                    .collect();
                 screen_grips
                     .into_iter()
                     .enumerate()
@@ -1208,30 +1232,56 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
                 grips
             };
-            let control_polygon = tab.selected_handle.and_then(|handle| {
-                let spline = match tab.scene.document.get_entity(handle) {
-                    Some(codec::EntityType::Spline(spline))
-                        if crate::entities::spline::shows_control_vertices(spline) =>
-                    {
-                        spline
-                    }
-                    _ => return None,
-                };
-                if tab
-                    .selected_grip_handles
-                    .iter()
-                    .any(|owner| *owner != handle)
-                {
-                    return None;
+            // The frame of every selected CV spline and spline-fit 2D or 3D
+            // polyline: its frame-vertex grips joined in order.
+            let mut framed: Vec<codec::Handle> = Vec::new();
+            for (owner, _, _) in &owned_grips {
+                if !framed.contains(owner) {
+                    framed.push(*owner);
                 }
-                let points: Vec<_> = grips
-                    .iter()
-                    .filter(|grip| grip.shape == crate::scene::model::object::GripShape::Circle)
-                    .map(|grip| grip.pos)
-                    .collect();
-                (points.len() >= 2)
-                    .then_some((points, spline.flags.closed || spline.flags.periodic))
-            });
+            }
+            let control_polygons: Vec<(Vec<iced::Point>, bool, bool)> = framed
+                .into_iter()
+                .filter_map(|handle| {
+                    let (closed, dotted, grip_shape) = match tab.scene.document.get_entity(handle) {
+                        Some(codec::EntityType::Spline(spline))
+                            if crate::entities::spline::shows_control_vertices(spline) =>
+                        {
+                            (
+                                spline.flags.closed || spline.flags.periodic,
+                                false,
+                                crate::scene::model::object::GripShape::Circle,
+                            )
+                        }
+                        Some(codec::EntityType::Polyline2D(polyline))
+                            if polyline.flags.bits() & 4 != 0 =>
+                        {
+                            (
+                                polyline.is_closed(),
+                                true,
+                                crate::scene::model::object::GripShape::Square,
+                            )
+                        }
+                        Some(codec::EntityType::Polyline3D(polyline))
+                            if polyline.smooth_type
+                                != codec::entities::polyline3d::SmoothSurfaceType::None =>
+                        {
+                            (
+                                polyline.is_closed(),
+                                true,
+                                crate::scene::model::object::GripShape::Square,
+                            )
+                        }
+                        _ => return None,
+                    };
+                    let points: Vec<_> = owned_grips
+                        .iter()
+                        .filter(|(owner, _, shape)| *owner == handle && *shape == grip_shape)
+                        .map(|(_, pos, _)| *pos)
+                        .collect();
+                    (points.len() >= 2).then_some((points, closed, dotted))
+                })
+                .collect();
             let grip_clip = if grips.is_empty() {
                 None
             } else {
@@ -1794,7 +1844,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 snap_ext_base2,
                 snap_ext_dir,
                 grips,
-                control_polygon,
+                control_polygons,
                 grip_clip,
                 ucs_icons,
                 ost_points,

@@ -608,6 +608,8 @@ pub struct GripMarker {
     pub is_plugin: bool,
     pub is_authoring: bool,
     pub is_dynamic: bool,
+    /// Drawn filled in the grip colour (a group's centre grip).
+    pub is_filled: bool,
 }
 
 // ── Grid display params ───────────────────────────────────────────────────
@@ -1469,7 +1471,7 @@ fn draw_grip_marker(
         } else {
             palette.primary.base.color
         };
-        let fill = if grip.is_dynamic || matches!(
+        let fill = if grip.is_filled || grip.is_dynamic || matches!(
             grip.shape,
             GripShape::Dropdown | GripShape::DropdownAdjacent | GripShape::Diamond
         ) {
@@ -1638,7 +1640,7 @@ pub struct GripLayerKey {
     pub palette: iced::theme::Palette,
     pub grips: Vec<GripMarker>,
     pub control_polygon: Option<(Vec<Point>, bool)>,
-    pub group_boxes: Vec<Vec<Point>>,
+    pub group_boxes: Vec<(Vec<Point>, Color)>,
     pub grip_clip: Option<iced::Rectangle>,
     pub selection_visual: SelectionVisualOptions,
     pub authoring_style: AuthoringStyleKey,
@@ -2193,7 +2195,16 @@ impl canvas::Program<Message> for SelectionCanvas {
             palette: *theme.palette(),
             grips: self.grips.clone(),
             control_polygon: self.control_polygon.clone(),
-            group_boxes: self.group_boxes.clone(),
+            // The group box is mid grey on a dark canvas, lighter grey on a
+            // light one, as measured in the reference.
+            group_boxes: {
+                let colour = if crate::ui::style::common::canvas_is_light(self.crosshair_bg) {
+                    Color::from_rgb8(151, 151, 151)
+                } else {
+                    Color::from_rgb8(124, 125, 126)
+                };
+                self.group_boxes.iter().map(|corners| (corners.clone(), colour)).collect()
+            },
             grip_clip: self.grip_clip,
             selection_visual: self.selection_visual,
             authoring_style: AuthoringStyleKey::from(&self.authoring_visual),
@@ -2257,7 +2268,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                         );
                     }
                 }
-                for corners in &self.group_boxes {
+                for (corners, colour) in &grip_key.group_boxes {
                     if corners.len() == 4 {
                         let outline = canvas::Path::new(|builder| {
                             builder.move_to(corners[0]);
@@ -2270,7 +2281,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                             &outline,
                             canvas::Stroke::default()
                                 .with_width(1.0)
-                                .with_color(Color::from_rgb8(124, 125, 126)),
+                                .with_color(*colour),
                         );
                     }
                 }
@@ -6389,6 +6400,7 @@ mod selection_canvas_state_tests {
                 is_plugin: false,
                 is_authoring: false,
                 is_dynamic: false,
+                is_filled: false,
             }],
             control_polygon: None,
             group_boxes: Vec::new(),

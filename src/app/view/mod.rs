@@ -947,6 +947,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             is_authoring: crate::app::block_authoring_edit::is_editor_grip(grip_id),
                             is_dynamic: crate::app::block_actions::is_test_grip(grip_id)
                                 || grip_id == crate::app::visibility::VIS_GRIP_ID,
+                            is_filled: grip_id == crate::scene::GROUP_GRIP_ID,
                         }
                     })
                     .collect();
@@ -979,6 +980,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             is_plugin: true,
                             is_authoring: false,
                             is_dynamic: false,
+                            is_filled: false,
                         });
                     }
                 }

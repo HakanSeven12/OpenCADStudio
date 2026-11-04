@@ -1680,7 +1680,7 @@ mod bedit_characterization_tests {
         let line = app.tabs[tab]
             .scene
             .document
-            .add_entity(EntityType::Line(Line::from_points(
+            .add_entity(codec::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )))
@@ -2985,5 +2985,91 @@ mod copytolayer_tests {
         assert_circle(&app, copy, "BLUE", DVec3::new(3.0, 4.0, 5.0));
         assert_circle(&app, src, "RED", DVec3::ZERO);
         assert_eq!(app.tabs[app.active_tab].history.undo_stack.len(), 1);
+    }
+}
+
+#[cfg(test)]
+mod selection_history_tests {
+    use super::super::*;
+    use crate::app::OpenCADStudio;
+    use crate::command::StepInput;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    fn three_lines() -> (OpenCADStudio, Vec<codec::Handle>) {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handles = (0..3)
+            .map(|n| {
+                app.tabs[i]
+                    .scene
+                    .add_entity(codec::EntityType::Line(Line::from_points(
+                        Vector3::new(n as f64 * 10.0, 0.0, 0.0),
+                        Vector3::new(n as f64 * 10.0 + 5.0, 0.0, 0.0),
+                    )))
+            })
+            .collect();
+        (app, handles)
+    }
+
+    fn selected(app: &OpenCADStudio) -> Vec<codec::Handle> {
+        app.tabs[app.active_tab]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect()
+    }
+
+    fn pick(app: &mut OpenCADStudio, handle: codec::Handle) {
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(handle, false);
+        let current = selected(app);
+        let _ = app.feed_command(StepInput::SelectionComplete(current));
+    }
+
+    #[test]
+    fn select_command_commits_the_picked_set() {
+        let (mut app, h) = three_lines();
+        let _ = app.run_command_line("SELECT");
+        let i = app.active_tab;
+        assert!(
+            app.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|c| c.is_selection_gathering()),
+            "SELECT must gather objects"
+        );
+        pick(&mut app, h[1]);
+        let _ = app.feed_command(StepInput::Enter);
+
+        assert_eq!(selected(&app), vec![h[1]]);
+        assert!(app.tabs[app.active_tab].active_cmd.is_none());
+    }
+
+    #[test]
+    fn select_previous_restores_the_set_before_select() {
+        let (mut app, h) = three_lines();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(h[0], false);
+
+        let _ = app.run_command_line("SELECT");
+        app.tabs[i].scene.deselect_all();
+        pick(&mut app, h[1]);
+        let _ = app.feed_command(StepInput::Enter);
+        assert_eq!(selected(&app), vec![h[1]]);
+
+        let _ = app.run_command_line("SELECTPREVIOUS");
+        assert_eq!(selected(&app), vec![h[0]]);
+    }
+
+    #[test]
+    fn select_previous_without_a_previous_set_keeps_the_selection() {
+        let (mut app, h) = three_lines();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(h[2], false);
+        let _ = app.run_command_line("SELECTPREVIOUS");
+        assert_eq!(selected(&app), vec![h[2]]);
     }
 }

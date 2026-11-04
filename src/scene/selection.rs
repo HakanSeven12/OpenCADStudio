@@ -166,6 +166,29 @@ impl Scene {
         self.bump_selection_set();
     }
 
+    /// Snapshot the current selection as the "previous" set SELECTPREVIOUS
+    /// hands back. Called when a command starts, before its own picks replace
+    /// the set, and skipped by the commands that only read the set.
+    pub(crate) fn remember_selection_set(&mut self) {
+        let current = self.selected_handles_in_order();
+        if current != self.previous_selected {
+            self.previous_selected = current;
+        }
+    }
+
+    /// Swap the current selection with the remembered one. Returns the number
+    /// of objects restored, or `None` when nothing was remembered.
+    pub(crate) fn select_previous(&mut self) -> Option<usize> {
+        if self.previous_selected.is_empty() {
+            return None;
+        }
+        let current = self.selected_handles_in_order();
+        let previous = std::mem::take(&mut self.previous_selected);
+        self.replace_selection_exact(&previous);
+        self.previous_selected = current;
+        Some(previous.len())
+    }
+
     /// Script-facing replacement: preserve exactly the validated input order.
     /// UI picks still use `select_entity` and its leader/annotation expansion.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]

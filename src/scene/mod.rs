@@ -2587,6 +2587,9 @@ pub struct Scene {
     constraint_status_suppressed: std::cell::Cell<bool>,
     /// Currently selected entity handles.
     pub selected: HashSet<Handle>,
+    /// The selection as it stood when the last command started, so
+    /// SELECTPREVIOUS can hand it back. Kept in pick order.
+    previous_selected: Vec<Handle>,
     /// Polylines only part of which is selected (Ctrl+click): the picked
     /// segment indices.
     pub sub_segments: HashMap<Handle, std::collections::BTreeSet<usize>>,
@@ -3336,6 +3339,7 @@ impl Scene {
             lighting_cache: RefCell::new(HashMap::default()),
             visibility_states: HashMap::default(),
             selected: HashSet::default(),
+            previous_selected: Vec::new(),
             sub_segments: HashMap::default(),
             selected_order: Vec::new(),
             selected_constraint: None,

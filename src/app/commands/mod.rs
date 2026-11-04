@@ -127,9 +127,30 @@ impl OpenCADStudio {
     }
 
     pub(super) fn dispatch_command(&mut self, cmd: &str) -> Task<Message> {
+        self.remember_selection_before_command(cmd);
         let task = self.dispatch_command_inner(cmd, false);
         self.clear_idle_tool_highlight();
         task
+    }
+
+    /// SELECTPREVIOUS hands back the set a command started with, so capture the
+    /// live selection whenever a user command begins. Answers fed to a running
+    /// command, internal `_` dispatches and SELECTPREVIOUS itself leave it
+    /// alone; otherwise the set being gathered would overwrite the one to
+    /// restore.
+    fn remember_selection_before_command(&mut self, cmd: &str) {
+        let i = self.active_tab;
+        if self.tabs[i].active_cmd.is_some() || self.active_modal.is_some() {
+            return;
+        }
+        let verb = cmd.split([' ', ':']).next().unwrap_or(cmd);
+        if verb.starts_with('_') || verb.starts_with('\'') {
+            return;
+        }
+        if verb.eq_ignore_ascii_case("SELECTPREVIOUS") {
+            return;
+        }
+        self.tabs[i].scene.remember_selection_set();
     }
 
     /// Run a ribbon command. A `;` stands for Enter, as in a menu macro: each
@@ -1309,6 +1330,9 @@ inventory::submit!(crate::command::CommandRegistration {
         "DE",
         "DESELALL",
         "DESELECT",
+        "SELECT",
+        "SELECTPREVIOUS",
+        "PSELECT",
         "DIMSTYLE",
         "DONATE",
         "DRAWORDER",

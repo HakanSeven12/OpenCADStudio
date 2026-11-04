@@ -593,8 +593,11 @@ fn block_move_point_chains_reject_ambiguous_grip_aliases_before_publication() {
 }
 
 #[test]
-fn block_named_order_composes_with_point_transport_on_shared_geometry() {
-    for scale_first in [false, true] {
+fn block_named_order_composes_with_parameter_transport_on_shared_geometry() {
+    for (scale_first, child_linear) in [false, true]
+        .into_iter()
+        .flat_map(|order| [false, true].map(|linear| (order, linear)))
+    {
         let (mut doc, definition, members) = super::super::tests::fixture();
         let parent = distance::create(
             &mut doc,
@@ -605,14 +608,27 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
             Vector3::new(5., 2., 0.),
         )
         .unwrap();
-        let child = point::create(&mut doc, definition, Vector3::ZERO, Vector3::ZERO).unwrap();
+        let child = if child_linear {
+            distance::create(
+                &mut doc,
+                definition,
+                distance::Kind::Linear,
+                Vector3::ZERO,
+                Vector3::new(10., 0., 0.),
+                Vector3::UNIT_Y,
+            )
+            .unwrap()
+        } else {
+            point::create(&mut doc, definition, Vector3::ZERO, Vector3::ZERO).unwrap()
+        };
         let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&child).unwrap() else {
             panic!()
         };
-        let DynamicBlockData::PointParameter(p) = &mut object.data else {
-            panic!()
-        };
-        p.parameter.parameter.chain_actions = true;
+        match &mut object.data {
+            DynamicBlockData::PointParameter(p) => p.parameter.parameter.chain_actions = true,
+            DynamicBlockData::LinearParameter(p) => p.parameter.parameter.chain_actions = true,
+            _ => panic!(),
+        }
         let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&parent).unwrap() else {
             panic!()
         };
@@ -689,13 +705,24 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
             instance::frame(&changed, first, &child_parameter)
                 .unwrap()
                 .end,
-            DVec3::X * 10.
+            child_parameter.end + DVec3::X * 10.
         );
         assert_eq!(
             instance::frame(&changed, second, &child_parameter)
                 .unwrap()
                 .end,
-            DVec3::ZERO
+            child_parameter.end
+        );
+        assert_eq!(
+            instance::frame(&changed, first, &child_parameter)
+                .unwrap()
+                .base,
+            child_parameter.base
+                + if child_linear {
+                    DVec3::X * 10.
+                } else {
+                    DVec3::ZERO
+                }
         );
         let circle = |drawing: &Document, reference: Handle| {
             let EntityType::Insert(insert) = drawing.get_entity(reference).unwrap() else {
@@ -726,16 +753,20 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
             instance::frame(&combined, first, &child_parameter)
                 .unwrap()
                 .end,
-            DVec3::X * 13.
+            child_parameter.end + DVec3::X * 13.
         );
         assert_eq!(
             circle(&combined, first),
             (expected.0 + DVec3::X * 3., expected.1)
         );
-        let combined =
-            instance::evaluate_value(&combined, first, child, Value::Point(DVec3::X * 15.))
-                .unwrap()
-                .unwrap();
+        let combined = instance::evaluate_value(
+            &combined,
+            first,
+            child,
+            Value::Point(child_parameter.end + DVec3::X * 15.),
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(
             circle(&combined, first),
             (expected.0 + DVec3::X * 5., expected.1)
@@ -748,7 +779,18 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
             instance::frame(&combined, first, &child_parameter)
                 .unwrap()
                 .end,
-            DVec3::X * 5.
+            child_parameter.end + DVec3::X * 5.
+        );
+        assert_eq!(
+            instance::frame(&combined, first, &child_parameter)
+                .unwrap()
+                .base,
+            child_parameter.base
+                + if child_linear {
+                    DVec3::X * 3.
+                } else {
+                    DVec3::ZERO
+                }
         );
         assert_eq!(circle(&combined, first), (DVec3::new(9., 3., 0.), 2.));
         assert_eq!(circle(&combined, second), (DVec3::new(4., 3., 0.), 2.));
@@ -767,8 +809,19 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
             assert_eq!(
                 instance::frame(&saved, first, &child_parameter)
                     .unwrap()
+                    .base,
+                child_parameter.base
+                    + if child_linear {
+                        DVec3::X * 3.
+                    } else {
+                        DVec3::ZERO
+                    }
+            );
+            assert_eq!(
+                instance::frame(&saved, first, &child_parameter)
+                    .unwrap()
                     .end,
-                DVec3::X * 5.
+                child_parameter.end + DVec3::X * 5.
             );
             let resumed =
                 instance::evaluate_value(&saved, first, second_parent, Value::Point(DVec3::X * 4.))
@@ -778,9 +831,20 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
                 instance::frame(&resumed, first, &child_parameter)
                     .unwrap()
                     .end,
-                DVec3::X * 6.
+                child_parameter.end + DVec3::X * 6.
             );
             assert_eq!(circle(&resumed, first), (DVec3::new(10., 3., 0.), 2.));
+            assert_eq!(
+                instance::frame(&resumed, first, &child_parameter)
+                    .unwrap()
+                    .base,
+                child_parameter.base
+                    + if child_linear {
+                        DVec3::X * 4.
+                    } else {
+                        DVec3::ZERO
+                    }
+            );
         }
         for saved in [
             DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&changed).unwrap()))
@@ -798,10 +862,17 @@ fn block_named_order_composes_with_point_transport_on_shared_geometry() {
                 instance::frame(&saved, first, &child_parameter)
                     .unwrap()
                     .end,
-                DVec3::X * 10.
+                child_parameter.end + DVec3::X * 10.
             );
             let reset = instance::reset(&saved, first).unwrap().unwrap();
             assert_eq!(circle(&reset, first), (DVec3::new(4., 3., 0.), 2.));
+            assert_eq!(
+                instance::frame(&reset, first, &child_parameter).unwrap(),
+                ParameterFrame {
+                    base: child_parameter.base,
+                    end: child_parameter.end,
+                }
+            );
         }
     }
 }

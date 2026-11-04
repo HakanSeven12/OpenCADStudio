@@ -432,6 +432,20 @@ impl CommandLine {
             format!("{COMMAND_PREFIX}{} {cmd}", t!("Command:")),
         );
     }
+    /// The latest command echo shows only `cmd`: a value typed on the same
+    /// line as a variable belongs to its prompt, not to the command line.
+    pub fn restate_last_command(&mut self, cmd: &str) {
+        if let Some(entry) = self.history.iter_mut().rev().find(|e| e.kind == EntryKind::Command) {
+            entry.text = format!("{COMMAND_PREFIX}{} {cmd}", t!("Command:"));
+        }
+    }
+    /// An answer given to the prompt just shown is written after it on the
+    /// same line (`Enter new value for X <1>: 0`), as the reference echoes it.
+    pub fn answer_last_prompt(&mut self, answer: &str) {
+        if let Some(entry) = self.history.last_mut().filter(|e| e.text.trim_end().ends_with(':')) {
+            entry.text = format!("{} {answer}", entry.text.trim_end());
+        }
+    }
     pub fn push_output(&mut self, msg: &str) {
         self.push(EntryKind::Output, msg.to_string());
     }

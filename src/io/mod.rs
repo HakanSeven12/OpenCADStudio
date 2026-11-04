@@ -216,7 +216,7 @@ pub async fn pick_open_path() -> Option<(PathBuf, u64)> {
             &["bak", "sv$", "BAK"],
         );
     for format in ocs_save::external_formats() {
-        dialog = dialog.add_filter(format.name(), format.extensions());
+        dialog = dialog.add_filter(ocs_save::external_format_label(*format), format.extensions());
     }
     let handle = dialog
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
@@ -1651,7 +1651,7 @@ pub const SAVE_FORMAT_OPTIONS: &[&str] = &[
 
 /// The Save As format list: the DWG/DXF targets, then each listed converter.
 pub fn save_format_options() -> Vec<String> {
-    let converters = ocs_save::external_formats().iter().map(|format| format.name());
+    let converters = ocs_save::external_formats().iter().map(|format| ocs_save::external_format_label(*format));
     SAVE_FORMAT_OPTIONS
         .iter()
         .copied()
@@ -1661,6 +1661,9 @@ pub fn save_format_options() -> Vec<String> {
 }
 
 pub fn canonical_save_format(format: &str) -> &'static str {
+    if let Some(converter) = ocs_save::external_format_by_label(format) {
+        return ocs_save::external_format_label(converter);
+    }
     SAVE_FORMAT_OPTIONS
         .iter()
         .copied()
@@ -1687,10 +1690,7 @@ pub fn source_is_dxf(path: Option<&Path>, document: &Document) -> bool {
 /// `(extension, DxfVersion)`.  Falls back to ("dwg", AC1032) for unknown strings.
 pub fn parse_save_format(format: &str) -> (&'static str, codec::DxfVersion) {
     // A converter writes its own format; the DXF version does not apply.
-    if let Some(converter) = ocs_save::external_formats()
-        .iter()
-        .find(|converter| converter.name().eq_ignore_ascii_case(format))
-    {
+    if let Some(converter) = ocs_save::external_format_by_label(format) {
         let ext = converter.extensions().first().copied().unwrap_or("dwg");
         return (ext, codec::DxfVersion::AC1032);
     }

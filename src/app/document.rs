@@ -164,6 +164,8 @@ pub(super) struct DocumentTab {
     /// Direct Save is redirected to Save As after open-time repairs so the
     /// source drawing cannot be overwritten accidentally.
     pub(super) recovery_save_as_required: bool,
+    /// Experimental IFCCAD consent belongs only to this open document session.
+    pub(super) ifccad_alpha_acknowledged: bool,
     /// Monotonic committed-edit/undo/redo revision. Background save completion
     /// uses it with scene epochs so an older snapshot never clears newer work.
     pub(super) edit_revision: u64,
@@ -787,6 +789,7 @@ impl DocumentTab {
             disk_fingerprint: None,
             dirty: false,
             recovery_save_as_required: false,
+            ifccad_alpha_acknowledged: false,
             edit_revision: 0,
             document_opened_pending: true,
             prev_selection: Vec::new(),

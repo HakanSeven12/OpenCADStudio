@@ -8,6 +8,9 @@ use std::borrow::Cow;
 #[path = "conversion_loss_tests.rs"]
 mod conversion_loss_tests;
 #[cfg(test)]
+#[path = "ifccad_tests.rs"]
+mod ifccad_tests;
+#[cfg(test)]
 #[path = "unsaved_changes_tests.rs"]
 mod unsaved_changes_tests;
 
@@ -109,6 +112,7 @@ impl OpenCADStudio {
             Some(K::AssocPrompt) => crate::tr!("modal", "default-application"),
             Some(K::AecDropWarning) => crate::tr!("modal", "save-warning"),
             Some(K::ConversionLoss) => crate::tr!("modal", "save-warning"),
+            Some(K::IfccadAlphaWarning) => crate::tr!("ifccad-ui", "alpha-title"),
             #[cfg(not(target_arch = "wasm32"))]
             Some(K::FileInUse) => crate::tr!("modal", "unable-save"),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1888,6 +1892,9 @@ impl OpenCADStudio {
                     conversion_loss_dialog_window(&self.conversion_losses, &target, flow)
                 })
             }
+            super::super::ModalKind::IfccadAlphaWarning => {
+                sized_flow(ex, 600, 480, |flow| ifccad_alpha_dialog(&self.conversion_losses, flow))
+            }
             #[cfg(not(target_arch = "wasm32"))]
             super::super::ModalKind::FileInUse => {
                 let (path, error) = self
@@ -2248,11 +2255,10 @@ fn save_as_dialog_window<'a>(
 ) -> Element<'a, Message> {
     let options = crate::io::save_format_options();
     let sel_fmt = options.iter().find(|s| *s == format).cloned();
-    let label = |s: Cow<'static, str>| text(s).size(11).style(dialog_muted_text_style);
     let field_width = if matches!(sizing.width, iced::Length::Fill) {
         Fill
     } else {
-        iced::Length::Shrink
+        iced::Length::Fixed(160.0)
     };
 
     let mut items: Vec<Element<'a, Message>> = Vec::new();
@@ -2263,38 +2269,30 @@ fn save_as_dialog_window<'a>(
     // the OS save dialog collects the name, so this field is omitted.
     #[cfg(target_arch = "wasm32")]
     {
-        items.push(
-            row![
-                label(t!("File name:")).width(70),
-                iced::widget::text_input("drawing.dwg", filename)
-                    .on_input(Message::SaveDialogFilenameChanged)
-                    .size(13)
-                    .padding([5, 8])
-                    .width(field_width),
-            ]
-            .align_y(iced::Alignment::Center)
-            .spacing(6)
-            .width(sizing.width)
-            .into(),
-        );
+        items.push(crate::ui::style::form::labeled_field(
+            t!("File name:"),
+            filename,
+            Message::SaveDialogFilenameChanged,
+            field_width,
+        ));
         items.push(Space::new().height(8).into());
     }
     #[cfg(not(target_arch = "wasm32"))]
     let _ = filename;
 
-    items.push(
-        row![
-            label(t!("Format:")).width(70),
-            crate::ui::dropdown_list::pick_list(sel_fmt, options, |value| value.clone())
-                .on_select(Message::SaveDialogFormatChanged)
-            .width(field_width),
-        ]
-        .align_y(iced::Alignment::Center)
-        .spacing(6)
-        .width(sizing.width)
-        .into(),
-    );
+    items.push(crate::ui::style::form::labeled_pick_list(
+        t!("Format:"),
+        options,
+        sel_fmt,
+        Message::SaveDialogFormatChanged,
+        field_width,
+    ));
     items.push(Space::new().height(16).into());
+    if crate::io::parse_save_format(format).0 == "ifcx" {
+        items.push(text(crate::tr!("ifccad-ui", "alpha-note"))
+            .size(11).style(dialog_muted_text_style).into());
+        items.push(Space::new().height(12).into());
+    }
     items.push(
         row![
             Space::new().width(Fit),
@@ -2600,6 +2598,34 @@ fn external_change_dialog_window(
 /// (AEC / application) objects that survive only as verbatim source-version
 /// bytes, so saving to a different version or to DXF would drop them. Offers to
 /// save in the source version (keep them) or proceed (drop them).
+fn ifccad_alpha_dialog<'a>(losses: &'a [String], sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+    let mut body = column![text(crate::tr!("ifccad-ui", "alpha-body"))
+        .size(13).wrapping(iced::widget::text::Wrapping::WordOrGlyph)].spacing(8)
+        .padding(iced::Padding {
+            right: 14.0,
+            bottom: 1.0,
+            ..iced::Padding::ZERO
+        });
+    if !losses.is_empty() {
+        body = body.push(text(crate::tr!("ifccad-ui", "conversion-title")).size(13));
+        for loss in losses {
+            body = body.push(text(format!("• {loss}")).size(12)
+                .wrapping(iced::widget::text::Wrapping::WordOrGlyph));
+        }
+    }
+    container(column![
+        iced::widget::scrollable(body)
+            .width(sizing.width).height(sizing.height),
+        Space::new().height(16),
+        row![
+            dialog_button(t!("Save anyway"), Message::IfccadAlphaProceed, button::warning),
+            Space::new().width(8),
+            dialog_button(t!("Cancel"), Message::CloseModal, button::secondary),
+        ],
+    ].width(sizing.width).height(sizing.height))
+        .style(dialog_body_style).padding([20, 24]).into()
+}
+
 fn conversion_loss_dialog_window<'a>(
     losses: &'a [String],
     target: &str,

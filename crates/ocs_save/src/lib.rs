@@ -18,6 +18,8 @@ use codec::{
     ReadStage, ReadStats,
 };
 
+mod ifccad;
+
 /// Worker protocol version. Bumped whenever a request/response payload shape
 /// changes; the `?v=` cache-buster on the worker URL must match. v5 adds the
 /// `serialize` action and extends the runtime-field sidecar with
@@ -52,6 +54,23 @@ const EXTERNAL_FORMATS: &[&(dyn Format + Sync)] = &[&codec::Ifcx];
 
 pub fn external_formats() -> &'static [&'static (dyn Format + Sync)] {
     EXTERNAL_FORMATS
+}
+
+/// Compact application label; the converter's machine identifier stays unchanged.
+pub fn external_format_label(format: &dyn Format) -> &str {
+    if format.extensions().contains(&"ifcx") {
+        "IFCCAD"
+    } else {
+        format.name()
+    }
+}
+
+/// Accept the display label and the old converter name in stored settings.
+pub fn external_format_by_label(label: &str) -> Option<&'static (dyn Format + Sync)> {
+    external_formats().iter().copied().find(|format| {
+        external_format_label(*format).eq_ignore_ascii_case(label)
+            || format.name().eq_ignore_ascii_case(label)
+    })
 }
 
 /// The listed converter for files with extension `ext`, if any.
@@ -92,7 +111,13 @@ pub const CONVERSION_LOSS: &str = "conversion-loss";
 /// read diagnostics, reported when the drawing opens; it is not damage, so the
 /// read does not count as recovered.
 pub fn read_external(format: &dyn Format, bytes: &[u8]) -> Result<ReadOutcome, String> {
-    let (document, losses) = format.read(bytes).map_err(|e| format!("{}: {e}", format.name()))?;
+    let (document, losses) = format.read(bytes).map_err(|error| {
+        if format.extensions().contains(&"ifcx") {
+            ifccad::read_error(bytes, &error.to_string())
+        } else {
+            format!("{}: {error}", format.name())
+        }
+    })?;
     let output_entities = document.entities().count();
     let output_objects = document.objects.len();
     // The open path refuses a read that decoded no records; an empty
@@ -274,6 +299,63 @@ mod tests {
         line.common.handle = doc.allocate_handle();
         let _ = doc.add_entity(EntityType::Line(line));
         doc
+    }
+
+    #[test]
+    fn ifccad_read_explains_missing_drawing_without_calling_bim_invalid() {
+        let bytes = br#"{"header":{"ifcxVersion":"ifcx_alpha"},"imports":[],"schemas":{},"data":[{"path":"wall","attributes":{"usd::usdgeom::mesh":{"points":[]}}}]}"#;
+        let error = read_external(&codec::Ifcx, bytes).unwrap_err();
+        assert!(
+            error.contains("does not contain an IFCCAD drawing"),
+            "{error}"
+        );
+        assert!(error.contains("BIM"), "{error}");
+        assert!(!error.contains("Invalid IFCX file"), "{error}");
+    }
+
+    #[test]
+    fn ifccad_read_keeps_malformed_input_distinct_from_missing_drawing() {
+        let error = read_external(&codec::Ifcx, b"{broken").unwrap_err();
+        assert!(error.contains("could not be read"), "{error}");
+        assert!(
+            !error.contains("does not contain an IFCCAD drawing"),
+            "{error}"
+        );
+        assert!(error.contains("Details:"), "{error}");
+    }
+
+    #[test]
+    fn ifccad_read_explains_unsupported_profile_and_preserves_reader_details() {
+        let (bytes, _) = codec::Ifcx.write(&Document::new()).unwrap();
+        // Change only the explicit profile version; retain all real writer output.
+        let text = String::from_utf8(bytes).unwrap();
+        let start = text.find("\"profileVersion\"").unwrap();
+        let value_start = start + text[start..].find(':').unwrap() + 1;
+        let quote_start = value_start + text[value_start..].find('"').unwrap();
+        let quote_end = quote_start + 1 + text[quote_start + 1..].find('"').unwrap();
+        let changed = format!("{}999.0.0{}", &text[..quote_start + 1], &text[quote_end..]);
+        let error = read_external(&codec::Ifcx, changed.as_bytes()).unwrap_err();
+        assert!(
+            error.contains("unsupported IFCCAD profile version"),
+            "{error}"
+        );
+        assert!(error.contains("999.0.0"), "{error}");
+        assert!(error.contains("Details:"), "{error}");
+    }
+
+    #[test]
+    fn ifccad_read_accepts_empty_and_populated_production_output() {
+        for doc in [Document::new(), sample_document()] {
+            let (bytes, _) = codec::Ifcx.write(&doc).unwrap();
+            let read = read_external(&codec::Ifcx, &bytes).unwrap();
+            // The importer may add a model viewport helper to an empty drawing.
+            let geometry_count = |doc: &Document| {
+                doc.entities()
+                    .filter(|e| matches!(e, EntityType::Point(_) | EntityType::Line(_)))
+                    .count()
+            };
+            assert_eq!(geometry_count(&read.document), geometry_count(&doc));
+        }
     }
 
     // The sidecar is the whole reason documents don't lose raw DWG storage

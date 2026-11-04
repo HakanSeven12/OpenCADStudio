@@ -240,7 +240,7 @@ pub fn labeled_field<'a>(
     label: Cow<'static, str>,
     value: &'a str,
     on_input: impl Fn(String) -> Message + 'a,
-    width: f32,
+    width: impl Into<Length>,
 ) -> Element<'a, Message> {
     row![
         row_label(label),

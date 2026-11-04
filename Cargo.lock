@@ -4387,6 +4387,7 @@ dependencies = [
  "bincode",
  "opencaddocument",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

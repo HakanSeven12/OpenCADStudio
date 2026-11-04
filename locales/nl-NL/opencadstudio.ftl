@@ -8547,3 +8547,12 @@ quad-menu =
     .width = Quad width
     .launch = Right-click over an object launches its default command directly (QUADCOMMANDLAUNCH)
     .about = The Quad cursor menu appears at the cursor: default commands for what it points at, recent and creation commands otherwise (QUAD, QUADWIDTH).
+
+ifccad-ui =
+    .alpha-title = IFCCAD alpha — opslagwaarschuwing
+    .alpha-note = Alpha — bestandsformaat in ontwikkeling.
+    .alpha-body =
+        IFCCAD is een alphaformaat in actieve ontwikkeling. Een bestand dat u vandaag opslaat, kan in een latere OCS-versie mogelijk niet meer worden geopend. Achterwaartse compatibiliteit en migratie zijn niet gegarandeerd.
+
+        Gebruik IFCCAD voor testen en beoordeling. Bewaar de oorspronkelijke tekening en een aparte DWG/DXF-kopie; gebruik IFCCAD niet als enige kopie of voor langdurige archivering.
+    .conversion-title = Conversiemeldingen bij deze opslag

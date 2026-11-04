@@ -893,14 +893,19 @@ bg={bg_ms:.1}ms n={view_count}"
                 // frame through it; a rubber band runs from it to the cursor.
                 let screen_grips = match tab.active_grip.as_ref() {
                     Some(edit) => {
-                        let mut list = tab.selected_grips.clone();
-                        for (index, grip) in list.iter_mut().enumerate() {
-                            if tab.selected_grip_handles.get(index) == Some(&edit.handle)
-                                && grip.id == edit.grip_id
+                        // Every grip stays where it was when the drag
+                        // started; the dragged one marks its start point.
+                        let list = match &tab.drag_start_grips {
+                            Some(((handle, id, start), list, owners))
+                                if (*handle, *id, *start)
+                                    == (edit.handle, edit.grip_id, edit.origin_world)
+                                    && list.len() == tab.selected_grips.len()
+                                    && owners == &tab.selected_grip_handles =>
                             {
-                                grip.world = edit.origin_world;
+                                list.clone()
                             }
-                        }
+                            _ => tab.selected_grips.clone(),
+                        };
                         // A circle's quadrant stretches from its centre.
                         let base = match tab.scene.document.get_entity(edit.handle) {
                             Some(codec::EntityType::Circle(circle)) => {

@@ -3376,6 +3376,21 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             self.cancel_active_grip_edit();
             return;
         }
+        // Keep the grips of the moment a drag starts, before it reshapes
+        // anything, to draw them in place for the whole drag.
+        let drag_key = self.tabs[i]
+            .active_grip
+            .as_ref()
+            .map(|grip| (grip.handle, grip.grip_id, grip.origin_world));
+        let tab = &mut self.tabs[i];
+        match drag_key {
+            Some(key) if tab.drag_start_grips.as_ref().map(|(k, ..)| *k) != Some(key) => {
+                tab.drag_start_grips =
+                    Some((key, tab.selected_grips.clone(), tab.selected_grip_handles.clone()));
+            }
+            Some(_) => {}
+            None => tab.drag_start_grips = None,
+        }
         let is_paper = self.tabs[i].scene.current_layout != "Model";
         // Paper-space entity coordinates are NOT offset by world_offset (same rule
         // as wire tessellation in wires_for_block). Only subtract in model space.

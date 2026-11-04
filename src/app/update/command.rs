@@ -69,6 +69,25 @@ fn polyline_add_vertex_target(entity: &AcadEntityType, grip_id: usize) -> Option
     }
 }
 
+/// The modes Ctrl steps through after the one a polyline grip was picked up in.
+fn grip_ctrl_stages(
+    items: &[crate::scene::model::object::GripMenuItem],
+) -> Vec<crate::scene::model::object::GripMenuAction> {
+    use crate::scene::model::object::GripMenuAction as Action;
+    if !items.iter().any(|item| item.action == Action::AddVertex) {
+        return Vec::new();
+    }
+    [
+        Action::AddVertex,
+        Action::RemoveVertex,
+        Action::ConvertToArc,
+        Action::ConvertToLine,
+    ]
+    .into_iter()
+    .filter(|action| items.iter().any(|item| item.action == *action))
+    .collect()
+}
+
 fn polyline_vertex_count(entity: &AcadEntityType) -> Option<usize> {
     match entity {
         AcadEntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
@@ -1826,6 +1845,191 @@ impl OpenCADStudio {
             self.refresh_layer_panel();
         }
         Task::none()
+    }
+
+    /// The action of the Ctrl cycle waiting for the next click, if the cycle
+    /// still belongs to the hot grip.
+    pub(super) fn grip_ctrl_one_shot(
+        &self,
+        i: usize,
+    ) -> Option<crate::scene::model::object::GripMenuAction> {
+        let cycle = self.grip_ctrl_cycle.as_ref()?;
+        let active = self.tabs[i].active_grip.as_ref()?;
+        (active.handle == cycle.handle && active.grip_id == cycle.active_grip_id)
+            .then_some(cycle.one_shot)
+            .flatten()
+    }
+
+    /// Ctrl on a hot polyline grip moves to its next mode, as the grip menu
+    /// offers them. Each stage starts from the geometry the grip was picked up
+    /// with, so a stage left behind leaves nothing in the drawing or in undo.
+    pub(super) fn cycle_grip_ctrl_mode(&mut self) -> Task<Message> {
+        use crate::entities::traits::EntityTypeOps;
+        use crate::scene::model::object::GripMenuAction as Action;
+        let i = self.active_tab;
+        if self.tabs[i].grip_copy || self.grip_pending.is_some() {
+            return Task::none();
+        }
+        let Some(active) = self.tabs[i].active_grip.as_ref() else {
+            return Task::none();
+        };
+        let [target] = active.targets.as_slice() else {
+            return Task::none();
+        };
+        if active.gizmo {
+            return Task::none();
+        }
+        let (handle, active_grip_id) = (active.handle, active.grip_id);
+        let mut cycle = self
+            .grip_ctrl_cycle
+            .take()
+            .filter(|cycle| cycle.handle == handle && cycle.active_grip_id == active_grip_id)
+            .unwrap_or(crate::app::GripCtrlCycle {
+                handle,
+                grip_id: active_grip_id,
+                is_translate: target.is_translate,
+                world: active.origin_world,
+                stage: 0,
+                active_grip_id,
+                one_shot: None,
+            });
+        let original = self
+            .grip_originals
+            .iter()
+            .find(|(owner, _)| *owner == handle)
+            .map(|(_, entity)| entity.clone())
+            .or_else(|| self.tabs[i].scene.document.get_entity(handle).cloned());
+        let Some(original) = original else {
+            return Task::none();
+        };
+        // Other grips (and entities whose Add Vertex is not a placement) keep
+        // their single behaviour.
+        if polyline_add_vertex_target(&original, cycle.grip_id).is_none() {
+            return Task::none();
+        }
+        let items = original.grip_menu(cycle.grip_id);
+        let stages = grip_ctrl_stages(&items);
+        if stages.is_empty() || self.reject_locked_edit(i, handle) {
+            return Task::none();
+        }
+
+        self.cancel_active_grip_edit();
+        cycle.stage = (cycle.stage + 1) % (stages.len() + 1);
+        cycle.one_shot = None;
+        let mut task = Task::none();
+        let label = match cycle.stage.checked_sub(1).map(|stage| stages[stage]) {
+            None => {
+                let edit = self.grip_edit_for_hit(
+                    i,
+                    handle,
+                    cycle.grip_id,
+                    cycle.is_translate,
+                    cycle.world,
+                );
+                // A rectangle's grips start in their own Resize / Move Parallel.
+                let stretches =
+                    matches!(edit.mode, crate::scene::pick::grip::GripEditMode::Stretch);
+                self.tabs[i].active_grip = Some(edit);
+                self.sync_dyn_fields();
+                stretches.then_some("Stretch")
+            }
+            Some(Action::AddVertex) => {
+                // The menu's own placement: it prompts for the new vertex.
+                let index = items
+                    .iter()
+                    .position(|item| item.action == Action::AddVertex);
+                self.grip_popup = Some(crate::app::GripPopup {
+                    handle,
+                    grip_id: cycle.grip_id,
+                    anchor: self.tabs[i].last_cursor_screen,
+                    items: items.clone(),
+                    selected: 0,
+                    pinned: true,
+                });
+                task = self.on_grip_menu_pick(index.unwrap_or(0));
+                None
+            }
+            Some(Action::ConvertToArc) => {
+                let dirty_before = self.tabs[i].dirty;
+                if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
+                    entity.apply_grip_menu(cycle.grip_id, Action::ConvertToArc);
+                }
+                self.tabs[i]
+                    .scene
+                    .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
+                self.tabs[i].dirty = true;
+                self.refresh_selected_grips();
+                self.refresh_properties();
+                let world = self.tabs[i]
+                    .selected_grip_handles
+                    .iter()
+                    .zip(self.tabs[i].selected_grips.iter())
+                    .find(|(owner, grip)| **owner == handle && grip.id == cycle.grip_id)
+                    .map_or(cycle.world, |(_, grip)| grip.world);
+                self.grip_originals = vec![(handle, original)];
+                self.grip_dirty_before = Some(dirty_before);
+                self.tabs[i].active_grip =
+                    Some(GripEdit::single(handle, cycle.grip_id, false, world));
+                Some("Convert to Arc")
+            }
+            Some(action) => {
+                self.tabs[i].active_grip = Some(GripEdit::single(
+                    handle,
+                    cycle.grip_id,
+                    cycle.is_translate,
+                    cycle.world,
+                ));
+                cycle.one_shot = Some(action);
+                items
+                    .iter()
+                    .find(|item| item.action == action)
+                    .map(|item| item.label)
+            }
+        };
+        if let Some(label) = label {
+            self.command_line
+                .push_info(&format!("{}:", crate::i18n::translate(label)));
+        }
+        let Some(active_grip_id) = self.tabs[i].active_grip.as_ref().map(|grip| grip.grip_id)
+        else {
+            return task;
+        };
+        cycle.active_grip_id = active_grip_id;
+        self.grip_ctrl_cycle = Some(cycle);
+        // Show the new mode at the cursor without waiting for the next move.
+        let at = self.tabs[i].last_cursor_screen;
+        Task::batch([task, Task::done(Message::ViewportMove(at))])
+    }
+
+    /// The click that confirms Remove Vertex or Convert to Line: the menu's
+    /// own action, recorded as one undo step.
+    pub(super) fn commit_grip_ctrl_one_shot(&mut self, i: usize) -> Task<Message> {
+        use crate::entities::traits::EntityTypeOps;
+        let Some(action) = self.grip_ctrl_one_shot(i) else {
+            return Task::none();
+        };
+        let Some(cycle) = self.grip_ctrl_cycle.take() else {
+            return Task::none();
+        };
+        self.cancel_active_grip_edit();
+        let items = self.tabs[i]
+            .scene
+            .document
+            .get_entity(cycle.handle)
+            .map(|entity| entity.grip_menu(cycle.grip_id))
+            .unwrap_or_default();
+        let Some(index) = items.iter().position(|item| item.action == action) else {
+            return Task::none();
+        };
+        self.grip_popup = Some(crate::app::GripPopup {
+            handle: cycle.handle,
+            grip_id: cycle.grip_id,
+            anchor: self.tabs[i].last_cursor_screen,
+            items,
+            selected: index,
+            pinned: true,
+        });
+        self.on_grip_menu_pick(index)
     }
 
     pub(super) fn on_grip_menu_pick(&mut self, idx: usize) -> Task<Message> {
@@ -6240,5 +6444,179 @@ mod tab_close_tests {
         );
         assert!(app.pending_close.is_none(), "pending target consumed");
         assert!(app.active_tab < app.tabs.len(), "active tab stays valid");
+    }
+}
+
+#[cfg(test)]
+mod grip_ctrl_cycle_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use crate::scene::model::object::GripMenuAction;
+    use codec::entities::LwPolyline;
+    use codec::types::Vector2;
+    use codec::{EntityType, Handle};
+    use glam::DVec3;
+
+    fn app_with_polyline() -> (OpenCADStudio, usize, Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let polyline = LwPolyline::from_points(vec![
+            Vector2::new(0.0, 0.0),
+            Vector2::new(10.0, 0.0),
+            Vector2::new(10.0, 10.0),
+        ]);
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(EntityType::LwPolyline(polyline));
+        app.tabs[i].scene.selected.insert(handle);
+        app.refresh_selected_grips();
+        (app, i, handle)
+    }
+
+    fn pick_up(app: &mut OpenCADStudio, i: usize, handle: Handle, grip_id: usize, at: DVec3) {
+        let edit = app.grip_edit_for_hit(i, handle, grip_id, false, at);
+        app.tabs[i].active_grip = Some(edit);
+    }
+
+    fn press_ctrl(app: &mut OpenCADStudio) {
+        let _ = app.update(Message::SetModifiers {
+            shift: false,
+            ctrl: true,
+            alt: false,
+        });
+        let _ = app.update(Message::SetModifiers {
+            shift: false,
+            ctrl: false,
+            alt: false,
+        });
+    }
+
+    fn polyline(app: &OpenCADStudio, i: usize, handle: Handle) -> LwPolyline {
+        match app.tabs[i].scene.document.get_entity(handle) {
+            Some(EntityType::LwPolyline(polyline)) => polyline.clone(),
+            other => panic!("expected a polyline, found {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ctrl_cycles_a_vertex_grip_and_a_full_turn_changes_nothing() {
+        let (mut app, i, handle) = app_with_polyline();
+        let dirty = app.tabs[i].dirty;
+        pick_up(&mut app, i, handle, 1, DVec3::new(10.0, 0.0, 0.0));
+
+        press_ctrl(&mut app);
+        assert_eq!(
+            polyline(&app, i, handle).vertices.len(),
+            4,
+            "Add Vertex is provisional"
+        );
+        assert_eq!(app.grip_ctrl_one_shot(i), None);
+        assert_eq!(
+            app.tabs[i].active_grip.as_ref().map(|grip| grip.grip_id),
+            Some(2)
+        );
+
+        press_ctrl(&mut app);
+        assert_eq!(
+            polyline(&app, i, handle).vertices.len(),
+            3,
+            "Add Vertex left behind"
+        );
+        assert_eq!(
+            app.grip_ctrl_one_shot(i),
+            Some(GripMenuAction::RemoveVertex)
+        );
+
+        press_ctrl(&mut app);
+        assert_eq!(polyline(&app, i, handle).vertices.len(), 3);
+        assert_eq!(app.grip_ctrl_one_shot(i), None);
+        assert_eq!(
+            app.tabs[i].active_grip.as_ref().map(|grip| grip.grip_id),
+            Some(1)
+        );
+        assert_eq!(
+            app.tabs[i].dirty, dirty,
+            "a full turn leaves the drawing clean"
+        );
+    }
+
+    #[test]
+    fn the_click_after_ctrl_removes_the_vertex_as_one_undo_step() {
+        let (mut app, i, handle) = app_with_polyline();
+        pick_up(&mut app, i, handle, 1, DVec3::new(10.0, 0.0, 0.0));
+        press_ctrl(&mut app);
+        press_ctrl(&mut app);
+
+        // The cursor has nothing to place while the removal waits for a click.
+        let _ = app.update(Message::ViewportMove(iced::Point::new(50.0, 50.0)));
+        assert_eq!(
+            polyline(&app, i, handle).vertices[1].location,
+            Vector2::new(10.0, 0.0)
+        );
+
+        let _ = app.on_viewport_left_release();
+        assert_eq!(polyline(&app, i, handle).vertices.len(), 2);
+        assert!(app.tabs[i].active_grip.is_none());
+        assert!(app.grip_ctrl_cycle.is_none());
+
+        let _ = app.update(Message::Undo);
+        assert_eq!(polyline(&app, i, handle).vertices.len(), 3);
+    }
+
+    #[test]
+    fn ctrl_cycles_a_midpoint_grip_through_add_vertex_and_arc() {
+        let (mut app, i, handle) = app_with_polyline();
+        // Grips 0..3 are the vertices; grip 3 is the first segment's midpoint.
+        pick_up(&mut app, i, handle, 3, DVec3::new(5.0, 0.0, 0.0));
+
+        press_ctrl(&mut app);
+        assert_eq!(polyline(&app, i, handle).vertices.len(), 4);
+
+        press_ctrl(&mut app);
+        let arc = polyline(&app, i, handle);
+        assert_eq!(arc.vertices.len(), 3);
+        assert!(
+            arc.vertices[0].bulge.abs() > 1e-9,
+            "the segment is an arc while placing"
+        );
+
+        press_ctrl(&mut app);
+        let back = polyline(&app, i, handle);
+        assert_eq!(back.vertices.len(), 3);
+        assert_eq!(
+            back.vertices[0].bulge, 0.0,
+            "leaving the stage restores the line"
+        );
+    }
+
+    #[test]
+    fn escape_during_the_cycle_restores_the_polyline() {
+        let (mut app, i, handle) = app_with_polyline();
+        pick_up(&mut app, i, handle, 1, DVec3::new(10.0, 0.0, 0.0));
+        press_ctrl(&mut app);
+        assert!(app.cancel_active_grip_edit());
+        assert_eq!(polyline(&app, i, handle).vertices.len(), 3);
+        assert!(app.tabs[i].active_grip.is_none());
+        assert!(app.grip_ctrl_cycle.is_none());
+    }
+
+    #[test]
+    fn ctrl_leaves_other_grips_alone() {
+        use codec::entities::Line;
+        use codec::types::Vector3;
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        let handle = app.tabs[i].scene.add_entity(EntityType::Line(line));
+        app.tabs[i].scene.selected.insert(handle);
+        app.refresh_selected_grips();
+        pick_up(&mut app, i, handle, 0, DVec3::ZERO);
+        press_ctrl(&mut app);
+        assert!(app.grip_ctrl_cycle.is_none());
+        assert_eq!(
+            app.tabs[i].active_grip.as_ref().map(|grip| grip.grip_id),
+            Some(0)
+        );
     }
 }

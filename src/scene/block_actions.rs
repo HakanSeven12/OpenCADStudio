@@ -1298,6 +1298,7 @@ struct Evaluation<'a> {
     previous_values: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     requested: Option<&'a std::collections::BTreeSet<Handle>>,
     resolved_frames: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
+    resolved_active: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     frames: Option<&'a std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     managed_flip: Option<Handle>,
 }
@@ -1312,6 +1313,7 @@ pub(crate) fn evaluate_framed(
     base_changed: bool,
     previous_frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     resolved_frames: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    resolved_active: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     managed_flip: Option<Handle>,
 ) -> Result<bool, &'static str> {
     let bases = frames
@@ -1338,6 +1340,7 @@ pub(crate) fn evaluate_framed(
             previous_values: Some(&previous_values),
             base_changed,
             resolved_frames: Some(resolved_frames),
+            resolved_active: Some(resolved_active),
             frames: Some(frames),
             managed_flip,
             rebuild: false,
@@ -1387,6 +1390,7 @@ pub(crate) fn rebuild_framed(
             previous_values: previous.map(|p| p.values),
             requested: previous.map(|p| p.requested),
             resolved_frames: Some(&mut resolved_frames),
+            resolved_active: None,
             managed_flip: None,
         },
     )?;
@@ -1564,6 +1568,9 @@ fn evaluate_impl(
         evaluation.bases,
         &mut active_frames,
     )?;
+    if let Some(resolved) = evaluation.resolved_active.as_deref_mut() {
+        resolved.extend(active_frames.iter().map(|(handle, frame)| (*handle, *frame)));
+    }
     let base_for = |p: &Parameter| active_frames.get(&p.handle).map(|f| f.base)
         .or_else(|| evaluation.bases.and_then(|bases| bases.get(&p.handle)).copied()).unwrap_or(p.base);
     let baseline_members = authoring::members(baseline, definition)

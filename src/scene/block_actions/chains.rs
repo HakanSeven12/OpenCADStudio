@@ -211,6 +211,20 @@ impl<'a> Graph<'a> {
         self.nodes.contains_key(&handle)
     }
 
+    /// The frame driving an action can differ from its displayed frame when
+    /// an incoming parameter is not configured to chain its actions.
+    pub(super) fn active_frame(
+        &self,
+        handle: Handle,
+        effective: ParameterFrame,
+        autonomous: &BTreeMap<Handle, ParameterFrame>,
+    ) -> ParameterFrame {
+        match self.nodes.get(&handle) {
+            Some(node) if !node.chained => autonomous.get(&handle).copied().unwrap_or(effective),
+            _ => effective,
+        }
+    }
+
     pub(super) fn resolve(
         &self,
         previous: &Document,

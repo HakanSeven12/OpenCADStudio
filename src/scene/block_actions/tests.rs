@@ -3698,37 +3698,174 @@ fn flip_rejects_linked_relocated_grips_until_offsets_are_transported() {
 }
 
 #[test]
-fn flip_rejects_linked_frames_when_its_axis_has_an_incoming_move() {
+fn flip_uses_active_axis_after_incoming_moves_without_losing_linear_edits() {
     use super::super::block_orientation_parameter::Kind as O;
-    let (mut doc, def, targets) = fixture();
-    let child = linear(&mut doc, def);
-    let linked = create(&mut doc, def, Kind::Move, child, &[targets[0]], DVec3::ZERO).unwrap();
-    let flip = orientation(&mut doc, def, O::Flip);
-    let flip_action = create(&mut doc, def, Kind::Flip, flip, &[targets[0]], DVec3::ZERO).unwrap();
-    action_object_mut(&mut doc, flip_action)
-        .dependencies
-        .extend([child, linked]);
-    let parent = linear(&mut doc, def);
-    let move_axis = create(
-        &mut doc,
-        def,
-        Kind::Move,
-        parent,
-        &[targets[1]],
-        DVec3::ZERO,
-    )
-    .unwrap();
-    action_object_mut(&mut doc, move_axis).dependencies = vec![flip];
-    let insert = doc
-        .add_entity(EntityType::Insert(codec::entities::Insert::new(
-            "ACTIONS",
-            Vector3::ZERO,
-        )))
-        .unwrap();
-    let before = doc.clone();
-    assert_eq!(
-        instance::evaluate_value(&doc, insert, flip, Value::Flip(true)).unwrap_err(),
-        "This action targets another parameter or an unsupported native object."
-    );
-    assert_eq!(doc, before);
+    for testing in [false, true] {
+        for chained in [false, true] {
+            let (mut doc, def, targets) = fixture();
+            let child = distance::create(
+                &mut doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::new(0., 2., 0.),
+                Vector3::new(10., 2., 0.),
+                Vector3::new(5., 4., 0.),
+            )
+            .unwrap();
+            let linked =
+                create(&mut doc, def, Kind::Move, child, &[targets[1]], DVec3::ZERO).unwrap();
+            let flip = orientation(&mut doc, def, O::Flip);
+            let ObjectType::DynamicBlock(o) = doc.objects.get_mut(&flip).unwrap() else {
+                panic!()
+            };
+            let DynamicBlockData::FlipParameter(p) = &mut o.data else {
+                panic!()
+            };
+            p.parameter.parameter.chain_actions = chained;
+            let flip_action =
+                create(&mut doc, def, Kind::Flip, flip, &[targets[1]], DVec3::ZERO).unwrap();
+            action_object_mut(&mut doc, flip_action)
+                .dependencies
+                .extend([child, linked]);
+            let parent = distance::create(
+                &mut doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::new(0., 10., 0.),
+                Vector3::new(0., 20., 0.),
+                Vector3::UNIT_X,
+            )
+            .unwrap();
+            let move_axis = create(
+                &mut doc,
+                def,
+                Kind::Move,
+                parent,
+                &[targets[0]],
+                DVec3::ZERO,
+            )
+            .unwrap();
+            action_object_mut(&mut doc, move_axis).dependencies = vec![flip];
+            let first = doc
+                .add_entity(EntityType::Insert(codec::entities::Insert::new(
+                    "ACTIONS",
+                    Vector3::ZERO,
+                )))
+                .unwrap();
+            let other = doc
+                .add_entity(EntityType::Insert(codec::entities::Insert::new(
+                    "ACTIONS",
+                    Vector3::UNIT_X * 40.,
+                )))
+                .unwrap();
+            let child_p = all_parameters(&doc, def)
+                .into_iter()
+                .find(|p| p.handle == child)
+                .unwrap();
+            let flip_p = all_parameters(&doc, def)
+                .into_iter()
+                .find(|p| p.handle == flip)
+                .unwrap();
+            let baseline = doc.clone();
+            let eval = |d: &Document, parameter, input| {
+                if testing {
+                    instance::evaluate_test_value(d, &baseline, def, first, parameter, input)
+                } else {
+                    instance::evaluate_value(d, first, parameter, input)
+                }
+                .unwrap()
+                .unwrap()
+            };
+            doc = eval(&doc, parent, Value::Point(DVec3::new(0., 24., 0.)));
+            doc = eval(&doc, flip, Value::Flip(true));
+            let initial_y = if chained { 6. } else { -2. };
+            assert_eq!(
+                instance::frame(&doc, first, &flip_p).unwrap().base,
+                DVec3::Y * 4.
+            );
+            assert_eq!(
+                instance::frame(&doc, first, &child_p).unwrap().base,
+                DVec3::Y * initial_y
+            );
+            doc = eval(&doc, child, Value::Point(DVec3::new(15., initial_y, 0.)));
+            doc = eval(&doc, parent, Value::Point(DVec3::new(0., 26., 0.)));
+            let final_y = if chained { 10. } else { -2. };
+            let current = instance::frame(&doc, first, &child_p).unwrap();
+            assert_eq!(current.base, DVec3::Y * final_y);
+            assert_eq!(current.end, DVec3::new(15., final_y, 0.));
+            assert_eq!(
+                instance::frame(&doc, other, &child_p).unwrap(),
+                instance::ParameterFrame {
+                    base: child_p.base,
+                    end: child_p.end
+                }
+            );
+            let EntityType::Insert(reference) = doc.get_entity(first).unwrap() else {
+                panic!()
+            };
+            let circle = doc
+                .entities_in_block(&reference.block_name)
+                .find_map(|e| {
+                    if let EntityType::Circle(c) = e {
+                        Some(c)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            assert_eq!(
+                circle.center,
+                Vector3::new(9., if chained { 9. } else { -3. }, 0.)
+            );
+            for extension in ["dwg", "dxf"] {
+                let bytes = crate::io::save_to_bytes(&doc, extension, doc.version).unwrap();
+                let saved =
+                    crate::io::load_bytes(&format!("moving-flip.{extension}"), bytes).unwrap();
+                assert_eq!(instance::frame(&saved, first, &child_p).unwrap(), current);
+                let unflipped = eval(&saved, flip, Value::Flip(false));
+                let frame = instance::frame(&unflipped, first, &child_p).unwrap();
+                assert_eq!(frame.base, DVec3::new(0., 2., 0.));
+                assert_eq!(frame.end, DVec3::new(15., 2., 0.));
+                let EntityType::Insert(reference) = unflipped.get_entity(first).unwrap() else {
+                    panic!()
+                };
+                let circle = unflipped
+                    .entities_in_block(&reference.block_name)
+                    .find_map(|e| {
+                        if let EntityType::Circle(c) = e {
+                            Some(c)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                assert_eq!(circle.center, Vector3::new(9., 3., 0.));
+                let reset = if testing {
+                    instance::reset_test(&saved, &baseline, def, first)
+                } else {
+                    instance::reset(&saved, first)
+                }
+                .unwrap()
+                .unwrap();
+                assert_eq!(
+                    instance::frame(&reset, first, &child_p).unwrap(),
+                    instance::ParameterFrame {
+                        base: child_p.base,
+                        end: child_p.end
+                    }
+                );
+                assert_eq!(
+                    instance::frame(&reset, first, &flip_p).unwrap(),
+                    instance::ParameterFrame {
+                        base: flip_p.base,
+                        end: flip_p.end
+                    }
+                );
+                assert_eq!(
+                    instance::value(&reset, first, &flip_p).unwrap(),
+                    Value::Flip(false)
+                );
+            }
+        }
+    }
 }

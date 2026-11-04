@@ -110,10 +110,12 @@ impl Plan {
                     }
                 }
             }
-            // Interactions with the Move transport graph require a shared ordering model.
+            // A reflected Linear cannot itself drive a transported frame until
+            // both graphs share a single ordered composition.
             if *kind == Kind::Move
                 && linked.dependencies.iter().any(|target| {
-                    targets.contains(target) || *target == axis.handle || *target == axis.grip
+                    targets.contains(target)
+                        || (belongs && (*target == axis.handle || *target == axis.grip))
                 })
             {
                 return None;
@@ -133,10 +135,8 @@ impl Plan {
     pub fn reflect_frames(
         &self,
         frames: &mut BTreeMap<Handle, ParameterFrame>,
+        axis: ParameterFrame,
     ) -> Result<(), &'static str> {
-        let axis = *frames
-            .get(&self.axis)
-            .ok_or("The block parameter frame is unavailable.")?;
         if !axis.base.is_finite() || !axis.end.is_finite() || axis.base.distance(axis.end) < 1e-9 {
             return Err("The parameter direction is unavailable.");
         }
@@ -154,14 +154,11 @@ impl Plan {
         &self,
         parameter: Handle,
         input: Value,
-        frames: &BTreeMap<Handle, ParameterFrame>,
+        axis: ParameterFrame,
     ) -> Result<Value, &'static str> {
         if !self.targets.contains(&parameter) {
             return Ok(input);
         }
-        let axis = *frames
-            .get(&self.axis)
-            .ok_or("The block parameter frame is unavailable.")?;
         if !axis.base.is_finite() || !axis.end.is_finite() || axis.base.distance(axis.end) < 1e-9 {
             return Err("The parameter direction is unavailable.");
         }

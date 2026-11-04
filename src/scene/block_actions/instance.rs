@@ -517,6 +517,7 @@ fn canonical_flip_input(
     doc: &Document,
     staged: &mut Document,
     insert: Handle,
+    definition: Handle,
     parameters: &[Parameter],
     frames: &mut std::collections::BTreeMap<Handle, ParameterFrame>,
     parameter: Handle,
@@ -560,8 +561,13 @@ fn canonical_flip_input(
     if old != Value::Flip(true) {
         return Ok(input);
     }
-    let input = plan.reflect_input(parameter, input, frames)?;
-    plan.reflect_frames(frames)?;
+    let graph = super::chains::Graph::new(staged, definition)?;
+    let values = frames.iter().map(|(h, frame)| (*h, frame.end)).collect();
+    let bases = frames.iter().map(|(h, frame)| (*h, frame.base)).collect();
+    let autonomous = graph.autonomous(staged, Some(&values), Some(&bases))?;
+    let active_axis = graph.active_frame(axis.handle, axis_frame, &autonomous);
+    let input = plan.reflect_input(parameter, input, active_axis)?;
+    plan.reflect_frames(frames, active_axis)?;
     for handle in plan.targets() {
         let p = parameters
             .iter()
@@ -579,6 +585,7 @@ fn publish_flip_frames(
     selected: &Parameter,
     frames: &std::collections::BTreeMap<Handle, ParameterFrame>,
     resolved: &mut std::collections::BTreeMap<Handle, ParameterFrame>,
+    active: &std::collections::BTreeMap<Handle, ParameterFrame>,
 ) -> Result<(), &'static str> {
     let mut output = frames.clone();
     output.extend(resolved.iter().map(|(h, frame)| (*h, *frame)));
@@ -596,7 +603,12 @@ fn publish_flip_frames(
         .find(|p| p.handle == plan.axis())
         .ok_or("The block parameter frame is unavailable.")?;
     if super::value(staged, axis)? == Value::Flip(true) {
-        plan.reflect_frames(&mut output)?;
+        let axis_frame = active
+            .get(&axis.handle)
+            .or_else(|| output.get(&axis.handle))
+            .copied()
+            .ok_or("The block parameter frame is unavailable.")?;
+        plan.reflect_frames(&mut output, axis_frame)?;
     }
     for handle in plan.targets() {
         resolved.insert(handle, output[&handle]);
@@ -631,6 +643,7 @@ fn evaluate_input(
             doc,
             &mut evaluated,
             insert,
+            def,
             &parameters,
             &mut frames,
             parameter,
@@ -653,6 +666,7 @@ fn evaluate_input(
         input = Value::Point(requested.end);
     }
     let mut resolved_frames = std::collections::BTreeMap::new();
+    let mut resolved_active = std::collections::BTreeMap::new();
     if !super::evaluate_framed(
         &mut evaluated,
         doc,
@@ -663,6 +677,7 @@ fn evaluate_input(
         base_changed,
         &previous_frames,
         &mut resolved_frames,
+        &mut resolved_active,
         plan.as_ref().map(|p| p.action),
     )? {
         return Ok(None);
@@ -676,6 +691,7 @@ fn evaluate_input(
             selected,
             &frames,
             &mut resolved_frames,
+            &resolved_active,
         )?;
     }
     let mut result = materialize(doc, insert, def, &evaluated)?;
@@ -746,6 +762,7 @@ pub(crate) fn evaluate_test_value(
             doc,
             &mut staged,
             insert,
+            definition,
             &parameters,
             &mut frames,
             parameter,
@@ -773,6 +790,7 @@ pub(crate) fn evaluate_test_value(
         value => value,
     };
     let mut resolved_frames = std::collections::BTreeMap::new();
+    let mut resolved_active = std::collections::BTreeMap::new();
     if !super::evaluate_framed(
         &mut staged,
         baseline,
@@ -783,6 +801,7 @@ pub(crate) fn evaluate_test_value(
         base_changed,
         &previous_frames,
         &mut resolved_frames,
+        &mut resolved_active,
         plan.as_ref().map(|p| p.action),
     )? {
         return Ok(None);
@@ -796,6 +815,7 @@ pub(crate) fn evaluate_test_value(
             selected,
             &frames,
             &mut resolved_frames,
+            &resolved_active,
         )?;
     }
     save_resolved_frames(&mut staged, &parameters, insert, &resolved_frames)?;

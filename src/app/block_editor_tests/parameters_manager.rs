@@ -1308,6 +1308,10 @@ fn an_uneditable_graph_keeps_the_parameters_it_holds_listed() {
         "and it hangs off the definition's graph"
     );
     assert!(
+        manager::target_of(&app.tabs[tab].scene.document, definition, "Visibility1").is_some(),
+        "the placed parameter is addressable while the graph is sound"
+    );
+    assert!(
         duplicate_a_node(&mut app.tabs[tab].scene.document, graph),
         "the graph has a node to name twice"
     );
@@ -1324,5 +1328,41 @@ fn an_uneditable_graph_keeps_the_parameters_it_holds_listed() {
     assert!(
         names.iter().any(|name| name == "Visibility1"),
         "the parameter the definition still holds keeps its row: {names:?}"
+    );
+}
+
+/// The other half of the same rule: a definition's lookup row is read off its
+/// evaluation graph, so a graph that will not take an edit still has to keep that
+/// row listed. Listing it is not editing it — the row stays one nothing can be
+/// addressed through, which is what the refusal below says.
+#[test]
+fn an_uneditable_graph_keeps_the_lookup_it_holds_listed() {
+    let (mut app, tab, definition) = open(
+        &["BPARAMETER POLAR 0,0 10,0 5,2", "BPARAMETER LOOKUP 3,3"],
+        &[],
+    );
+    let graph = evaluation_graph(&app.tabs[tab].scene.document);
+    // Before the corruption, the lookup is addressable through the definition, so
+    // the refusal below is a refusal on this row and not a name that never matched.
+    assert!(
+        manager::target_of(&app.tabs[tab].scene.document, definition, "Lookup1").is_some(),
+        "the placed lookup is addressable while the graph is sound"
+    );
+    assert!(
+        duplicate_a_node(&mut app.tabs[tab].scene.document, graph),
+        "the graph has a node to name twice"
+    );
+    assert!(
+        manager::target_of(&app.tabs[tab].scene.document, definition, "Lookup1").is_none(),
+        "and the definition's graph really does refuse"
+    );
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    assert!(
+        rows.iter()
+            .any(|row| row.name == "Lookup1" && row.type_name == "Lookup"),
+        "the lookup the definition still holds keeps its row: {:?}",
+        rows.iter()
+            .map(|row| (row.name.as_str(), row.type_name))
+            .collect::<Vec<_>>()
     );
 }

@@ -19,16 +19,46 @@ impl Plan {
             .enumerate()
             .filter(|(_, (_, _, kind, _))| *kind == Kind::Flip)
             .collect();
-        if flips.len() != 1 {
+        let parameters = all_parameters(doc, definition);
+        let candidates: Vec<_> = flips
+            .iter()
+            .copied()
+            .filter(|(_, (_, record, _, id))| {
+                let own_grip = parameters
+                    .iter()
+                    .find(|p| p.id == *id && p.flip)
+                    .map(|p| p.grip);
+                record
+                    .dependencies
+                    .iter()
+                    .any(|h| doc.get_entity(*h).is_none() && Some(*h) != own_grip)
+            })
+            .collect();
+        if candidates.len() != 1 {
             return None;
         }
-        let (flip_graph_index, (action, record, _, id)) = flips[0];
+        let (flip_graph_index, (action, record, _, id)) = candidates[0];
         let order = chain_order(doc, definition, &all).ok()?;
         let flip_index = order.iter().position(|index| *index == flip_graph_index)?;
-        let parameters = all_parameters(doc, definition);
         let axis = parameters.iter().find(|p| p.id == *id && p.flip)?;
         if parameters.iter().filter(|p| p.id == axis.id).count() != 1 {
             return None;
+        }
+        // Independent geometry-only Flips need no frame conversion. Overlapping
+        // or nested selections still require ordered reflection composition.
+        for (_, (other, selection, _, owner)) in &flips {
+            if other == action {
+                continue;
+            }
+            let own_grip = parameters.iter().find(|p| p.id == *owner && p.flip)?.grip;
+            for handle in &selection.dependencies {
+                if *handle == own_grip {
+                    continue;
+                }
+                if doc.get_entity(*handle).is_none() || record.dependencies.contains(handle) {
+                    return None;
+                }
+            }
         }
         let mut targets = BTreeSet::new();
         let mut aliases = BTreeSet::new();

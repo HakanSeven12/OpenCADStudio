@@ -3869,3 +3869,120 @@ fn flip_uses_active_axis_after_incoming_moves_without_losing_linear_edits() {
         }
     }
 }
+
+#[test]
+fn linked_linear_flip_coexists_with_an_independent_geometry_flip() {
+    use crate::scene::block_orientation_parameter as orientation;
+    for testing in [false, true] {
+        let (mut doc, def, targets) = fixture();
+        let child = distance::create(
+            &mut doc,
+            def,
+            distance::Kind::Linear,
+            Vector3::new(0., 2., 0.),
+            Vector3::new(10., 2., 0.),
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let linked = create(&mut doc, def, Kind::Move, child, &[targets[1]], DVec3::ZERO).unwrap();
+        let flip = orientation(&mut doc, def, orientation::Kind::Flip);
+        let action = create(&mut doc, def, Kind::Flip, flip, &[targets[1]], DVec3::ZERO).unwrap();
+        action_object_mut(&mut doc, action)
+            .dependencies
+            .extend([child, linked]);
+        let independent = orientation::create(
+            &mut doc,
+            def,
+            orientation::Kind::Flip,
+            Vector3::ZERO,
+            Vector3::new(0., 10., 0.),
+            Vector3::UNIT_X,
+        )
+        .unwrap();
+        let independent_action = create(
+            &mut doc,
+            def,
+            Kind::Flip,
+            independent,
+            &[targets[0]],
+            DVec3::ZERO,
+        )
+        .unwrap();
+        let insert = doc
+            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+                "ACTIONS",
+                Vector3::ZERO,
+            )))
+            .unwrap();
+        let p = all_parameters(&doc, def)
+            .into_iter()
+            .find(|p| p.handle == child)
+            .unwrap();
+        let baseline = doc.clone();
+        let mut overlapping = doc.clone();
+        action_object_mut(&mut overlapping, independent_action).dependencies = vec![targets[1]];
+        let before = overlapping.clone();
+        assert!(instance::evaluate_value(&overlapping, insert, flip, Value::Flip(true)).is_err());
+        assert_eq!(overlapping, before);
+
+        let eval = |d: &Document, parameter, input| {
+            if testing {
+                instance::evaluate_test_value(d, &baseline, def, insert, parameter, input)
+            } else {
+                instance::evaluate_value(d, insert, parameter, input)
+            }
+            .unwrap()
+            .unwrap()
+        };
+        for reverse in [false, true] {
+            let mut changed = baseline.clone();
+            for handle in if reverse {
+                [independent, flip]
+            } else {
+                [flip, independent]
+            } {
+                changed = eval(&changed, handle, Value::Flip(true));
+            }
+            changed = eval(&changed, child, Value::Point(DVec3::new(15., -2., 0.)));
+            assert_eq!(
+                instance::frame(&changed, insert, &p).unwrap().end,
+                DVec3::new(15., -2., 0.)
+            );
+            for extension in ["dwg", "dxf"] {
+                let bytes = crate::io::save_to_bytes(&changed, extension, changed.version).unwrap();
+                let saved = crate::io::load_bytes(&format!("independent-flips.{extension}"), bytes)
+                    .unwrap();
+                let unflipped = eval(&saved, flip, Value::Flip(false));
+                assert_eq!(
+                    instance::frame(&unflipped, insert, &p).unwrap().end,
+                    DVec3::new(15., 2., 0.)
+                );
+                let EntityType::Insert(reference) = unflipped.get_entity(insert).unwrap() else {
+                    panic!()
+                };
+                let line = unflipped
+                    .entities_in_block(&reference.block_name)
+                    .find_map(|e| {
+                        if let EntityType::Line(l) = e {
+                            Some(l)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                assert_eq!(line.start, -Vector3::UNIT_X);
+                let circle = unflipped
+                    .entities_in_block(&reference.block_name)
+                    .find_map(|e| {
+                        if let EntityType::Circle(c) = e {
+                            Some(c)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                assert_eq!(circle.center, Vector3::new(9., 3., 0.));
+            }
+        }
+    }
+}

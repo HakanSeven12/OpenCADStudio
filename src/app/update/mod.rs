@@ -189,6 +189,14 @@ impl OpenCADStudio {
     pub(in crate::app) fn close_active_modal(&mut self) {
         self.mark_startup_modal_shown();
         use super::ModalKind::*;
+        if self.active_modal == Some(IfccadAlphaWarning) {
+            self.pending_ifccad_alpha_save = None;
+            self.pending_conversion_save = None;
+            self.conversion_losses.clear();
+            self.conversion_loss_allowed = false;
+            self.pending_close = None;
+            self.save_dialog_for_unsaved = false;
+        }
         if self.active_modal == Some(BlockEditorSettings) {
             self.block_editor_settings = None;
         }
@@ -12848,6 +12856,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::ConversionLossProceed => self.on_conversion_loss_proceed(),
+            Message::IfccadAlphaProceed => self.on_ifccad_alpha_proceed(),
             Message::ConversionLossBack => {
                 self.active_modal = None;
                 self.pending_conversion_save = None;

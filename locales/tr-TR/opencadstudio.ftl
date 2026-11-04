@@ -8509,3 +8509,12 @@ tool-windows =
     .detach = Kendi penceresinde aç
     .back = Ana pencereye geri al
     .command-history = Komut Geçmişi
+
+ifccad-ui =
+    .alpha-title = IFCCAD alpha — save warning
+    .alpha-note = Alpha — file format under development.
+    .alpha-body =
+        IFCCAD is an alpha file format in active development. A file saved today may not open in a later OCS version. Backward compatibility and migration are not guaranteed.
+
+        Use IFCCAD for testing and evaluation. Keep the original drawing and a separate DWG/DXF copy; do not use it as your only copy or for long-term archiving.
+    .conversion-title = Conversion messages for this save

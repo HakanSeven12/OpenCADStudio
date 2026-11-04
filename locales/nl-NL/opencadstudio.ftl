@@ -8588,3 +8588,12 @@ tool-windows =
     .detach = Open in its own window
     .back = Back to the main window
     .command-history = Command History
+
+ifccad-ui =
+    .alpha-title = IFCCAD alpha — opslagwaarschuwing
+    .alpha-note = Alpha — bestandsformaat in ontwikkeling.
+    .alpha-body =
+        IFCCAD is een alphaformaat in actieve ontwikkeling. Een bestand dat u vandaag opslaat, kan in een latere OCS-versie mogelijk niet meer worden geopend. Achterwaartse compatibiliteit en migratie zijn niet gegarandeerd.
+
+        Gebruik IFCCAD voor testen en beoordeling. Bewaar de oorspronkelijke tekening en een aparte DWG/DXF-kopie; gebruik IFCCAD niet als enige kopie of voor langdurige archivering.
+    .conversion-title = Conversiemeldingen bij deze opslag

@@ -45,7 +45,7 @@ impl OpenCADStudio {
             .and_then(|path| path.extension())
             .and_then(|ext| ocs_save::external_format(&ext.to_string_lossy()));
         self.save_dialog_format = if let Some(converter) = converter {
-            converter.name().to_string()
+            ocs_save::external_format_label(converter).to_string()
         } else if let Some(path) = &self.tabs[tab_idx].current_path {
             let document = &self.tabs[tab_idx].scene.document;
             let is_dxf = crate::io::source_is_dxf(Some(path), document);

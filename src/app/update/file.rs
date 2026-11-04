@@ -2294,6 +2294,7 @@ impl OpenCADStudio {
         self.install_native_edit_guard(i, &path, opened_fingerprint);
         self.tabs[i].scene.material_base_dir = path.parent().map(std::path::Path::to_path_buf);
         self.tabs[i].scene.document = doc;
+        self.tabs[i].ifccad_alpha_acknowledged = false;
         // A walk belongs to the drawing it was opened on. Loading a document
         // into this tab ends any walk it still held, so the new drawing can
         // never render under the previous one's hide.
@@ -2731,6 +2732,16 @@ impl OpenCADStudio {
     /// writer ran.
     #[cfg(target_arch = "wasm32")]
     pub(in crate::app) fn saveall_web(&mut self) -> Task<Message> {
+        // Collect per-document alpha consent before capturing or writing any batch output.
+        if let Some(tab_id) = self.tabs.iter().enumerate().find_map(|(i, tab)| {
+            let ext = tab.current_path.as_ref()?.extension()?.to_str()?;
+            (tab.dirty && !tab.is_start && tab.block_test.is_none()
+                && self.needs_ifccad_alpha_consent(i, ext)).then_some(tab.id)
+        }) {
+            self.pending_ifccad_alpha_save = Some(crate::app::PendingConversionSave::WebSaveAll { tab_id });
+            self.active_modal = Some(crate::app::ModalKind::IfccadAlphaWarning);
+            return Task::none();
+        }
         let mut skipped = 0usize;
         let mut pending: Vec<(crate::app::WebSaveallEntry, codec::Document)> = Vec::new();
         for t in 0..self.tabs.len() {
@@ -3421,6 +3432,17 @@ impl OpenCADStudio {
                 let pending = crate::app::PendingConversionSave::Native(save);
                 return self.ask_conversion_loss(losses, pending);
             }
+        }
+        if purpose != crate::app::SavePurpose::Autosave
+            && self.needs_ifccad_alpha_consent(i, path.extension().and_then(|e| e.to_str()).unwrap_or(""))
+        {
+            let save = crate::app::PendingNativeThumbnailSave {
+                tab_id: self.tabs[i].id, path, version, purpose, continuation,
+                set_current_path, check_external_change, allow_conversion_loss,
+            };
+            self.pending_ifccad_alpha_save = Some(crate::app::PendingConversionSave::Native(save));
+            self.active_modal = Some(crate::app::ModalKind::IfccadAlphaWarning);
+            return Task::none();
         }
         let tab_id = self.tabs[i].id;
         if self
@@ -4250,7 +4272,7 @@ impl OpenCADStudio {
         let path = self.tabs[tab_idx].current_path.as_deref()?;
         let ext = path.extension()?.to_str()?;
         if let Some(converter) = ocs_save::external_format(ext) {
-            return Some(converter.name().to_string());
+            return Some(ocs_save::external_format_label(converter).to_string());
         }
         let is_dxf = ext.eq_ignore_ascii_case("dxf");
         (is_dxf || ext.eq_ignore_ascii_case("dwg")).then(|| {
@@ -4304,7 +4326,7 @@ impl OpenCADStudio {
             let (filter_label, filter_ext): (&str, &str) = if let Some(converter) =
                 ocs_save::external_format(ext)
             {
-                (converter.name(), ext)
+                (ocs_save::external_format_label(converter), ext)
             } else if ext.eq_ignore_ascii_case("dxf") {
                 ("DXF Files", "dxf")
             } else if ext.eq_ignore_ascii_case("dwt") {
@@ -4426,6 +4448,15 @@ impl OpenCADStudio {
                     version,
                 };
                 return self.ask_conversion_loss(losses, save);
+            }
+        }
+        if let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) {
+            if self.needs_ifccad_alpha_consent(i, &ext) {
+                self.pending_ifccad_alpha_save = Some(crate::app::PendingConversionSave::Web {
+                    tab_id, filename, ext, version,
+                });
+                self.active_modal = Some(crate::app::ModalKind::IfccadAlphaWarning);
+                return Task::none();
             }
         }
         // The save is now committed to this tab and this format: mark it
@@ -4612,8 +4643,14 @@ impl OpenCADStudio {
         pending: crate::app::PendingConversionSave,
     ) -> Task<Message> {
         self.conversion_losses = losses;
+        let ifccad = pending.format_name() == "IFCCAD"
+            && (cfg!(target_arch = "wasm32") || self.main_window.is_some());
         self.pending_conversion_save = Some(pending);
-        self.active_modal = Some(crate::app::ModalKind::ConversionLoss);
+        self.active_modal = Some(if ifccad {
+            crate::app::ModalKind::IfccadAlphaWarning
+        } else {
+            crate::app::ModalKind::ConversionLoss
+        });
         Task::none()
     }
 
@@ -4626,7 +4663,50 @@ impl OpenCADStudio {
             return Task::none();
         };
         self.conversion_loss_allowed = true;
+        self.resume_format_save(pending)
+    }
+
+    fn needs_ifccad_alpha_consent(&self, i: usize, ext: &str) -> bool {
+        (cfg!(target_arch = "wasm32") || self.main_window.is_some())
+            && ext.eq_ignore_ascii_case("ifcx")
+            && !self.tabs[i].ifccad_alpha_acknowledged
+    }
+
+    pub(super) fn on_ifccad_alpha_proceed(&mut self) -> Task<Message> {
+        self.active_modal = None;
+        let accepted_losses = self.pending_conversion_save.is_some();
+        let pending = self.pending_ifccad_alpha_save.take()
+            .or_else(|| self.pending_conversion_save.take());
+        let Some(pending) = pending else {
+            return Task::none();
+        };
+        self.conversion_losses.clear();
+        let tab_id = match &pending {
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::app::PendingConversionSave::Native(save) => save.tab_id,
+            #[cfg(target_arch = "wasm32")]
+            crate::app::PendingConversionSave::Web { tab_id, .. }
+            | crate::app::PendingConversionSave::WebSaveAll { tab_id } => *tab_id,
+        };
+        let Some(i) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            self.conversion_loss_allowed = false;
+            return Task::none();
+        };
+        self.tabs[i].ifccad_alpha_acknowledged = true;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let crate::app::PendingConversionSave::Native(save) = &pending;
+            self.conversion_loss_allowed = accepted_losses || save.allow_conversion_loss;
+        }
+        #[cfg(target_arch = "wasm32")]
+        if accepted_losses { self.conversion_loss_allowed = true; }
+        self.resume_format_save(pending)
+    }
+
+    fn resume_format_save(&mut self, pending: crate::app::PendingConversionSave) -> Task<Message> {
         match pending {
+            #[cfg(target_arch = "wasm32")]
+            crate::app::PendingConversionSave::WebSaveAll { .. } => self.saveall_web(),
             #[cfg(not(target_arch = "wasm32"))]
             crate::app::PendingConversionSave::Native(save) => {
                 let Some(i) = self.tabs.iter().position(|tab| tab.id == save.tab_id) else {

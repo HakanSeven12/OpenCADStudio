@@ -2353,7 +2353,7 @@ mod tests {
             &mut app,
             json!({"op":"save","path":path,"overwrite":true,"allow_lossy":true}),
         );
-        let asked = app.active_modal == Some(crate::app::ModalKind::ConversionLoss);
+        let asked = app.active_modal == Some(crate::app::ModalKind::IfccadAlphaWarning);
         let _ = std::fs::remove_file(&path);
         assert!(asked, "converter target must still ask");
     }

@@ -1604,6 +1604,7 @@ pub(super) struct OpenCADStudio {
     conversion_losses: Vec<String>,
     /// The save held back while that modal asks.
     pending_conversion_save: Option<PendingConversionSave>,
+    pending_ifccad_alpha_save: Option<PendingConversionSave>,
     /// Set by "Save anyway" for the save it releases; that save takes it.
     conversion_loss_allowed: bool,
     /// Layers awaiting a "delete non-empty layer(s)" confirmation: `(names,
@@ -2272,6 +2273,8 @@ pub(super) struct PendingNativeThumbnailSave {
 /// A save waiting on the conversion-loss modal; "Save anyway" replays it.
 #[derive(Debug, Clone)]
 pub(super) enum PendingConversionSave {
+    #[cfg(target_arch = "wasm32")]
+    WebSaveAll { tab_id: u64 },
     #[cfg(not(target_arch = "wasm32"))]
     Native(PendingNativeThumbnailSave),
     #[cfg(target_arch = "wasm32")]
@@ -2287,6 +2290,8 @@ impl PendingConversionSave {
     /// The name of the converter the held-back save writes with.
     pub(super) fn format_name(&self) -> String {
         let (ext, version) = match self {
+            #[cfg(target_arch = "wasm32")]
+            Self::WebSaveAll { .. } => ("ifcx".to_string(), codec::DxfVersion::AC1032),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Native(save) => (
                 save.path
@@ -2300,7 +2305,7 @@ impl PendingConversionSave {
         };
         // A DWG/DXF loss depends on the target version, so name it too.
         ocs_save::external_format(&ext)
-            .map(|format| format.name().to_string())
+            .map(|format| ocs_save::external_format_label(format).to_string())
             .unwrap_or_else(|| {
                 crate::io::format_for_version(version, ext.eq_ignore_ascii_case("dxf"))
             })
@@ -3118,6 +3123,7 @@ pub enum ModalKind {
     AecDropWarning,
     /// A converter would drop part of the drawing on save.
     ConversionLoss,
+    IfccadAlphaWarning,
     #[cfg(not(target_arch = "wasm32"))]
     FileInUse,
     #[cfg(not(target_arch = "wasm32"))]
@@ -3891,6 +3897,7 @@ pub enum Message {
     AecDropBack,
     /// Save with the converter anyway, accepting the listed losses.
     ConversionLossProceed,
+    IfccadAlphaProceed,
     /// Drop the held-back save from the conversion-loss warning.
     ConversionLossBack,
     /// Periodic autosave tick — write `.sv$` recovery files for dirty tabs.
@@ -6224,6 +6231,7 @@ impl OpenCADStudio {
             aec_drop_count: 0,
             conversion_losses: Vec::new(),
             pending_conversion_save: None,
+            pending_ifccad_alpha_save: None,
             conversion_loss_allowed: false,
             layer_delete_pending: None,
             modal_offset: iced::Vector::ZERO,

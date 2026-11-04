@@ -1159,7 +1159,9 @@ fn rebuild_polyline3d_fit(pl: &mut Polyline3D) -> bool {
     true
 }
 
-fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
+/// `frame` (SPLFRAME on) also draws a spline-fit polyline's frame, from the
+/// first frame vertex through every one to the last.
+fn tessellate_polyline3d(pl: &Polyline3D, frame: bool) -> RenderEntity {
     let to_pt = |v: &codec::entities::Vertex3DPolyline| -> [f64; 3] {
         [v.position.x, v.position.y, v.position.z]
     };
@@ -1193,6 +1195,13 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
     if pl.is_closed() && wire_pts.len() >= 2 {
         points.push(wire_pts[0]);
     }
+    if frame && !spline_curve.is_empty() && key_verts.len() >= 2 {
+        points.push([f64::NAN; 3]);
+        points.extend(key_verts.iter().copied());
+        if pl.is_closed() {
+            points.push(key_verts[0]);
+        }
+    }
 
     RenderEntity {
         pick_tris: Vec::new(),
@@ -1205,8 +1214,8 @@ fn tessellate_polyline3d(pl: &Polyline3D) -> RenderEntity {
 }
 
 impl RenderConvertible for Polyline3D {
-    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
-        Some(tessellate_polyline3d(self))
+    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+        Some(tessellate_polyline3d(self, document.header.spline_frame))
     }
 }
 

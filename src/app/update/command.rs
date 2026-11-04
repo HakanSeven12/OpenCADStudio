@@ -219,6 +219,9 @@ impl OpenCADStudio {
         // editor holds a document-local handle into one tab, so drop it
         // now rather than risk it applying to a different tab's document.
         self.cancel_attr_editor();
+        // The Block Properties Table list names an insert of the tab being
+        // closed, so it goes with that tab.
+        self.table_popup = None;
         // The insertion attribute form parks a placement on the tab it belongs
         // to, so a closed tab has to take the form — and the placement — with it.
         if self.active_modal == Some(crate::app::ModalKind::InsertAttributes) {

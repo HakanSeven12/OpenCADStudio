@@ -3496,6 +3496,9 @@ impl OpenCADStudio {
                         // app-global panels, so leaving it open would let a
                         // pick re-target the outgoing drawing's handles).
                         self.close_quad();
+                        // The Block Properties Table list is tab-scoped for the
+                        // same reason: it names an insert of the outgoing drawing.
+                        self.table_popup = None;
                         // Persist the outgoing drawing's Ortho / running OSNAP
                         // before leaving it, so switching back restores them.
                         let prev = self.active_tab;

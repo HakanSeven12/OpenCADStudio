@@ -5562,7 +5562,7 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                     if grip_id == crate::app::visibility::TABLE_GRIP_ID {
-                        self.open_table_popup(p);
+                        self.open_table_popup();
                         self.grip_hover = None;
                         self.grip_popup = None;
                         return Task::none();

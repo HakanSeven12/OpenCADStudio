@@ -3414,7 +3414,26 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 // entity_grips_for errs only for a missing tab/entity; inside
                 // the selection walk the entity exists, so a defensive empty
                 // keeps the cache build total.
+                // A polyline picked by segment shows only those segments'
+                // vertex and mid grips (vertex `k` is grip `k`, the mid grip
+                // of segment `k` is `n + k`).
+                let segment_grips: Option<rustc_hash::FxHashSet<usize>> =
+                    match (entity, self.tabs[i].scene.picked_segments(handle)) {
+                        (codec::EntityType::LwPolyline(polyline), Some(segments)) => {
+                            let n = polyline.vertices.len().max(1);
+                            Some(
+                                segments
+                                    .iter()
+                                    .flat_map(|&k| [k, (k + 1) % n, n + k])
+                                    .collect(),
+                            )
+                        }
+                        _ => None,
+                    };
                 for grip in self.entity_grips_for(i, handle).unwrap_or_default() {
+                    if segment_grips.as_ref().is_some_and(|ids| !ids.contains(&grip.id)) {
+                        continue;
+                    }
                     handles.push(handle);
                     grips.push(grip);
                 }

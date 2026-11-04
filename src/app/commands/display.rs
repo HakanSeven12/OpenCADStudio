@@ -1014,6 +1014,38 @@ impl OpenCADStudio {
             "EXPORT" => {
                 return Some(Task::done(Message::PlotExport));
             }
+            cmd if cmd.starts_with("EXPORTPDF ") || cmd.starts_with("EXPORT ") => {
+                let rest = cmd.split_once(' ').map(|(_, rest)| rest.trim()).unwrap_or("");
+                let (path_text, all_layouts) = match rest.rsplit_once(char::is_whitespace) {
+                    Some((head, tail)) if tail.eq_ignore_ascii_case("ALL") => {
+                        (head.trim(), true)
+                    }
+                    _ => (rest, false),
+                };
+                let path_text = path_text.trim().trim_matches('"');
+                if path_text.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("Usage: EXPORTPDF <file.pdf> [ALL]").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let path = std::path::PathBuf::from(path_text);
+                match self.export_pdf_direct(&path, all_layouts) {
+                    Ok((pages, bytes, (width, height))) => {
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "Exported: {}  {pages} page(s), {bytes} bytes, {width:.1}×{height:.1} mm",
+                                path.display()
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    Err(error) => {
+                        self.command_line.push_error(&error);
+                    }
+                }
+                return Some(Task::none());
+            }
             "EXPORTPDF" => {
                 self.plot_dialog.file_svg = false;
                 return Some(Task::done(Message::PlotExport));

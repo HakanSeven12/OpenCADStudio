@@ -3743,3 +3743,98 @@ mod mission_m051_tests {
         assert!(all_output(&app).contains("removed 1 mask"));
     }
 }
+
+#[cfg(test)]
+mod mission_m062_tests {
+    use super::super::*;
+    use codec::entities::Line;
+    use codec::types::Vector3;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn temp_pdf(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ocs_m062_{tag}_{unique}.pdf"))
+    }
+
+    #[test]
+    fn exporting_the_current_layout_writes_a_real_pdf_and_reports_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(100.0, 100.0, 0.0),
+            )));
+        let path = temp_pdf("current");
+
+        let _ = app.run_command_line(&format!("EXPORTPDF {}", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("Exported:"), "{output}");
+        assert!(output.contains("1 page(s)"), "{output}");
+        assert!(output.contains("mm"), "{output}");
+        let bytes = std::fs::read(&path).expect("the command must create the file");
+        assert!(bytes.len() > 100, "a real PDF, not a stub: {output}");
+        assert!(
+            bytes.starts_with(b"%PDF"),
+            "the file must carry a PDF header"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn exporting_all_layouts_reports_the_page_count() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(50.0, 25.0, 0.0),
+            )));
+        app.tabs[i].scene.add_layout("Sheet1").unwrap();
+        app.tabs[i].scene.initialize_layout_page_setup("Sheet1");
+        app.tabs[i].scene.add_layout_default_viewport("Sheet1");
+        let expected_pages = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .filter(|name| name != "Model")
+            .count();
+        let path = temp_pdf("all");
+
+        let _ = app.run_command_line(&format!("EXPORTPDF {} ALL", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("Exported:"), "{output}");
+        assert!(
+            output.contains(&format!("{expected_pages} page(s)")),
+            "expected {expected_pages} paper layouts: {output}"
+        );
+        let bytes = std::fs::read(&path).expect("the command must create the file");
+        assert!(bytes.starts_with(b"%PDF"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_missing_output_path_is_refused_with_usage_text() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("EXPORTPDF ");
+        assert!(all_output(&app).contains("Usage: EXPORTPDF"));
+    }
+}

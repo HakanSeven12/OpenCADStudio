@@ -5484,29 +5484,83 @@ impl OpenCADStudio {
         );
     }
 
+    /// Refresh the paper/scale context from the active layout without
+    /// disturbing the device the user plotted with. Shared by the dialog's
+    /// export continuation and the direct `EXPORTPDF <path>` form.
+    fn refresh_current_plot_context(&mut self) {
+        let i = self.active_tab;
+        if self.tabs[i].scene.current_layout == "Model" {
+            return;
+        }
+        self.plot_dialog.paper_space = true;
+        self.plot_dialog.scales = self.tabs[i]
+            .scene
+            .scale_list()
+            .into_iter()
+            .map(|(name, _, factor)| (name, factor))
+            .collect();
+        let kept_printer = self.plot_dialog.printer.clone();
+        let kept_to_file = self.plot_dialog.to_file;
+        if let Some(settings) = self.tabs[i].scene.effective_plot_settings() {
+            self.load_plotsettings_into_dialog(&settings);
+        }
+        self.plot_dialog.printer = kept_printer;
+        self.plot_dialog.to_file = kept_to_file;
+    }
+
+    /// Write `path` through the same page pipeline the plot dialog uses, with
+    /// no dialog and no background task, so a script gets the file before the
+    /// command returns. `all_layouts` exports every paper layout instead of
+    /// only the current one.
+    ///
+    /// Returns the page count, byte size and the first page's sheet size in
+    /// millimetres.
+    pub(in crate::app) fn export_pdf_direct(
+        &mut self,
+        path: &std::path::Path,
+        all_layouts: bool,
+    ) -> Result<(usize, u64, (f64, f64)), String> {
+        self.stamp_plot_fields();
+        let pages = if all_layouts {
+            let i = self.active_tab;
+            let saved = std::mem::take(&mut self.print_all_layouts);
+            self.print_all_layouts = self.tabs[i]
+                .scene
+                .layout_names()
+                .into_iter()
+                .filter(|name| name != "Model")
+                .map(|name| (name, true))
+                .collect();
+            let result = self.print_all_pages();
+            self.print_all_layouts = saved;
+            let pages = result?;
+            if pages.is_empty() {
+                return Err(
+                    crate::t!("Nothing to plot: the drawing has no paper layouts.").into_owned(),
+                );
+            }
+            pages
+        } else {
+            self.refresh_current_plot_context();
+            vec![self.direct_plot_page().ok_or_else(|| {
+                crate::t!("Nothing to plot: model space contains no printable geometry.").into_owned()
+            })?]
+        };
+        let style = self.dialog_plot_style(&self.plot_dialog);
+        crate::io::pdf_export::export_pdf_pages(&pages, path, style.as_ref())?;
+        let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        let sheet = pages
+            .first()
+            .map(|page| (page.paper_w, page.paper_h))
+            .unwrap_or((0.0, 0.0));
+        Ok((pages.len(), bytes, sheet))
+    }
+
     pub(in crate::app) fn on_plot_export_path_some(
         &mut self,
         path: std::path::PathBuf,
     ) -> Task<Message> {
-        let i = self.active_tab;
-        if self.tabs[i].scene.current_layout != "Model" {
-            self.plot_dialog.paper_space = true;
-            self.plot_dialog.scales = self.tabs[i]
-                .scene
-                .scale_list()
-                .into_iter()
-                .map(|(name, _, factor)| (name, factor))
-                .collect();
-            // This load only refreshes paper/scale context from the layout;
-            // the device the user just plotted with must survive it.
-            let kept_printer = self.plot_dialog.printer.clone();
-            let kept_to_file = self.plot_dialog.to_file;
-            if let Some(settings) = self.tabs[i].scene.effective_plot_settings() {
-                self.load_plotsettings_into_dialog(&settings);
-            }
-            self.plot_dialog.printer = kept_printer;
-            self.plot_dialog.to_file = kept_to_file;
-        }
+        self.refresh_current_plot_context();
         let Some(page) = self.direct_plot_page() else {
             self.command_line.push_error(
                 crate::t!("Nothing to plot: model space contains no printable geometry.").as_ref(),

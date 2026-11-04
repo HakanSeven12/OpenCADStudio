@@ -372,3 +372,77 @@ fn loops_flagged_not_closed_stay_out_of_the_extents() {
     let (_, max) = scene.model_space_extents().unwrap();
     assert!(max.x < 10.5 && max.y < 10.5, "{max:?}");
 }
+
+// The island style picks loops by their path flags: Outer keeps loops flagged
+// external (bit 0) or outermost (bit 4), Ignore only those flagged external,
+// Normal all of them. The kept loops fill even-odd. Squares of 40, 24 and 10
+// (two loops: 40 and 20), each centred in the one before.
+#[test]
+fn island_style_keeps_loops_by_their_flags() {
+    use codec::entities::HatchStyleType::{Ignore, Normal, Outer};
+    let square = |half: f64, flags: u32| {
+        let mut path = rectangle(
+            [20.0 - half, 20.0 - half],
+            [20.0 + half, 20.0 + half],
+            [0.0; 2],
+        );
+        path.flags = BoundaryPathFlags::from_bits(flags);
+        path
+    };
+    let two = |f0, f1| vec![square(20.0, f0), square(10.0, f1)];
+    let three = |f0, f1, f2| vec![square(20.0, f0), square(12.0, f1), square(5.0, f2)];
+    let area = |style, paths: Vec<BoundaryPath>| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        hatch.style = style;
+        hatch.paths = paths;
+        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
+    };
+    let cases = [
+        // A letter's counter stored as an external loop is a hole.
+        ("ignore 1 1", area(Ignore, two(1, 1)), 1200.0),
+        ("ignore 1 0", area(Ignore, two(1, 0)), 1600.0),
+        ("ignore 1 1 1", area(Ignore, three(1, 1, 1)), 1124.0),
+        ("ignore 1 1 0", area(Ignore, three(1, 1, 0)), 1024.0),
+        ("ignore 1 16 0", area(Ignore, three(1, 16, 0)), 1600.0),
+        ("ignore 0 1", area(Ignore, two(0, 1)), 400.0),
+        ("outer 1 0 0", area(Outer, three(1, 0, 0)), 1600.0),
+        ("outer 1 1 1", area(Outer, three(1, 1, 1)), 1124.0),
+        ("outer 1 16 0", area(Outer, three(1, 16, 0)), 1024.0),
+        ("outer 17 16 0", area(Outer, three(17, 16, 0)), 1024.0),
+        ("outer 1 0 1", area(Outer, three(1, 0, 1)), 1500.0),
+        ("normal 1 0 0", area(Normal, three(1, 0, 0)), 1124.0),
+        ("normal 0 0", area(Normal, two(0, 0)), 1200.0),
+    ];
+    for (name, area, expected) in cases {
+        assert!(
+            (area - expected).abs() < 1e-3,
+            "{name}: {area}, expected {expected}"
+        );
+    }
+}
+
+// With no loop flagged the way the style needs, nesting depth picks the loops
+// as before: Ignore the outermost, Outer the outermost and the next.
+#[test]
+fn island_style_without_flags_falls_back_to_nesting_depth() {
+    use codec::entities::HatchStyleType::{Ignore, Outer};
+    let square = |half: f64| {
+        rectangle(
+            [20.0 - half, 20.0 - half],
+            [20.0 + half, 20.0 + half],
+            [0.0; 2],
+        )
+    };
+    let area = |style, paths: Vec<BoundaryPath>| {
+        let mut hatch = Hatch::new();
+        hatch.is_solid = true;
+        hatch.style = style;
+        hatch.paths = paths;
+        Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
+    };
+    let ignore = area(Ignore, vec![square(20.0), square(10.0)]);
+    let outer = area(Outer, vec![square(20.0), square(12.0), square(5.0)]);
+    assert!((ignore - 1600.0).abs() < 1e-3, "{ignore}");
+    assert!((outer - 1024.0).abs() < 1e-3, "{outer}");
+}

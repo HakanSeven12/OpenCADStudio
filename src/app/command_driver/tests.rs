@@ -5024,3 +5024,144 @@ mod mission_m078_tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+#[cfg(test)]
+mod mission_m100_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn add_mleader(app: &mut OpenCADStudio) -> codec::Handle {
+        let i = app.active_tab;
+        let mut leader = codec::entities::MultiLeader::with_text(
+            "office note",
+            codec::types::Vector3::new(20.0, 0.0, 0.0),
+            vec![
+                codec::types::Vector3::ZERO,
+                codec::types::Vector3::new(5.0, 5.0, 0.0),
+            ],
+        );
+        leader.text_height = 0.18;
+        leader.context.text_height = 0.18;
+        app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::MultiLeader(Box::new(leader)))
+    }
+
+    fn style(app: &OpenCADStudio, name: &str) -> codec::objects::MultiLeaderStyle {
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                codec::objects::ObjectType::MultiLeaderStyle(style)
+                    if style.name.eq_ignore_ascii_case(name) =>
+                {
+                    Some(style.clone())
+                }
+                _ => None,
+            })
+            .expect("style")
+    }
+
+    fn leader(app: &OpenCADStudio, handle: codec::Handle) -> codec::entities::MultiLeader {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(codec::EntityType::MultiLeader(leader)) => (**leader).clone(),
+            _ => panic!("multileader missing"),
+        }
+    }
+
+    #[test]
+    fn a_style_with_a_closed_arrow_and_its_text_height_can_be_applied() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+
+        let _ = app.run_command_line("MLEADERSTYLE NEW NOTE-2.5 TEXT 2.5 ARROW CLOSED");
+        let output = all_output(&app);
+        assert!(output.contains("'NOTE-2.5' created with"), "{output}");
+        let created = style(&app, "NOTE-2.5");
+        assert_eq!(created.text_height, 2.5);
+        let arrow = created.arrowhead_handle.expect("closed arrow block");
+        let arrow_name = app.tabs[app.active_tab]
+            .scene
+            .document
+            .block_records
+            .iter()
+            .find(|record| record.handle == arrow)
+            .map(|record| record.name.clone());
+        assert_eq!(arrow_name.as_deref(), Some("_Closed"));
+
+        let handle = add_mleader(&mut app);
+        let _ = app.run_command_line("MLEADERSTYLE APPLY NOTE-2.5 ALL");
+        let output = all_output(&app);
+        assert!(output.contains("applied 'NOTE-2.5' to 1 multileader(s)"), "{output}");
+
+        let styled = leader(&app, handle);
+        assert_eq!(styled.style_handle, Some(created.handle));
+        assert_eq!(styled.text_height, 2.5);
+        assert_eq!(styled.context.text_height, 2.5);
+        assert_eq!(styled.arrowhead_handle, Some(arrow));
+
+        let _ = app.run_command_line("MLEADERSTYLE INFO ALL");
+        let output = all_output(&app);
+        assert!(output.contains("NOTE-2.5"), "{output}");
+        assert!(
+            output.contains(&format!("MLEADER {:x}", handle.value())),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn changing_landing_distance_updates_existing_geometry() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+        let _ = app.run_command_line("MLEADERSTYLE NEW NOTE-2.5 TEXT 2.5");
+        let handle = add_mleader(&mut app);
+        let _ = app.run_command_line("MLEADERSTYLE APPLY NOTE-2.5 ALL");
+        let before = leader(&app, handle)
+            .context
+            .leader_roots
+            .first()
+            .map(|root| root.landing_distance)
+            .unwrap_or_default();
+
+        let _ = app.run_command_line("MLEADERSTYLE SET NOTE-2.5 LANDING 5");
+        let output = all_output(&app);
+        assert!(
+            output.contains("'NOTE-2.5'.LANDING = 5 (1 multileader(s) updated)"),
+            "{output}"
+        );
+
+        assert_eq!(style(&app, "NOTE-2.5").landing_distance, 5.0);
+        let after = leader(&app, handle);
+        assert_eq!(after.dogleg_length, 5.0);
+        let root = after.context.leader_roots.first().expect("leader root");
+        assert_eq!(root.landing_distance, 5.0);
+        assert_ne!(root.landing_distance, before);
+
+        let _ = app.run_command_line("MLEADERSTYLE LIST");
+        let output = all_output(&app);
+        assert!(output.contains("landing:5.00 used:1"), "{output}");
+    }
+
+    #[test]
+    fn an_unknown_property_or_style_is_reported() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{ "op": "new" }"#);
+        let _ = app.run_command_line("MLEADERSTYLE NEW NOTE-2.5 TEXT 2.5");
+
+        let _ = app.run_command_line("MLEADERSTYLE SET NOTE-2.5 WIDTH 4");
+        assert!(all_output(&app).contains("unknown property 'width'"), "{}", all_output(&app));
+
+        let _ = app.run_command_line("MLEADERSTYLE APPLY GHOST ALL");
+        assert!(all_output(&app).contains("'GHOST' not found"), "{}", all_output(&app));
+    }
+}

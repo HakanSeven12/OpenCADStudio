@@ -3545,13 +3545,13 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                     &self.tabs[i].scene.document,
                     anno_scale,
                 ) {
-                    // The text grip is the final native grip of Linear/Aligned
-                    // dims. While the text is still automatic, make this a
+                    // The text grip has ID 3 on Linear/Aligned dims.
+                    // While the text is still automatic, make this a
                     // point/stretch grip rather than a midpoint-translate
                     // grip. That makes the first drag use the displayed
                     // automatic position as its absolute starting point instead
                     // of translating the stale DWG text_middle_point.
-                    if let Some(text_grip) = entity_grips.last_mut() {
+                    if let Some(text_grip) = entity_grips.iter_mut().find(|grip| grip.id == 3) {
                         text_grip.world = glam::DVec3::new(position.x, position.y, position.z);
                         text_grip.is_midpoint = false;
                     }
@@ -6200,6 +6200,40 @@ mod aggregation_tests {
         let sections = aggregate_sections(&selected, &[]);
         let layer = row(&sections, "layer").expect("a layer row");
         assert!(format!("{:?}", layer.value).contains("WALLS"));
+    }
+}
+
+#[cfg(test)]
+mod arrow_tip_grips_tests {
+    use crate::app::OpenCADStudio;
+    use codec::{entities::{Dimension, DimensionLinear}, types::Vector3, EntityType};
+    use glam::DVec3;
+
+    #[test]
+    fn automatic_text_correction_preserves_arrow_tips() {
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        let mut d = DimensionLinear::horizontal(
+            Vector3::new(10.0, 10.0, 0.0), Vector3::new(30.0, 10.0, 0.0),
+        );
+        d.definition_point = Vector3::new(10.0, 20.0, 0.0);
+        let dim = Dimension::Linear(d);
+        let text = crate::entities::dimension::dimension_text_grip_position(
+            &dim, &app.tabs[i].scene.document, app.tabs[i].scene.annotation_scale as f64,
+        ).expect("automatic text placement");
+        let handle = app.tabs[i].scene.add_entity(EntityType::Dimension(Box::new(dim)));
+        app.tabs[i].scene.selected.insert(handle);
+        app.refresh_selected_grips();
+        let grips = &app.tabs[i].selected_grips;
+        assert_eq!(grips.len(), 6, "selected dimension must retain both arrow-tip grips");
+        let text_grip = grips.iter().find(|g| g.id == 3).unwrap();
+        assert!(text_grip.world.distance(DVec3::new(text.x, text.y, text.z)) < 1e-9);
+        assert!(!text_grip.is_midpoint);
+        for (id, x) in [(4, 10.0), (5, 30.0)] {
+            let grip = grips.iter().find(|g| g.id == id).unwrap();
+            assert!(grip.world.distance(DVec3::new(x, 20.0, 0.0)) < 1e-9);
+            assert!(grip.is_midpoint);
+        }
     }
 }
 

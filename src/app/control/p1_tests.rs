@@ -2215,11 +2215,11 @@ fn a_deleted_constraint_stops_clamping_the_grip_that_moved_it() {
     );
 }
 
-/// The delete command works on the selection, not on one named constraint, so it
-/// takes every constraint the selection touches — and only those: a constraint on
-/// geometry the selection leaves alone still sizes it, and the clamp on the deleted
-/// one goes with it, so the drag lands where it is released instead of at the span
-/// the command just removed.
+/// The delete command works on the selection: every constraint naming geometry in
+/// the selection goes, and the constraints on geometry outside it are untouched.
+/// Here the second line keeps its constraint and its size, while the constraint
+/// removed from the first line stops clamping the next grip drag, which lands
+/// where it is released rather than at the span the command deleted.
 #[test]
 fn the_delete_command_frees_the_grip_it_clamped() {
     use crate::command::CmdResult;
@@ -2261,9 +2261,7 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         .iter()
         .find(|entity| entity["handle"].as_str() != Some(handle.as_str()))
         .map(|entity| {
-            codec::Handle::new(
-                u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
-            )
+            codec::Handle::new(u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap())
         })
         .expect("the second line");
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
@@ -2314,13 +2312,13 @@ fn the_delete_command_frees_the_grip_it_clamped() {
     assert_eq!(
         survivors.len(),
         1,
-        "the command deleted the constraint the selection touches"
+        "the constraint on the line outside the selection is the only survivor"
     );
     assert!(
         survivors
             .iter()
             .all(|constraint| constraint.refs.iter().all(|r| r.entity == other)),
-        "and only it: the constraint on the line the selection left alone survives"
+        "and it is that line's own constraint"
     );
     assert!(
         (span(&app, other) - 60.0).abs() < 1e-6,
@@ -2336,9 +2334,9 @@ fn the_delete_command_frees_the_grip_it_clamped() {
     let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
     let entity = q["entities"]
         .as_array()
-        .expect("two lines drawn")
+        .expect("the read returns the drawn lines")
         .iter()
-        .find(|line| line["handle"].as_str() == Some(handle.as_str()))
+        .find(|row| row["handle"].as_str() == Some(handle.as_str()))
         .expect("the dragged line is still in the read");
     let end = line_point(entity, "end");
     assert!(

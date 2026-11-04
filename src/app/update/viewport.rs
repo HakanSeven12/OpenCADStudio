@@ -10519,6 +10519,132 @@ mod selection_preview_tests {
     use super::*;
     use crate::app::{HoverDwell, OpenCADStudio, HOVER_DWELL_MS};
 
+    fn mtext_size_fixture(rotation: f64) -> (OpenCADStudio, Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.snapper.snap_enabled = false;
+        app.snapper.grid_snap_on = false;
+        app.snapper.otrack_enabled = false;
+        app.ortho_mode = false;
+        app.polar_mode = false;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let mut text = codec::entities::MText::with_value(
+            "asd asd asd asd",
+            codec::types::Vector3::new(100.0, 50.0, 0.0),
+        );
+        text.height = 2.5;
+        text.rectangle_width = 60.0;
+        text.rectangle_height = Some(10.0);
+        text.rotation = rotation;
+        text.attachment_point = codec::entities::AttachmentPoint::TopLeft;
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::MText(Box::new(text)));
+        app.tabs[i].scene.selected.insert(handle);
+        app.refresh_selected_grips();
+        (app, handle)
+    }
+
+    fn mtext_size_value(app: &OpenCADStudio, handle: Handle) -> &codec::entities::MText {
+        let Some(codec::EntityType::MText(text)) = app.tabs[app.active_tab].scene.document.get_entity(handle)
+        else {
+            panic!("expected MTEXT")
+        };
+        text
+    }
+
+    fn drag_mtext_size(
+        app: &mut OpenCADStudio,
+        id: usize,
+        points: &[glam::DVec3],
+    ) {
+        let i = app.active_tab;
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let grip = app.tabs[i].selected_grips.iter()
+            .find(|g| g.id == id).unwrap().clone();
+        let cursor = app.tabs[i].scene.camera.borrow().project(grip.world, bounds).unwrap();
+        app.tabs[i].scene.selection.borrow_mut().input.last_move_pos =
+            Some(Point::new(cursor.x, cursor.y));
+        let _ = app.on_viewport_left_press();
+        assert_eq!(app.tabs[i].active_grip.as_ref().map(|g| g.grip_id), Some(id));
+        for point in points {
+            let cursor = app.tabs[i].scene.camera.borrow().project(*point, bounds).unwrap();
+            let _ = app.on_viewport_move(Point::new(cursor.x, cursor.y));
+        }
+        let _ = app.on_viewport_left_release();
+        assert!(app.tabs[i].active_grip.is_none());
+        assert_eq!(app.tabs[i].history.undo_stack.len(), 1);
+    }
+
+    #[test]
+    fn mtext_size_width_drag_rewraps_and_undo_restores() {
+        for rotation in [0.0, std::f64::consts::FRAC_PI_2] {
+            let (mut app, handle) = mtext_size_fixture(rotation);
+            let before = mtext_size_value(&app, handle).clone();
+            let line_count = crate::entities::mtext::layout_of(
+                &before, &app.tabs[app.active_tab].scene.document, false,
+            ).line_count;
+            let x = glam::DVec3::new(rotation.cos(), rotation.sin(), 0.0);
+            let down = glam::DVec3::new(rotation.sin(), -rotation.cos(), 0.0);
+            let origin = glam::DVec3::new(100.0, 50.0, 0.0);
+            drag_mtext_size(&mut app, 1, &[
+                origin + x * 20.0 + down * 3.0,
+                origin + x * 8.0 + down * 5.0,
+            ]);
+            let text = mtext_size_value(&app, handle);
+            assert!((text.rectangle_width - 8.0).abs() < 1e-3, "width = {}", text.rectangle_width);
+            assert_eq!(text.insertion_point, before.insertion_point);
+            assert!(crate::entities::mtext::layout_of(
+                text, &app.tabs[app.active_tab].scene.document, false,
+            ).line_count > line_count);
+            app.undo_steps(1);
+            assert_eq!(mtext_size_value(&app, handle), &before);
+            let grip = app.tabs[app.active_tab].selected_grips.iter()
+                .find(|g| g.id == 1).unwrap();
+            assert_eq!(grip.shape, crate::scene::model::object::GripShape::Triangle);
+            assert!((grip.dir.expect("width arrow direction") - x).length() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn mtext_size_height_drag_and_undo_restores() {
+        for rotation in [0.0, std::f64::consts::FRAC_PI_2] {
+            let (mut app, handle) = mtext_size_fixture(rotation);
+            let before = mtext_size_value(&app, handle).clone();
+            let x = glam::DVec3::new(rotation.cos(), rotation.sin(), 0.0);
+            let down = glam::DVec3::new(rotation.sin(), -rotation.cos(), 0.0);
+            let origin = glam::DVec3::new(100.0, 50.0, 0.0);
+            drag_mtext_size(&mut app, 2, &[
+                origin + down * 20.0 + x * 3.0,
+                origin + down * 30.0 + x * 5.0,
+            ]);
+            let text = mtext_size_value(&app, handle);
+            assert!((text.rectangle_height.unwrap() - 30.0).abs() < 1e-3, "height = {:?}", text.rectangle_height);
+            assert_eq!(text.insertion_point, before.insertion_point);
+            assert_eq!(text.rectangle_width, before.rectangle_width);
+            app.undo_steps(1);
+            assert_eq!(mtext_size_value(&app, handle), &before);
+            let grip = app.tabs[app.active_tab].selected_grips.iter()
+                .find(|g| g.id == 2).unwrap();
+            assert!((grip.dir.expect("height arrow direction") - down).length() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn mtext_size_width_drag_clamps_before_insertion() {
+        let (mut app, handle) = mtext_size_fixture(0.0);
+        let before = mtext_size_value(&app, handle).clone();
+        drag_mtext_size(&mut app, 1, &[glam::DVec3::new(80.0, 55.0, 0.0)]);
+        assert_eq!(mtext_size_value(&app, handle).rectangle_width, 0.01);
+        app.undo_steps(1);
+        assert_eq!(mtext_size_value(&app, handle), &before);
+        drag_mtext_size(&mut app, 2, &[glam::DVec3::new(105.0, 70.0, 0.0)]);
+        assert_eq!(mtext_size_value(&app, handle).rectangle_height, Some(0.01));
+        app.undo_steps(1);
+        assert_eq!(mtext_size_value(&app, handle), &before);
+    }
+
     #[test]
     fn lower_endpoint_drag_previews_connected_tangent_profile_and_keeps_top_fixed() {
         use crate::scene::parametric_constraints::{

@@ -533,6 +533,7 @@ impl OpenCADStudio {
         };
         match verb.as_str() {
             "SHEETSET" | "SSM" => {
+                self.pallet_as_window(crate::ui::dock::PanelId::SheetSetManager);
                 self.show_sheet_set_manager(true);
                 Some(Task::none())
             }

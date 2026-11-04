@@ -150,6 +150,9 @@ impl OpenCADStudio {
                 // Anything else (closed, floating, on the other edge) moves
                 // here and opens, in its own group here if it has one, else
                 // as a new group; adding a pallet ends the menu's job.
+                // Called from the dock, a pallet in a window of its own comes
+                // back as a pallet.
+                self.dock.detached.remove(&id);
                 let here = self.dock.location(id).map(|(s, _)| s) == Some(side);
                 if !here {
                     self.dock.dock(id, side, usize::MAX);

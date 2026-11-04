@@ -541,7 +541,10 @@ impl OpenCADStudio {
             "PERSP" => return Some(Task::done(Message::SetProjection(false))),
             // LAYERS opens the Layer Manager pallet (its close button or
             // the toggle message close it).
-            "LAYERS" => self.open_layers_pallet(),
+            "LAYERS" => {
+                self.pallet_as_window(crate::ui::dock::PanelId::Layers);
+                self.open_layers_pallet();
+            }
 
             // SCRIPT <path> — run a command script: each non-comment
             // line is fed through the same command path the `--script` startup

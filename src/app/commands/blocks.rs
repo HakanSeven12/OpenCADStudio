@@ -967,6 +967,7 @@ impl OpenCADStudio {
             // (XREFMAN was a provisional name and is not kept, not even as an
             // alias.) The XREF command below is untouched.
             "EXTERNALREFERENCES" => {
+                self.pallet_as_window(crate::ui::dock::PanelId::ExternalReferences);
                 self.show_external_references = true;
                 // Always open expanded so the panel is immediately usable;
                 // dock it on the right if the user closed it from the layout.

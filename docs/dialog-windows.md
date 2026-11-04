@@ -10,6 +10,13 @@ and the web build share one code path for it.
   content, so it can sit anywhere, for example on a second monitor.
 - Dock pallets stay in the dock. Any pallet can move into a window of its own
   from its title bar, and back.
+- A manager that is both a dialog and a pallet opens by where it is called
+  from: its command (typed, or from the ribbon, a menu, the Quick Access
+  Toolbar) opens it in a window of its own on the desktop; the dock's pallet
+  menu opens it as a pallet on that edge. One already showing stays where it
+  is. These are Layer Manager (LAYERS), External References, QuickCalc,
+  Sheet Set Manager, Count (COUNTLIST), Layer Walk, Point Cloud Manager and
+  Command History.
 - The web build has one canvas, so there dialogs and pallets stay as frames
   inside it.
 

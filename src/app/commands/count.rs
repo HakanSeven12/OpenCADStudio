@@ -92,6 +92,7 @@ impl OpenCADStudio {
                 Some(Task::none())
             }
             "COUNTLIST" => {
+                self.pallet_as_window(crate::ui::dock::PanelId::Count);
                 self.set_count_palette(true);
                 Some(Task::none())
             }

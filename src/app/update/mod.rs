@@ -4321,11 +4321,15 @@ impl OpenCADStudio {
                         crate::ui::dock::PanelId::Layers,
                     ));
                 }
+                self.pallet_as_window(crate::ui::dock::PanelId::Layers);
                 self.open_layers_pallet();
                 Task::none()
             }
 
             Message::ToggleXrefManager => {
+                if !self.show_external_references {
+                    self.pallet_as_window(crate::ui::dock::PanelId::ExternalReferences);
+                }
                 self.show_external_references ^= true;
                 if self.show_external_references {
                     self.dock_open_at_default(crate::ui::dock::PanelId::ExternalReferences);

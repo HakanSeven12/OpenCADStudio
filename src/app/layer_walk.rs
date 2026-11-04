@@ -33,6 +33,7 @@ impl OpenCADStudio {
         if open {
             self.close_layer_walk(false);
         } else {
+            self.pallet_as_window(PanelId::Laywalk);
             self.open_layer_walk();
         }
         Task::none()

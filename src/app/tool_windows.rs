@@ -145,6 +145,13 @@ fn tool_key(kind: ModalKind) -> String {
     format!("{kind:?}")
 }
 
+/// The key a pallet's window placement is remembered under, beside the
+/// dialogs' ones.
+#[cfg(not(target_arch = "wasm32"))]
+fn pallet_key(id: crate::ui::dock::PanelId) -> String {
+    format!("pallet:{id:?}")
+}
+
 /// Frame padding and title bar around a dialog's content, as `modal` draws it.
 const FRAME_W: f32 = 20.0;
 const FRAME_H: f32 = 50.0;
@@ -383,6 +390,19 @@ impl OpenCADStudio {
         self.active_modal == Some(kind) || (self.tool_open(kind) && self.enter_tool(kind))
     }
 
+    /// A manager pallet called up the way a dialog is (its command, a ribbon
+    /// button, a menu entry): on the desktop it opens in a window of its own.
+    /// One already showing stays where it is; the dock's own menu opens it
+    /// as a pallet.
+    pub(crate) fn pallet_as_window(&mut self, id: crate::ui::dock::PanelId) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.main_window.is_some() && !self.dock_panel_wanted(id) && !self.dock.is_separate(id) {
+            let _ = self.detach_panel(id);
+        }
+        #[cfg(target_arch = "wasm32")]
+        let _ = id;
+    }
+
     /// Whether dialog `kind` is up, the active modal or an open tool.
     pub(crate) fn dialog_open(&self, kind: ModalKind) -> bool {
         self.active_modal == Some(kind) || self.tool_open(kind)
@@ -554,17 +574,26 @@ impl OpenCADStudio {
 impl OpenCADStudio {
     /// Move dock pallet `id` into a window of its own.
     pub(crate) fn detach_panel(&mut self, id: crate::ui::dock::PanelId) -> Task<Message> {
+        // A pallet floating short in the main window still opens a window
+        // tall enough to work in.
         let (w, h) = self
             .dock
             .float_rect(id)
             .map(|f| (f.w, f.h))
             .unwrap_or_else(|| self.dock_float_size(id));
-        let placement = self.dock.detached.get(&id).copied().unwrap_or(WindowPlacement {
-            x: f32::NAN,
-            y: f32::NAN,
-            w,
-            h: h + HEADER_H,
-        });
+        let h = h.max(PALLET_WINDOW_MIN_H);
+        let placement = self
+            .dock
+            .detached
+            .get(&id)
+            .or_else(|| self.dock.tool_windows.get(&pallet_key(id)))
+            .copied()
+            .unwrap_or(WindowPlacement {
+                x: f32::NAN,
+                y: f32::NAN,
+                w,
+                h: h + HEADER_H,
+            });
         self.dock.separate(id, placement);
         self.dock_float_menu = None;
         self.save_config();
@@ -659,6 +688,9 @@ impl OpenCADStudio {
             }
             Some(Detached::Panel(panel)) => {
                 self.dock.detached.insert(panel, placement);
+                // Kept after it comes back, for the next time it is called
+                // up as a window.
+                self.dock.tool_windows.insert(pallet_key(panel), placement);
             }
             None => {}
         }
@@ -845,6 +877,10 @@ pub(crate) const BACK_BUTTON_ID: &str = "back-to-main-window";
 /// The header strip of a window of its own.
 #[cfg(not(target_arch = "wasm32"))]
 const HEADER_H: f32 = 26.0;
+
+/// The least height a pallet's window opens at.
+#[cfg(not(target_arch = "wasm32"))]
+const PALLET_WINDOW_MIN_H: f32 = 420.0;
 
 /// Padding around a dialog in a window of its own.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1098,6 +1134,37 @@ mod tests {
             (placement.x, placement.y, placement.w, placement.h),
             (2400.0, 120.0, 700.0, 500.0)
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_manager_opens_as_a_window_or_a_pallet_by_where_it_is_called() {
+        use crate::app::config::DockSide;
+        use crate::ui::dock::{DockMsg, PanelId};
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.main_window = Some(iced::window::Id::unique());
+        let in_window = |app: &OpenCADStudio| {
+            app.os_windows
+                .iter()
+                .any(|window| window.content == Detached::Panel(PanelId::Layers))
+        };
+        // Its command: a window of its own.
+        let _ = app.dispatch_command("LAYERS");
+        let _ = app.update_root(Message::Noop);
+        assert!(app.dock.is_separate(PanelId::Layers) && in_window(&app));
+        // Closed there, then opened from the dock's pallet menu: a pallet.
+        let id = app.os_windows[0].id;
+        let _ = app.update_root(Message::WindowCloseRequested(id));
+        assert!(!app.dock_panel_wanted(PanelId::Layers));
+        let _ = app.update_root(Message::Dock(DockMsg::EdgeMenuToggle(DockSide::Right, PanelId::Layers)));
+        assert!(!app.dock.is_separate(PanelId::Layers) && !in_window(&app));
+        assert_eq!(app.dock.location(PanelId::Layers).map(|(side, _)| side), Some(DockSide::Right));
+        assert!(app.dock_panel_wanted(PanelId::Layers));
+        // Its command while it shows as a pallet leaves it there.
+        let _ = app.dispatch_command("LAYERS");
+        let _ = app.update_root(Message::Noop);
+        assert!(!app.dock.is_separate(PanelId::Layers) && !in_window(&app));
     }
 
     #[cfg(not(target_arch = "wasm32"))]

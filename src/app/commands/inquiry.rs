@@ -187,6 +187,9 @@ impl OpenCADStudio {
             "COMMANDHISTORY" => {
                 let id = crate::ui::dock::PanelId::CommandHistory;
                 let open = !self.dock_panel_wanted(id);
+                if open {
+                    self.pallet_as_window(id);
+                }
                 return Some(self.dock_set_open(id, open));
             }
             "CAL" => {

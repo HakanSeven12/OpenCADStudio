@@ -9698,7 +9698,7 @@ impl Scene {
         sig ^ count
     }
 
-    pub(super) fn wipeout_models_arc(&self) -> Arc<Vec<HatchModel>> {
+    pub(crate) fn wipeout_models_arc(&self) -> Arc<Vec<HatchModel>> {
         let target_block = self.content_render_block_handle();
         let any_wipeout = std::cell::OnceCell::<bool>::new();
         let key = (target_block, self.current_layout.clone());

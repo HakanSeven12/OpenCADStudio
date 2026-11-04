@@ -27,8 +27,10 @@ mod mleader_layer;
 pub(crate) mod display;
 mod draw;
 mod field;
+mod group_display;
 mod fileops;
 mod hyperlink;
+pub(crate) use group_display::{group_display_mode, set_group_display_mode};
 pub(crate) use hyperlink::{hyperlink_options, set_hyperlink_options};
 mod inquiry;
 mod layerprops;
@@ -1217,6 +1219,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "REVCLOUDCREATEMODE",
         "REVCLOUDARCVARIANCE",
         "REVCLOUDGRIPS",
+        "GROUPDISPLAYMODE",
         "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",
         "SELECTIONCYCLING",

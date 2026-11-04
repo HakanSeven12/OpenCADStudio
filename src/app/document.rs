@@ -225,6 +225,9 @@ pub(super) struct DocumentTab {
     pub(super) selected_grips: Vec<GripDef>,
     /// Entity handle for each entry in `selected_grips`.
     pub(super) selected_grip_handles: Vec<Handle>,
+    /// GROUPDISPLAYMODE 2: the box (min, max corners) round each group
+    /// picked whole.
+    pub(super) group_boxes: Vec<[glam::DVec3; 2]>,
     /// Plugin-declared custom grip points for this tab (API v11): session
     /// display state only — never persisted, never host-interpreted.
     #[cfg(not(target_arch = "wasm32"))]
@@ -810,6 +813,7 @@ impl DocumentTab {
             active_grip: None,
             selected_grips: vec![],
             selected_grip_handles: vec![],
+            group_boxes: vec![],
             #[cfg(not(target_arch = "wasm32"))]
             plugin_grips: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]

@@ -830,8 +830,8 @@ bg={bg_ms:.1}ms n={view_count}"
                     .as_ref()
                     .is_some_and(|cmd| cmd.name() == "STRETCH");
 
-            let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
-                && !tab.selected_grips.is_empty()
+            let (grips, group_boxes): (Vec<crate::ui::overlay::GripMarker>, Vec<Vec<iced::Point>>) =
+                if show_grips && !tab.selected_grips.is_empty()
             {
                 let (vw, vh) = sel_ref.view.vp_size;
                 // Overlays project through the active tile's camera, so
@@ -868,9 +868,25 @@ bg={bg_ms:.1}ms n={view_count}"
                 // viewport camera so they sit on the wire the GPU draws.
                 // Paper entities use the 2-D paper transform; the model tab
                 // uses the model camera.
+                // GROUPDISPLAYMODE 2 boxes project with the grips, as four
+                // corners each after them.
+                let mut projected = tab.selected_grips.clone();
+                for [min, max] in &tab.group_boxes {
+                    let z = (min.z + max.z) * 0.5;
+                    for (x, y) in [(min.x, min.y), (max.x, min.y), (max.x, max.y), (min.x, max.y)] {
+                        projected.push(crate::scene::model::object::GripDef {
+                            id: 0,
+                            world: glam::DVec3::new(x, y, z),
+                            is_midpoint: false,
+                            shape: crate::scene::model::object::GripShape::Square,
+                            dir: None,
+                            axis: None,
+                        });
+                    }
+                }
                 let screen_grips = if let Some((cam, _)) = &edit_frame {
                     grips_to_screen_rte(
-                        &tab.selected_grips,
+                        &projected,
                         cam.view_proj_rte(bounds),
                         cam.eye(),
                         bounds,
@@ -883,12 +899,18 @@ bg={bg_ms:.1}ms n={view_count}"
                     let tx = cam.target.x as f32;
                     let ty = cam.target.y as f32;
                     drop(cam);
-                    grips_to_screen_paper(&tab.selected_grips, tx, ty, half_w, half_h, bounds)
+                    grips_to_screen_paper(&projected, tx, ty, half_w, half_h, bounds)
                 } else {
                     let cam = tab.scene.camera.borrow();
-                    grips_to_screen(&tab.selected_grips, &cam, bounds)
+                    grips_to_screen(&projected, &cam, bounds)
                 };
-                screen_grips
+                let mut screen_grips = screen_grips;
+                let corners = screen_grips.split_off(tab.selected_grips.len());
+                let boxes: Vec<Vec<iced::Point>> = corners
+                    .chunks(4)
+                    .map(|corner| corner.iter().map(|grip| grip.1).collect())
+                    .collect();
+                let markers = screen_grips
                     .into_iter()
                     .enumerate()
                     .filter(|(_, (_, screen, _, _, _))| {
@@ -927,9 +949,10 @@ bg={bg_ms:.1}ms n={view_count}"
                                 || grip_id == crate::app::visibility::VIS_GRIP_ID,
                         }
                     })
-                    .collect()
+                    .collect();
+                (markers, boxes)
             } else {
-                vec![]
+                (vec![], vec![])
             };
             // API v11: plugin-declared custom grips render in the same overlay
             // layer with a distinct accent (always-visible display state of a
@@ -1548,6 +1571,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 snap_ext_dir,
                 grips,
                 control_polygon,
+                group_boxes,
                 grip_clip,
                 ucs_icons,
                 ost_points,

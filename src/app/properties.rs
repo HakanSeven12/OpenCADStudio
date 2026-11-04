@@ -3380,6 +3380,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         // Paper-space entity coordinates are NOT offset by world_offset (same rule
         // as wire tessellation in wires_for_block). Only subtract in model space.
         let wo = if is_paper { [0.0f64; 3] } else { [0.0_f64; 3] };
+        let group_boxes;
         let (new_handle, new_grips, new_grip_handles) = {
             let selected = self.tabs[i].scene.selected_entities();
             let single_handle = (selected.len() == 1
@@ -3396,9 +3397,48 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             } else {
                 selected
             };
+            // A group picked whole shows one grip at the centre of its
+            // extents (GROUPDISPLAYMODE 1, 2) in place of its members' own,
+            // and a box round them (2) 2.5 % of their size out on each side.
+            let group_mode = crate::app::commands::group_display_mode();
+            let whole_groups = if group_mode == 0 {
+                Vec::new()
+            } else {
+                self.tabs[i].scene.selected_whole_groups()
+            };
+            let group_members: rustc_hash::FxHashSet<Handle> = whole_groups
+                .iter()
+                .flat_map(|(members, _, _)| members.iter().copied())
+                .collect();
+            let mut boxes = Vec::new();
+            for (members, min, max) in &whole_groups {
+                let centre = (*min + *max) * 0.5;
+                for &member in members {
+                    if self.tabs[i].scene.is_layer_locked(member) {
+                        continue;
+                    }
+                    handles.push(member);
+                    grips.push(GripDef {
+                        id: crate::scene::GROUP_GRIP_ID,
+                        world: centre,
+                        is_midpoint: true,
+                        shape: crate::scene::model::object::GripShape::Square,
+                        dir: None,
+                        axis: None,
+                    });
+                }
+                if group_mode == 2 {
+                    let pad = (*max - *min) * 0.025;
+                    boxes.push([*min - pad, *max + pad]);
+                }
+            }
+            group_boxes = boxes;
             // A table whose cells are picked shows no table grips.
             let picked_table = self.tabs[i].scene.table_cells_handle();
             for (handle, entity) in selected {
+                if group_members.contains(&handle) {
+                    continue;
+                }
                 if Some(handle) == picked_table {
                     // Picked cells show their own edge and fill grips.
                     if let (codec::EntityType::Table(table), Some(cells)) =
@@ -3449,6 +3489,7 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         self.tabs[i].selected_handle = new_handle;
         self.tabs[i].selected_grips = new_grips;
         self.tabs[i].selected_grip_handles = new_grip_handles;
+        self.tabs[i].group_boxes = group_boxes;
         let available: rustc_hash::FxHashSet<_> = self.tabs[i]
             .selected_grip_handles
             .iter()

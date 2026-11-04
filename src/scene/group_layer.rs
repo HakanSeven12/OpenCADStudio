@@ -234,6 +234,31 @@ impl Scene {
         expanded
     }
 
+    /// Selectable groups picked whole (PICKSTYLE picks groups and every
+    /// member is selected), each with the extents of its members.
+    pub fn selected_whole_groups(&self) -> Vec<(Vec<Handle>, glam::DVec3, glam::DVec3)> {
+        if self.document.header.pick_style & 1 == 0 {
+            return Vec::new();
+        }
+        self.groups()
+            .filter(|group| {
+                group.selectable
+                    && !group.entities.is_empty()
+                    && group.entities.iter().all(|h| self.selected.contains(h))
+            })
+            .filter_map(|group| {
+                let mut min = glam::DVec3::splat(f64::INFINITY);
+                let mut max = glam::DVec3::splat(f64::NEG_INFINITY);
+                for entity in group.entities.iter().filter_map(|h| self.document.get_entity(*h)) {
+                    let (a, b) = crate::scene::convert::tess::entity_bounds_in(&self.document, entity);
+                    min = min.min(glam::DVec3::from_array(a));
+                    max = max.max(glam::DVec3::from_array(b));
+                }
+                (min.is_finite() && max.is_finite()).then(|| (group.entities.clone(), min, max))
+            })
+            .collect()
+    }
+
     /// If any handle belongs to a selectable group, also select every member.
     pub fn expand_selection_for_groups(&mut self, handles: &[Handle]) {
         let previous_len = self.selected.len();

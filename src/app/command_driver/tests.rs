@@ -3939,3 +3939,106 @@ mod mission_m060_tests {
         assert!(!path.exists(), "nothing should be written on an unknown sheet");
     }
 }
+
+#[cfg(test)]
+mod mission_m042_tests {
+    use super::super::*;
+    use codec::entities::Text;
+    use codec::types::Vector3;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn add_text(app: &mut OpenCADStudio) -> codec::Handle {
+        let i = app.active_tab;
+        let text = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Text(Text::with_value(
+                "OLD",
+                Vector3::ZERO,
+            )));
+        text
+    }
+
+    fn text_value(app: &OpenCADStudio, handle: codec::Handle) -> String {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(codec::EntityType::Text(text)) => text.value.clone(),
+            Some(codec::EntityType::MText(text)) => text.value.clone(),
+            _ => panic!("text host disappeared"),
+        }
+    }
+
+    #[test]
+    fn a_filename_field_is_inserted_and_follows_the_drawing_name() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.document.source_path =
+            Some(r"C:\work\TITLEBLOCK.dwg".to_string());
+        let text = add_text(&mut app);
+
+        let _ = app.run_command_line(&format!("-FIELD {:X} FILENAME", text.value()));
+
+        let output = all_output(&app);
+        assert!(output.contains(r"\AcVar Filename"), "{output}");
+        assert_eq!(text_value(&app, text), "TITLEBLOCK.dwg", "{output}");
+        let (code, _) = crate::entities::field::whole_text_field(
+            &app.tabs[i].scene.document,
+            text,
+        )
+        .expect("the text must carry a field expression");
+        assert!(code.contains("Filename"), "{code}");
+
+        app.tabs[i].scene.document.source_path = Some(r"C:\work\PLAN.dwg".to_string());
+        let (changed, _) = crate::entities::field::update_fields(
+            &mut app.tabs[i].scene.document,
+            32,
+            Some(&[text]),
+        );
+        assert_eq!(changed, vec![text]);
+        assert_eq!(text_value(&app, text), "PLAN.dwg");
+    }
+
+    #[test]
+    fn a_date_field_uses_the_requested_format() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let text = add_text(&mut app);
+
+        let _ = app.run_command_line(&format!(
+            r#"-FIELD {:X} DATE "yyyy/MM/dd""#,
+            text.value()
+        ));
+
+        let output = all_output(&app);
+        assert!(output.contains("yyyy/MM/dd"), "{output}");
+        let value = text_value(&app, text);
+        let bytes = value.as_bytes();
+        assert_eq!(bytes.len(), 10, "date value: {value}");
+        assert_eq!(bytes[4], b'/');
+        assert_eq!(bytes[7], b'/');
+        assert!(value.chars().filter(char::is_ascii_digit).count() == 8, "{value}");
+    }
+
+    #[test]
+    fn the_expression_can_be_read_back_without_changing_it() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let text = add_text(&mut app);
+        let _ = app.run_command_line(&format!("-FIELD {:X} FILENAME", text.value()));
+        let before = text_value(&app, text);
+
+        let _ = app.run_command_line(&format!("-FIELD {:X}", text.value()));
+
+        let output = all_output(&app);
+        assert!(output.contains("Field: %<"), "{output}");
+        assert!(output.contains(r"\AcVar Filename"), "{output}");
+        assert_eq!(text_value(&app, text), before);
+    }
+}

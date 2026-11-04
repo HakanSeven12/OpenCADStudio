@@ -19,6 +19,93 @@ impl OpenCADStudio {
                 self.open_field_dialog(FieldTarget::NewText);
                 Some(Task::none())
             }
+            // -FIELD <handle> [FILENAME | DATE <format> | CODE <expression>]
+            // The scriptable face of the Field dialog: attach a field to an
+            // existing text object, or read the expression it already holds.
+            cmd if cmd == "-FIELD" || cmd.starts_with("-FIELD ") => {
+                let rest = cmd.trim_start_matches("-FIELD").trim();
+                let Some(handle_text) = rest.split_whitespace().next() else {
+                    self.command_line.push_info(
+                        crate::t!(
+                            "Usage: -FIELD <handle> [FILENAME | DATE <format> | CODE <expression>]"
+                        )
+                        .as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                let handle = u64::from_str_radix(handle_text, 16)
+                    .ok()
+                    .map(codec::Handle::new);
+                let Some(handle) = handle else {
+                    self.command_line
+                        .push_error(crate::t!("-FIELD: expected a hex object handle.").as_ref());
+                    return Some(Task::none());
+                };
+                if !matches!(
+                    self.tabs[i].scene.document.get_entity(handle),
+                    Some(codec::EntityType::Text(_) | codec::EntityType::MText(_))
+                ) {
+                    self.command_line.push_error(
+                        crate::t!("-FIELD: the handle must name a Text or MText object.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let spec = rest[handle_text.len()..].trim();
+                if spec.is_empty() {
+                    match crate::entities::field::whole_text_field(
+                        &self.tabs[i].scene.document,
+                        handle,
+                    ) {
+                        Some((code, _)) => self
+                            .command_line
+                            .push_output(&crate::tf!("Field: %<{code}>%")),
+                        None => self
+                            .command_line
+                            .push_output(crate::t!("Field: none").as_ref()),
+                    }
+                    return Some(Task::none());
+                }
+                let (kind, tail) = match spec.split_once(char::is_whitespace) {
+                    Some((kind, tail)) => (kind.to_uppercase(), tail.trim()),
+                    None => (spec.to_uppercase(), ""),
+                };
+                let code = match kind.as_str() {
+                    "FILENAME" | "FILENAMEONLY" => r#"\AcVar Filename \f "%fn6""#.to_string(),
+                    "DATE" if !tail.is_empty() => {
+                        format!(r#"\AcVar Date \f "{}""#, tail.trim_matches('"'))
+                    }
+                    "DATE" => r#"\AcVar Date \f "yyyy-MM-dd""#.to_string(),
+                    "CODE" if !tail.is_empty() => tail.trim_matches('"').to_string(),
+                    _ => {
+                        self.command_line.push_error(
+                            crate::t!(
+                                "-FIELD: use FILENAME, DATE <format> or CODE <expression>."
+                            )
+                            .as_ref(),
+                        );
+                        return Some(Task::none());
+                    }
+                };
+                let value = crate::entities::field::evaluate(
+                    &self.tabs[i].scene.document,
+                    &code,
+                    &[],
+                    Some(handle),
+                )
+                .unwrap_or_else(|| "####".to_string());
+                self.push_undo_snapshot(i, "-FIELD");
+                crate::entities::field::set_text_field(
+                    &mut self.tabs[i].scene.document,
+                    handle,
+                    Some((code.clone(), Vec::new())),
+                    &value,
+                );
+                self.tabs[i].dirty = true;
+                self.command_line
+                    .push_output(&crate::tf!("Field: %<{code}>% = {value}"));
+                Some(Task::none())
+            }
             // FIELDEVAL — the events that update fields, kept in the drawing.
             cmd if cmd == "FIELDEVAL"
                 || cmd.starts_with("FIELDEVAL ")

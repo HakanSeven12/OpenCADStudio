@@ -3006,6 +3006,23 @@ impl Scene {
         }
 
         let depths = kernel::geom2d::ring_nesting_depths(&rings);
+        // The island style picks loops by their path flags: Outer keeps the
+        // loops flagged external (bit 0) or outermost (bit 4), Ignore only
+        // those flagged external. A counter stored as an external loop is a
+        // hole even with Ignore. When no loop carries the flag the style
+        // needs, nesting depth picks them instead.
+        let style_keeps = |path: &codec::entities::BoundaryPath| {
+            use codec::entities::hatch::BoundaryPathFlags;
+            let external = BoundaryPathFlags::EXTERNAL.bits();
+            let outermost = BoundaryPathFlags::OUTERMOST.bits();
+            let bits = path.flags.bits();
+            match dxf.style {
+                codec::entities::HatchStyleType::Normal => true,
+                codec::entities::HatchStyleType::Outer => bits & (external | outermost) != 0,
+                codec::entities::HatchStyleType::Ignore => bits & external != 0,
+            }
+        };
+        let by_flags = local_rings.iter().any(|(_, path)| style_keeps(path));
         let mut boundary = Vec::new();
         let mut local_boundary = Vec::new();
         let mut boundary_exterior = Vec::new();
@@ -3017,10 +3034,14 @@ impl Scene {
             .zip(ring_sources)
             .zip(depths)
         {
-            let keep = match dxf.style {
-                codec::entities::HatchStyleType::Normal => true,
-                codec::entities::HatchStyleType::Outer => depth <= 1,
-                codec::entities::HatchStyleType::Ignore => depth == 0,
+            let keep = if by_flags {
+                style_keeps(path)
+            } else {
+                match dxf.style {
+                    codec::entities::HatchStyleType::Normal => true,
+                    codec::entities::HatchStyleType::Outer => depth <= 1,
+                    codec::entities::HatchStyleType::Ignore => depth == 0,
+                }
             };
             if !keep {
                 continue;

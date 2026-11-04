@@ -83,8 +83,8 @@ fn number(p: &actions::Parameter, component: Component) -> Result<f64, &'static 
 
 fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
     let mut rows: Vec<Row> = Vec::new();
-    for p in actions::all_parameters(doc, definition) {
-        let Ok(fields) = properties::descriptors(doc, definition, &p) else {
+    for p in actions::all_listed_parameters(doc, definition) {
+        let Ok(fields) = properties::listed_descriptors(doc, definition, &p) else {
             continue;
         };
         let type_name = parameter_type(&p);

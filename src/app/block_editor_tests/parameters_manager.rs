@@ -1366,3 +1366,48 @@ fn an_uneditable_graph_keeps_the_lookup_it_holds_listed() {
             .collect::<Vec<_>>()
     );
 }
+
+/// A parameter the definition holds in its own components is the same case as
+/// one hanging off the graph: the manager's rule is one row per component, so a
+/// graph that will not take an edit has to keep both of a polar parameter's rows
+/// listed, with the numbers they printed. A short table with no reason is the
+/// defect either way; only addressing a row by name keeps refusing.
+#[test]
+fn an_uneditable_graph_keeps_the_component_rows_it_holds_listed() {
+    let (mut app, tab, definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    let table = |app: &OpenCADStudio| {
+        manager::rows(&app.tabs[tab].scene.document, definition)
+            .into_iter()
+            .map(|row| (row.name, row.type_name, row.value))
+            .collect::<Vec<_>>()
+    };
+    let before = table(&app);
+    for name in ["Distance1", "Angle1"] {
+        assert!(
+            before.iter().any(|(row, _, _)| row.as_str() == name),
+            "a sound graph lists both of the polar parameter's rows: {before:?}"
+        );
+    }
+    let graph = evaluation_graph(&app.tabs[tab].scene.document);
+    assert!(
+        manager::target_of(&app.tabs[tab].scene.document, definition, "Distance1").is_some(),
+        "and a row is addressable while the graph is sound"
+    );
+    assert!(
+        duplicate_a_node(&mut app.tabs[tab].scene.document, graph),
+        "the graph has a node to name twice"
+    );
+    assert!(
+        manager::target_of(&app.tabs[tab].scene.document, definition, "Distance1").is_none(),
+        "and the definition's graph really does refuse"
+    );
+    let after = table(&app);
+    assert_eq!(
+        after, before,
+        "the parameter the definition holds keeps its rows, and the numbers they printed"
+    );
+    assert!(
+        after.iter().all(|(_, type_name, _)| *type_name == "Polar"),
+        "and they still read as the parameter type they came from: {after:?}"
+    );
+}

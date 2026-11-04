@@ -27,6 +27,22 @@ pub(crate) fn descriptors<'a>(
     p: &Parameter,
 ) -> Result<Vec<Descriptor<'a>>, &'static str> {
     super::block_authoring::metadata::read(doc, definition, p.handle)?;
+    rows(doc, p)
+}
+
+/// The same component rows for a reader that only lists them: the parameter's
+/// belonging is proved through the links, so a graph that will not take an edit
+/// still says which rows its own parameters print.
+pub(crate) fn listed_descriptors<'a>(
+    doc: &'a Document,
+    definition: Handle,
+    p: &Parameter,
+) -> Result<Vec<Descriptor<'a>>, &'static str> {
+    super::block_authoring::metadata::listed_read(doc, definition, p.handle)?;
+    rows(doc, p)
+}
+
+fn rows<'a>(doc: &'a Document, p: &Parameter) -> Result<Vec<Descriptor<'a>>, &'static str> {
     let Some(ObjectType::DynamicBlock(object)) = doc.objects.get(&p.handle) else {
         return Err("The reference parameter is unavailable.");
     };

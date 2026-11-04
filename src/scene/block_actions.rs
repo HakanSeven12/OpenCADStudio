@@ -132,6 +132,15 @@ pub(crate) fn all_parameters(doc: &Document, definition: Handle) -> Vec<Paramete
     result
 }
 
+/// The listing reader over every parameter kind.
+pub(crate) fn all_listed_parameters(doc: &Document, definition: Handle) -> Vec<Parameter> {
+    let mut result = listed_parameters(doc, definition, Kind::Move);
+    result.extend(listed_parameters(doc, definition, Kind::Rotate));
+    result.extend(listed_parameters(doc, definition, Kind::Flip));
+    result.sort_by_key(|p| p.id);
+    result
+}
+
 /// Resolve native action association for runtime grip interaction.
 pub(crate) fn has_action(doc: &Document, definition: Handle, parameter: Handle) -> bool {
     let Some(p) = all_parameters(doc, definition).into_iter().find(|p| p.handle == parameter) else { return false; };
@@ -266,6 +275,21 @@ pub(crate) fn parameters(doc: &Document, definition: Handle, kind: Kind) -> Vec<
     let Ok(Some(graph)) = authoring::graph(doc, definition) else {
         return vec![];
     };
+    parameters_at(doc, definition, kind, graph)
+}
+
+/// The same parameters for a reader that only lists them. The graph is resolved
+/// through the links that say a definition holds it, not through the checks that
+/// decide whether an edit can be addressed through it, so a definition keeps
+/// listing its parameters while a graph refuses an edit.
+pub(crate) fn listed_parameters(doc: &Document, definition: Handle, kind: Kind) -> Vec<Parameter> {
+    let Some(graph) = authoring::listed_graph(doc, definition) else {
+        return vec![];
+    };
+    parameters_at(doc, definition, kind, graph)
+}
+
+fn parameters_at(doc: &Document, definition: Handle, kind: Kind, graph: Handle) -> Vec<Parameter> {
     let mut result = vec![];
     for (handle, p) in super::block_point_parameter::parameters(doc, definition) {
         if matches!(kind, Kind::Move | Kind::Stretch) {

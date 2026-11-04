@@ -55,6 +55,29 @@ fn object(
 ) -> Result<&ObjectType, &'static str> {
     let graph =
         super::graph(document, definition)?.ok_or("The block authoring graph is unavailable.")?;
+    belonging(document, graph, handle)
+}
+
+/// The proof a list needs: the links between the definition, its dictionary and
+/// its graph, and the node that names the parameter. The checks that decide
+/// whether a graph can be edited are not needed to say a parameter belongs to a
+/// definition, and a parameter that belongs has to be listed even when no edit
+/// can be addressed through it.
+fn listed_object(
+    document: &Document,
+    definition: Handle,
+    handle: Handle,
+) -> Result<&ObjectType, &'static str> {
+    let graph = super::listed_graph(document, definition)
+        .ok_or("The block authoring graph is unavailable.")?;
+    belonging(document, graph, handle)
+}
+
+fn belonging(
+    document: &Document,
+    graph: Handle,
+    handle: Handle,
+) -> Result<&ObjectType, &'static str> {
     let Some(ObjectType::DynamicBlock(graph_object)) = document.objects.get(&graph) else {
         return Err("The block authoring graph is unavailable.");
     };
@@ -241,6 +264,17 @@ pub(crate) fn read(
     handle: Handle,
 ) -> Result<Metadata<'_>, &'static str> {
     describe(object(document, definition, handle)?)
+}
+
+/// The metadata of a parameter a definition holds, for a reader that only lists:
+/// the same text, resolved through the links rather than through the checks that
+/// decide whether the graph can be edited.
+pub(crate) fn listed_read(
+    document: &Document,
+    definition: Handle,
+    handle: Handle,
+) -> Result<Metadata<'_>, &'static str> {
+    describe(listed_object(document, definition, handle)?)
 }
 /// The authoring name a named parameter object stores on its own element.
 fn element_name(object: &ObjectType) -> Option<&String> {

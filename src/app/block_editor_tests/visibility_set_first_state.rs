@@ -35,3 +35,66 @@ fn visibility_set_row_keeps_every_object_visible_in_the_first_state() {
         "the initial state keeps every object visible"
     );
 }
+
+/// A member drawn after the definition already carries an evaluation graph is
+/// new to that graph, and it still travels into the evaluated visibility copy.
+/// There it has to be identified by a tag naming the copy itself: a tag carried
+/// over from the definition points back at an object the copy does not contain.
+#[test]
+fn a_member_drawn_after_the_graph_reaches_the_visibility_copy_tagged() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.run_command_line("BPARAMETER POINT 2,3 4,5");
+
+    let _ = app.run_command_line("LINE 20,20 24,20");
+    let _ = app.run_command_line("BPARAMETER VISIBILITY 8,8");
+    let _ = app.dispatch_command("BTESTBLOCK");
+    let i = app.active_tab;
+    let insert = app.tabs[i].block_test.as_ref().unwrap().insert;
+    app.apply_visibility_state(insert, 0);
+    app.finish_pending_history(i);
+
+    let EntityType::Insert(ins) = app.tabs[i].scene.document.get_entity(insert).unwrap() else {
+        unreachable!();
+    };
+    let record = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .iter()
+        .find(|record| record.name == ins.block_name)
+        .expect("the state is read through its own copy of the definition");
+    assert!(
+        record.flags.anonymous,
+        "and the copy is the evaluated one, not the definition the line was drawn in"
+    );
+    let late = record
+        .entity_handles
+        .iter()
+        .copied()
+        .find(|handle| {
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(*handle)
+                .is_some_and(|entity| {
+                    matches!(entity,EntityType::Line(line)
+                        if (line.start.x,line.start.y,line.end.x,line.end.y) == (20.,20.,24.,20.))
+                })
+        })
+        .expect("the member drawn after the graph is in the copy");
+    let EntityType::Line(late) = app.tabs[i].scene.document.get_entity(late).unwrap() else {
+        unreachable!();
+    };
+    let tag = late
+        .common
+        .extended_data
+        .get_record("AcDbBlockRepETag")
+        .expect("the member drawn after the graph carries an element tag in the copy");
+    assert!(
+        tag.values
+            .iter()
+            .any(|value| matches!(value, codec::xdata::XDataValue::Handle(handle) if *handle == late.common.handle)),
+        "and the tag names the object it sits on: {tag:?}"
+    );
+}

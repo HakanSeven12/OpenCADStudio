@@ -2926,13 +2926,16 @@ impl OpenCADStudio {
                                     .ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
                                 None => Ok((format!("BLIPMODE = {}", h.blip_mode as i32), false)),
                             },
+                            // Only 0 or 1; anything else is refused and
+                            // asked for again, an accepted value is silent.
                             "SPLFRAME" => match &value {
-                                Some(v) => parse_bool(v)
-                                    .map(|b| {
-                                        h.spline_frame = b;
-                                        (format!("SPLFRAME = {}", b as i32), true)
-                                    })
-                                    .ok_or_else(|| "SETVAR: 0 or 1 required.".into()),
+                                Some(v) => match v.trim() {
+                                    "0" | "1" => {
+                                        h.spline_frame = v.trim() == "1";
+                                        Ok((String::new(), true))
+                                    }
+                                    _ => Err(crate::t!("Requires 0 or 1 only.").into_owned()),
+                                },
                                 None => {
                                     Ok((format!("SPLFRAME = {}", h.spline_frame as i32), false))
                                 }
@@ -3507,7 +3510,9 @@ impl OpenCADStudio {
                                 if matches!(name.as_str(), "PSLTSCALE" | "PLIMCHECK") {
                                     self.tabs[i].scene.persist_current_layout_state();
                                 }
-                                self.command_line.push_output(&msg);
+                                if !msg.is_empty() {
+                                    self.command_line.push_output(&msg);
+                                }
                             } else {
                                 // Queried with no value (`changed == false`):
                                 // prompt for a new value on the next line instead
@@ -3519,7 +3524,16 @@ impl OpenCADStudio {
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
-                        Err(e) => self.command_line.push_error(&e),
+                        Err(e) => {
+                            self.command_line.push_error(&e);
+                            if name == "SPLFRAME" {
+                                let current = self.tabs[i].scene.document.header.spline_frame as i32;
+                                self.command_line.push_output(
+                                    crate::tf!("Enter new value for {name} <{current}>:").as_ref(),
+                                );
+                                self.pending_setvar = Some(name.clone());
+                            }
+                        }
                     }
                     // TEXTFILL reset the glyph atlas; re-tessellate so text picks
                     // up the re-baked filled / hollow tiles.

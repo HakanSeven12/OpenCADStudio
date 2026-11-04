@@ -608,7 +608,7 @@ impl OpenCADStudio {
     /// curated tables + the visible plugins' registered quad panels) and open
     /// the window state on the selection boundary. Replaces any open context
     /// menu.
-    pub(crate) fn open_quad(&mut self, mode: QuadMode, anchor: Point) {
+    pub(crate) fn open_quad(&mut self, mode: QuadMode, anchor: Point) -> bool {
         let target = self.quad_target_for(mode);
         // API v15: the visible plugins' registered panels join after the
         // builtin catalog (registration order; the disabled and dead drop
@@ -624,6 +624,19 @@ impl OpenCADStudio {
             self.quad_width as usize,
             &plugin_panels,
         );
+        // Nothing to offer (an object type with no commands, an empty
+        // creation catalogue): no quad, so the shortcut menu still answers
+        // and Enter keeps its meaning. The hover and selection quads show
+        // their primary panel collapsed; the void quad any of its panels.
+        let offers = match mode {
+            QuadMode::Hover | QuadMode::Selection => {
+                panels.first().is_some_and(|panel| !panel.items.is_empty())
+            }
+            QuadMode::NoSelection => panels.iter().any(|panel| !panel.items.is_empty()),
+        };
+        if !offers {
+            return false;
+        }
         let i = self.active_tab;
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -637,6 +650,7 @@ impl OpenCADStudio {
         self.quad_open_target = Some(target);
         self.quad_panels = panels;
         self.quad_hover_since = None;
+        true
     }
 
     /// Close the quad: drop the window state on the active tab's selection
@@ -881,8 +895,10 @@ impl OpenCADStudio {
         if self.quad_command_launch {
             if let QuadTarget::Hovered { handle, type_key } = &target {
                 if held_ms >= self.right_click_hold_ms {
-                    self.open_quad(QuadMode::NoSelection, at);
-                    return Some(self.unfocus_widgets());
+                    if self.open_quad(QuadMode::NoSelection, at) {
+                        return Some(self.unfocus_widgets());
+                    }
+                    return None;
                 }
                 // The verb resolves the same way the quad model assembles
                 // the primary tile: the type's MRU head, else the curated
@@ -905,12 +921,11 @@ impl OpenCADStudio {
             }
         }
         let has_selection = !self.tabs[i].scene.selected.is_empty();
-        if has_selection && self.quad_on_select {
-            self.open_quad(QuadMode::Selection, at);
+        if has_selection && self.quad_on_select && self.open_quad(QuadMode::Selection, at) {
             return Some(self.unfocus_widgets());
         }
-        if target.is_none() && self.quad_on_right_click {
-            self.open_quad(QuadMode::NoSelection, at);
+        if target.is_none() && self.quad_on_right_click && self.open_quad(QuadMode::NoSelection, at)
+        {
             return Some(self.unfocus_widgets());
         }
         // Over an entity with launch off, or with the respective display
@@ -946,8 +961,15 @@ impl OpenCADStudio {
         // a Selection / NoSelection quad stays out of hover accounting.
         if let Some(quad) = &quad_state {
             if quad.mode == QuadMode::Hover {
-                let drifted = (pos.x - quad.anchor.x).hypot(pos.y - quad.anchor.y) > QUAD_DRIFT_PX;
-                if tab.scene.hover_highlight.is_none() || drifted {
+                // The tile sits up and right of the anchor: the cursor may
+                // cross from the object to it (losing the hover on the way)
+                // without closing it; anywhere else closes it.
+                use crate::ui::popup::quad_overlay::{QUAD_HOVER_GAP, QUAD_TILE};
+                let reach = QUAD_HOVER_GAP + QUAD_TILE + QUAD_DRIFT_PX;
+                let (dx, dy) = (pos.x - quad.anchor.x, quad.anchor.y - pos.y);
+                let toward_tile = (-QUAD_DRIFT_PX..=reach).contains(&dx)
+                    && (-QUAD_DRIFT_PX..=reach).contains(&dy);
+                if !toward_tile {
                     self.close_quad();
                 }
             }
@@ -976,7 +998,7 @@ impl OpenCADStudio {
         };
         if due {
             self.quad_hover_since = None;
-            self.open_quad(QuadMode::Hover, pos);
+            let _ = self.open_quad(QuadMode::Hover, pos);
         }
     }
 
@@ -1031,6 +1053,32 @@ impl OpenCADStudio {
         if !self.quad_open() {
             // A quad closed since the gate tested it (a repeat of a global
             // shortcut): nothing left to drive.
+            return None;
+        }
+        // The hover quad opens without being asked for: a key typed then
+        // (Enter to repeat the last command, an option letter, a digit) is
+        // meant for the command line, so the quad closes and lets it through.
+        let hover = self.tabs[self.active_tab]
+            .scene
+            .selection
+            .borrow()
+            .menu
+            .quad
+            .as_ref()
+            .is_some_and(|quad| quad.mode == QuadMode::Hover);
+        let key = matches!(
+            msg,
+            Message::ShortcutPressed(_)
+                | Message::DynTabNext
+                | Message::DynTabPrev
+                | Message::CommandFinalize
+                | Message::CommandSpace
+                | Message::CommandSubmit
+                | Message::CommandAppendChar(_)
+                | Message::CommandInput(_)
+        );
+        if hover && key {
+            self.close_quad();
             return None;
         }
         match msg {
@@ -2134,8 +2182,13 @@ mod quad_tests {
             app.quad_hover_step(0, Point::new(100.0, 100.0), 320);
             let quad = quad_state(&app).expect("the hover quad opened past the delay");
             assert_eq!(quad.mode, QuadMode::Hover);
-            // A drift past 8px from the open anchor closes it again.
-            app.quad_hover_step(0, Point::new(130.0, 100.0), 0);
+            // On the way up and right to its tile it stays open, even once
+            // the cursor leaves the object.
+            app.tabs[0].scene.hover_highlight = None;
+            app.quad_hover_step(0, Point::new(130.0, 80.0), 0);
+            assert!(quad_state(&app).is_some());
+            // Any other way, past 8px from the open anchor, closes it again.
+            app.quad_hover_step(0, Point::new(80.0, 100.0), 0);
             assert!(quad_state(&app).is_none());
             assert!(app.quad_hover_since.is_none());
         });

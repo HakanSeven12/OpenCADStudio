@@ -456,19 +456,20 @@ impl StatusBar {
             );
         }
         // ── QUAD field (docs/quad-menu.md §3.6) ──────────────────────────
-        // Not user-hideable this wave (statusbar_config's `StatusPill` list
-        // stays untouched): one mastertoggle left of the pill's caret opens
-        // the display-option popup, both wired through `Message::Quad` /
-        // `Message::QuadOption`. The mirrored flags live on `StatusBar`
-        // (refreshed per message by the app).
-        pills.push(
-            quad_pill(
-                self.quad.on,
-                tooltip_hidden,
-                crate::ui::popup::quad_status::menu_entries(self.quad),
-            )
-            .into(),
-        );
+        // One mastertoggle left of the pill's caret opens the display-option
+        // popup, both wired through `Message::Quad` / `Message::QuadOption`.
+        // The mirrored flags live on `StatusBar` (refreshed per message by
+        // the app). Hidden until turned on from the customization menu.
+        if vis(StatusPill::Quad) {
+            pills.push(
+                quad_pill(
+                    self.quad.on,
+                    tooltip_hidden,
+                    crate::ui::popup::quad_status::menu_entries(self.quad),
+                )
+                .into(),
+            );
+        }
         if vis(StatusPill::Space) {
             pills.push(
                 tip(

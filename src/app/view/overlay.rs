@@ -1532,6 +1532,25 @@ pub(super) fn viewport_quad_overlay<'a>(
         })
     };
 
+    // The hover quad opens on its own beside the cursor: it catches no clicks
+    // and sits up and right of the pointer, so the hovered object can still
+    // be clicked, and it closes when the cursor leaves for elsewhere.
+    if quad.mode == crate::ui::popup::quad_menu::QuadMode::Hover {
+        let Some(content) = quad_element else {
+            return iced::widget::Space::new().into();
+        };
+        let gap = quad_overlay::QUAD_HOVER_GAP;
+        let offset = if quad.expanded {
+            Vector::new(
+                gap - quad_overlay::QUAD_PANEL_PAD,
+                -(gap + quad_overlay::QUAD_TILE + quad_overlay::QUAD_PANEL_PAD),
+            )
+        } else {
+            Vector::new(gap, -(gap + quad_overlay::QUAD_TILE))
+        };
+        return position_canvas_overlay_clamped(quad.anchor, bottom_inset, offset, content);
+    }
+
     let catcher = mouse_area(
         container(iced::widget::Space::new().width(Fill).height(Fill))
             .width(Fill)
@@ -2175,12 +2194,12 @@ mod quad_view_tests {
     }
 
     fn collapsed_quad() -> Element<'static, Message> {
-        let quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Hover);
+        let quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Selection);
         viewport_quad_overlay(&quad, &quad_panels(), 6, 60.0)
     }
 
     fn expanded_quad() -> Element<'static, Message> {
-        let mut quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Hover);
+        let mut quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Selection);
         quad.expanded = true;
         viewport_quad_overlay(&quad, &quad_panels(), 6, 60.0)
     }
@@ -2278,6 +2297,22 @@ mod quad_view_tests {
             m,
             Message::Quad(QuadMsg::Pick { panel_id, item_index: 1 }) if panel_id == "quad.primary"
         )));
+    }
+
+    #[test]
+    fn hover_quad_sits_beside_the_cursor_and_catches_no_click() {
+        // The hover quad opens unasked: its tile goes up and right of the
+        // cursor, so a click on the hovered object reaches the drawing.
+        use crate::ui::popup::quad_overlay::{QUAD_HOVER_GAP, QUAD_TILE};
+        let hover = || {
+            let quad = QuadUi::open(iced::Point::new(300.0, 225.0), QuadMode::Hover);
+            viewport_quad_overlay(&quad, &quad_panels(), 6, 60.0)
+        };
+        let at_cursor = press_at(hover(), iced::Point::new(300.0, 225.0));
+        assert!(!at_cursor.iter().any(|m| matches!(m, Message::Quad(_))), "{at_cursor:?}");
+        let middle = QUAD_HOVER_GAP + QUAD_TILE * 0.5;
+        let on_tile = press_at(hover(), iced::Point::new(300.0 + middle, 225.0 - middle));
+        assert!(on_tile.iter().any(|m| matches!(m, Message::Quad(QuadMsg::Pick { .. }))), "{on_tile:?}");
     }
 
     #[test]

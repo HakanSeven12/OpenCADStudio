@@ -739,7 +739,7 @@ impl OpenCADStudio {
             // stays the feed-time `panels_for_visible` filter either way.
             crate::plugin::quad::retain_alive(|plugin| {
                 !self.disabled_plugins.contains(plugin)
-                    || crate::plugin::external::with_manager(|manager| {
+                    && crate::plugin::external::with_manager(|manager| {
                         !manager.grip_endpoint(plugin).is_some_and(|(_, _, alive)| !alive)
                     })
             });

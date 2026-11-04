@@ -20,6 +20,7 @@ pub enum StatusPill {
     Otrack,
     Ducs,
     Osnap,
+    Quad,
     Space,
     Scale,
     AnnoVisibility,
@@ -49,6 +50,7 @@ impl StatusPill {
         StatusPill::Otrack,
         StatusPill::Ducs,
         StatusPill::Osnap,
+        StatusPill::Quad,
         StatusPill::Space,
         StatusPill::Scale,
         StatusPill::AnnoVisibility,
@@ -77,6 +79,7 @@ impl StatusPill {
             StatusPill::Otrack => "otrack",
             StatusPill::Ducs => "ducs",
             StatusPill::Osnap => "osnap",
+            StatusPill::Quad => "quad",
             StatusPill::Space => "space",
             StatusPill::Scale => "scale",
             StatusPill::AnnoVisibility => "anno_visibility",
@@ -106,6 +109,7 @@ impl StatusPill {
             StatusPill::Otrack => "Object Snap Tracking",
             StatusPill::Ducs => "Dynamic UCS",
             StatusPill::Osnap => "Object Snap",
+            StatusPill::Quad => "Quad Cursor Menu",
             StatusPill::Space => "Model/Paper Space",
             StatusPill::Scale => "Annotation Scale",
             StatusPill::AnnoVisibility => "Show Annotation Objects",
@@ -147,6 +151,7 @@ impl Default for StatusBarConfig {
             StatusPill::Transparency,
             StatusPill::SelCycle,
             StatusPill::Vp,
+            StatusPill::Quad,
         ]
         .into_iter()
         .collect();

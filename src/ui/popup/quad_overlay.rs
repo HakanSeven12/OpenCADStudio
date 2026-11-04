@@ -19,6 +19,9 @@ pub const QUAD_TILE: f32 = 38.0;
 pub const QUAD_TILE_GAP: f32 = 4.0;
 /// Padding around the grid inside the quad card.
 pub const QUAD_PANEL_PAD: f32 = 4.0;
+/// How far the hover quad's tile sits up and right of the cursor, so the
+/// object under the cursor still takes a click.
+pub const QUAD_HOVER_GAP: f32 = 10.0;
 /// Icon canvas inside a tile (the SVG assets are 24×24).
 const QUAD_ICON: f32 = 24.0;
 /// Height of one bottom tab.

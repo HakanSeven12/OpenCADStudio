@@ -653,6 +653,20 @@ pub(crate) fn screenshot_if_drawn(
     })
 }
 
+/// The viewport VPMAX enlarged, with the geometry and active-viewport choice
+/// VPMIN must put back.
+#[derive(Clone, Debug)]
+pub(crate) struct VpMaxState {
+    pub layout: String,
+    pub handle: codec::Handle,
+    pub center: codec::types::Vector3,
+    pub width: f64,
+    pub height: f64,
+    pub view_height: f64,
+    pub scale: f64,
+    pub active_viewport: Option<codec::Handle>,
+}
+
 pub(super) struct OpenCADStudio {
     start: Instant,
     control: control::State,
@@ -1177,6 +1191,8 @@ pub(super) struct OpenCADStudio {
     /// `true` after a bare `VPORTS` in model space — the next command-line
     /// entry is treated as the tiled-config option (SIngle/2H/2V/4).
     awaiting_vports: bool,
+    /// VPMAX's saved viewport state; `None` while not maximized.
+    vpmax_state: Option<VpMaxState>,
     /// Set to the variable name after a bare system-variable query (e.g. a lone
     /// `MIRRTEXT`) — the next command-line entry is its new value, empty keeps
     /// the current one.
@@ -5972,6 +5988,7 @@ impl OpenCADStudio {
             #[cfg(not(target_arch = "wasm32"))]
             block_usage_last_persist: None,
             awaiting_vports: false,
+            vpmax_state: None,
             pending_setvar: None,
             delete_objects: 1,
             ucs_icon_hover: false,

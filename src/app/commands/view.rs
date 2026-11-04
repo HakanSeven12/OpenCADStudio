@@ -658,6 +658,126 @@ impl OpenCADStudio {
             "VPJOIN" => return self.dispatch_view("VPORTS SINGLE", i),
             "CASCADE" => return self.dispatch_view("VPORTS 4", i),
 
+            // ── VPMAX / VPMIN — enlarge the active viewport and put it back ──
+            // The viewport grows to the printable area at its current scale;
+            // VPMIN restores the saved rectangle, view height and active
+            // viewport, so scale, lock state and model centre are unchanged.
+            "VPMAX" | "-VPMAX" => {
+                let scene = &self.tabs[i].scene;
+                if scene.current_layout == "Model" {
+                    self.command_line.push_error(
+                        crate::t!("VPMAX: switch to a paper layout first.").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                if self.vpmax_state.is_some() {
+                    self.command_line
+                        .push_error(crate::t!("VPMAX: a viewport is already maximized.").as_ref());
+                    return Some(Task::none());
+                }
+                let Some(handle) = scene
+                    .active_viewport
+                    .or_else(|| scene.first_user_viewport())
+                else {
+                    self.command_line.push_error(
+                        crate::t!("VPMAX: this layout has no viewport to maximize.").as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                let Some(codec::EntityType::Viewport(vp)) =
+                    scene.document.get_entity(handle)
+                else {
+                    self.command_line
+                        .push_error(crate::t!("VPMAX: the active viewport is gone.").as_ref());
+                    return Some(Task::none());
+                };
+                let scale = crate::scene::vp_effective_scale(
+                    vp.custom_scale,
+                    vp.view_height,
+                    vp.height,
+                );
+                let saved = crate::app::VpMaxState {
+                    layout: scene.current_layout.clone(),
+                    handle,
+                    center: vp.center.clone(),
+                    width: vp.width,
+                    height: vp.height,
+                    view_height: vp.view_height,
+                    scale,
+                    active_viewport: scene.active_viewport,
+                };
+                let ((x0, y0), (x1, y1)) = scene
+                    .printable_area_limits()
+                    .unwrap_or(((0.0, 0.0), (297.0, 210.0)));
+                let (uw, uh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
+                let (cx, cz) = (x0 + uw / 2.0, y0 + uh / 2.0);
+                if let Some(codec::EntityType::Viewport(vp)) =
+                    self.tabs[i].scene.document.get_entity_mut(handle)
+                {
+                    vp.center = codec::types::Vector3::new(cx, 0.0, cz);
+                    vp.width = uw;
+                    vp.height = uh;
+                    // Keep the paper-per-model scale: height / view_height.
+                    if vp.view_height.abs() > 1e-9 && scale.abs() > 1e-12 {
+                        vp.view_height = uh / scale;
+                    }
+                }
+                self.tabs[i].scene.active_viewport = Some(handle);
+                self.tabs[i].scene.camera_generation += 1;
+                self.vpmax_state = Some(saved);
+                self.command_line.push_output(
+                    crate::tf!(
+                        "VPMAX: viewport maximized to {uw:.1}×{uh:.1} at scale {}.",
+                        viewport_scale_text(scale)
+                    )
+                    .as_ref(),
+                );
+                return Some(Task::none());
+            }
+            "VPMIN" | "-VPMIN" => {
+                let Some(saved) = self.vpmax_state.clone() else {
+                    self.command_line
+                        .push_error(crate::t!("VPMIN: no viewport is maximized.").as_ref());
+                    return Some(Task::none());
+                };
+                if self.tabs[i].scene.current_layout != saved.layout {
+                    self.command_line.push_error(
+                        crate::tf!(
+                            "VPMIN: return to layout '{}' before restoring the viewport.",
+                            saved.layout
+                        )
+                        .as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let Some(codec::EntityType::Viewport(vp)) =
+                    self.tabs[i].scene.document.get_entity_mut(saved.handle)
+                else {
+                    self.vpmax_state = None;
+                    self.command_line
+                        .push_error(crate::t!("VPMIN: the maximized viewport is gone.").as_ref());
+                    return Some(Task::none());
+                };
+                vp.center = saved.center;
+                vp.width = saved.width;
+                vp.height = saved.height;
+                vp.view_height = saved.view_height;
+                self.tabs[i].scene.active_viewport = saved.active_viewport;
+                self.tabs[i].scene.camera_generation += 1;
+                self.vpmax_state = None;
+                self.tabs[i].dirty = true;
+                self.command_line.push_output(
+                    crate::tf!(
+                        "VPMIN: viewport restored to {:.1}×{:.1} at scale {}.",
+                        saved.width,
+                        saved.height,
+                        viewport_scale_text(saved.scale)
+                    )
+                    .as_ref(),
+                );
+                return Some(Task::none());
+            }
+
             // ── VPORTS — list or create preset viewport configurations ────
             //   VPORTS                    list the viewports in this layout
             //   VPORTS 2H|2V|4|SINGLE     apply a preset arrangement
@@ -1592,8 +1712,18 @@ fn vports_config_forget(doc: &mut codec::Document, name: &str) {
     crate::io::set_drawing_variable(doc, VPORTSCONFIG_INDEX, &names.join("\n"));
 }
 
-fn parse_vport_rects(value: &str) -> Vec<(f64, f64, f64, f64)> {
-    value
+/// A paper-per-model scale as the command line shows it: `1:50` or `2.00:1`.
+fn viewport_scale_text(scale: f64) -> String {
+    if scale.is_finite() && scale > 0.0 && scale < 1.0 {
+        format!("1:{:.0}", 1.0 / scale)
+    } else if scale.is_finite() && scale > 0.0 {
+        format!("{scale:.2}:1")
+    } else {
+        "?".to_string()
+    }
+}
+
+fn parse_vport_rects(value: &str) -> Vec<(f64, f64, f64, f64)> {    value
         .split(';')
         .filter_map(|entry| {
             let mut parts = entry.split(',');

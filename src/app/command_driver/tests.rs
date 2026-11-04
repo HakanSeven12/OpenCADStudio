@@ -4169,3 +4169,147 @@ mod mission_m055_tests {
         assert!(all_output(&app).contains("no saved configuration named 'NOPE'"));
     }
 }
+
+#[cfg(test)]
+mod mission_m058_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn enter_layout(app: &mut OpenCADStudio) {
+        let i = app.active_tab;
+        let name = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        app.tabs[i].scene.set_current_layout(name);
+        app.tabs[i].scene.load_current_layout_state();
+    }
+
+    fn viewports(app: &OpenCADStudio) -> Vec<codec::Handle> {
+        let i = app.active_tab;
+        let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(vp)
+                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn vp(app: &OpenCADStudio, handle: codec::Handle) -> &codec::entities::Viewport {
+        match app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+        {
+            Some(codec::EntityType::Viewport(vp)) => vp,
+            _ => panic!("viewport missing"),
+        }
+    }
+
+    #[test]
+    fn maximizing_keeps_the_scale_and_restoring_puts_the_viewport_back() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS 2H");
+        let handles = viewports(&app);
+        assert_eq!(handles.len(), 2, "{}", all_output(&app));
+        let (target, other) = (handles[0], handles[1]);
+        let i = app.active_tab;
+
+        let ((x0, y0), (x1, y1)) = app.tabs[i]
+            .scene
+            .printable_area_limits()
+            .unwrap();
+        if let Some(codec::EntityType::Viewport(vp)) =
+            app.tabs[i].scene.document.get_entity_mut(target)
+        {
+            vp.custom_scale = 0.02; // 1:50
+            vp.view_height = 0.0;
+            vp.status.locked = true;
+        }
+        app.tabs[i].scene.active_viewport = Some(target);
+        let before = vp(&app, target).clone();
+        let other_before = vp(&app, other).clone();
+
+        let _ = app.run_command_line("VPMAX");
+
+        let output = all_output(&app);
+        assert!(output.contains("scale 1:50"), "{output}");
+        let maximized = vp(&app, target);
+        assert!((maximized.width - (x1 - x0)).abs() < 1e-6);
+        assert!((maximized.height - (y1 - y0)).abs() < 1e-6);
+        assert!((maximized.center.x - (x0 + x1) / 2.0).abs() < 1e-6);
+        assert!(maximized.status.locked, "the lock state must survive");
+        assert!(
+            (crate::scene::vp_effective_scale(
+                maximized.custom_scale,
+                maximized.view_height,
+                maximized.height
+            ) - 0.02)
+                .abs()
+                < 1e-9
+        );
+
+        let _ = app.run_command_line("VPMIN");
+
+        let restored = vp(&app, target);
+        assert!((restored.width - before.width).abs() < 1e-9);
+        assert!((restored.height - before.height).abs() < 1e-9);
+        assert!((restored.center.x - before.center.x).abs() < 1e-9);
+        assert!((restored.center.z - before.center.z).abs() < 1e-9);
+        assert!((restored.view_target.x - before.view_target.x).abs() < 1e-9);
+        assert!(restored.status.locked);
+        assert!((crate::scene::vp_effective_scale(
+            restored.custom_scale,
+            restored.view_height,
+            restored.height
+        ) - 0.02)
+            .abs()
+            < 1e-9);
+        assert_eq!(app.tabs[i].scene.active_viewport, Some(target));
+        let other_after = vp(&app, other);
+        assert!((other_after.width - other_before.width).abs() < 1e-9);
+        assert!((other_after.center.x - other_before.center.x).abs() < 1e-9);
+    }
+
+    #[test]
+    fn restoring_without_maximizing_is_refused() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+
+        let _ = app.run_command_line("VPMIN");
+
+        assert!(all_output(&app).contains("no viewport is maximized"));
+    }
+
+    #[test]
+    fn maximizing_in_model_space_is_refused() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.run_command_line("VPMAX");
+
+        assert!(all_output(&app).contains("switch to a paper layout first"));
+    }
+}

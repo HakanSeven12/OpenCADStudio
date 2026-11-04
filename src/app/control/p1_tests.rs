@@ -2042,6 +2042,96 @@ fn a_converted_constraint_clamps_the_grip_that_moves_a_level_line() {
     );
 }
 
+/// A dimensional constraint added by the constraint command owns the span its
+/// value names, so the grip that moves one of its participants is clamped by
+/// that drag rather than by whatever constraint command walks the network next.
+/// Which end the solver holds is the separate datum question.
+#[test]
+fn a_created_constraint_clamps_the_grip_that_moves_it() {
+    use crate::command::CmdResult;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+        kind: ConstraintKind::DistanceX,
+        first: ParametricRef::point(line, 0),
+        second: ParametricRef::point(line, 1),
+        first_point: glam::DVec3::ZERO,
+        second_point: glam::DVec3::new(40.0, 0.0, 0.0),
+        location: glam::DVec3::new(20.0, -10.0, 0.0),
+        axis: glam::DVec3::X,
+        direction: None,
+        name: "d1".to_string(),
+        expression: "100".to_string(),
+        renamed: false,
+        label: "Linear constraint",
+    });
+    app.drive_headless_task(task).unwrap();
+    let constraint = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the drawing has a constraint set")
+        .constraints
+        .iter()
+        .find(|constraint| constraint.kind == ConstraintKind::DistanceX)
+        .expect("the command added a horizontal span");
+    // The form the clamp keys on: one entity's own two point markers, driven by a
+    // named value, and enabled.
+    assert_eq!(constraint.refs.len(), 2, "both ends are the participants");
+    assert!(
+        constraint
+            .refs
+            .iter()
+            .all(|reference| reference.entity == line && reference.marker.is_some()),
+        "and they are markers of the line the command was aimed at: {:?}",
+        constraint.refs
+    );
+    assert!(
+        constraint.enabled && constraint.driving_param.is_some(),
+        "and it is the driving one: {:?}",
+        constraint.driving_param
+    );
+    let span = |app: &OpenCADStudio| {
+        let document = &app.tabs[app.active_tab].scene.document;
+        let codec::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
+            unreachable!("the participant is still a line");
+        };
+        entity.end.x - entity.start.x
+    };
+    assert!(
+        (span(&app) - 100.0).abs() < 1e-6,
+        "the value the constraint names sizes the line it was drawn on: {}",
+        span(&app)
+    );
+
+    let dragged = control(
+        &mut app,
+        json!({"op":"grip_drag","handle":handle,"grip_id":1,"point":[80,10,0]}),
+    );
+    assert_eq!(dragged["ok"], json!(true), "{dragged}");
+    let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
+    let entity = &q["entities"][0];
+    let (start, end) = (line_point(entity, "start"), line_point(entity, "end"));
+    assert!(
+        (end.1 - 10.0).abs() < 1e-3,
+        "the drag still moved the end off the axis it was aimed at: {q}"
+    );
+    assert!(
+        (end.0 - start.0 - 100.0).abs() < 1e-6,
+        "and the created constraint holds its own span through the drag: {q}"
+    );
+}
+
 /// Auto-constraining a selection adds constraints the same way, so its
 /// completion reports the geometry its solve moves outside the selection.
 #[test]

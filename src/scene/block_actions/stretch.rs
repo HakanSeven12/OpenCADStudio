@@ -189,12 +189,22 @@ pub(crate) fn bind_existing(
 }
 
 pub(crate) fn validate_options(a: &BlockStretchAction) -> Result<(), &'static str> {
+    validate_action_options(a, None)
+}
+
+pub(crate) fn validate_action_options(
+    a: &BlockStretchAction,
+    action_nodes: Option<&std::collections::BTreeSet<i32>>,
+) -> Result<(), &'static str> {
     options::validate(&a.offsets)?;
-    if !a.action.action_ids.is_empty() {
+    let chained = match action_nodes {
+        Some(nodes) => a.action.action_ids.iter().any(|id| nodes.contains(id)),
+        None => !a.action.action_ids.is_empty(),
+    };
+    if chained {
         return Err("This Stretch action cannot chain follow-up actions yet.");
     }
-    if !a.codes.is_empty()
-        || a.connections[0].code != a.connections[1].code
+    if a.connections[0].code != a.connections[1].code
         || !matches!(
             [
                 a.connections[0].name.as_str(),
@@ -213,7 +223,12 @@ pub(crate) fn validate_options(a: &BlockStretchAction) -> Result<(), &'static st
 }
 
 pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchAction) -> Result<(), &'static str> {
-    validate_options(a)?;
+    let action_nodes: std::collections::BTreeSet<i32> = actions(doc, definition)
+        .into_iter()
+        .map(|(_, act, _, _)| act.element.eval.node_id)
+        .filter(|&id| id > 0)
+        .collect();
+    validate_action_options(a, Some(&action_nodes))?;
     if a.points.len() < 2
         || a.points
             .iter()
@@ -275,12 +290,16 @@ pub(crate) fn validate_polar(
     a: &BlockPolarStretchAction,
 ) -> Result<(), &'static str> {
     polar_key_point(a)?;
-    if !a.action.action_ids.is_empty() {
+    let action_nodes: std::collections::BTreeSet<i32> = actions(doc, definition)
+        .into_iter()
+        .map(|(_, act, _, _)| act.element.eval.node_id)
+        .filter(|&id| id > 0)
+        .collect();
+    if a.action.action_ids.iter().any(|id| action_nodes.contains(id)) {
         return Err("This Polar Stretch action cannot chain follow-up actions yet.");
     }
     if !a.distance_multiplier.is_finite()
         || !a.angle_offset.is_finite()
-        || !a.codes.is_empty()
         || !a.extra.is_empty()
         || a.points.len() < 2
         || a.points

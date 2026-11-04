@@ -232,6 +232,93 @@ fn block_actions_rotate_flip_saved_values_compose_copy_and_roundtrip() {
 }
 
 #[test]
+fn block_actions_evaluate_stretch_with_relocated_flip_reflection_line() {
+    use super::super::block_orientation_parameter::Kind as O;
+    let (mut doc, def, targets) = fixture();
+    let linear = linear(&mut doc, def);
+    let flip = orientation(&mut doc, def, O::Flip);
+    let stretch_frame = [DVec3::new(1.5, -5., 0.), DVec3::new(15., 15., 0.)];
+    create_with_frame(
+        &mut doc,
+        def,
+        Kind::Stretch,
+        linear,
+        &targets,
+        DVec3::ZERO,
+        Some(stretch_frame),
+    )
+    .unwrap();
+    create(&mut doc, def, Kind::Flip, flip, &targets, DVec3::ZERO).unwrap();
+    let insert = doc
+        .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            "ACTIONS",
+            Vector3::ZERO,
+        )))
+        .unwrap();
+
+    let flip_p = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == flip)
+        .unwrap();
+    let mut owner = doc.ensure_extension_dictionary(insert);
+    for key in [
+        "AcDbBlockRepresentation",
+        "AppDataCache",
+        "ACAD_ENHANCEDBLOCKDATA",
+    ] {
+        owner = instance::ensure_dictionary(&mut doc, owner, key).unwrap();
+    }
+    let key = flip_p.id.to_string();
+    let h = doc.allocate_handle();
+    let mut r = codec::objects::XRecord::named(&key);
+    r.handle = h;
+    r.owner = owner;
+    r.reactors.push(owner);
+    r.cloning_flags = codec::objects::DictionaryCloningFlags::KeepExisting;
+    let shifted_base = flip_p.base + DVec3::new(25., 10., 0.);
+    let shifted_end = flip_p.end + DVec3::new(25., 10., 0.);
+    r.entries = vec![
+        codec::objects::XRecordEntry::int32(1071, 0),
+        codec::objects::XRecordEntry::int32(1071, 0),
+        codec::objects::XRecordEntry::int16(70, 25),
+        codec::objects::XRecordEntry::int16(70, 104),
+        codec::objects::XRecordEntry::new(10, codec::objects::XRecordValue::Point3D(shifted_base.x, shifted_base.y, shifted_base.z)),
+        codec::objects::XRecordEntry::new(10, codec::objects::XRecordValue::Point3D(shifted_end.x, shifted_end.y, shifted_end.z)),
+        codec::objects::XRecordEntry::new(10, codec::objects::XRecordValue::Point3D(0., 0., -1.)),
+        codec::objects::XRecordEntry::int16(70, 0),
+    ];
+    doc.objects.insert(h, ObjectType::XRecord(r));
+    if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&owner) {
+        d.add_entry(&key, h);
+    }
+
+    let flip_val = instance::value(&doc, insert, &flip_p).unwrap();
+    assert_eq!(flip_val, Value::Flip(false));
+
+    let linear_p = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == linear)
+        .unwrap();
+    let new_pos = Value::Point(linear_p.end + DVec3::X * 10.);
+    let evaluated = instance::evaluate_value(&doc, insert, linear, new_pos)
+        .expect("Stretch evaluation must succeed despite relocated flip parameter")
+        .expect("Evaluation should change the document");
+
+    let EntityType::Insert(i) = evaluated.get_entity(insert).unwrap() else { panic!() };
+    let line_h = evaluated.block_records.get(&i.block_name).unwrap().entity_handles[0];
+    let EntityType::Line(l) = evaluated.get_entity(line_h).unwrap() else { panic!() };
+    assert_eq!(l.end, Vector3::new(12., 0., 0.));
+
+    let flipped_doc = instance::evaluate_value(&evaluated, insert, flip, Value::Flip(true))
+        .expect("Flip evaluation must succeed with relocated reflection line")
+        .expect("Flip should produce changes");
+    assert_eq!(
+        instance::value(&flipped_doc, insert, &flip_p).unwrap(),
+        Value::Flip(true)
+    );
+}
+
+#[test]
 fn block_actions_rotate_flip_test_baseline_reversible_and_invalid_atomic() {
     use super::super::block_orientation_parameter::Kind as O;
     let (mut doc, def, targets) = fixture();

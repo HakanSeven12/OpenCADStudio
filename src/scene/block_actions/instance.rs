@@ -193,8 +193,8 @@ pub(crate) fn value(
     if points.len() < 2
         || !points[0].is_finite()
         || !points[1].is_finite()
-        || points[0].distance(p.base) > 1e-8
-        || points[1].distance(p.end) > 1e-8
+        || (points[0].z - p.base.z).abs() > 1e-8
+        || (points[1].z - p.end.z).abs() > 1e-8
     {
         return Err("This reference uses an unsupported Flip reflection line.");
     }
@@ -205,11 +205,11 @@ pub(crate) fn value(
     match state {
         Some(0) => Ok(Value::Flip(false)),
         Some(1) => Ok(Value::Flip(true)),
-        _ => Err("The Flip state is not zero or one."),
+        _ => Ok(Value::Flip(false)),
     }
 }
 
-fn ensure_dictionary(
+pub(crate) fn ensure_dictionary(
     doc: &mut Document,
     owner: Handle,
     key: &str,
@@ -476,13 +476,21 @@ pub(crate) fn load_frames(
 ) -> Result<std::collections::BTreeMap<Handle, ParameterFrame>, &'static str> {
     let mut frames = std::collections::BTreeMap::new();
     for p in parameters {
-        let value = if p.flip {
-            value(doc, insert, p)?
+        let (frame, value) = if p.flip {
+            let f = frame(doc, insert, p).unwrap_or(ParameterFrame {
+                base: p.base,
+                end: p.end,
+            });
+            let v = value(doc, insert, p).unwrap_or(Value::Flip(false));
+            (f, v)
         } else {
-            let frame = frame(doc, insert, p)?;
-            frames.insert(p.handle, frame);
-            Value::Point(frame.end)
+            let frame = frame(doc, insert, p).unwrap_or(ParameterFrame {
+                base: p.base,
+                end: p.end,
+            });
+            (frame, Value::Point(frame.end))
         };
+        frames.insert(p.handle, frame);
         super::set_value(evaluated, p, value)?;
     }
     Ok(frames)
@@ -551,13 +559,21 @@ pub(crate) fn load_test_frames(
 ) -> Result<std::collections::BTreeMap<Handle, ParameterFrame>, &'static str> {
     let mut frames = std::collections::BTreeMap::new();
     for p in parameters {
-        let value = if p.flip {
-            test_value(doc, insert, p)?
+        let (frame, value) = if p.flip {
+            let f = test_frame(doc, insert, p).unwrap_or(ParameterFrame {
+                base: p.base,
+                end: p.end,
+            });
+            let v = test_value(doc, insert, p).unwrap_or(Value::Flip(false));
+            (f, v)
         } else {
-            let frame = test_frame(doc, insert, p)?;
-            frames.insert(p.handle, frame);
-            Value::Point(frame.end)
+            let frame = test_frame(doc, insert, p).unwrap_or(ParameterFrame {
+                base: p.base,
+                end: p.end,
+            });
+            (frame, Value::Point(frame.end))
         };
+        frames.insert(p.handle, frame);
         super::set_value(evaluated, p, value)?;
     }
     Ok(frames)

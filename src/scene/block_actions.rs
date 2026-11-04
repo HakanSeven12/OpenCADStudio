@@ -907,7 +907,12 @@ pub(crate) fn retarget_frame_points(
                 .ok_or("The Stretch parameter is unavailable.")?
                 .end
                 .z;
-            stretch::validate_options(a)?;
+            let action_nodes: std::collections::BTreeSet<i32> = actions(doc, definition)
+                .into_iter()
+                .map(|(_, act, _, _)| act.element.eval.node_id)
+                .filter(|&id| id > 0)
+                .collect();
+            stretch::validate_action_options(a, Some(&action_nodes))?;
             if let Some(corners) = frame {
                 let (points, handles) = stretch::bind_frame(doc, &targets, corners, plane)?;
                 a.points = points;
@@ -1292,6 +1297,7 @@ struct Evaluation<'a> {
     previous_values: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     requested: Option<&'a std::collections::BTreeSet<Handle>>,
     resolved_frames: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
+    frames: Option<&'a std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
 }
 
 pub(crate) fn evaluate_framed(
@@ -1324,6 +1330,7 @@ pub(crate) fn evaluate_framed(
             previous_bases: Some(&previous_bases),
             base_changed,
             resolved_frames: Some(resolved_frames),
+            frames: Some(frames),
             rebuild: false,
             ..Evaluation::default()
         },
@@ -1363,6 +1370,7 @@ pub(crate) fn rebuild_framed(
         value(doc, &p)?,
         Evaluation {
             bases: Some(&bases),
+            frames: Some(frames),
             rebuild: true,
             base_changed: false,
             previous_bases: previous_bases.as_ref().or(Some(&bases)),
@@ -1669,9 +1677,16 @@ fn evaluate_impl(
                 if value(&staged, &q)? == Value::Flip(false) {
                     crate::command::EntityTransform::Translate(DVec3::ZERO)
                 } else {
+                    let (p1, p2) = if let Some(frame) =
+                        evaluation.frames.and_then(|f| f.get(&q.handle))
+                    {
+                        (frame.base, frame.end)
+                    } else {
+                        (q.base, q.end)
+                    };
                     crate::command::EntityTransform::Mirror {
-                        p1: q.base,
-                        p2: q.end,
+                        p1,
+                        p2,
                         working_normal: DVec3::Z,
                     }
                 }
@@ -1882,7 +1897,10 @@ fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, 
         }
     }
     let mut followed_by = std::collections::BTreeMap::new();
-    for (index, (_, action, _, _)) in all.iter().enumerate() {
+    for (index, (_, action, kind, _)) in all.iter().enumerate() {
+        if matches!(*kind, Kind::Stretch | Kind::PolarStretch | Kind::Array) {
+            continue;
+        }
         if action.action_ids.len() > 1 {
             return Err("An action chain cannot name more than one follow-up action yet.");
         }
@@ -1913,8 +1931,12 @@ fn chain_order(all: &[(Handle, &BlockAction, Kind, i32)]) -> Result<Vec<usize>, 
                 continue;
             }
             order.push(index);
-            for id in &all[index].1.action_ids {
-                queue.push_back(by_chain_id[id]);
+            if !matches!(all[index].2, Kind::Stretch | Kind::PolarStretch | Kind::Array) {
+                for id in &all[index].1.action_ids {
+                    if let Some(&next) = by_chain_id.get(id) {
+                        queue.push_back(next);
+                    }
+                }
             }
         }
     }

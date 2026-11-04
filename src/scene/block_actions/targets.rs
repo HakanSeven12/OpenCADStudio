@@ -36,9 +36,21 @@ pub(super) fn geometry(
         if kind == Kind::Move && chains::frame_target(doc, definition, parameter_id, *handle).is_some() {
             continue;
         }
-        if !grips.as_ref().unwrap().contains(handle) {
-            return Err("This action targets another parameter or an unsupported native object.");
+        if grips.as_ref().unwrap().contains(handle) {
+            continue;
         }
+        let all_params = all_parameters(doc, definition);
+        let is_block_param_or_grip = all_params.iter().any(|p| {
+            p.handle == *handle
+                || p.grip == *handle
+                || super::super::block_grips::config::locations(doc, definition, p.handle)
+                    .map(|locs| locs.iter().any(|g| g.handle == *handle))
+                    .unwrap_or(false)
+        });
+        if is_block_param_or_grip {
+            continue;
+        }
+        return Err("This action targets another parameter or an unsupported native object.");
         // The current per-reference parameter frame already determines its own
         // grips. Keep the native link without transforming definition objects.
     }

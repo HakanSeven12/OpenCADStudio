@@ -341,7 +341,9 @@ fn blocks_reports_an_unmatched_table_row_as_present_and_unmatched() {
         .iter()
         .flat_map(|section| &section.props)
         .find_map(|property| match &property.value {
-            PropValue::BlockChoice { key, .. } if matches!(key.component, Component::TableRow(_)) => {
+            PropValue::BlockChoice { key, .. }
+                if matches!(key.component, Component::TableRow(_)) =>
+            {
                 Some(property.label.clone())
             }
             _ => None,
@@ -794,5 +796,226 @@ fn block_table_properties_and_grip_popup_refresh_the_same_indexed_row() {
         let _ = app.update(Message::TableRowPick(1));
         assert_eq!(row(&app).1, 1);
         assert_eq!(app.tabs[i].table_grip.as_ref().unwrap().current, Some(1));
+    }
+}
+
+#[test]
+fn block_table_row_history_preserves_transported_linear_frames() {
+    use glam::DVec3;
+    for testing in [false, true] {
+        for chained in [false, true] {
+            let (mut app, reference) = fixture();
+            let source = app.active_tab;
+            let other = app.tabs[source]
+                .scene
+                .document
+                .add_entity(EntityType::Insert(Insert::new("EDIT_ME", Vector3::UNIT_Y)))
+                .unwrap();
+            begin(&mut app, reference);
+            let def = app.tabs[source]
+                .active_block_edit_session()
+                .unwrap()
+                .br_handle;
+            let line = members(&app)[0];
+            let doc = &mut app.tabs[source].scene.document;
+            let parent = distance::create(
+                doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::ZERO,
+                Vector3::new(10., 0., 0.),
+                Vector3::UNIT_Y,
+            )
+            .unwrap();
+            let child = distance::create(
+                doc,
+                def,
+                distance::Kind::Linear,
+                Vector3::new(0., 5., 0.),
+                Vector3::new(10., 5., 0.),
+                Vector3::new(5., 7., 0.),
+            )
+            .unwrap();
+            let codec::objects::ObjectType::DynamicBlock(object) =
+                doc.objects.get_mut(&child).unwrap()
+            else {
+                panic!()
+            };
+            let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
+            else {
+                panic!()
+            };
+            parameter.parameter.parameter.chain_actions = chained;
+            actions::create(doc, def, actions::Kind::Move, parent, &[child], DVec3::ZERO).unwrap();
+            actions::create(doc, def, actions::Kind::Move, child, &[line], DVec3::ZERO).unwrap();
+            let columns: Vec<_> = tables::columns(doc, def)
+                .into_iter()
+                .filter(|c| c.handle == parent)
+                .collect();
+            assert_eq!(columns.len(), 1);
+            tables::apply(doc, def, &columns, &[vec![10.], vec![20.]], false).unwrap();
+            let target = actions::all_parameters(doc, def)
+                .into_iter()
+                .find(|p| p.handle == child)
+                .unwrap();
+            if testing {
+                let _ = app.open_block_test(source);
+            } else {
+                let _ = app.dispatch_command("BSAVE");
+                let _ = app.dispatch_command("BCLOSE");
+            }
+            let i = app.active_tab;
+            let insert = app.tabs[i]
+                .block_test
+                .as_ref()
+                .map_or(reference, |test| test.insert);
+            let source_before = app.tabs[source].scene.document.clone();
+            let input = actions::Value::Point(target.end + DVec3::X * 2.);
+            let doc = &app.tabs[i].scene.document;
+            let changed = if testing {
+                actions::instance::evaluate_test_value(
+                    doc,
+                    &app.tabs[i].block_test.as_ref().unwrap().baseline,
+                    def,
+                    insert,
+                    child,
+                    input,
+                )
+            } else {
+                actions::instance::evaluate_value(doc, insert, child, input)
+            }
+            .unwrap()
+            .unwrap();
+            app.tabs[i].scene.document = changed;
+            app.tabs[i].scene.bump_geometry();
+            app.tabs[i].scene.select_entity(insert, true);
+            app.tabs[i].selected_handle = Some(insert);
+            app.refresh_properties();
+            let (key, selected, _) = row(&app);
+            assert_eq!(selected, 0);
+            let depth = app.tabs[i].history.undo_stack.len();
+            let check = |app: &OpenCADStudio, selected: usize, offset: f64| {
+                let doc = &app.tabs[i].scene.document;
+                assert_eq!(row(app).1, selected);
+                let frame = actions::instance::frame(doc, insert, &target).unwrap();
+                assert_eq!(frame.base, target.base + DVec3::X * offset);
+                assert_eq!(frame.end, target.end + DVec3::X * (offset + 2.));
+                let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
+                    panic!()
+                };
+                let line = doc
+                    .entities_in_block(&reference.block_name)
+                    .find_map(|e| {
+                        if let EntityType::Line(line) = e {
+                            Some(line)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap();
+                assert_eq!(
+                    line.start,
+                    Vector3::new(2. + if chained { offset } else { 0. }, 0., 0.)
+                );
+                if testing {
+                    assert_eq!(app.tabs[source].scene.document, source_before);
+                } else {
+                    let other_frame = actions::instance::frame(doc, other, &target).unwrap();
+                    assert_eq!(other_frame.base, target.base);
+                    assert_eq!(other_frame.end, target.end);
+                }
+            };
+            check(&app, 0, 0.);
+            let _ = app.update(Message::PropBlockChoice { key, index: 1 });
+            assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+            check(&app, 1, 10.);
+            app.undo_steps(1);
+            check(&app, 0, 0.);
+            app.redo_steps(1);
+            check(&app, 1, 10.);
+        }
+    }
+}
+
+#[test]
+fn drawing1_dxf_and_berb_dwg_stretch_grips_evaluate_without_error() {
+    let dxf_path = r"C:\Users\Atelier La Medina\AppData\Local\Temp\Rar$DRa40168.24845.rartemp\Drawing1.dxf";
+    if std::path::Path::new(dxf_path).exists() {
+        let doc = codec::DxfReader::from_file(std::path::Path::new(dxf_path))
+            .unwrap()
+            .read()
+            .unwrap();
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        app.tabs[i].scene.document = doc.clone();
+
+        for e in doc.entities() {
+            if let EntityType::Insert(ins) = e {
+                if let Some(_def_handle) = actions::instance::definition(&doc, ins.common.handle) {
+                    app.tabs[i].scene.select_entity(ins.common.handle, true);
+                    app.tabs[i].selected_handle = Some(ins.common.handle);
+                    app.refresh_properties();
+
+                    let grips = app.tabs[i].selected_grips.clone();
+                    for g in grips {
+                        if g.id != 0 {
+                            let started = app.start_test_action_grip(ins.common.handle, g.id);
+                            if started {
+                                if let Some(mut cmd) = app.tabs[i].active_cmd.take() {
+                                    let pt = g.world + glam::DVec3::new(5.0, 0.0, 0.0);
+                                    let res = cmd.on_point(pt);
+                                    let _ = app.apply_cmd_result(res);
+                                    assert!(
+                                        app.command_line.last_error.is_none(),
+                                        "Drawing1.dxf grip evaluation failed: {:?}",
+                                        app.command_line.last_error
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let dwg_path = r"C:\Users\Atelier La Medina\Desktop\berb.dwg";
+    if std::path::Path::new(dwg_path).exists() {
+        let doc = codec::DwgReader::from_file(std::path::Path::new(dwg_path))
+            .unwrap()
+            .read()
+            .unwrap();
+        let mut app = OpenCADStudio::new_for_test();
+        let i = app.active_tab;
+        app.tabs[i].scene.document = doc.clone();
+
+        for e in doc.entities() {
+            if let EntityType::Insert(ins) = e {
+                if let Some(_def_handle) = actions::instance::definition(&doc, ins.common.handle) {
+                    app.tabs[i].scene.select_entity(ins.common.handle, true);
+                    app.tabs[i].selected_handle = Some(ins.common.handle);
+                    app.refresh_properties();
+
+                    let grips = app.tabs[i].selected_grips.clone();
+                    for g in grips {
+                        if g.id != 0 {
+                            let started = app.start_test_action_grip(ins.common.handle, g.id);
+                            if started {
+                                if let Some(mut cmd) = app.tabs[i].active_cmd.take() {
+                                    let pt = g.world + glam::DVec3::new(5.0, 0.0, 0.0);
+                                    let res = cmd.on_point(pt);
+                                    let _ = app.apply_cmd_result(res);
+                                    assert!(
+                                        app.command_line.last_error.is_none(),
+                                        "berb.dwg grip evaluation failed: {:?}",
+                                        app.command_line.last_error
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

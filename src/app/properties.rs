@@ -3416,11 +3416,16 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 // keeps the cache build total.
                 // A polyline picked by segment shows only those segments'
                 // vertex and mid grips (vertex `k` is grip `k`, the mid grip
-                // of segment `k` is `n + k`).
+                // of segment `k` is `n + k`; a heavy polyline has no mid grips).
                 let segment_grips: Option<rustc_hash::FxHashSet<usize>> =
                     match (entity, self.tabs[i].scene.picked_segments(handle)) {
-                        (codec::EntityType::LwPolyline(polyline), Some(segments)) => {
-                            let n = polyline.vertices.len().max(1);
+                        (codec::EntityType::LwPolyline(_) | codec::EntityType::Polyline2D(_), Some(segments)) => {
+                            let n = match entity {
+                                codec::EntityType::LwPolyline(polyline) => polyline.vertices.len(),
+                                codec::EntityType::Polyline2D(polyline) => polyline.vertices.len(),
+                                _ => 0,
+                            }
+                            .max(1);
                             Some(
                                 segments
                                     .iter()

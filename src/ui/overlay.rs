@@ -1084,7 +1084,7 @@ pub fn selection_overlay<'a>(
     snap_ext_base2: Option<Point>,
     snap_ext_dir: Option<Point>,
     grips: Vec<GripMarker>,
-    control_polygon: Option<(Vec<Point>, bool, bool)>,
+    control_polygons: Vec<(Vec<Point>, bool, bool)>,
     grip_clip: Option<iced::Rectangle>,
     ucs_icons: Vec<UcsIconParams>,
     ost_points: Vec<OstTrackPoint>,
@@ -1122,7 +1122,7 @@ pub fn selection_overlay<'a>(
         snap_ext_base2,
         snap_ext_dir,
         grips,
-        control_polygon,
+        control_polygons,
         grip_clip,
         ucs_icons,
         ost_points,
@@ -1182,9 +1182,9 @@ struct SelectionCanvas {
     snap_ext_base2: Option<Point>,
     snap_ext_dir: Option<Point>,
     grips: Vec<GripMarker>,
-    /// Selected spline control polygon, its closed state, and whether it is
+    /// Each selected spline control polygon, its closed state, and whether it is
     /// a spline-fit polyline's frame (grey dots) rather than a CV frame.
-    control_polygon: Option<(Vec<Point>, bool, bool)>,
+    control_polygons: Vec<(Vec<Point>, bool, bool)>,
     /// Active 3D pane / floating viewport rectangle. Grip markers are clipped
     /// here so orbiting cannot leak them into paper space or adjacent panes.
     grip_clip: Option<iced::Rectangle>,
@@ -1634,7 +1634,7 @@ pub struct GripLayerKey {
     pub bounds: iced::Rectangle,
     pub palette: iced::theme::Palette,
     pub grips: Vec<GripMarker>,
-    pub control_polygon: Option<(Vec<Point>, bool, bool)>,
+    pub control_polygons: Vec<(Vec<Point>, bool, bool)>,
     pub grip_clip: Option<iced::Rectangle>,
     pub selection_visual: SelectionVisualOptions,
     pub authoring_style: AuthoringStyleKey,
@@ -2188,7 +2188,7 @@ impl canvas::Program<Message> for SelectionCanvas {
             bounds,
             palette: *theme.palette(),
             grips: self.grips.clone(),
-            control_polygon: self.control_polygon.clone(),
+            control_polygons: self.control_polygons.clone(),
             grip_clip: self.grip_clip,
             selection_visual: self.selection_visual,
             authoring_style: AuthoringStyleKey::from(&self.authoring_visual),
@@ -2227,7 +2227,7 @@ impl canvas::Program<Message> for SelectionCanvas {
                 height: grip_y1 - grip_y0,
             };
             frame.with_clip(grip_clip, |frame| {
-                if let Some((points, closed, dotted)) = &self.control_polygon {
+                for (points, closed, dotted) in &self.control_polygons {
                     if points.len() >= 2 {
                         let polygon = canvas::Path::new(|builder| {
                             builder.move_to(points[0]);
@@ -6374,7 +6374,7 @@ mod selection_canvas_state_tests {
                 is_authoring: false,
                 is_dynamic: false,
             }],
-            control_polygon: None,
+            control_polygons: Vec::new(),
             grip_clip: None,
             selection_visual: SelectionVisualOptions::default(),
             authoring_style: AuthoringStyleKey {

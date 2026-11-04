@@ -830,6 +830,9 @@ bg={bg_ms:.1}ms n={view_count}"
                     .as_ref()
                     .is_some_and(|cmd| cmd.name() == "STRETCH");
 
+            // Screen grips with the object they belong to, for the frames.
+            let mut owned_grips: Vec<(codec::Handle, iced::Point, crate::scene::model::object::GripShape)> =
+                Vec::new();
             let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
                 && !tab.selected_grips.is_empty()
             {
@@ -888,6 +891,13 @@ bg={bg_ms:.1}ms n={view_count}"
                     let cam = tab.scene.camera.borrow();
                     grips_to_screen(&tab.selected_grips, &cam, bounds)
                 };
+                owned_grips = screen_grips
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, (_, screen, _, shape, _))| {
+                        Some((*tab.selected_grip_handles.get(index)?, *screen, *shape))
+                    })
+                    .collect();
                 screen_grips
                     .into_iter()
                     .enumerate()
@@ -961,44 +971,56 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
                 grips
             };
-            let control_polygon = tab.selected_handle.and_then(|handle| {
-                // A CV spline's control frame, or a spline-fit 2D polyline's
-                // frame (its grips sit on the frame vertices, in order).
-                let (closed, dotted, grip_shape) = match tab.scene.document.get_entity(handle) {
-                    Some(codec::EntityType::Spline(spline))
-                        if crate::entities::spline::shows_control_vertices(spline) =>
-                    {
-                        (
-                            spline.flags.closed || spline.flags.periodic,
-                            false,
-                            crate::scene::model::object::GripShape::Circle,
-                        )
-                    }
-                    Some(codec::EntityType::Polyline2D(polyline))
-                        if polyline.flags.bits() & 4 != 0 =>
-                    {
-                        (
-                            polyline.is_closed(),
-                            true,
-                            crate::scene::model::object::GripShape::Square,
-                        )
-                    }
-                    _ => return None,
-                };
-                if tab
-                    .selected_grip_handles
-                    .iter()
-                    .any(|owner| *owner != handle)
-                {
-                    return None;
+            // The frame of every selected CV spline and spline-fit 2D or 3D
+            // polyline: its frame-vertex grips joined in order.
+            let mut framed: Vec<codec::Handle> = Vec::new();
+            for (owner, _, _) in &owned_grips {
+                if !framed.contains(owner) {
+                    framed.push(*owner);
                 }
-                let points: Vec<_> = grips
-                    .iter()
-                    .filter(|grip| grip.shape == grip_shape)
-                    .map(|grip| grip.pos)
-                    .collect();
-                (points.len() >= 2).then_some((points, closed, dotted))
-            });
+            }
+            let control_polygons: Vec<(Vec<iced::Point>, bool, bool)> = framed
+                .into_iter()
+                .filter_map(|handle| {
+                    let (closed, dotted, grip_shape) = match tab.scene.document.get_entity(handle) {
+                        Some(codec::EntityType::Spline(spline))
+                            if crate::entities::spline::shows_control_vertices(spline) =>
+                        {
+                            (
+                                spline.flags.closed || spline.flags.periodic,
+                                false,
+                                crate::scene::model::object::GripShape::Circle,
+                            )
+                        }
+                        Some(codec::EntityType::Polyline2D(polyline))
+                            if polyline.flags.bits() & 4 != 0 =>
+                        {
+                            (
+                                polyline.is_closed(),
+                                true,
+                                crate::scene::model::object::GripShape::Square,
+                            )
+                        }
+                        Some(codec::EntityType::Polyline3D(polyline))
+                            if polyline.smooth_type
+                                != codec::entities::polyline3d::SmoothSurfaceType::None =>
+                        {
+                            (
+                                polyline.is_closed(),
+                                true,
+                                crate::scene::model::object::GripShape::Square,
+                            )
+                        }
+                        _ => return None,
+                    };
+                    let points: Vec<_> = owned_grips
+                        .iter()
+                        .filter(|(owner, _, shape)| *owner == handle && *shape == grip_shape)
+                        .map(|(_, pos, _)| *pos)
+                        .collect();
+                    (points.len() >= 2).then_some((points, closed, dotted))
+                })
+                .collect();
             let grip_clip = if grips.is_empty() {
                 None
             } else {
@@ -1560,7 +1582,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 snap_ext_base2,
                 snap_ext_dir,
                 grips,
-                control_polygon,
+                control_polygons,
                 grip_clip,
                 ucs_icons,
                 ost_points,

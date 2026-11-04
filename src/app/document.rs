@@ -231,6 +231,9 @@ pub(super) struct DocumentTab {
     /// the drag's handle, grip and start point): every grip stays drawn
     /// there while the drag reshapes the object.
     pub(super) drag_start_grips: Option<((Handle, usize, glam::DVec3), Vec<GripDef>, Vec<Handle>)>,
+    /// GROUPDISPLAYMODE 2: the box (min, max corners) round each group
+    /// picked whole.
+    pub(super) group_boxes: Vec<[glam::DVec3; 2]>,
     /// Plugin-declared custom grip points for this tab (API v11): session
     /// display state only — never persisted, never host-interpreted.
     #[cfg(not(target_arch = "wasm32"))]
@@ -818,6 +821,7 @@ impl DocumentTab {
             selected_grips: vec![],
             selected_grip_handles: vec![],
             drag_start_grips: None,
+            group_boxes: vec![],
             #[cfg(not(target_arch = "wasm32"))]
             plugin_grips: Default::default(),
             #[cfg(not(target_arch = "wasm32"))]

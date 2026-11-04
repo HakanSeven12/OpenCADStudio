@@ -995,6 +995,7 @@ impl OpenCADStudio {
                     | "REVCLOUDCREATEMODE"
                     | "REVCLOUDARCVARIANCE"
                     | "REVCLOUDGRIPS"
+                    | "GROUPDISPLAYMODE"
                     | "REVCLOUDAPPROXARCLEN"
                     | "PELLIPSE"
                     | "SELECTIONCYCLING"
@@ -1116,6 +1117,10 @@ impl OpenCADStudio {
                         "CANNOSCALE" | "ANNOALLVISIBLE" | "ANNOAUTOSCALE" | "HPLAYER"
                     ) {
                         return Some(self.annotation_setvar(i, &name, value.as_deref()));
+                    }
+                    if name == "GROUPDISPLAYMODE" {
+                        self.group_display_setvar(value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
                     }
                     if name.starts_with("REVCLOUD") {
                         if self.revcloud_setvar(&name, value.as_deref(), i) {

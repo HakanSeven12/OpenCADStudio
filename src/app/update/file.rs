@@ -851,6 +851,7 @@ impl OpenCADStudio {
             file_dia: crate::sys::file_dia(),
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
+            group_display_mode: crate::app::commands::group_display_mode(),
             trim_extend_quick: crate::modules::draw::modify::trim::quick_mode(),
             revcloud_create_mode: crate::entities::revcloud::create_mode(),
             revcloud_arc_variance: crate::entities::revcloud::arc_variance(),
@@ -1041,6 +1042,7 @@ impl OpenCADStudio {
         crate::sys::set_file_dia(s.file_dia);
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
+        crate::app::commands::set_group_display_mode(s.group_display_mode);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
         crate::entities::revcloud::set_create_mode(s.revcloud_create_mode);
         crate::entities::revcloud::set_arc_variance(s.revcloud_arc_variance);

@@ -916,6 +916,9 @@ pub struct UserSettings {
     pub ole_hide: i16,
     /// OLEQUALITY: the plot quality of new OLE objects (3 automatic).
     pub ole_quality: i16,
+    /// GROUPDISPLAYMODE: a picked group shows member grips (0), a centre
+    /// grip (1) or a centre grip and a box (2).
+    pub group_display_mode: i16,
     /// TRIMEXTENDMODE: TRIM and EXTEND start in Quick mode (else Standard).
     pub trim_extend_quick: bool,
     /// REVCLOUDCREATEMODE: the type REVCLOUD starts with (0 Freehand, 1 Rectangular, 2 Polygonal).
@@ -1462,6 +1465,7 @@ impl Default for UserSettings {
             file_dia: true,
             ole_hide: 0,
             ole_quality: 3,
+            group_display_mode: 2,
             trim_extend_quick: true,
             revcloud_create_mode: 1,
             revcloud_arc_variance: true,

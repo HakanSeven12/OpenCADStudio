@@ -72,6 +72,10 @@ pub(crate) use entity::gradient_tint_color;
 pub use entity::CreateBlockOptions;
 pub(crate) use entity::normalize_block_terminators;
 mod group_layer;
+/// The one grip a whole picked group shows (GROUPDISPLAYMODE 1 and 2), at
+/// the centre of its extents: each member carries it, so dragging it moves
+/// the whole group.
+pub const GROUP_GRIP_ID: usize = usize::MAX - 2;
 #[cfg(test)]
 mod hatch_boundary;
 mod layout;

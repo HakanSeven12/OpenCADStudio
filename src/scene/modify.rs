@@ -2788,6 +2788,12 @@ impl Scene {
         if self.is_layer_locked(handle) {
             return;
         }
+        if grip_id == GROUP_GRIP_ID {
+            if let GripApply::Translate(delta) = apply {
+                self.transform_entities(&[handle], &crate::command::EntityTransform::Translate(delta));
+            }
+            return;
+        }
         // An attribute grip sits on the displayed (annotation-scaled)
         // attribute; the stored one is unscaled.
         let apply = match self.document.get_entity(handle) {

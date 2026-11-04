@@ -1084,8 +1084,8 @@ bg={bg_ms:.1}ms n={view_count}"
             let mut owned_grips: Vec<(codec::Handle, iced::Point, crate::scene::model::object::GripShape)> =
                 Vec::new();
             let mut grip_rubber: Option<(iced::Point, iced::Point)> = None;
-            let grips: Vec<crate::ui::overlay::GripMarker> = if show_grips
-                && !tab.selected_grips.is_empty()
+            let (grips, group_boxes): (Vec<crate::ui::overlay::GripMarker>, Vec<Vec<iced::Point>>) =
+                if show_grips && !tab.selected_grips.is_empty()
             {
                 let (vw, vh) = sel_ref.view.vp_size;
                 // Overlays project through the active tile's camera, so
@@ -1182,7 +1182,21 @@ bg={bg_ms:.1}ms n={view_count}"
                         Some((*tab.selected_grip_handles.get(index)?, *screen, *shape))
                     })
                     .collect();
-                screen_grips
+                // GROUPDISPLAYMODE 2: each group box's four corners on screen.
+                let boxes: Vec<Vec<iced::Point>> = tab
+                    .group_boxes
+                    .iter()
+                    .map(|[min, max]| {
+                        let z = (min.z + max.z) * 0.5;
+                        let corners: Vec<crate::scene::model::object::GripDef> =
+                            [(min.x, min.y), (max.x, min.y), (max.x, max.y), (min.x, max.y)]
+                                .into_iter()
+                                .map(|(x, y)| crate::entities::common::square_grip(0, glam::DVec3::new(x, y, z)))
+                                .collect();
+                        project(&corners).into_iter().map(|grip| grip.1).collect()
+                    })
+                    .collect();
+                let markers = screen_grips
                     .into_iter()
                     .enumerate()
                     .filter(|(_, (_, screen, _, _, _))| {
@@ -1219,11 +1233,13 @@ bg={bg_ms:.1}ms n={view_count}"
                             is_authoring: crate::app::block_authoring_edit::is_editor_grip(grip_id),
                             is_dynamic: crate::app::block_actions::is_test_grip(grip_id)
                                 || grip_id == crate::app::visibility::VIS_GRIP_ID,
+                            is_filled: grip_id == crate::scene::GROUP_GRIP_ID,
                         }
                     })
-                    .collect()
+                    .collect();
+                (markers, boxes)
             } else {
-                vec![]
+                (vec![], vec![])
             };
             // API v11: plugin-declared custom grips render in the same overlay
             // layer with a distinct accent (always-visible display state of a
@@ -1250,6 +1266,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             is_plugin: true,
                             is_authoring: false,
                             is_dynamic: false,
+                            is_filled: false,
                         });
                     }
                 }
@@ -1869,6 +1886,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 grips,
                 control_polygons,
                 grip_rubber,
+                group_boxes,
                 grip_clip,
                 ucs_icons,
                 ost_points,

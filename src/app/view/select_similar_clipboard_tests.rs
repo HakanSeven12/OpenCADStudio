@@ -10,21 +10,37 @@ fn apply_focus_task(
     renderer: &mut iced::Renderer,
     cache: &mut Cache,
     task: Task<Message>,
-) {
+) -> Vec<Message> {
     let mut ui = UserInterface::build(
         app.view_main(),
         iced::Size::new(1600.0, 900.0),
         std::mem::take(cache),
         renderer,
     );
+    let mut messages = Vec::new();
     if let Some(mut actions) = iced_runtime::task::into_stream(task) {
         while let Some(action) = block_on(actions.next()) {
-            if let iced_runtime::Action::Widget(mut operation) = action {
-                ui.operate(renderer, operation.as_mut());
+            match action {
+                iced_runtime::Action::Widget(mut operation) => {
+                    loop {
+                        ui.operate(renderer, operation.as_mut());
+                        // iced completes widget queries after traversing the
+                        // UI; finish delivers the native paste focus result.
+                        match operation.finish() {
+                            iced::advanced::widget::operation::Outcome::Chain(next) => {
+                                operation = next;
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+                iced_runtime::Action::Output(message) => messages.push(message),
+                _ => {}
             }
         }
     }
     *cache = ui.into_cache();
+    messages
 }
 
 fn key_messages(
@@ -71,6 +87,10 @@ fn key_messages(
 }
 
 fn copy_events() -> [iced::Event; 2] {
+    shortcut_events("c", keyboard::key::Code::KeyC)
+}
+
+fn shortcut_events(character: &str, code: keyboard::key::Code) -> [iced::Event; 2] {
     let modifiers = if cfg!(target_os = "macos") {
         keyboard::Modifiers::LOGO
     } else {
@@ -79,9 +99,9 @@ fn copy_events() -> [iced::Event; 2] {
     [
         iced::Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)),
         iced::Event::Keyboard(keyboard::Event::KeyPressed {
-            key: keyboard::Key::Character("c".into()),
-            modified_key: keyboard::Key::Character("c".into()),
-            physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyC),
+            key: keyboard::Key::Character(character.into()),
+            modified_key: keyboard::Key::Character(character.into()),
+            physical_key: keyboard::key::Physical::Code(code),
             location: keyboard::Location::Standard,
             modifiers,
             text: None,
@@ -91,6 +111,7 @@ fn copy_events() -> [iced::Event; 2] {
 }
 
 fn check_copy_after(start: Option<Message>, typed: &str, expected: usize) {
+    let _guard = crate::headless_ui_lock();
     let mut app = OpenCADStudio::new_for_test();
     let _ = app.automation_op(r#"{"op":"new"}"#);
     let i = app.active_tab;
@@ -115,7 +136,7 @@ fn check_copy_after(start: Option<Message>, typed: &str, expected: usize) {
         if matches!(start, Message::CommandSubmit) {
             app.command_line.input = typed.into();
         }
-        apply_focus_task(&app, &mut renderer, &mut cache, app.focus_cmd_input());
+        let _ = apply_focus_task(&app, &mut renderer, &mut cache, app.focus_cmd_input());
         // Verify the harness really routes a focused field's captured event:
         // it must keep the native text shortcut and leave CAD clipboard alone.
         let (messages, statuses) = key_messages(&app, &mut renderer, &mut cache, &copy_events());
@@ -125,7 +146,7 @@ fn check_copy_after(start: Option<Message>, typed: &str, expected: usize) {
             .any(|m| matches!(m, Message::ShortcutPressed(_))));
         assert!(app.clipboard.is_empty());
         let task = app.update(start);
-        apply_focus_task(&app, &mut renderer, &mut cache, task);
+        let _ = apply_focus_task(&app, &mut renderer, &mut cache, task);
     }
     // Baseline (no start): the same committed selection used by a canvas pick.
     assert_eq!(app.tabs[i].scene.selected.len(), expected);
@@ -185,4 +206,106 @@ fn typed_select_similar_copies_via_iced_keyboard() {
 #[test]
 fn canvas_selection_copies_via_iced_keyboard() {
     check_copy_after(None, "", 1);
+}
+
+#[test]
+fn copied_blocks_follow_cursor_when_pasted_via_iced_keyboard() {
+    use codec::entities::{Insert, Line};
+    use codec::types::Vector3;
+    use codec::EntityType;
+    use glam::DVec3;
+
+    let _guard = crate::headless_ui_lock();
+    let mut app = OpenCADStudio::new_for_test();
+    let _ = app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i]
+        .scene
+        .define_block_from_owned_entities(
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 5.0, 0.0),
+            ))],
+            "ClipboardPreview",
+            DVec3::ZERO,
+        )
+        .unwrap();
+    let handles: Vec<_> = [20.0, 70.0]
+        .into_iter()
+        .map(|x| {
+            app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+                "ClipboardPreview",
+                Vector3::new(x, 10.0, 0.0),
+            )))
+        })
+        .collect();
+    app.tabs[i].scene.select_entities(&handles);
+    app.tabs[i].scene.wire_models_for(&handles);
+
+    let mut renderer = block_on(iced::Renderer::new(
+        iced_test::core::renderer::Settings::default(),
+        Some("tiny-skia"),
+    ))
+    .expect("headless renderer");
+    let mut cache = Cache::default();
+    // Dispatch both keys through widget capture, subscription, shortcut mapping
+    // and the focus probe used by the native paste task.
+    for events in [
+        copy_events(),
+        shortcut_events("v", keyboard::key::Code::KeyV),
+    ] {
+        let (messages, _) = key_messages(&app, &mut renderer, &mut cache, &events);
+        assert!(!messages.is_empty());
+        let mut pending = std::collections::VecDeque::from(messages);
+        while let Some(message) = pending.pop_front() {
+            let task = app.update(message);
+            pending.extend(apply_focus_task(&app, &mut renderer, &mut cache, task));
+        }
+    }
+    assert_eq!(app.clipboard.len(), 2);
+    let base = app.clipboard_base;
+    let command = app.tabs[i]
+        .active_cmd
+        .as_mut()
+        .expect("Ctrl+V starts paste");
+    assert_eq!(command.name(), "PASTECLIP");
+    for cursor in [DVec3::new(100.0, 80.0, 0.0), DVec3::new(-30.0, 15.0, 0.0)] {
+        let preview = command.on_preview_wires(cursor);
+        let expanded = crate::scene::model::instance_model::expand_stubs(&preview);
+        let points: Vec<_> = expanded
+            .iter()
+            .flat_map(|wire| (0..wire.points.len()).map(|index| wire.point_world(index, 100.0)))
+            .filter(|point| point.is_finite())
+            .collect();
+        let delta = cursor - base;
+        assert_eq!(points.len(), 4, "{points:?}");
+        for x in [20.0, 70.0] {
+            for source in [DVec3::new(x, 10.0, 0.0), DVec3::new(x + 10.0, 15.0, 0.0)] {
+                let expected = source + delta;
+                assert!(
+                    points.iter().any(|point| point.distance(expected) < 1e-4),
+                    "missing {expected:?} in {points:?}"
+                );
+            }
+        }
+    }
+    let result = command.on_point(DVec3::new(100.0, 80.0, 0.0));
+    let _ = app.apply_cmd_result(result);
+    assert!(app.tabs[i].active_cmd.is_none());
+    // The command driver clears selection when placement finishes. Inspect
+    // the committed document rather than relying on a post-command selection.
+    let pasted: Vec<_> = app.tabs[i]
+        .scene
+        .document
+        .entities()
+        .filter_map(|entity| match entity {
+            EntityType::Insert(insert) if !handles.contains(&insert.common.handle) => Some(insert),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pasted.len(), 2);
+    for insert in pasted {
+        assert_eq!(insert.block_name, "ClipboardPreview");
+        assert!((insert.insert_point.y - (90.0 - base.y)).abs() < 1e-6);
+    }
 }

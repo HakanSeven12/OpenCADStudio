@@ -592,11 +592,14 @@ impl Scene {
 
     /// Build wire models for an arbitrary slice of entities (e.g. clipboard contents).
     /// Entities need not be in the document — they are tessellated directly.
+    /// Resolve cached block copies before consumers transform or count their
+    /// points, just like the handle-based edit preview snapshots.
     pub fn wires_for_entities(&self, entities: &[codec::EntityType]) -> Vec<WireModel> {
-        entities
+        let wires = entities
             .iter()
             .flat_map(|e| self.tessellate_one(e))
-            .collect()
+            .collect();
+        transform_preview_wires(wires)
     }
 
     pub fn set_interim_wire(&mut self, w: WireModel) {

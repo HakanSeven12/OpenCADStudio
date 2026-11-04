@@ -1100,6 +1100,9 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("-VPORTS")
             // -PAGESETUP takes SAVE/APPLY/RENAME and names on one line.
             || tokens[0].eq_ignore_ascii_case("-PAGESETUP")
+            // XBIND takes its reference, symbol type and names on one line.
+            || tokens[0].eq_ignore_ascii_case("XBIND")
+            || tokens[0].eq_ignore_ascii_case("-XBIND")
         {
             return self.dispatch_command(cmd);
         }

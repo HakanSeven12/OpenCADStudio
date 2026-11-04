@@ -1,5 +1,18 @@
 use super::*;
 
+/// The symbol-kind words `XBIND` accepts.
+fn xbind_kind(word: &str) -> Option<crate::io::xref::XbindKind> {
+    use crate::io::xref::XbindKind;
+    match word.to_ascii_uppercase().as_str() {
+        "LAYER" | "LAYERS" | "LA" => Some(XbindKind::Layer),
+        "BLOCK" | "BLOCKS" | "B" => Some(XbindKind::Block),
+        "LTYPE" | "LINETYPE" | "LTYPES" | "LT" => Some(XbindKind::Linetype),
+        "STYLE" | "STYLES" | "TEXTSTYLE" | "TEXT" => Some(XbindKind::TextStyle),
+        "DIMSTYLE" | "DIMSTYLES" | "DIM" => Some(XbindKind::DimStyle),
+        _ => None,
+    }
+}
+
 impl OpenCADStudio {
     /// Shared per-reference status reporting for XRELOAD and XREF Reload.
     /// Extracted verbatim from the XRELOAD arm — no behavior change.
@@ -986,6 +999,178 @@ impl OpenCADStudio {
                     "ERSTATE = {} (read only)",
                     u8::from(self.show_external_references)
                 ));
+            }
+
+            // XBIND / -XBIND — copy named symbols out of one reference and
+            // leave the reference attached. The bound copy uses the same
+            // `PLAN$0$WALLS` names a full BIND produces.
+            //   XBIND                         list the drawing references
+            //   XBIND <reference>             list its bindable symbols
+            //   XBIND <reference> <kind> <name> [<name>…] [<kind> <name>…]
+            cmd if cmd.eq_ignore_ascii_case("XBIND")
+                || cmd.to_ascii_uppercase().starts_with("XBIND ")
+                || cmd.eq_ignore_ascii_case("-XBIND")
+                || cmd.to_ascii_uppercase().starts_with("-XBIND ") =>
+            {
+                let rest = cmd
+                    .trim_start_matches('-')
+                    .split_once(char::is_whitespace)
+                    .map(|(_, rest)| rest.trim())
+                    .unwrap_or("");
+                let base_dir: std::path::PathBuf = self.tabs[i]
+                    .current_path
+                    .as_ref()
+                    .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                let entries = crate::io::xref::collect_entries_with_prev(
+                    &self.tabs[i].scene.document,
+                    &base_dir,
+                    self.tabs[i].xref_unloaded.as_set(),
+                    &self.tabs[i].xref_stat_cache.0,
+                );
+                let direct: Vec<_> = entries
+                    .iter()
+                    .filter(|entry| entry.parent_key.is_none())
+                    .collect();
+                let mut words = rest.split_whitespace();
+                let Some(pattern) = words.next() else {
+                    if direct.is_empty() {
+                        self.command_line
+                            .push_info(crate::t!("No drawing references to bind from.").as_ref());
+                    } else {
+                        self.command_line
+                            .push_output(crate::t!("Bindable references:").as_ref());
+                        for entry in &direct {
+                            self.command_line
+                                .push_output(crate::tf!("  {}", entry.name).as_ref());
+                        }
+                        self.command_line.push_info(
+                            crate::t!(
+                                "Usage: XBIND <reference> <layer|block|ltype|style|dimstyle> <name> …"
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    return Some(self.finish_dispatch(cmd));
+                };
+                let matched: Vec<_> = direct
+                    .iter()
+                    .filter(|entry| crate::io::xref_model::wildcard_match(&entry.name, pattern))
+                    .collect();
+                if matched.is_empty() {
+                    self.command_line.push_error(
+                        crate::tf!("XBIND: no reference matches '{}'.", pattern).as_ref(),
+                    );
+                    return Some(self.finish_dispatch(cmd));
+                }
+                if matched.len() > 1 {
+                    let names: Vec<&str> = matched.iter().map(|entry| entry.name.as_str()).collect();
+                    self.command_line.push_error(
+                        crate::tf!(
+                            "XBIND: '{}' matches more than one reference ({}).",
+                            pattern,
+                            names.join(", ")
+                        )
+                        .as_ref(),
+                    );
+                    return Some(self.finish_dispatch(cmd));
+                }
+                let entry = matched[0];
+                let mut requests: Vec<(crate::io::xref::XbindKind, String)> = Vec::new();
+                let mut kind: Option<crate::io::xref::XbindKind> = None;
+                let mut parse_error = None;
+                for word in words {
+                    if let Some(found) = xbind_kind(word) {
+                        kind = Some(found);
+                        continue;
+                    }
+                    match kind {
+                        Some(kind) => requests.push((
+                            kind,
+                            word.trim_matches('"').to_string(),
+                        )),
+                        None => {
+                            parse_error = Some(word.to_string());
+                            break;
+                        }
+                    }
+                }
+                if let Some(word) = parse_error {
+                    self.command_line.push_error(
+                        crate::tf!(
+                            "XBIND: name a symbol type before '{}' (layer, block, ltype, style, dimstyle).",
+                            word
+                        )
+                        .as_ref(),
+                    );
+                    return Some(self.finish_dispatch(cmd));
+                }
+                if requests.is_empty() {
+                    match crate::io::xref::xbind_list(
+                        &self.tabs[i].scene.document,
+                        entry.key,
+                        &base_dir,
+                    ) {
+                        Ok(symbols) => {
+                            if symbols.is_empty() {
+                                self.command_line.push_info(
+                                    crate::tf!("No bindable symbols in \"{}\".", entry.name)
+                                        .as_ref(),
+                                );
+                            } else {
+                                self.command_line.push_output(
+                                    crate::tf!("Bindable symbols in \"{}\":", entry.name).as_ref(),
+                                );
+                                for (kind, name) in symbols {
+                                    self.command_line.push_output(
+                                        crate::tf!("  {} {}", kind.label(), name).as_ref(),
+                                    );
+                                }
+                            }
+                        }
+                        Err(error) => self.command_line.push_error(&error),
+                    }
+                    return Some(self.finish_dispatch(cmd));
+                }
+                self.push_undo_snapshot(i, "XBIND");
+                match crate::io::xref::xbind_symbols(
+                    &mut self.tabs[i].scene.document,
+                    entry.key,
+                    &base_dir,
+                    &requests,
+                ) {
+                    Ok(outcome) => {
+                        for (kind, source_name, host_name) in &outcome.imported {
+                            self.command_line.push_output(
+                                crate::tf!(
+                                    "XBIND: \"{}\" {} {} -> {}",
+                                    outcome.reference,
+                                    kind.label(),
+                                    source_name,
+                                    host_name
+                                )
+                                .as_ref(),
+                            );
+                        }
+                        for (kind, pattern) in &outcome.missing {
+                            self.command_line.push_error(
+                                crate::tf!(
+                                    "XBIND: no {} matching '{}' in \"{}\".",
+                                    kind.label(),
+                                    pattern,
+                                    outcome.reference
+                                )
+                                .as_ref(),
+                            );
+                        }
+                        if !outcome.imported.is_empty() {
+                            self.tabs[i].dirty = true;
+                            self.post_ref_op(i);
+                        }
+                    }
+                    Err(error) => self.command_line.push_error(&error),
+                }
+                return Some(self.finish_dispatch(cmd));
             }
 
             cmd if cmd.eq_ignore_ascii_case("XREF")

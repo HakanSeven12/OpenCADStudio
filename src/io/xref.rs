@@ -2009,6 +2009,496 @@ fn bind_failed(name: &str, reason: impl std::fmt::Display) -> String {
     crate::tf!("XREF: cannot bind \"{}\": {}.", name, reason.to_string()).to_string()
 }
 
+// ── XBIND — copy named symbols out of one reference ────────────────────
+
+/// The symbol kinds XBIND can copy out of a referenced drawing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum XbindKind {
+    Layer,
+    Block,
+    Linetype,
+    TextStyle,
+    DimStyle,
+}
+
+impl XbindKind {
+    /// The word reports and prompts use.
+    pub fn label(self) -> &'static str {
+        match self {
+            XbindKind::Layer => "layer",
+            XbindKind::Block => "block",
+            XbindKind::Linetype => "linetype",
+            XbindKind::TextStyle => "text style",
+            XbindKind::DimStyle => "dim style",
+        }
+    }
+
+    /// Every bindable name of this kind in `doc`, using the drawing's own
+    /// spelling. Anonymous blocks, layout records and nested references are
+    /// not bindable named objects, so they are not listed.
+    fn names(self, doc: &Document) -> Vec<String> {
+        match self {
+            XbindKind::Layer => doc.layers.names().map(str::to_string).collect(),
+            XbindKind::Linetype => doc.line_types.names().map(str::to_string).collect(),
+            XbindKind::TextStyle => doc.text_styles.names().map(str::to_string).collect(),
+            XbindKind::DimStyle => doc.dim_styles.names().map(str::to_string).collect(),
+            XbindKind::Block => doc
+                .block_records
+                .iter()
+                .filter(|br| {
+                    !br.name.starts_with('*')
+                        && !br.is_layout()
+                        && !br.flags.is_xref
+                        && !br.flags.is_xref_overlay
+                })
+                .map(|br| br.name.clone())
+                .collect(),
+        }
+    }
+}
+
+/// What one XBIND call copied.
+#[derive(Debug, Default)]
+pub struct XbindOutcome {
+    /// The reference the symbols came from.
+    pub reference: String,
+    /// `(kind, source name, host name)` for every symbol written.
+    pub imported: Vec<(XbindKind, String, String)>,
+    /// `(kind, requested pattern)` that matched nothing bindable.
+    pub missing: Vec<(XbindKind, String)>,
+}
+
+/// Everything a selective import must carry, as upper-case names.
+#[derive(Debug, Default)]
+struct XbindSelection {
+    layers: HashSet<String>,
+    blocks: HashSet<String>,
+    linetypes: HashSet<String>,
+    text_styles: HashSet<String>,
+    dim_styles: HashSet<String>,
+    image_defs: HashSet<Handle>,
+    underlay_defs: HashSet<Handle>,
+}
+
+/// Import `requests` of `(kind, name-or-wildcard)` from the drawing reference
+/// `key` into `doc`, under BIND names (`PLAN$0$WALLS`), leaving the reference
+/// itself attached. Only the selected symbols and the symbols they actually
+/// draw with (a block's layers, styles and nested blocks) are copied.
+pub fn xbind_symbols(
+    doc: &mut Document,
+    key: u64,
+    base_dir: &Path,
+    requests: &[(XbindKind, String)],
+) -> Result<XbindOutcome, String> {
+    let Some(RefTarget::DwgXref { handle, name }) = find_target(doc, key) else {
+        return Err(crate::t!("XBIND: applies to drawing references only.").to_string());
+    };
+    let saved = doc
+        .block_records
+        .iter()
+        .find(|b| b.handle == handle)
+        .map(|b| b.xref_path.clone())
+        .unwrap_or_default();
+    let Some(found) = resolve_path(&saved, base_dir) else {
+        return Err(crate::t!("XBIND: the reference file was not found.").to_string());
+    };
+    let source = load_bind_source(&name, &found)?;
+
+    let mut selection = XbindSelection::default();
+    let mut outcome = XbindOutcome {
+        reference: name.clone(),
+        ..Default::default()
+    };
+    let mut requested: Vec<(XbindKind, String)> = Vec::new();
+    for (kind, pattern) in requests {
+        let hits: Vec<String> = kind
+            .names(&source)
+            .into_iter()
+            .filter(|candidate| crate::io::xref_model::wildcard_match(candidate, pattern))
+            .collect();
+        if hits.is_empty() {
+            outcome.missing.push((*kind, pattern.clone()));
+            continue;
+        }
+        for hit in hits {
+            let upper = hit.to_uppercase();
+            let set = match kind {
+                XbindKind::Layer => &mut selection.layers,
+                XbindKind::Block => &mut selection.blocks,
+                XbindKind::Linetype => &mut selection.linetypes,
+                XbindKind::TextStyle => &mut selection.text_styles,
+                XbindKind::DimStyle => &mut selection.dim_styles,
+            };
+            set.insert(upper);
+            if !requested
+                .iter()
+                .any(|(k, n)| k == kind && n.eq_ignore_ascii_case(&hit))
+            {
+                requested.push((*kind, hit));
+            }
+        }
+    }
+    if requested.is_empty() {
+        return Ok(outcome);
+    }
+
+    collect_xbind_dependencies(&source, &mut selection);
+    let filtered = prune_source_for_xbind(&source, &selection);
+
+    let taken = BindTaken::capture(doc);
+    let mut naming = SymbolNaming::BindDollar {
+        parent: name.clone(),
+        taken,
+    };
+    let maps = import_xref_symbols(doc, &filtered, &mut naming);
+
+    // An imported layer keeps naming its linetype: point it at the imported
+    // copy instead of the reference's own name (the layer clone precedes the
+    // linetype clones in `import_xref_symbols`).
+    for (source_name, host_name) in &maps.layers {
+        let Some(source_layer) = source.layers.get(source_name) else {
+            continue;
+        };
+        let Some(new_linetype) = maps
+            .linetypes
+            .get(&source_layer.line_type.to_uppercase())
+        else {
+            continue;
+        };
+        if let Some(host_layer) = doc.layers.get_mut(host_name) {
+            host_layer.line_type = new_linetype.clone();
+        }
+    }
+
+    if !selection.blocks.is_empty() {
+        copy_xbind_block_entities(doc, &filtered, &maps);
+        for host_block in maps.blocks.values() {
+            ensure_block_entities(doc, host_block);
+        }
+    }
+
+    for (kind, source_name) in requested {
+        let upper = source_name.to_uppercase();
+        let host = match kind {
+            XbindKind::Layer => maps.layers.get(&upper),
+            XbindKind::Block => maps.blocks.get(&upper),
+            XbindKind::Linetype => maps.linetypes.get(&upper),
+            XbindKind::TextStyle => maps.text_styles.get(&upper),
+            XbindKind::DimStyle => maps.dim_styles.get(&upper),
+        };
+        match host {
+            Some(host) => outcome.imported.push((kind, source_name, host.clone())),
+            None => outcome.missing.push((kind, source_name)),
+        }
+    }
+    Ok(outcome)
+}
+
+/// Every bindable named object in one drawing reference, grouped by kind.
+/// Backs the bare `XBIND <reference>` listing.
+pub fn xbind_list(
+    doc: &Document,
+    key: u64,
+    base_dir: &Path,
+) -> Result<Vec<(XbindKind, String)>, String> {
+    let Some(RefTarget::DwgXref { handle, name }) = find_target(doc, key) else {
+        return Err(crate::t!("XBIND: applies to drawing references only.").to_string());
+    };
+    let saved = doc
+        .block_records
+        .iter()
+        .find(|b| b.handle == handle)
+        .map(|b| b.xref_path.clone())
+        .unwrap_or_default();
+    let Some(found) = resolve_path(&saved, base_dir) else {
+        return Err(crate::t!("XBIND: the reference file was not found.").to_string());
+    };
+    let source = load_bind_source(&name, &found)?;
+    let mut symbols = Vec::new();
+    for kind in [
+        XbindKind::Layer,
+        XbindKind::Block,
+        XbindKind::Linetype,
+        XbindKind::TextStyle,
+        XbindKind::DimStyle,
+    ] {
+        for symbol in kind.names(&source) {
+            if kind == XbindKind::Layer
+                && (symbol == "0" || symbol.eq_ignore_ascii_case("Defpoints"))
+            {
+                continue;
+            }
+            if kind == XbindKind::Linetype && is_sentinel_linetype(&symbol) {
+                continue;
+            }
+            symbols.push((kind, symbol));
+        }
+    }
+    Ok(symbols)
+}
+
+/// Follow the selected blocks through their geometry, collecting every layer,
+/// linetype, text style, dimension style, image/underlay definition and nested
+/// block an INSERT of those blocks would need.
+fn collect_xbind_dependencies(source: &Document, selection: &mut XbindSelection) {
+    let mut queue: Vec<String> = selection.blocks.iter().cloned().collect();
+    let mut visited: HashSet<String> = HashSet::default();
+    while let Some(upper) = queue.pop() {
+        if !visited.insert(upper.clone()) {
+            continue;
+        }
+        let Some(record) = source.block_records.get(&upper) else {
+            continue;
+        };
+        let mut handles: HashSet<Handle> = record.entity_handles.iter().copied().collect();
+        for entity in source.entities() {
+            if entity.common().owner_handle == record.handle {
+                handles.insert(entity.common().handle);
+            }
+        }
+        for handle in handles {
+            let Some(entity) = source.get_entity(handle) else {
+                continue;
+            };
+            let common = entity.common();
+            if !common.layer.is_empty() {
+                selection.layers.insert(common.layer.to_uppercase());
+            }
+            if !common.linetype.is_empty() && !is_sentinel_linetype(&common.linetype) {
+                selection.linetypes.insert(common.linetype.to_uppercase());
+            }
+            match entity {
+                EntityType::Text(text) => {
+                    selection.text_styles.insert(text.style.to_uppercase());
+                }
+                EntityType::MText(mtext) => {
+                    selection.text_styles.insert(mtext.style.to_uppercase());
+                }
+                EntityType::AttributeDefinition(attribute) => {
+                    selection
+                        .text_styles
+                        .insert(attribute.text_style.to_uppercase());
+                }
+                EntityType::AttributeEntity(attribute) => {
+                    selection
+                        .text_styles
+                        .insert(attribute.text_style.to_uppercase());
+                }
+                EntityType::Dimension(dimension) => {
+                    let base = dimension.base();
+                    if !base.style_name.is_empty() {
+                        selection
+                            .dim_styles
+                            .insert(base.style_name.to_uppercase());
+                    }
+                    queue_bindable_block(source, &base.block_name, selection, &mut queue);
+                }
+                EntityType::Leader(leader) => {
+                    if !leader.dimension_style.is_empty() {
+                        selection
+                            .dim_styles
+                            .insert(leader.dimension_style.to_uppercase());
+                    }
+                }
+                EntityType::Tolerance(tolerance) => {
+                    if !tolerance.dimension_style_name.is_empty() {
+                        selection
+                            .dim_styles
+                            .insert(tolerance.dimension_style_name.to_uppercase());
+                    }
+                }
+                EntityType::Insert(insert) => {
+                    queue_bindable_block(source, &insert.block_name, selection, &mut queue);
+                }
+                EntityType::Table(table) => {
+                    queue_bindable_block(source, &table.block_name, selection, &mut queue);
+                }
+                EntityType::RasterImage(image) => {
+                    if let Some(definition) = image.definition_handle {
+                        selection.image_defs.insert(definition);
+                    }
+                }
+                EntityType::Underlay(underlay) => {
+                    selection.underlay_defs.insert(underlay.definition_handle);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // A layer's linetype and a linetype's compound text style are part of
+    // what the layer or linetype draws with.
+    for name in selection.layers.clone() {
+        if let Some(layer) = source.layers.get(&name) {
+            if !layer.line_type.is_empty() && !is_sentinel_linetype(&layer.line_type) {
+                selection.linetypes.insert(layer.line_type.to_uppercase());
+            }
+        }
+    }
+    for name in selection.linetypes.clone() {
+        let Some(linetype) = source.line_types.get(&name) else {
+            continue;
+        };
+        for element in &linetype.elements {
+            let Some(complex) = element.complex.as_ref() else {
+                continue;
+            };
+            if let Some(style) = source
+                .text_styles
+                .iter()
+                .find(|style| style.handle == complex.style_handle)
+            {
+                selection.text_styles.insert(style.name.to_uppercase());
+            }
+        }
+    }
+}
+
+fn queue_bindable_block(
+    source: &Document,
+    name: &str,
+    selection: &mut XbindSelection,
+    queue: &mut Vec<String>,
+) {
+    let upper = name.to_uppercase();
+    let Some(record) = source.block_records.get(name) else {
+        return;
+    };
+    if record.name.starts_with('*')
+        || record.is_layout()
+        || record.flags.is_xref
+        || record.flags.is_xref_overlay
+    {
+        return;
+    }
+    if selection.blocks.insert(upper.clone()) {
+        queue.push(upper);
+    }
+}
+
+/// A copy of `source` reduced to what the selection needs, so the shared
+/// `import_xref_symbols` copies the chosen symbols and nothing else.
+fn prune_source_for_xbind(source: &Document, selection: &XbindSelection) -> Document {
+    let mut filtered = source.clone();
+    let model_space = filtered.header.model_space_block_handle;
+
+    let block_names: Vec<String> = filtered
+        .block_records
+        .iter()
+        .map(|record| record.name.clone())
+        .collect();
+    for name in block_names {
+        let keep = filtered
+            .block_records
+            .get(&name)
+            .map(|record| {
+                record.handle == model_space || selection.blocks.contains(&name.to_uppercase())
+            })
+            .unwrap_or(false);
+        if !keep {
+            filtered.block_records.remove(&name);
+        }
+    }
+
+    let kept_blocks: HashSet<Handle> = filtered
+        .block_records
+        .iter()
+        .map(|record| record.handle)
+        .collect();
+    let mut keep_entities: HashSet<Handle> = HashSet::default();
+    for record in filtered.block_records.iter() {
+        keep_entities.extend(record.entity_handles.iter().copied());
+    }
+    for entity in source.entities() {
+        if kept_blocks.contains(&entity.common().owner_handle) {
+            keep_entities.insert(entity.common().handle);
+        }
+    }
+    let entity_handles: Vec<Handle> = filtered
+        .entities()
+        .map(|entity| entity.common().handle)
+        .collect();
+    for handle in entity_handles {
+        if !keep_entities.contains(&handle) {
+            filtered.remove_entity(handle);
+        }
+    }
+
+    let keep_table = |table_names: Vec<String>, keep: &HashSet<String>| {
+        table_names
+            .into_iter()
+            .filter(|name| !keep.contains(&name.to_uppercase()))
+            .collect::<Vec<_>>()
+    };
+    for name in keep_table(
+        filtered.layers.names().map(str::to_string).collect(),
+        &selection.layers,
+    ) {
+        // Layer 0 and Defpoints are shared, never dependent copies.
+        if name != "0" && !name.eq_ignore_ascii_case("Defpoints") {
+            filtered.layers.remove(&name);
+        }
+    }
+    for name in keep_table(
+        filtered.line_types.names().map(str::to_string).collect(),
+        &selection.linetypes,
+    ) {
+        filtered.line_types.remove(&name);
+    }
+    for name in keep_table(
+        filtered.text_styles.names().map(str::to_string).collect(),
+        &selection.text_styles,
+    ) {
+        filtered.text_styles.remove(&name);
+    }
+    for name in keep_table(
+        filtered.dim_styles.names().map(str::to_string).collect(),
+        &selection.dim_styles,
+    ) {
+        filtered.dim_styles.remove(&name);
+    }
+
+    let dead_objects: Vec<Handle> = filtered
+        .objects
+        .iter()
+        .filter_map(|(handle, object)| match object {
+            codec::objects::ObjectType::ImageDefinition(_)
+                if !selection.image_defs.contains(handle) =>
+            {
+                Some(*handle)
+            }
+            codec::objects::ObjectType::UnderlayDefinition(_)
+                if !selection.underlay_defs.contains(handle) =>
+            {
+                Some(*handle)
+            }
+            _ => None,
+        })
+        .collect();
+    for handle in dead_objects {
+        filtered.objects.remove(&handle);
+    }
+
+    filtered
+}
+
+/// Copy the selected blocks' geometry into the host. The imported block
+/// records arrive with cleared membership, so `add_entity` re-chains each
+/// entity under its new owner and `import_xref_symbols` has already renamed
+/// every symbol its geometry references.
+fn copy_xbind_block_entities(target: &mut Document, source: &Document, maps: &XrefSymbolMaps) {
+    for (_, mut entity) in ordered_source_entities(source) {
+        let old_owner = entity.common().owner_handle;
+        let Some(&new_owner) = maps.br_handles.get(&old_owner) else {
+            continue;
+        };
+        remap_xref_entity(target, &mut entity, maps);
+        entity.common_mut().owner_handle = new_owner;
+        set_handle(&mut entity, Handle::NULL);
+        let _ = target.add_entity(entity);
+    }
+}
+
 fn bind_dwg(
     doc: &mut Document,
     br_handle: Handle,
@@ -3263,6 +3753,145 @@ mod tests {
             doc.layers
                 .add(codec::tables::Layer::new(name))
                 .expect("add layer");
+        }
+
+        #[test]
+        fn xbind_layer_copies_only_the_named_layer() {
+            use super::super::{xbind_symbols, XbindKind};
+            let dir = bind_dir("xbindlayer");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                add_layer(doc, "HIDDEN");
+                let mut title = codec::tables::BlockRecord::new("TITLE");
+                title.handle = doc.allocate_handle();
+                doc.block_records.add(title).expect("add title");
+                doc.add_entity(line_on("HIDDEN")).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+
+            let outcome = xbind_symbols(
+                &mut host,
+                key,
+                &dir,
+                &[(XbindKind::Layer, "WALLS".to_string())],
+            )
+            .expect("xbind");
+
+            assert_eq!(outcome.imported.len(), 1, "{outcome:?}");
+            assert!(host.layers.get("PLAN$0$WALLS").is_some());
+            assert!(host.layers.get("PLAN$0$HIDDEN").is_none());
+            assert!(host.block_records.get("PLAN$0$TITLE").is_none());
+            // The reference itself stays attached.
+            let reference = host.block_records.get("PLAN").expect("reference");
+            assert!(reference.flags.is_xref);
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn xbind_block_brings_its_geometry_and_stays_insertable_after_detach() {
+            use super::super::{detach_reference, xbind_symbols, XbindKind};
+            let dir = bind_dir("xbindblock");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "WALLS");
+                add_layer(doc, "HIDDEN");
+                doc.text_styles
+                    .add(codec::tables::TextStyle::new("NOTE"))
+                    .expect("add text style");
+                // TITLE: one line on WALLS and one note in NOTE.
+                let mut title = codec::tables::BlockRecord::new("TITLE");
+                title.handle = doc.allocate_handle();
+                let title_handle = title.handle;
+                doc.block_records.add(title).expect("add title");
+                let mut line = codec::entities::Line::new();
+                line.common.layer = "WALLS".to_string();
+                line.common.owner_handle = title_handle;
+                doc.add_entity(codec::EntityType::Line(line)).unwrap();
+                let mut text = codec::entities::Text::new();
+                text.style = "NOTE".to_string();
+                text.common.owner_handle = title_handle;
+                doc.add_entity(codec::EntityType::Text(text)).unwrap();
+                // OTHER: not selected.
+                let mut other = codec::tables::BlockRecord::new("OTHER");
+                other.handle = doc.allocate_handle();
+                let other_handle = other.handle;
+                doc.block_records.add(other).expect("add other");
+                let mut other_line = codec::entities::Line::new();
+                other_line.common.layer = "HIDDEN".to_string();
+                other_line.common.owner_handle = other_handle;
+                doc.add_entity(codec::EntityType::Line(other_line)).unwrap();
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+
+            let outcome = xbind_symbols(
+                &mut host,
+                key,
+                &dir,
+                &[(XbindKind::Block, "TITLE".to_string())],
+            )
+            .expect("xbind");
+
+            assert_eq!(outcome.imported.len(), 1, "{outcome:?}");
+            let block = host
+                .block_records
+                .get("PLAN$0$TITLE")
+                .expect("bound block")
+                .clone();
+            assert!(host.block_records.get("PLAN$0$OTHER").is_none());
+            let owned: Vec<_> = host
+                .entities()
+                .filter(|entity| entity.common().owner_handle == block.handle)
+                .collect();
+            assert_eq!(owned.len(), 2, "the block keeps its geometry");
+            let layers: Vec<_> = owned
+                .iter()
+                .map(|entity| entity.common().layer.clone())
+                .collect();
+            assert!(layers.contains(&"PLAN$0$WALLS".to_string()), "{layers:?}");
+            assert!(host.layers.get("PLAN$0$HIDDEN").is_none());
+            assert!(host.text_styles.get("PLAN$0$NOTE").is_some());
+            let styles: Vec<_> = owned
+                .iter()
+                .filter_map(|entity| match entity {
+                    codec::EntityType::Text(text) => Some(text.style.clone()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(styles, vec!["PLAN$0$NOTE".to_string()]);
+
+            // Leaving the reference keeps the import usable on its own.
+            detach_reference(&mut host, key).expect("detach");
+            assert!(host.block_records.get("PLAN").is_none());
+            assert!(host.block_records.get("PLAN$0$TITLE").is_some());
+            let insert = codec::entities::Insert::new("PLAN$0$TITLE", codec::types::Vector3::ZERO);
+            let handle = host.add_entity(codec::EntityType::Insert(insert)).expect("insert");
+            assert!(host.get_entity(handle).is_some());
+            std::fs::remove_dir_all(&dir).ok();
+        }
+
+        #[test]
+        fn xbind_reports_symbols_it_cannot_find() {
+            use super::super::{xbind_symbols, XbindKind};
+            let dir = bind_dir("xbindmissing");
+            let xref_path = write_xref_file(&dir, "plan.dwg", |doc| {
+                add_layer(doc, "WALLS");
+            });
+            let (mut host, key) = xref_doc_with("PLAN", &xref_path);
+
+            let outcome = xbind_symbols(
+                &mut host,
+                key,
+                &dir,
+                &[
+                    (XbindKind::Layer, "NOPE".to_string()),
+                    (XbindKind::Block, "GHOST".to_string()),
+                ],
+            )
+            .expect("xbind");
+
+            assert!(outcome.imported.is_empty());
+            assert_eq!(outcome.missing.len(), 2, "{outcome:?}");
+            assert!(!host.layers.names().any(|name| name.contains("$0$")));
+            std::fs::remove_dir_all(&dir).ok();
         }
 
         #[test]

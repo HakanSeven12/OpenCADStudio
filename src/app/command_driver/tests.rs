@@ -4534,3 +4534,153 @@ mod mission_m061_tests {
         assert!(!path.exists());
     }
 }
+
+#[cfg(test)]
+mod mission_m070_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn fixture_dir(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ocs_m070_{tag}_{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_source(dir: &std::path::Path) {
+        let mut source = codec::Document::new();
+        source
+            .layers
+            .add(codec::tables::Layer::new("WALLS"))
+            .unwrap();
+        source
+            .layers
+            .add(codec::tables::Layer::new("HIDDEN"))
+            .unwrap();
+        source
+            .text_styles
+            .add(codec::tables::TextStyle::new("NOTE"))
+            .unwrap();
+        let mut title = codec::tables::BlockRecord::new("TITLE");
+        title.handle = source.allocate_handle();
+        let title_handle = title.handle;
+        source.block_records.add(title).unwrap();
+        let mut line = codec::entities::Line::new();
+        line.common.layer = "WALLS".to_string();
+        line.common.owner_handle = title_handle;
+        source.add_entity(codec::EntityType::Line(line)).unwrap();
+        let mut text = codec::entities::Text::new();
+        text.style = "NOTE".to_string();
+        text.common.owner_handle = title_handle;
+        source.add_entity(codec::EntityType::Text(text)).unwrap();
+        let bytes = crate::io::save_to_bytes(&source, "dwg", source.version).unwrap();
+        std::fs::write(dir.join("plan.dwg"), bytes).unwrap();
+    }
+
+    fn attach(app: &mut OpenCADStudio, dir: &std::path::Path) -> u64 {
+        let i = app.active_tab;
+        app.tabs[i].current_path = Some(dir.join("host.dwg"));
+        let mut record = codec::tables::BlockRecord::new("PLAN");
+        record.flags.is_xref = true;
+        record.xref_path = "plan.dwg".to_string();
+        record.handle = app.tabs[i].scene.document.allocate_handle();
+        let key = record.handle.value();
+        app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .add(record)
+            .unwrap();
+        key
+    }
+
+    #[test]
+    fn a_layer_and_a_block_can_be_bound_from_the_command_line() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let dir = fixture_dir("cmd");
+        write_source(&dir);
+        let _ = attach(&mut app, &dir);
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("XBIND PLAN LAYER WALLS");
+        let output = all_output(&app);
+        assert!(output.contains("layer WALLS -> PLAN$0$WALLS"), "{output}");
+        assert!(app.tabs[i].scene.document.layers.get("PLAN$0$WALLS").is_some());
+        assert!(app.tabs[i].scene.document.layers.get("PLAN$0$HIDDEN").is_none());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN")
+            .unwrap()
+            .flags
+            .is_xref);
+
+        let _ = app.run_command_line("XBIND PLAN BLOCK TITLE");
+        let output = all_output(&app);
+        assert!(output.contains("block TITLE -> PLAN$0$TITLE"), "{output}");
+        let block = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("PLAN$0$TITLE")
+            .expect("bound block")
+            .clone();
+        let owned = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter(|entity| entity.common().owner_handle == block.handle)
+            .count();
+        assert_eq!(owned, 2, "{output}");
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .text_styles
+            .get("PLAN$0$NOTE")
+            .is_some());
+
+        let _ = app.run_command_line("XBIND PLAN");
+        let output = all_output(&app);
+        assert!(output.contains("Bindable symbols in \"PLAN\""), "{output}");
+        assert!(output.contains("layer WALLS"), "{output}");
+        assert!(output.contains("block TITLE"), "{output}");
+
+        let _ = app.run_command_line("XBIND PLAN LAYER NOPE");
+        assert!(all_output(&app).contains("no layer matching 'NOPE'"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn an_unknown_reference_is_refused_and_nothing_is_copied() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let dir = fixture_dir("missingref");
+        write_source(&dir);
+        let _ = attach(&mut app, &dir);
+        let i = app.active_tab;
+
+        let _ = app.run_command_line("XBIND GHOST LAYER WALLS");
+
+        assert!(all_output(&app).contains("no reference matches 'GHOST'"));
+        assert!(!app.tabs[i]
+            .scene
+            .document
+            .layers
+            .names()
+            .any(|name| name.contains("$0$")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

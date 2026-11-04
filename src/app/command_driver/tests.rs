@@ -3838,3 +3838,104 @@ mod mission_m062_tests {
         assert!(all_output(&app).contains("Usage: EXPORTPDF"));
     }
 }
+
+#[cfg(test)]
+mod mission_m060_tests {
+    use super::super::*;
+
+    fn all_output(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn temp_pdf(tag: &str) -> std::path::PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ocs_m060_{tag}_{unique}.pdf"))
+    }
+
+    fn paper_layouts(app: &mut OpenCADStudio) -> Vec<String> {
+        let i = app.active_tab;
+        let names: Vec<String> = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .filter(|name| name != "Model")
+            .collect();
+        for name in &names {
+            app.tabs[i].scene.initialize_layout_page_setup(name);
+        }
+        names
+    }
+
+    #[test]
+    fn publishing_three_layouts_writes_one_pdf_with_three_pages() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.add_layout("Sheet1").unwrap();
+        app.tabs[i].scene.add_layout("Sheet2").unwrap();
+        let names = paper_layouts(&mut app);
+        assert_eq!(names.len(), 3, "expected three paper layouts: {names:?}");
+        let path = temp_pdf("three");
+
+        let _ = app.run_command_line(&format!("PUBLISH {}", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("Publishing 3 sheet(s)"), "{output}");
+        assert!(output.contains("Published:") && output.contains("3 page(s)"), "{output}");
+        for name in &names {
+            assert!(output.contains(&format!("  {name}:")), "{output}");
+        }
+        let bytes = std::fs::read(&path).expect("publish must create the PDF");
+        assert!(bytes.starts_with(b"%PDF"), "a real PDF was written");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn choosing_two_sheets_publishes_two_pages() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.add_layout("Sheet2").unwrap();
+        app.tabs[i].scene.add_layout("Sheet3").unwrap();
+        let names = paper_layouts(&mut app);
+        let chosen = [names[0].clone(), names[1].clone()];
+        let path = temp_pdf("two");
+
+        let _ = app.run_command_line(&format!(
+            "PUBLISH {} {},{}",
+            path.display(),
+            chosen[0],
+            chosen[1]
+        ));
+
+        let output = all_output(&app);
+        assert!(output.contains("Publishing 2 sheet(s)"), "{output}");
+        assert!(output.contains("2 page(s)"), "{output}");
+        assert!(!output.contains(&format!("  {}:", names[2])), "{output}");
+        let bytes = std::fs::read(&path).expect("publish must create the PDF");
+        assert!(bytes.starts_with(b"%PDF"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn an_unknown_sheet_name_is_refused_before_writing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        paper_layouts(&mut app);
+        let path = temp_pdf("unknown");
+
+        let _ = app.run_command_line(&format!("PUBLISH {} MISSING-SHEET", path.display()));
+
+        let output = all_output(&app);
+        assert!(output.contains("no layout named 'MISSING-SHEET'"), "{output}");
+        assert!(!path.exists(), "nothing should be written on an unknown sheet");
+    }
+}

@@ -1014,6 +1014,100 @@ impl OpenCADStudio {
             "EXPORT" => {
                 return Some(Task::done(Message::PlotExport));
             }
+            // PUBLISH <file.pdf> [sheets…] — batch publish without the dialog:
+            // every named layout (or all paper layouts) into one multi-page
+            // PDF, each sheet with its own page setup, with per-sheet status.
+            cmd if cmd.starts_with("PUBLISH ") || cmd.starts_with("-PUBLISH ") => {
+                let line = cmd.trim_start_matches('-');
+                let rest = line
+                    .split_once(char::is_whitespace)
+                    .map(|(_, rest)| rest.trim())
+                    .unwrap_or("");
+                let (path_text, sheet_text) = if let Some(stripped) = rest.strip_prefix('"') {
+                    match stripped.split_once('"') {
+                        Some((path, tail)) => (path, tail.trim()),
+                        None => (stripped, ""),
+                    }
+                } else {
+                    match rest.split_once(char::is_whitespace) {
+                        Some((path, tail)) => (path, tail.trim()),
+                        None => (rest, ""),
+                    }
+                };
+                if path_text.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!("Usage: PUBLISH <file.pdf> [sheet names…]").as_ref(),
+                    );
+                    return Some(Task::none());
+                }
+                let available: Vec<String> = self.tabs[i]
+                    .scene
+                    .layout_names()
+                    .into_iter()
+                    .filter(|name| name != "Model")
+                    .collect();
+                let mut names: Vec<String> = Vec::new();
+                if !sheet_text.is_empty() {
+                    let requested: Vec<&str> = if sheet_text.contains(',') {
+                        sheet_text.split(',').collect()
+                    } else {
+                        sheet_text.split_whitespace().collect()
+                    };
+                    for sheet in requested {
+                        let sheet = sheet.trim().trim_matches('"').trim();
+                        if sheet.is_empty() {
+                            continue;
+                        }
+                        match available
+                            .iter()
+                            .find(|name| name.eq_ignore_ascii_case(sheet))
+                        {
+                            Some(name) => names.push(name.clone()),
+                            None => {
+                                self.command_line.push_error(
+                                    crate::tf!(
+                                        "PUBLISH: no layout named '{sheet}'. Layouts: {}",
+                                        available.join(", ")
+                                    )
+                                    .as_ref(),
+                                );
+                                return Some(Task::none());
+                            }
+                        }
+                    }
+                } else {
+                    names = available.clone();
+                }
+                let path = std::path::PathBuf::from(path_text);
+                self.command_line.push_output(
+                    crate::tf!(
+                        "Publishing {} sheet(s) to {}",
+                        names.len(),
+                        path.display()
+                    )
+                    .as_ref(),
+                );
+                match self.export_pdf_layout_names(&path, &names) {
+                    Ok((pages, bytes, sheets)) => {
+                        for (name, (_, width, height)) in names.iter().zip(sheets.iter()) {
+                            self.command_line.push_output(
+                                crate::tf!("  {name}: {width:.1}×{height:.1} mm").as_ref(),
+                            );
+                        }
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "Published: {}  {pages} page(s), {bytes} bytes",
+                                path.display()
+                            )
+                            .as_ref(),
+                        );
+                    }
+                    Err(error) => {
+                        self.command_line.push_error(&error);
+                    }
+                }
+                return Some(Task::none());
+            }
             cmd if cmd.starts_with("EXPORTPDF ") || cmd.starts_with("EXPORT ") => {
                 let rest = cmd.split_once(' ').map(|(_, rest)| rest.trim()).unwrap_or("");
                 let (path_text, all_layouts) = match rest.rsplit_once(char::is_whitespace) {

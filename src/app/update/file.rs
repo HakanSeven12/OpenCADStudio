@@ -5556,6 +5556,38 @@ impl OpenCADStudio {
         Ok((pages.len(), bytes, sheet))
     }
 
+    /// Publish named layouts into one PDF, each with its own page setup, and
+    /// return each sheet's size so the caller can report per-sheet status.
+    pub(in crate::app) fn export_pdf_layout_names(
+        &mut self,
+        path: &std::path::Path,
+        names: &[String],
+    ) -> Result<(usize, u64, Vec<(String, f64, f64)>), String> {
+        if names.is_empty() {
+            return Err(
+                crate::t!("Nothing to publish: no paper layouts were selected.").into_owned(),
+            );
+        }
+        self.stamp_plot_fields();
+        let saved = std::mem::take(&mut self.print_all_layouts);
+        self.print_all_layouts = names.iter().cloned().map(|name| (name, true)).collect();
+        let result = self.print_all_pages();
+        self.print_all_layouts = saved;
+        let pages = result?;
+        if pages.is_empty() {
+            return Err(crate::t!("Nothing to publish: no page could be built.").into_owned());
+        }
+        let style = self.dialog_plot_style(&self.plot_dialog);
+        crate::io::pdf_export::export_pdf_pages(&pages, path, style.as_ref())?;
+        let bytes = std::fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+        let sheets = names
+            .iter()
+            .zip(pages.iter())
+            .map(|(name, page)| (name.clone(), page.paper_w, page.paper_h))
+            .collect();
+        Ok((pages.len(), bytes, sheets))
+    }
+
     pub(in crate::app) fn on_plot_export_path_some(
         &mut self,
         path: std::path::PathBuf,

@@ -187,11 +187,12 @@ impl OpenCADStudio {
             .active_cmd
             .as_ref()
             .and_then(|command| command.drawing_variable_update());
-        // REVCLOUD's type choice is a profile setting (REVCLOUDCREATEMODE).
+        // REVCLOUD's type choice (REVCLOUDCREATEMODE) and MEASUREGEOM's
+        // Mode answer are profile settings.
         if self.tabs[self.active_tab]
             .active_cmd
             .as_ref()
-            .is_some_and(|command| command.name() == "REVCLOUD")
+            .is_some_and(|command| matches!(command.name(), "REVCLOUD" | "MEASUREGEOM"))
         {
             self.save_config();
         }

@@ -7069,6 +7069,43 @@ measurement =
     .area-preview =
         { $current }
         Preview total area = { $total }
+    .option-prompt = Enter an option [Distance/Radius/Angle/ARea/Volume/Quick/Mode/eXit] <{ $default }>:
+    .mode-prompt = Always default to quick measure behavior? [Yes/No] <No>:
+    .quick-options = { $command }  Move cursor or [Distance/Radius/Angle/ARea/Volume/Quick/Mode/eXit] <eXit>:
+    .first-point = Specify first point:
+    .second-point = Specify second point or [Multiple points]:
+    .next-point-multiple = Specify next point or [Undo/Total] <Total>:
+    .distance-result = Distance = { $distance },  Angle in XY Plane = { $in_plane },  Angle from XY Plane = { $from_plane }
+    .distance-deltas = Delta X = { $dx },  Delta Y = { $dy },   Delta Z = { $dz }
+    .option-multiple-points = Multiple points
+    .area-first = Specify first corner point or [Object/Add area/Subtract area/eXit] <Object>:
+    .area-first-add = Specify first corner point or [Object/Subtract area/eXit]:
+    .area-first-subtract = Specify first corner point or [Object/Add area/eXit]:
+    .volume-first = Specify first corner point or [Object/Add volume/Subtract volume/eXit] <Object>:
+    .volume-first-add = Specify first corner point or [Object/Subtract volume/eXit]:
+    .volume-first-subtract = Specify first corner point or [Object/Add volume/eXit]:
+    .next-point = Specify next point or [Arc/Length/Undo]:
+    .next-point-total = Specify next point or [Arc/Length/Undo/Total] <Total>:
+    .add-mode = {" "}(ADD mode)
+    .subtract-mode = {" "}(SUBTRACT mode)
+    .add-objects = (ADD mode) Select objects:
+    .subtract-objects = (SUBTRACT mode) Select objects:
+    .arc-endpoint =
+        Specify endpoint of arc (hold Ctrl to switch direction) or
+        {"["}Angle/CEnter/Direction/Line/Radius/Second pt/Undo]:
+    .length-of-line = Specify length of line:
+    .height = Specify height:
+    .area-perimeter = Area = { $area }, Perimeter = { $perimeter }
+    .area-circumference = Area = { $area }, Circumference = { $perimeter }
+    .area-only = Area = { $area }
+    .total-area = Total area = { $total }
+    .total-volume = Total Volume = { $total }
+    .volume-result = Volume = { $volume }
+    .not-measurable = The selected object has no measurable area.
+    .option-add-area = Add area
+    .option-subtract-area = Subtract area
+    .option-add-volume = Add volume
+    .option-subtract-volume = Subtract volume
 pgp-import =
     .button = Import PGP…
     .filter = Command aliases (*.pgp)

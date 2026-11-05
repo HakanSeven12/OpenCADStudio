@@ -122,6 +122,17 @@ pub fn set_unit_context(ctx: UnitContext) {
     UNIT_CTX.with(|c| c.set(ctx));
 }
 
+/// Runs `f` with DIMZIN off: a command-line measurement shows every place
+/// LUPREC asks for (`Area = 5000.0000`); zero suppression is for the
+/// Properties palette.
+pub fn with_all_places<T>(f: impl FnOnce() -> T) -> T {
+    let saved = unit_context();
+    set_unit_context(UnitContext { dimzin: 0, ..saved });
+    let out = f();
+    set_unit_context(saved);
+    out
+}
+
 pub fn unit_context() -> UnitContext {
     UNIT_CTX.with(|c| c.get())
 }

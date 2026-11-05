@@ -5293,9 +5293,6 @@ impl OpenCADStudio {
         if self.table_popup.take().is_some() {
             return Task::none();
         }
-        if self.flip_popup.take().is_some() {
-            return Task::none();
-        }
         // Same dismiss-on-outside-click for the right-click
         // context menu: its panel is opaque, so a press that
         // reaches here is outside the menu.
@@ -5643,14 +5640,6 @@ impl OpenCADStudio {
                     }
                     if grip_id == crate::app::visibility::TABLE_GRIP_ID {
                         self.open_table_popup();
-                        self.grip_hover = None;
-                        self.grip_popup = None;
-                        return Task::none();
-                    }
-                    // A flip parameter's chevron lists its two state labels
-                    // outside the block editor instead of toggling or
-                    // starting a command.
-                    if self.open_flip_popup_at(handle, grip_id, p_full) {
                         self.grip_hover = None;
                         self.grip_popup = None;
                         return Task::none();
@@ -9024,7 +9013,6 @@ properties={:.1}ms picked={}",
             (session.br_handle, session.editor_camera.clone())
         };
         self.layout_rename_state = None;
-        self.flip_popup = None;
         self.tabs[i].scene.active_viewport = None;
         self.tabs[i].scene.set_current_layout("Model".to_string());
         self.tabs[i].scene.block_edit_block = Some(br_handle);

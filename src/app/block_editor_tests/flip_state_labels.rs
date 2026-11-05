@@ -85,7 +85,7 @@ fn choice(app: &OpenCADStudio) -> (BlockParameterKey, usize, Vec<String>) {
 }
 
 #[test]
-fn block_flip_grip_outside_the_editor_lists_states_and_applies_the_choice() {
+fn block_flip_grip_toggles_directly_and_reverses_the_arrow() {
     let (mut app, reference, def, _) = setup();
     edit(&mut app, "authoring_base_state_label", BASE);
     edit(&mut app, "authoring_flipped_state_label", FLIPPED);
@@ -109,9 +109,11 @@ fn block_flip_grip_outside_the_editor_lists_states_and_applies_the_choice() {
             let p = actions::all_parameters(&app.tabs[i].scene.document, def)
                 .into_iter()
                 .find(|p| p.id == node)?;
-            p.flip.then_some((grip.id, grip.world))
+            p.flip.then_some(grip.clone())
         })
-        .expect("the reference draws the flip chevron");
+        .expect("the reference draws the Flip arrow");
+    assert_eq!(flip.shape, crate::scene::model::object::GripShape::Arrow);
+    assert_eq!(choice(&app).2, [BASE, FLIPPED]);
     let click = |app: &mut OpenCADStudio, world: glam::DVec3| {
         let scene = &app.tabs[app.active_tab].scene;
         let (w, h) = scene.selection.borrow().view.vp_size;
@@ -135,7 +137,6 @@ fn block_flip_grip_outside_the_editor_lists_states_and_applies_the_choice() {
         )));
         let _ = app.update(Message::ViewportLeftRelease);
     };
-    let before = app.tabs[i].scene.document.clone();
     let member_end = |app: &OpenCADStudio| {
         let doc = &app.tabs[app.active_tab].scene.document;
         let EntityType::Insert(ins) = doc.get_entity(reference).unwrap() else {
@@ -149,31 +150,26 @@ fn block_flip_grip_outside_the_editor_lists_states_and_applies_the_choice() {
     };
     let original_end = member_end(&app);
     let depth = app.tabs[i].history.undo_stack.len();
-    click(&mut app, flip.1);
-    assert!(
-        app.tabs[i].active_cmd.is_none(),
-        "the flip chevron lists states instead of starting a command"
-    );
-    let popup = app.flip_popup.as_ref().expect("flip state list");
-    assert_eq!(popup.current, 0);
-    assert_eq!(popup.labels, [BASE.to_string(), FLIPPED.to_string()]);
-    assert_eq!(app.tabs[i].scene.document, before);
-    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
-    let _ = app.update(Message::CommandEscape);
-    assert!(app.flip_popup.is_none());
-    assert_eq!(app.tabs[i].selected_handle, Some(reference));
-    assert_eq!(app.tabs[i].scene.document, before);
-    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
-    click(&mut app, flip.1);
-    let _ = app.update(Message::FlipPick(1));
-    assert!(app.flip_popup.is_none());
+    click(&mut app, flip.world);
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert!(app.grip_popup.is_none());
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
     let flipped_end = member_end(&app);
     assert!((flipped_end.x + 1.).abs() < 1e-8, "{:?}", flipped_end);
     assert!(flipped_end.distance(&original_end) > 0.5);
-    app.undo_steps(1);
+    let reversed = app.tabs[i]
+        .selected_grips
+        .iter()
+        .find(|grip| grip.id == flip.id)
+        .expect("the selected reference retains its Flip arrow");
+    assert!((reversed.dir.unwrap() + flip.dir.unwrap()).length() < 1e-9);
+    assert!(reversed.world.distance(flip.world) < 1e-9);
+    assert_eq!(choice(&app).1, 1);
+    click(&mut app, flip.world);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 2);
     assert!(member_end(&app).distance(&original_end) < 1e-9);
-    let _ = flip.0;
+    app.undo_steps(1);
+    assert!(member_end(&app).distance(&flipped_end) < 1e-9);
 }
 
 #[test]

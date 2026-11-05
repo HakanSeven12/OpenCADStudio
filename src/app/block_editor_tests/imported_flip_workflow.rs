@@ -54,6 +54,7 @@ fn imported_coupled_flip_reference_workflow() {
                     })
                     .expect("Flip grip must be displayed")
                     .clone();
+                assert_eq!(grip.shape, crate::scene::model::object::GripShape::Arrow);
                 assert!(app.start_test_action_grip(insert, grip.id));
                 assert!(
                     app.command_line.last_error.is_none(),
@@ -65,6 +66,13 @@ fn imported_coupled_flip_reference_workflow() {
                     actions::instance::value(&app.tabs[i].scene.document, insert, p).unwrap(),
                     actions::Value::Flip(true)
                 );
+                select(&mut app);
+                let reversed = app.tabs[i]
+                    .selected_grips
+                    .iter()
+                    .find(|marker| marker.id == grip.id)
+                    .expect("Flip arrow must remain visible after toggling");
+                assert!((reversed.dir.unwrap() + grip.dir.unwrap()).length() < 1e-8);
             }
             select(&mut app);
             let params = actions::all_parameters(&app.tabs[i].scene.document, def);

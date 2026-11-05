@@ -172,7 +172,6 @@ impl OpenCADStudio {
         self.discard_block_tests(source_id);
         self.visibility_popup = None;
         self.table_popup = None;
-        self.flip_popup = None;
         self.grip_popup = None;
         self.grip_hover = None;
         self.tabs.push(tab);

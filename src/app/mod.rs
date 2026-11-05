@@ -17,7 +17,6 @@ mod insert_attributes;
 mod insert_attributes_tests;
 mod block_alignment;
 mod block_feedback;
-mod block_flip;
 mod block_cycle_order;
 mod block_grip_set;
 mod block_construction;
@@ -1316,8 +1315,6 @@ pub(super) struct OpenCADStudio {
     /// Open dynamic-block visibility-state dropdown.
     visibility_popup: Option<visibility::VisibilityPopup>,
     table_popup: Option<visibility::TablePopup>,
-    /// Open dynamic-block flip-state list on a model-space reference.
-    flip_popup: Option<block_flip::FlipPopup>,
     /// A leader line just added via the "Add Leader" grip menu whose arrow is
     /// being placed (follows the cursor). `(entity handle, new-arrow grip id)`.
     /// Esc before the placement click removes it again.
@@ -4330,8 +4327,6 @@ pub enum Message {
     TestVisibilityPick(usize),
     /// The Test Block window's lookup widget picked a table entry.
     TestLookupPick(usize),
-    /// User picked a dynamic-block flip state — `0` base, `1` flipped.
-    FlipPick(usize),
     /// Timer pulse while the cursor is dwelling on a grip; drives the
     /// dwell-to-popup transition without requiring further mouse motion.
     GripDwellTick,
@@ -6141,7 +6136,6 @@ impl OpenCADStudio {
             grip_pending: None,
             visibility_popup: None,
             table_popup: None,
-            flip_popup: None,
             grip_add_provisional: None,
             grip_ctrl_cycle: None,
             grip_preview_handles: Vec::new(),

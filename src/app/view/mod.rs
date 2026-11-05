@@ -2650,67 +2650,6 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
-            // Dynamic-block flip-state list.
-            if let Some(popup) = self.flip_popup.as_ref() {
-                if !tab.is_start {
-                    let max_len = popup
-                        .labels
-                        .iter()
-                        .map(|s| s.chars().count())
-                        .max()
-                        .unwrap_or(4) as f32;
-                    // +2 chars for the leading "✓ " / "  " marker column.
-                    let row_w = (max_len + 2.0) * 7.0 + 24.0;
-                    let mut col = column![].spacing(0).width(iced::Length::Fixed(row_w));
-                    for (idx, name) in popup.labels.iter().enumerate() {
-                        let is_cur = popup.current == idx;
-                        let mark: Element<'_, Message> = if is_cur {
-                            crate::ui::icons::themed_check_cell(true)
-                        } else {
-                            Space::new().width(11).into()
-                        };
-                        let btn = button(
-                            row![container(mark).width(16), text(name).size(12),]
-                                .spacing(2)
-                                .align_y(iced::Center),
-                        )
-                        .on_press(Message::FlipPick(idx))
-                        .padding([3, 10])
-                        .width(Fill)
-                        .style(move |theme: &Theme, status| {
-                            let palette = theme.palette();
-                            iced::widget::button::Style {
-                                background: matches!(status, iced::widget::button::Status::Hovered)
-                                    .then_some(Background::Color(palette.primary.weak.color)),
-                                border: Border {
-                                    color: Color::TRANSPARENT,
-                                    width: 0.0,
-                                    radius: 0.0.into(),
-                                },
-                                text_color: palette.background.base.text,
-                                ..Default::default()
-                            }
-                        });
-                        col = col.push(btn);
-                    }
-                    let panel = container(col).padding(2).style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(Background::Color(palette.background.weak.color)),
-                            border: Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 3.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    });
-                    let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
-                    viewport_stack =
-                        viewport_stack.push(position_canvas_overlay(anchor, panel.into()));
-                }
-            }
-
             // Dynamic-block visibility-state dropdown.
             if let Some(popup) = self.visibility_popup.as_ref() {
                 if !tab.is_start {

@@ -715,7 +715,11 @@ impl OpenCADStudio {
                     id: grip.id,
                     world: actions::v(transform.apply(actions::native(grip.point))) - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: crate::scene::model::object::GripShape::Triangle,
+                    shape: if p.flip {
+                        crate::scene::model::object::GripShape::Arrow
+                    } else {
+                        crate::scene::model::object::GripShape::Triangle
+                    },
                     dir: grip.direction.and_then(|direction| actions::v(transform.apply_rotation(actions::native(direction))).try_normalize()),
                     axis: None,
                 });
@@ -812,7 +816,11 @@ impl OpenCADStudio {
                     id: grip.id,
                     world: actions::v(transform.apply(actions::native(grip.point))) - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: crate::scene::model::object::GripShape::Triangle,
+                    shape: if p.flip {
+                        crate::scene::model::object::GripShape::Arrow
+                    } else {
+                        crate::scene::model::object::GripShape::Triangle
+                    },
                     dir: grip.direction.and_then(|direction| actions::v(transform.apply_rotation(actions::native(direction))).try_normalize()),
                     axis: None,
                 });

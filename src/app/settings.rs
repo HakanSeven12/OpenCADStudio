@@ -921,6 +921,8 @@ pub struct UserSettings {
     pub group_display_mode: i16,
     /// TRIMEXTENDMODE: TRIM and EXTEND start in Quick mode (else Standard).
     pub trim_extend_quick: bool,
+    /// MEASUREGEOM starts in quick measure (its Mode option).
+    pub measuregeom_quick: bool,
     /// REVCLOUDCREATEMODE: the type REVCLOUD starts with (0 Freehand, 1 Rectangular, 2 Polygonal).
     pub revcloud_create_mode: u8,
     /// REVCLOUDARCVARIANCE: cloud chords of random length.
@@ -1467,6 +1469,7 @@ impl Default for UserSettings {
             ole_quality: 3,
             group_display_mode: 2,
             trim_extend_quick: true,
+            measuregeom_quick: true,
             revcloud_create_mode: 1,
             revcloud_arc_variance: true,
             revcloud_grips: true,

@@ -853,6 +853,7 @@ impl OpenCADStudio {
             ole_quality: crate::app::commands::ole_quality(),
             group_display_mode: crate::app::commands::group_display_mode(),
             trim_extend_quick: crate::modules::draw::modify::trim::quick_mode(),
+            measuregeom_quick: crate::modules::draw::inquiry::measuregeom::quick_default(),
             revcloud_create_mode: crate::entities::revcloud::create_mode(),
             revcloud_arc_variance: crate::entities::revcloud::arc_variance(),
             revcloud_grips: crate::entities::revcloud::grips_on(),
@@ -1044,6 +1045,7 @@ impl OpenCADStudio {
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::app::commands::set_group_display_mode(s.group_display_mode);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
+        crate::modules::draw::inquiry::measuregeom::set_quick_default(s.measuregeom_quick);
         crate::entities::revcloud::set_create_mode(s.revcloud_create_mode);
         crate::entities::revcloud::set_arc_variance(s.revcloud_arc_variance);
         crate::entities::revcloud::set_grips_on(s.revcloud_grips);

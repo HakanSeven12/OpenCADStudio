@@ -19,9 +19,9 @@ enum AreaMode {
 }
 
 #[derive(Clone, Copy)]
-struct AreaMeasurement {
-    area: f64,
-    perimeter: Option<f64>,
+pub(crate) struct AreaMeasurement {
+    pub(crate) area: f64,
+    pub(crate) perimeter: Option<f64>,
 }
 
 pub struct AreaCommand {
@@ -63,7 +63,7 @@ impl AreaCommand {
     /// Measured in space rather than in projection — a picked sequence need
     /// not lie in a coordinate plane, and flattening it to XY first would
     /// report its shadow.
-    fn point_measurement(points: &[DVec3], close_perimeter: bool) -> AreaMeasurement {
+    pub(crate) fn point_measurement(points: &[DVec3], close_perimeter: bool) -> AreaMeasurement {
         if points.len() < 2 {
             return AreaMeasurement {
                 area: 0.0,
@@ -96,7 +96,7 @@ impl AreaCommand {
         })
     }
 
-    fn entity_measurement(entity: &EntityType) -> Option<AreaMeasurement> {
+    pub(crate) fn entity_measurement(entity: &EntityType) -> Option<AreaMeasurement> {
         // Anything the converter recognises is measured from its own curve.
         if let Some(measurement) = Self::curve_measurement(entity) {
             return Some(measurement);

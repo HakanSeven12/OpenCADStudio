@@ -7099,7 +7099,7 @@ measurement =
     .quick-options = { $command }  Move cursor or [Distance/Radius/Angle/ARea/Volume/Quick/Mode/eXit] <eXit>:
     .first-point = Specify first point:
     .second-point = Specify second point or [Multiple points]:
-    .next-point-multiple = Specify next point or [Undo/Total] <Total>:
+    .next-point-multiple = Specify next point or [Arc/Length/Undo/Total] <Total>:
     .distance-result = Distance = { $distance },  Angle in XY Plane = { $in_plane },  Angle from XY Plane = { $from_plane }
     .distance-deltas = Delta X = { $dx },  Delta Y = { $dy },   Delta Z = { $dz }
     .option-multiple-points = Multiple points
@@ -7126,11 +7126,18 @@ measurement =
     .total-area = Total area = { $total }
     .total-volume = Total Volume = { $total }
     .volume-result = Volume = { $volume }
-    .not-measurable = The selected object has no measurable area.
+    .not-measurable = Selected object does not have an area
     .option-add-area = Add area
     .option-subtract-area = Subtract area
     .option-add-volume = Add volume
     .option-subtract-volume = Subtract volume
+    .next-point-multiple-close = Specify next point or [Arc/Close/Length/Undo/Total] <Total>:
+    .arc-endpoint-close =
+        Specify endpoint of arc (hold Ctrl to switch direction) or
+        {"["}Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo]:
+    .invalid-selection =
+        {"*"}Invalid selection*
+        Expects a point or Last
 pgp-import =
     .button = Import PGP…
     .filter = Command aliases (*.pgp)

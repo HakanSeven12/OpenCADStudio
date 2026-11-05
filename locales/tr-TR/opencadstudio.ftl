@@ -7023,7 +7023,7 @@ measurement =
     .quick-options = { $command }  İmleci hareket ettirin veya [Distance/Radius/Angle/ARea/Volume/Quick/Mode/eXit] <eXit>:
     .first-point = İlk noktayı belirtin:
     .second-point = İkinci noktayı belirtin veya [Multiple points]:
-    .next-point-multiple = Sonraki noktayı belirtin veya [Undo/Total] <Total>:
+    .next-point-multiple = Sonraki noktayı belirtin veya [Arc/Length/Undo/Total] <Total>:
     .distance-result = Mesafe = { $distance },  XY düzlemindeki açı = { $in_plane },  XY düzleminden açı = { $from_plane }
     .distance-deltas = Delta X = { $dx },  Delta Y = { $dy },   Delta Z = { $dz }
     .option-multiple-points = Birden çok nokta
@@ -7050,11 +7050,18 @@ measurement =
     .total-area = Toplam alan = { $total }
     .total-volume = Toplam hacim = { $total }
     .volume-result = Hacim = { $volume }
-    .not-measurable = Seçilen nesnenin ölçülebilir bir alanı yok.
+    .not-measurable = Seçilen nesnenin alanı yok
     .option-add-area = Alan ekle
     .option-subtract-area = Alan çıkar
     .option-add-volume = Hacim ekle
     .option-subtract-volume = Hacim çıkar
+    .next-point-multiple-close = Sonraki noktayı belirtin veya [Arc/Close/Length/Undo/Total] <Total>:
+    .arc-endpoint-close =
+        Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya
+        {"["}Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo]:
+    .invalid-selection =
+        {"*"}Geçersiz seçim*
+        Bir nokta veya Last bekleniyor
 pgp-import =
     .button = Import PGP…
     .filter = Command aliases (*.pgp)

@@ -495,6 +495,7 @@ fn evaluate_row_context(
             baseline.unwrap_or(document),
             definition,
             insert,
+            &frames,
             previous,
         )?
     } else {

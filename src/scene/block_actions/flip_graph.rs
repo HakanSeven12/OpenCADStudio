@@ -223,7 +223,9 @@ impl Plan {
                 .iter()
                 .find(|p| p.id == *id)
                 .ok_or(FRAME_ERROR)?;
-            if v(*base).distance(p.base) > 1e-8
+            if !v(*base).is_finite()
+                || !v(*end).is_finite()
+                || v(*base).distance(p.base) > 1e-8
                 || v(*end).distance(p.end) > 1e-8
                 || !v(*a).is_finite()
                 || !v(*b).is_finite()
@@ -324,11 +326,12 @@ impl Plan {
         baseline: &Document,
         def: Handle,
         insert: Handle,
+        frames: &BTreeMap<Handle, ParameterFrame>,
         previous: super::RebuildInputs<'_>,
     ) -> Result<Document, &'static str> {
         let actions: Vec<_> = self.steps.iter().map(|s| s.action).collect();
         let mut active = BTreeMap::new();
-        let mut canonical = previous.frames.clone();
+        let mut canonical = frames.clone();
         let resolved = super::rebuild_framed_with_flips(
             evaluated,
             baseline,
@@ -358,19 +361,100 @@ impl Plan {
         before: &Document,
         def: Handle,
         insert: Handle,
+        previous_plan: Option<&Self>,
     ) -> Result<Document, &'static str> {
+        let (before, previous_plan, cached) = match previous_plan {
+            Some(plan) => match plan.read(doc, insert) {
+                Ok(cached) => (before, Some(plan), cached),
+                Err(error) => {
+                    // A live authoring edit can refresh the reference before
+                    // BSAVE revisits it with the editor's older checkpoint.
+                    if self.read(doc, insert).ok().flatten().is_none() {
+                        return Err(error);
+                    }
+                    (doc, None, None)
+                }
+            },
+            None => (before, None, None),
+        };
+        let mut cleaned = None;
         let mut evaluated = doc.clone();
-        let frames = self.load_canonical(doc, &mut evaluated, insert, false)?;
+        let (frames, previous_frames) = if let Some(plan) = previous_plan {
+            let previous_frames = match cached {
+                Some(frames) => frames,
+                None => plan.load_canonical(doc, &mut before.clone(), insert, false)?,
+            };
+            let old_parameters: BTreeMap<_, _> =
+                plan.parameters.iter().map(|p| (p.handle, p)).collect();
+            let new_handles: BTreeSet<_> = self.parameters.iter().map(|p| p.handle).collect();
+            let reset_ids: BTreeSet<_> = plan
+                .parameters
+                .iter()
+                .filter(|p| !new_handles.contains(&p.handle))
+                .chain(
+                    self.parameters
+                        .iter()
+                        .filter(|p| !old_parameters.contains_key(&p.handle)),
+                )
+                .map(|p| p.id)
+                .collect();
+            if !reset_ids.is_empty() {
+                let reference = cleaned.insert(doc.clone());
+                for id in reset_ids {
+                    instance::remove_cache(reference, insert, id)?;
+                }
+            }
+            let mut frames = BTreeMap::new();
+            for p in &self.parameters {
+                let authored = ParameterFrame {
+                    base: p.base,
+                    end: p.end,
+                };
+                let (frame, value) = if let Some(old) = old_parameters.get(&p.handle) {
+                    if old.id != p.id
+                        || old.base.distance(p.base) > 1e-8
+                        || old.end.distance(p.end) > 1e-8
+                    {
+                        return Err(FRAME_ERROR);
+                    }
+                    let frame = previous_frames[&p.handle];
+                    let value = if p.flip {
+                        instance::value(doc, insert, old).unwrap_or(Value::Flip(false))
+                    } else {
+                        Value::Point(frame.end)
+                    };
+                    (frame, value)
+                } else {
+                    let value = if p.flip {
+                        Value::Flip(false)
+                    } else {
+                        Value::Point(p.end)
+                    };
+                    (authored, value)
+                };
+                super::set_value(&mut evaluated, p, value)?;
+                frames.insert(p.handle, frame);
+            }
+            (frames, Some(previous_frames))
+        } else {
+            (
+                self.load_canonical(doc, &mut evaluated, insert, false)?,
+                None,
+            )
+        };
+        let reference = cleaned.as_ref().unwrap_or(doc);
+        let previous_frames = previous_frames.as_ref().unwrap_or(&frames);
         self.rebuild_reference(
-            doc,
+            reference,
             &mut evaluated,
             doc,
             def,
             insert,
+            &frames,
             super::RebuildInputs {
                 document: before,
-                frames: &frames,
-                values: &frames.iter().map(|(h, f)| (*h, f.end)).collect(),
+                frames: previous_frames,
+                values: &previous_frames.iter().map(|(h, f)| (*h, f.end)).collect(),
                 requested: &BTreeSet::new(),
             },
         )

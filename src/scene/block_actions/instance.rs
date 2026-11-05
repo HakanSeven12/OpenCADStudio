@@ -40,6 +40,22 @@ fn cache(doc: &Document, insert: Handle, id: i32) -> Result<Option<Handle>, &'st
     Ok(result)
 }
 
+pub(super) fn remove_cache(doc: &mut Document, insert: Handle, id: i32) -> Result<(), &'static str> {
+    let Some(handle) = cache(doc, insert, id)? else {
+        return Ok(());
+    };
+    let Some(ObjectType::XRecord(record)) = doc.objects.get(&handle) else {
+        return Err("The reference contains an invalid parameter record.");
+    };
+    let owner = record.owner;
+    let Some(ObjectType::Dictionary(owner)) = doc.objects.get_mut(&owner) else {
+        return Err("The reference contains an invalid parameter dictionary.");
+    };
+    owner.entries.retain(|(_, entry)| *entry != handle);
+    doc.objects.remove(&handle);
+    Ok(())
+}
+
 /// Evaluated definition-plane coordinates, independent of display grip locations.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct ParameterFrame {
@@ -1236,9 +1252,10 @@ pub(crate) fn refresh_after_edit(
         })
         .collect::<Vec<_>>();
     if let Some(plan) = super::flip_graph::Plan::new(&staged, def) {
+        let previous_plan = super::flip_graph::Plan::new(before, def);
         for insert in inserts {
             let state = super::representation::visibility_state(&staged, before, def, insert);
-            staged = plan.refresh(&staged, before, def, insert)?;
+            staged = plan.refresh(&staged, before, def, insert, previous_plan.as_ref())?;
             if let Some(state) = state {
                 super::representation::apply_visibility(&mut staged, def, insert, state)?;
             }

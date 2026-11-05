@@ -175,6 +175,65 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
                 );
                 let moved = eval(&refreshed, child, Value::Point(DVec3::new(-18., -2., 0.)));
                 assert_eq!(circle(&moved), Vector3::new(-12., -7., 0.));
+
+                let mut with_parent = changed.clone();
+                let parent = crate::scene::block_point_parameter::create(
+                    &mut with_parent,
+                    def,
+                    Vector3::ZERO,
+                    Vector3::UNIT_X,
+                )
+                .unwrap();
+                create(
+                    &mut with_parent,
+                    def,
+                    Kind::Move,
+                    parent,
+                    &[child],
+                    DVec3::ZERO,
+                )
+                .unwrap();
+                let with_parent =
+                    instance::refresh_after_edit(&with_parent, &changed, def).unwrap();
+                let added = all_parameters(&with_parent, def)
+                    .into_iter()
+                    .find(|p| p.handle == parent)
+                    .unwrap();
+                assert_eq!(
+                    instance::frame(&with_parent, first, &added).unwrap().end,
+                    DVec3::ZERO
+                );
+                assert_eq!(circle(&with_parent), Vector3::new(-9., -3., 0.));
+                let transported = eval(&with_parent, parent, Value::Point(DVec3::Y * 3.));
+                assert_eq!(
+                    instance::frame(&transported, first, &p).unwrap().end,
+                    DVec3::new(-15., -5., 0.)
+                );
+                assert_eq!(
+                    instance::frame(&transported, first, &added).unwrap().end,
+                    DVec3::Y * 3.
+                );
+                let resaved = instance::refresh_after_edit(&transported, &changed, def).unwrap();
+                assert_eq!(
+                    instance::frame(&resaved, first, &p).unwrap().end,
+                    DVec3::new(-15., -5., 0.)
+                );
+
+                let mut deleted = transported.clone();
+                crate::scene::block_authoring::edit::remove_parameter(&mut deleted, def, parent)
+                    .unwrap();
+                let deleted = instance::refresh_after_edit(&deleted, &transported, def).unwrap();
+                assert_eq!(
+                    instance::frame(&deleted, first, &p).unwrap().end,
+                    DVec3::new(-15., -2., 0.)
+                );
+                assert_eq!(
+                    instance::frame(&deleted, first, &added).unwrap().end,
+                    DVec3::ZERO
+                );
+                assert_eq!(circle(&deleted), Vector3::new(-9., -3., 0.));
+                let next = eval(&deleted, child, Value::Point(DVec3::new(-18., -2., 0.)));
+                assert_eq!(circle(&next), Vector3::new(-12., -3., 0.));
             }
             let value = instance::value(&changed, first, &p).unwrap();
             let grips = instance::action_grips(&changed, &baseline, def, first, &p, value, testing);

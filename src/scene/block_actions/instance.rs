@@ -541,7 +541,7 @@ pub(crate) fn load_frames(
     Ok(frames)
 }
 
-fn canonical_flip_input(
+pub(super) fn canonical_flip_input(
     plan: &super::flip_frames::Plan,
     doc: &Document,
     staged: &mut Document,
@@ -1128,7 +1128,7 @@ fn evaluate_table_row_context(
         .rows
         .get(row)
         .ok_or("The selected table row is unavailable.")?;
-    let coupled_flips = super::flip_graph::Plan::new(baseline.unwrap_or(doc), def).is_some();
+    let reflects_parameters = super::flip_graph::Plan::for_rebuild(baseline.unwrap_or(doc), def).is_some();
     let mut staged = doc.clone();
     for (column, value) in columns.iter().zip(values) {
         let p = all_parameters(&staged, def)
@@ -1144,7 +1144,7 @@ fn evaluate_table_row_context(
         let input = if column.connection_name.eq_ignore_ascii_case("UpdatedAngle") {
             Value::Point(base + DVec3::new(value.cos(), value.sin(), 0.0) * current_frame.end.distance(base))
         } else {
-            let axis = if p.polar || (p.linear && coupled_flips) { (current_frame.end - base).normalize() }
+            let axis = if p.polar || (p.linear && reflects_parameters) { (current_frame.end - base).normalize() }
                 else { (p.end - p.base).normalize() };
             Value::Point(base + axis * *value)
         };
@@ -1251,11 +1251,27 @@ pub(crate) fn refresh_after_edit(
             _ => None,
         })
         .collect::<Vec<_>>();
-    if let Some(plan) = super::flip_graph::Plan::new(&staged, def) {
-        let previous_plan = super::flip_graph::Plan::new(before, def);
+    let previous_plan = super::flip_graph::Plan::for_rebuild(before, def);
+    let plan = super::flip_graph::Plan::for_rebuild(&staged, def);
+    if plan.is_some() || previous_plan.is_some() && !inserts.is_empty() {
+        let plan = match plan {
+            Some(plan) => plan,
+            None => super::flip_graph::Plan::exit(&staged, def)?,
+        };
+        let leaving = !plan.retains_inputs();
         for insert in inserts {
             let state = super::representation::visibility_state(&staged, before, def, insert);
-            staged = plan.refresh(&staged, before, def, insert, previous_plan.as_ref())?;
+            let has_inputs = |doc: &Document| {
+                doc.get_entity(insert).is_some_and(|entity| {
+                    entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_some()
+                })
+            };
+            staged = if leaving && !has_inputs(&staged) && has_inputs(before) {
+                // A live editor edit already published native frames.
+                plan.refresh(&staged, &staged, def, insert, None)?
+            } else {
+                plan.refresh(&staged, before, def, insert, previous_plan.as_ref())?
+            };
             if let Some(state) = state {
                 super::representation::apply_visibility(&mut staged, def, insert, state)?;
             }

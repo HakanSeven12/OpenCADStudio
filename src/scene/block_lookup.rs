@@ -385,7 +385,7 @@ fn evaluate_row_context(
         reference_row_context(document, baseline, insert, definition, &table) != Some(row);
 
     let parameters = super::block_actions::all_parameters(baseline.unwrap_or(document), definition);
-    let flip_plan = super::block_actions::flip_graph::Plan::new(
+    let flip_plan = super::block_actions::flip_graph::Plan::for_rebuild(
         baseline.unwrap_or(document),
         definition,
     );

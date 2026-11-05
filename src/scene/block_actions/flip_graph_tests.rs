@@ -164,6 +164,99 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             assert_eq!(circle(&unflipped), Vector3::new(13., 3., 0.));
             if !testing {
                 let mut edited = changed.clone();
+                crate::scene::block_authoring::edit::remove_parameter(&mut edited, def, flips[1])
+                    .unwrap();
+                let single = instance::refresh_after_edit(&edited, &changed, def).unwrap();
+                assert_eq!(circle(&single), Vector3::new(9., -3., 0.));
+                assert_eq!(
+                    instance::frame(&single, first, &p).unwrap().end,
+                    DVec3::new(15., -2., 0.)
+                );
+                assert!(has_inputs(&single, first));
+
+                let mut ordinary = single.clone();
+                let ObjectType::DynamicBlock(o) =
+                    ordinary.objects.get_mut(&flip_actions[0]).unwrap()
+                else {
+                    panic!()
+                };
+                targets::action_mut(&mut o.data).unwrap().dependencies = vec![geometry[1]];
+                let ordinary = instance::refresh_after_edit(&ordinary, &single, def).unwrap();
+                assert!(!has_inputs(&ordinary, first));
+                assert_eq!(circle(&ordinary), Vector3::new(9., -3., 0.));
+                assert_eq!(
+                    instance::frame(&ordinary, first, &p).unwrap().end,
+                    DVec3::new(15., 2., 0.)
+                );
+                let resaved = instance::refresh_after_edit(&ordinary, &single, def).unwrap();
+                assert_eq!(circle(&resaved), Vector3::new(9., -3., 0.));
+                assert_eq!(
+                    circle(&eval(&resaved, flips[0], Value::Flip(false))),
+                    Vector3::new(9., 3., 0.)
+                );
+
+                let mut legacy = single.clone();
+                let ObjectType::DynamicBlock(o) = legacy.objects.get_mut(&flip_actions[0]).unwrap()
+                else {
+                    panic!()
+                };
+                targets::action_mut(&mut o.data).unwrap().dependencies =
+                    vec![geometry[1], child, linked];
+                for grip in
+                    crate::scene::block_grips::config::locations(&legacy, def, child).unwrap()
+                {
+                    crate::scene::block_grips::config::set_location(
+                        &mut legacy,
+                        def,
+                        child,
+                        grip.role,
+                        grip.key_point,
+                    )
+                    .unwrap();
+                }
+                assert!(super::flip_frames::Plan::new(&legacy, def).is_some());
+                let legacy = instance::refresh_after_edit(&legacy, &single, def).unwrap();
+                assert!(!has_inputs(&legacy, first));
+                assert_eq!(circle(&legacy), Vector3::new(9., -3., 0.));
+                assert_eq!(
+                    instance::frame(&legacy, first, &p).unwrap().end,
+                    DVec3::new(15., -2., 0.)
+                );
+                let resaved = instance::refresh_after_edit(&legacy, &single, def).unwrap();
+                assert_eq!(circle(&resaved), Vector3::new(9., -3., 0.));
+                let resaved = instance::refresh(&resaved, def).unwrap();
+                let selected =
+                    block_lookup::evaluate_reference_value(&resaved, first, lookup, "Long")
+                        .unwrap()
+                        .unwrap();
+                assert!(!has_inputs(&selected, first));
+                assert_eq!(circle(&selected), Vector3::new(11., -3., 0.));
+                let selected = instance::evaluate_table_row(&selected, first, &columns, 1)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(circle(&selected), Vector3::new(13., -3., 0.));
+                for extension in ["dwg", "dxf"] {
+                    let bytes =
+                        crate::io::save_to_bytes(&selected, extension, selected.version).unwrap();
+                    let saved =
+                        crate::io::load_bytes(&format!("native-flips.{extension}"), bytes).unwrap();
+                    assert!(!has_inputs(&saved, first));
+                    let unflipped = eval(&saved, flips[0], Value::Flip(false));
+                    assert_eq!(circle(&unflipped), Vector3::new(13., 3., 0.));
+                    assert_eq!(
+                        instance::frame(&unflipped, first, &p).unwrap().end,
+                        DVec3::new(19., 2., 0.)
+                    );
+                }
+
+                let mut no_flip = single.clone();
+                crate::scene::block_authoring::edit::remove_parameter(&mut no_flip, def, flips[0])
+                    .unwrap();
+                let no_flip = instance::refresh_after_edit(&no_flip, &single, def).unwrap();
+                assert!(!has_inputs(&no_flip, first));
+                assert_eq!(circle(&no_flip), Vector3::new(9., 3., 0.));
+
+                let mut edited = changed.clone();
                 let EntityType::Circle(source) = edited.get_entity_mut(geometry[1]).unwrap() else {
                     panic!()
                 };
@@ -367,4 +460,13 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             }
         }
     }
+}
+
+fn has_inputs(doc: &Document, insert: Handle) -> bool {
+    doc.get_entity(insert)
+        .unwrap()
+        .common()
+        .extended_data
+        .get_record(super::flip_graph::INPUTS)
+        .is_some()
 }

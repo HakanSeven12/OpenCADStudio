@@ -3653,7 +3653,7 @@ fn active_flip_transports_linked_parameter_and_action_frames() {
 }
 
 #[test]
-fn flip_rejects_linked_relocated_grips_until_offsets_are_transported() {
+fn single_flip_transports_relocated_linear_grip_offsets() {
     use super::super::block_orientation_parameter::Kind as O;
     let (mut doc, def, targets) = fixture();
     let linear = linear(&mut doc, def);
@@ -3689,12 +3689,32 @@ fn flip_rejects_linked_relocated_grips_until_offsets_are_transported() {
         )))
         .unwrap();
     let before = doc.clone();
-    let error = instance::evaluate_value(&doc, insert, flip, Value::Flip(true)).unwrap_err();
-    assert_eq!(
-        error,
-        "This action targets another parameter or an unsupported native object."
-    );
+    let flipped = instance::evaluate_value(&doc, insert, flip, Value::Flip(true))
+        .unwrap()
+        .unwrap();
     assert_eq!(doc, before);
+    let parameter = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == linear)
+        .unwrap();
+    let offset = |reference: &Document| {
+        let value = instance::value(reference, insert, &parameter).unwrap();
+        instance::action_grips(reference, &doc, def, insert, &parameter, value, false)
+            .into_iter()
+            .find(|marker| marker.role == grip.role)
+            .unwrap()
+            .offset
+    };
+    assert_eq!(offset(&doc), DVec3::Y * 2.);
+    assert_eq!(offset(&flipped), -DVec3::Y * 2.);
+    let edited = instance::evaluate_value(&flipped, insert, linear, Value::Point(DVec3::X * 15.))
+        .unwrap()
+        .unwrap();
+    let unflipped = instance::evaluate_value(&edited, insert, flip, Value::Flip(false))
+        .unwrap()
+        .unwrap();
+    assert_eq!(offset(&unflipped), DVec3::Y * 2.);
+    assert_eq!(instance::frame(&unflipped, insert, &parameter).unwrap().end, DVec3::X * 15.);
 }
 
 #[test]

@@ -13,11 +13,13 @@ struct Step {
 pub(in crate::scene) struct Plan {
     steps: Vec<Step>,
     parameters: Vec<Parameter>,
+    legacy: Option<super::flip_frames::Plan>,
+    keep_cache: bool,
 }
 impl Plan {
     pub fn new(doc: &Document, def: Handle) -> Option<Self> {
         let all = actions(doc, def);
-        if all.iter().filter(|(_, _, k, _)| *k == Kind::Flip).count() < 2 {
+        if !all.iter().any(|(_, _, kind, _)| *kind == Kind::Flip) {
             return None;
         }
         if super::flip_frames::Plan::new(doc, def).is_some() {
@@ -148,7 +150,61 @@ impl Plan {
         steps
             .iter()
             .any(|step| !step.targets.is_empty())
-            .then_some(Self { steps, parameters })
+            .then_some(Self {
+                steps,
+                parameters,
+                legacy: None,
+                keep_cache: true,
+            })
+    }
+
+    pub fn for_rebuild(doc: &Document, def: Handle) -> Option<Self> {
+        Self::new(doc, def).or_else(|| {
+            let legacy = super::flip_frames::Plan::new(doc, def)?;
+            let step = Step {
+                action: legacy.action,
+                axis: legacy.axis(),
+                targets: legacy.targets().collect(),
+            };
+            Self::native(doc, def, vec![step], Some(legacy)).ok()
+        })
+    }
+
+    pub(super) fn exit(doc: &Document, def: Handle) -> Result<Self, &'static str> {
+        Self::native(doc, def, Vec::new(), None)
+    }
+
+    pub(super) fn retains_inputs(&self) -> bool {
+        self.keep_cache
+    }
+
+    fn native(
+        doc: &Document,
+        def: Handle,
+        steps: Vec<Step>,
+        legacy: Option<super::flip_frames::Plan>,
+    ) -> Result<Self, &'static str> {
+        for (handle, action, kind, owner) in actions(doc, def) {
+            if kind == Kind::Flip && !steps.iter().any(|step| step.action == handle) {
+                super::targets::geometry(doc, def, kind, owner, &action.dependencies)?;
+            }
+        }
+        let parameters = all_parameters(doc, def);
+        if parameters
+            .iter()
+            .map(|p| p.id)
+            .collect::<BTreeSet<_>>()
+            .len()
+            != parameters.len()
+        {
+            return Err(FRAME_ERROR);
+        }
+        Ok(Self {
+            steps,
+            parameters,
+            legacy,
+            keep_cache: false,
+        })
     }
     fn states(
         &self,
@@ -295,13 +351,32 @@ impl Plan {
         insert: Handle,
         testing: bool,
     ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
-        let visible = if testing {
+        let mut visible = if testing {
             instance::load_test_frames(doc, evaluated, insert, &self.parameters)?
         } else {
             instance::load_frames(doc, evaluated, insert, &self.parameters)?
         };
         let canonical = match self.read(doc, insert)? {
             Some(frames) => frames,
+            None if self.legacy.is_some() => {
+                let plan = self.legacy.as_ref().ok_or(FRAME_ERROR)?;
+                let definition = doc
+                    .dynamic_definition_for_insert(insert)
+                    .ok_or(FRAME_ERROR)?;
+                instance::canonical_flip_input(
+                    plan,
+                    doc,
+                    evaluated,
+                    insert,
+                    definition,
+                    &self.parameters,
+                    &mut visible,
+                    plan.axis(),
+                    Value::Flip(false),
+                    testing,
+                )?;
+                visible
+            }
             None if self
                 .states(|p| super::value(evaluated, p))?
                 .iter()
@@ -351,7 +426,11 @@ impl Plan {
         let visible = self.display_frames(evaluated, &canonical, &active)?;
         let mut result = instance::materialize(doc, insert, def, evaluated)?;
         instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
-        self.write(&mut result, insert, &canonical);
+        if self.keep_cache {
+            self.write(&mut result, insert, &canonical);
+        } else {
+            crate::scene::view::dispatch::set_entity_xdata(&mut result, insert, INPUTS, None);
+        }
         Ok(result)
     }
 

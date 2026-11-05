@@ -24,6 +24,7 @@ mod block_construction;
 mod block_constraint_status;
 mod block_action_bars;
 mod block_authoring_edit;
+mod block_autosave;
 mod block_editor;
 #[cfg(test)]
 mod block_editor_tests;

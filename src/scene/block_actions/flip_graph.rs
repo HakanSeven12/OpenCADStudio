@@ -452,7 +452,8 @@ impl Plan {
                 end: new.end + (frame.end - old.end),
             });
         }
-        if !(new.linear && old.linear || new.flip && old.flip) {
+        let angular = new.polar && old.polar || new.rotation && old.rotation;
+        if !(new.linear && old.linear || new.flip && old.flip || angular) {
             return Err(FRAME_ERROR);
         }
         let old_axis = old.end - old.base;
@@ -462,15 +463,36 @@ impl Plan {
         }
         let old_direction = old_axis.try_normalize().ok_or(FRAME_ERROR)?;
         let new_direction = new_axis.try_normalize().ok_or(FRAME_ERROR)?;
+        let length = frame.base.distance(frame.end);
+        let default_length = (length - old_axis.length()).abs() <= 1e-8;
+        if angular {
+            let direction = (frame.end - frame.base)
+                .try_normalize()
+                .ok_or(FRAME_ERROR)?;
+            let direction = if direction.distance(old_direction) <= 1e-8 {
+                new_direction
+            } else {
+                direction
+            };
+            let radius = if new.rotation || default_length {
+                new_axis.length()
+            } else {
+                length
+            };
+            let base = new.base + (frame.base - old.base);
+            return Ok(ParameterFrame {
+                base,
+                end: base + direction * radius,
+            });
+        }
         let cosine = old_direction.dot(new_direction);
         let sine = old_direction.cross(new_direction).z;
         let rotate =
             |v: DVec3| DVec3::new(cosine * v.x - sine * v.y, sine * v.x + cosine * v.y, v.z);
         let base = new.base + rotate(frame.base - old.base);
-        let length = frame.base.distance(frame.end);
         let delta = if new.flip {
             rotate(frame.end - frame.base) * (new_axis.length() / old_axis.length())
-        } else if (length - old_axis.length()).abs() <= 1e-8 {
+        } else if default_length {
             new_axis
         } else {
             new_direction * length
@@ -541,6 +563,18 @@ impl Plan {
                 let (frame, value) = if let Some(old) = old_parameters.get(&p.handle) {
                     if old.id != p.id {
                         return Err(FRAME_ERROR);
+                    }
+                    if p.rotation
+                        && old.rotation
+                        && (p.reference - p.base).distance(old.reference - old.base) > 1e-8
+                        && instance::cache(doc, insert, old.id)?.is_some()
+                    {
+                        instance::migrate_rotation_reference(
+                            cleaned.get_or_insert_with(|| doc.clone()),
+                            insert,
+                            old,
+                            p,
+                        )?;
                     }
                     let mut frame = previous_frames[&p.handle];
                     if old.base.distance(p.base) > 1e-8 || old.end.distance(p.end) > 1e-8 {

@@ -367,18 +367,40 @@ pub(crate) fn save_frame(
         put(frame.end)?;
     }
     if p.rotation {
-        let reference = r
-            .entries
-            .iter_mut()
-            .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)))
-            .nth(3)
-            .ok_or("The rotation parameter cache has no reference point.")?;
-        let point = p.reference + frame.base - p.base;
-        reference.value = XRecordValue::Point3D(point.x, point.y, point.z);
+        write_rotation_reference(r, p.reference + frame.base - p.base)?;
     }
     r.raw_data.clear();
     r.raw_dwg_data = None;
     *doc = staged;
+    Ok(())
+}
+
+fn write_rotation_reference(record: &mut XRecord, point: DVec3) -> Result<(), &'static str> {
+    let entry = record.entries.iter_mut()
+        .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)))
+        .nth(3)
+        .ok_or("The rotation parameter cache has no reference point.")?;
+    entry.value = XRecordValue::Point3D(point.x, point.y, point.z);
+    Ok(())
+}
+
+pub(super) fn migrate_rotation_reference(
+    doc: &mut Document,
+    insert: Handle,
+    old: &Parameter,
+    new: &Parameter,
+) -> Result<(), &'static str> {
+    let Some(handle) = cache(doc, insert, old.id)? else {
+        return Ok(());
+    };
+    // A live edit may already have updated the cache when BSAVE sees it again.
+    let stored = frame(doc, insert, old).or_else(|_| frame(doc, insert, new))?;
+    let Some(ObjectType::XRecord(record)) = doc.objects.get_mut(&handle) else {
+        return Err("The reference contains an invalid parameter record.");
+    };
+    write_rotation_reference(record, new.reference + stored.base - new.base)?;
+    record.raw_data.clear();
+    record.raw_dwg_data = None;
     Ok(())
 }
 

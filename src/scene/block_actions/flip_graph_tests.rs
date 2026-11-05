@@ -501,3 +501,187 @@ fn has_inputs(doc: &Document, insert: Handle) -> bool {
         .get_record(super::flip_graph::INPUTS)
         .is_some()
 }
+
+#[test]
+fn coupled_refresh_migrates_polar_and_rotation_values() {
+    use crate::scene::block_authoring::edit::{move_part, Part};
+    let (mut doc, def, geometry) = super::tests::fixture();
+    let linear = distance::create(
+        &mut doc,
+        def,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::UNIT_X * 10.,
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let polar = distance::create(
+        &mut doc,
+        def,
+        distance::Kind::Polar,
+        Vector3::ZERO,
+        Vector3::UNIT_X * 4.,
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let rotation = orientation::create(
+        &mut doc,
+        def,
+        orientation::Kind::Rotation,
+        Vector3::ZERO,
+        Vector3::UNIT_Y * 4.,
+        Vector3::UNIT_X * 4.,
+    )
+    .unwrap();
+    create(
+        &mut doc,
+        def,
+        Kind::Move,
+        polar,
+        &geometry[1..],
+        DVec3::ZERO,
+    )
+    .unwrap();
+    create(
+        &mut doc,
+        def,
+        Kind::Rotate,
+        rotation,
+        &geometry[..1],
+        DVec3::ZERO,
+    )
+    .unwrap();
+    let linked = create(
+        &mut doc,
+        def,
+        Kind::Move,
+        linear,
+        &geometry[1..],
+        DVec3::ZERO,
+    )
+    .unwrap();
+    let mut flips = Vec::new();
+    for axis in [Vector3::UNIT_X, Vector3::UNIT_Y] {
+        let flip = orientation::create(
+            &mut doc,
+            def,
+            orientation::Kind::Flip,
+            Vector3::ZERO,
+            axis * 10.,
+            Vector3::UNIT_X,
+        )
+        .unwrap();
+        let action = create(&mut doc, def, Kind::Flip, flip, &geometry[1..], DVec3::ZERO).unwrap();
+        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else {
+            panic!()
+        };
+        targets::action_mut(&mut object.data)
+            .unwrap()
+            .dependencies
+            .extend([linear, linked]);
+        flips.push(flip);
+    }
+    let mut inserts = Vec::new();
+    for origin in [Vector3::ZERO, Vector3::UNIT_Y * 30.] {
+        let insert = doc
+            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+                "ACTIONS", origin,
+            )))
+            .unwrap();
+        for flip in &flips {
+            doc = instance::evaluate_value(&doc, insert, *flip, Value::Flip(true))
+                .unwrap()
+                .unwrap();
+        }
+        inserts.push(insert);
+    }
+    let edited_insert = inserts[0];
+    let default_insert = inserts[1];
+    for (p, end) in [(polar, DVec3::Y * 6.), (rotation, -DVec3::X * 4.)] {
+        doc = instance::evaluate_value(&doc, edited_insert, p, Value::Point(end))
+            .unwrap()
+            .unwrap();
+    }
+    let mut definition_edit = doc.clone();
+    move_part(
+        &mut definition_edit,
+        def,
+        polar,
+        Part::End,
+        -Vector3::UNIT_X * 8.,
+    )
+    .unwrap();
+    move_part(
+        &mut definition_edit,
+        def,
+        rotation,
+        Part::Reference,
+        -Vector3::UNIT_Y * 7.,
+    )
+    .unwrap();
+    move_part(
+        &mut definition_edit,
+        def,
+        rotation,
+        Part::End,
+        Vector3::UNIT_X * 7.,
+    )
+    .unwrap();
+    let before_reference = instance::refresh_after_edit(&definition_edit, &doc, def).unwrap();
+    let mut reference_edit = before_reference.clone();
+    move_part(
+        &mut reference_edit,
+        def,
+        rotation,
+        Part::Reference,
+        Vector3::UNIT_Y * 7.,
+    )
+    .unwrap();
+    let refreshed = instance::refresh_after_edit(&reference_edit, &before_reference, def).unwrap();
+    let refreshed = instance::refresh_after_edit(&refreshed, &before_reference, def).unwrap();
+    let close = |actual: DVec3, expected: DVec3| assert!(actual.distance(expected) < 1e-8);
+    for extension in ["dwg", "dxf"] {
+        let bytes = crate::io::save_to_bytes(&refreshed, extension, refreshed.version).unwrap();
+        let reopened =
+            crate::io::load_bytes(&format!("angular-reframe.{extension}"), bytes).unwrap();
+        let parameters = all_parameters(&reopened, def);
+        for (handle, edited, default) in [
+            (polar, DVec3::Y * 6., -DVec3::X * 8.),
+            (rotation, -DVec3::X * 7., DVec3::X * 7.),
+        ] {
+            let parameter = parameters.iter().find(|p| p.handle == handle).unwrap();
+            close(
+                instance::frame(&reopened, edited_insert, parameter)
+                    .unwrap()
+                    .end,
+                edited,
+            );
+            close(
+                instance::frame(&reopened, default_insert, parameter)
+                    .unwrap()
+                    .end,
+                default,
+            );
+        }
+        let EntityType::Insert(reference) = reopened.get_entity(edited_insert).unwrap() else {
+            panic!()
+        };
+        let mut members = reopened.entities_in_block(&reference.block_name);
+        let line = members
+            .by_ref()
+            .find_map(|entity| match entity {
+                EntityType::Line(line) => Some(line),
+                _ => None,
+            })
+            .unwrap();
+        close(v(line.start), -DVec3::X);
+        let circle = reopened
+            .entities_in_block(&reference.block_name)
+            .find_map(|entity| match entity {
+                EntityType::Circle(circle) => Some(circle),
+                _ => None,
+            })
+            .unwrap();
+        close(v(circle.center), DVec3::new(-12., -9., 0.));
+    }
+}

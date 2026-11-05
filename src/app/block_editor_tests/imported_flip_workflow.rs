@@ -1,6 +1,29 @@
 use super::*;
 use crate::scene::block_actions as actions;
 
+fn click_flip(app: &mut OpenCADStudio, grip: &crate::scene::model::object::GripDef) {
+    let scene = &app.tabs[app.active_tab].scene;
+    let size = iced::Size::new(1600., 900.);
+    let radius = glam::DVec3::new(10., 10., 0.);
+    scene.selection.borrow_mut().view.vp_size = (size.width, size.height);
+    let mut camera = scene.camera.borrow_mut();
+    camera.fit_to_bounds_f64(
+        grip.world - radius,
+        grip.world + radius,
+        size.width / size.height,
+    );
+    let at = camera
+        .project(grip.world, iced::Rectangle::with_size(size))
+        .unwrap();
+    drop(camera);
+    let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(at.x, at.y)));
+    let _ = app.update(Message::ViewportLeftRelease);
+    assert!(app.tabs[app.active_tab].active_cmd.is_none());
+    assert!(app.grip_popup.is_none());
+    assert!(app.visibility_popup.is_none());
+    assert!(app.table_popup.is_none());
+}
+
 #[test]
 #[ignore = "requires an explicitly supplied dynamic-block fixture"]
 fn imported_coupled_flip_reference_workflow() {
@@ -55,7 +78,7 @@ fn imported_coupled_flip_reference_workflow() {
                     .expect("Flip grip must be displayed")
                     .clone();
                 assert_eq!(grip.shape, crate::scene::model::object::GripShape::Arrow);
-                assert!(app.start_test_action_grip(insert, grip.id));
+                click_flip(&mut app, &grip);
                 assert!(
                     app.command_line.last_error.is_none(),
                     "Flip {}: {:?}",
@@ -168,7 +191,7 @@ fn imported_coupled_flip_reference_workflow() {
                         })
                         .unwrap()
                         .clone();
-                    assert!(reopened.start_test_action_grip(insert, grip.id));
+                    click_flip(&mut reopened, &grip);
                     assert!(
                         reopened.command_line.last_error.is_none(),
                         "reopened Flip {}: {:?}",

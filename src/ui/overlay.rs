@@ -1540,6 +1540,7 @@ fn draw_grip_marker(
     } else {
         visual.grip_size.clamp(1.0, 25.0)
     };
+    let is_arrow = grip.shape == GripShape::Arrow;
     let path = match grip.shape {
         GripShape::Square => {
             canvas::Path::rectangle(Point::new(sp.x - h, sp.y - h), Size::new(h * 2.0, h * 2.0))
@@ -1576,6 +1577,7 @@ fn draw_grip_marker(
             };
             let side_x = -forward_y;
             let side_y = forward_x;
+            let h = if is_arrow { (h * 1.3).min(h + 1.5) } else { h };
             let point = |forward: f32, side: f32| {
                 Point::new(
                     sp.x + (forward_x * forward + side_x * side) * h,
@@ -1583,13 +1585,13 @@ fn draw_grip_marker(
                 )
             };
             b.move_to(point(1.0, 0.0));
-            if grip.shape == GripShape::Arrow {
-                b.line_to(point(-0.15, 0.9));
-                b.line_to(point(-0.15, 0.28));
-                b.line_to(point(-1.0, 0.28));
-                b.line_to(point(-1.0, -0.28));
-                b.line_to(point(-0.15, -0.28));
-                b.line_to(point(-0.15, -0.9));
+            if is_arrow {
+                b.line_to(point(0.05, 0.95));
+                b.line_to(point(0.05, 0.34));
+                b.line_to(point(-1.0, 0.34));
+                b.line_to(point(-1.0, -0.34));
+                b.line_to(point(0.05, -0.34));
+                b.line_to(point(0.05, -0.95));
             } else {
                 b.line_to(point(-1.0, 1.0));
                 b.line_to(point(-1.0, -1.0));
@@ -1681,8 +1683,12 @@ fn draw_grip_marker(
         frame.stroke(
             &path,
             canvas::Stroke {
-                width: 1.5,
-                style: canvas::Style::Solid(color),
+                width: if is_arrow { 1.0 } else { 1.5 },
+                style: canvas::Style::Solid(if is_arrow {
+                    palette.background.base.text.scale_alpha(0.55)
+                } else {
+                    color
+                }),
                 ..Default::default()
             },
         );

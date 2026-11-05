@@ -4118,6 +4118,12 @@ pub enum Message {
     CommandHistoryHeightReset,
     /// Start dragging the Layer Manager's Name-column divider.
     LayerNameColGrab,
+    /// Open or close the Layer Manager's column chooser.
+    LayerColumnsMenu(bool),
+    /// Show or hide a Layer Manager column.
+    LayerColumnToggle(crate::ui::window::layers::LayerSortCol),
+    /// Move a Layer Manager column left (-1) or right (1).
+    LayerColumnMove(crate::ui::window::layers::LayerSortCol, i8),
     /// Toggle the persistent literal-space mode (the `>` button): while on,
     /// every command line behaves as if it started with `>` — Space stays in
     /// the input instead of submitting. Saved in the user config.

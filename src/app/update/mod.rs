@@ -12122,6 +12122,21 @@ impl OpenCADStudio {
                 self.tabs[i].layers.filter = f;
                 Task::none()
             }
+            Message::LayerColumnsMenu(open) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.columns_menu = open;
+                Task::none()
+            }
+            Message::LayerColumnToggle(col) => {
+                crate::ui::window::layers::toggle_column(col);
+                self.save_config();
+                Task::none()
+            }
+            Message::LayerColumnMove(col, step) => {
+                crate::ui::window::layers::move_column(col, step);
+                self.save_config();
+                Task::none()
+            }
             Message::LayerNameColGrab => {
                 // Start a Name-column divider drag; the dock's pointer capture
                 // feeds it (see `on_dock`).

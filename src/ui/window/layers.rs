@@ -12,7 +12,8 @@ use codec::tables::Table;
 use codec::types::{Color as AcadColor, LineWeight};
 use codec::Handle;
 use iced::widget::{
-    button, column, combo_box, container, mouse_area, row, scrollable, text, text_input, tooltip,
+    button, checkbox, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
+    tooltip,
 };
 use iced::Padding;
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
@@ -48,6 +49,121 @@ pub enum LayerSortCol {
     Linetype,
     Lineweight,
     Transparency,
+}
+
+impl LayerSortCol {
+    /// The name a column is saved under.
+    fn key(self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::On => "On",
+            Self::Freeze => "Freeze",
+            Self::Lock => "Lock",
+            Self::Plot => "Plot",
+            Self::Color => "Color",
+            Self::Linetype => "Linetype",
+            Self::Lineweight => "Lineweight",
+            Self::Transparency => "Transparency",
+        }
+    }
+
+    fn label(self) -> Cow<'static, str> {
+        match self {
+            Self::Name => t!("Name"),
+            Self::On => t!("On"),
+            Self::Freeze => t!("Freeze"),
+            Self::Lock => t!("Lock"),
+            Self::Plot => t!("Plot"),
+            Self::Color => t!("Color"),
+            Self::Linetype => t!("Linetype"),
+            Self::Lineweight => t!("Lineweight"),
+            Self::Transparency => t!("Transparency"),
+        }
+    }
+
+    fn width(self) -> f32 {
+        match self {
+            Self::Color => COL_COLOR,
+            Self::Linetype => COL_LT,
+            Self::Lineweight => COL_LW,
+            Self::Transparency => COL_TRANS,
+            _ => COL_ICON,
+        }
+    }
+}
+
+/// The columns after Name that can be moved and hidden, in their default
+/// order.
+const COLUMNS: [LayerSortCol; 8] = [
+    LayerSortCol::On,
+    LayerSortCol::Freeze,
+    LayerSortCol::Lock,
+    LayerSortCol::Plot,
+    LayerSortCol::Color,
+    LayerSortCol::Linetype,
+    LayerSortCol::Lineweight,
+    LayerSortCol::Transparency,
+];
+
+thread_local! {
+    /// The columns' order and which show; a user preference (UI thread).
+    static COLUMN_LAYOUT: std::cell::RefCell<Vec<(LayerSortCol, bool)>> =
+        std::cell::RefCell::new(COLUMNS.iter().map(|&col| (col, true)).collect());
+}
+
+pub fn column_layout() -> Vec<(LayerSortCol, bool)> {
+    COLUMN_LAYOUT.with(|layout| layout.borrow().clone())
+}
+
+/// The layout as saved: column names in order, a hidden one led by `-`.
+pub fn column_layout_names() -> Vec<String> {
+    column_layout()
+        .into_iter()
+        .map(|(col, shown)| format!("{}{}", if shown { "" } else { "-" }, col.key()))
+        .collect()
+}
+
+/// The saved layout back; unknown names are skipped and columns the save
+/// lacks come last, shown.
+pub fn set_column_layout_names(names: &[String]) {
+    let mut layout: Vec<(LayerSortCol, bool)> = names
+        .iter()
+        .filter_map(|name| {
+            let (shown, key) = match name.strip_prefix('-') {
+                Some(key) => (false, key),
+                None => (true, name.as_str()),
+            };
+            COLUMNS.iter().find(|col| col.key() == key).map(|&col| (col, shown))
+        })
+        .collect();
+    for col in COLUMNS {
+        if !layout.iter().any(|(c, _)| *c == col) {
+            layout.push((col, true));
+        }
+    }
+    layout.dedup_by_key(|(col, _)| *col);
+    COLUMN_LAYOUT.with(|current| *current.borrow_mut() = layout);
+}
+
+/// Show or hide `col`.
+pub fn toggle_column(col: LayerSortCol) {
+    COLUMN_LAYOUT.with(|layout| {
+        if let Some(entry) = layout.borrow_mut().iter_mut().find(|(c, _)| *c == col) {
+            entry.1 = !entry.1;
+        }
+    });
+}
+
+/// Move `col` one place left (`-1`) or right (`1`).
+pub fn move_column(col: LayerSortCol, step: i8) {
+    COLUMN_LAYOUT.with(|layout| {
+        let mut layout = layout.borrow_mut();
+        let Some(at) = layout.iter().position(|(c, _)| *c == col) else {
+            return;
+        };
+        let to = (at as i64 + i64::from(step)).clamp(0, layout.len() as i64 - 1) as usize;
+        layout.swap(at, to);
+    });
 }
 
 // ── Row-height-derived constants ─────────────────────────────────────────
@@ -134,6 +250,9 @@ pub struct LayerPanel {
     pub sort_asc: bool,
     /// Live name filter from the search box; empty shows every layer (#343).
     pub filter: String,
+    /// The column chooser (a right-click on the header) is open; it stays
+    /// open while columns are ticked, until Close.
+    pub columns_menu: bool,
 }
 
 impl Default for LayerPanel {
@@ -163,6 +282,7 @@ impl Default for LayerPanel {
             sort_col: Some(LayerSortCol::Name),
             sort_asc: true,
             filter: String::new(),
+            columns_menu: false,
         }
     }
 }
@@ -447,59 +567,20 @@ impl LayerPanel {
             )
             .on_press(Message::LayerNameColGrab)
             .interaction(iced::mouse::Interaction::ResizingHorizontally),
-            sortable_header(t!("On"), LayerSortCol::On, Length::Fixed(COL_ICON), sc, sa),
-            sortable_header(
-                t!("Freeze"),
-                LayerSortCol::Freeze,
-                Length::Fixed(COL_ICON),
-                sc,
-                sa
-            ),
-            sortable_header(
-                t!("Lock"),
-                LayerSortCol::Lock,
-                Length::Fixed(COL_ICON),
-                sc,
-                sa
-            ),
-            sortable_header(
-                t!("Plot"),
-                LayerSortCol::Plot,
-                Length::Fixed(COL_ICON),
-                sc,
-                sa
-            ),
-            sortable_header(
-                t!("Color"),
-                LayerSortCol::Color,
-                Length::Fixed(COL_COLOR),
-                sc,
-                sa
-            ),
-            sortable_header(
-                t!("Linetype"),
-                LayerSortCol::Linetype,
-                Length::Fixed(COL_LT),
-                sc,
-                sa
-            ),
-            sortable_header(
-                t!("Lineweight"),
-                LayerSortCol::Lineweight,
-                Length::Fixed(COL_LW),
-                sc,
-                sa
-            ),
-            sortable_header(
-                t!("Transparency"),
-                LayerSortCol::Transparency,
-                Length::Fixed(COL_TRANS),
-                sc,
-                sa
-            ),
         ]
         .spacing(4)
         .align_y(iced::Center);
+        for (col, shown) in column_layout() {
+            if shown {
+                header_row = header_row.push(sortable_header(
+                    col.label(),
+                    col,
+                    Length::Fixed(col.width()),
+                    sc,
+                    sa,
+                ));
+            }
+        }
 
         for vp in self.vp_cols.iter().filter(|vp| active_vp.is_none_or(|h| h == vp.handle)) {
             header_row = header_row.push(
@@ -525,6 +606,9 @@ impl LayerPanel {
             })
             .padding([4, 8])
             .width(Length::Fill);
+        // A right-click on the header chooses the columns.
+        let col_header = iced::widget::mouse_area(col_header)
+            .on_right_press(Message::LayerColumnsMenu(true));
 
         // ── Layer rows ────────────────────────────────────────────────────
         let mut rows_col = column![].spacing(0);
@@ -583,8 +667,56 @@ impl LayerPanel {
             ))
             .width(Length::Fill)
             .height(Length::Fill);
-        column![toolbar, grid].height(Length::Fill).into()
+        if self.columns_menu {
+            column![toolbar, column_chooser(), grid].height(Length::Fill).into()
+        } else {
+            column![toolbar, grid].height(Length::Fill).into()
+        }
     }
+}
+
+/// Every movable column with a tick to show it and arrows to move it; it
+/// stays open while several are changed.
+fn column_chooser<'a>() -> Element<'a, Message> {
+    let mut list = column![].spacing(2);
+    let layout = column_layout();
+    let last = layout.len().saturating_sub(1);
+    for (n, (col, shown)) in layout.into_iter().enumerate() {
+        let arrow = |up: bool| {
+            let icon = if up {
+                crate::ui::icons::themed_arrow_up(9.0)
+            } else {
+                crate::ui::icons::themed_arrow_down(9.0)
+            };
+            let enabled = if up { n > 0 } else { n < last };
+            button(icon)
+                .on_press_maybe(enabled.then_some(Message::LayerColumnMove(col, if up { -1 } else { 1 })))
+                .style(button::text)
+                .padding([2, 6])
+        };
+        list = list.push(
+            row![
+                checkbox(shown)
+                    .label(col.label())
+                    .text_size(FONT_SZ)
+                    .size(13)
+                    .on_toggle(move |_| Message::LayerColumnToggle(col))
+                    .width(Length::Fill),
+                arrow(true),
+                arrow(false),
+            ]
+            .align_y(iced::Center),
+        );
+    }
+    let close = button(text(t!("Close")).size(FONT_SZ))
+        .on_press(Message::LayerColumnsMenu(false))
+        .padding([2, 10])
+        .style(button::secondary);
+    container(column![list, close].spacing(6))
+        .style(container::bordered_box)
+        .padding(6)
+        .width(Length::Fixed(220.0))
+        .into()
 }
 
 // ── Sorting helpers ─────────────────────────────────────────────────────────
@@ -973,26 +1105,53 @@ fn layer_row<'a>(
             .align_y(iced::Center),
         name_cell,
         iced::widget::Space::new().width(2),
-        container(svg_btn(vis_svg, Message::LayerToggleVisible(lname.clone())))
-            .width(Length::Fixed(COL_ICON))
-            .align_x(iced::Center),
-        container(svg_btn(frz_svg, Message::LayerToggleFreeze(lname.clone())))
-            .width(Length::Fixed(COL_ICON))
-            .align_x(iced::Center),
-        container(svg_btn(lck_svg, Message::LayerToggleLock(lname.clone())))
-            .width(Length::Fixed(COL_ICON))
-            .align_x(iced::Center),
-        container(plot_btn)
-            .width(Length::Fixed(COL_ICON))
-            .align_x(iced::Center),
-        color_cell,
-        lt_cell,
-        lw_cell,
-        trans_cell,
     ]
     .spacing(4)
     .width(Fill)
     .align_y(iced::Center);
+    // The movable columns, in the chosen order.
+    let mut cells: Vec<(LayerSortCol, Element<'a, Message>)> = vec![
+        (
+            LayerSortCol::On,
+            container(svg_btn(vis_svg, Message::LayerToggleVisible(lname.clone())))
+                .width(Length::Fixed(COL_ICON))
+                .align_x(iced::Center)
+                .into(),
+        ),
+        (
+            LayerSortCol::Freeze,
+            container(svg_btn(frz_svg, Message::LayerToggleFreeze(lname.clone())))
+                .width(Length::Fixed(COL_ICON))
+                .align_x(iced::Center)
+                .into(),
+        ),
+        (
+            LayerSortCol::Lock,
+            container(svg_btn(lck_svg, Message::LayerToggleLock(lname.clone())))
+                .width(Length::Fixed(COL_ICON))
+                .align_x(iced::Center)
+                .into(),
+        ),
+        (
+            LayerSortCol::Plot,
+            container(plot_btn)
+                .width(Length::Fixed(COL_ICON))
+                .align_x(iced::Center)
+                .into(),
+        ),
+        (LayerSortCol::Color, color_cell),
+        (LayerSortCol::Linetype, lt_cell),
+        (LayerSortCol::Lineweight, lw_cell),
+        (LayerSortCol::Transparency, trans_cell.into()),
+    ];
+    for (col, shown) in column_layout() {
+        if let Some(at) = cells.iter().position(|(c, _)| *c == col) {
+            let (_, cell) = cells.swap_remove(at);
+            if shown {
+                row_content = row_content.push(cell);
+            }
+        }
+    }
 
     // Per-viewport freeze columns
     for (vp_idx, vp_col) in vp_cols.iter().enumerate() {
@@ -1077,3 +1236,24 @@ const COL_COLOR: f32 = 90.0;
 const COL_LT: f32 = 110.0;
 const COL_LW: f32 = 90.0;
 const COL_TRANS: f32 = 80.0;
+
+#[cfg(test)]
+mod column_layout_tests {
+    use super::*;
+
+    /// #2180: columns hide, move, and come back from their saved names.
+    #[test]
+    fn columns_hide_move_and_round_trip() {
+        set_column_layout_names(&[]);
+        toggle_column(LayerSortCol::Plot);
+        move_column(LayerSortCol::Color, -1);
+        move_column(LayerSortCol::On, -1);
+        let names = column_layout_names();
+        assert_eq!(names[..5], ["On", "Freeze", "Lock", "Color", "-Plot"]);
+        set_column_layout_names(&["-Lock".into(), "Transparency".into(), "bogus".into()]);
+        let layout = column_layout();
+        assert_eq!(layout[0], (LayerSortCol::Lock, false));
+        assert_eq!(layout[1], (LayerSortCol::Transparency, true));
+        assert_eq!(layout.len(), COLUMNS.len());
+    }
+}

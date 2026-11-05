@@ -181,6 +181,28 @@ pub(crate) fn is_main_window(id: iced::window::Id) -> bool {
         .unwrap_or(true)
 }
 
+/// The redraws of the main window, for the subscriptions that tick until the
+/// drawing has drawn something. `window::frames` follows every window: with
+/// a dialog in a window of its own, each of its frames ticks them, each tick
+/// redraws every window, the dialog's window is painted first again and the
+/// main window — the one they wait for — never paints, so they never stop
+/// and no new dialog is ever measured for its window.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn main_window_frames() -> iced::Subscription<iced::time::Instant> {
+    iced::event::listen_raw(|event, _status, id| match event {
+        iced::Event::Window(iced::window::Event::RedrawRequested(at)) if is_main_window(id) => {
+            Some(at)
+        }
+        _ => None,
+    })
+}
+
+/// The web build has one window.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn main_window_frames() -> iced::Subscription<iced::time::Instant> {
+    iced::window::frames()
+}
+
 impl OpenCADStudio {
     /// The update iced runs: one message, then open tools parked again.
     pub fn update_root(&mut self, msg: Message) -> Task<Message> {

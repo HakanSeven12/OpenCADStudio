@@ -3703,7 +3703,7 @@ impl OpenCADStudio {
             .as_ref()
             .is_some_and(|progress| progress.recovery_error.is_none());
         let frames = if needs_frames {
-            window::frames().map(Message::Tick)
+            crate::app::tool_windows::main_window_frames().map(Message::Tick)
         } else {
             Subscription::none()
         };
@@ -3712,7 +3712,7 @@ impl OpenCADStudio {
         // entry disappears at the moment its visible window expires.
         // The subscription auto-stops once no entry is expiring.
         let history_tick = if self.command_line.has_expiring_history() {
-            window::frames().map(Message::Tick)
+            crate::app::tool_windows::main_window_frames().map(Message::Tick)
         } else {
             Subscription::none()
         };
@@ -3723,12 +3723,12 @@ impl OpenCADStudio {
         // already open.
         // Resume scene construction after the notice redraw.
         let layout_settle = if self.layout_settling {
-            window::frames().map(|_| Message::LayoutSettled)
+            crate::app::tool_windows::main_window_frames().map(|_| Message::LayoutSettled)
         } else {
             Subscription::none()
         };
         let grip_dwell = if self.grip_hover.is_some() && self.grip_popup.is_none() {
-            window::frames().map(|_| Message::GripDwellTick)
+            crate::app::tool_windows::main_window_frames().map(|_| Message::GripDwellTick)
         } else {
             Subscription::none()
         };
@@ -3736,7 +3736,7 @@ impl OpenCADStudio {
         // moment the cursor has been still for the dwell window — without
         // this `ViewportMove` alone never re-fires once the user stops.
         let hover_dwell = if self.hover_dwell.is_some() {
-            window::frames().map(|_| Message::HoverDwellTick)
+            crate::app::tool_windows::main_window_frames().map(|_| Message::HoverDwellTick)
         } else {
             Subscription::none()
         };
@@ -3745,7 +3745,7 @@ impl OpenCADStudio {
             .as_ref()
             .is_some_and(|dwell| !dwell.snap_resolved || dwell.preview_dirty)
         {
-            window::frames().map(|_| Message::SnapDwellTick)
+            crate::app::tool_windows::main_window_frames().map(|_| Message::SnapDwellTick)
         } else {
             Subscription::none()
         };
@@ -3758,7 +3758,7 @@ impl OpenCADStudio {
         let nav_settle = if self.tabs[self.active_tab].scene.is_settling()
             || self.tabs[self.active_tab].scene.underlay_resolution_stale()
         {
-            window::frames().map(Message::Tick)
+            crate::app::tool_windows::main_window_frames().map(Message::Tick)
         } else {
             Subscription::none()
         };
@@ -3770,7 +3770,7 @@ impl OpenCADStudio {
         let gpu_probe = if matches!(self.gpu_status, crate::scene::pipeline::GpuStatus::Unknown)
             && !self.tabs[self.active_tab].is_start
         {
-            window::frames().map(Message::Tick)
+            crate::app::tool_windows::main_window_frames().map(Message::Tick)
         } else {
             Subscription::none()
         };
@@ -3778,7 +3778,7 @@ impl OpenCADStudio {
         // window) must not hold the save: a timer goes ahead without it.
         let thumbnail_capture = if self.thumbnail_capture_clean {
             Subscription::batch([
-                window::frames().map(|_| Message::ThumbnailCaptureFrame),
+                crate::app::tool_windows::main_window_frames().map(|_| Message::ThumbnailCaptureFrame),
                 iced::time::every(std::time::Duration::from_millis(300))
                     .map(|_| Message::ThumbnailCaptureFrame),
             ])
@@ -3790,7 +3790,7 @@ impl OpenCADStudio {
         // pending.
         let capture_frame = if self.control.capture_frame_pending {
             Subscription::batch([
-                window::frames().map(|_| Message::ControlCaptureFrame { redrew: true }),
+                crate::app::tool_windows::main_window_frames().map(|_| Message::ControlCaptureFrame { redrew: true }),
                 iced::time::every(std::time::Duration::from_millis(50))
                     .map(|_| Message::ControlCaptureFrame { redrew: false }),
             ])
@@ -3897,7 +3897,7 @@ impl OpenCADStudio {
             .map(|_| Message::PollWebControl);
         iced::Subscription::batch([
             if self.spacemouse.moving() && self.spacemouse_focused && !self.spacemouse_paused {
-                window::frames().map(Message::SpaceMouseFrame)
+                crate::app::tool_windows::main_window_frames().map(Message::SpaceMouseFrame)
             } else {
                 Subscription::none()
             },

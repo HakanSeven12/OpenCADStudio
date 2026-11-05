@@ -162,6 +162,7 @@ action =
     .plugins = 플러그인
 
 ribbon-tab =
+    .user = 내 도구
     .block-editor = 블록 편집기
     .draw = 그리기
     .parametric = 파라메트릭
@@ -8758,3 +8759,17 @@ context-menu =
     .command-placeholder = 명령 또는 별칭
     .add = 추가
     .done = 완료
+
+ribbon-customize =
+    .window-title = 사용자 인터페이스 사용자화
+    .hint = 내 도구 탭의 나만의 리본 패널입니다. 변경 사항이 바로 반영됩니다.
+    .panels = 패널
+    .new-panel = 새 패널
+    .pick-panel = 패널을 선택하거나 만드세요.
+    .title = 제목
+    .commands = 명령
+    .command-placeholder = 명령 또는 별칭
+    .add = 추가
+    .shortcuts = 바로 가기 키…
+    .close = 닫기
+    .default-title = 패널 { $n }

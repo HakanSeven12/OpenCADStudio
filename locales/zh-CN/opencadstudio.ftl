@@ -162,6 +162,7 @@ action =
     .plugins = 插件
 
 ribbon-tab =
+    .user = 我的工具
     .block-editor = 块编辑器
     .draw = 绘制
     .parametric = 参数化
@@ -8742,3 +8743,17 @@ context-menu =
     .command-placeholder = 命令或别名
     .add = 添加
     .done = 完成
+
+ribbon-customize =
+    .window-title = 自定义用户界面
+    .hint = 您自己的功能区面板，位于“我的工具”选项卡。更改立即生效。
+    .panels = 面板
+    .new-panel = 新建面板
+    .pick-panel = 选择或新建一个面板。
+    .title = 标题
+    .commands = 命令
+    .command-placeholder = 命令或别名
+    .add = 添加
+    .shortcuts = 键盘快捷键…
+    .close = 关闭
+    .default-title = 面板 { $n }

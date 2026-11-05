@@ -162,6 +162,7 @@ action =
     .plugins = Phần bổ trợ
 
 ribbon-tab =
+    .user = Công cụ của tôi
     .block-editor = Trình soạn thảo Block
     .draw = Vẽ
     .parametric = Tham số
@@ -8766,3 +8767,17 @@ context-menu =
     .command-placeholder = Lệnh hoặc bí danh
     .add = Thêm
     .done = Xong
+
+ribbon-customize =
+    .window-title = Tùy biến giao diện
+    .hint = Bảng ribbon của riêng bạn, trong thẻ Công cụ của tôi. Thay đổi hiện ngay.
+    .panels = Bảng
+    .new-panel = Bảng mới
+    .pick-panel = Chọn hoặc tạo một bảng.
+    .title = Tiêu đề
+    .commands = Lệnh
+    .command-placeholder = Lệnh hoặc bí danh
+    .add = Thêm
+    .shortcuts = Phím tắt…
+    .close = Đóng
+    .default-title = Bảng { $n }

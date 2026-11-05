@@ -162,6 +162,7 @@ action =
     .plugins = Plugins
 
 ribbon-tab =
+    .user = My Tools
     .block-editor = Block Editor
     .draw = Draw
     .parametric = Parametric
@@ -8768,3 +8769,17 @@ context-menu =
     .command-placeholder = Command or alias
     .add = Add
     .done = Done
+
+ribbon-customize =
+    .window-title = Customize User Interface
+    .hint = Your own ribbon panels, on the My Tools tab. Changes show at once.
+    .panels = Panels
+    .new-panel = New panel
+    .pick-panel = Pick or make a panel.
+    .title = Title
+    .commands = Commands
+    .command-placeholder = Command or alias
+    .add = Add
+    .shortcuts = Keyboard Shortcuts…
+    .close = Close
+    .default-title = Panel { $n }

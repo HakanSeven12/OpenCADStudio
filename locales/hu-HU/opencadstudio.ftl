@@ -156,6 +156,7 @@ action =
     .plugins = Bővítmények
 
 ribbon-tab =
+    .user = Saját eszközök
     .block-editor = Blokkszerkesztő
     .draw = Rajz
     .parametric = Parametrikus
@@ -8747,3 +8748,17 @@ context-menu =
     .command-placeholder = Parancs vagy álnév
     .add = Hozzáadás
     .done = Kész
+
+ribbon-customize =
+    .window-title = Felhasználói felület testreszabása
+    .hint = Saját szalagpanelek a Saját eszközök lapon. A változások azonnal látszanak.
+    .panels = Panelek
+    .new-panel = Új panel
+    .pick-panel = Válasszon vagy hozzon létre panelt.
+    .title = Cím
+    .commands = Parancsok
+    .command-placeholder = Parancs vagy álnév
+    .add = Hozzáadás
+    .shortcuts = Billentyűparancsok…
+    .close = Bezárás
+    .default-title = { $n }. panel

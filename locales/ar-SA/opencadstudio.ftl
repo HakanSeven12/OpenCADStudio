@@ -162,6 +162,7 @@ action =
     .plugins = الإضافات
 
 ribbon-tab =
+    .user = أدواتي
     .block-editor = محرر الكتل
     .draw = رسم
     .parametric = بارامتري
@@ -8772,3 +8773,17 @@ context-menu =
     .command-placeholder = أمر أو اسم مستعار
     .add = إضافة
     .done = تم
+
+ribbon-customize =
+    .window-title = تخصيص الواجهة
+    .hint = لوحات الشريط الخاصة بك في علامة التبويب أدواتي. تظهر التغييرات فورًا.
+    .panels = اللوحات
+    .new-panel = لوحة جديدة
+    .pick-panel = اختر لوحة أو أنشئها.
+    .title = العنوان
+    .commands = الأوامر
+    .command-placeholder = أمر أو اسم مستعار
+    .add = إضافة
+    .shortcuts = اختصارات لوحة المفاتيح…
+    .close = إغلاق
+    .default-title = لوحة { $n }

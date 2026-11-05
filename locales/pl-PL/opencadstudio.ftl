@@ -162,6 +162,7 @@ action =
     .plugins = Wtyczki
 
 ribbon-tab =
+    .user = Moje narzędzia
     .block-editor = Edytor bloków
     .draw = Rysowanie
     .parametric = Parametryczne
@@ -8771,3 +8772,17 @@ context-menu =
     .command-placeholder = Polecenie lub alias
     .add = Dodaj
     .done = Gotowe
+
+ribbon-customize =
+    .window-title = Dostosuj interfejs
+    .hint = Własne panele wstążki na karcie Moje narzędzia. Zmiany widać od razu.
+    .panels = Panele
+    .new-panel = Nowy panel
+    .pick-panel = Wybierz lub utwórz panel.
+    .title = Tytuł
+    .commands = Polecenia
+    .command-placeholder = Polecenie lub alias
+    .add = Dodaj
+    .shortcuts = Skróty klawiszowe…
+    .close = Zamknij
+    .default-title = Panel { $n }

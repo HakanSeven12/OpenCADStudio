@@ -162,6 +162,7 @@ action =
     .plugins = Plug-ins
 
 ribbon-tab =
+    .user = Meine Werkzeuge
     .block-editor = Blockeditor
     .draw = Zeichnen
     .parametric = Parametrisch
@@ -8767,3 +8768,17 @@ context-menu =
     .command-placeholder = Befehl oder Alias
     .add = Hinzufügen
     .done = Fertig
+
+ribbon-customize =
+    .window-title = Benutzeroberfläche anpassen
+    .hint = Eigene Multifunktionsleisten-Gruppen auf der Registerkarte Meine Werkzeuge. Änderungen erscheinen sofort.
+    .panels = Gruppen
+    .new-panel = Neue Gruppe
+    .pick-panel = Gruppe wählen oder erstellen.
+    .title = Titel
+    .commands = Befehle
+    .command-placeholder = Befehl oder Alias
+    .add = Hinzufügen
+    .shortcuts = Tastenkürzel…
+    .close = Schließen
+    .default-title = Gruppe { $n }

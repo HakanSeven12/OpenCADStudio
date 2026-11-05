@@ -10485,6 +10485,16 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::HatchPanel(msg) => self.on_hatch_panel(msg),
+            Message::RibbonCustomizeOpen => {
+                let selected = (!self.ribbon.custom_panels().is_empty()).then_some(0);
+                self.ribbon_customize = Some(crate::ui::window::ribbon_customize::State {
+                    selected,
+                    draft: String::new(),
+                });
+                self.active_modal = Some(crate::app::ModalKind::RibbonCustomize);
+                Task::none()
+            }
+            Message::RibbonCustomize(msg) => self.on_ribbon_customize(msg),
             Message::ContextMenuEdit(msg) => self.on_context_menu_edit(msg),
             Message::KeyListExport(aliases) => {
                 let (header, rows, name) = if aliases {

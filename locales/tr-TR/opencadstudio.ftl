@@ -162,6 +162,7 @@ action =
     .plugins = Eklentiler
 
 ribbon-tab =
+    .user = Araçlarım
     .block-editor = Blok Düzenleyici
     .draw = Çizim
     .parametric = Parametrik
@@ -8688,3 +8689,17 @@ context-menu =
     .command-placeholder = Komut veya kısayol
     .add = Ekle
     .done = Bitti
+
+ribbon-customize =
+    .window-title = Arayüzü Özelleştir
+    .hint = Kendi şerit panelleriniz, Araçlarım sekmesinde. Değişiklikler hemen görünür.
+    .panels = Paneller
+    .new-panel = Yeni panel
+    .pick-panel = Bir panel seçin ya da oluşturun.
+    .title = Başlık
+    .commands = Komutlar
+    .command-placeholder = Komut veya kısayol
+    .add = Ekle
+    .shortcuts = Klavye Kısayolları…
+    .close = Kapat
+    .default-title = Panel { $n }

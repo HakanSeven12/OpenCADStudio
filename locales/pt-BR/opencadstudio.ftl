@@ -162,6 +162,7 @@ action =
     .plugins = Plugins
 
 ribbon-tab =
+    .user = Minhas ferramentas
     .block-editor = Editor de blocos
     .draw = Desenhar
     .parametric = Paramétrico
@@ -8769,3 +8770,17 @@ context-menu =
     .command-placeholder = Comando ou alias
     .add = Adicionar
     .done = Concluído
+
+ribbon-customize =
+    .window-title = Personalizar interface
+    .hint = Seus próprios painéis da faixa, na guia Minhas ferramentas. As mudanças aparecem na hora.
+    .panels = Painéis
+    .new-panel = Novo painel
+    .pick-panel = Escolha ou crie um painel.
+    .title = Título
+    .commands = Comandos
+    .command-placeholder = Comando ou alias
+    .add = Adicionar
+    .shortcuts = Atalhos de teclado…
+    .close = Fechar
+    .default-title = Painel { $n }

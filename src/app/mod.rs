@@ -989,6 +989,8 @@ pub(super) struct OpenCADStudio {
     hatch_drafts: crate::ui::window::hatch_panel::Drafts,
     /// The user's changes to the right-click menu.
     context_menu_custom: crate::ui::popup::context_menu::MenuCustomization,
+    /// Customize User Interface while it is open.
+    ribbon_customize: Option<crate::ui::window::ribbon_customize::State>,
     /// The right-click menu is being edited in place; the command typed
     /// to add.
     context_menu_editing: Option<String>,
@@ -3086,6 +3088,8 @@ pub enum ModalKind {
     LayerStateManager,
     LayerTranslator,
     DrawingUnits,
+    /// Customize User Interface (CUI): the user's ribbon panels.
+    RibbonCustomize,
     BlockDefinition,
     PdfAttach,
     PointCloudAttach,
@@ -4932,6 +4936,10 @@ pub enum Message {
     KeyListExport(bool),
     /// An edit of the right-click menu in its in-place editor.
     ContextMenuEdit(ContextMenuEditMsg),
+    /// Open Customize User Interface (CUI).
+    RibbonCustomizeOpen,
+    /// An edit in Customize User Interface.
+    RibbonCustomize(crate::ui::window::ribbon_customize::Msg),
     /// An edit in the Hatch panel shown while HATCH runs.
     HatchPanel(crate::ui::window::hatch_panel::HatchPanelMsg),
     /// The file the export goes to (none when the picker was cancelled),
@@ -6029,6 +6037,7 @@ impl OpenCADStudio {
             hatch_associative: true,
             hatch_drafts: Default::default(),
             context_menu_custom: Default::default(),
+            ribbon_customize: None,
             context_menu_editing: None,
             hatch_gap_tolerance: 0.0,
             hatch_start_method: 0,

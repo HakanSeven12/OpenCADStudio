@@ -206,6 +206,16 @@ pub struct RibbonLayout {
     pub qat_faces: BTreeMap<String, String>,
     /// The panels floating over the drawing.
     pub floating: Vec<FloatingPanel>,
+    /// The user's own panels, shown on the My Tools tab.
+    pub custom_panels: Vec<CustomPanel>,
+}
+
+/// A panel of the user's: a title and the commands its buttons run.
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CustomPanel {
+    pub title: String,
+    pub commands: Vec<String>,
 }
 
 impl Default for RibbonLayout {
@@ -223,6 +233,7 @@ impl Default for RibbonLayout {
             qat_below: false,
             qat_faces: BTreeMap::new(),
             floating: Vec::new(),
+            custom_panels: Vec::new(),
         }
     }
 }

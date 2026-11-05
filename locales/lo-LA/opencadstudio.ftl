@@ -162,6 +162,7 @@ action =
     .plugins = ປລັກອິນ
 
 ribbon-tab =
+    .user = ເຄື່ອງມືຂອງຂ້ອຍ
     .block-editor = ຕົວແກ້ໄຂບລັອກ
     .draw = ແຕ້ມ
     .parametric = ພາຣາມີຕຣິກ
@@ -8760,3 +8761,17 @@ context-menu =
     .command-placeholder = ຄຳສັ່ງ ຫຼື ຊື່ຫຍໍ້
     .add = ເພີ່ມ
     .done = ແລ້ວໆ
+
+ribbon-customize =
+    .window-title = ປັບແຕ່ງສ່ວນຕິດຕໍ່
+    .hint = ແຜງຣິບບອນຂອງທ່ານເອງ ໃນແຖບເຄື່ອງມືຂອງຂ້ອຍ. ການປ່ຽນແປງສະແດງທັນທີ.
+    .panels = ແຜງ
+    .new-panel = ແຜງໃໝ່
+    .pick-panel = ເລືອກ ຫຼື ສ້າງແຜງ.
+    .title = ຫົວຂໍ້
+    .commands = ຄຳສັ່ງ
+    .command-placeholder = ຄຳສັ່ງ ຫຼື ຊື່ຫຍໍ້
+    .add = ເພີ່ມ
+    .shortcuts = ປຸ່ມລັດ…
+    .close = ປິດ
+    .default-title = ແຜງ { $n }

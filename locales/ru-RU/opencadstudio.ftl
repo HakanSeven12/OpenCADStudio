@@ -162,6 +162,7 @@ action =
     .plugins = Модули
 
 ribbon-tab =
+    .user = Мои инструменты
     .block-editor = Редактор блоков
     .draw = Начертить
     .parametric = Параметрический
@@ -8773,3 +8774,17 @@ context-menu =
     .command-placeholder = Команда или псевдоним
     .add = Добавить
     .done = Готово
+
+ribbon-customize =
+    .window-title = Настройка интерфейса
+    .hint = Ваши панели ленты на вкладке «Мои инструменты». Изменения видны сразу.
+    .panels = Панели
+    .new-panel = Новая панель
+    .pick-panel = Выберите или создайте панель.
+    .title = Заголовок
+    .commands = Команды
+    .command-placeholder = Команда или псевдоним
+    .add = Добавить
+    .shortcuts = Сочетания клавиш…
+    .close = Закрыть
+    .default-title = Панель { $n }

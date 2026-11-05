@@ -164,6 +164,7 @@ action =
     .plugins = Zásuvné moduly
 
 ribbon-tab =
+    .user = Moje nástroje
     .block-editor = Editor bloků
     .draw = Kreslení
     .parametric = Parametrické
@@ -8775,3 +8776,17 @@ context-menu =
     .command-placeholder = Příkaz nebo alias
     .add = Přidat
     .done = Hotovo
+
+ribbon-customize =
+    .window-title = Přizpůsobit rozhraní
+    .hint = Vlastní panely pásu karet na kartě Moje nástroje. Změny se projeví hned.
+    .panels = Panely
+    .new-panel = Nový panel
+    .pick-panel = Vyberte nebo vytvořte panel.
+    .title = Název
+    .commands = Příkazy
+    .command-placeholder = Příkaz nebo alias
+    .add = Přidat
+    .shortcuts = Klávesové zkratky…
+    .close = Zavřít
+    .default-title = Panel { $n }

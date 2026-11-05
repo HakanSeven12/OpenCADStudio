@@ -162,6 +162,7 @@ action =
     .plugins = Plug-ins
 
 ribbon-tab =
+    .user = Mijn gereedschap
     .block-editor = Blokeditor
     .draw = Tekenen
     .parametric = Parametrisch
@@ -8767,3 +8768,17 @@ context-menu =
     .command-placeholder = Opdracht of alias
     .add = Toevoegen
     .done = Klaar
+
+ribbon-customize =
+    .window-title = Gebruikersinterface aanpassen
+    .hint = Uw eigen lintpanelen, op het tabblad Mijn gereedschap. Wijzigingen verschijnen direct.
+    .panels = Panelen
+    .new-panel = Nieuw paneel
+    .pick-panel = Kies of maak een paneel.
+    .title = Titel
+    .commands = Opdrachten
+    .command-placeholder = Opdracht of alias
+    .add = Toevoegen
+    .shortcuts = Sneltoetsen…
+    .close = Sluiten
+    .default-title = Paneel { $n }

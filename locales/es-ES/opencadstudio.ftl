@@ -162,6 +162,7 @@ action =
     .plugins = Complementos
 
 ribbon-tab =
+    .user = Mis herramientas
     .block-editor = Editor de bloques
     .draw = Dibujo
     .parametric = Paramétrico
@@ -8769,3 +8770,17 @@ context-menu =
     .command-placeholder = Comando o alias
     .add = Añadir
     .done = Hecho
+
+ribbon-customize =
+    .window-title = Personalizar interfaz
+    .hint = Sus propios grupos de la cinta, en la ficha Mis herramientas. Los cambios se ven al instante.
+    .panels = Grupos
+    .new-panel = Nuevo grupo
+    .pick-panel = Elija o cree un grupo.
+    .title = Título
+    .commands = Comandos
+    .command-placeholder = Comando o alias
+    .add = Añadir
+    .shortcuts = Métodos abreviados…
+    .close = Cerrar
+    .default-title = Grupo { $n }

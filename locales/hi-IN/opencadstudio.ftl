@@ -162,6 +162,7 @@ action =
     .plugins = प्लग-इन
 
 ribbon-tab =
+    .user = मेरे टूल
     .block-editor = ब्लॉक संपादक
     .draw = ड्रॉ
     .parametric = पैरामीट्रिक
@@ -8757,3 +8758,17 @@ context-menu =
     .command-placeholder = कमांड या उपनाम
     .add = जोड़ें
     .done = हो गया
+
+ribbon-customize =
+    .window-title = इंटरफ़ेस अनुकूलित करें
+    .hint = मेरे टूल टैब पर आपके अपने रिबन पैनल। बदलाव तुरंत दिखते हैं।
+    .panels = पैनल
+    .new-panel = नया पैनल
+    .pick-panel = कोई पैनल चुनें या बनाएँ।
+    .title = शीर्षक
+    .commands = कमांड
+    .command-placeholder = कमांड या उपनाम
+    .add = जोड़ें
+    .shortcuts = कीबोर्ड शॉर्टकट…
+    .close = बंद करें
+    .default-title = पैनल { $n }

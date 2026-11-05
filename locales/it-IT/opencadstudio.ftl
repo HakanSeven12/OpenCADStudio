@@ -162,6 +162,7 @@ action =
     .plugins = Plugin
 
 ribbon-tab =
+    .user = I miei strumenti
     .block-editor = Editor blocchi
     .draw = Disegno
     .parametric = Parametrico
@@ -8768,3 +8769,17 @@ context-menu =
     .command-placeholder = Comando o alias
     .add = Aggiungi
     .done = Fine
+
+ribbon-customize =
+    .window-title = Personalizza interfaccia
+    .hint = I tuoi gruppi della barra multifunzione, nella scheda I miei strumenti. Le modifiche appaiono subito.
+    .panels = Gruppi
+    .new-panel = Nuovo gruppo
+    .pick-panel = Scegli o crea un gruppo.
+    .title = Titolo
+    .commands = Comandi
+    .command-placeholder = Comando o alias
+    .add = Aggiungi
+    .shortcuts = Scelte rapide da tastiera…
+    .close = Chiudi
+    .default-title = Gruppo { $n }

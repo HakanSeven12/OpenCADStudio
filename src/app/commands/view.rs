@@ -216,7 +216,7 @@ impl OpenCADStudio {
 
             // ── CUI — keyboard shortcut / key-binding editor ───────────────
             "CUI" => {
-                return Some(Task::done(Message::ShortcutsPanelOpen));
+                return Some(Task::done(Message::RibbonCustomizeOpen));
             }
 
             // ── OPTIONS / OP — the preferences dialog ──────────────────────

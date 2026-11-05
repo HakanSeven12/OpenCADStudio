@@ -51,6 +51,7 @@ use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
+pub use layout::CustomPanel;
 use collapse::{CollapsePanels, Panel};
 pub use draw_panel::SlideOutMsg;
 pub use floating::FloatMsg;
@@ -625,10 +626,42 @@ impl Ribbon {
     /// consolidated app config (`save_config`).
     pub fn set_layout(&mut self, layout: RibbonLayout) {
         self.layout = layout;
+        self.refresh_user_tab();
         self.layout.dedupe_qat();
         self.layout
             .clamp_floating((self.win_w, self.win_h), Self::floating_size);
         self.show_a_visible_tab();
+    }
+
+    /// The user's own panels.
+    pub fn custom_panels(&self) -> &[CustomPanel] {
+        &self.layout.custom_panels
+    }
+
+    /// Change the user's panels and rebuild their tab.
+    pub fn set_custom_panels(&mut self, panels: Vec<CustomPanel>) {
+        self.layout.custom_panels = panels;
+        self.refresh_user_tab();
+    }
+
+    /// The My Tools tab, rebuilt from the user's panels; gone without any.
+    fn refresh_user_tab(&mut self) {
+        let active_id = self.modules.get(self.active).map(|module| module.id());
+        self.modules.retain(|module| module.id() != USER_TAB_ID);
+        let panels: Vec<_> = self
+            .layout
+            .custom_panels
+            .iter()
+            .filter(|panel| !panel.commands.is_empty())
+            .collect();
+        if !panels.is_empty() {
+            self.modules.push(Box::new(UserModule::new(&panels)));
+        }
+        if let Some(index) = active_id.and_then(|id| self.modules.iter().position(|m| m.id() == id)) {
+            self.active = index;
+        } else if self.active >= self.modules.len() {
+            self.active = self.modules.len().saturating_sub(1);
+        }
     }
 
     /// The current layout (for saving into the app config).
@@ -867,6 +900,7 @@ impl Ribbon {
     /// Plugin Manager). Clamps the active tab so it stays in range.
     pub fn set_modules(&mut self, modules: Vec<Box<dyn CadModule>>) {
         self.modules = modules;
+        self.refresh_user_tab();
         self.forget_qat_looks();
         if self.active >= self.modules.len() {
             self.active = self.modules.len().saturating_sub(1);
@@ -2983,5 +3017,64 @@ mod tests {
         assert_eq!(ribbon.open_dropdown.as_deref(), Some("modify_extension"));
         assert!(ribbon.escape_extension());
         assert_eq!(ribbon.open_dropdown, None);
+    }
+}
+
+/// Module id of the tab holding the user's own panels.
+pub const USER_TAB_ID: &str = "user";
+
+/// The My Tools tab: one ribbon panel per panel of the user's, a labelled
+/// button per command, with the command's ribbon icon and name when the
+/// ribbon has it.
+struct UserModule {
+    groups: Vec<RibbonGroup>,
+}
+
+impl UserModule {
+    fn new(panels: &[&CustomPanel]) -> Self {
+        use crate::modules::{IconKind, ModuleEvent, RibbonItem, ToolDef};
+        // ponytail: labels are leaked to the 'static the ribbon types want;
+        // a few bytes per edit of the user's panels.
+        let leak = |text: &str| -> &'static str { Box::leak(text.to_string().into_boxed_str()) };
+        let known = crate::modules::registry::ribbon_commands();
+        let groups = panels
+            .iter()
+            .map(|panel| RibbonGroup {
+                title: leak(&panel.title),
+                tools: panel
+                    .commands
+                    .iter()
+                    .map(|command| {
+                        let verb = command.split_whitespace().next().unwrap_or("").to_ascii_uppercase();
+                        let (label, icon) = known
+                            .get(&command.to_ascii_uppercase())
+                            .or_else(|| known.get(&verb))
+                            .copied()
+                            .unwrap_or_else(|| (leak(command), IconKind::Svg(crate::ui::icons::LIST)));
+                        RibbonItem::LargeTool(ToolDef {
+                            id: leak(command),
+                            label,
+                            icon,
+                            event: ModuleEvent::Command(command.clone()),
+                        })
+                    })
+                    .collect(),
+            })
+            .collect();
+        Self { groups }
+    }
+}
+
+impl CadModule for UserModule {
+    fn id(&self) -> &'static str {
+        USER_TAB_ID
+    }
+
+    fn title(&self) -> &'static str {
+        "My Tools"
+    }
+
+    fn ribbon_groups(&self) -> &[RibbonGroup] {
+        &self.groups
     }
 }

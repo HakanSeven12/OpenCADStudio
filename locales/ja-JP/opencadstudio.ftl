@@ -162,6 +162,7 @@ action =
     .plugins = プラグイン
 
 ribbon-tab =
+    .user = マイ ツール
     .block-editor = ブロック エディタ
     .draw = 作図
     .parametric = パラメトリック
@@ -8747,3 +8748,17 @@ context-menu =
     .command-placeholder = コマンドまたはエイリアス
     .add = 追加
     .done = 完了
+
+ribbon-customize =
+    .window-title = ユーザー インタフェースをカスタマイズ
+    .hint = [マイ ツール] タブに独自のリボン パネルを置きます。変更はすぐに反映されます。
+    .panels = パネル
+    .new-panel = 新しいパネル
+    .pick-panel = パネルを選択または作成してください。
+    .title = タイトル
+    .commands = コマンド
+    .command-placeholder = コマンドまたはエイリアス
+    .add = 追加
+    .shortcuts = キーボード ショートカット…
+    .close = 閉じる
+    .default-title = パネル { $n }

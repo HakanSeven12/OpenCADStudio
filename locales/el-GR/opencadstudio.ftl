@@ -162,6 +162,7 @@ action =
     .plugins = Πρόσθετα
 
 ribbon-tab =
+    .user = Τα εργαλεία μου
     .block-editor = Επεξεργαστής μπλοκ
     .draw = Σχεδίαση
     .parametric = Παραμετρικό
@@ -8769,3 +8770,17 @@ context-menu =
     .command-placeholder = Εντολή ή ψευδώνυμο
     .add = Προσθήκη
     .done = Τέλος
+
+ribbon-customize =
+    .window-title = Προσαρμογή περιβάλλοντος
+    .hint = Δικές σας ομάδες κορδέλας, στην καρτέλα Τα εργαλεία μου. Οι αλλαγές φαίνονται αμέσως.
+    .panels = Ομάδες
+    .new-panel = Νέα ομάδα
+    .pick-panel = Επιλέξτε ή δημιουργήστε ομάδα.
+    .title = Τίτλος
+    .commands = Εντολές
+    .command-placeholder = Εντολή ή ψευδώνυμο
+    .add = Προσθήκη
+    .shortcuts = Συντομεύσεις πληκτρολογίου…
+    .close = Κλείσιμο
+    .default-title = Ομάδα { $n }

@@ -162,6 +162,7 @@ action =
     .plugins = Liitännäiset
 
 ribbon-tab =
+    .user = Omat työkalut
     .block-editor = Lohkoeditori
     .draw = Piirrä
     .parametric = Parametrinen
@@ -8766,3 +8767,17 @@ context-menu =
     .command-placeholder = Komento tai alias
     .add = Lisää
     .done = Valmis
+
+ribbon-customize =
+    .window-title = Mukauta käyttöliittymää
+    .hint = Omat valintanauhan paneelit Omat työkalut -välilehdellä. Muutokset näkyvät heti.
+    .panels = Paneelit
+    .new-panel = Uusi paneeli
+    .pick-panel = Valitse tai luo paneeli.
+    .title = Otsikko
+    .commands = Komennot
+    .command-placeholder = Komento tai alias
+    .add = Lisää
+    .shortcuts = Pikanäppäimet…
+    .close = Sulje
+    .default-title = Paneeli { $n }

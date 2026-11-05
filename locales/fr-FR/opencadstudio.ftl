@@ -162,6 +162,7 @@ action =
     .plugins = Extensions
 
 ribbon-tab =
+    .user = Mes outils
     .block-editor = Éditeur de blocs
     .draw = Dessin
     .parametric = Paramétrique
@@ -8769,3 +8770,17 @@ context-menu =
     .command-placeholder = Commande ou alias
     .add = Ajouter
     .done = Terminé
+
+ribbon-customize =
+    .window-title = Personnaliser l'interface
+    .hint = Vos propres groupes du ruban, sur l'onglet Mes outils. Les changements s'affichent aussitôt.
+    .panels = Groupes
+    .new-panel = Nouveau groupe
+    .pick-panel = Choisissez ou créez un groupe.
+    .title = Titre
+    .commands = Commandes
+    .command-placeholder = Commande ou alias
+    .add = Ajouter
+    .shortcuts = Raccourcis clavier…
+    .close = Fermer
+    .default-title = Groupe { $n }

@@ -3293,3 +3293,86 @@ impl OpenCADStudio {
         Task::none()
     }
 }
+
+impl OpenCADStudio {
+    /// An edit in Customize User Interface: the user's panels change and the
+    /// My Tools tab follows at once.
+    pub(in crate::app) fn on_ribbon_customize(
+        &mut self,
+        msg: crate::ui::window::ribbon_customize::Msg,
+    ) -> Task<Message> {
+        use crate::ui::window::ribbon_customize::Msg as M;
+        let Some(state) = self.ribbon_customize.as_mut() else {
+            return Task::none();
+        };
+        let mut panels = self.ribbon.custom_panels().to_vec();
+        let selected = state.selected.filter(|index| *index < panels.len());
+        match msg {
+            M::Select(index) => state.selected = Some(index),
+            M::NewPanel => {
+                let title = (1..)
+                    .map(|n| crate::tr!("ribbon-customize", "default-title", n = n))
+                    .find(|title| !panels.iter().any(|panel| panel.title == *title))
+                    .unwrap_or_default();
+                panels.push(crate::ui::ribbon::CustomPanel {
+                    title,
+                    commands: Vec::new(),
+                });
+                state.selected = Some(panels.len() - 1);
+            }
+            M::DeletePanel => {
+                if let Some(index) = selected {
+                    panels.remove(index);
+                    state.selected = (!panels.is_empty()).then(|| index.min(panels.len() - 1));
+                }
+            }
+            M::MovePanel(up) => {
+                if let Some(index) = selected {
+                    let other = if up { index.checked_sub(1) } else { Some(index + 1) };
+                    if let Some(other) = other.filter(|other| *other < panels.len()) {
+                        panels.swap(index, other);
+                        state.selected = Some(other);
+                    }
+                }
+            }
+            M::Title(title) => {
+                if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
+                    panel.title = title;
+                }
+            }
+            M::Draft(text) => {
+                state.draft = text;
+                return Task::none();
+            }
+            M::AddCommand => {
+                let typed = state.draft.trim().to_uppercase();
+                state.draft.clear();
+                if let (Some(panel), false) =
+                    (selected.and_then(|index| panels.get_mut(index)), typed.is_empty())
+                {
+                    let command = self.resolve_alias(&typed).unwrap_or(typed);
+                    panel.commands.push(command);
+                }
+            }
+            M::RemoveCommand(at) => {
+                if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
+                    if at < panel.commands.len() {
+                        panel.commands.remove(at);
+                    }
+                }
+            }
+            M::MoveCommand(at, up) => {
+                if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
+                    let other = if up { at.checked_sub(1) } else { Some(at + 1) };
+                    if let Some(other) = other.filter(|other| *other < panel.commands.len()) {
+                        panel.commands.swap(at, other);
+                    }
+                }
+            }
+            M::Shortcuts => return Task::done(Message::ShortcutsPanelOpen),
+        }
+        self.ribbon.set_custom_panels(panels);
+        self.save_config();
+        Task::none()
+    }
+}

@@ -8433,6 +8433,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     )
     .unwrap();
     let action_list = actions::actions(doc, definition);
+    let driver = action_list.iter().find(|(handle, ..)| *handle == scale_action).unwrap().3;
     let ids: Vec<_> = [extra, move_action]
         .iter()
         .map(|handle| {
@@ -8446,19 +8447,44 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
                 .node_id
         })
         .collect();
-    let expected = format!("{}, {}", name(doc, extra), move_name);
+    let names = [name(doc, extra), move_name];
+    let list = serde_json::to_string(&names).unwrap();
     let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&scale_action).unwrap() else {
         panic!()
     };
     let codec::objects::DynamicBlockData::ScaleAction(scale) = &mut object.data else {
         panic!()
     };
-    scale.action.action.action_ids = ids;
+    scale.action.action.action_ids = vec![driver];
     let _ = app.update(Message::BlockActionBarSelect(scale_action));
+    let branch_depth = app.tabs[i].history.undo_stack.len();
+    let _ = type_name(&mut app, &list);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), branch_depth + 1);
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(names.to_vec()));
     assert!(app.tabs[i].properties.sections.iter().flat_map(|s| &s.props).any(|property| {
         property.field == "authoring_action_chain"
-            && matches!(&property.value, crate::scene::model::object::PropValue::ReadOnly(text) if *text == expected)
+            && matches!(&property.value, crate::scene::model::object::PropValue::PlainText(text) if *text == list)
     }));
+    let retained = |app: &OpenCADStudio| {
+        actions::actions(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .find(|(handle, ..)| *handle == scale_action)
+            .unwrap().1.action_ids.clone()
+    };
+    let expected: Vec<_> = std::iter::once(driver).chain(ids).collect();
+    assert_eq!(retained(&app), expected);
+    assert_eq!(drive(&app.tabs[i].scene.document), (20., 22.));
+    let _ = type_name(&mut app, &list);
+    let invalid = serde_json::to_string(&[names[0].as_str(), "NoSuchAction"]).unwrap();
+    let _ = type_name(&mut app, &invalid);
+    assert_eq!(retained(&app), expected);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), branch_depth + 1);
+    app.undo_steps(1);
+    assert_eq!(retained(&app), [driver]);
+    app.redo_steps(1);
+    assert_eq!(retained(&app), expected);
+    let _ = type_name(&mut app, "[]");
+    assert_eq!(retained(&app), [driver]);
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }
 

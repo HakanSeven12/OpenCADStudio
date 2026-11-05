@@ -3148,6 +3148,35 @@ fn an_authored_follow_up_cannot_close_a_retained_branch_loop() {
     assert_eq!(doc, before);
 }
 
+#[test]
+fn action_follow_up_list_preserves_literal_names_and_retained_metadata() {
+    let (mut doc, def, parameter, member, head, first) = chained_pair();
+    let second = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let names = ["  Move, north  ", r#"[Scale "north"]"#];
+    action_object_mut(&mut doc, first).element.name = names[0].into();
+    action_object_mut(&mut doc, second).element.name = names[1].into();
+    let driver = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+        .unwrap()
+        .id;
+    action_object_mut(&mut doc, head).action_ids = vec![driver];
+    let input = serde_json::to_string(&names).unwrap();
+    assert!(super::chain::set_by_name(&mut doc, def, head, &input).unwrap());
+    let expected = vec![driver, chain_id(&doc, first), chain_id(&doc, second)];
+    assert_eq!(action_object(&doc, head).action_ids, expected);
+    assert_eq!(super::chain::labels(&doc, def, head).unwrap(), names);
+    for extension in ["dwg", "dxf"] {
+        let bytes = crate::io::save_to_bytes(&doc, extension, doc.version).unwrap();
+        let mut saved = crate::io::load_bytes(&format!("authored-branches.{extension}"), bytes)
+            .unwrap();
+        assert_eq!(action_object(&saved, head).action_ids, expected);
+        assert!(!super::chain::set_by_name(&mut saved, def, head, &input).unwrap());
+        assert!(super::chain::set_by_name(&mut saved, def, head, "[]").unwrap());
+        assert_eq!(action_object(&saved, head).action_ids, [driver]);
+    }
+}
+
 /// An array action replaces the member with a grid of copies, so nothing is left
 /// for a follow-up action to work on. Naming one says what is missing rather
 /// than dropping the link or building the grid anyway.

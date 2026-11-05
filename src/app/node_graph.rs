@@ -620,7 +620,7 @@ impl graph::Host for AppHost<'_> {
                     .first()
                     .and_then(|handle| app.tabs[i].scene.document.get_entity(*handle))
                     .cloned()
-                    .or_else(|| kind.entity())
+                    .or_else(|| kind.entity(&app.tabs[i].scene.document))
                 else {
                     break;
                 };

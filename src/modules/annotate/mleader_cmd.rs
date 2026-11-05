@@ -949,7 +949,7 @@ fn v3(p: DVec3) -> Vector3 {
     Vector3::new(p.x, p.y, p.z)
 }
 
-fn build_mleader(
+pub(crate) fn build_mleader(
     text: &str,
     verts: &[DVec3],
     content_point: Option<DVec3>,

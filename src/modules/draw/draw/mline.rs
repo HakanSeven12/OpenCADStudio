@@ -445,7 +445,7 @@ pub(crate) fn sync_mline_element_parameters(mline: &mut MLine, style: &MLineStyl
     mline.style_element_count = offsets.len();
 }
 
-fn build_mline(
+pub(crate) fn build_mline(
     points: &[DVec3],
     scale: f64,
     justification: MLineJustification,

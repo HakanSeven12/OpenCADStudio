@@ -412,3 +412,22 @@ mod radial_dimension_node_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod object_node_tests {
+    use crate::ui::node_graph::ObjectKind;
+
+    /// #2590: Hatch, Multiline, Multileader and Helix nodes make their object.
+    #[test]
+    fn the_new_object_nodes_make_their_objects() {
+        for kind in [ObjectKind::Hatch, ObjectKind::MLine, ObjectKind::MultiLeader, ObjectKind::Helix] {
+            let mut app = crate::app::OpenCADStudio::new_for_test();
+            let _ = app.automation_op(r#"{"op":"new"}"#);
+            let i = app.active_tab;
+            app.tabs[i].graph.add_node(super::PaletteItem::Object(kind), Vec::new(), iced::Point::ORIGIN);
+            let _ = app.graph_run(i);
+            let made = app.tabs[i].scene.document.entities().any(|entity| kind.matches(entity));
+            assert!(made, "{} made nothing", kind.name());
+        }
+    }
+}

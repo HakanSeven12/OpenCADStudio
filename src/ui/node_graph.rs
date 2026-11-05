@@ -57,6 +57,10 @@ pub enum ObjectKind {
     Leader,
     Tolerance,
     Wipeout,
+    Hatch,
+    MLine,
+    MultiLeader,
+    Helix,
 }
 
 pub(crate) const OBJECTS: &[ObjectKind] = &[
@@ -78,6 +82,10 @@ pub(crate) const OBJECTS: &[ObjectKind] = &[
     ObjectKind::Leader,
     ObjectKind::Tolerance,
     ObjectKind::Wipeout,
+    ObjectKind::Hatch,
+    ObjectKind::MLine,
+    ObjectKind::MultiLeader,
+    ObjectKind::Helix,
 ];
 
 /// Every object node type, in palette order.
@@ -107,6 +115,10 @@ impl ObjectKind {
             ObjectKind::Leader => "Leader",
             ObjectKind::Tolerance => "Tolerance",
             ObjectKind::Wipeout => "Wipeout",
+            ObjectKind::Hatch => "Hatch",
+            ObjectKind::MLine => "Multiline",
+            ObjectKind::MultiLeader => "Multileader",
+            ObjectKind::Helix => "Helix",
         }
     }
 
@@ -136,6 +148,10 @@ impl ObjectKind {
                 | (ObjectKind::Leader, EntityType::Leader(_))
                 | (ObjectKind::Tolerance, EntityType::Tolerance(_))
                 | (ObjectKind::Wipeout, EntityType::Wipeout(_))
+                | (ObjectKind::Hatch, EntityType::Hatch(_))
+                | (ObjectKind::MLine, EntityType::MLine(_))
+                | (ObjectKind::MultiLeader, EntityType::MultiLeader(_))
+                | (ObjectKind::Helix, EntityType::Helix(_))
         )
     }
 
@@ -159,6 +175,10 @@ impl ObjectKind {
             ObjectKind::Leader => "LEADER",
             ObjectKind::Tolerance => "TOLERANCE",
             ObjectKind::Wipeout => "WIPEOUT",
+            ObjectKind::Hatch => "HATCH",
+            ObjectKind::MLine => "MLINE",
+            ObjectKind::MultiLeader => "MLEADER",
+            ObjectKind::Helix => "HELIX",
         }
     }
 
@@ -167,8 +187,9 @@ impl ObjectKind {
         self != ObjectKind::Object
     }
 
-    /// The entity a new node starts from; `None` for `Object`.
-    pub fn entity(self) -> Option<EntityType> {
+    /// The entity a new node starts from; `None` for `Object`. Styles and
+    /// patterns come from `document`, as the commands take them.
+    pub fn entity(self, document: &codec::Document) -> Option<EntityType> {
         use codec::entities as e;
         use codec::types::{Vector2, Vector3};
         let origin = Vector3::new(0.0, 0.0, 0.0);
@@ -234,6 +255,67 @@ impl ObjectKind {
                 EntityType::Tolerance(e::Tolerance::with_text(origin, "{\\Fgdt;j}%%v0.1"))
             }
             ObjectKind::Wipeout => EntityType::Wipeout(e::Wipeout::rectangular(origin, 10.0, 5.0)),
+            // A solid fill over a rectangle; pattern, scale and angle are rows.
+            ObjectKind::Hatch => crate::entity_creation::build_entity(
+                &serde_json::json!({
+                    "type": "HATCH",
+                    "boundary": [[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]],
+                    "solid": true,
+                }),
+                Some(document),
+            )
+            .ok()?,
+            // Two vertices in the current multiline style, scale and justification.
+            ObjectKind::MLine => {
+                let header = &document.header;
+                let (handle, style) = document
+                    .objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        codec::objects::ObjectType::MLineStyle(style)
+                            if style.name.eq_ignore_ascii_case(&header.multiline_style) =>
+                        {
+                            Some((Some(*handle), style.clone()))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| (None, codec::objects::MLineStyle::standard()));
+                crate::modules::draw::draw::mline::build_mline(
+                    &[glam::DVec3::ZERO, glam::DVec3::new(10.0, 0.0, 0.0)],
+                    header.multiline_scale,
+                    codec::entities::MLineJustification::from(header.multiline_justification),
+                    false,
+                    &style,
+                    handle,
+                )
+            }
+            // One leader with MText content, in the current multileader style.
+            ObjectKind::MultiLeader => {
+                let name = &document.header.current_mleader_style_name;
+                let style = document.objects.iter().find_map(|(handle, object)| match object {
+                    codec::objects::ObjectType::MultiLeaderStyle(style)
+                        if style.name.eq_ignore_ascii_case(name) =>
+                    {
+                        let mut style = style.clone();
+                        style.handle = *handle;
+                        Some(style)
+                    }
+                    _ => None,
+                });
+                EntityType::MultiLeader(Box::new(
+                    crate::modules::annotate::mleader_cmd::build_mleader(
+                        "MText",
+                        &[glam::DVec3::ZERO, glam::DVec3::new(10.0, 5.0, 0.0)],
+                        None,
+                        glam::Mat4::IDENTITY,
+                        style.as_ref(),
+                        1.0,
+                    ),
+                ))
+            }
+            // The HELIX defaults (radius, turns, direction) about the Z axis.
+            ObjectKind::Helix => crate::modules::draw::draw::helix::HelixCommand::new()
+                .build(10.0, glam::DVec3::Z)?,
         })
     }
 }

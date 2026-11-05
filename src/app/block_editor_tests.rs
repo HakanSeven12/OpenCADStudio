@@ -3465,7 +3465,7 @@ fn a_rotation_takes_its_chain_description_and_palette_answers_at_the_base_prompt
     let _ = app.dispatch_command("BPARAMETER ROTATION");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
     );
     feed(&mut app, "C");
     assert_eq!(
@@ -3540,6 +3540,12 @@ fn a_rotation_keeps_the_defaults_shown_at_each_question() {
     assert!(!native.parameter.parameter.chain_actions);
     assert_eq!(native.angle_description, "");
     assert!(!native.parameter.parameter.show_properties);
+    assert_eq!(
+        native.value_set.flags,
+        1 | 2,
+        "a rotation placed without a value-set answer keeps its periodic default"
+    );
+    assert_eq!(native.value_set.maximum, std::f64::consts::TAU);
 }
 
 #[test]
@@ -3592,6 +3598,134 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
         !native.parameter.parameter.show_properties,
         "No at the palette question hides the property"
     );
+}
+
+#[test]
+fn a_rotation_takes_its_value_set() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "V");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter angle value set type [None/List/Increment] <None>:"
+    );
+    feed(&mut app, "I");
+    feed(&mut app, "5");
+    feed(&mut app, "0");
+    feed(&mut app, "360");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let first = {
+        let doc = &app.tabs[i].scene.document;
+        let rotation = crate::scene::block_orientation_parameter::parameters(doc, definition)
+            .into_iter()
+            .find(|parameter| {
+                parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
+            })
+            .expect("placed rotation parameter");
+        let codec::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get(&rotation.handle).expect("rotation record")
+        else {
+            panic!("expected a dynamic block record");
+        };
+        let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+            panic!("expected a rotation parameter");
+        };
+        assert_eq!(
+            native.value_set.flags,
+            1 | 2 | 4,
+            "the answered set is stored on the parameter"
+        );
+        assert_eq!(native.value_set.increment, 5f64.to_radians());
+        assert_eq!(native.value_set.minimum, 0.0);
+        assert_eq!(native.value_set.maximum, 360f64.to_radians());
+        rotation.handle
+    };
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "V");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter list of angle values (separated by commas):"
+    );
+    feed(&mut app, "30,150");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let listed = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| {
+            parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
+                && parameter.handle != first
+        })
+        .expect("the rotation with the list");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&listed.handle).expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert_eq!(
+        native.value_set.flags, 8,
+        "a list replaces the increment limits rather than adding to them"
+    );
+    assert_eq!(
+        native.value_set.values,
+        vec![30f64.to_radians(), 150f64.to_radians()]
+    );
+    let second = listed.handle;
+
+    let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "V");
+    feed(&mut app, "");
+    feed(&mut app, "0,0");
+    feed(&mut app, "2");
+    feed(&mut app, "");
+    feed(&mut app, "5,5");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let answered_none = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| {
+            parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
+                && parameter.handle != first
+                && parameter.handle != second
+        })
+        .expect("the rotation answered with no set");
+    let codec::objects::ObjectType::DynamicBlock(object) = doc
+        .objects
+        .get(&answered_none.handle)
+        .expect("rotation record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        panic!("expected a rotation parameter");
+    };
+    assert_eq!(
+        native.value_set.flags, 1,
+        "answering None stores the empty set rather than the periodic default"
+    );
+    assert_eq!(native.value_set.maximum, 0.0);
 }
 
 #[test]
@@ -3721,7 +3855,7 @@ fn a_rotation_takes_a_name_and_one_property_label() {
     feed(&mut app, "Turn");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
     );
     feed(&mut app, "0,0");
     feed(&mut app, "2");

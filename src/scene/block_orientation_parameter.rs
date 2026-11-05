@@ -194,7 +194,7 @@ pub(crate) fn create(
     end: Vector3,
     reference: Vector3,
 ) -> Result<Handle, &'static str> {
-    create_with_label(document, definition, kind, base, end, reference, None)
+    create_with_label(document, definition, kind, base, end, reference, None, None)
 }
 
 /// The next free `Flip state<n>` label the placement prompt offers.
@@ -213,6 +213,7 @@ pub(crate) fn create_with_label(
     end: Vector3,
     reference: Vector3,
     label_offset: Option<f64>,
+    value_set: Option<&super::block_distance_parameter::ValueSet>,
 ) -> Result<Handle, &'static str> {
     if let Some(error) = points_error(kind, base, end, reference)
         .or_else(|| placement_error(document, definition, kind))
@@ -293,11 +294,13 @@ pub(crate) fn create_with_label(
             definition_base_angle_point: reference,
             angle_name: label,
             angle: label_offset.unwrap_or((end - base).length() * 0.15),
-            value_set: BlockParameterValueSet {
-                flags: 3,
-                maximum: std::f64::consts::TAU,
-                ..Default::default()
-            },
+            value_set: value_set
+                .map(|set| set.record())
+                .unwrap_or(BlockParameterValueSet {
+                    flags: 3,
+                    maximum: std::f64::consts::TAU,
+                    ..Default::default()
+                }),
             ..Default::default()
         }),
         Kind::Alignment => DynamicBlockData::AlignmentParameter(BlockAlignmentParameter {

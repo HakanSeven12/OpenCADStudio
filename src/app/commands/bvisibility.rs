@@ -63,6 +63,10 @@ impl OpenCADStudio {
             vector(end),
             vector(reference),
             label_offset,
+            options
+                .value_set
+                .as_ref()
+                .filter(|_| kind == crate::scene::block_orientation_parameter::Kind::Rotation),
         )
         .expect("validated parameter placement");
         if let Some(count) = grips

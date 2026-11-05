@@ -24,7 +24,7 @@ pub(crate) enum BaseLocation {
     Midpoint,
 }
 
-/// The value set answered at a Linear parameter's Value set option.
+/// The value set answered at a parameter's Value set option.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum ValueSet {
     None,
@@ -37,7 +37,7 @@ pub(crate) enum ValueSet {
 }
 
 impl ValueSet {
-    fn record(&self) -> BlockParameterValueSet {
+    pub(crate) fn record(&self) -> BlockParameterValueSet {
         match self {
             Self::None => BlockParameterValueSet {
                 flags: 1,

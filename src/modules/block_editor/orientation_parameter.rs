@@ -3,6 +3,7 @@
 //! the length only. Rotation then takes a label location and a grip count.
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::scene::{
+    block_distance_parameter::ValueSet,
     block_orientation_parameter::{self, Kind},
     WireModel,
 };
@@ -17,6 +18,7 @@ pub struct Options {
     pub chain: Option<bool>,
     pub description: Option<String>,
     pub palette: Option<bool>,
+    pub value_set: Option<ValueSet>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +28,11 @@ enum Asking {
     Chain,
     Description,
     Palette,
+    ValueSetType,
+    ValueSetIncrement,
+    ValueSetMinimum,
+    ValueSetMaximum,
+    ValueSetList,
 }
 
 impl Asking {
@@ -36,6 +43,11 @@ impl Asking {
             }
             Self::Description => "Enter property description:",
             Self::Palette => "Display property in Properties palette? [Yes/No] <Yes>:",
+            Self::ValueSetType => "Enter angle value set type [None/List/Increment] <None>:",
+            Self::ValueSetIncrement => "Enter angle increment:",
+            Self::ValueSetMinimum => "Enter minimum angle:",
+            Self::ValueSetMaximum => "Enter maximum angle:",
+            Self::ValueSetList => "Enter list of angle values (separated by commas):",
             Self::Name | Self::Label => unreachable!("this question is printed with its default"),
         }
     }
@@ -65,6 +77,8 @@ pub struct OrientationParameterCommand {
     options: Options,
     name_default: String,
     label_default: String,
+    increment: Option<f64>,
+    minimum: Option<f64>,
 }
 
 impl OrientationParameterCommand {
@@ -86,6 +100,8 @@ impl OrientationParameterCommand {
             options: Options::default(),
             name_default: String::new(),
             label_default: String::new(),
+            increment: None,
+            minimum: None,
         }
     }
     pub(crate) fn with_name(mut self, name: String) -> Self {
@@ -124,6 +140,91 @@ impl OrientationParameterCommand {
             self.asking = None;
             return CmdResult::NeedPoint;
         }
+        if asking == Asking::ValueSetType {
+            match text
+                .map(str::trim)
+                .unwrap_or("")
+                .to_ascii_uppercase()
+                .as_str()
+            {
+                "" | "N" | "NONE" => {
+                    self.options.value_set = Some(ValueSet::None);
+                    self.asking = None;
+                }
+                "I" | "INCREMENT" => {
+                    self.options.value_set = None;
+                    self.increment = None;
+                    self.minimum = None;
+                    self.asking = Some(Asking::ValueSetIncrement);
+                }
+                "L" | "LIST" => {
+                    self.options.value_set = None;
+                    self.asking = Some(Asking::ValueSetList);
+                }
+                _ => {
+                    return CmdResult::ReportError(
+                        crate::t!("Invalid option keyword.").into_owned(),
+                    )
+                }
+            }
+            return CmdResult::NeedPoint;
+        }
+        if matches!(
+            asking,
+            Asking::ValueSetIncrement
+                | Asking::ValueSetMinimum
+                | Asking::ValueSetMaximum
+                | Asking::ValueSetList
+        ) {
+            // The questions take degrees; the parameter stores radians.
+            let answer = text.unwrap_or("").trim();
+            if asking == Asking::ValueSetList {
+                let values = answer
+                    .split(',')
+                    .map(|part| part.trim().parse::<f64>())
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
+                    .filter(|values| !values.is_empty() && values.iter().all(|v| v.is_finite()));
+                let Some(values) = values else {
+                    return CmdResult::ReportError(
+                        crate::t!("Requires numeric value.").into_owned(),
+                    );
+                };
+                self.options.value_set = Some(ValueSet::List(
+                    values.into_iter().map(f64::to_radians).collect(),
+                ));
+                self.asking = None;
+                return CmdResult::NeedPoint;
+            }
+            let number = answer
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .map(f64::to_radians);
+            let Some(number) = number else {
+                return CmdResult::ReportError(crate::t!("Requires numeric value.").into_owned());
+            };
+            match asking {
+                Asking::ValueSetIncrement => {
+                    self.increment = Some(number);
+                    self.asking = Some(Asking::ValueSetMinimum);
+                }
+                Asking::ValueSetMinimum => {
+                    self.minimum = Some(number);
+                    self.asking = Some(Asking::ValueSetMaximum);
+                }
+                Asking::ValueSetMaximum => {
+                    self.options.value_set = Some(ValueSet::Increment {
+                        increment: self.increment.expect("the increment was answered"),
+                        minimum: self.minimum.expect("the minimum was answered"),
+                        maximum: number,
+                    });
+                    self.asking = None;
+                }
+                _ => unreachable!(),
+            }
+            return CmdResult::NeedPoint;
+        }
         let value = match text.map(str::trim) {
             None | Some("") => asking.default_answer(),
             Some(text) => match text.to_ascii_uppercase().as_str() {
@@ -136,7 +237,14 @@ impl OrientationParameterCommand {
             match asking {
                 Asking::Chain => self.options.chain = Some(value),
                 Asking::Palette => self.options.palette = Some(value),
-                Asking::Description | Asking::Name | Asking::Label => unreachable!(),
+                Asking::Description
+                | Asking::Name
+                | Asking::Label
+                | Asking::ValueSetType
+                | Asking::ValueSetIncrement
+                | Asking::ValueSetMinimum
+                | Asking::ValueSetMaximum
+                | Asking::ValueSetList => unreachable!(),
             }
         }
         self.asking = None;
@@ -241,7 +349,9 @@ impl CadCommand for OrientationParameterCommand {
             }
         } else if self.base.is_none() {
             match self.kind {
-                Kind::Rotation => "Specify base point or [Name/Label/Chain/Description/Palette]:",
+                Kind::Rotation => {
+                    "Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
+                }
                 Kind::Flip => {
                     "Specify base point of reflection line or [Name/Label/Description/Palette]:"
                 }
@@ -276,7 +386,15 @@ impl CadCommand for OrientationParameterCommand {
     }
     fn input_kind(&self) -> InputKind {
         match self.asking {
-            Some(Asking::Description | Asking::Name | Asking::Label) => InputKind::FreeText,
+            Some(
+                Asking::Description
+                | Asking::Name
+                | Asking::Label
+                | Asking::ValueSetIncrement
+                | Asking::ValueSetMinimum
+                | Asking::ValueSetMaximum
+                | Asking::ValueSetList,
+            ) => InputKind::FreeText,
             Some(_) => InputKind::SingleToken,
             None => InputKind::Point,
         }
@@ -405,6 +523,7 @@ impl CadCommand for OrientationParameterCommand {
                 "C" | "CHAIN" if self.kind == Kind::Rotation => Asking::Chain,
                 "D" | "DESCRIPTION" => Asking::Description,
                 "P" | "PALETTE" => Asking::Palette,
+                "V" if self.kind == Kind::Rotation => Asking::ValueSetType,
                 _ => {
                     return Some(CmdResult::ReportError(
                         crate::t!("Point or option keyword required.").into_owned(),
@@ -417,6 +536,15 @@ impl CadCommand for OrientationParameterCommand {
                 Asking::Chain => self.options.chain = None,
                 Asking::Description => self.options.description = None,
                 Asking::Palette => self.options.palette = None,
+                Asking::ValueSetType => {
+                    self.options.value_set = None;
+                    self.increment = None;
+                    self.minimum = None;
+                }
+                Asking::ValueSetIncrement
+                | Asking::ValueSetMinimum
+                | Asking::ValueSetMaximum
+                | Asking::ValueSetList => unreachable!(),
             }
             self.asking = Some(asking);
             return Some(CmdResult::NeedPoint);
@@ -590,8 +718,142 @@ mod tests {
     fn a_rotation_base_point_prompt_lists_the_options_it_accepts() {
         assert_eq!(
             rotation().prompt(),
-            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
         );
+    }
+
+    #[test]
+    fn a_rotation_value_set_asks_its_angle_questions() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("V"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter angle value set type [None/List/Increment] <None>:"
+        );
+        assert_eq!(command.input_kind(), InputKind::SingleToken);
+        assert!(matches!(
+            command.on_text_input("I"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter angle increment:");
+        assert_eq!(command.input_kind(), InputKind::FreeText);
+        assert!(matches!(
+            command.on_text_input("5"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter minimum angle:");
+        assert!(matches!(
+            command.on_text_input("0"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter maximum angle:");
+        assert!(matches!(
+            command.on_text_input("360"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.options.value_set,
+            Some(ValueSet::Increment {
+                increment: 5f64.to_radians(),
+                minimum: 0.0,
+                maximum: 360f64.to_radians()
+            }),
+            "the answered degrees are stored as the angles the parameter uses"
+        );
+        assert!(command.asking.is_none());
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
+        );
+    }
+
+    #[test]
+    fn a_rotation_value_set_list_takes_comma_separated_degrees() {
+        let mut command = rotation();
+        for answer in ["V", "L"] {
+            assert!(matches!(
+                command.on_text_input(answer),
+                Some(CmdResult::NeedPoint)
+            ));
+        }
+        assert_eq!(
+            command.prompt(),
+            "Enter list of angle values (separated by commas):"
+        );
+        assert!(matches!(
+            command.on_text_input("90, 180 ,270"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.options.value_set,
+            Some(ValueSet::List(vec![
+                90f64.to_radians(),
+                180f64.to_radians(),
+                270f64.to_radians()
+            ]))
+        );
+    }
+
+    #[test]
+    fn an_empty_rotation_value_set_type_answer_clears_the_set() {
+        let mut command = rotation();
+        for answer in ["V", "I", "5", "0", "360"] {
+            assert!(matches!(
+                command.on_text_input(answer),
+                Some(CmdResult::NeedPoint)
+            ));
+        }
+        assert!(matches!(
+            command.on_text_input("V"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.value_set, Some(ValueSet::None));
+        assert!(command.asking.is_none());
+    }
+
+    #[test]
+    fn a_rotation_value_set_type_outside_the_three_is_refused() {
+        let mut command = rotation();
+        assert!(matches!(
+            command.on_text_input("V"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Both"),
+            Some(CmdResult::ReportError(reason)) if reason == "Invalid option keyword."
+        ));
+        assert!(command.asking.is_some());
+    }
+
+    #[test]
+    fn a_rotation_value_set_number_refuses_text() {
+        let mut command = rotation();
+        for answer in ["V", "I"] {
+            assert!(matches!(
+                command.on_text_input(answer),
+                Some(CmdResult::NeedPoint)
+            ));
+        }
+        assert!(matches!(
+            command.on_text_input("wide"),
+            Some(CmdResult::ReportError(reason)) if reason == "Requires numeric value."
+        ));
+        assert_eq!(command.prompt(), "Enter angle increment:");
+        assert_eq!(command.options.value_set, None);
+    }
+
+    #[test]
+    fn a_value_set_answer_on_a_flip_is_not_an_option() {
+        let Some(CmdResult::ReportError(error)) =
+            OrientationParameterCommand::new(0, Handle::new(1), Kind::Flip).on_text_input("V")
+        else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error, "Point or option keyword required.");
     }
 
     #[test]
@@ -641,7 +903,7 @@ mod tests {
         assert_eq!(command.options.label.as_deref(), Some("Turn"));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:",
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:",
             "both questions return to the placement prompt"
         );
     }
@@ -723,7 +985,7 @@ mod tests {
         assert_eq!(command.options.chain, Some(true));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette]:"
+            "BPARAMETER Rotation  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
         );
     }
 

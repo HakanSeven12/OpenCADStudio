@@ -714,8 +714,17 @@ fn lwpoly_replace_corner(
     vt2.bulge = 0.0;
     new_poly.vertices.remove(corner_idx);
     new_poly.vertices.insert(corner_idx, vt2);
-    new_poly.vertices.insert(corner_idx, vt1);
+    // A zero-size chamfer or fillet meets at one point: a second vertex there
+    // would leave a zero-length segment in the polyline.
+    if !same_xy(t1, t2) {
+        new_poly.vertices.insert(corner_idx, vt1);
+    }
     new_poly
+}
+
+/// Whether two plan points coincide within the modify tolerance.
+fn same_xy(a: [f64; 2], b: [f64; 2]) -> bool {
+    (a[0] - b[0]).hypot(a[1] - b[1]) < 1e-9
 }
 
 /// Rebuild a LwPolyline after shortening segment `seg_idx`:
@@ -1628,6 +1637,8 @@ fn trim_line_to_point(line: &LineEnt, isect: [f64; 2], click: [f64; 2]) -> Optio
 // ── Chamfer ────────────────────────────────────────────────────────────────
 
 /// Compute chamfer: trim l1 by dist1 from intersection, l2 by dist2, add chamfer line.
+/// The chamfer line is `None` when both distances are zero: the lines then
+/// simply meet at their corner and a zero-length line would be left behind.
 fn compute_chamfer(
     l1: &LineEnt,
     click1: [f64; 2],
@@ -1635,7 +1646,7 @@ fn compute_chamfer(
     l2: &LineEnt,
     click2: [f64; 2],
     dist2: f64,
-) -> Option<(EntityType, EntityType, EntityType)> {
+) -> Option<(EntityType, EntityType, Option<EntityType>)> {
     let (p1, _, u1, _) = line_geom(l1);
     let (p3, _, u2, _) = line_geom(l2);
 
@@ -1667,16 +1678,15 @@ fn compute_chamfer(
     let new_l2 = trim_to_xy(l2, c2, dir2, u2)?;
 
     // Chamfer line
-    let mut cline = l1.clone();
-    cline.common.handle = Handle::NULL;
-    cline.start = Vector3::new(c1[0], c1[1], z);
-    cline.end = Vector3::new(c2[0], c2[1], z);
+    let cline = (!same_xy(c1, c2)).then(|| {
+        let mut cline = l1.clone();
+        cline.common.handle = Handle::NULL;
+        cline.start = Vector3::new(c1[0], c1[1], z);
+        cline.end = Vector3::new(c2[0], c2[1], z);
+        EntityType::Line(cline)
+    });
 
-    Some((
-        EntityType::Line(new_l1),
-        EntityType::Line(new_l2),
-        EntityType::Line(cline),
-    ))
+    Some((EntityType::Line(new_l1), EntityType::Line(new_l2), cline))
 }
 
 // ══════════════════════════════════════════════════════════════════════════
@@ -2463,6 +2473,10 @@ enum ChamferStep {
 /// The refusal a no-trim CHAMFER prints for anything but two independent Lines.
 const NO_TRIM_CHAMFER_LINES_ONLY: &str = "No-trim chamfer supports two independent lines only.";
 
+/// The refusal a no-trim CHAMFER prints when both distances are zero: the
+/// cut would be a zero-length line.
+const NO_TRIM_CHAMFER_ZERO: &str = "Zero chamfer distances with No trim leave nothing to add.";
+
 pub struct ChamferCommand {
     dist1: f64,
     dist2: f64,
@@ -2885,20 +2899,25 @@ impl CadCommand for ChamferCommand {
                             // No-trim keeps both source lines and adds only the
                             // derived chamfer line.
                             if !self.trim {
-                                return self.continue_after_addition(chamfer_line);
+                                return match chamfer_line {
+                                    Some(line) => self.continue_after_addition(line),
+                                    None => {
+                                        self.step = ChamferStep::First;
+                                        CmdResult::ReportError(NO_TRIM_CHAMFER_ZERO.into())
+                                    }
+                                };
                             }
                             // Single mode adds the chamfer line as a new entity;
                             // Multiple folds it into the first line's replacement
                             // so the command can carry on.
+                            let mut first = vec![new_l1];
                             if self.multiple {
-                                self.commit(vec![
-                                    (h1, vec![new_l1, chamfer_line]),
-                                    (handle, vec![new_l2]),
-                                ])
+                                first.extend(chamfer_line);
+                                self.commit(vec![(h1, first), (handle, vec![new_l2])])
                             } else {
                                 CmdResult::ReplaceMany(
-                                    vec![(h1, vec![new_l1]), (handle, vec![new_l2])],
-                                    vec![chamfer_line],
+                                    vec![(h1, first), (handle, vec![new_l2])],
+                                    chamfer_line.into_iter().collect(),
                                 )
                             }
                         }
@@ -2960,15 +2979,18 @@ impl CadCommand for ChamferCommand {
                     if let Some((new_l1, new_l2, cline)) =
                         compute_chamfer(&l1, click1, self.dist1, &l2, click, self.dist2)
                     {
-                        if !self.trim {
-                            return vec![WireModel::solid(
+                        let cut = cline.map(|cline| {
+                            WireModel::solid(
                                 "chamfer_line".into(),
                                 entity_pts(&cline),
                                 WireModel::CYAN,
                                 false,
-                            )];
+                            )
+                        });
+                        if !self.trim {
+                            return cut.into_iter().collect();
                         }
-                        return vec![
+                        let mut wires = vec![
                             WireModel::solid(
                                 "chamfer_l1".into(),
                                 entity_pts(&new_l1),
@@ -2981,13 +3003,9 @@ impl CadCommand for ChamferCommand {
                                 WireModel::CYAN,
                                 false,
                             ),
-                            WireModel::solid(
-                                "chamfer_line".into(),
-                                entity_pts(&cline),
-                                WireModel::CYAN,
-                                false,
-                            ),
                         ];
+                        wires.extend(cut);
+                        return wires;
                     }
                 }
                 vec![]
@@ -3357,6 +3375,96 @@ mod tests {
             CmdResult::ReportError(_)
         ));
         assert!(matches!(command.step, ChamferStep::First));
+    }
+
+    /// Two lines that stop short of their shared corner at the origin.
+    fn open_corner() -> Vec<EntityType> {
+        vec![line(2.0, 0.0, 10.0, 0.0, 1), line(0.0, 2.0, 0.0, 10.0, 2)]
+    }
+
+    fn assert_meets_origin(entity: &EntityType) {
+        let EntityType::Line(l) = entity else {
+            panic!("expected a line, got {entity:?}")
+        };
+        let at_origin = |v: &Vector3| v.x.abs() < 1e-9 && v.y.abs() < 1e-9;
+        assert!(
+            at_origin(&l.start) || at_origin(&l.end),
+            "line should reach the corner: {:?} -> {:?}",
+            l.start,
+            l.end
+        );
+        let len = (l.end.x - l.start.x).hypot(l.end.y - l.start.y);
+        assert!(len > 1.0, "source line must keep its length");
+    }
+
+    #[test]
+    fn zero_distance_chamfer_closes_the_corner_without_a_zero_length_line() {
+        let mut single = ChamferCommand::new(0.0, open_corner());
+        single.dist2 = 0.0;
+        single.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+        match single.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::ReplaceMany(replacements, additions) => {
+                assert!(additions.is_empty(), "no chamfer line: {additions:?}");
+                assert_eq!(replacements.len(), 2);
+                for (_, entities) in &replacements {
+                    assert_eq!(entities.len(), 1);
+                    assert_meets_origin(&entities[0]);
+                }
+            }
+            _ => panic!("zero-distance CHAMFER should replace both lines"),
+        }
+
+        let mut multi = ChamferCommand::new(0.0, open_corner());
+        multi.dist2 = 0.0;
+        multi.on_text_input("M");
+        multi.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+        match multi.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::ReplaceManyContinue(replacements) => {
+                assert_eq!(replacements.len(), 2);
+                for (_, entities) in &replacements {
+                    assert_eq!(entities.len(), 1, "no chamfer line rides along");
+                    assert_meets_origin(&entities[0]);
+                }
+            }
+            _ => panic!("multiple zero-distance CHAMFER should keep running"),
+        }
+    }
+
+    #[test]
+    fn zero_distance_no_trim_chamfer_adds_nothing() {
+        let mut command = ChamferCommand::new(0.0, open_corner());
+        command.dist2 = 0.0;
+        command.trim = false;
+        command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+        assert!(matches!(
+            command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
+            CmdResult::ReportError(_)
+        ));
+        assert!(matches!(command.step, ChamferStep::First));
+        assert_eq!(command.all_entities.len(), 2, "nothing was added");
+    }
+
+    #[test]
+    fn zero_distance_polyline_corner_keeps_a_single_vertex() {
+        let mut poly = LwPolyline::new();
+        poly.add_point(codec::types::Vector2::new(0.0, 0.0));
+        poly.add_point(codec::types::Vector2::new(10.0, 0.0));
+        poly.add_point(codec::types::Vector2::new(10.0, 10.0));
+        let Some(EntityType::LwPolyline(out)) =
+            chamfer_lwpoly_corner(&poly, [5.0, 0.0], 0.0, [10.0, 5.0], 0.0)
+        else {
+            panic!("zero-distance polyline chamfer should succeed")
+        };
+        assert_eq!(out.vertices.len(), 3, "no duplicate corner vertex");
+        assert!((out.vertices[1].location.x - 10.0).abs() < 1e-9);
+        assert!(out.vertices[1].location.y.abs() < 1e-9);
+
+        let Some(EntityType::LwPolyline(cut)) =
+            chamfer_lwpoly_corner(&poly, [5.0, 0.0], 1.0, [10.0, 5.0], 1.0)
+        else {
+            panic!("polyline chamfer should succeed")
+        };
+        assert_eq!(cut.vertices.len(), 4, "a real chamfer still adds its edge");
     }
 
     #[test]

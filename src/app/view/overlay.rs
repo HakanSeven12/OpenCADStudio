@@ -2166,6 +2166,46 @@ mod measurement_tests {
             }
         }
     }
+
+    /// The value list is a panel with its own width, not a readout that
+    /// stretches to fit: it lands wholly inside the canvas, on the side of the
+    /// grip that has room for it.
+    #[test]
+    fn the_value_list_panel_sits_beside_the_grip_and_away_from_the_edges() {
+        for (anchor, expected_x) in [
+            (iced::Point::new(60.0, 300.0), 60.0 + 12.0),
+            (iced::Point::new(780.0, 300.0), 780.0 - 12.0 - 240.0),
+        ] {
+            let mut ui = iced_test::simulator::Simulator::with_size(
+                Default::default(),
+                iced::Size::new(800.0, 600.0),
+                position_canvas_overlay_near_cursor(
+                    anchor,
+                    90.0,
+                    container(Space::new().width(240).height(120))
+                        .id(iced::widget::Id::new("value-list"))
+                        .into(),
+                ),
+            );
+            let bounds = ui
+                .find(iced::widget::Id::new("value-list"))
+                .expect("the value list is drawn")
+                .visible_bounds()
+                .expect("the value list is visible");
+            assert_eq!(
+                bounds.x, expected_x,
+                "the list takes the side of the grip with room for it ({anchor:?})"
+            );
+            assert_eq!(
+                bounds.width, 240.0,
+                "the list keeps its own width rather than stretching"
+            );
+            assert!(
+                bounds.y >= 4.0 && bounds.y + bounds.height <= 506.0,
+                "the list stays between the top edge and the command line: {bounds:?}"
+            );
+        }
+    }
 }
 
 #[cfg(test)]

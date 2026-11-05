@@ -1224,6 +1224,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "REVCLOUDARCVARIANCE",
         "REVCLOUDGRIPS",
         "GROUPDISPLAYMODE",
+        "OFFSETGAPTYPE",
         "REVCLOUDAPPROXARCLEN",
         "PELLIPSE",
         "SELECTIONCYCLING",

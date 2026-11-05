@@ -3269,7 +3269,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = hedef katman yüklenen kümede yok
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  Nesneler hizalama noktalarına göre ölçeklensin mi? [E/H]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Geçerli ayarlar: Kaynağı sil=__ocs_arg_erase__  Katman=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Öteleme mesafesini belirtin veya [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET  İkinci referans noktasını belirtin:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3453,10 +3454,10 @@ modify =
     .move-text-arrows-out = Metni ve okları dışarı taşı
     .offset-select-object-to-offset-enter-to-finish = OFFSET  Ötelenecek nesneyi seçin veya [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Ofset mesafesini belirtin veya [İçinden] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Tarafa tıklayın veya [Birden Çok] [mesafe __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Geçiş noktasına tıklayın veya [Birden Çok]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Birden Çok  Sonraki tarafa tıklayın [mesafe __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Birden Çok  Sonraki geçiş noktasına tıklayın:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Ötelenecek taraftaki noktayı belirtin veya [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Geçiş noktasını belirtin veya [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Ötelenecek taraftaki noktayı belirtin veya [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Geçiş noktasını belirtin veya [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Geçiş noktasına tıklayın veya mesafe yazın, diğer taraf için negatif [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Birden Çok  Geçiş noktasına tıklayın veya mesafe yazın, diğer taraf için negatif [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = Ofset (DIMEXO)
@@ -3512,8 +3513,8 @@ modify =
     .mode-keyword = Mod
     .array-keyword = Dizi
     .use-first-point-as-displacement = İlk noktayı yer değiştirme olarak kullan
-    .offset-erase-source-object-after-offsetting = OFFSET  Ötelemeden sonra kaynak nesne silinsin mi? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Ötelenen nesnelerin katmanı [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Ötelemeden sonra kaynak nesne silinsin mi? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Ötelenen nesneler için katman seçeneğini girin [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  Grup adını girin [__ocs_arg_name__]:

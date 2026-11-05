@@ -1275,6 +1275,8 @@ impl OpenCADStudio {
                 } else {
                     OffsetCommand::with_selection(all_entities, preselected)
                 };
+                self.command_line
+                    .push_info(&crate::modules::draw::modify::offset::current_settings_line());
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

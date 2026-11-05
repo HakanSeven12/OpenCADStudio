@@ -3290,7 +3290,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = целевой слой отсутствует в загруженном наборе
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN Объекты масштаба, основанные на точках выравнивания? [Y/N]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET Укажите вторую точку отсчета:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3474,10 +3475,10 @@ modify =
     .move-text-arrows-out = Переместить текст и стрелки снаружи
     .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET Укажите расстояние смещения или [Через] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__ Нажмите на бок или [Много] [расстояние __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__ Нажмите на точку или [Множественное число]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Несколько кликов на следующую сторону [расстояние __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Несколько кликов по следующей точке:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Укажите точку прохождения или введите расстояние, отрицательное для другой стороны [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Несколько  Укажите точку прохождения или введите расстояние, отрицательное для другой стороны [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = Отступ от объекта (DIMEXO)
@@ -3533,8 +3534,8 @@ modify =
     .mode-keyword = Режим
     .array-keyword = Массив
     .use-first-point-as-displacement = Первая точка как перемещение
-    .offset-erase-source-object-after-offsetting = OFFSET  Удалить исходный объект после смещения? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Слой для смещённых объектов [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP Введите название группы [__ocs_arg_name__]:

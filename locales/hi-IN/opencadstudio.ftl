@@ -3275,7 +3275,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = लक्षित परत लोड किए गए समूह में नहीं है
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN संरेखण बिंदुओं के आधार पर ऑब्जेक्ट स्केल करें? [हाँ/नहीं]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET दूसरे संदर्भ बिंदु को निर्दिष्ट करें:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3459,10 +3460,10 @@ modify =
     .move-text-arrows-out = बाहर पाठ और तीर ले जाएँ
     .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET ऑफसेट दूरी निर्दिष्ट करें या [थ्रू] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__ दिशा की ओर क्लिक करें या [एकाधिक] [दूरी __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__ बिंदु के माध्यम से क्लिक करें या [एकाधिक]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ अगली दिशा की ओर क्लिक करें [दूरी __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ एकाधिक बिंदु के माध्यम से आगे क्लिक करें:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  पारगमन बिंदु पर क्लिक करें या दूरी टाइप करें, दूसरी ओर के लिए ऋणात्मक [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ एकाधिक  पारगमन बिंदु पर क्लिक करें या दूरी टाइप करें, दूसरी ओर के लिए ऋणात्मक [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = ऑफसेट (DIMEXO)
@@ -3518,8 +3519,8 @@ modify =
     .mode-keyword = मोड
     .array-keyword = सारणी
     .use-first-point-as-displacement = पहले बिंदु को विस्थापन के रूप में उपयोग करें
-    .offset-erase-source-object-after-offsetting = OFFSET  ऑफ़सेट के बाद स्रोत ऑब्जेक्ट मिटाएँ? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  ऑफ़सेट ऑब्जेक्ट के लिए परत विकल्प दर्ज करें [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP समूह का नाम दर्ज करें [__ocs_arg_name__]:

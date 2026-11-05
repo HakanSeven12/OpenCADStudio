@@ -3299,7 +3299,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = الطبقة الهدف ليست ضمن المجموعة المحملة
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  هل تريد تغيير مقياس الكائنات وفق نقاط المحاذاة؟ [نعم/لا]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET  حدد نقطة المرجع الثانية:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3483,10 +3484,10 @@ modify =
     .move-text-arrows-out = نقل النص والأسهم للخارج
     .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  حدد مسافة الإزاحة أو [عبر] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  انقر الجانب أو [متعدد] [المسافة __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  انقر نقطة العبور أو [متعدد]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ متعدد  انقر الجانب التالي [المسافة __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ متعدد  انقر نقطة العبور التالية:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  انقر نقطة العبور أو اكتب المسافة، والقيمة السالبة للجهة الأخرى [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ متعدد  انقر نقطة العبور أو اكتب المسافة، والقيمة السالبة للجهة الأخرى [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = إزاحة (DIMEXO)
@@ -3542,8 +3543,8 @@ modify =
     .mode-keyword = الوضع
     .array-keyword = مصفوفة
     .use-first-point-as-displacement = استخدام النقطة الأولى كإزاحة
-    .offset-erase-source-object-after-offsetting = OFFSET  مسح الكائن المصدر بعد الإزاحة؟ [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  أدخل خيار الطبقة للكائنات المزاحة [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  أدخل اسم المجموعة [__ocs_arg_name__]:

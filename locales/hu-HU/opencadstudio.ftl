@@ -3283,7 +3283,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = a célfólia nincs a betöltött készletben
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  Léptékezze az objektumokat az igazítási pontok alapján? [Yes / No]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [Through ({ modify.through })] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET Második referenciapont megadása:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3467,10 +3468,10 @@ modify =
     .move-text-arrows-out = Szöveg és nyilak mozgatása kifelé
     .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET Adja meg az eltolási távolságot vagy a [Through] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Kattintson az oldalra vagy [Multiple] [távolság __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Jelölje ki az áthaladási pontot vagy [Multiple]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Multiple  Kattintson a következő oldalra [távolság __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Multiple  Jelölje ki a következő áthaladási pontot:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Kattintson az átmenő pontra, vagy írja be a távolságot, negatívat a másik oldalhoz [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Többszörös  Kattintson az átmenő pontra, vagy írja be a távolságot, negatívat a másik oldalhoz [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = Eltolás (DIMEXO)
@@ -3526,8 +3527,8 @@ modify =
     .mode-keyword = Mód
     .array-keyword = Kiosztás
     .use-first-point-as-displacement = Első pont eltolásként
-    .offset-erase-source-object-after-offsetting = OFFSET  Törli a forrásobjektumot eltolás után? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Az eltolt objektumok fóliája [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  Adja meg a csoport nevét [__ocs_arg_name__]:

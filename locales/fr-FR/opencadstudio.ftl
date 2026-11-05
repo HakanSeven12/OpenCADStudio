@@ -3287,7 +3287,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = le calque cible ne fait pas partie de l’ensemble chargé
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN Échelle des objets en fonction des points d'alignement? [A/N]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET Préciser le deuxième point de référence:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3471,10 +3472,10 @@ modify =
     .move-text-arrows-out = Déplacer le texte et les flèches à l'extérieur
     .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET Spécifiez la distance de décalage ou [Plein] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__ Cliquez sur le côté ou [multiple] [distance __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__ Cliquez sur le point ou [multiple]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Cliquer sur le côté suivant [distance __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Cliquez sur plusieurs ci-dessous pour accéder au point suivant:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Cliquez sur le point de passage ou saisissez la distance, négative pour l'autre côté [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Multiple  Cliquez sur le point de passage ou saisissez la distance, négative pour l'autre côté [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = Décomposition (DIMEXO)
@@ -3530,8 +3531,8 @@ modify =
     .mode-keyword = Mode
     .array-keyword = Réseau
     .use-first-point-as-displacement = Premier point comme déplacement
-    .offset-erase-source-object-after-offsetting = OFFSET  Effacer l'objet source après le décalage ? [Yes/No] <No> :
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Calque des objets décalés [Current/Source] <Source> :
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP Entrez le nom du groupe [__ocs_arg_name__]:

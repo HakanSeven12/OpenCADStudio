@@ -444,13 +444,15 @@ enum Step {
     },
 }
 
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
-// The Erase and Layer answers and the Through choice carry over to the next
-// OFFSET for the session, as in the reference.
-static ERASE_SOURCE: AtomicBool = AtomicBool::new(false);
-static LAYER_CURRENT: AtomicBool = AtomicBool::new(false);
-static THROUGH: AtomicBool = AtomicBool::new(false);
+thread_local! {
+    // The Erase and Layer answers and the Through choice carry over to the
+    // next OFFSET for the session (commands run on the UI thread).
+    static ERASE_SOURCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LAYER_CURRENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static THROUGH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 /// OFFSETGAPTYPE: how a polyline offset outward closes its corner gaps
 /// (0 extend, 1 fillet, 2 chamfer); a profile setting.
 static GAP_TYPE: AtomicU8 = AtomicU8::new(0);
@@ -466,8 +468,8 @@ pub fn set_gap_type(value: u8) {
 /// `Current settings: Erase source=No  Layer=Source  OFFSETGAPTYPE=0`, the
 /// line OFFSET prints as it starts.
 pub fn current_settings_line() -> String {
-    let erase = if ERASE_SOURCE.load(Ordering::Relaxed) { "Yes" } else { "No" };
-    let layer = if LAYER_CURRENT.load(Ordering::Relaxed) { "Current" } else { "Source" };
+    let erase = if ERASE_SOURCE.get() { "Yes" } else { "No" };
+    let layer = if LAYER_CURRENT.get() { "Current" } else { "Source" };
     t!(
         "Current settings: Erase source=%{erase}  Layer=%{layer}  OFFSETGAPTYPE=%{gap}",
         erase = erase,
@@ -537,8 +539,8 @@ impl OffsetCommand {
             cursor: None,
             drag_start: false,
             awaiting: None,
-            erase_source: ERASE_SOURCE.load(Ordering::Relaxed),
-            layer_current: LAYER_CURRENT.load(Ordering::Relaxed),
+            erase_source: ERASE_SOURCE.get(),
+            layer_current: LAYER_CURRENT.get(),
             targets_are_sources: false,
             made: 0,
         }
@@ -586,7 +588,7 @@ impl OffsetCommand {
         let distance = distance.abs().max(1e-9);
 
         defaults::set_offset_dist(distance);
-        THROUGH.store(false, Ordering::Relaxed);
+        THROUGH.set(false);
         self.advance_from_distance(Some(distance))
     }
 
@@ -685,7 +687,7 @@ impl CadCommand for OffsetCommand {
         }
         match &self.step {
             Step::Distance => {
-                let d = if THROUGH.load(Ordering::Relaxed) {
+                let d = if THROUGH.get() {
                     "Through".to_owned()
                 } else {
                     format!("{:.4}", defaults::get_offset_dist())
@@ -886,7 +888,7 @@ impl CadCommand for OffsetCommand {
                     "" => {}
                     _ => return Some(CmdResult::NeedPoint),
                 }
-                ERASE_SOURCE.store(self.erase_source, Ordering::Relaxed);
+                ERASE_SOURCE.set(self.erase_source);
                 self.awaiting = None;
                 return Some(CmdResult::NeedPoint);
             }
@@ -897,7 +899,7 @@ impl CadCommand for OffsetCommand {
                     "" => {}
                     _ => return Some(CmdResult::NeedPoint),
                 }
-                LAYER_CURRENT.store(self.layer_current, Ordering::Relaxed);
+                LAYER_CURRENT.set(self.layer_current);
                 self.awaiting = None;
                 return Some(CmdResult::NeedPoint);
             }
@@ -929,7 +931,7 @@ impl CadCommand for OffsetCommand {
         match &mut self.step {
             Step::Distance => {
                 if t.eq_ignore_ascii_case("t") || t.eq_ignore_ascii_case("through") {
-                    THROUGH.store(true, Ordering::Relaxed);
+                    THROUGH.set(true);
                     return Some(self.advance_from_distance(None));
                 }
                 if let Some(d) = crate::entities::common::parse_typed_length(&t) {
@@ -1060,7 +1062,7 @@ impl CadCommand for OffsetCommand {
             // Enter / Space on the distance step accepts the last distance —
             // the "repeat the same value with just Space" flow (#418).
             Step::Distance => {
-                if THROUGH.load(Ordering::Relaxed) {
+                if THROUGH.get() {
                     return self.advance_from_distance(None);
                 }
                 let d = defaults::get_offset_dist();
@@ -1180,10 +1182,8 @@ mod option_tests {
         assert!(matches!(cmd.on_text_input("E"), Some(CmdResult::NeedPoint)));
         assert_eq!(keywords(&cmd), ["Y", "N"]);
         assert!(matches!(cmd.on_text_input("Y"), Some(CmdResult::NeedPoint)));
-        assert!(matches!(
-            cmd.on_text_input("2"),
-            Some(CmdResult::ReportMeasurement(_))
-        ));
+        // The distance is taken without a separate report line.
+        assert!(matches!(cmd.on_text_input("2"), Some(CmdResult::NeedPoint)));
         assert!(matches!(
             cmd.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0)),
             CmdResult::NeedPoint

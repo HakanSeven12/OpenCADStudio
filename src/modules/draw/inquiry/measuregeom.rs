@@ -841,16 +841,22 @@ impl MeasureGeomCommand {
     }
 
     /// Multiple points: every change of the chain prints its length.
+    /// Switching between line and arc mode prints it too, and a refused
+    /// entry prints it again after the error.
     fn report_chain_change(&mut self, before: (usize, bool), result: CmdResult) -> CmdResult {
-        let changed = self.points.len() != before.0 || (self.arc && !before.1);
-        if self.mode == Mode::Distance
-            && self.multiple
-            && changed
-            && matches!(result, CmdResult::NeedPoint | CmdResult::NeedPointQuiet)
-        {
-            return CmdResult::ReportMeasurement(self.running_distance());
+        if self.mode != Mode::Distance || !self.multiple {
+            return result;
         }
-        result
+        let changed = self.points.len() != before.0 || self.arc != before.1;
+        match result {
+            CmdResult::NeedPoint | CmdResult::NeedPointQuiet if changed => {
+                CmdResult::ReportMeasurement(self.running_distance())
+            }
+            CmdResult::ReportError(error) => {
+                CmdResult::ReportErrorAndMeasurement(error, self.running_distance())
+            }
+            result => result,
+        }
     }
 
     /// The height typed (or measured from the base point) for Volume.

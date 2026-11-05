@@ -4074,6 +4074,117 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
 }
 
 #[test]
+fn a_polar_takes_a_distance_and_then_an_angle_value_set() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER POLAR");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
+    );
+    feed(&mut app, "V");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter distance value set type [None/List/Increment] <None>:"
+    );
+    feed(&mut app, "I");
+    feed(&mut app, "5");
+    feed(&mut app, "0");
+    feed(&mut app, "100");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter angle value set type [None/List/Increment] <None>:",
+        "the angle set is asked once the distance set is answered"
+    );
+    feed(&mut app, "L");
+    feed(&mut app, "0, 45, 90");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:",
+        "both answers return to placement"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,5");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let polar = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Polar)
+        .expect("placed polar parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&polar.handle).expect("polar record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::PolarParameter(native) = &object.data else {
+        panic!("expected a polar parameter");
+    };
+    assert_eq!(native.distance_value_set.flags, 1 | 2 | 4);
+    assert_eq!(native.distance_value_set.increment, 5.0);
+    assert_eq!(native.distance_value_set.minimum, 0.0);
+    assert_eq!(native.distance_value_set.maximum, 100.0);
+    assert_eq!(native.angle_value_set.flags, 8);
+    assert_eq!(
+        native.angle_value_set.values,
+        vec![
+            0.0,
+            std::f64::consts::FRAC_PI_4,
+            std::f64::consts::FRAC_PI_2
+        ],
+        "angles are stored in radians"
+    );
+}
+
+#[test]
+fn a_polar_angle_increment_is_asked_and_stored_in_radians() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER POLAR");
+    feed(&mut app, "V");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter angle value set type [None/List/Increment] <None>:",
+        "an explicit None for the distance set still asks the angle set"
+    );
+    feed(&mut app, "I");
+    feed(&mut app, "45");
+    feed(&mut app, "0");
+    feed(&mut app, "360");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,5");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let polar = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Polar)
+        .expect("placed polar parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&polar.handle).expect("polar record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::PolarParameter(native) = &object.data else {
+        panic!("expected a polar parameter");
+    };
+    assert_eq!(native.distance_value_set.flags, 1, "an explicit None stores no set");
+    assert_eq!(native.angle_value_set.flags, 1 | 2 | 4);
+    assert_eq!(native.angle_value_set.increment, 45f64.to_radians());
+    assert_eq!(native.angle_value_set.minimum, 0.0);
+    assert_eq!(native.angle_value_set.maximum, 360f64.to_radians());
+}
+
+#[test]
 fn a_linear_takes_its_base_location_and_value_set() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -4230,7 +4341,7 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
     let _ = app.dispatch_command("BPARAMETER POLAR");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
     );
     feed(&mut app, "L");
     assert_eq!(
@@ -4245,7 +4356,7 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
     feed(&mut app, "C");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
     );
     feed(&mut app, "0,0");
     feed(&mut app, "4,0");

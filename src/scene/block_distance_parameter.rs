@@ -262,6 +262,29 @@ pub(crate) fn create(
     create_with(document, definition, kind, base, end, label, None, None)
 }
 
+/// Writes the value sets a Polar placement collected: the distance set and the
+/// angle set, the latter in radians.
+pub(crate) fn set_polar_value_sets(
+    document: &mut Document,
+    parameter: Handle,
+    distance: Option<&ValueSet>,
+    angle: Option<&ValueSet>,
+) -> Result<(), &'static str> {
+    let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&parameter) else {
+        return Err("The parameter is unavailable.");
+    };
+    let DynamicBlockData::PolarParameter(polar) = &mut object.data else {
+        return Err("The parameter is not a Polar parameter.");
+    };
+    if let Some(set) = distance {
+        polar.distance_value_set = set.record();
+    }
+    if let Some(set) = angle {
+        polar.angle_value_set = set.record();
+    }
+    Ok(())
+}
+
 /// Creates a parameter with the placement answers a Linear command collected.
 pub(crate) fn create_with(
     document: &mut Document,
@@ -632,7 +655,7 @@ mod tests {
     use crate::scene::{block_point_parameter, block_visibility, Scene};
     use codec::{entities::Line, EntityType};
 
-    fn fixture() -> (Scene, Handle) {
+    pub(super) fn fixture() -> (Scene, Handle) {
         let mut scene = Scene::new();
         scene.define_block_raw(
             "PARAMETERS",
@@ -1019,5 +1042,67 @@ mod tests {
             assert_eq!(Sha256::digest(std::fs::read(&path).unwrap()), checksum);
             eprintln!("{filename}: Linear/Polar/XY appended to existing graph; DWG/DXF passed; original objects/checksum preserved");
         }
+    }
+}
+
+#[cfg(test)]
+mod value_set_tests {
+    use super::*;
+
+    #[test]
+    fn value_sets_are_written_only_to_a_polar_parameter() {
+        let (mut scene, definition) = super::tests::fixture();
+        let linear = create(
+            &mut scene.document,
+            definition,
+            Kind::Linear,
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let polar = create(
+            &mut scene.document,
+            definition,
+            Kind::Polar,
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+
+        assert_eq!(
+            set_polar_value_sets(
+                &mut scene.document,
+                linear,
+                Some(&ValueSet::List(vec![1.0])),
+                None
+            ),
+            Err("The parameter is not a Polar parameter.")
+        );
+        assert_eq!(
+            set_polar_value_sets(
+                &mut scene.document,
+                polar,
+                Some(&ValueSet::Increment {
+                    increment: 5.0,
+                    minimum: 0.0,
+                    maximum: 100.0
+                }),
+                Some(&ValueSet::List(vec![0.0, 1.0])),
+            ),
+            Ok(())
+        );
+
+        let ObjectType::DynamicBlock(object) = &scene.document.objects[&polar] else {
+            panic!("expected a dynamic block record");
+        };
+        let DynamicBlockData::PolarParameter(native) = &object.data else {
+            panic!("expected a polar parameter");
+        };
+        assert_eq!(native.distance_value_set.flags, 1 | 2 | 4);
+        assert_eq!(native.distance_value_set.maximum, 100.0);
+        assert_eq!(native.angle_value_set.flags, 8);
+        assert_eq!(native.angle_value_set.values, vec![0.0, 1.0]);
     }
 }

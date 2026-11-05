@@ -195,6 +195,15 @@ impl OpenCADStudio {
                 .filter(|_| kind == crate::scene::block_distance_parameter::Kind::Linear),
         )
         .expect("validated parameter placement");
+        if kind == crate::scene::block_distance_parameter::Kind::Polar {
+            crate::scene::block_distance_parameter::set_polar_value_sets(
+                &mut self.tabs[i].scene.document,
+                parameter,
+                options.value_set.as_ref(),
+                options.angle_value_set.as_ref(),
+            )
+            .expect("a placed polar parameter carries its value sets");
+        }
         if let Some(count) = grips
             .filter(|_| kind == crate::scene::block_distance_parameter::Kind::XY)
             .filter(|count| *count != 1)

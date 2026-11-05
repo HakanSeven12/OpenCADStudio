@@ -19,6 +19,7 @@ pub struct Options {
     pub angle_label: Option<String>,
     pub base_location: Option<BaseLocation>,
     pub value_set: Option<ValueSet>,
+    pub angle_value_set: Option<ValueSet>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +36,11 @@ enum Asking {
     ValueSetMinimum,
     ValueSetMaximum,
     ValueSetList,
+    AngleValueSetType,
+    AngleValueSetIncrement,
+    AngleValueSetMinimum,
+    AngleValueSetMaximum,
+    AngleValueSetList,
 }
 
 impl Asking {
@@ -61,6 +67,8 @@ pub struct DistanceParameterCommand {
     angle_label_default: String,
     increment: Option<f64>,
     minimum: Option<f64>,
+    angle_increment: Option<f64>,
+    angle_minimum: Option<f64>,
 }
 
 impl DistanceParameterCommand {
@@ -79,7 +87,13 @@ impl DistanceParameterCommand {
             angle_label_default: String::new(),
             increment: None,
             minimum: None,
+            angle_increment: None,
+            angle_minimum: None,
         }
+    }
+    /// A Polar parameter asks for the angle set once the distance set is answered.
+    fn after_distance_set(&self) -> Option<Asking> {
+        (self.kind == Kind::Polar).then_some(Asking::AngleValueSetType)
     }
     pub(crate) fn with_name(mut self, name: String) -> Self {
         self.name_default = name;
@@ -169,7 +183,7 @@ impl DistanceParameterCommand {
             {
                 "" | "N" | "NONE" => {
                     self.options.value_set = Some(ValueSet::None);
-                    self.asking = None;
+                    self.asking = self.after_distance_set();
                 }
                 "I" | "INCREMENT" => {
                     self.options.value_set = None;
@@ -210,7 +224,7 @@ impl DistanceParameterCommand {
                     );
                 };
                 self.options.value_set = Some(ValueSet::List(values));
-                self.asking = None;
+                self.asking = self.after_distance_set();
                 return CmdResult::NeedPoint;
             }
             let number = answer.parse::<f64>().ok().filter(|v| v.is_finite());
@@ -230,6 +244,89 @@ impl DistanceParameterCommand {
                     self.options.value_set = Some(ValueSet::Increment {
                         increment: self.increment.expect("the increment was answered"),
                         minimum: self.minimum.expect("the minimum was answered"),
+                        maximum: number,
+                    });
+                    self.asking = self.after_distance_set();
+                }
+                _ => unreachable!(),
+            }
+            return CmdResult::NeedPoint;
+        }
+        if asking == Asking::AngleValueSetType {
+            match text
+                .map(str::trim)
+                .unwrap_or("")
+                .to_ascii_uppercase()
+                .as_str()
+            {
+                "" | "N" | "NONE" => {
+                    self.options.angle_value_set = Some(ValueSet::None);
+                    self.asking = None;
+                }
+                "I" | "INCREMENT" => {
+                    self.options.angle_value_set = None;
+                    self.angle_increment = None;
+                    self.angle_minimum = None;
+                    self.asking = Some(Asking::AngleValueSetIncrement);
+                }
+                "L" | "LIST" => {
+                    self.options.angle_value_set = None;
+                    self.asking = Some(Asking::AngleValueSetList);
+                }
+                _ => {
+                    return CmdResult::ReportError(
+                        crate::t!("Invalid option keyword.").into_owned(),
+                    )
+                }
+            }
+            return CmdResult::NeedPoint;
+        }
+        if matches!(
+            asking,
+            Asking::AngleValueSetIncrement
+                | Asking::AngleValueSetMinimum
+                | Asking::AngleValueSetMaximum
+                | Asking::AngleValueSetList
+        ) {
+            let answer = text.unwrap_or("").trim();
+            let radians = |value: f64| value.to_radians();
+            if asking == Asking::AngleValueSetList {
+                let values = answer
+                    .split(',')
+                    .map(|part| part.trim().parse::<f64>().map(radians))
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
+                    .filter(|values| !values.is_empty() && values.iter().all(|v| v.is_finite()));
+                let Some(values) = values else {
+                    return CmdResult::ReportError(
+                        crate::t!("Requires numeric value.").into_owned(),
+                    );
+                };
+                self.options.angle_value_set = Some(ValueSet::List(values));
+                self.asking = None;
+                return CmdResult::NeedPoint;
+            }
+            let number = answer
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+                .map(radians);
+            let Some(number) = number else {
+                return CmdResult::ReportError(crate::t!("Requires numeric value.").into_owned());
+            };
+            match asking {
+                Asking::AngleValueSetIncrement => {
+                    self.angle_increment = Some(number);
+                    self.asking = Some(Asking::AngleValueSetMinimum);
+                }
+                Asking::AngleValueSetMinimum => {
+                    self.angle_minimum = Some(number);
+                    self.asking = Some(Asking::AngleValueSetMaximum);
+                }
+                Asking::AngleValueSetMaximum => {
+                    self.options.angle_value_set = Some(ValueSet::Increment {
+                        increment: self.angle_increment.expect("the increment was answered"),
+                        minimum: self.angle_minimum.expect("the minimum was answered"),
                         maximum: number,
                     });
                     self.asking = None;
@@ -259,7 +356,12 @@ impl DistanceParameterCommand {
                 | Asking::ValueSetIncrement
                 | Asking::ValueSetMinimum
                 | Asking::ValueSetMaximum
-                | Asking::ValueSetList => unreachable!(),
+                | Asking::ValueSetList
+                | Asking::AngleValueSetType
+                | Asking::AngleValueSetIncrement
+                | Asking::AngleValueSetMinimum
+                | Asking::AngleValueSetMaximum
+                | Asking::AngleValueSetList => unreachable!(),
             }
         }
         self.asking = None;
@@ -303,6 +405,16 @@ impl DistanceParameterCommand {
             Asking::ValueSetList => {
                 crate::t!("Enter list of distance values (separated by commas):").into_owned()
             }
+            Asking::AngleValueSetType => crate::t!(
+                "Enter angle value set type [None/List/Increment] <None>:"
+            )
+            .into_owned(),
+            Asking::AngleValueSetIncrement => crate::t!("Enter angle increment:").into_owned(),
+            Asking::AngleValueSetMinimum => crate::t!("Enter minimum angle:").into_owned(),
+            Asking::AngleValueSetMaximum => crate::t!("Enter maximum angle:").into_owned(),
+            Asking::AngleValueSetList => {
+                crate::t!("Enter list of angle values (separated by commas):").into_owned()
+            }
         }
     }
     /// The kinds that offer a name and a label: Linear and Polar. Linear asks
@@ -341,7 +453,7 @@ impl CadCommand for DistanceParameterCommand {
             if self.kind == Kind::Linear {
                 "Specify start point or [Name/Label/Chain/Description/Base/Palette/Value set]:"
             } else if self.accepts_label() {
-                "Specify base point or [Name/Label/Chain/Description/Palette]:"
+                "Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
             } else {
                 "Specify base point or [Chain/Description/Palette]:"
             }
@@ -369,7 +481,11 @@ impl CadCommand for DistanceParameterCommand {
                 | Asking::ValueSetIncrement
                 | Asking::ValueSetMinimum
                 | Asking::ValueSetMaximum
-                | Asking::ValueSetList,
+                | Asking::ValueSetList
+                | Asking::AngleValueSetIncrement
+                | Asking::AngleValueSetMinimum
+                | Asking::AngleValueSetMaximum
+                | Asking::AngleValueSetList,
             ) => InputKind::FreeText,
             Some(_) => InputKind::SingleToken,
             None => InputKind::Point,
@@ -421,7 +537,7 @@ impl CadCommand for DistanceParameterCommand {
                 "P" | "PALETTE" => Asking::Palette,
                 "L" | "LABEL" if self.accepts_label() => Asking::DistanceLabel,
                 "B" | "BASE" if self.kind == Kind::Linear => Asking::Base,
-                "V" if self.kind == Kind::Linear => Asking::ValueSetType,
+                "V" if matches!(self.kind, Kind::Linear | Kind::Polar) => Asking::ValueSetType,
                 _ => {
                     return Some(CmdResult::ReportError(
                         crate::t!("Point or option keyword required.").into_owned(),
@@ -442,12 +558,20 @@ impl CadCommand for DistanceParameterCommand {
                     self.options.value_set = None;
                     self.increment = None;
                     self.minimum = None;
+                    self.options.angle_value_set = None;
+                    self.angle_increment = None;
+                    self.angle_minimum = None;
                 }
                 Asking::AngleLabel => unreachable!(),
                 Asking::ValueSetIncrement
                 | Asking::ValueSetMinimum
                 | Asking::ValueSetMaximum
-                | Asking::ValueSetList => unreachable!(),
+                | Asking::ValueSetList
+                | Asking::AngleValueSetType
+                | Asking::AngleValueSetIncrement
+                | Asking::AngleValueSetMinimum
+                | Asking::AngleValueSetMaximum
+                | Asking::AngleValueSetList => unreachable!(),
             }
             self.asking = Some(asking);
             return Some(CmdResult::NeedPoint);
@@ -816,7 +940,7 @@ mod tests {
             ),
             (
                 Kind::Polar,
-                "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:",
+                "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:",
             ),
             (
                 Kind::XY,
@@ -851,7 +975,7 @@ mod tests {
         ));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
+            "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
         );
         assert_eq!(command.options.name.as_deref(), Some("P9"));
     }
@@ -938,7 +1062,7 @@ mod tests {
         ));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette]:"
+            "BPARAMETER Polar  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
         );
         assert_eq!(command.options.distance_label.as_deref(), Some("Dist9"));
         assert_eq!(command.options.angle_label.as_deref(), Some("C"));
@@ -1091,21 +1215,37 @@ mod tests {
     }
 
     #[test]
-    fn base_and_value_set_keywords_are_refused_outside_linear() {
+    fn base_and_value_set_keywords_are_refused_where_the_type_does_not_offer_them() {
         for kind in [Kind::Polar, Kind::XY] {
-            for answer in ["B", "V"] {
-                let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
-                assert!(
-                    matches!(
-                        command.on_text_input(answer),
-                        Some(CmdResult::ReportError(reason))
-                            if reason == "Point or option keyword required."
-                    ),
-                    "{} asks no {answer} question",
-                    kind.name()
-                );
-            }
+            let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
+            assert!(
+                matches!(
+                    command.on_text_input("B"),
+                    Some(CmdResult::ReportError(reason))
+                        if reason == "Point or option keyword required."
+                ),
+                "{} asks no base-location question",
+                kind.name()
+            );
         }
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY);
+        assert!(
+            matches!(
+                command.on_text_input("V"),
+                Some(CmdResult::ReportError(reason))
+                    if reason == "Point or option keyword required."
+            ),
+            "XY asks no value-set question"
+        );
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::Polar);
+        assert!(
+            matches!(command.on_text_input("V"), Some(CmdResult::NeedPoint)),
+            "Polar offers a value set"
+        );
+        assert_eq!(
+            command.prompt(),
+            "Enter distance value set type [None/List/Increment] <None>:"
+        );
     }
 
     #[test]

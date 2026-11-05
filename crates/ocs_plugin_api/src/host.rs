@@ -2026,6 +2026,19 @@ pub trait HostApi {
     fn unregister_quad_panels(&mut self, _plugin_id: &str, panel_ids: &[&str]) -> Vec<bool> {
         vec![false; panel_ids.len()]
     }
+
+    /// Validate a declared parametric chain without staging it (additive).
+    ///
+    /// Capable hosts run the same structural, seam, cap and chord-refinement
+    /// audit as staging, discarding the resulting display entities. This is a
+    /// pure read: no document, undo, publish, dirty or cache state changes.
+    fn validate_parametric_chain(
+        &self,
+        _chain: &ParametricChain,
+        _tolerance: f64,
+    ) -> Result<(), String> {
+        Err("Parametric chain validation is not supported by this host".to_owned())
+    }
 }
 
 /// **Parametric-chain staging types (api 14, the v2 generic shapes).**

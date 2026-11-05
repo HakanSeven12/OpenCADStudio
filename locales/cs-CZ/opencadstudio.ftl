@@ -8790,3 +8790,8 @@ ribbon-customize =
     .shortcuts = Klávesové zkratky…
     .close = Zavřít
     .default-title = Panel { $n }
+
+toolbar =
+    .list = Panely nástrojů (● zobrazené):
+    .not-found = TOOLBAR: panel "{ $name }" neexistuje.
+    .workspace = WSCURRENT  aktuální pracovní prostor: { $current } [Classic/Ribbon]

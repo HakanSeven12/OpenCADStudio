@@ -8783,3 +8783,8 @@ ribbon-customize =
     .shortcuts = Keyboard Shortcuts…
     .close = Close
     .default-title = Panel { $n }
+
+toolbar =
+    .list = Toolbars (● shown):
+    .not-found = TOOLBAR: no toolbar named "{ $name }".
+    .workspace = WSCURRENT  current workspace: { $current } [Classic/Ribbon]

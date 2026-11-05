@@ -8782,3 +8782,8 @@ ribbon-customize =
     .shortcuts = Tastenkürzel…
     .close = Schließen
     .default-title = Gruppe { $n }
+
+toolbar =
+    .list = Werkzeugkästen (● angezeigt):
+    .not-found = TOOLBAR: kein Werkzeugkasten namens "{ $name }".
+    .workspace = WSCURRENT  aktueller Arbeitsbereich: { $current } [Classic/Ribbon]

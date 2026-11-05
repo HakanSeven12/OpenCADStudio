@@ -8783,3 +8783,8 @@ ribbon-customize =
     .shortcuts = Scelte rapide da tastiera…
     .close = Chiudi
     .default-title = Gruppo { $n }
+
+toolbar =
+    .list = Barre degli strumenti (● visibili):
+    .not-found = TOOLBAR: nessuna barra chiamata "{ $name }".
+    .workspace = WSCURRENT  area di lavoro corrente: { $current } [Classic/Ribbon]

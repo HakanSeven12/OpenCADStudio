@@ -8762,3 +8762,8 @@ ribbon-customize =
     .shortcuts = Billentyűparancsok…
     .close = Bezárás
     .default-title = { $n }. panel
+
+toolbar =
+    .list = Eszköztárak (● látható):
+    .not-found = TOOLBAR: nincs "{ $name }" nevű eszköztár.
+    .workspace = WSCURRENT  aktuális munkaterület: { $current } [Classic/Ribbon]

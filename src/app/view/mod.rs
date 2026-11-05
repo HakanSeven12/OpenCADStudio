@@ -3492,9 +3492,10 @@ bg={bg_ms:.1}ms n={view_count}"
         .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
         // Floating ribbon panels lie over the drawing and the palettes, under
-        // the ribbon's popups and menus.
+        // the ribbon's popups and menus. With the ribbon closed they stay:
+        // they are the classic toolbars then.
         let floating_layer: Element<'_, Message> =
-            if self.clean_screen || self.ribbon_closed || self.tabs[self.active_tab].is_start {
+            if self.clean_screen || self.tabs[self.active_tab].is_start {
                 None
             } else {
                 self.ribbon.floating_layer(self.show_block_palette)

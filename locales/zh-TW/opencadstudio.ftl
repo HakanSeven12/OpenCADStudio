@@ -8769,3 +8769,8 @@ ribbon-customize =
     .shortcuts = 鍵盤快速鍵…
     .close = 關閉
     .default-title = 面板 { $n }
+
+toolbar =
+    .list = 工具列（● 已顯示）：
+    .not-found = TOOLBAR：沒有名為「{ $name }」的工具列。
+    .workspace = WSCURRENT  目前工作區：{ $current } [Classic/Ribbon]

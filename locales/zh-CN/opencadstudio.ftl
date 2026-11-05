@@ -8757,3 +8757,8 @@ ribbon-customize =
     .shortcuts = 键盘快捷键…
     .close = 关闭
     .default-title = 面板 { $n }
+
+toolbar =
+    .list = 工具栏（● 已显示）：
+    .not-found = TOOLBAR：没有名为“{ $name }”的工具栏。
+    .workspace = WSCURRENT  当前工作空间：{ $current } [Classic/Ribbon]

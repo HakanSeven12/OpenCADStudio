@@ -8784,3 +8784,8 @@ ribbon-customize =
     .shortcuts = Συντομεύσεις πληκτρολογίου…
     .close = Κλείσιμο
     .default-title = Ομάδα { $n }
+
+toolbar =
+    .list = Γραμμές εργαλείων (● εμφανείς):
+    .not-found = TOOLBAR: δεν υπάρχει γραμμή "{ $name }".
+    .workspace = WSCURRENT  τρέχων χώρος εργασίας: { $current } [Classic/Ribbon]

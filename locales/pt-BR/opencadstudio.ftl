@@ -8784,3 +8784,8 @@ ribbon-customize =
     .shortcuts = Atalhos de teclado…
     .close = Fechar
     .default-title = Painel { $n }
+
+toolbar =
+    .list = Barras de ferramentas (● exibidas):
+    .not-found = TOOLBAR: nenhuma barra chamada "{ $name }".
+    .workspace = WSCURRENT  espaço de trabalho atual: { $current } [Classic/Ribbon]

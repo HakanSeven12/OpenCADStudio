@@ -8784,3 +8784,8 @@ ribbon-customize =
     .shortcuts = Клавишни комбинации…
     .close = Затвори
     .default-title = Панел { $n }
+
+toolbar =
+    .list = Ленти с инструменти (● показани):
+    .not-found = TOOLBAR: няма лента "{ $name }".
+    .workspace = WSCURRENT  текущо работно пространство: { $current } [Classic/Ribbon]

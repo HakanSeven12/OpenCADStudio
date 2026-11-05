@@ -8784,3 +8784,8 @@ ribbon-customize =
     .shortcuts = Métodos abreviados…
     .close = Cerrar
     .default-title = Grupo { $n }
+
+toolbar =
+    .list = Barras de herramientas (● mostradas):
+    .not-found = TOOLBAR: no hay ninguna barra llamada "{ $name }".
+    .workspace = WSCURRENT  espacio de trabajo actual: { $current } [Classic/Ribbon]

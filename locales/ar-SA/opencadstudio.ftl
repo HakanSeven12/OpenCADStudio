@@ -8787,3 +8787,8 @@ ribbon-customize =
     .shortcuts = اختصارات لوحة المفاتيح…
     .close = إغلاق
     .default-title = لوحة { $n }
+
+toolbar =
+    .list = أشرطة الأدوات (● ظاهرة):
+    .not-found = TOOLBAR: لا يوجد شريط باسم "{ $name }".
+    .workspace = WSCURRENT  مساحة العمل الحالية: { $current } [Classic/Ribbon]

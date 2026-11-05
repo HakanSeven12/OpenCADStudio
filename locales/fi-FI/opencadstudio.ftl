@@ -8781,3 +8781,8 @@ ribbon-customize =
     .shortcuts = Pikanäppäimet…
     .close = Sulje
     .default-title = Paneeli { $n }
+
+toolbar =
+    .list = Työkalurivit (● näkyvissä):
+    .not-found = TOOLBAR: työkaluriviä "{ $name }" ei ole.
+    .workspace = WSCURRENT  nykyinen työtila: { $current } [Classic/Ribbon]

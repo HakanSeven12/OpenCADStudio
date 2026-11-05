@@ -8772,3 +8772,8 @@ ribbon-customize =
     .shortcuts = कीबोर्ड शॉर्टकट…
     .close = बंद करें
     .default-title = पैनल { $n }
+
+toolbar =
+    .list = टूलबार (● दिख रहे):
+    .not-found = TOOLBAR: "{ $name }" नाम का कोई टूलबार नहीं।
+    .workspace = WSCURRENT  वर्तमान वर्कस्पेस: { $current } [Classic/Ribbon]

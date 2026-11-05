@@ -8781,3 +8781,8 @@ ribbon-customize =
     .shortcuts = Phím tắt…
     .close = Đóng
     .default-title = Bảng { $n }
+
+toolbar =
+    .list = Thanh công cụ (● đang hiện):
+    .not-found = TOOLBAR: không có thanh công cụ "{ $name }".
+    .workspace = WSCURRENT  không gian làm việc hiện tại: { $current } [Classic/Ribbon]

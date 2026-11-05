@@ -8773,3 +8773,8 @@ ribbon-customize =
     .shortcuts = 바로 가기 키…
     .close = 닫기
     .default-title = 패널 { $n }
+
+toolbar =
+    .list = 도구 막대 (● 표시됨):
+    .not-found = TOOLBAR: "{ $name }" 도구 막대가 없습니다.
+    .workspace = WSCURRENT  현재 작업공간: { $current } [Classic/Ribbon]

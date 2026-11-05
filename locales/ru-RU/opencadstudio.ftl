@@ -8788,3 +8788,8 @@ ribbon-customize =
     .shortcuts = Сочетания клавиш…
     .close = Закрыть
     .default-title = Панель { $n }
+
+toolbar =
+    .list = Панели инструментов (● показаны):
+    .not-found = TOOLBAR: нет панели «{ $name }».
+    .workspace = WSCURRENT  текущее рабочее пространство: { $current } [Classic/Ribbon]

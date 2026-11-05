@@ -8762,3 +8762,8 @@ ribbon-customize =
     .shortcuts = キーボード ショートカット…
     .close = 閉じる
     .default-title = パネル { $n }
+
+toolbar =
+    .list = ツールバー (● 表示中):
+    .not-found = TOOLBAR: 「{ $name }」というツールバーはありません。
+    .workspace = WSCURRENT  現在のワークスペース: { $current } [Classic/Ribbon]

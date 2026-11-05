@@ -8775,3 +8775,8 @@ ribbon-customize =
     .shortcuts = ປຸ່ມລັດ…
     .close = ປິດ
     .default-title = ແຜງ { $n }
+
+toolbar =
+    .list = ແຖບເຄື່ອງມື (● ສະແດງ):
+    .not-found = TOOLBAR: ບໍ່ມີແຖບ "{ $name }".
+    .workspace = WSCURRENT  ພື້ນທີ່ເຮັດວຽກປັດຈຸບັນ: { $current } [Classic/Ribbon]

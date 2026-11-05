@@ -8703,3 +8703,8 @@ ribbon-customize =
     .shortcuts = Klavye Kısayolları…
     .close = Kapat
     .default-title = Panel { $n }
+
+toolbar =
+    .list = Araç çubukları (● gösteriliyor):
+    .not-found = TOOLBAR: "{ $name }" adlı araç çubuğu yok.
+    .workspace = WSCURRENT  geçerli çalışma alanı: { $current } [Classic/Ribbon]

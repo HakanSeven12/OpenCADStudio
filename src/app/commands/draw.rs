@@ -3376,3 +3376,13 @@ impl OpenCADStudio {
         Task::none()
     }
 }
+
+impl OpenCADStudio {
+    /// Where new toolbars line up: past the left dock, under the menu bar
+    /// and the drawing tabs.
+    pub(in crate::app) fn toolbar_origin(&self) -> iced::Point {
+        let left = self.dock_column_width(crate::app::config::DockSide::Left)
+            + crate::ui::dock::DOCK_STRIP_W;
+        iced::Point::new(left + 8.0, 74.0)
+    }
+}

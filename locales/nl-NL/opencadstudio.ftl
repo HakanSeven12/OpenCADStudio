@@ -8782,3 +8782,8 @@ ribbon-customize =
     .shortcuts = Sneltoetsen…
     .close = Sluiten
     .default-title = Paneel { $n }
+
+toolbar =
+    .list = Werkbalken (● getoond):
+    .not-found = TOOLBAR: geen werkbalk met de naam "{ $name }".
+    .workspace = WSCURRENT  huidige werkruimte: { $current } [Classic/Ribbon]

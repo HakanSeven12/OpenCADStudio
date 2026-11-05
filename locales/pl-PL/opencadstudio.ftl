@@ -8786,3 +8786,8 @@ ribbon-customize =
     .shortcuts = Skróty klawiszowe…
     .close = Zamknij
     .default-title = Panel { $n }
+
+toolbar =
+    .list = Paski narzędzi (● widoczne):
+    .not-found = TOOLBAR: brak paska "{ $name }".
+    .workspace = WSCURRENT  bieżący obszar roboczy: { $current } [Classic/Ribbon]

@@ -10485,6 +10485,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::HatchPanel(msg) => self.on_hatch_panel(msg),
+            Message::ContextMenuEdit(msg) => self.on_context_menu_edit(msg),
             Message::KeyListExport(aliases) => {
                 let (header, rows, name) = if aliases {
                     (

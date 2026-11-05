@@ -8767,3 +8767,11 @@ layer-groups =
     .updated = LAYERGROUP: aktualizována "{ $name }".
     .deleted = LAYERGROUP: "{ $name }" odstraněna; hladiny zůstávají.
     .not-found = LAYERGROUP: skupina "{ $name }" neexistuje.
+
+context-menu =
+    .customize = Přizpůsobit…
+    .editor-title = Zrušením zaškrtnutí řádek skryjete
+    .my-commands = Moje příkazy
+    .command-placeholder = Příkaz nebo alias
+    .add = Přidat
+    .done = Hotovo

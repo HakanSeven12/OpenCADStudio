@@ -8752,3 +8752,11 @@ layer-groups =
     .updated = LAYERGROUP: ອັບເດດ "{ $name }" ແລ້ວ.
     .deleted = LAYERGROUP: ລຶບ "{ $name }" ແລ້ວ; ຊັ້ນຍັງຢູ່.
     .not-found = LAYERGROUP: ບໍ່ມີກຸ່ມ "{ $name }".
+
+context-menu =
+    .customize = ປັບແຕ່ງ…
+    .editor-title = ຍົກເລີກເຄື່ອງໝາຍເພື່ອເຊື່ອງແຖວ
+    .my-commands = ຄຳສັ່ງຂອງຂ້ອຍ
+    .command-placeholder = ຄຳສັ່ງ ຫຼື ຊື່ຫຍໍ້
+    .add = ເພີ່ມ
+    .done = ແລ້ວໆ

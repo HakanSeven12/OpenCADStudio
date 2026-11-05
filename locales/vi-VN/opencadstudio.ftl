@@ -8758,3 +8758,11 @@ layer-groups =
     .updated = LAYERGROUP: đã cập nhật "{ $name }".
     .deleted = LAYERGROUP: đã xóa "{ $name }"; các lớp vẫn còn.
     .not-found = LAYERGROUP: không có nhóm "{ $name }".
+
+context-menu =
+    .customize = Tùy biến…
+    .editor-title = Bỏ chọn một dòng để ẩn nó
+    .my-commands = Lệnh của tôi
+    .command-placeholder = Lệnh hoặc bí danh
+    .add = Thêm
+    .done = Xong

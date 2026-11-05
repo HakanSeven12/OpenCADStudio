@@ -122,7 +122,75 @@ impl OpenCADStudio {
         }) {
             return menu;
         }
-        build_context_menu(&self.context_menu_context(), open)
+        let context = self.context_menu_context();
+        let mut menu = build_context_menu(&context, open);
+        if matches!(context, crate::ui::popup::context_menu::MenuContext::Idle { .. }) {
+            let mut rows = crate::ui::popup::context_menu::customize_rows(
+                menu.rows,
+                &self.context_menu_custom,
+            );
+            crate::ui::popup::context_menu::give_mnemonics(&mut rows);
+            menu = ContextMenu::from_rows(rows);
+        }
+        menu
+    }
+
+    /// The rows the editor lists: the idle menu as built, before the user's
+    /// changes.
+    pub(in crate::app) fn uncustomized_context_menu(&self) -> ContextMenu {
+        build_context_menu(&self.context_menu_context(), None)
+    }
+
+    pub(in crate::app) fn on_context_menu_edit(
+        &mut self,
+        msg: crate::app::ContextMenuEditMsg,
+    ) -> Task<Message> {
+        use crate::app::ContextMenuEditMsg as M;
+        // A typed command is named as the ribbon names it.
+        let typed = self.context_menu_editing.clone().unwrap_or_default().trim().to_uppercase();
+        let resolved = self.resolve_alias(&typed).unwrap_or_else(|| typed.clone());
+        let label = crate::modules::registry::ribbon_commands()
+            .get(&resolved)
+            .map(|(label, _)| crate::t!(*label).into_owned())
+            .unwrap_or_else(|| typed.clone());
+        let custom = &mut self.context_menu_custom;
+        match msg {
+            M::Toggle(key) => {
+                if let Some(at) = custom.hidden.iter().position(|hidden| *hidden == key) {
+                    custom.hidden.remove(at);
+                } else {
+                    custom.hidden.push(key);
+                }
+            }
+            M::Draft(text) => {
+                self.context_menu_editing = Some(text);
+                return Task::none();
+            }
+            M::Add => {
+                if !typed.is_empty() {
+                    custom.custom.push((label, typed));
+                }
+                self.context_menu_editing = Some(String::new());
+            }
+            M::Remove(index) => {
+                if index < custom.custom.len() {
+                    custom.custom.remove(index);
+                }
+            }
+            M::Move(index, up) => {
+                let other = if up { index.checked_sub(1) } else { Some(index + 1) };
+                if let Some(other) = other.filter(|other| *other < custom.custom.len()) {
+                    custom.custom.swap(index, other);
+                }
+            }
+            M::Done => {
+                self.context_menu_editing = None;
+                self.save_config();
+                return self.close_context_menu();
+            }
+        }
+        self.save_config();
+        Task::none()
     }
 
     /// Alt+letter with the menu bar shown: that menu opens under its title
@@ -151,6 +219,7 @@ impl OpenCADStudio {
         sel.menu.close();
         drop(sel);
         self.menu_bar_popup = None;
+        self.context_menu_editing = None;
         self.focus_cmd_input()
     }
 
@@ -184,6 +253,11 @@ impl OpenCADStudio {
     pub(in crate::app) fn on_context_menu_pick(&mut self, action: MenuAction) -> Task<Message> {
         if let MenuAction::ToggleSubmenu(id) = action {
             return self.on_context_menu_submenu_toggle(id);
+        }
+        // The menu stays open, turned into its editor.
+        if action == MenuAction::Customize {
+            self.context_menu_editing = Some(String::new());
+            return Task::none();
         }
         let i = self.active_tab;
         {
@@ -242,7 +316,7 @@ impl OpenCADStudio {
             MenuAction::DrawOrderPickRef(above) => self.update(Message::DrawOrderPickRef(above)),
             MenuAction::ConstraintDelete(id) => self.update(Message::PropConstraintDelete(id)),
             MenuAction::Grip(cmd) => self.on_grip_context_pick(cmd),
-            MenuAction::ToggleSubmenu(_) => Task::none(),
+            MenuAction::ToggleSubmenu(_) | MenuAction::Customize => Task::none(),
         };
         Task::batch(vec![focus, task])
     }

@@ -8734,3 +8734,11 @@ layer-groups =
     .updated = LAYERGROUP：已更新“{ $name }”。
     .deleted = LAYERGROUP：已删除“{ $name }”；其图层保留。
     .not-found = LAYERGROUP：没有名为“{ $name }”的组。
+
+context-menu =
+    .customize = 自定义…
+    .editor-title = 取消勾选以隐藏该行
+    .my-commands = 我的命令
+    .command-placeholder = 命令或别名
+    .add = 添加
+    .done = 完成

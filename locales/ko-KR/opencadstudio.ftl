@@ -8750,3 +8750,11 @@ layer-groups =
     .updated = LAYERGROUP: "{ $name }" 업데이트됨.
     .deleted = LAYERGROUP: "{ $name }" 삭제됨, 도면층은 유지됩니다.
     .not-found = LAYERGROUP: "{ $name }" 그룹이 없습니다.
+
+context-menu =
+    .customize = 사용자화…
+    .editor-title = 행을 숨기려면 체크를 해제하세요
+    .my-commands = 내 명령
+    .command-placeholder = 명령 또는 별칭
+    .add = 추가
+    .done = 완료

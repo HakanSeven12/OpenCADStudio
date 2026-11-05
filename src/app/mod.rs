@@ -987,6 +987,11 @@ pub(super) struct OpenCADStudio {
     hatch_associative: bool,
     /// The Hatch panel's numbers as typed.
     hatch_drafts: crate::ui::window::hatch_panel::Drafts,
+    /// The user's changes to the right-click menu.
+    context_menu_custom: crate::ui::popup::context_menu::MenuCustomization,
+    /// The right-click menu is being edited in place; the command typed
+    /// to add.
+    context_menu_editing: Option<String>,
     /// HPGAPTOL: gaps up to this size count as closed for HATCH/BOUNDARY
     /// internal-point picks (0 = exact).
     hatch_gap_tolerance: f64,
@@ -3053,6 +3058,21 @@ impl ClipboardDeps {
     }
 }
 
+/// The right-click menu editor's actions.
+#[derive(Debug, Clone)]
+pub enum ContextMenuEditMsg {
+    /// Show or hide the row with this key.
+    Toggle(String),
+    Draft(String),
+    /// Add the typed command.
+    Add,
+    Remove(usize),
+    /// Move a user command up (`true`) or down.
+    Move(usize, bool),
+    /// Leave the editor.
+    Done,
+}
+
 /// Which in-canvas modal dialog is currently open (Plan B). At most one shows
 /// at a time; dialog-specific data lives in its own fields. Closed via the
 /// modal's ✕ (`Message::CloseModal`).
@@ -4910,6 +4930,8 @@ pub enum Message {
     AliasEditorImported(Option<Result<Vec<u8>, String>>),
     /// Export the shortcut (`false`) or alias (`true`) list to a spreadsheet.
     KeyListExport(bool),
+    /// An edit of the right-click menu in its in-place editor.
+    ContextMenuEdit(ContextMenuEditMsg),
     /// An edit in the Hatch panel shown while HATCH runs.
     HatchPanel(crate::ui::window::hatch_panel::HatchPanelMsg),
     /// The file the export goes to (none when the picker was cancelled),
@@ -6006,6 +6028,8 @@ impl OpenCADStudio {
             pick_box: 3,
             hatch_associative: true,
             hatch_drafts: Default::default(),
+            context_menu_custom: Default::default(),
+            context_menu_editing: None,
             hatch_gap_tolerance: 0.0,
             hatch_start_method: 0,
             show_menu_bar: false,

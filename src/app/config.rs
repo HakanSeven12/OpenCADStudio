@@ -48,6 +48,8 @@ pub struct AppConfig {
     pub shortcuts: ShortcutConfig,
     /// Model space background, grid, and selection appearance.
     pub model_space: ModelSpaceThemeConfig,
+    /// The user's changes to the right-click menu.
+    pub context_menu: crate::ui::popup::context_menu::MenuCustomization,
 }
 
 impl Default for AppConfig {
@@ -67,6 +69,7 @@ impl Default for AppConfig {
             plot: PlotDialogState::default(),
             shortcuts: ShortcutConfig::default(),
             model_space: ModelSpaceThemeConfig::default(),
+            context_menu: Default::default(),
         }
     }
 }

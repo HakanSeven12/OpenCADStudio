@@ -8765,3 +8765,11 @@ layer-groups =
     .updated = LAYERGROUP: обновлена "{ $name }".
     .deleted = LAYERGROUP: "{ $name }" удалена; слои остаются.
     .not-found = LAYERGROUP: нет группы "{ $name }".
+
+context-menu =
+    .customize = Настроить…
+    .editor-title = Снимите флажок, чтобы скрыть строку
+    .my-commands = Мои команды
+    .command-placeholder = Команда или псевдоним
+    .add = Добавить
+    .done = Готово

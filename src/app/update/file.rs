@@ -1531,6 +1531,7 @@ impl OpenCADStudio {
                 layout: self.ribbon.layout().clone(),
             },
             plot: self.plot_dialog.clone(),
+            context_menu: self.context_menu_custom.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
                 bindings: self
                     .shortcut_bindings
@@ -1608,6 +1609,7 @@ impl OpenCADStudio {
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
         self.ribbon.set_layout(cfg.ribbon.layout);
         self.plot_dialog = cfg.plot;
+        self.context_menu_custom = cfg.context_menu;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
         self.shortcut_bindings
             .entry("F5".to_string())

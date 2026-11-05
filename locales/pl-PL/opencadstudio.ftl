@@ -8763,3 +8763,11 @@ layer-groups =
     .updated = LAYERGROUP: zaktualizowano "{ $name }".
     .deleted = LAYERGROUP: usunięto "{ $name }"; warstwy pozostają.
     .not-found = LAYERGROUP: brak grupy "{ $name }".
+
+context-menu =
+    .customize = Dostosuj…
+    .editor-title = Odznacz wiersz, aby go ukryć
+    .my-commands = Moje polecenia
+    .command-placeholder = Polecenie lub alias
+    .add = Dodaj
+    .done = Gotowe

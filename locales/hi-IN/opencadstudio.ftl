@@ -8749,3 +8749,11 @@ layer-groups =
     .updated = LAYERGROUP: "{ $name }" अपडेट किया गया।
     .deleted = LAYERGROUP: "{ $name }" हटाया गया; इसकी लेयर बनी रहती हैं।
     .not-found = LAYERGROUP: "{ $name }" नाम का कोई समूह नहीं।
+
+context-menu =
+    .customize = अनुकूलित करें…
+    .editor-title = पंक्ति छिपाने के लिए उसका चिह्न हटाएँ
+    .my-commands = मेरे कमांड
+    .command-placeholder = कमांड या उपनाम
+    .add = जोड़ें
+    .done = हो गया

@@ -8680,3 +8680,11 @@ layer-groups =
     .updated = LAYERGROUP: "{ $name }" güncellendi.
     .deleted = LAYERGROUP: "{ $name }" silindi; katmanları duruyor.
     .not-found = LAYERGROUP: "{ $name }" adlı grup yok.
+
+context-menu =
+    .customize = Özelleştir…
+    .editor-title = Gizlemek için satırın işaretini kaldırın
+    .my-commands = Komutlarım
+    .command-placeholder = Komut veya kısayol
+    .add = Ekle
+    .done = Bitti

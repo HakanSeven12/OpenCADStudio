@@ -8761,3 +8761,11 @@ layer-groups =
     .updated = LAYERGROUP: ενημερώθηκε η "{ $name }".
     .deleted = LAYERGROUP: διαγράφηκε η "{ $name }"· τα επίπεδα μένουν.
     .not-found = LAYERGROUP: δεν υπάρχει ομάδα "{ $name }".
+
+context-menu =
+    .customize = Προσαρμογή…
+    .editor-title = Αποεπιλέξτε μια γραμμή για απόκρυψη
+    .my-commands = Οι εντολές μου
+    .command-placeholder = Εντολή ή ψευδώνυμο
+    .add = Προσθήκη
+    .done = Τέλος

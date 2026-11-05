@@ -1478,6 +1478,10 @@ impl OpenCADStudio {
                 };
                 Message::PlotDlg(PlotDlgMsg::Printer(device))
             }
+            // The open right-click menu turns into its editor.
+            "context_menu_customize" => {
+                Message::ContextMenuPick(crate::ui::popup::context_menu::MenuAction::Customize)
+            }
             // The Plot dialog's Plot / Export button.
             "plot_commit" => Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::Commit),
             // The "changed outside" modal's suggested actions (D6): reload

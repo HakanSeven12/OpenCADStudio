@@ -8758,3 +8758,11 @@ layer-groups =
     .updated = LAYERGROUP: "{ $name }" päivitetty.
     .deleted = LAYERGROUP: "{ $name }" poistettu; tasot säilyvät.
     .not-found = LAYERGROUP: ryhmää "{ $name }" ei ole.
+
+context-menu =
+    .customize = Mukauta…
+    .editor-title = Piilota rivi poistamalla valinta
+    .my-commands = Omat komennot
+    .command-placeholder = Komento tai alias
+    .add = Lisää
+    .done = Valmis

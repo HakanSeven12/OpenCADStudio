@@ -3038,13 +3038,24 @@ bg={bg_ms:.1}ms n={view_count}"
                     (sel.menu.open_at, sel.menu.ui.highlighted)
                 };
                 if let Some(p) = ctx_pos {
-                    let menu = self.current_context_menu();
-                    viewport_stack = viewport_stack.push(viewport_context_menu_overlay(
-                        p,
-                        command_line_inset,
-                        &menu,
-                        highlighted,
-                    ));
+                    if let Some(draft) = &self.context_menu_editing {
+                        let raw = self.uncustomized_context_menu();
+                        viewport_stack = viewport_stack.push(overlay::context_menu_editor_overlay(
+                            p,
+                            command_line_inset,
+                            &raw.rows,
+                            &self.context_menu_custom,
+                            draft,
+                        ));
+                    } else {
+                        let menu = self.current_context_menu();
+                        viewport_stack = viewport_stack.push(viewport_context_menu_overlay(
+                            p,
+                            command_line_inset,
+                            &menu,
+                            highlighted,
+                        ));
+                    }
                 }
             }
 

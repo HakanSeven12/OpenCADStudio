@@ -8761,3 +8761,11 @@ layer-groups =
     .updated = LAYERGROUP: обновена "{ $name }".
     .deleted = LAYERGROUP: "{ $name }" е изтрита; слоевете остават.
     .not-found = LAYERGROUP: няма група "{ $name }".
+
+context-menu =
+    .customize = Персонализиране…
+    .editor-title = Махнете отметката, за да скриете ред
+    .my-commands = Моите команди
+    .command-placeholder = Команда или псевдоним
+    .add = Добави
+    .done = Готово

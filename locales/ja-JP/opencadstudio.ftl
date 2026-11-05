@@ -8739,3 +8739,11 @@ layer-groups =
     .updated = LAYERGROUP: 「{ $name }」を更新しました。
     .deleted = LAYERGROUP: 「{ $name }」を削除しました。画層は残ります。
     .not-found = LAYERGROUP: 「{ $name }」というグループはありません。
+
+context-menu =
+    .customize = カスタマイズ…
+    .editor-title = チェックを外すと行を非表示にします
+    .my-commands = マイ コマンド
+    .command-placeholder = コマンドまたはエイリアス
+    .add = 追加
+    .done = 完了

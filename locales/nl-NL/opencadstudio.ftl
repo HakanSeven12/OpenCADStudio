@@ -8759,3 +8759,11 @@ layer-groups =
     .updated = LAYERGROUP: "{ $name }" bijgewerkt.
     .deleted = LAYERGROUP: "{ $name }" verwijderd; de lagen blijven.
     .not-found = LAYERGROUP: geen groep met de naam "{ $name }".
+
+context-menu =
+    .customize = Aanpassen…
+    .editor-title = Vink een regel uit om die te verbergen
+    .my-commands = Mijn opdrachten
+    .command-placeholder = Opdracht of alias
+    .add = Toevoegen
+    .done = Klaar

@@ -8764,3 +8764,11 @@ layer-groups =
     .updated = LAYERGROUP: تم تحديث "{ $name }".
     .deleted = LAYERGROUP: تم حذف "{ $name }"؛ تبقى طبقاتها.
     .not-found = LAYERGROUP: لا توجد مجموعة باسم "{ $name }".
+
+context-menu =
+    .customize = تخصيص…
+    .editor-title = ألغِ تحديد صف لإخفائه
+    .my-commands = أوامري
+    .command-placeholder = أمر أو اسم مستعار
+    .add = إضافة
+    .done = تم

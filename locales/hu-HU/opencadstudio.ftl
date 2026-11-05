@@ -8739,3 +8739,11 @@ layer-groups =
     .updated = LAYERGROUP: "{ $name }" frissítve.
     .deleted = LAYERGROUP: "{ $name }" törölve; a fóliák maradnak.
     .not-found = LAYERGROUP: nincs "{ $name }" nevű csoport.
+
+context-menu =
+    .customize = Testreszabás…
+    .editor-title = Egy sor elrejtéséhez vegye ki a pipát
+    .my-commands = Saját parancsok
+    .command-placeholder = Parancs vagy álnév
+    .add = Hozzáadás
+    .done = Kész

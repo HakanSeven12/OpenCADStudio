@@ -3472,17 +3472,22 @@ impl Scene {
     }
 
     fn apply_default_lighting(uniforms: &mut Uniforms, camera: &Camera, default_type: i16) {
+        // Soft studio light: a key and a fill not much weaker, over a raised
+        // ambient floor, so faces turned away keep their colour.
         let sources = [
-            (glam::Vec3::new(0.5, 0.8, 0.6), 0.6_f32),
+            (glam::Vec3::new(0.5, 0.8, 0.6), 0.55_f32),
             (glam::Vec3::new(-0.7, 0.3, 0.4), 0.4_f32),
         ];
         let count = if default_type == 0 { 1 } else { 2 };
         uniforms.lighting[0] = count as f32;
+        for ambient in &mut uniforms.lighting[1..4] {
+            *ambient = ambient.max(0.3);
+        }
         for (index, (view_direction, two_light_intensity)) in
             sources.into_iter().take(count).enumerate()
         {
             let toward_source = (camera.rotation * view_direction).normalize_or_zero();
-            let intensity = if count == 1 { 1.0 } else { two_light_intensity };
+            let intensity = if count == 1 { 0.85 } else { two_light_intensity };
             uniforms.light_position_type[index][3] = 1.0;
             uniforms.light_direction_intensity[index] = [
                 -toward_source.x,
@@ -5149,7 +5154,7 @@ impl Scene {
             let highlight = if style.face_modifier & 2 != 0 {
                 (style.face_specular / 100.0).clamp(0.0, 1.0)
             } else {
-                -1.0
+                crate::scene::pipeline::uniforms::DEFAULT_HIGHLIGHT
             };
             uniforms.visual_style = [
                 style.face_color_mode as f32,

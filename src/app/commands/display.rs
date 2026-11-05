@@ -952,6 +952,7 @@ impl OpenCADStudio {
                     selected,
                     available,
                 );
+                self.command_line.push_info(&cmd.wire_density_line(isolines));
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

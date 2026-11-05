@@ -15,7 +15,7 @@ use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
 
-/// The line EXTRUDE, REVOLVE and SWEEP print as they start.
+/// The line EXTRUDE, REVOLVE, SWEEP and LOFT print as they start.
 fn wire_density_line(isolines: usize, solid: bool) -> String {
     t!(
         "Current wire frame density:  ISOLINES=%{n}, Closed profiles creation mode = %{mode}",
@@ -2325,6 +2325,9 @@ struct LoftPreviewKey {
 }
 
 impl LoftCommand {
+    pub fn wire_density_line(&self, isolines: usize) -> String {
+        wire_density_line(isolines, self.state.mode == ExtrudeMode::Solid)
+    }
     pub fn new(
         color: [f32; 4],
         isolines: usize,

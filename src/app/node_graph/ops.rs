@@ -852,7 +852,7 @@ impl AppHost<'_> {
             // hatch it makes.
             "Hatch At Point" => one(self.run("HATCH", vec3(&a[0]).map(|p| vec![Point(p), Enter]))),
             "Hatch Objects" => {
-                one(self.run("HATCH", selection(&a[0]).map(|s| vec![typed("O"), s, Enter])))
+                one(self.run("HATCH", selection(&a[0]).map(|s| vec![typed("S"), s, Enter])))
             }
             "Centerline" => {
                 let steps = (|| Some(vec![pick(&a[0], &a[1])?, pick(&a[2], &a[3])?]))();

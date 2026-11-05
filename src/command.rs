@@ -2508,6 +2508,9 @@ pub enum CmdResult {
     ReportMeasurement(String),
     /// Print an input error and keep the command active.
     ReportError(String),
+    /// Print an input error, then a measurement result again, and keep the
+    /// command active.
+    ReportErrorAndMeasurement(String, String),
     /// Reports an error and ends the command (`Lines are parallel.`).
     CancelWithMessage(String),
     /// Explode this block reference and commit its pieces; end the command

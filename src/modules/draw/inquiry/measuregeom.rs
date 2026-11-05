@@ -132,6 +132,8 @@ pub struct MeasureGeomCommand {
     last_report: Option<String>,
     /// Distance: Multiple points.
     multiple: bool,
+    /// The last finished result, printed again after an invalid option.
+    last_result: Option<String>,
     /// The picked entity for RADIUS, injected before `on_entity_pick`.
     picked: Option<EntityType>,
     plane: WorkingPlane,
@@ -168,6 +170,7 @@ impl MeasureGeomCommand {
             height_base: DVec3::ZERO,
             last_report: None,
             multiple: false,
+            last_result: None,
             picked: None,
             plane: WorkingPlane::default(),
             quick: std::cell::RefCell::new(None),
@@ -216,6 +219,7 @@ impl MeasureGeomCommand {
         }
         self.reset();
         self.mode = Mode::Choose;
+        self.last_result = Some(message.clone());
         CmdResult::ReportMeasurement(message)
     }
 
@@ -1506,7 +1510,11 @@ impl CadCommand for MeasureGeomCommand {
         match self.mode {
             Mode::Choose => {
                 return Some(self.choose(&input).unwrap_or_else(|| {
-                    CmdResult::ReportError(t!("Invalid option keyword.").into_owned())
+                    let error = t!("Invalid option keyword.").into_owned();
+                    match self.last_result.clone() {
+                        Some(result) => CmdResult::ReportErrorAndMeasurement(error, result),
+                        None => CmdResult::ReportError(error),
+                    }
                 }));
             }
             // A letter that is no option is left alone: quick measure keeps

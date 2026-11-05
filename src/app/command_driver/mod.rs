@@ -1176,6 +1176,10 @@ impl OpenCADStudio {
             CmdResult::ReportError(msg) => {
                 self.handle_report_error(msg);
             }
+            CmdResult::ReportErrorAndMeasurement(error, msg) => {
+                self.command_line.push_error(&error);
+                self.handle_report_measurement(msg);
+            }
             CmdResult::ReportMeasurementAndDeselect(msg) => {
                 self.handle_report_measurement_and_deselect(msg);
             }

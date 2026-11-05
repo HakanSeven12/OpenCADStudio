@@ -1009,9 +1009,11 @@ pub struct PolyCommand {
     plane: WorkingPlane,
 }
 
-/// The inscribed/circumscribed choice is offered as the default next time.
-static POLYGON_CIRCUMSCRIBED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    /// The inscribed/circumscribed choice is offered as the default next
+    /// time (commands run on the UI thread).
+    static POLYGON_CIRCUMSCRIBED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
 
 impl PolyCommand {
     pub fn new() -> Self {
@@ -1019,14 +1021,14 @@ impl PolyCommand {
             sides: defaults::get_polygon_sides() as u32,
             step: 0,
             center: DVec3::ZERO,
-            circumscribed: POLYGON_CIRCUMSCRIBED.load(std::sync::atomic::Ordering::Relaxed),
+            circumscribed: POLYGON_CIRCUMSCRIBED.get(),
             plane: WorkingPlane::default(),
         }
     }
 
     fn choose(&mut self, circumscribed: bool) {
         self.circumscribed = circumscribed;
-        POLYGON_CIRCUMSCRIBED.store(circumscribed, std::sync::atomic::Ordering::Relaxed);
+        POLYGON_CIRCUMSCRIBED.set(circumscribed);
         self.step = 3;
     }
 

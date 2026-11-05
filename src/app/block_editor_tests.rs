@@ -4090,7 +4090,7 @@ fn a_linear_takes_its_base_location_and_value_set() {
     feed(&mut app, "V");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "Enter distance value set type [None/Increment/List] <None>:"
+        "Enter distance value set type [None/List/Increment] <None>:"
     );
     feed(&mut app, "I");
     feed(&mut app, "5");

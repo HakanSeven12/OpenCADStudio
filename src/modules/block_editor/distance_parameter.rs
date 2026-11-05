@@ -294,7 +294,7 @@ impl DistanceParameterCommand {
                 crate::t!("Enter base location [Startpoint/Midpoint] <Startpoint>:").into_owned()
             }
             Asking::ValueSetType => crate::t!(
-                "Enter distance value set type [None/Increment/List] <None>:"
+                "Enter distance value set type [None/List/Increment] <None>:"
             )
             .into_owned(),
             Asking::ValueSetIncrement => crate::t!("Enter distance increment:").into_owned(),
@@ -647,7 +647,7 @@ mod tests {
         ));
         assert_eq!(
             command.prompt(),
-            "Enter distance value set type [None/Increment/List] <None>:"
+            "Enter distance value set type [None/List/Increment] <None>:"
         );
         assert_eq!(command.input_kind(), InputKind::SingleToken);
         assert!(matches!(

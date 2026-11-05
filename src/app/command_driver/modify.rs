@@ -152,6 +152,10 @@ impl OpenCADStudio {
                     .collect();
                 crate::modules::draw::modify::join::join_to_source(entity, &candidates)
             });
+        let line_source = matches!(
+            self.tabs[i].scene.document.get_entity(source),
+            Some(codec::EntityType::Line(_))
+        );
         if let Some((replacement, consumed)) = joined {
             self.push_undo_snapshot(i, "JOIN");
             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(source) {
@@ -163,7 +167,14 @@ impl OpenCADStudio {
                 .scene
                 .bump_entities(&[(source, crate::scene::ChangeKind::Modified)]);
             self.tabs[i].dirty = true;
-            let count = consumed.len();
+            // The reference counts no segments when a line source stays a line.
+            let count = if line_source
+                && matches!(self.tabs[i].scene.document.get_entity(source), Some(codec::EntityType::Line(_)))
+            {
+                0
+            } else {
+                consumed.len()
+            };
             let message = match self.tabs[i].scene.document.get_entity(source) {
                 Some(codec::EntityType::Arc(_)) if count == 1 => crate::tf!("{count} arc joined to source"),
                 Some(codec::EntityType::Arc(_)) => crate::tf!("{count} arcs joined to source"),

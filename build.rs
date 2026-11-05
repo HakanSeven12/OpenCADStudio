@@ -82,9 +82,9 @@ fn main() {
     println!("cargo:rustc-env=OCS_FULL_VERSION={full_version}");
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "unknown".to_string());
     println!("cargo:rustc-env=OCS_BUILD_PROFILE={profile}");
-    if std::env::var("TARGET").ok().as_deref() == Some("x86_64-pc-windows-msvc")
-        && profile == "debug"
-    {
+    // Bounded selection UI construction exceeds the 1 MiB default in release;
+    // link every profile explicitly because rustflags may be overridden/bypassed.
+    if std::env::var("TARGET").ok().as_deref() == Some("x86_64-pc-windows-msvc") {
         println!("cargo:rustc-link-arg-bin=OpenCADStudio=/STACK:16777216");
     }
     let mut features: Vec<String> = std::env::vars()

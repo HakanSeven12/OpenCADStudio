@@ -6872,6 +6872,8 @@ count-feature =
     .invalid-point = Virheellinen piste.
 
 dock =
+    .icons-only = Vain kuvakkeet
+    .icons-and-names = Kuvakkeet ja nimet
     .allow-docking = Salli telakointi
     .auto-hide = Piilota automaattisesti
     .dock-left = Telakoi vasemmalle

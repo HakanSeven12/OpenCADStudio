@@ -6853,6 +6853,8 @@ count-feature =
     .invalid-point = Érvénytelen pont.
 
 dock =
+    .icons-only = Csak ikonok
+    .icons-and-names = Ikonok és nevek
     .allow-docking = Dokkolás engedélyezése
     .auto-hide = Automatikus elrejtés
     .dock-left = Dokkolás balra

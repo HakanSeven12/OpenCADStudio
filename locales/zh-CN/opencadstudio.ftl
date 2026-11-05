@@ -6858,6 +6858,8 @@ count-feature =
     .invalid-point = 无效的点。
 
 dock =
+    .icons-only = 仅图标
+    .icons-and-names = 图标和名称
     .allow-docking = 允许停靠
     .auto-hide = 自动隐藏
     .dock-left = 停靠到左侧

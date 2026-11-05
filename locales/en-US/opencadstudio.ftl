@@ -6876,6 +6876,8 @@ count-feature =
     .invalid-point = Invalid point.
 
 dock =
+    .icons-only = Icons only
+    .icons-and-names = Icons and names
     .allow-docking = Allow docking
     .auto-hide = Auto-hide
     .dock-left = Dock left

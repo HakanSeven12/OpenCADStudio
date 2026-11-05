@@ -6863,6 +6863,8 @@ count-feature =
     .invalid-point = अमान्य बिंदु।
 
 dock =
+    .icons-only = केवल आइकन
+    .icons-and-names = आइकन और नाम
     .allow-docking = डॉकिंग की अनुमति दें
     .auto-hide = स्वतः छिपाएँ
     .dock-left = बाएँ डॉक करें

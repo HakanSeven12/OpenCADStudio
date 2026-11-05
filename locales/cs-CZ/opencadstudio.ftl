@@ -6877,6 +6877,8 @@ count-feature =
     .invalid-point = Neplatný bod.
 
 dock =
+    .icons-only = Pouze ikony
+    .icons-and-names = Ikony a názvy
     .allow-docking = Povolit ukotvení
     .auto-hide = Automaticky skrýt
     .dock-left = Ukotvit vlevo

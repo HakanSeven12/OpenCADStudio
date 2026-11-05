@@ -56,6 +56,9 @@ pub enum DockMsg {
     /// Pallet menu pick: hide `panel` when it shows, else open it docked on
     /// the edge (as a new group unless it already has a group there).
     EdgeMenuToggle(DockSide, PanelId),
+    /// Show each pallet's name beside its icon in the strips (`true`), or
+    /// icons only.
+    StripLabels(bool),
     /// Begin dragging a whole group by its edge band in the icon strip.
     GroupGrab(DockSide, usize),
     /// The pointer entered a group's edge band (side, group).
@@ -529,6 +532,9 @@ pub struct DockState {
     /// Desktop: where each dialog's window of its own last was, by dialog
     /// name.
     pub tool_windows: BTreeMap<String, crate::app::tool_windows::WindowPlacement>,
+    /// The icon strips label each pallet, sharing the edge's height between
+    /// them, instead of showing icons only.
+    pub strip_labels: bool,
 }
 
 impl Default for DockState {
@@ -542,6 +548,7 @@ impl Default for DockState {
             panels: BTreeMap::new(),
             detached: BTreeMap::new(),
             tool_windows: BTreeMap::new(),
+            strip_labels: false,
         }
     }
 }
@@ -1116,6 +1123,10 @@ pub const DOCK_FLOAT_BAR_W: f32 = 28.0;
 pub const DOCK_STRIP_W: f32 = 40.0;
 /// Height of one pallet icon in the strip.
 pub const STRIP_CELL_H: f32 = 32.0;
+/// Shortest pallet cell of a labelled strip.
+pub const STRIP_LABEL_MIN_H: f32 = 96.0;
+/// Height of the + button below a strip's groups.
+pub const STRIP_PLUS_H: f32 = 28.0;
 /// Space above and below a group's icons, inside the group.
 pub const STRIP_PAD: f32 = 6.0;
 /// Hairline divider between groups.
@@ -1140,12 +1151,14 @@ pub struct StripGroup {
     pub icons_top: f32,
     /// Number of icons (open pallets).
     pub icons: usize,
+    /// Height of one pallet's cell.
+    pub cell_h: f32,
 }
 
 impl StripGroup {
     /// Bottom of the group's last icon.
     pub fn icons_bottom(&self) -> f32 {
-        self.icons_top + self.icons as f32 * STRIP_CELL_H
+        self.icons_top + self.icons as f32 * self.cell_h
     }
 
     /// Bottom of the group's row (where its divider starts).
@@ -1154,9 +1167,10 @@ impl StripGroup {
     }
 }
 
-/// Lay out the icon strip for `groups` = (group index, open pallet count),
-/// returning each group's place and the top of the + button below them.
-pub fn strip_layout(groups: &[(usize, usize)]) -> (Vec<StripGroup>, f32) {
+/// Lay out the icon strip for `groups` = (group index, open pallet count)
+/// with `cell_h` tall pallet cells, returning each group's place and the top
+/// of the + button below them.
+pub fn strip_layout(groups: &[(usize, usize)], cell_h: f32) -> (Vec<StripGroup>, f32) {
     let mut y = 0.0;
     let placed = groups
         .iter()
@@ -1166,6 +1180,7 @@ pub fn strip_layout(groups: &[(usize, usize)]) -> (Vec<StripGroup>, f32) {
                 top: y,
                 icons_top: y + STRIP_PAD,
                 icons,
+                cell_h,
             };
             y = g.bottom() + STRIP_DIVIDER_H;
             g
@@ -1192,7 +1207,7 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
             return StripHit::NewGroup(Some(g.group));
         }
         if y < g.icons_bottom() - STRIP_NEW_GROUP_SLOP {
-            let index = (((y - g.icons_top) / STRIP_CELL_H).round().max(0.0) as usize).min(g.icons);
+            let index = (((y - g.icons_top) / g.cell_h).round().max(0.0) as usize).min(g.icons);
             return StripHit::Join {
                 group: g.group,
                 index,
@@ -1405,6 +1420,8 @@ pub fn frame<'a>(
 /// Rotated label shared by floating dock title bars and palette categories.
 pub(crate) struct VerticalLabel {
     pub text: String,
+    /// Centre the text along the bar instead of starting at its bottom.
+    pub centered: bool,
 }
 
 impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
@@ -1424,12 +1441,17 @@ impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
             frame.rotate(iced::Radians(-std::f32::consts::FRAC_PI_2));
             // After the rotation the text runs along local +x (upward), so
             // the bar's bottom end sits at -height/2.
+            let (start, align_x) = if self.centered {
+                (0.0, iced::advanced::text::Alignment::Center)
+            } else {
+                (-bounds.height / 2.0, iced::advanced::text::Alignment::Left)
+            };
             frame.fill_text(iced::widget::canvas::Text {
                 content: self.text.clone(),
-                position: iced::Point::new(-bounds.height / 2.0, 0.0),
+                position: iced::Point::new(start, 0.0),
                 color: theme.palette().background.base.text.scale_alpha(0.72),
                 size: iced::Pixels(13.0),
-                align_x: iced::advanced::text::Alignment::Left,
+                align_x,
                 align_y: iced::alignment::Vertical::Center,
                 shaping: iced::advanced::text::Shaping::Advanced,
                 ..Default::default()
@@ -1720,7 +1742,7 @@ mod tests {
     #[test]
     fn strip_hit_maps_dividers_icons_and_the_end() {
         // Two groups: three icons, then one.
-        let (layout, plus_top) = strip_layout(&[(0, 3), (2, 1)]);
+        let (layout, plus_top) = strip_layout(&[(0, 3), (2, 1)], STRIP_CELL_H);
         let g0 = layout[0];
         let g1 = layout[1];
         assert_eq!(g0.icons_top, STRIP_PAD);

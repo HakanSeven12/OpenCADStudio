@@ -6887,6 +6887,8 @@ count-feature =
     .invalid-point = نقطة غير صالحة.
 
 dock =
+    .icons-only = الأيقونات فقط
+    .icons-and-names = الأيقونات والأسماء
     .allow-docking = السماح بالإرساء
     .auto-hide = إخفاء تلقائي
     .dock-left = إرساء إلى اليسار

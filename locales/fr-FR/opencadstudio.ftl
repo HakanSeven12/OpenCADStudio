@@ -6875,6 +6875,8 @@ count-feature =
     .invalid-point = Point non valide.
 
 dock =
+    .icons-only = Icônes seules
+    .icons-and-names = Icônes et noms
     .allow-docking = Autoriser l'ancrage
     .auto-hide = Masquage automatique
     .dock-left = Ancrer à gauche

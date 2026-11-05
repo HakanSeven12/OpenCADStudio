@@ -6875,6 +6875,8 @@ count-feature =
     .invalid-point = Μη έγκυρο σημείο.
 
 dock =
+    .icons-only = Μόνο εικονίδια
+    .icons-and-names = Εικονίδια και ονόματα
     .allow-docking = Να επιτρέπεται η πρόσδεση
     .auto-hide = Αυτόματη απόκρυψη
     .dock-left = Πρόσδεση αριστερά

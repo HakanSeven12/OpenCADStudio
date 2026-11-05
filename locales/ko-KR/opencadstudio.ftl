@@ -6874,6 +6874,8 @@ count-feature =
     .invalid-point = 점이 잘못되었습니다.
 
 dock =
+    .icons-only = 아이콘만
+    .icons-and-names = 아이콘과 이름
     .allow-docking = 도킹 허용
     .auto-hide = 자동 숨기기
     .dock-left = 왼쪽에 도킹

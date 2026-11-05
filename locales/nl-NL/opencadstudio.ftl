@@ -6873,6 +6873,8 @@ count-feature =
     .invalid-point = Ongeldig punt.
 
 dock =
+    .icons-only = Alleen pictogrammen
+    .icons-and-names = Pictogrammen en namen
     .allow-docking = Koppelen toestaan
     .auto-hide = Automatisch verbergen
     .dock-left = Links koppelen

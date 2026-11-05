@@ -6863,6 +6863,8 @@ count-feature =
     .invalid-point = 点が無効です。
 
 dock =
+    .icons-only = アイコンのみ
+    .icons-and-names = アイコンと名前
     .allow-docking = ドッキングを許可
     .auto-hide = 自動的に隠す
     .dock-left = 左にドッキング

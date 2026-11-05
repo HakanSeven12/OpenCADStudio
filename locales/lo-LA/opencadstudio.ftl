@@ -6876,6 +6876,8 @@ count-feature =
     .invalid-point = ຈຸດບໍ່ຖືກຕ້ອງ.
 
 dock =
+    .icons-only = ສະເພາະໄອຄອນ
+    .icons-and-names = ໄອຄອນ ແລະ ຊື່
     .allow-docking = ອະນຸຍາດການຕິດຂອບ
     .auto-hide = ເຊື່ອງອັດຕະໂນມັດ
     .dock-left = ຕິດຂອບຊ້າຍ

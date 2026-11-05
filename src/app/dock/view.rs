@@ -95,7 +95,7 @@ impl OpenCADStudio {
                         .into(),
                 );
                 layers.push(place_at(
-                    dock_edge_menu(side, &checked),
+                    dock_edge_menu(side, &checked, self.dock.strip_labels),
                     x.max(0.0),
                     plus_top,
                 ));
@@ -246,8 +246,11 @@ impl OpenCADStudio {
         use crate::app::config::DockSide;
         use crate::ui::dock::{
             DockMsg, DropTarget, DOCK_STRIP_W, STRIP_CELL_H, STRIP_DIVIDER_H, STRIP_GRIP_W,
-            STRIP_PAD, STRIP_PLUS_GAP,
+            STRIP_PAD, STRIP_PLUS_GAP, STRIP_PLUS_H,
         };
+        let (layout, _) = self.dock_strip_layout(side);
+        let cell_h = layout.first().map_or(STRIP_CELL_H, |g| g.cell_h);
+        let labels = self.dock.strip_labels;
         // Only a group actually on screen is marked as shown: on an
         // auto-hiding edge nothing is, until a group is revealed.
         let shown = self
@@ -268,7 +271,7 @@ impl OpenCADStudio {
             let group_dragged =
                 dragging && movement.is_some_and(|(_, group, _)| group == Some((side, gi)));
             let panels = self.dock_group_visible(side, gi);
-            let row_h = 2.0 * STRIP_PAD + panels.len() as f32 * STRIP_CELL_H;
+            let row_h = 2.0 * STRIP_PAD + panels.len() as f32 * cell_h;
 
             let mut icons: Vec<Element<'_, Message>> = vec![Space::new().height(STRIP_PAD).into()];
             for id in panels {
@@ -284,9 +287,24 @@ impl OpenCADStudio {
                     crate::ui::icons::themed_secondary(id.icon(), 20.0)
                 };
                 let hovered = !dragging && self.dock_icon_hover == Some(id);
+                // Labelled, the pallet's name reads upward under its icon.
+                let glyph: Element<'_, Message> = if labels {
+                    column![
+                        container(glyph).center_x(Fill).height(Length::Fixed(STRIP_CELL_H - 4.0)),
+                        iced::widget::canvas(crate::ui::dock::VerticalLabel {
+                            text: t!(id.title()).into_owned(),
+                            centered: true,
+                        })
+                        .width(Fill)
+                        .height(Fill),
+                    ]
+                    .into()
+                } else {
+                    glyph.into()
+                };
                 let cell = container(glyph)
                     .center_x(Length::Fixed(STRIP_CELL_H))
-                    .center_y(Length::Fixed(STRIP_CELL_H - 2.0))
+                    .center_y(Length::Fixed(cell_h - 2.0))
                     .style(move |theme: &Theme| container::Style {
                         background: hovered
                             .then(|| Background::Color(theme.palette().background.weak.color)),
@@ -299,9 +317,10 @@ impl OpenCADStudio {
                 let cell = mouse_area(
                     container(cell)
                         .center_x(Length::Fixed(DOCK_STRIP_W))
-                        .center_y(Length::Fixed(STRIP_CELL_H)),
+                        .center_y(Length::Fixed(cell_h)),
                 )
                 .on_press(Message::Dock(DockMsg::IconPress(id)))
+                .on_right_press(Message::Dock(DockMsg::EdgeMenu(Some(side))))
                 .on_enter(Message::Dock(DockMsg::Hover(id)))
                 .on_exit(Message::Dock(DockMsg::HoverEnd(id)))
                 .interaction(iced::mouse::Interaction::Pointer);
@@ -413,8 +432,8 @@ impl OpenCADStudio {
             },
             ..Default::default()
         })
-        .width(Length::Fixed(28.0))
-        .height(Length::Fixed(28.0))
+        .width(Length::Fixed(STRIP_PLUS_H))
+        .height(Length::Fixed(STRIP_PLUS_H))
         .padding(7);
         items.push(container(plus).center_x(Length::Fixed(DOCK_STRIP_W)).into());
         container(column(items))
@@ -863,7 +882,7 @@ impl OpenCADStudio {
         target: crate::ui::dock::DropTarget,
     ) -> Vec<Element<'_, Message>> {
         use crate::app::config::DockSide;
-        use crate::ui::dock::{DropTarget, DOCK_STRIP_W, STRIP_CELL_H};
+        use crate::ui::dock::{DropTarget, DOCK_STRIP_W};
         let (ww, _) = self.dock_workspace_size();
         let strip_x = match side {
             DockSide::Left => 0.0,
@@ -883,7 +902,7 @@ impl OpenCADStudio {
                     .iter()
                     .filter(|p| self.dock_panel_visible(**p) || Some(**p) == dragged)
                     .count();
-                let y = g.icons_top + above as f32 * STRIP_CELL_H;
+                let y = g.icons_top + above as f32 * g.cell_h;
                 marks.push(place_at(dock_insert_line(), strip_x + 7.0, y - 3.5));
             }
             DropTarget::Edge { index, .. } => {
@@ -1045,6 +1064,7 @@ fn floating_title_bar(
     };
     let title = canvas(crate::ui::dock::VerticalLabel {
         text: t!(id.title()).into_owned(),
+        centered: false,
     })
     .width(Fill)
     .height(Fill);
@@ -1175,6 +1195,7 @@ const FLOAT_MENU_H: f32 = 140.0;
 fn dock_edge_menu(
     side: crate::app::config::DockSide,
     checked: &[(crate::ui::dock::PanelId, bool)],
+    labels: bool,
 ) -> Element<'static, Message> {
     use crate::ui::dock::DockMsg;
     let rows: Vec<Element<'static, Message>> = checked
@@ -1202,6 +1223,35 @@ fn dock_edge_menu(
             .into()
         })
         .collect();
+    let mut rows = rows;
+    rows.push(
+        container(Space::new())
+            .width(Fill)
+            .height(1)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.neutral.color)),
+                ..Default::default()
+            })
+            .into(),
+    );
+    for (label, on) in [
+        (crate::tr!("dock", "icons-only"), false),
+        (crate::tr!("dock", "icons-and-names"), true),
+    ] {
+        let check: Element<'static, Message> = if on == labels {
+            crate::ui::icons::themed(crate::ui::icons::CHECK, 12.0)
+        } else {
+            Space::new().width(12).height(12).into()
+        };
+        rows.push(
+            button(row![text(label).size(12).width(Fill), check].spacing(8).align_y(iced::Center))
+                .on_press(Message::Dock(DockMsg::StripLabels(on)))
+                .style(menu_row_style)
+                .padding([5, 8])
+                .width(Fill)
+                .into(),
+        );
+    }
     menu_frame(column(rows).spacing(1).padding(4).into())
 }
 

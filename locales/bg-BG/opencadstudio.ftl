@@ -6875,6 +6875,8 @@ count-feature =
     .invalid-point = Невалидна точка.
 
 dock =
+    .icons-only = Само икони
+    .icons-and-names = Икони и имена
     .allow-docking = Разреши закачане
     .auto-hide = Автоматично скриване
     .dock-left = Закачи вляво

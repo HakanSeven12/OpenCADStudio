@@ -6873,6 +6873,8 @@ count-feature =
     .invalid-point = Ungültiger Punkt.
 
 dock =
+    .icons-only = Nur Symbole
+    .icons-and-names = Symbole und Namen
     .allow-docking = Andocken zulassen
     .auto-hide = Automatisch ausblenden
     .dock-left = Links andocken

@@ -113,13 +113,21 @@ pub(crate) struct ToolDrag {
     pub last: Option<Point>,
 }
 
-/// Where a window of its own last was, in screen logical pixels.
+/// Where a window of its own last was, in screen logical pixels. A NaN
+/// position (not placed yet) is written as `null` and read back as NaN.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WindowPlacement {
+    #[serde(deserialize_with = "nan_when_null")]
     pub x: f32,
+    #[serde(deserialize_with = "nan_when_null")]
     pub y: f32,
     pub w: f32,
     pub h: f32,
+}
+
+fn nan_when_null<'de, D: serde::Deserializer<'de>>(d: D) -> Result<f32, D::Error> {
+    use serde::Deserialize;
+    Ok(Option::<f32>::deserialize(d)?.unwrap_or(f32::NAN))
 }
 
 /// What a window of its own shows.
@@ -965,6 +973,16 @@ fn open_window(placement: WindowPlacement, _title: String) -> (iced::window::Id,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An unplaced window must not make the whole settings file unreadable.
+    #[test]
+    fn unplaced_window_round_trips_through_settings() {
+        let placement = WindowPlacement { x: f32::NAN, y: f32::NAN, w: 300.0, h: 200.0 };
+        let json = serde_json::to_string(&placement).unwrap();
+        let back: WindowPlacement = serde_json::from_str(&json).unwrap();
+        assert!(back.x.is_nan() && back.y.is_nan());
+        assert_eq!((back.w, back.h), (300.0, 200.0));
+    }
 
     /// The messages a press on widget `id` in `element` sends.
     #[cfg(not(target_arch = "wasm32"))]

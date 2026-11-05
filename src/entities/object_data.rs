@@ -980,6 +980,34 @@ fn class_object_section(data: &codec::objects::ClassObjectData) -> Option<PropSe
                 ro("Indexed Objects", value.indexed_objects.len().to_string()),
             ],
         },
+        ClassObjectData::ObjectDataDictionary(value) => PropSection {
+            title: "Object Data Dictionary".to_string(),
+            props: vec![ro(
+                "Entries",
+                bounded_join(
+                    value
+                        .entries
+                        .iter()
+                        .map(|(name, handle)| format!("{name}: {}", handle_text(*handle))),
+                    64,
+                ),
+            )],
+        },
+        ClassObjectData::ObjectDataDescriptor(value) => PropSection {
+            title: "Object Data Descriptor".to_string(),
+            props: vec![
+                ro("Name", value.name.clone()),
+                ro("Kind", value.kind.to_string()),
+                ro("Payload", format!("{} bytes", value.payload.len())),
+            ],
+        },
+        ClassObjectData::ObjectDataRecord(value) => PropSection {
+            title: "Object Data Record".to_string(),
+            props: vec![
+                ro("Table", handle_text(value.table)),
+                ro("Payload", format!("{} bytes", value.payload.len())),
+            ],
+        },
         ClassObjectData::LayerFilter(value) => PropSection {
             title: "Layer Filter".to_string(),
             props: vec![ro("Names", bounded_join(value.names.iter().cloned(), 64))],

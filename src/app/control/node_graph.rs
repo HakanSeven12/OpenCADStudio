@@ -382,3 +382,33 @@ mod shape_node_tests {
     }
 }
 
+#[cfg(test)]
+mod radial_dimension_node_tests {
+    use serde_json::json;
+
+    /// #2591: Radius and Diameter Dimension nodes dimension a linked circle.
+    #[test]
+    fn radial_dimension_nodes_measure_the_linked_circle() {
+        for (node, measured) in [("Radius Dimension", 5.0), ("Diameter Dimension", 10.0)] {
+            let mut app = crate::app::OpenCADStudio::new_for_test();
+            let _ = app.automation_op(r#"{"op":"new"}"#);
+            let _ = app.run_command_line("CIRCLE 0,0 5");
+            let i = app.active_tab;
+            let circle = app.tabs[i].scene.document.entities().next().unwrap().common().handle;
+            let spec = super::ops::resolve(node).expect("node type");
+            let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+            for (field, value) in [
+                ("object", json!({"handle": circle.value()})),
+                ("location", json!({"x": 8, "y": 0})),
+            ] {
+                let port = super::Port { node: id, field: field.into() };
+                let _ = app.on_graph(super::GraphMsg::Set(port, value));
+            }
+            let dimension = app.tabs[i].scene.document.entities().find_map(|entity| match entity {
+                codec::EntityType::Dimension(dimension) => Some(dimension.base().actual_measurement),
+                _ => None,
+            });
+            assert_eq!(dimension, Some(measured), "{node}");
+        }
+    }
+}

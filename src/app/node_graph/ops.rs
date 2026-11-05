@@ -92,6 +92,8 @@ pub const LIBRARY: &[Spec] = &[
         &[v("vertex"), v("first"), v("second"), v("location")],
         OBJECT,
     ),
+    host("Radius Dimension", "Create", &[v("object"), v("location")], OBJECT),
+    host("Diameter Dimension", "Create", &[v("object"), v("location")], OBJECT),
     host(
         "Block Reference",
         "Create",
@@ -345,6 +347,29 @@ impl AppHost<'_> {
                             vertex, first, second, location, None,
                         )
                     }
+                    _ => None,
+                };
+                one(entity.map_or(Value::Null, |entity| self.create(entity)))
+            }
+            // The circle or arc of `object` nearest `location`, which also
+            // places the text, as DIMRADIUS and DIMDIAMETER take a pick.
+            "Radius Dimension" | "Diameter Dimension" => {
+                let entity = match (self.entity(&a[0]), vec3(&a[1])) {
+                    (Some(entity), Some(location)) => crate::scene::dimension_assoc::radial_source_at(
+                        entity,
+                        codec::types::Vector3::new(location.x, location.y, location.z),
+                    )
+                    .map(|source| {
+                        if spec.name == "Radius Dimension" {
+                            crate::modules::annotate::radius_dim::radial_dimension_entity(
+                                source, location, None, None,
+                            )
+                        } else {
+                            crate::modules::annotate::diameter_dim::diameter_dimension_entity(
+                                source, location, None, None,
+                            )
+                        }
+                    }),
                     _ => None,
                 };
                 one(entity.map_or(Value::Null, |entity| self.create(entity)))

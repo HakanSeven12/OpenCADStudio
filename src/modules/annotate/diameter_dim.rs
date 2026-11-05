@@ -62,29 +62,36 @@ impl DiameterDimensionCommand {
         source: crate::scene::dimension_assoc::RadialSourceGeometry,
         world: DVec3,
     ) -> EntityType {
-        let plane = WorkingPlane::new(
-            DVec3::from_array(source.plane.origin),
-            DVec3::from_array(source.plane.x_axis),
-            DVec3::from_array(source.plane.y_axis),
-        );
-        let chord = plane.to_local(dvec(source.chord_at(world.to_array())));
-        let far_chord = plane.to_local(dvec(source.opposite_chord_at(world.to_array())));
-        let point = plane.to_local(world);
-        let mut dim = DimensionDiameter::new(v3(chord), v3(far_chord));
-        dim.base.text_middle_point = v3(point);
-        dim.base.insertion_point = v3(point);
-        dim.base.text_user_positioned = true;
-        dim.leader_length = chord.distance(point);
-        dim.base.actual_measurement = dim.measurement();
-        crate::entities::dimension::set_dimension_text_override(
-            &mut dim.base,
-            self.text_override.clone(),
-        );
-        if let Some(angle) = self.text_angle {
-            dim.base.text_rotation = angle;
-        }
-        plane.place_entity(EntityType::Dimension(Box::new(Dimension::Diameter(dim))))
+        diameter_dimension_entity(source, world, self.text_override.clone(), self.text_angle)
     }
+}
+
+/// A diameter dimension of `source` with its text at `world`.
+pub(crate) fn diameter_dimension_entity(
+    source: crate::scene::dimension_assoc::RadialSourceGeometry,
+    world: DVec3,
+    text_override: Option<String>,
+    text_angle: Option<f64>,
+) -> EntityType {
+    let plane = WorkingPlane::new(
+        DVec3::from_array(source.plane.origin),
+        DVec3::from_array(source.plane.x_axis),
+        DVec3::from_array(source.plane.y_axis),
+    );
+    let chord = plane.to_local(dvec(source.chord_at(world.to_array())));
+    let far_chord = plane.to_local(dvec(source.opposite_chord_at(world.to_array())));
+    let point = plane.to_local(world);
+    let mut dim = DimensionDiameter::new(v3(chord), v3(far_chord));
+    dim.base.text_middle_point = v3(point);
+    dim.base.insertion_point = v3(point);
+    dim.base.text_user_positioned = true;
+    dim.leader_length = chord.distance(point);
+    dim.base.actual_measurement = dim.measurement();
+    crate::entities::dimension::set_dimension_text_override(&mut dim.base, text_override);
+    if let Some(angle) = text_angle {
+        dim.base.text_rotation = angle;
+    }
+    plane.place_entity(EntityType::Dimension(Box::new(Dimension::Diameter(dim))))
 }
 
 /// A diameter dimension for a dimensional constraint: the dimension line

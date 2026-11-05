@@ -3252,9 +3252,10 @@ pub trait CadCommand: Send {
         false
     }
 
-    /// Take a typed coordinate at an object prompt as a pick at that point.
+    /// Take a typed coordinate at an object prompt as a pick at that point,
+    /// as a click there would; a step that reads points itself keeps them.
     fn typed_point_picks_entity(&self) -> bool {
-        false
+        !self.entity_pick_accepts_points()
     }
 
     /// A constraint point the host resolved for a `CheckConstraintPoint`

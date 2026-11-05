@@ -3421,7 +3421,14 @@ modify =
     .bvhide-select = Выберите объекты, которые нужно скрыть:
     .bvshow-select = Выберите объекты, которые нужно показать:
     .arrayedit-select-array = ARRAYEDIT  Выберите массив:
-    .arrayedit-options = ARRAYEDIT  Введите параметр [Исходные/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Введите параметр [Исходные/Перенести элемент/Стереть элемент/Сбросить/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Выберите элемент:
+    .arrayedit-base-point = ARRAYEDIT  Базовая точка:
+    .arrayedit-second-point = ARRAYEDIT  Вторая точка:
+    .arrayedit-move-item = Перенести элемент
+    .arrayedit-erase-item = Стереть элемент
+    .arrayedit-no-item = ARRAYEDIT: там нет элемента массива.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: выбранный объект не является ассоциативным массивом.
     .blend-enter-continuity-tangent-curvature-c = BLEND Введите непрерывность [Тангент/Курватура] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND Выберите первую открытую кривую [Продолжение=__ocs_arg_c__]:

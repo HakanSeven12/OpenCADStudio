@@ -3417,7 +3417,14 @@ modify =
     .bvhide-select = Valitse piilotettavat objektit:
     .bvshow-select = Valitse näytettävät objektit:
     .arrayedit-select-array = ARRAYEDIT  Valitse sarja:
-    .arrayedit-options = ARRAYEDIT  Anna vaihtoehto [Lähde/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Anna vaihtoehto [Lähde/Siirrä kohde/Poista kohde/Nollaa/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Valitse kohde:
+    .arrayedit-base-point = ARRAYEDIT  Peruspiste:
+    .arrayedit-second-point = ARRAYEDIT  Toinen piste:
+    .arrayedit-move-item = Siirrä kohde
+    .arrayedit-erase-item = Poista kohde
+    .arrayedit-no-item = ARRAYEDIT: siinä ei ole ryhmän kohdetta.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: valittu objekti ei ole assosiatiivinen sarja.
     .blend-enter-continuity-tangent-curvature-c = BLEND Enter jatkuvuus [tangentti/kaarevuus] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND Valitse ensimmäinen avoin käyrä [Continuity=__ocs_arg_c__]:

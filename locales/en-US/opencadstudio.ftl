@@ -3419,7 +3419,14 @@ modify =
     .bvhide-select = Select objects to hide:
     .bvshow-select = Select objects to make visible:
     .arrayedit-select-array = ARRAYEDIT  Select array:
-    .arrayedit-options = ARRAYEDIT  Enter an option [Source/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Enter an option [Source/Move item/Erase item/Reset/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Select item:
+    .arrayedit-base-point = ARRAYEDIT  Base point:
+    .arrayedit-second-point = ARRAYEDIT  Second point:
+    .arrayedit-move-item = Move item
+    .arrayedit-erase-item = Erase item
+    .arrayedit-no-item = ARRAYEDIT: no array item there.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: the selected object is not an associative array.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Enter continuity [Tangent/Curvature] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  Select first open curve  [Continuity=__ocs_arg_c__]:

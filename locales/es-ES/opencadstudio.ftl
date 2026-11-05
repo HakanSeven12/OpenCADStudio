@@ -3418,7 +3418,14 @@ modify =
     .bvhide-select = Seleccione los objetos que se ocultarán:
     .bvshow-select = Seleccione los objetos que se harán visibles:
     .arrayedit-select-array = ARRAYEDIT  Seleccione la matriz:
-    .arrayedit-options = ARRAYEDIT  Indique una opción [Origen/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Indique una opción [Origen/Mover elemento/Borrar elemento/Restablecer/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Seleccione elemento:
+    .arrayedit-base-point = ARRAYEDIT  Punto base:
+    .arrayedit-second-point = ARRAYEDIT  Segundo punto:
+    .arrayedit-move-item = Mover elemento
+    .arrayedit-erase-item = Borrar elemento
+    .arrayedit-no-item = ARRAYEDIT: no hay ningún elemento de matriz ahí.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: el objeto seleccionado no es una matriz asociativa.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Indique la continuidad [Tangente/Curvatura] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  Seleccione la primera curva abierta [Continuidad=__ocs_arg_c__]:

@@ -3418,7 +3418,14 @@ modify =
     .bvhide-select = Selecteer te verbergen objecten:
     .bvshow-select = Selecteer zichtbaar te maken objecten:
     .arrayedit-select-array = ARRAYEDIT  Selecteer de reeks:
-    .arrayedit-options = ARRAYEDIT  Geef een optie [Bron/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Geef een optie [Bron/Element verplaatsen/Element wissen/Herstellen/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Selecteer element:
+    .arrayedit-base-point = ARRAYEDIT  Basispunt:
+    .arrayedit-second-point = ARRAYEDIT  Tweede punt:
+    .arrayedit-move-item = Element verplaatsen
+    .arrayedit-erase-item = Element wissen
+    .arrayedit-no-item = ARRAYEDIT: daar is geen reekselement.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: het geselecteerde object is geen associatieve reeks.
     .blend-enter-continuity-tangent-curvature-c = BLEND Vul continuïteit [tangent/curvature] <__ocs_arg_c__> in:
     .blend-select-first-open-curve-continuity-c = BLEND Selecteer eerste open curve [Continuïteit=__ocs_arg_c__]:

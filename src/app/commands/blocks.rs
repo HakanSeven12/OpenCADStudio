@@ -412,6 +412,53 @@ impl OpenCADStudio {
                 }
             }
 
+            // ARRAYEDIT's single-item edits: ARRAYEDIT_ITEM:<array>:<op>[:x,y,z…]
+            // with E (erase the item at a point), M (move the item at a
+            // point by an offset) or R (reset every item).
+            cmd if cmd.starts_with("ARRAYEDIT_ITEM:") => {
+                use crate::scene::assoc_array::{self, ItemEdit};
+                let mut parts = cmd["ARRAYEDIT_ITEM:".len()..].split(':');
+                let handle = codec::Handle::new(parts.next()?.parse().unwrap_or(0));
+                let op = parts.next().unwrap_or("");
+                let points: Vec<glam::DVec3> = parts
+                    .filter_map(|p| {
+                        let v: Vec<f64> = p.split(',').filter_map(|c| c.parse().ok()).collect();
+                        (v.len() == 3).then(|| glam::DVec3::new(v[0], v[1], v[2]))
+                    })
+                    .collect();
+                let Some(array) = assoc_array::array_of_insert(&self.tabs[i].scene.document, handle)
+                else {
+                    self.command_line.push_error(
+                        crate::t!("ARRAYEDIT: the selected object is not an associative array.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                let location = points
+                    .first()
+                    .and_then(|p| assoc_array::nearest_item(&self.tabs[i].scene.document, &array, *p));
+                self.push_undo_snapshot(i, "ARRAYEDIT");
+                let scene = &mut self.tabs[i].scene;
+                let result = match (op, location, points.get(1)) {
+                    ("R", _, _) => assoc_array::reset_items(scene, &array),
+                    ("E", Some(location), _) => {
+                        assoc_array::edit_item(scene, &array, location, ItemEdit::Erase)
+                    }
+                    ("M", Some(location), Some(offset)) => {
+                        assoc_array::edit_item(scene, &array, location, ItemEdit::Move(*offset))
+                    }
+                    _ => Err(crate::t!("ARRAYEDIT: no array item there.").into_owned()),
+                };
+                match result {
+                    Ok(()) => self.tabs[i].dirty = true,
+                    Err(error) => self
+                        .command_line
+                        .push_error(crate::tf!("ARRAYEDIT: {error}").as_ref()),
+                }
+                self.finish_pending_history(i);
+                self.refresh_properties();
+            }
+
             // PASTESPEC — offer the copied objects now; the system clipboard's
             // text joins the formats once read (Message::PasteSpecial).
             "PASTESPEC" => {

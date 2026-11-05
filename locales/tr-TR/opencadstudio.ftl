@@ -3400,7 +3400,14 @@ modify =
     .bvhide-select = Gizlenecek nesneleri seçin:
     .bvshow-select = Görünür yapılacak nesneleri seçin:
     .arrayedit-select-array = ARRAYEDIT  Diziyi seçin:
-    .arrayedit-options = ARRAYEDIT  Bir seçenek girin [Kaynak/çıKış] <çıKış>:
+    .arrayedit-options = ARRAYEDIT  Bir seçenek girin [Kaynak/Öğe taşı/Öğe sil/Sıfırla/çıKış] <çıKış>:
+    .arrayedit-select-item = ARRAYEDIT  Öğe seçin:
+    .arrayedit-base-point = ARRAYEDIT  Taban noktası:
+    .arrayedit-second-point = ARRAYEDIT  İkinci nokta:
+    .arrayedit-move-item = Öğe taşı
+    .arrayedit-erase-item = Öğe sil
+    .arrayedit-no-item = ARRAYEDIT: orada dizi öğesi yok.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: seçilen nesne ilişkili bir dizi değil.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Sürekliliği girin [Teğet/Eğrilik] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  İlk açık eğriyi seçin [Süreklilik=__ocs_arg_c__]:

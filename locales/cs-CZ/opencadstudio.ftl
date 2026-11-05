@@ -3422,7 +3422,14 @@ modify =
     .bvhide-select = Vyberte objekty ke skrytí:
     .bvshow-select = Vyberte objekty k zobrazení:
     .arrayedit-select-array = ARRAYEDIT  Vyberte pole:
-    .arrayedit-options = ARRAYEDIT  Zadejte možnost [Zdroj/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Zadejte možnost [Zdroj/Posunout položku/Vymazat položku/Obnovit/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Vyberte položku:
+    .arrayedit-base-point = ARRAYEDIT  Základní bod:
+    .arrayedit-second-point = ARRAYEDIT  Druhý bod:
+    .arrayedit-move-item = Posunout položku
+    .arrayedit-erase-item = Vymazat položku
+    .arrayedit-no-item = ARRAYEDIT: tam není žádná položka pole.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: vybraný objekt není asociativní pole.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Zadejte spojitost [Tečna/Zakřivení] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  Vyberte první otevřenou křivku [spojitost=__ocs_arg_c__]:

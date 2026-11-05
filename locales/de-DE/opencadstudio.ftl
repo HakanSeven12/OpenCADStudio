@@ -3418,7 +3418,14 @@ modify =
     .bvhide-select = Auszublendende Objekte wählen:
     .bvshow-select = Einzublendende Objekte wählen:
     .arrayedit-select-array = ARRAYEDIT  Reihe wählen:
-    .arrayedit-options = ARRAYEDIT  Option eingeben [Quelle/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Option eingeben [Quelle/Element verschieben/Element löschen/Zurücksetzen/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Element wählen:
+    .arrayedit-base-point = ARRAYEDIT  Basispunkt:
+    .arrayedit-second-point = ARRAYEDIT  Zweiter Punkt:
+    .arrayedit-move-item = Element verschieben
+    .arrayedit-erase-item = Element löschen
+    .arrayedit-no-item = ARRAYEDIT: dort ist kein Reihenelement.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: das gewählte Objekt ist keine assoziative Reihe.
     .blend-enter-continuity-tangent-curvature-c = BLEND Geben Sie Kontinuität ein [Tangente/Krümmung] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND Erste offene Kurve auswählen [Continuity=__ocs_arg_c__]:

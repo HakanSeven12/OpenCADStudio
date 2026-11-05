@@ -3406,7 +3406,14 @@ modify =
     .bvhide-select = छिपाने के लिए ऑब्जेक्ट चुनें:
     .bvshow-select = दिखाने के लिए ऑब्जेक्ट चुनें:
     .arrayedit-select-array = ARRAYEDIT  ऐरे चुनें:
-    .arrayedit-options = ARRAYEDIT  विकल्प दर्ज करें [स्रोत/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  विकल्प दर्ज करें [स्रोत/आइटम खिसकाएँ/आइटम मिटाएँ/रीसेट करें/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  आइटम चुनें:
+    .arrayedit-base-point = ARRAYEDIT  आधार बिंदु:
+    .arrayedit-second-point = ARRAYEDIT  दूसरा बिंदु:
+    .arrayedit-move-item = आइटम खिसकाएँ
+    .arrayedit-erase-item = आइटम मिटाएँ
+    .arrayedit-no-item = ARRAYEDIT: वहाँ कोई ऐरे आइटम नहीं।
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: चुना गया ऑब्जेक्ट सहयोगी ऐरे नहीं है।
     .blend-enter-continuity-tangent-curvature-c = BLEND  निरंतरता चुनें [स्पर्शरेखा/वक्रता] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND प्रथम खुले वक्र का चयन करें [Continuity=__ocs_arg_c__]:

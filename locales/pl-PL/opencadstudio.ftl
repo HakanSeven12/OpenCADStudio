@@ -3417,7 +3417,14 @@ modify =
     .bvhide-select = Wybierz obiekty do ukrycia:
     .bvshow-select = Wybierz obiekty do pokazania:
     .arrayedit-select-array = ARRAYEDIT  Wybierz szyk:
-    .arrayedit-options = ARRAYEDIT  Podaj opcję [Źródło/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Podaj opcję [Źródło/Przesuń element/Usuń element/Resetuj/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Wybierz element:
+    .arrayedit-base-point = ARRAYEDIT  Punkt bazowy:
+    .arrayedit-second-point = ARRAYEDIT  Drugi punkt:
+    .arrayedit-move-item = Przesuń element
+    .arrayedit-erase-item = Usuń element
+    .arrayedit-no-item = ARRAYEDIT: brak tam elementu szyku.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: wybrany obiekt nie jest szykiem skojarzonym.
     .blend-enter-continuity-tangent-curvature-c = BLEND Enter ciągłość [styczna/krzywizna] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND Wybierz pierwszą otwartą krzywą [Continuity=__ocs_arg_c__]:

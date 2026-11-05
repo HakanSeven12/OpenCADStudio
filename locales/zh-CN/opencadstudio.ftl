@@ -3405,7 +3405,14 @@ modify =
     .bvhide-select = 选择要隐藏的对象:
     .bvshow-select = 选择要显示的对象:
     .arrayedit-select-array = ARRAYEDIT  选择阵列:
-    .arrayedit-options = ARRAYEDIT  输入选项 [源/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  输入选项 [源/移动项目/删除项目/重置/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  选择项目:
+    .arrayedit-base-point = ARRAYEDIT  基点:
+    .arrayedit-second-point = ARRAYEDIT  第二点:
+    .arrayedit-move-item = 移动项目
+    .arrayedit-erase-item = 删除项目
+    .arrayedit-no-item = ARRAYEDIT: 那里没有阵列项目。
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: 所选对象不是关联阵列。
     .blend-enter-continuity-tangent-curvature-c = BLEND  输入连续性 [相切/曲率] <__ocs_arg_c__>：
     .blend-select-first-open-curve-continuity-c = BLEND  选择第一条开放曲线  [Continuity=__ocs_arg_c__]：

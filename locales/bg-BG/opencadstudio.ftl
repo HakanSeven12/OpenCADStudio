@@ -3417,7 +3417,14 @@ modify =
     .bvhide-select = Изберете обекти за скриване:
     .bvshow-select = Изберете обекти за показване:
     .arrayedit-select-array = ARRAYEDIT  Изберете масив:
-    .arrayedit-options = ARRAYEDIT  Въведете опция [Източник/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Въведете опция [Източник/Премести елемент/Изтрий елемент/Нулиране/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Изберете елемент:
+    .arrayedit-base-point = ARRAYEDIT  Базова точка:
+    .arrayedit-second-point = ARRAYEDIT  Втора точка:
+    .arrayedit-move-item = Премести елемент
+    .arrayedit-erase-item = Изтрий елемент
+    .arrayedit-no-item = ARRAYEDIT: там няма елемент на масива.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: избраният обект не е асоциативен масив.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Въведи непрекъснатост [Допирателност/Кривина] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  Избери първа отворена крива  [Непрекъснатост=__ocs_arg_c__]:

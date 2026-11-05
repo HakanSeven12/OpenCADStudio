@@ -3425,7 +3425,14 @@ modify =
     .bvhide-select = Chọn đối tượng cần ẩn:
     .bvshow-select = Chọn các đối tượng để hiển thị:
     .arrayedit-select-array = ARRAYEDIT Chọn mảng:
-    .arrayedit-options = ARRAYEDIT Nhập một tùy chọn [Source/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT Nhập một tùy chọn [Source/Di chuyển phần tử/Xóa phần tử/Đặt lại/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Chọn phần tử:
+    .arrayedit-base-point = ARRAYEDIT  Điểm gốc:
+    .arrayedit-second-point = ARRAYEDIT  Điểm thứ hai:
+    .arrayedit-move-item = Di chuyển phần tử
+    .arrayedit-erase-item = Xóa phần tử
+    .arrayedit-no-item = ARRAYEDIT: không có phần tử mảng ở đó.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: đối tượng được chọn không phải là mảng liên kết.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Nhập độ liên tục [Tiếp tuyến/Độ cong] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  Chọn đường cong hở thứ nhất  [Liên tục=__ocs_arg_c__]:

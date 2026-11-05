@@ -3408,7 +3408,14 @@ modify =
     .bvhide-select = 非表示にするオブジェクトを選択:
     .bvshow-select = 表示するオブジェクトを選択:
     .arrayedit-select-array = ARRAYEDIT  配列複写を選択:
-    .arrayedit-options = ARRAYEDIT  オプションを入力 [元/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  オプションを入力 [元/アイテムを移動/アイテムを削除/リセット/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  アイテムを選択:
+    .arrayedit-base-point = ARRAYEDIT  基点:
+    .arrayedit-second-point = ARRAYEDIT  2 点目:
+    .arrayedit-move-item = アイテムを移動
+    .arrayedit-erase-item = アイテムを削除
+    .arrayedit-no-item = ARRAYEDIT: そこに配列アイテムはありません。
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: 選択したオブジェクトは自動調整配列複写ではありません。
     .blend-enter-continuity-tangent-curvature-c = BLEND  連続性を入力 [接線/曲率] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  1 本目の開いた曲線を選択 [連続性=__ocs_arg_c__]:

@@ -3417,7 +3417,14 @@ modify =
     .bvhide-select = 숨길 객체 선택:
     .bvshow-select = 표시할 객체 선택:
     .arrayedit-select-array = ARRAYEDIT  배열 선택:
-    .arrayedit-options = ARRAYEDIT  옵션 입력 [원본/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  옵션 입력 [원본/항목 이동/항목 지우기/초기화/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  항목 선택:
+    .arrayedit-base-point = ARRAYEDIT  기준점:
+    .arrayedit-second-point = ARRAYEDIT  두 번째 점:
+    .arrayedit-move-item = 항목 이동
+    .arrayedit-erase-item = 항목 지우기
+    .arrayedit-no-item = ARRAYEDIT: 거기에 배열 항목이 없습니다.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: 선택한 객체는 연관 배열이 아닙니다.
     .blend-enter-continuity-tangent-curvature-c = BLEND Enter 연속성 [접선/곡률] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND 첫 번째 열린 곡선 선택 [연속성=__ocs_arg_c__]:

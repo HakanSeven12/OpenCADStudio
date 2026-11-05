@@ -3419,7 +3419,14 @@ modify =
     .bvhide-select = ເລືອກວັດຖຸທີ່ຈະເຊື່ອງ:
     .bvshow-select = ເລືອກວັດຖຸທີ່ຈະສະແດງ:
     .arrayedit-select-array = ARRAYEDIT  ເລືອກອາເຣ:
-    .arrayedit-options = ARRAYEDIT  ປ້ອນທາງເລືອກ [ແຫຼ່ງ/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  ປ້ອນທາງເລືອກ [ແຫຼ່ງ/ຍ້າຍລາຍການ/ລຶບລາຍການ/ຕັ້ງຄ່າໃໝ່/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  ເລືອກລາຍການ:
+    .arrayedit-base-point = ARRAYEDIT  ຈຸດຖານ:
+    .arrayedit-second-point = ARRAYEDIT  ຈຸດທີສອງ:
+    .arrayedit-move-item = ຍ້າຍລາຍການ
+    .arrayedit-erase-item = ລຶບລາຍການ
+    .arrayedit-no-item = ARRAYEDIT: ບໍ່ມີລາຍການອາເຣຢູ່ນັ້ນ.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: ວັດຖຸທີ່ເລືອກບໍ່ແມ່ນອາເຣທີ່ເຊື່ອມໂຍງ.
     .blend-enter-continuity-tangent-curvature-c = BLEND  ປ້ອນຄວາມຕໍ່ເນື່ອງ [Tangent/Curvature] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  ເລືອກເສັ້ນໂຄ້ງປາຍເປີດທຳອິດ  [Continuity=__ocs_arg_c__]:

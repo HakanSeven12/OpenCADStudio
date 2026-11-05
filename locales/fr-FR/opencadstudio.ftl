@@ -3418,7 +3418,14 @@ modify =
     .bvhide-select = Sélectionnez les objets à masquer :
     .bvshow-select = Sélectionnez les objets à rendre visibles :
     .arrayedit-select-array = ARRAYEDIT  Sélectionnez le réseau :
-    .arrayedit-options = ARRAYEDIT  Entrez une option [Source/eXit] <eXit> :
+    .arrayedit-options = ARRAYEDIT  Entrez une option [Source/Déplacer l'élément/Effacer l'élément/Réinitialiser/eXit] <eXit> :
+    .arrayedit-select-item = ARRAYEDIT  Choisissez l'élément:
+    .arrayedit-base-point = ARRAYEDIT  Point de base:
+    .arrayedit-second-point = ARRAYEDIT  Deuxième point:
+    .arrayedit-move-item = Déplacer l'élément
+    .arrayedit-erase-item = Effacer l'élément
+    .arrayedit-no-item = ARRAYEDIT: aucun élément de réseau ici.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT : l'objet sélectionné n'est pas un réseau associatif.
     .blend-enter-continuity-tangent-curvature-c = BLEND Entrer la continuité [Tangent/Curvature] <__ocs_arg_c__:
     .blend-select-first-open-curve-continuity-c = BLEND Sélectionner la première courbe ouverte [Continuité=__ocs_arg_c__]:

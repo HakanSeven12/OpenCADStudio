@@ -3414,7 +3414,14 @@ modify =
     .bvhide-select = Jelölje ki az elrejtendő objektumokat:
     .bvshow-select = Jelölje ki a megjelenítendő objektumokat:
     .arrayedit-select-array = ARRAYEDIT  Válassza ki a tömböt:
-    .arrayedit-options = ARRAYEDIT  Adjon meg egy lehetőséget [Forrás/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Adjon meg egy lehetőséget [Forrás/Elem mozgatása/Elem törlése/Visszaállítás/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Válassza ki az elemet:
+    .arrayedit-base-point = ARRAYEDIT  Bázispont:
+    .arrayedit-second-point = ARRAYEDIT  Második pont:
+    .arrayedit-move-item = Elem mozgatása
+    .arrayedit-erase-item = Elem törlése
+    .arrayedit-no-item = ARRAYEDIT: ott nincs tömbelem.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: a kijelölt objektum nem asszociatív tömb.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Adja meg a folytonosságot [Tangent/Curvature] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND Válassza ki az első nyitott görbét [Continuity=__ocs_arg_c__]:

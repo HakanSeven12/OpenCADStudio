@@ -3418,7 +3418,14 @@ modify =
     .bvhide-select = Επιλέξτε αντικείμενα για απόκρυψη:
     .bvshow-select = Επιλέξτε αντικείμενα για εμφάνιση:
     .arrayedit-select-array = ARRAYEDIT  Επιλέξτε διάταξη:
-    .arrayedit-options = ARRAYEDIT  Δώστε επιλογή [Πηγή/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Δώστε επιλογή [Πηγή/Μετακίνηση στοιχείου/Διαγραφή στοιχείου/Επαναφορά/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Επιλέξτε στοιχείο:
+    .arrayedit-base-point = ARRAYEDIT  Σημείο βάσης:
+    .arrayedit-second-point = ARRAYEDIT  Δεύτερο σημείο:
+    .arrayedit-move-item = Μετακίνηση στοιχείου
+    .arrayedit-erase-item = Διαγραφή στοιχείου
+    .arrayedit-no-item = ARRAYEDIT: δεν υπάρχει στοιχείο διάταξης εκεί.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: το επιλεγμένο αντικείμενο δεν είναι συσχετιστική διάταξη.
     .blend-enter-continuity-tangent-curvature-c = BLEND  Δώστε συνέχεια [Εφαπτομενική/Καμπυλότητα] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  Επιλέξτε πρώτη ανοικτή καμπύλη  [Συνέχεια=__ocs_arg_c__]:

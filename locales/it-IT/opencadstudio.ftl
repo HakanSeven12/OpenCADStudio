@@ -3417,7 +3417,14 @@ modify =
     .bvhide-select = Selezionare gli oggetti da nascondere:
     .bvshow-select = Selezionare gli oggetti da rendere visibili:
     .arrayedit-select-array = ARRAYEDIT  Selezionare la serie:
-    .arrayedit-options = ARRAYEDIT  Immettere un'opzione [Origine/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  Immettere un'opzione [Origine/Sposta elemento/Cancella elemento/Reimposta/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  Selezionare l'elemento:
+    .arrayedit-base-point = ARRAYEDIT  Punto base:
+    .arrayedit-second-point = ARRAYEDIT  Secondo punto:
+    .arrayedit-move-item = Sposta elemento
+    .arrayedit-erase-item = Cancella elemento
+    .arrayedit-no-item = ARRAYEDIT: nessun elemento della serie lì.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: l'oggetto selezionato non è una serie associativa.
     .blend-enter-continuity-tangent-curvature-c = BLEND Enter continuità [Tangente/Curvatura] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND Selezionare la prima curva aperta [Continuità=__ocs_arg_c__]:

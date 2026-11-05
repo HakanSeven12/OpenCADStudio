@@ -3430,7 +3430,14 @@ modify =
     .bvhide-select = حدد الكائنات المراد إخفاؤها:
     .bvshow-select = حدد الكائنات المراد إظهارها:
     .arrayedit-select-array = ARRAYEDIT  حدد المصفوفة:
-    .arrayedit-options = ARRAYEDIT  أدخل خيارًا [المصدر/eXit] <eXit>:
+    .arrayedit-options = ARRAYEDIT  أدخل خيارًا [المصدر/نقل عنصر/مسح عنصر/إعادة تعيين/eXit] <eXit>:
+    .arrayedit-select-item = ARRAYEDIT  حدد العنصر:
+    .arrayedit-base-point = ARRAYEDIT  نقطة الأساس:
+    .arrayedit-second-point = ARRAYEDIT  النقطة الثانية:
+    .arrayedit-move-item = نقل عنصر
+    .arrayedit-erase-item = مسح عنصر
+    .arrayedit-no-item = ARRAYEDIT: لا يوجد عنصر صفيف هناك.
+    .arrayedit-error = ARRAYEDIT: __ocs_fmt_0__
     .arrayedit-not-an-array = ARRAYEDIT: الكائن المحدد ليس مصفوفة ترابطية.
     .blend-enter-continuity-tangent-curvature-c = BLEND  أدخل الاستمرارية [مماس/انحناء] <__ocs_arg_c__>:
     .blend-select-first-open-curve-continuity-c = BLEND  حدد المنحنى المفتوح الأول [الاستمرارية=__ocs_arg_c__]:

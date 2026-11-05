@@ -3857,6 +3857,91 @@ mod v_anchor_tests {
         }
     }
 
+    /// Baseline of each line, as a multiple of the text height, for a
+    /// top-left MTEXT at the origin.
+    fn baselines_in_heights(value: &str, height: f32) -> Vec<f32> {
+        use crate::entities::text_support::{
+            layout_mtext, MTextRenderOpts, MTextVAnchor, ResolvedTextStyle,
+        };
+        let style = ResolvedTextStyle {
+            font_name: "Standard".to_string(),
+            width_factor: 1.0,
+            oblique_angle: 0.0,
+            is_backward: false,
+            is_upside_down: false,
+            is_vertical: false,
+        };
+        let layout = layout_mtext(&MTextRenderOpts {
+            layer_color: None,
+            columns: Default::default(),
+            value,
+            insertion: [0.0, 0.0, 0.0],
+            height,
+            rect_w: 6.0 * height,
+            rotation: 0.0,
+            style: &style,
+            attach_h_anchor: 0.0,
+            v_anchor: MTextVAnchor::Top,
+            line_spacing_factor: 1.0,
+            exact_line_spacing: false,
+            rectangle_height: 0.0,
+            vertical_text: false,
+            want_glyph_boxes: false,
+            break_long_words: false,
+        });
+        // One run per line here; its lowest point is the baseline of "AAA",
+        // "BBB" or "CCC".
+        layout
+            .strokes
+            .iter()
+            .map(|run| {
+                let low = run
+                    .strokes
+                    .iter()
+                    .flatten()
+                    .map(|p| p[1])
+                    .fold(f32::INFINITY, f32::min);
+                (run.origin[1] as f32 + low) / height
+            })
+            .collect()
+    }
+
+    fn assert_baselines(value: &str, expected: &[f32]) {
+        for height in [2.0, 10.0] {
+            let got = baselines_in_heights(value, height);
+            assert_eq!(got.len(), expected.len(), "{value} at h {height}: {got:?}");
+            for (g, e) in got.iter().zip(expected) {
+                assert!(
+                    (g - e).abs() < 0.02,
+                    "{value} at h {height}: baselines {got:?}, expected {expected:?}"
+                );
+            }
+        }
+    }
+
+    /// `\pxb#;` and `\pxa#;` are multiples of the text height, like the
+    /// `\px` indents: two heights of space before or after a paragraph.
+    #[test]
+    fn paragraph_space_before_and_after_are_multiples_of_the_text_height() {
+        assert_baselines(r"AAA\PBBB", &[-1.0, -2.667]);
+        assert_baselines(r"AAA\P\pxb2;BBB", &[-1.0, -4.667]);
+        assert_baselines(r"\pxa2;AAA\P\pxa0;BBB", &[-1.0, -4.667]);
+        // The space before carries to the next paragraph.
+        assert_baselines(r"AAA\P\pxb2;BBB\PCCC", &[-1.0, -4.667, -8.333]);
+    }
+
+    /// `\pxse#;` is a factor of the default line pitch (5/3 of the height),
+    /// like `\pxsm#;`, but each of its lines also sits that many heights
+    /// below the top of its slot, so its first line drops (# - 1) heights.
+    #[test]
+    fn exact_paragraph_line_spacing_is_a_factor_of_the_line_pitch() {
+        assert_baselines(r"\pxsm2;AAA\PBBB\PCCC", &[-1.0, -4.333, -7.667]);
+        assert_baselines(r"\pxse2;AAA\PBBB\PCCC", &[-2.0, -5.333, -8.667]);
+        assert_baselines(r"\pxse0.5;AAA\PBBB\PCCC", &[-0.5, -1.333, -2.167]);
+        assert_baselines(r"AAA\P\pxse2;BBB\PCCC", &[-1.0, -3.667, -7.0]);
+        assert_baselines(r"\pxse2;AAA\P\pxb2;BBB\PCCC", &[-2.0, -7.333, -12.667]);
+    }
+
     #[test]
     fn cjk_paragraph_wraps_between_ideographs() {
         use crate::entities::text_support::{

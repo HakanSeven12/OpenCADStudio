@@ -1057,6 +1057,7 @@ impl OpenCADStudio {
                     | "SELECTIONEFFECT"
                     | "SELECTIONEFFECTCOLOR"
                     | "VSEDGECOLOR"
+                    | "VSEDGESMOOTH"
                     | "WINDOWSAREACOLOR"
                     | "WINDOWAREACOLOR"
                     | "CROSSINGAREACOLOR"
@@ -2628,6 +2629,22 @@ impl OpenCADStudio {
                                     )),
                                 }
                             }
+                            // The crease angle (0–180°) below which mesh
+                            // edges are not drawn in shaded-with-edges modes.
+                            "VSEDGESMOOTH" => match &value {
+                                Some(v) => match v.trim().parse::<f32>() {
+                                    Ok(angle) if (0.0..=180.0).contains(&angle) => {
+                                        self.model_space.edge_smooth = angle;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("VSEDGESMOOTH = {angle}"), true))
+                                    }
+                                    _ => Err("SETVAR: a value from 0 to 180 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("VSEDGESMOOTH = {}", self.model_space.edge_smooth),
+                                    false,
+                                )),
+                            },
                             "WINDOWSAREACOLOR" | "WINDOWAREACOLOR" => {
                                 match &value {
                                     Some(v) => match v.parse::<u8>() {

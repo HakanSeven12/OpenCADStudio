@@ -1654,6 +1654,15 @@ impl OpenCADStudio {
     /// Sync the active theme and model space configuration into all open tabs
     /// and the application default background settings.
     pub(in crate::app) fn sync_model_space_theme(&mut self, geometry_changed: bool) {
+        // VSEDGESMOOTH: meshes draw their edges again when the angle changes.
+        let smooth = self.model_space.edge_smooth.clamp(0.0, 180.0);
+        if (crate::entities::mesh::edge_smooth_degrees() - smooth).abs() > f32::EPSILON {
+            crate::entities::mesh::set_edge_smooth_degrees(smooth);
+            // Block definitions hold meshes too, so every mesh is built again.
+            for tab in &mut self.tabs {
+                tab.scene.populate_meshes_from_document();
+            }
+        }
         let model_bg = self.model_space.resolve_model_bg(&self.active_theme);
         let paper_bg = self.model_space.resolve_paper_bg();
         let desk_bg = self.model_space.resolve_desk_bg();

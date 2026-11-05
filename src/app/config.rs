@@ -363,6 +363,9 @@ pub struct ModelSpaceThemeConfig {
     /// VSEDGECOLOR: the edge colour of the shaded-with-edges modes
     /// (`None`: black).
     pub edge_color: Option<[u8; 3]>,
+    /// VSEDGESMOOTH: crease angle in degrees; mesh edges whose faces meet
+    /// flatter are not drawn in the shaded-with-edges modes (default 1).
+    pub edge_smooth: f32,
     /// Selection highlight opacity in percent (10–100); below 100 the
     /// object's own colour shows through.
     pub selection_highlight_opacity: u8,
@@ -398,6 +401,7 @@ impl Default for ModelSpaceThemeConfig {
             selection_crossing_color: 0,
             selection_highlight_color: 0,
             edge_color: None,
+            edge_smooth: 1.0,
             selection_highlight_opacity: 100,
             selection_highlight_widen: 0,
             selection_effect: true,

@@ -1269,6 +1269,71 @@ fn append_feature_edge(
     }
 }
 
+static EDGE_SMOOTH_DEGREES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0x3f80_0000);
+
+/// VSEDGESMOOTH: the crease angle in degrees (default 1). A mesh edge whose
+/// two faces meet flatter than this is not drawn in the shaded-with-edges
+/// modes, so smooth curved meshes show their outline, not every facet.
+pub fn edge_smooth_degrees() -> f32 {
+    f32::from_bits(EDGE_SMOOTH_DEGREES.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+pub fn set_edge_smooth_degrees(degrees: f32) {
+    EDGE_SMOOTH_DEGREES.store(
+        degrees.clamp(0.0, 180.0).to_bits(),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// The edges of `edges` worth drawing: boundary edges, edges shared by
+/// more than two faces, and those whose two faces meet at more than the
+/// VSEDGESMOOTH angle.
+fn crease_edges(
+    vertices: &[[f64; 3]],
+    faces: &[Vec<usize>],
+    edges: std::collections::HashSet<(usize, usize)>,
+) -> std::collections::HashSet<(usize, usize)> {
+    let crease = f64::from(edge_smooth_degrees()).to_radians();
+    if crease <= 0.0 {
+        return edges;
+    }
+    // Newell normals: right for any planar polygon, sane for a warped one.
+    let normal = |face: &Vec<usize>| {
+        let mut n = glam::DVec3::ZERO;
+        for (k, &a) in face.iter().enumerate() {
+            let (Some(p), Some(q)) = (vertices.get(a), vertices.get(face[(k + 1) % face.len()])) else {
+                continue;
+            };
+            n.x += (p[1] - q[1]) * (p[2] + q[2]);
+            n.y += (p[2] - q[2]) * (p[0] + q[0]);
+            n.z += (p[0] - q[0]) * (p[1] + q[1]);
+        }
+        n.normalize_or_zero()
+    };
+    let mut adjacent: std::collections::HashMap<(usize, usize), Vec<glam::DVec3>> =
+        std::collections::HashMap::new();
+    for face in faces {
+        let n = normal(face);
+        for k in 0..face.len() {
+            let key = edge_key(face[k], face[(k + 1) % face.len()]);
+            if edges.contains(&key) {
+                adjacent.entry(key).or_default().push(n);
+            }
+        }
+    }
+    let cos_crease = crease.cos();
+    edges
+        .into_iter()
+        .filter(|key| match adjacent.get(key).map(Vec::as_slice) {
+            Some([a, b]) if *a != glam::DVec3::ZERO && *b != glam::DVec3::ZERO => {
+                // Faces wound either way: the fold is the smaller angle.
+                a.dot(*b).abs() < cos_crease
+            }
+            _ => true,
+        })
+        .collect()
+}
+
 fn make_mesh_lod_set(
     name: String,
     color: [f32; 4],
@@ -1277,6 +1342,7 @@ fn make_mesh_lod_set(
     visible_edges: std::collections::HashSet<(usize, usize)>,
     face_colors: &[Option<[f32; 4]>],
 ) -> Option<crate::scene::model::mesh_model::MeshLodSet> {
+    let visible_edges = crease_edges(&vertices, &faces, visible_edges);
     let (indices, triangle_faces) = face_triangle_indices(&vertices, &faces);
     if indices.is_empty() {
         return None;
@@ -1582,5 +1648,34 @@ impl Transformable for Mesh {
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod crease_edge_tests {
+    use super::*;
+
+    /// #1860: an edge between coplanar faces is not drawn; one at a fold is.
+    #[test]
+    fn flat_shared_edges_hide_and_folds_show() {
+        let edges_of = |faces: &[Vec<usize>]| {
+            let mut edges = std::collections::HashSet::new();
+            for face in faces {
+                for k in 0..face.len() {
+                    edges.insert(edge_key(face[k], face[(k + 1) % face.len()]));
+                }
+            }
+            edges
+        };
+        // Two quads side by side in one plane share edge 1–4.
+        let flat = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [2.0, 1.0, 0.0]];
+        let faces = vec![vec![0, 1, 4, 3], vec![1, 2, 5, 4]];
+        let kept = crease_edges(&flat, &faces, edges_of(&faces));
+        assert!(!kept.contains(&edge_key(1, 4)));
+        assert_eq!(kept.len(), 6, "the outline stays");
+        // The second quad folded up by 90° keeps the shared edge.
+        let folded = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [1.0, 1.0, 1.0]];
+        let kept = crease_edges(&folded, &faces, edges_of(&faces));
+        assert!(kept.contains(&edge_key(1, 4)));
     }
 }

@@ -103,6 +103,36 @@ fn strip_option_listing(s: &str, options: &[CmdOption]) -> String {
     out.replace(" :", ":").trim().to_string()
 }
 
+/// An option label split around the letters typed to pick it: the capitals
+/// (`T` in `Ttr`, `RE` in `REpeat`, `X` in `eXit`), or the whole label when
+/// it has no lower case (`3P`).
+fn option_shortcut(label: &str) -> (&str, &str, &str) {
+    if !label.chars().any(char::is_lowercase) {
+        return ("", label, "");
+    }
+    let Some(start) = label.find(|c: char| c.is_uppercase() || c.is_ascii_digit()) else {
+        return (label, "", "");
+    };
+    let len = label[start..]
+        .find(|c: char| c.is_lowercase() || c.is_whitespace())
+        .unwrap_or(label.len() - start);
+    (&label[..start], &label[start..start + len], &label[start + len..])
+}
+
+#[cfg(test)]
+mod option_shortcut_tests {
+    #[test]
+    fn the_capitals_are_the_shortcut() {
+        use super::option_shortcut as split;
+        assert_eq!(split("Ttr"), ("", "T", "tr"));
+        assert_eq!(split("REpeat"), ("", "RE", "peat"));
+        assert_eq!(split("eXit"), ("e", "X", "it"));
+        assert_eq!(split("3P"), ("", "3P", ""));
+        assert_eq!(split("2Point"), ("", "2P", "oint"));
+        assert_eq!(split("by line"), ("by line", "", ""));
+    }
+}
+
 // Font swaps must preserve U+276F, U+24D8, and U+2715.
 const COMMAND_PREFIX: &str = "❯ ";
 const INFO_PREFIX: &str = "ⓘ ";
@@ -935,9 +965,21 @@ impl CommandLine {
                     let shown = strip_option_listing(&entry.text, &self.step_options);
                     let mut r = row![entry_text(shown)].spacing(6).align_y(iced::Center);
                     for opt in &self.step_options {
-                        let label = text(opt.label.to_uppercase())
-                            .size(11)
-                            .wrapping(iced::widget::text::Wrapping::None);
+                        // The letters to type are drawn in the accent colour,
+                        // so the short form of each option can be seen.
+                        let (before, short, after) = option_shortcut(&opt.label);
+                        let part = |s: &str| {
+                            text(s.to_string())
+                                .size(11)
+                                .wrapping(iced::widget::text::Wrapping::None)
+                        };
+                        let label = row![
+                            part(before),
+                            part(short).style(|theme: &Theme| iced::widget::text::Style {
+                                color: Some(theme.palette().primary.base.color),
+                            }),
+                            part(after),
+                        ];
                         let btn = button(label)
                             .on_press(Message::CommandOptionPick(opt.keyword.clone()))
                             .padding([1, 6])

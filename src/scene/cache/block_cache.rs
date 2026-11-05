@@ -645,6 +645,7 @@ fn build_defn(
                 block_use.scale_policy,
                 doc,
                 anno_scale,
+                annotation_scale_handle,
                 bg_color,
                 viewport,
                 depth_map,
@@ -739,6 +740,7 @@ fn build_nested_ref(
     scale_policy: crate::scene::BlockScalePolicy,
     doc: &Document,
     anno_scale: f32,
+    annotation_scale_handle: Option<Handle>,
     bg_color: [f32; 4],
     viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
@@ -764,6 +766,7 @@ fn build_nested_ref(
         doc,
         nested_ins,
         anno_scale,
+        annotation_scale_handle,
         scale_policy,
     )
     .into_iter()

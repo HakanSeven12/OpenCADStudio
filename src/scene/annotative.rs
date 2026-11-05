@@ -635,7 +635,11 @@ fn annotation_scales_dict(doc: &Document, entity: Handle) -> Option<Handle> {
     let xd = doc
         .get_entity(entity)
         .and_then(|e| e.common().xdictionary_handle)?;
-    let mgr = as_dict(doc, xd).and_then(|d| d.get("AcDbContextDataManager"))?;
+    annotation_scales_in_xdictionary(doc, xd)
+}
+
+fn annotation_scales_in_xdictionary(doc: &Document, xdictionary: Handle) -> Option<Handle> {
+    let mgr = as_dict(doc, xdictionary).and_then(|d| d.get("AcDbContextDataManager"))?;
     as_dict(doc, mgr).and_then(|d| d.get("ACDB_ANNOTATIONSCALES"))
 }
 
@@ -648,8 +652,15 @@ pub fn active_object_context_for_scale(
     entity: Handle,
     scale_handle: Option<Handle>,
 ) -> Option<&ObjectContextData> {
-    let coll_h = annotation_scales_dict(doc, entity)?;
-    let coll = as_dict(doc, coll_h)?;
+    active_context_in(doc, annotation_scales_dict(doc, entity)?, scale_handle)
+}
+
+fn active_context_in(
+    doc: &Document,
+    collection: Handle,
+    scale_handle: Option<Handle>,
+) -> Option<&ObjectContextData> {
+    let coll = as_dict(doc, collection)?;
     let mut default = None;
     let mut first = None;
     for (_, leaf_h) in &coll.entries {
@@ -777,8 +788,16 @@ pub fn text_context_ratio(
     handle: Handle,
     scale_handle: Option<Handle>,
 ) -> Option<f64> {
-    let coll = as_dict(doc, annotation_scales_dict(doc, handle)?)?;
-    let active = active_object_context_for_scale(doc, handle, scale_handle)?;
+    context_ratio_in(doc, annotation_scales_dict(doc, handle)?, scale_handle)
+}
+
+fn context_ratio_in(
+    doc: &Document,
+    collection: Handle,
+    scale_handle: Option<Handle>,
+) -> Option<f64> {
+    let coll = as_dict(doc, collection)?;
+    let active = active_context_in(doc, collection, scale_handle)?;
     let native = coll
         .entries
         .iter()
@@ -974,6 +993,50 @@ fn apply_attribute_context(
             apply_mtext_context(mtext, &embedded.mtext);
         }
     }
+}
+
+/// Place an INSERT's attribute for an annotation scale (the displayed one when
+/// `None`): the position of that scale's representation, and the stored height
+/// at the ratio to the default representation, as annotative text draws. An
+/// ATTRIB is part of its INSERT rather than a document entity, so its scale data
+/// is found from its own extension dictionary. `false` leaves it untouched: it
+/// has no representations.
+pub(crate) fn place_attribute_for_annotation_scale(
+    doc: &Document,
+    attribute: &mut codec::entities::AttributeEntity,
+    scale_handle: Option<Handle>,
+) -> bool {
+    let Some(collection) = attribute
+        .common
+        .xdictionary_handle
+        .and_then(|xdictionary| annotation_scales_in_xdictionary(doc, xdictionary))
+    else {
+        return false;
+    };
+    let Some(ObjectContextData {
+        kind: ObjectContextKind::MTextAttribute(context),
+        ..
+    }) = active_context_in(doc, collection, scale_handle)
+    else {
+        return false;
+    };
+    apply_attribute_context(
+        &mut attribute.insertion_point,
+        &mut attribute.alignment_point,
+        &mut attribute.rotation,
+        &mut attribute.horizontal_alignment,
+        &mut attribute.embedded_mtext,
+        context,
+    );
+    let ratio = context_ratio_in(doc, collection, scale_handle).unwrap_or(1.0);
+    attribute.height *= ratio;
+    if let Some(mtext) = attribute.embedded_mtext.as_mut() {
+        mtext.height *= ratio;
+        if !context.enable_context || context.context.is_none() {
+            mtext.rectangle_width *= ratio;
+        }
+    }
+    true
 }
 
 fn apply_hatch_context(hatch: &mut codec::entities::Hatch, context: &HatchScaleContext) {

@@ -1360,6 +1360,7 @@ fn tessellate_entity_inner(
             is_xref,
             pslt_factor,
             anno_scale,
+            annotation_scale_handle,
         );
         wires.push(marker);
         return wires;

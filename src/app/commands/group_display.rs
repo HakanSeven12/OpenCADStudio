@@ -61,7 +61,10 @@ impl OpenCADStudio {
             ask(self);
             return;
         };
-        match value.parse::<u32>() {
+        // A larger whole number keeps its low 32 bits, as the reference does
+        // (4294967296 → 0, 99999999999 → 1215752191).
+        let wrapped = value.parse::<u128>().ok().map(|v| (v % (1u128 << 32)) as u32);
+        match wrapped.ok_or(()) {
             Ok(mode) => {
                 if mode != match_mode() {
                     set_match_mode(mode);

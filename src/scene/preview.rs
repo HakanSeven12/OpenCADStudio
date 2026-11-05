@@ -552,7 +552,7 @@ impl Scene {
     ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
         let source_entity = self.document.get_entity(source)?.clone();
         let mut target_entity = self.document.get_entity(target)?.clone();
-        let opts = crate::entities::match_props::MatchOpts::current();
+        let opts = crate::entities::match_props::MatchOpts::for_document(&self.document);
         crate::entities::match_props::match_properties_kernel(
             &source_entity,
             &mut target_entity,
@@ -570,6 +570,15 @@ impl Scene {
             match crate::entities::hatch::background_color(source_hatch) {
                 Some(color) => crate::entities::hatch::set_background_color(target_hatch, &color),
                 None => crate::entities::hatch::clear_background_color(target_hatch),
+            }
+        }
+        // A centre line is rebuilt on its own sources, as the click does.
+        if let (true, EntityType::Line(line)) = (
+            opts.has(crate::entities::match_props::MatchOpts::CENTER),
+            &target_entity,
+        ) {
+            if let Some(rebuilt) = self.centerline_with_extensions_of(&source_entity, line) {
+                target_entity = EntityType::Line(rebuilt);
             }
         }
 

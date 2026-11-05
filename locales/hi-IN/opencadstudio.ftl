@@ -2478,6 +2478,7 @@ common =
     .relative-path = Relative path
     .remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope = Remaining degrees of freedom in the current parametric constraint scope
     .requires-an-integer-between-0-and-99 = Requires an integer between 0 and 99.
+    .requires-an-integer-value = Requires an integer value.
     .requires-numeric-distance-or-two-points = Requires numeric distance or two points.
     .sectionplane-align-section-to-front-back-top-bottom-left-right-top = SECTIONPLANE  Align section to [Front/bAck/Top/Bottom/Left/Right] <Top>:
     .sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane = SECTIONPLANE  Enter section plane type [Plane/Slice/Boundary/Volume] <Plane>:

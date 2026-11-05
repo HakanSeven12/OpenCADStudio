@@ -2494,6 +2494,7 @@ common =
     .relative-path = Đường dẫn tương đối
     .remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope = Số bậc tự do còn lại trong phạm vi ràng buộc tham số hiện tại
     .requires-an-integer-between-0-and-99 = Yêu cầu một số nguyên từ 0 đến 99.
+    .requires-an-integer-value = Requires an integer value.
     .requires-numeric-distance-or-two-points = Yêu cầu khoảng cách số hoặc hai điểm.
     .sectionplane-align-section-to-front-back-top-bottom-left-right-top = SECTIONPLANE  Căn mặt cắt theo [Front/bAck/Top/Bottom/Left/Right] <Top>:
     .sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane = SECTIONPLANE  Nhập loại mặt phẳng cắt [Plane/Slice/Boundary/Volume] <Plane>:

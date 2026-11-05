@@ -2494,6 +2494,7 @@ common =
     .relative-path = Relativní cesta
     .remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope = Zbývající stupně volnosti v aktuálním rozsahu parametrických vazeb
     .requires-an-integer-between-0-and-99 = Vyžaduje celé číslo od 0 do 99.
+    .requires-an-integer-value = Requires an integer value.
     .requires-numeric-distance-or-two-points = Vyžaduje číselnou vzdálenost nebo dva body.
     .sectionplane-align-section-to-front-back-top-bottom-left-right-top = SECTIONPLANE  Zarovnat řez [Front/bAck/Top/Bottom/Left/Right] <Top>:
     .sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane = SECTIONPLANE  Zadejte typ roviny řezu [Plane/Slice/Boundary/Volume] <Plane>:

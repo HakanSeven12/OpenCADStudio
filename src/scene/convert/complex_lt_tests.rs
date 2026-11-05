@@ -47,19 +47,23 @@ fn add(document: &mut Document, mut entity: EntityType) -> Handle {
 }
 
 fn wires(document: &Document, handle: Handle) -> Vec<WireModel> {
+    wires_at(document, handle, 1.0, false)
+}
+
+fn wires_at(document: &Document, handle: Handle, anno: f32, paper_space: bool) -> Vec<WireModel> {
     let entity = document.get_entity(handle).expect("entity").clone();
     crate::scene::tessellate_entity(
         document,
         &HashSet::default(),
         None,
         [0.0, 0.0, 0.0, 1.0],
-        1.0,
+        anno,
         None,
         &entity,
         None,
         None,
         None,
-        false,
+        paper_space,
         &HashSet::default(),
     )
 }
@@ -338,6 +342,59 @@ fn complex_linetype_fits_every_whole_period() {
             assert!((g - w).abs() < 0.3, "L = {length}: {got:?} vs {want:?}");
         }
     }
+}
+
+/// Model space at annotation scale 1:15 lays the fence out like linetype scale
+/// 15 at 1:1: the 22.8 period of `complex_linetype_fits_every_whole_period`.
+const FENCE_AT_15: [f64; 4] = [15.8, 38.6, 61.4, 84.2];
+
+fn assert_fence_at_15(got: &[f64]) {
+    assert_eq!(got.len(), FENCE_AT_15.len(), "{got:?}");
+    for (g, w) in got.iter().zip(FENCE_AT_15) {
+        assert!((g - w).abs() < 0.3, "{got:?} vs {FENCE_AT_15:?}");
+    }
+}
+
+#[test]
+fn complex_linetype_scales_by_the_model_space_annotation_scale() {
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(100.0, 0.0, 0.0));
+    let handle = add(&mut document, EntityType::Line(line));
+    let got = glyph_stations(&wires_at(&document, handle, 15.0, false), [0.0, 0.0], 8.0);
+    assert_fence_at_15(&got);
+}
+
+#[test]
+fn complex_linetype_inside_a_viewport_ignores_the_annotation_override() {
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(100.0, 0.0, 0.0));
+    let handle = add(&mut document, EntityType::Line(line));
+    let unscaled = glyph_stations(&wires(&document, handle), [0.0, 0.0], 0.5);
+    let viewport = glyph_stations(&wires_at(&document, handle, 15.0, true), [0.0, 0.0], 0.5);
+    assert_eq!(unscaled.len(), viewport.len());
+}
+
+#[test]
+fn changing_the_annotation_scale_relays_a_complex_linetype() {
+    let mut scene = crate::scene::Scene::new();
+    scene.document = fence_document();
+    let mut line = EntityType::Line(Line::from_points(
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(100.0, 0.0, 0.0),
+    ));
+    line.common_mut().linetype = "FENCE".to_string();
+    scene.add_entity(line);
+
+    scene.set_annotation_scale_named("1:1").expect("1:1");
+    let at_1_1 = glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5).len();
+    assert!(at_1_1 > 60, "{at_1_1} glyphs at 1:1");
+
+    scene.set_annotation_scale_named("1:15").expect("1:15");
+    assert_fence_at_15(&glyph_stations(&scene.entity_wires(), [0.0, 0.0], 8.0));
+
+    scene.set_annotation_scale_named("1:1").expect("1:1");
+    let back = glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5).len();
+    assert_eq!(back, at_1_1);
 }
 
 #[test]

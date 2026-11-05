@@ -763,9 +763,9 @@ fn tessellate_entity_inner(
     // World units per screen pixel for LOD culling. `None` = no LOD.
     world_per_pixel: Option<f32>,
     // True only when tessellating content shown inside a paper-space viewport.
-    // Retained through recursive INSERT expansion; PSLTSCALE itself is applied
-    // by the viewport's GPU uniform so it never changes resident wire content.
-    _paper_space: bool,
+    // PSLTSCALE itself is applied by the viewport's GPU uniform so it never
+    // changes resident wire content.
+    paper_space: bool,
     // The scene's reference-only designation set (API v9): drives the
     // `WireModel::reference_only` stamp for dimensions' synthesis paths that
     // bypass the wrapper's post-stamp.
@@ -954,6 +954,15 @@ fn tessellate_entity_inner(
     // resident geometry at its model-space scale prevents every MSPACE wheel
     // tick from rebuilding and uploading the viewport's complete wire set.
     let pslt_factor = 1.0_f32;
+    // A complex linetype is walked here on the CPU, so it never sees the wire
+    // shader's model-space `linetype_scale` uniform. Bake the same ratio in:
+    // outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the Model layout
+    // and 1.0 on a paper sheet, which is exactly when the shader applies it.
+    let complex_lt_anno = if !paper_space && anno_scale.is_finite() && anno_scale > 1e-9 {
+        anno_scale
+    } else {
+        1.0
+    };
     // ── Proxy entity: draw its cached preview ───────────────────────────────
     //
     // An unsupported application-specific entity arrives as `Unknown`. Its data is
@@ -1515,7 +1524,7 @@ fn tessellate_entity_inner(
                     &base.name,
                     &local,
                     &clt,
-                    (lt_scale * pslt_factor).max(1e-4),
+                    (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
                     entity_color,
                     sel,
                     base.line_weight_px,

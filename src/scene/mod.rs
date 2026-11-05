@@ -14716,6 +14716,7 @@ vis_index={:.1} visible_probe={:.1}",
         let mut index = SceneDependencyIndex::default();
         index.signatures.reserve(self.document.entity_count());
         let mut normalized_layers: HashMap<&str, String> = HashMap::default();
+        let mut complex_linetypes: HashMap<&str, bool> = HashMap::default();
         for entity in self.document.entities() {
             let common = entity.common();
             let owner = if common.owner_handle.is_null() {
@@ -14764,7 +14765,14 @@ vis_index={:.1} visible_probe={:.1}",
             {
                 render_handles.extend_into(&mut index.text_geometry, common.handle);
             }
-            if matches!(entity, EntityType::Hatch(_))
+            // A complex linetype bakes the annotation scale into its wires, so
+            // changing the scale has to re-tessellate it like annotative content.
+            let lt_name = view::render::linetype_name_for_viewport(&self.document, entity, None);
+            let complex_linetype = *complex_linetypes.entry(lt_name).or_insert_with(|| {
+                crate::io::linetypes::resolve_complex_lt(&self.document, lt_name).is_some()
+            });
+            if complex_linetype
+                || matches!(entity, EntityType::Hatch(_))
                 || crate::scene::annotative::is_annotative(&self.document, entity)
             {
                 render_handles.extend_into(&mut index.annotation_geometry, common.handle);

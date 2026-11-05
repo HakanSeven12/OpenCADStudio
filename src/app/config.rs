@@ -48,6 +48,8 @@ pub struct AppConfig {
     pub shortcuts: ShortcutConfig,
     /// Model space background, grid, and selection appearance.
     pub model_space: ModelSpaceThemeConfig,
+    /// The user's changes to the right-click menu.
+    pub context_menu: crate::ui::popup::context_menu::MenuCustomization,
 }
 
 impl Default for AppConfig {
@@ -67,6 +69,7 @@ impl Default for AppConfig {
             plot: PlotDialogState::default(),
             shortcuts: ShortcutConfig::default(),
             model_space: ModelSpaceThemeConfig::default(),
+            context_menu: Default::default(),
         }
     }
 }
@@ -363,6 +366,17 @@ pub struct ModelSpaceThemeConfig {
     /// VSEDGECOLOR: the edge colour of the shaded-with-edges modes
     /// (`None`: black).
     pub edge_color: Option<[u8; 3]>,
+    /// VSEDGESMOOTH: crease angle in degrees; mesh edges whose faces meet
+    /// flatter are not drawn in the shaded-with-edges modes (default 1).
+    pub edge_smooth: f32,
+    /// COMPARECOLORADDED / REMOVED / MODIFIED: COMPARE's overlay colours.
+    pub compare_added: [u8; 3],
+    pub compare_removed: [u8; 3],
+    pub compare_modified: [u8; 3],
+    /// COMPARETOLERANCE: points closer than this compare as the same.
+    pub compare_tolerance: f64,
+    /// HPDLGMODE: 0 hides the Hatch panel while HATCH runs, 1 and 2 show it.
+    pub hatch_dialog_mode: u8,
     /// Selection highlight opacity in percent (10–100); below 100 the
     /// object's own colour shows through.
     pub selection_highlight_opacity: u8,
@@ -398,6 +412,12 @@ impl Default for ModelSpaceThemeConfig {
             selection_crossing_color: 0,
             selection_highlight_color: 0,
             edge_color: None,
+            edge_smooth: 1.0,
+            compare_added: crate::scene::compare::CompareSettings::default().colors[0],
+            compare_removed: crate::scene::compare::CompareSettings::default().colors[1],
+            compare_modified: crate::scene::compare::CompareSettings::default().colors[2],
+            compare_tolerance: crate::scene::compare::CompareSettings::default().tolerance,
+            hatch_dialog_mode: 2,
             selection_highlight_opacity: 100,
             selection_highlight_widen: 0,
             selection_effect: true,

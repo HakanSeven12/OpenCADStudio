@@ -106,7 +106,6 @@ impl OpenCADStudio {
         self.grip_pending = None;
         self.visibility_popup = None;
         self.table_popup = None;
-        self.flip_popup = None;
         self.hover_dwell = None;
         self.ucs_grip_drag = None;
         self.ucs_icon_selected = false;
@@ -1162,6 +1161,10 @@ impl OpenCADStudio {
             // LAYERFILTER takes its whole argument list on one line.
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
+            || tokens[0].eq_ignore_ascii_case("LAYERGROUP")
+            || tokens[0].eq_ignore_ascii_case("TOOLBAR")
+            || tokens[0].eq_ignore_ascii_case("-TOOLBAR")
+            || tokens[0].eq_ignore_ascii_case("WSCURRENT")
             // DIMUPDATE takes its KEEP / CLEAR answer on the same line.
             || tokens[0].eq_ignore_ascii_case("DIMUPDATE")
             // TEXTMASK takes OFFSET <n> / OFF on the same line.

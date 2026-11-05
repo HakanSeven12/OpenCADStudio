@@ -1540,6 +1540,7 @@ fn draw_grip_marker(
     } else {
         visual.grip_size.clamp(1.0, 25.0)
     };
+    let is_arrow = grip.shape == GripShape::Arrow;
     let path = match grip.shape {
         GripShape::Square => {
             canvas::Path::rectangle(Point::new(sp.x - h, sp.y - h), Size::new(h * 2.0, h * 2.0))
@@ -1566,7 +1567,7 @@ fn draw_grip_marker(
                 b.close();
             })
         }
-        GripShape::Triangle => canvas::Path::new(|b| {
+        GripShape::Triangle | GripShape::Arrow => canvas::Path::new(|b| {
             let (forward_x, forward_y) = match grip.dir {
                 Some([dx, dy]) if (dx * dx + dy * dy) > 1e-12 => {
                     let length = (dx * dx + dy * dy).sqrt();
@@ -1576,11 +1577,25 @@ fn draw_grip_marker(
             };
             let side_x = -forward_y;
             let side_y = forward_x;
-            let tip = Point::new(sp.x + forward_x * h, sp.y + forward_y * h);
-            let base = Point::new(sp.x - forward_x * h, sp.y - forward_y * h);
-            b.move_to(tip);
-            b.line_to(Point::new(base.x + side_x * h, base.y + side_y * h));
-            b.line_to(Point::new(base.x - side_x * h, base.y - side_y * h));
+            let h = if is_arrow { (h * 1.3).min(h + 1.5) } else { h };
+            let point = |forward: f32, side: f32| {
+                Point::new(
+                    sp.x + (forward_x * forward + side_x * side) * h,
+                    sp.y + (forward_y * forward + side_y * side) * h,
+                )
+            };
+            b.move_to(point(1.0, 0.0));
+            if is_arrow {
+                b.line_to(point(0.05, 0.95));
+                b.line_to(point(0.05, 0.34));
+                b.line_to(point(-1.0, 0.34));
+                b.line_to(point(-1.0, -0.34));
+                b.line_to(point(0.05, -0.34));
+                b.line_to(point(0.05, -0.95));
+            } else {
+                b.line_to(point(-1.0, 1.0));
+                b.line_to(point(-1.0, -1.0));
+            }
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
@@ -1668,8 +1683,12 @@ fn draw_grip_marker(
         frame.stroke(
             &path,
             canvas::Stroke {
-                width: 1.5,
-                style: canvas::Style::Solid(color),
+                width: if is_arrow { 1.0 } else { 1.5 },
+                style: canvas::Style::Solid(if is_arrow {
+                    palette.background.base.text.scale_alpha(0.55)
+                } else {
+                    color
+                }),
                 ..Default::default()
             },
         );

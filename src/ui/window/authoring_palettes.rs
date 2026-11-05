@@ -445,6 +445,7 @@ pub fn view(
             button(
                 canvas(VerticalLabel {
                     text: crate::t!(label).into_owned(),
+                    centered: false,
                 })
                 .width(16)
                 .height((label.len() as f32 * 7.0) + 8.0),

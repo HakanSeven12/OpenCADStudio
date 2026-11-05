@@ -56,6 +56,7 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         ("CTRL+TAB".to_string(), "NEXTDRAWING"),
         ("CTRL+SHIFT+TAB".to_string(), "PREVDRAWING"),
         (format!("{ACCEL}+0"), "CLEANSCREEN"),
+        (format!("{ACCEL}+9"), "COMMANDLINETOGGLE"),
         (format!("{ACCEL}+1"), "PROPERTIES"),
         (format!("{ACCEL}+K"), "HYPERLINK"),
         (format!("{ACCEL}+N"), "QNEW"),
@@ -343,6 +344,14 @@ impl OpenCADStudio {
             _ => None,
         };
         let builtin = builtin.filter(|_| !self.shortcut_bindings.contains_key(key));
+        // Alt+letter opens that menu of the menu bar, unless it is bound.
+        if let Some(letter) = key.strip_prefix("ALT+").filter(|rest| rest.chars().count() == 1) {
+            if !self.shortcut_bindings.contains_key(key) {
+                if let Some(task) = letter.chars().next().and_then(|ch| self.open_menu_bar_menu(ch)) {
+                    return task;
+                }
+            }
+        }
         let action = builtin.as_ref().or_else(|| self.shortcut_bindings.get(key)).or_else(|| {
             let base = key.rsplit('+').next()?;
             is_named_key(base)

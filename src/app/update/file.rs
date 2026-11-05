@@ -811,6 +811,8 @@ impl OpenCADStudio {
             hatch_start_method: self.hatch_start_method,
             show_menu_bar: self.show_menu_bar,
             ribbon_closed: self.ribbon_closed,
+            command_line_hidden: self.command_line_hidden,
+            layer_columns: crate::ui::window::layers::column_layout_names(),
             options_tab: self.options_tab,
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
@@ -1001,6 +1003,8 @@ impl OpenCADStudio {
         self.hatch_start_method = s.hatch_start_method.min(2);
         self.show_menu_bar = s.show_menu_bar;
         self.ribbon_closed = s.ribbon_closed;
+        self.command_line_hidden = s.command_line_hidden;
+        crate::ui::window::layers::set_column_layout_names(&s.layer_columns);
         self.options_tab = s.options_tab;
         self.spacemouse_preferences = s.spacemouse;
         // These four drive real features with commands and status-bar pills,
@@ -1527,6 +1531,7 @@ impl OpenCADStudio {
                 layout: self.ribbon.layout().clone(),
             },
             plot: self.plot_dialog.clone(),
+            context_menu: self.context_menu_custom.clone(),
             shortcuts: crate::app::config::ShortcutConfig {
                 bindings: self
                     .shortcut_bindings
@@ -1604,6 +1609,7 @@ impl OpenCADStudio {
         self.annotation_auto_scale = cfg.annotation_auto_scale.clamp(-4, 4);
         self.ribbon.set_layout(cfg.ribbon.layout);
         self.plot_dialog = cfg.plot;
+        self.context_menu_custom = cfg.context_menu;
         self.shortcut_bindings = cfg.shortcuts.bindings.into_iter().collect();
         self.shortcut_bindings
             .entry("F5".to_string())
@@ -1650,6 +1656,15 @@ impl OpenCADStudio {
     /// Sync the active theme and model space configuration into all open tabs
     /// and the application default background settings.
     pub(in crate::app) fn sync_model_space_theme(&mut self, geometry_changed: bool) {
+        // VSEDGESMOOTH: meshes draw their edges again when the angle changes.
+        let smooth = self.model_space.edge_smooth.clamp(0.0, 180.0);
+        if (crate::entities::mesh::edge_smooth_degrees() - smooth).abs() > f32::EPSILON {
+            crate::entities::mesh::set_edge_smooth_degrees(smooth);
+            // Block definitions hold meshes too, so every mesh is built again.
+            for tab in &mut self.tabs {
+                tab.scene.populate_meshes_from_document();
+            }
+        }
         let model_bg = self.model_space.resolve_model_bg(&self.active_theme);
         let paper_bg = self.model_space.resolve_paper_bg();
         let desk_bg = self.model_space.resolve_desk_bg();
@@ -5255,13 +5270,14 @@ impl OpenCADStudio {
         }
     }
 
-    /// Remove the autosave recovery files, then quit the application.
     /// Quit without removing the recovery copies (see `Message::Terminate`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn leave_keeping_recovery(&mut self) -> Task<Message> {
         self.exit_requested = true;
         iced::exit()
     }
 
+    /// Remove the autosave recovery files, then quit the application.
     pub(in crate::app) fn exit_app(&mut self) -> Task<Message> {
         self.cleanup_autosaves();
         self.exit_requested = true;
@@ -6446,6 +6462,36 @@ impl OpenCADStudio {
         dir.join(format!("{stem}_{ts}.pdf"))
     }
 
+    /// File stem the plot dialog names its output by and, when it picks a
+    /// folder (and the drawing has been saved), the finished path that
+    /// skips the save dialog. The `PDF` subfolder is created on demand.
+    pub(super) fn plot_output_target(&self) -> (String, Option<std::path::PathBuf>) {
+        let tab = &self.tabs[self.active_tab];
+        let drawing = self.active_stem("");
+        let layout = &tab.scene.current_layout;
+        let stem = match self.plot_dialog.output_name {
+            1 => layout.clone(),
+            2 => format!("{drawing}-{layout}"),
+            _ => drawing,
+        };
+        let stem: String = stem
+            .chars()
+            .map(|c| if "/\\:*?\"<>|".contains(c) { '_' } else { c })
+            .collect();
+        let dir = tab.current_path.as_deref().and_then(|path| path.parent());
+        let folder = match (self.plot_dialog.output_folder, dir) {
+            _ if cfg!(target_arch = "wasm32") => None,
+            (1, Some(dir)) => Some(dir.to_path_buf()),
+            (2, Some(dir)) => Some(dir.join("PDF")),
+            _ => None,
+        };
+        let path = folder.filter(|folder| std::fs::create_dir_all(folder).is_ok()).map(|folder| {
+            let ext = if self.plot_dialog.file_svg { "svg" } else { "pdf" };
+            folder.join(format!("{stem}.{ext}"))
+        });
+        (stem, path)
+    }
+
     /// File stem of the active drawing for default output names, with an
     /// optional suffix (e.g. "_layouts" for print-all). Falls back to
     /// "drawing" when the tab has never been saved.
@@ -7069,6 +7115,22 @@ impl OpenCADStudio {
             }
             M::Quality(s) => {
                 self.plot_dialog.quality = s;
+                Task::none()
+            }
+            M::OutputFolder(s) => {
+                self.plot_dialog.output_folder = s.parse().unwrap_or(0);
+                Task::none()
+            }
+            M::OutputName(s) => {
+                self.plot_dialog.output_name = s.parse().unwrap_or(0);
+                Task::none()
+            }
+            M::RasterDpi(s) => {
+                self.plot_dialog.raster_dpi = s;
+                Task::none()
+            }
+            M::VectorDpi(s) => {
+                self.plot_dialog.vector_dpi = s;
                 Task::none()
             }
             M::Shade(s) => {
@@ -7836,6 +7898,8 @@ impl OpenCADStudio {
             stamp: d.stamp,
             merge_lines: d.merge_lines,
             quality: crate::io::pdf_export::PlotQuality::from_dialog(&d.quality),
+            raster_dpi: d.raster_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
+            vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
         }
     }
 

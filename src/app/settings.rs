@@ -843,6 +843,10 @@ pub struct UserSettings {
     pub show_menu_bar: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
     pub ribbon_closed: bool,
+    /// COMMANDLINEHIDE (Ctrl+9) hid the command line; COMMANDLINE shows it.
+    pub command_line_hidden: bool,
+    /// The Layer Manager's column order; a hidden column is led by `-`.
+    pub layer_columns: Vec<String>,
     /// When true, double-clicking a block reference starts REFEDIT instead of BEDIT.
     pub double_click_block_refedit: bool,
     /// When true, double-clicking a block with attributes opens ATTEDIT.
@@ -1438,6 +1442,8 @@ impl Default for UserSettings {
             hatch_start_method: 0,
             show_menu_bar: false,
             ribbon_closed: false,
+            command_line_hidden: false,
+            layer_columns: Vec::new(),
             options_tab: crate::ui::window::options::OptionsTab::General,
             show_viewcube: true,
             show_ucs_icon: true,

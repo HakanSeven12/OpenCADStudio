@@ -117,7 +117,96 @@ impl OpenCADStudio {
             .menu
             .ui
             .open_submenu;
-        build_context_menu(&self.context_menu_context(), open)
+        if let Some(menu) = self.menu_bar_popup.and_then(|index| {
+            crate::ui::menu_bar::keyboard_menu(index, &self.command_aliases, open)
+        }) {
+            return menu;
+        }
+        let context = self.context_menu_context();
+        let mut menu = build_context_menu(&context, open);
+        if matches!(context, crate::ui::popup::context_menu::MenuContext::Idle { .. }) {
+            let mut rows = crate::ui::popup::context_menu::customize_rows(
+                menu.rows,
+                &self.context_menu_custom,
+            );
+            crate::ui::popup::context_menu::give_mnemonics(&mut rows);
+            menu = ContextMenu::from_rows(rows);
+        }
+        menu
+    }
+
+    /// The rows the editor lists: the idle menu as built, before the user's
+    /// changes.
+    pub(in crate::app) fn uncustomized_context_menu(&self) -> ContextMenu {
+        build_context_menu(&self.context_menu_context(), None)
+    }
+
+    pub(in crate::app) fn on_context_menu_edit(
+        &mut self,
+        msg: crate::app::ContextMenuEditMsg,
+    ) -> Task<Message> {
+        use crate::app::ContextMenuEditMsg as M;
+        // A typed command is named as the ribbon names it.
+        let typed = self.context_menu_editing.clone().unwrap_or_default().trim().to_uppercase();
+        let resolved = self.resolve_alias(&typed).unwrap_or_else(|| typed.clone());
+        let label = crate::modules::registry::ribbon_commands()
+            .get(&resolved)
+            .map(|(label, _)| crate::t!(*label).into_owned())
+            .unwrap_or_else(|| typed.clone());
+        let custom = &mut self.context_menu_custom;
+        match msg {
+            M::Toggle(key) => {
+                if let Some(at) = custom.hidden.iter().position(|hidden| *hidden == key) {
+                    custom.hidden.remove(at);
+                } else {
+                    custom.hidden.push(key);
+                }
+            }
+            M::Draft(text) => {
+                self.context_menu_editing = Some(text);
+                return Task::none();
+            }
+            M::Add => {
+                if !typed.is_empty() {
+                    custom.custom.push((label, typed));
+                }
+                self.context_menu_editing = Some(String::new());
+            }
+            M::Remove(index) => {
+                if index < custom.custom.len() {
+                    custom.custom.remove(index);
+                }
+            }
+            M::Move(index, up) => {
+                let other = if up { index.checked_sub(1) } else { Some(index + 1) };
+                if let Some(other) = other.filter(|other| *other < custom.custom.len()) {
+                    custom.custom.swap(index, other);
+                }
+            }
+            M::Done => {
+                self.context_menu_editing = None;
+                self.save_config();
+                return self.close_context_menu();
+            }
+        }
+        self.save_config();
+        Task::none()
+    }
+
+    /// Alt+letter with the menu bar shown: that menu opens under its title
+    /// as a shortcut menu, driven by arrows, Enter and the row letters.
+    pub(in crate::app) fn open_menu_bar_menu(&mut self, letter: char) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        if !self.show_menu_bar {
+            return None;
+        }
+        let (index, x) = crate::ui::menu_bar::menu_for_letter(letter, self.tabs[i].is_start)?;
+        self.menu_bar_popup = Some(index);
+        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+        sel.menu.open(iced::Point::new(x, 2.0));
+        sel.menu.ui.highlighted = Some(0);
+        drop(sel);
+        Some(self.unfocus_widgets())
     }
 
     /// Close the menu and give the keyboard back to the command line.
@@ -129,6 +218,8 @@ impl OpenCADStudio {
         }
         sel.menu.close();
         drop(sel);
+        self.menu_bar_popup = None;
+        self.context_menu_editing = None;
         self.focus_cmd_input()
     }
 
@@ -163,6 +254,11 @@ impl OpenCADStudio {
         if let MenuAction::ToggleSubmenu(id) = action {
             return self.on_context_menu_submenu_toggle(id);
         }
+        // The menu stays open, turned into its editor.
+        if action == MenuAction::Customize {
+            self.context_menu_editing = Some(String::new());
+            return Task::none();
+        }
         let i = self.active_tab;
         {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
@@ -196,6 +292,10 @@ impl OpenCADStudio {
                 }
             }
             MenuAction::Command(cmd) => self.update(Message::Command(cmd)),
+            MenuAction::MenuLine(line) => {
+                self.menu_bar_popup = None;
+                self.update(Message::MenuCommand(line))
+            }
             MenuAction::Mtp => self.update(Message::SnapOverrideMtp),
             MenuAction::From => self.update(Message::SnapOverrideFrom),
             MenuAction::SnapOverride(t) => self.update(Message::SnapOverridePick(t)),
@@ -216,7 +316,7 @@ impl OpenCADStudio {
             MenuAction::DrawOrderPickRef(above) => self.update(Message::DrawOrderPickRef(above)),
             MenuAction::ConstraintDelete(id) => self.update(Message::PropConstraintDelete(id)),
             MenuAction::Grip(cmd) => self.on_grip_context_pick(cmd),
-            MenuAction::ToggleSubmenu(_) => Task::none(),
+            MenuAction::ToggleSubmenu(_) | MenuAction::Customize => Task::none(),
         };
         Task::batch(vec![focus, task])
     }
@@ -306,6 +406,34 @@ impl OpenCADStudio {
                 None => Task::none(),
             },
         }
+    }
+
+    /// Dynamic Input's option list: the shortcut menu of the running command,
+    /// opened at the cursor with its first option highlighted. `None` when
+    /// Dynamic Input is off, text is typed, or the step has no options.
+    pub(in crate::app) fn open_dynamic_options(&mut self) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        let has_options = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.options().iter().any(|o| !o.keyword.is_empty()));
+        if !self.dyn_input || !has_options || !self.command_line.input.trim().is_empty() {
+            return None;
+        }
+        self.menu_bar_popup = None;
+        let first = {
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            // Beside the cursor; before the pointer has moved, the corner.
+            let at = sel.input.last_move_pos.unwrap_or(iced::Point::new(40.0, 40.0));
+            sel.menu.open(at);
+            drop(sel);
+            self.current_context_menu()
+                .selectable()
+                .iter()
+                .position(|row| matches!(row.action, MenuAction::Option(_)))
+        };
+        self.tabs[i].scene.selection.borrow_mut().menu.ui.highlighted = first;
+        Some(self.unfocus_widgets())
     }
 
     /// Route keyboard-derived messages to the open menu. Returns `Some(task)`

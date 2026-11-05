@@ -305,7 +305,7 @@ pub fn grips_to_screen_paper(
 pub const CUSTOM_GRIP_ID_START: usize = usize::MAX / 2;
 
 pub(crate) fn is_custom_block_marker(grip: &GripDef) -> bool {
-    grip.id >= CUSTOM_GRIP_ID_START && grip.shape == GripShape::Triangle
+    grip.id >= CUSTOM_GRIP_ID_START && matches!(grip.shape, GripShape::Triangle | GripShape::Arrow)
 }
 
 fn nearer_grip(

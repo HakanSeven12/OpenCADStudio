@@ -3820,6 +3820,14 @@ pub trait CadCommand: Send {
         None
     }
 
+    /// HATCH's settings for the Hatch panel; `None` for other commands.
+    fn hatch_settings(&self) -> Option<crate::modules::draw::draw::hatch::HatchSettings> {
+        None
+    }
+
+    /// Settings edited in the Hatch panel.
+    fn set_hatch_settings(&mut self, _settings: crate::modules::draw::draw::hatch::HatchSettings) {}
+
     /// The step draws a window that selects objects rather than placing
     /// geometry: no coordinate boxes at the cursor. Default `false`.
     fn selects_by_window(&self) -> bool {

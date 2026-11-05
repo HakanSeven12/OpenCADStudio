@@ -825,6 +825,24 @@ impl OpenCADStudio {
                 return task;
             }
         }
+        // With Dynamic Input on, Down opens the running command's options at
+        // the cursor, the first one highlighted; arrows and Enter then drive
+        // that menu.
+        if let Message::ArrowKeyPressed {
+            direction: crate::app::ArrowKey::Down,
+            ..
+        }
+        | Message::CommandLineArrowProbe {
+            direction: crate::app::ArrowKey::Down,
+            ..
+        } = &msg
+        {
+            if !self.context_menu_open() {
+                if let Some(task) = self.open_dynamic_options() {
+                    return task;
+                }
+            }
+        }
         // The open right-click context menu owns the keyboard the same way:
         // arrows / Enter / mnemonic letters drive it, any other key closes it
         // and falls through to the command line (the behaviour of commercial solutions).
@@ -5886,6 +5904,7 @@ impl OpenCADStudio {
                     return self.update(Message::CommandFinalize);
                 }
                 sel.input.right_click_entered = false;
+                self.menu_bar_popup = None;
                 sel.menu.open(click_pos);
                 drop(sel);
                 // Take the keyboard away from the command-line field so keys
@@ -6201,13 +6220,6 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
-            Message::FlipPick(idx) => {
-                if let Some(popup) = self.flip_popup.take() {
-                    self.apply_flip_state(popup, idx == 1);
-                }
-                Task::none()
-            }
-
             Message::GripMenuPick(idx) => self.on_grip_menu_pick(idx),
 
             // ── Snap / mode toggles ───────────────────────────────────────
@@ -8660,6 +8672,13 @@ impl OpenCADStudio {
                 use super::SystemClipboardText as Text;
 
                 match result {
+                    // SVG markup (from another program, or another OCS)
+                    // comes in as drawing, placed by the insertion prompts.
+                    Text::Text(text)
+                        if text.trim_start().starts_with('<') && text.contains("<svg") =>
+                    {
+                        self.paste_svg_text(self.active_tab, text)
+                    }
                     Text::Text(text) => {
                         // As if typed: rows submit one after another.
                         let typed = format!("{}{text}", self.command_line.input);
@@ -10465,6 +10484,68 @@ impl OpenCADStudio {
                 // check button does, so no half-visible "ghost" row appears.
                 Task::none()
             }
+            Message::HatchPanel(msg) => self.on_hatch_panel(msg),
+            Message::RibbonCustomizeOpen => {
+                let selected = (!self.ribbon.custom_panels().is_empty()).then_some(0);
+                self.ribbon_customize = Some(crate::ui::window::ribbon_customize::State {
+                    selected,
+                    draft: String::new(),
+                });
+                self.active_modal = Some(crate::app::ModalKind::RibbonCustomize);
+                Task::none()
+            }
+            Message::RibbonCustomize(msg) => self.on_ribbon_customize(msg),
+            Message::ContextMenuEdit(msg) => self.on_context_menu_edit(msg),
+            Message::KeyListExport(aliases) => {
+                let (header, rows, name) = if aliases {
+                    (
+                        [crate::t!("Alias"), crate::t!("Command")],
+                        &self.alias_editor_rows,
+                        "aliases",
+                    )
+                } else {
+                    (
+                        [crate::t!("Key"), crate::t!("Command")],
+                        &self.shortcut_editor_rows,
+                        "shortcuts",
+                    )
+                };
+                let table: Vec<Vec<String>> = std::iter::once(header.map(|h| h.into_owned()).to_vec())
+                    .chain(rows.iter().map(|(a, b)| vec![a.clone(), b.clone()]))
+                    .collect();
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // The web build downloads it as a workbook.
+                    let path = std::path::PathBuf::from(format!("{name}.xlsx"));
+                    return Task::done(Message::KeyListExportTo(Some(path), table));
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                Task::perform(
+                    async move {
+                        let path = crate::sys::file_dialog()
+                            .set_file_name(format!("{name}.xlsx"))
+                            .add_filter("Excel (*.xlsx)", &["xlsx"])
+                            .add_filter("CSV (*.csv)", &["csv"])
+                            .add_filter("Text (*.txt)", &["txt"])
+                            .save_file()
+                            .await
+                            .map(|handle| crate::sys::handle_path(&handle));
+                        (path, table)
+                    },
+                    |(path, table)| Message::KeyListExportTo(path, table),
+                )
+            }
+            Message::KeyListExportTo(path, table) => {
+                if let Some(path) = path {
+                    match crate::app::annotation_data::write_extraction_file(&path, &table) {
+                        Ok(()) => self
+                            .command_line
+                            .push_info(crate::tf!("Exported: {}", path.display()).as_ref()),
+                        Err(error) => self.command_line.push_error(&error),
+                    }
+                }
+                Task::none()
+            }
             Message::AliasEditorImport => Task::perform(
                 async {
                     let handle = rfd::AsyncFileDialog::new()
@@ -12048,9 +12129,58 @@ impl OpenCADStudio {
                 self.ribbon.layer_filter = f;
                 Task::none()
             }
+            Message::LayerGroupShow(group) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.group = group;
+                Task::none()
+            }
+            Message::LayerGroupNew => {
+                let i = self.active_tab;
+                let name = self.next_layer_group_name(i);
+                let layers = self.tabs[i].layers.selected_names();
+                self.set_layer_group(i, &name, &layers, true);
+                self.tabs[i].layers.group = Some(name);
+                Task::none()
+            }
+            Message::LayerGroupAdd(name) => {
+                let i = self.active_tab;
+                let layers = self.tabs[i].layers.selected_names();
+                self.set_layer_group(i, &name, &layers, true);
+                Task::none()
+            }
+            Message::LayerGroupRemove => {
+                let i = self.active_tab;
+                if let Some(name) = self.tabs[i].layers.group.clone() {
+                    let layers = self.tabs[i].layers.selected_names();
+                    self.set_layer_group(i, &name, &layers, false);
+                }
+                Task::none()
+            }
+            Message::LayerGroupDelete => {
+                let i = self.active_tab;
+                if let Some(name) = self.tabs[i].layers.group.take() {
+                    return self.dispatch_command(&format!("LAYERGROUP DELETE {name}"));
+                }
+                Task::none()
+            }
             Message::LayerManagerFilterChanged(f) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.filter = f;
+                Task::none()
+            }
+            Message::LayerColumnsMenu(open) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.columns_menu = open;
+                Task::none()
+            }
+            Message::LayerColumnToggle(col) => {
+                crate::ui::window::layers::toggle_column(col);
+                self.save_config();
+                Task::none()
+            }
+            Message::LayerColumnMove(col, step) => {
+                crate::ui::window::layers::move_column(col, step);
+                self.save_config();
                 Task::none()
             }
             Message::LayerNameColGrab => {
@@ -12878,6 +13008,7 @@ impl OpenCADStudio {
             // A service manager stopping the program (a container closing at
             // logout): unsaved work goes to the recovery copies, which are
             // kept, and the program leaves once they are written.
+            #[cfg(not(target_arch = "wasm32"))]
             Message::Terminate => {
                 self.terminating = true;
                 let task = self.on_autosave();
@@ -13162,13 +13293,10 @@ impl OpenCADStudio {
 
             // ── Plot / Export ─────────────────────────────────────────────
             Message::PlotExport => {
-                let i = self.active_tab;
-                let stem = self.tabs[i]
-                    .current_path
-                    .as_deref()
-                    .and_then(|p: &std::path::Path| p.file_stem())
-                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "drawing".into());
+                let (stem, preset) = self.plot_output_target();
+                if let Some(path) = preset {
+                    return Task::done(Message::PlotExportPath(Some(path)));
+                }
                 // The save dialog follows the dialog's file device, so the
                 // SVG choice proposes `stem.svg` up front.
                 #[cfg(not(target_arch = "wasm32"))]
@@ -13202,13 +13330,10 @@ impl OpenCADStudio {
             Message::PlotExportPath(Some(path)) => self.on_plot_export_path_some(path),
 
             Message::PlotWindowExport => {
-                let i = self.active_tab;
-                let stem = self.tabs[i]
-                    .current_path
-                    .as_deref()
-                    .and_then(|p: &std::path::Path| p.file_stem())
-                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "drawing".into());
+                let (stem, preset) = self.plot_output_target();
+                if let Some(path) = preset {
+                    return Task::done(Message::PlotWindowExportPath(Some(path)));
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 let svg = self.plot_dialog.file_svg;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]

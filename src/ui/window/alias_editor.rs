@@ -181,10 +181,16 @@ pub fn view_window<'a>(
         )
     } else {
         (
-            row![button(text(t!("Reset to default")).size(12))
-                .on_press(Message::AliasEditorResetAsk)
-                .padding([4, 10])
-                .style(button::secondary)]
+            row![
+                button(text(t!("Reset to default")).size(12))
+                    .on_press(Message::AliasEditorResetAsk)
+                    .padding([4, 10])
+                    .style(button::secondary),
+                button(text(t!("Export...")).size(12))
+                    .on_press(Message::KeyListExport(true))
+                    .padding([4, 10])
+                    .style(button::secondary),
+            ]
             .spacing(8)
             .align_y(iced::Center),
             row![

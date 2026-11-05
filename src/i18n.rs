@@ -486,6 +486,7 @@ pub fn ribbon_module_title(id: &str, fallback: &str) -> String {
         "manage" => crate::tr!("ribbon-tab", "manage"),
         "view" => crate::tr!("ribbon-tab", "view"),
         "block_editor" => crate::tr!("ribbon-tab", "block-editor"),
+        "user" => crate::tr!("ribbon-tab", "user"),
         _ => fallback.to_string(),
     }
 }
@@ -585,8 +586,12 @@ mod tests {
             assert!(prompt.contains("\"…\""), "{language:?}: {prompt}");
             let point = loader.get_attr("common", "point");
             let linear = loader.get_attr("common", "linear");
+            let flip = loader.get_attr("block-history-kinds", "flip");
             for rendered in [&prompt, &created] {
-                assert!(rendered.contains(&point) && rendered.contains(&linear), "{language:?}: {rendered}");
+                assert!(
+                    [&point, &linear, &flip].iter().all(|label| rendered.contains(label.as_str())),
+                    "{language:?}: {rendered}"
+                );
             }
             assert!(!loader.get_attr("block-action-targets", "unique-point").is_empty());
         }

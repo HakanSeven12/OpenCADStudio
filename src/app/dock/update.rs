@@ -145,6 +145,11 @@ impl OpenCADStudio {
                 }
             }
             DockMsg::EdgeMenu(side) => self.dock_edge_menu = side,
+            DockMsg::StripLabels(on) => {
+                self.dock_edge_menu = None;
+                self.dock.strip_labels = on;
+                self.save_config();
+            }
             DockMsg::EdgeMenuToggle(side, id) => {
                 // Checked = open and docked on this edge: unchecking hides it.
                 // Anything else (closed, floating, on the other edge) moves
@@ -882,7 +887,24 @@ impl OpenCADStudio {
             .into_iter()
             .map(|gi| (gi, self.dock_group_visible(side, gi).len()))
             .collect();
-        crate::ui::dock::strip_layout(&groups)
+        crate::ui::dock::strip_layout(&groups, self.dock_strip_cell_h(&groups))
+    }
+
+    /// Height of a pallet cell in an icon strip holding `groups`: fixed for
+    /// icons only; labelled, the edge's height shared between the pallets.
+    fn dock_strip_cell_h(&self, groups: &[(usize, usize)]) -> f32 {
+        use crate::ui::dock::{
+            STRIP_CELL_H, STRIP_DIVIDER_H, STRIP_LABEL_MIN_H, STRIP_PAD, STRIP_PLUS_GAP, STRIP_PLUS_H,
+        };
+        if !self.dock.strip_labels {
+            return STRIP_CELL_H;
+        }
+        let pallets: usize = groups.iter().map(|&(_, icons)| icons).sum();
+        let fixed = groups.len() as f32 * (2.0 * STRIP_PAD + STRIP_DIVIDER_H)
+            + STRIP_PLUS_GAP
+            + STRIP_PLUS_H
+            + STRIP_PAD;
+        ((self.dock_workspace_size().1 - fixed) / pallets.max(1) as f32).max(STRIP_LABEL_MIN_H)
     }
 
     /// The open pallets of `side`'s shown group, each as (position in the

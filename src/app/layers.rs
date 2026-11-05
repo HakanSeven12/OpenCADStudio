@@ -71,6 +71,8 @@ impl OpenCADStudio {
         self.tabs[i]
             .layers
             .sync_with_viewports(&doc_layers, vp_info);
+        let groups = self.layer_group_names(i);
+        self.tabs[i].layers.set_groups(groups);
         self.sync_ribbon_layers();
         // A walk in flight reads the same table: a layer added, renamed or
         // erased by any other command has to reach its rows, or the override

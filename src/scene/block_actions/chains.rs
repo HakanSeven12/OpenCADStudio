@@ -13,7 +13,7 @@ fn frame_index(
 ) -> Result<BTreeMap<Handle, (Handle, i32)>, &'static str> {
     let owner = authoring::graph(doc, definition).ok().flatten();
     let mut index = BTreeMap::new();
-    for p in parameters.iter().filter(|p| p.point || p.linear || p.flip) {
+    for p in parameters.iter().filter(|p| p.is_move_target()) {
         for h in [p.handle, if p.point || p.flip { p.grip } else { Handle::NULL }] {
             if h != Handle::NULL && doc.object_owner(h) == owner {
                 if index
@@ -167,7 +167,7 @@ impl<'a> Graph<'a> {
         self.nodes
             .values()
             .map(|n| &n.parameter)
-            .filter(|p| p.point || p.linear || p.flip)
+            .filter(|p| p.is_move_target())
     }
 
     pub(super) fn autonomous(
@@ -197,7 +197,7 @@ impl<'a> Graph<'a> {
                 -incoming.get(handle).copied().unwrap_or(DVec3::ZERO),
             );
             autonomous.insert(*handle, raw);
-            let active = if (p.point || p.linear || p.flip) && !node.chained {
+            let active = if p.is_move_target() && !node.chained {
                 raw
             } else {
                 effective
@@ -209,6 +209,11 @@ impl<'a> Graph<'a> {
 
     pub(super) fn contains(&self, handle: Handle) -> bool {
         self.nodes.contains_key(&handle)
+    }
+
+    pub(super) fn has_unchained_incoming_move(&self, handle: Handle) -> bool {
+        self.nodes.get(&handle).is_some_and(|node| !node.chained)
+            && self.nodes.values().any(|node| node.links.iter().any(|link| link.target == handle))
     }
 
     /// The frame driving an action can differ from its displayed frame when
@@ -269,7 +274,7 @@ impl<'a> Graph<'a> {
                 raw.base = bases.and_then(|b| b.get(handle)).copied().unwrap_or(p.base);
             }
             let effective = translated(p, raw, offset);
-            let active = if (p.point || p.linear || p.flip) && !node.chained {
+            let active = if p.is_move_target() && !node.chained {
                 raw
             } else {
                 effective
@@ -282,7 +287,7 @@ impl<'a> Graph<'a> {
                 return Err("The parameter value produces non-finite geometry.");
             }
             active_frames.insert(*handle, active);
-            if p.point || p.linear || p.flip {
+            if p.is_move_target() {
                 if !p.flip {
                     set_value(staged, p, Value::Point(active.end))?;
                 }

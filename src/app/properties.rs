@@ -2923,14 +2923,19 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                         });
                     }
                     if let Some(definition) = self.tabs[i].active_block_edit_session().map(|session| session.br_handle) {
-                        if let Some(current) = crate::scene::block_actions::chain::label(
+                        if let Some(names) = crate::scene::block_actions::chain::labels(
                             &self.tabs[i].scene.document, definition, item.handle) {
+                            let value = match names.as_slice() {
+                                [] => String::new(),
+                                [name] if name.trim() == name && !name.starts_with('[') => name.clone(),
+                                _ => serde_json::to_string(&names).expect("action names serialize as JSON strings"),
+                            };
                             panel.sections.push(PropSection {
                                 title: crate::t!("Action chain").into_owned(),
                                 props: vec![Property {
                                     label: crate::t!("Chain to").into_owned(),
                                     field: "authoring_action_chain",
-                                    value: PropValue::EditText(current),
+                                    value: PropValue::PlainText(value),
                                 }],
                             });
                         }

@@ -44,6 +44,27 @@ impl OpenCADStudio {
         }
     }
 
+    /// The selection as SVG on the system clipboard, so other programs
+    /// paste it as editable paths; OCS itself pastes from its own copy.
+    pub(in crate::app) fn copy_svg_to_system_clipboard(
+        &self,
+        i: usize,
+        handles: &[codec::Handle],
+    ) -> Task<Message> {
+        let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles) else {
+            return Task::none();
+        };
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::sys::write_clipboard_text(&svg);
+            Task::none()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            iced::clipboard::write(svg).discard()
+        }
+    }
+
     pub(in crate::app) fn copy_entities_to_clipboard(
         &mut self,
         i: usize,
@@ -274,6 +295,7 @@ impl OpenCADStudio {
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
                     self.command_line
                         .push_info(crate::tf!("{} object(s) copied to clipboard.", count).as_ref());
+                    return Some(self.copy_svg_to_system_clipboard(i, &handles));
                 }
             }
 
@@ -324,6 +346,7 @@ impl OpenCADStudio {
                         )
                         .as_ref(),
                     );
+                    return Some(self.copy_svg_to_system_clipboard(i, &handles));
                 }
             }
 
@@ -346,6 +369,7 @@ impl OpenCADStudio {
                         &handles,
                     );
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
+                    let svg = self.copy_svg_to_system_clipboard(i, &handles);
                     self.push_undo_snapshot(i, "CUTCLIP");
                     self.tabs[i].scene.erase_entities(&handles);
                     self.tabs[i].scene.deselect_all();
@@ -353,6 +377,7 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     self.command_line
                         .push_info(crate::tf!("{} object(s) cut to clipboard.", count).as_ref());
+                    return Some(svg);
                 }
             }
 
@@ -410,6 +435,53 @@ impl OpenCADStudio {
                             .as_ref(),
                     ),
                 }
+            }
+
+            // ARRAYEDIT's single-item edits: ARRAYEDIT_ITEM:<array>:<op>[:x,y,z…]
+            // with E (erase the item at a point), M (move the item at a
+            // point by an offset) or R (reset every item).
+            cmd if cmd.starts_with("ARRAYEDIT_ITEM:") => {
+                use crate::scene::assoc_array::{self, ItemEdit};
+                let mut parts = cmd["ARRAYEDIT_ITEM:".len()..].split(':');
+                let handle = codec::Handle::new(parts.next()?.parse().unwrap_or(0));
+                let op = parts.next().unwrap_or("");
+                let points: Vec<glam::DVec3> = parts
+                    .filter_map(|p| {
+                        let v: Vec<f64> = p.split(',').filter_map(|c| c.parse().ok()).collect();
+                        (v.len() == 3).then(|| glam::DVec3::new(v[0], v[1], v[2]))
+                    })
+                    .collect();
+                let Some(array) = assoc_array::array_of_insert(&self.tabs[i].scene.document, handle)
+                else {
+                    self.command_line.push_error(
+                        crate::t!("ARRAYEDIT: the selected object is not an associative array.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                let location = points
+                    .first()
+                    .and_then(|p| assoc_array::nearest_item(&self.tabs[i].scene.document, &array, *p));
+                self.push_undo_snapshot(i, "ARRAYEDIT");
+                let scene = &mut self.tabs[i].scene;
+                let result = match (op, location, points.get(1)) {
+                    ("R", _, _) => assoc_array::reset_items(scene, &array),
+                    ("E", Some(location), _) => {
+                        assoc_array::edit_item(scene, &array, location, ItemEdit::Erase)
+                    }
+                    ("M", Some(location), Some(offset)) => {
+                        assoc_array::edit_item(scene, &array, location, ItemEdit::Move(*offset))
+                    }
+                    _ => Err(crate::t!("ARRAYEDIT: no array item there.").into_owned()),
+                };
+                match result {
+                    Ok(()) => self.tabs[i].dirty = true,
+                    Err(error) => self
+                        .command_line
+                        .push_error(crate::tf!("ARRAYEDIT: {error}").as_ref()),
+                }
+                self.finish_pending_history(i);
+                self.refresh_properties();
             }
 
             // PASTESPEC — offer the copied objects now; the system clipboard's

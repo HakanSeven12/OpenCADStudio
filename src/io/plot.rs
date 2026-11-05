@@ -72,6 +72,11 @@ pub struct PlotOptions {
     pub stamp: bool,
     pub merge_lines: bool,
     pub quality: PlotQuality,
+    /// Raster image resolution cap in DPI; overrides `quality` when set.
+    pub raster_dpi: Option<u32>,
+    /// Vector resolution in DPI: path points snap to that grid on paper,
+    /// trading precision for size. `None` keeps full precision.
+    pub vector_dpi: Option<u32>,
 }
 
 /// End indexes of the first paper/model render group in each flat input list.
@@ -121,6 +126,8 @@ impl Default for PlotOptions {
             stamp: false,
             merge_lines: false,
             quality: PlotQuality::Normal,
+            raster_dpi: None,
+            vector_dpi: None,
         }
     }
 }

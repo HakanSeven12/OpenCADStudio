@@ -10,6 +10,7 @@ mod table_properties;
 mod lookup_properties;
 mod visibility_properties;
 mod grip_descriptions;
+mod imported_flip_workflow;
 mod flip_frame_grips;
 mod flip_state_labels;
 mod properties_internal_rows;
@@ -1365,21 +1366,16 @@ fn block_actions_rotate_flip_mouse_grips_authoring_history_and_reopen() {
             .unwrap();
         assert_eq!(
             flip_grip.shape,
-            crate::scene::model::object::GripShape::Triangle
+            crate::scene::model::object::GripShape::Arrow
         );
         assert!(flip_grip.dir.unwrap().distance(glam::DVec3::Y) < 1e-5);
         click(&mut app, flip_at);
         assert!(
             app.tabs[i].active_cmd.is_none(),
-            "the flip chevron never asks for point input"
+            "the Flip grip never asks for point input"
         );
-        if test {
-            check(&app, insert, -Vector3::UNIT_Y);
-        } else {
-            let flipped = 1 - app.flip_popup.as_ref().expect("flip state list").current;
-            let _ = app.update(Message::FlipPick(flipped));
-            check(&app, insert, -Vector3::UNIT_Y);
-        }
+        assert!(app.grip_popup.is_none());
+        check(&app, insert, -Vector3::UNIT_Y);
         app.tabs[i].scene.selected.insert(insert);
         app.refresh_properties();
         let flip_grip = app.tabs[i]
@@ -1406,8 +1402,6 @@ fn block_actions_rotate_flip_mouse_grips_authoring_history_and_reopen() {
             app.tabs[i].scene.selected.insert(insert);
             app.refresh_properties();
             click(&mut app, flip_at);
-            let flipped = 1 - app.flip_popup.as_ref().expect("flip state list").current;
-            let _ = app.update(Message::FlipPick(flipped));
             check(&app, insert, Vector3::UNIT_Y);
             let EntityType::Line(original) =
                 app.tabs[i].scene.document.get_entity(targets[0]).unwrap()
@@ -8392,7 +8386,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     assert!(!fields(&app).contains(&"authoring_action_chain"), "a parameter has no chain to name");
     let _ = app.update(Message::BlockActionBarSelect(scale_action));
     assert!(fields(&app).contains(&"authoring_action_chain"));
-    assert_eq!(chain::label(&app.tabs[i].scene.document, definition, scale_action), Some(String::new()));
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(vec![]));
     let before = app.tabs[i].scene.document.clone();
     let depth = app.tabs[i].history.undo_stack.len();
     // The parameter runs from ten to twenty units, so the move shifts the member
@@ -8414,7 +8408,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     assert_eq!(app.tabs[i].scene.document, before, "an unknown name chains nothing");
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
     let _ = type_name(&mut app, &move_name);
-    assert_eq!(chain::label(&app.tabs[i].scene.document, definition, scale_action), Some(move_name.clone()));
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(vec![move_name.clone()]));
     let chained = app.tabs[i].scene.document.clone();
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
     assert_eq!(drive(&chained), (10., 12.), "the scale runs first and hands its result to the move");
@@ -8424,9 +8418,73 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     app.redo_steps(1);
     assert_eq!(app.tabs[i].scene.document.objects[&scale_action], chained.objects[&scale_action]);
     let _ = type_name(&mut app, " ");
-    assert_eq!(chain::label(&app.tabs[i].scene.document, definition, scale_action), Some(String::new()));
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(vec![]));
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 2);
     assert_eq!(drive(&app.tabs[i].scene.document), drive(&before), "clearing the row hands the order back");
+
+    let doc = &mut app.tabs[i].scene.document;
+    let extra = actions::create(
+        doc,
+        definition,
+        Kind::Move,
+        parameter,
+        &targets,
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
+    let action_list = actions::actions(doc, definition);
+    let driver = action_list.iter().find(|(handle, ..)| *handle == scale_action).unwrap().3;
+    let ids: Vec<_> = [extra, move_action]
+        .iter()
+        .map(|handle| {
+            action_list
+                .iter()
+                .find(|(candidate, ..)| candidate == handle)
+                .unwrap()
+                .1
+                .element
+                .eval
+                .node_id
+        })
+        .collect();
+    let names = [name(doc, extra), move_name];
+    let list = serde_json::to_string(&names).unwrap();
+    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&scale_action).unwrap() else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::ScaleAction(scale) = &mut object.data else {
+        panic!()
+    };
+    scale.action.action.action_ids = vec![driver];
+    let _ = app.update(Message::BlockActionBarSelect(scale_action));
+    let branch_depth = app.tabs[i].history.undo_stack.len();
+    let _ = type_name(&mut app, &list);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), branch_depth + 1);
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(names.to_vec()));
+    assert!(app.tabs[i].properties.sections.iter().flat_map(|s| &s.props).any(|property| {
+        property.field == "authoring_action_chain"
+            && matches!(&property.value, crate::scene::model::object::PropValue::PlainText(text) if *text == list)
+    }));
+    let retained = |app: &OpenCADStudio| {
+        actions::actions(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .find(|(handle, ..)| *handle == scale_action)
+            .unwrap().1.action_ids.clone()
+    };
+    let expected: Vec<_> = std::iter::once(driver).chain(ids).collect();
+    assert_eq!(retained(&app), expected);
+    assert_eq!(drive(&app.tabs[i].scene.document), (20., 22.));
+    let _ = type_name(&mut app, &list);
+    let invalid = serde_json::to_string(&[names[0].as_str(), "NoSuchAction"]).unwrap();
+    let _ = type_name(&mut app, &invalid);
+    assert_eq!(retained(&app), expected);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), branch_depth + 1);
+    app.undo_steps(1);
+    assert_eq!(retained(&app), [driver]);
+    app.redo_steps(1);
+    assert_eq!(retained(&app), expected);
+    let _ = type_name(&mut app, "[]");
+    assert_eq!(retained(&app), [driver]);
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }
 

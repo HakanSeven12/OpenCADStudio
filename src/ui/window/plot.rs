@@ -260,6 +260,12 @@ pub enum PlotDlgMsg {
     /// The drawing side of the custom scale.
     CustomScaleDrawing(String),
     Quality(String),
+    /// File plot output folder choice ("0" ask, "1" drawing, "2" PDF subfolder).
+    OutputFolder(String),
+    /// File plot naming choice ("0" drawing, "1" layout, "2" both).
+    OutputName(String),
+    RasterDpi(String),
+    VectorDpi(String),
     Shade(String),
     Copies(String),
     OffsetX(String),
@@ -493,6 +499,19 @@ pub struct PlotDialogState {
     /// A file plot opens in the system viewer once written.
     #[serde(default)]
     pub open_when_done: bool,
+    /// Where a file plot goes: 0 ask, 1 the drawing's folder, 2 its `PDF`
+    /// subfolder. The last two skip the save dialog.
+    #[serde(default)]
+    pub output_folder: u8,
+    /// File name of a file plot: 0 drawing, 1 layout, 2 drawing-layout.
+    #[serde(default)]
+    pub output_name: u8,
+    /// Raster image resolution in DPI; blank follows the quality setting.
+    #[serde(default)]
+    pub raster_dpi: String,
+    /// Vector resolution in DPI; blank keeps full precision.
+    #[serde(default)]
+    pub vector_dpi: String,
     /// File output is SVG instead of PDF (only meaningful when `to_file`).
     /// Session state, like the printer choice: never written into the
     /// drawing's page setup, which only knows printers and PDF drivers.
@@ -609,6 +628,10 @@ impl Default for PlotDialogState {
             // Web defaults to PDF output: it has no system printers.
             to_file: cfg!(target_arch = "wasm32"),
             open_when_done: false,
+            output_folder: 0,
+            output_name: 0,
+            raster_dpi: String::new(),
+            vector_dpi: String::new(),
             file_svg: false,
             paper: paper_catalog::default_paper().canonical.to_string(),
             paper_width_mm: 297.0,
@@ -1435,14 +1458,55 @@ pub fn view_window(
     .align_y(iced::Center)
     .width(Length::Fill);
     let printer_controls: Element<'_, Message> = if to_file {
+        let pick = |value: u8, label: String| PlotChoice {
+            raw: value.to_string(),
+            localized: false,
+            display: Some(label),
+        };
+        let folders = vec![
+            pick(0, crate::tr!("plot", "folder-ask")),
+            pick(1, crate::tr!("plot", "folder-drawing")),
+            pick(2, crate::tr!("plot", "folder-pdf")),
+        ];
+        let names = vec![
+            pick(0, crate::tr!("plot", "name-drawing")),
+            pick(1, crate::tr!("plot", "name-layout")),
+            pick(2, crate::tr!("plot", "name-drawing-layout")),
+        ];
+        let folder_choice = folders.get(s.output_folder as usize).cloned();
+        let name_choice = names.get(s.output_name as usize).cloned();
+        let dpi = row![
+            field_row(crate::tr!("plot", "raster-dpi").into(), &s.raster_dpi, PlotDlgMsg::RasterDpi, 60),
+            field_row(crate::tr!("plot", "vector-dpi").into(), &s.vector_dpi, PlotDlgMsg::VectorDpi, 60),
+        ]
+        .spacing(8);
+        let name_row = drop_row(
+            crate::tr!("plot", "output-name").into(),
+            names,
+            name_choice,
+            PlotDlgMsg::OutputName,
+            Length::Fill,
+        );
         if cfg!(target_arch = "wasm32") {
-            Space::new().height(0).into()
+            column![name_row, dpi].spacing(7).into()
         } else {
-            checkbox(s.open_when_done)
-                .label(crate::tr!("plot", "open-when-done"))
-                .text_size(12)
-                .on_toggle(|_| Message::PlotDlg(PlotDlgMsg::Flag(PlotFlag::OpenWhenDone)))
-                .into()
+            column![
+                checkbox(s.open_when_done)
+                    .label(crate::tr!("plot", "open-when-done"))
+                    .text_size(12)
+                    .on_toggle(|_| Message::PlotDlg(PlotDlgMsg::Flag(PlotFlag::OpenWhenDone))),
+                drop_row(
+                    crate::tr!("plot", "output-folder").into(),
+                    folders,
+                    folder_choice,
+                    PlotDlgMsg::OutputFolder,
+                    Length::Fill,
+                ),
+                name_row,
+                dpi,
+            ]
+            .spacing(7)
+            .into()
         }
     } else {
         row![

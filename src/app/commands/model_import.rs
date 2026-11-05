@@ -239,6 +239,23 @@ impl OpenCADStudio {
         self.place_picture_block(i, "SVG", picture.entities, prompt)
     }
 
+    /// SVG markup pasted from the system clipboard, as a block placed by
+    /// the insertion prompts.
+    pub(in crate::app) fn paste_svg_text(&mut self, i: usize, text: String) -> Task<Message> {
+        let (_, size, _) = self.tabs[i].scene.view_window();
+        match crate::io::svg_import::read(text.as_bytes(), [0.5 * size[0], 0.5 * size[1]]) {
+            Ok(picture) => {
+                self.push_undo_snapshot(i, "PASTECLIP");
+                self.place_picture_block(i, "SVG", picture.entities, true)
+            }
+            Err(_) => {
+                self.command_line
+                    .push_error(crate::tr!("clipboard", "no-supported-content").as_ref());
+                Task::none()
+            }
+        }
+    }
+
     /// Defines `entities` as a new block `<prefix><n>` and puts it in the
     /// drawing: at the view's top-left corner, or by the insertion prompts.
     fn place_picture_block(
@@ -829,5 +846,27 @@ impl OpenCADStudio {
                 common.layer = layer.into();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod svg_paste_tests {
+    #[test]
+    fn copied_svg_pastes_back_as_drawing() {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = app.tabs[i]
+            .scene
+            .add_entity(codec::EntityType::Line(codec::entities::Line::from_coords(
+                0.0, 0.0, 0.0, 40.0, 20.0, 0.0,
+            )));
+        let svg = crate::io::svg_clipboard::selection_svg(&app.tabs[i].scene, &[line]).expect("the line draws");
+        let blocks = app.tabs[i].scene.document.block_records.len();
+        let _ = app.update(crate::app::Message::SystemClipboardPaste(
+            crate::app::SystemClipboardText::Text(svg),
+        ));
+        assert_eq!(app.tabs[i].scene.document.block_records.len(), blocks + 1);
+        assert!(app.tabs[i].active_cmd.is_some(), "placed by the insertion prompts");
     }
 }

@@ -1057,6 +1057,12 @@ impl OpenCADStudio {
                     | "SELECTIONEFFECT"
                     | "SELECTIONEFFECTCOLOR"
                     | "VSEDGECOLOR"
+                    | "VSEDGESMOOTH"
+                    | "COMPARECOLORADDED"
+                    | "COMPARECOLORREMOVED"
+                    | "COMPARECOLORMODIFIED"
+                    | "COMPARETOLERANCE"
+                    | "HPDLGMODE"
                     | "WINDOWSAREACOLOR"
                     | "WINDOWAREACOLOR"
                     | "CROSSINGAREACOLOR"
@@ -2628,6 +2634,79 @@ impl OpenCADStudio {
                                     )),
                                 }
                             }
+                            // The crease angle (0–180°) below which mesh
+                            // edges are not drawn in shaded-with-edges modes.
+                            "VSEDGESMOOTH" => match &value {
+                                Some(v) => match v.trim().parse::<f32>() {
+                                    Ok(angle) if (0.0..=180.0).contains(&angle) => {
+                                        self.model_space.edge_smooth = angle;
+                                        self.sync_model_space_theme(false);
+                                        Ok((format!("VSEDGESMOOTH = {angle}"), true))
+                                    }
+                                    _ => Err("SETVAR: a value from 0 to 180 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("VSEDGESMOOTH = {}", self.model_space.edge_smooth),
+                                    false,
+                                )),
+                            },
+                            // COMPARE's overlay colours: an index, a
+                            // colour name or R,G,B.
+                            "COMPARECOLORADDED" | "COMPARECOLORREMOVED"
+                            | "COMPARECOLORMODIFIED" => {
+                                let theme = &mut self.model_space;
+                                let slot = match name.as_str() {
+                                    "COMPARECOLORADDED" => &mut theme.compare_added,
+                                    "COMPARECOLORREMOVED" => &mut theme.compare_removed,
+                                    _ => &mut theme.compare_modified,
+                                };
+                                match &value {
+                                    Some(v) => match parse_edge_color(v) {
+                                        Some(rgb) => {
+                                            *slot = rgb.unwrap_or([0, 0, 0]);
+                                            let [r, g, b] = *slot;
+                                            Ok((format!("{name} = {r},{g},{b}"), true))
+                                        }
+                                        None => Err(
+                                            "SETVAR: a colour index, name or R,G,B required."
+                                                .into(),
+                                        ),
+                                    },
+                                    None => {
+                                        let [r, g, b] = *slot;
+                                        Ok((format!("{name} = {r},{g},{b}"), false))
+                                    }
+                                }
+                            }
+                            "HPDLGMODE" => match &value {
+                                Some(v) => match v.trim().parse::<u8>() {
+                                    Ok(mode) if mode <= 2 => {
+                                        self.model_space.hatch_dialog_mode = mode;
+                                        Ok((format!("HPDLGMODE = {mode}"), true))
+                                    }
+                                    _ => Err("SETVAR: 0, 1 or 2 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("HPDLGMODE = {}", self.model_space.hatch_dialog_mode),
+                                    false,
+                                )),
+                            },
+                            "COMPARETOLERANCE" => match &value {
+                                Some(v) => match v.trim().parse::<f64>() {
+                                    Ok(tolerance) if tolerance > 0.0 && tolerance.is_finite() => {
+                                        self.model_space.compare_tolerance = tolerance;
+                                        Ok((format!("COMPARETOLERANCE = {tolerance}"), true))
+                                    }
+                                    _ => Err("SETVAR: a positive number required.".into()),
+                                },
+                                None => Ok((
+                                    format!(
+                                        "COMPARETOLERANCE = {}",
+                                        self.model_space.compare_tolerance
+                                    ),
+                                    false,
+                                )),
+                            },
                             "WINDOWSAREACOLOR" | "WINDOWAREACOLOR" => {
                                 match &value {
                                     Some(v) => match v.parse::<u8>() {
@@ -3644,13 +3723,37 @@ impl OpenCADStudio {
                 let path = std::path::PathBuf::from(cmd.trim_start_matches("COMPARE").trim());
                 match crate::io::load_file(&path) {
                     Ok(other) => {
-                        let comparison = crate::scene::compare::compare(&self.tabs[i].scene, other);
+                        let theme = &self.model_space;
+                        let settings = crate::scene::compare::CompareSettings {
+                            colors: [theme.compare_added, theme.compare_removed, theme.compare_modified],
+                            tolerance: theme.compare_tolerance,
+                        };
+                        let comparison =
+                            crate::scene::compare::compare(&self.tabs[i].scene, other, settings);
+                        let current = self.tabs[i].current_path.clone();
+                        let name = |p: Option<&std::path::Path>| {
+                            p.map(|p| p.display().to_string()).unwrap_or_else(|| "drawing".into())
+                        };
+                        let names = (name(current.as_deref()), name(Some(&path)));
+                        let stem = current
+                            .as_deref()
+                            .and_then(|p| p.file_stem())
+                            .map(|s| s.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "drawing".into());
+                        let report = current
+                            .as_deref()
+                            .and_then(|p| p.parent())
+                            .map(std::path::Path::to_path_buf)
+                            .unwrap_or_else(std::env::temp_dir)
+                            .join(format!("{stem}-compare.csv"));
                         // The overlay shows at once, before the cursor moves.
                         self.tabs[i]
                             .scene
                             .set_preview_wires(comparison.overlay.clone());
                         let command =
-                            crate::modules::manage::compare::CompareCommand::new(comparison);
+                            crate::modules::manage::compare::CompareCommand::new(
+                                comparison, names, report,
+                            );
                         self.command_line.push_info(&command.prompt());
                         self.tabs[i].active_cmd = Some(Box::new(command));
                     }

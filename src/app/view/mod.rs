@@ -2239,11 +2239,15 @@ bg={bg_ms:.1}ms n={view_count}"
                     }
                 })
                 .collect();
-            let prompt = tab
+            let mut prompt = tab
                 .active_cmd
                 .as_ref()
                 .map(|c| c.prompt())
                 .unwrap_or_default();
+            // The command line is hidden: what is typed shows here.
+            if self.command_line_hidden && !self.command_line.input.is_empty() {
+                prompt = format!("{prompt} {}", self.command_line.input);
+            }
 
             let tracking_hint = match self.otrack_kind {
                 Some(crate::snap::TrackingKind::Perpendicular) => {
@@ -2543,6 +2547,17 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // HATCH's settings float at the drawing's top left (HPDLGMODE).
+            if self.model_space.hatch_dialog_mode != 0 {
+                if let Some(settings) =
+                    tab.active_cmd.as_ref().and_then(|command| command.hatch_settings())
+                {
+                    viewport_stack = viewport_stack.push(position_canvas_overlay(
+                        iced::Point::new(12.0, 40.0),
+                        crate::ui::window::hatch_panel::view(settings, &self.hatch_drafts),
+                    ));
+                }
+            }
             let (vw,vh)=tab.scene.selection.borrow().view.vp_size;
             let bar_bounds=tab.scene.active_model_tile_bounds(vw,vh);
             let bar_color=crate::ui::overlay::authoring::AuthoringVisualOptions::new(&self.block_editor_preferences,&tab.scene.document,crosshair_background(tab,is_paper)).action;
@@ -2643,67 +2658,6 @@ bg={bg_ms:.1}ms n={view_count}"
                     let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
                     viewport_stack =
                         viewport_stack.push(position_canvas_overlay(anchor, menu_panel.into()));
-                }
-            }
-
-            // Dynamic-block flip-state list.
-            if let Some(popup) = self.flip_popup.as_ref() {
-                if !tab.is_start {
-                    let max_len = popup
-                        .labels
-                        .iter()
-                        .map(|s| s.chars().count())
-                        .max()
-                        .unwrap_or(4) as f32;
-                    // +2 chars for the leading "✓ " / "  " marker column.
-                    let row_w = (max_len + 2.0) * 7.0 + 24.0;
-                    let mut col = column![].spacing(0).width(iced::Length::Fixed(row_w));
-                    for (idx, name) in popup.labels.iter().enumerate() {
-                        let is_cur = popup.current == idx;
-                        let mark: Element<'_, Message> = if is_cur {
-                            crate::ui::icons::themed_check_cell(true)
-                        } else {
-                            Space::new().width(11).into()
-                        };
-                        let btn = button(
-                            row![container(mark).width(16), text(name).size(12),]
-                                .spacing(2)
-                                .align_y(iced::Center),
-                        )
-                        .on_press(Message::FlipPick(idx))
-                        .padding([3, 10])
-                        .width(Fill)
-                        .style(move |theme: &Theme, status| {
-                            let palette = theme.palette();
-                            iced::widget::button::Style {
-                                background: matches!(status, iced::widget::button::Status::Hovered)
-                                    .then_some(Background::Color(palette.primary.weak.color)),
-                                border: Border {
-                                    color: Color::TRANSPARENT,
-                                    width: 0.0,
-                                    radius: 0.0.into(),
-                                },
-                                text_color: palette.background.base.text,
-                                ..Default::default()
-                            }
-                        });
-                        col = col.push(btn);
-                    }
-                    let panel = container(col).padding(2).style(|theme: &Theme| {
-                        let palette = theme.palette();
-                        container::Style {
-                            background: Some(Background::Color(palette.background.weak.color)),
-                            border: Border {
-                                color: palette.background.neutral.color,
-                                width: 1.0,
-                                radius: 3.0.into(),
-                            },
-                            ..Default::default()
-                        }
-                    });
-                    let anchor = iced::Point::new(popup.anchor.x + 12.0, popup.anchor.y + 12.0);
-                    viewport_stack =
-                        viewport_stack.push(position_canvas_overlay(anchor, panel.into()));
                 }
             }
 
@@ -3084,13 +3038,24 @@ bg={bg_ms:.1}ms n={view_count}"
                     (sel.menu.open_at, sel.menu.ui.highlighted)
                 };
                 if let Some(p) = ctx_pos {
-                    let menu = self.current_context_menu();
-                    viewport_stack = viewport_stack.push(viewport_context_menu_overlay(
-                        p,
-                        command_line_inset,
-                        &menu,
-                        highlighted,
-                    ));
+                    if let Some(draft) = &self.context_menu_editing {
+                        let raw = self.uncustomized_context_menu();
+                        viewport_stack = viewport_stack.push(overlay::context_menu_editor_overlay(
+                            p,
+                            command_line_inset,
+                            &raw.rows,
+                            &self.context_menu_custom,
+                            draft,
+                        ));
+                    } else {
+                        let menu = self.current_context_menu();
+                        viewport_stack = viewport_stack.push(viewport_context_menu_overlay(
+                            p,
+                            command_line_inset,
+                            &menu,
+                            highlighted,
+                        ));
+                    }
                 }
             }
 
@@ -3209,17 +3174,27 @@ bg={bg_ms:.1}ms n={view_count}"
             .height(Fill)
             .into()
         } else {
-            let command_line_overlay = iced::widget::container(command_line)
-                .width(Fill)
-                .height(Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Bottom)
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: 2.0,
-                    left: 0.0,
-                });
+            // Hidden (COMMANDLINEHIDE / Ctrl+9), the field stays in the tree,
+            // collapsed, so it keeps the keyboard; Dynamic Input shows the
+            // prompt and the typing at the cursor.
+            let command_line_overlay = if self.command_line_hidden {
+                iced::widget::container(command_line)
+                    .width(Fill)
+                    .height(iced::Length::Fixed(0.0))
+                    .clip(true)
+            } else {
+                iced::widget::container(command_line)
+                    .width(Fill)
+                    .height(Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Bottom)
+                    .padding(iced::Padding {
+                        top: 0.0,
+                        right: 0.0,
+                        bottom: 2.0,
+                        left: 0.0,
+                    })
+            };
             iced::widget::stack![workspace, command_line_overlay]
                 .width(Fill)
                 .height(Fill)
@@ -3517,9 +3492,10 @@ bg={bg_ms:.1}ms n={view_count}"
         .unwrap_or_else(|| iced::widget::Space::new().width(0).height(0).into());
 
         // Floating ribbon panels lie over the drawing and the palettes, under
-        // the ribbon's popups and menus.
+        // the ribbon's popups and menus. With the ribbon closed they stay:
+        // they are the classic toolbars then.
         let floating_layer: Element<'_, Message> =
-            if self.clean_screen || self.ribbon_closed || self.tabs[self.active_tab].is_start {
+            if self.clean_screen || self.tabs[self.active_tab].is_start {
                 None
             } else {
                 self.ribbon.floating_layer(self.show_block_palette)

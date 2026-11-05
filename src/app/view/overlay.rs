@@ -1405,6 +1405,121 @@ pub(super) fn viewport_context_menu_overlay(
     position_canvas_overlay_clamped(pos, bottom_inset, offset, panel.into())
 }
 
+/// The right-click menu turned into its editor, where it was: every row
+/// with a tick to show or hide it (submenu entries indented under their
+/// submenu), the user's own commands with up / down / remove, and a field
+/// to add a command by name or alias.
+pub(super) fn context_menu_editor_overlay(
+    pos: iced::Point,
+    bottom_inset: f32,
+    rows: &[MenuRow],
+    custom: &crate::ui::popup::context_menu::MenuCustomization,
+    draft: &str,
+) -> Element<'static, Message> {
+    use crate::app::ContextMenuEditMsg as E;
+    use crate::ui::popup::context_menu::row_key;
+    let edit = |msg: E| Message::ContextMenuEdit(msg);
+    let shown = |key: &str| !custom.hidden.iter().any(|hidden| hidden == key);
+    let tick = |key: String, label: String, indent: f32| -> Element<'static, Message> {
+        let on = shown(&key);
+        row![
+            iced::widget::Space::new().width(indent),
+            iced::widget::checkbox(on)
+                .label(label)
+                .text_size(12)
+                .size(13)
+                .on_toggle(move |_| Message::ContextMenuEdit(E::Toggle(key.clone()))),
+        ]
+        .into()
+    };
+    let mut items: Vec<Element<'static, Message>> = vec![text(crate::tr!("context-menu", "editor-title"))
+        .size(12)
+        .style(crate::ui::style::common::muted_style)
+        .into()];
+    for row in rows {
+        match row {
+            // Repeat stays: it is the menu's default row.
+            MenuRow::Item(item) if item.default => {}
+            MenuRow::Item(item) => {
+                if let Some(key) = row_key(row) {
+                    items.push(tick(key, item.label.clone(), 0.0));
+                }
+            }
+            MenuRow::Submenu { id, label, items: children, .. } => {
+                if let Some(key) = row_key(row) {
+                    items.push(tick(key, label.clone(), 0.0));
+                }
+                // Recent Input lists whatever ran last: only the whole of it hides.
+                let fixed = *id != crate::ui::popup::context_menu::SubmenuId::RecentInput;
+                for child in children.iter().filter(|_| fixed) {
+                    let key = row_key(&MenuRow::Item(child.clone())).unwrap_or_default();
+                    items.push(tick(key, child.label.clone(), 18.0));
+                }
+            }
+            MenuRow::Separator => {}
+        }
+    }
+    items.push(
+        text(crate::tr!("context-menu", "my-commands"))
+            .size(12)
+            .style(crate::ui::style::common::muted_style)
+            .into(),
+    );
+    let small = |glyph: &'static str, msg: Message| {
+        button(text(glyph).size(11))
+            .on_press(msg)
+            .padding([1, 6])
+            .style(button::text)
+    };
+    for (index, (label, command)) in custom.custom.iter().enumerate() {
+        items.push(
+            row![
+                text(format!("{label}  ({command})"))
+                    .size(12)
+                    .width(Fill)
+                    .wrapping(iced::widget::text::Wrapping::None),
+                small("↑", edit(E::Move(index, true))),
+                small("↓", edit(E::Move(index, false))),
+                small("×", edit(E::Remove(index))),
+            ]
+            .align_y(iced::Center)
+            .into(),
+        );
+    }
+    items.push(
+        row![
+            iced::widget::text_input(&crate::tr!("context-menu", "command-placeholder"), draft)
+                .on_input(|typed| Message::ContextMenuEdit(E::Draft(typed)))
+                .on_submit(edit(E::Add))
+                .size(12)
+                .padding([3, 6])
+                .width(Fill),
+            button(text(crate::tr!("context-menu", "add")).size(12))
+                .on_press(edit(E::Add))
+                .padding([3, 8]),
+        ]
+        .spacing(4)
+        .into(),
+    );
+    items.push(
+        row![
+            iced::widget::Space::new().width(Fill),
+            button(text(crate::tr!("context-menu", "done")).size(12))
+                .on_press(edit(E::Done))
+                .style(button::primary)
+                .padding([3, 12]),
+        ]
+        .into(),
+    );
+    let body = scrollable(column(items).spacing(3).padding([4, 10]).width(Length::Fixed(300.0)))
+        .height(Length::Shrink);
+    let panel = container(body)
+        .style(container::bordered_box)
+        .padding([MENU_PAD_TOP as u16, 0])
+        .width(Length::Fixed(300.0));
+    position_canvas_overlay_clamped(pos, bottom_inset, Vector::new(-MENU_CURSOR_INSET_X, 0.0), panel.into())
+}
+
 /// One menu row: label (bold for the default row), the keyword hint
 /// right-aligned and dimmed, and a check mark in the trailing column (where
 /// submenu headers draw their caret) when checked, so checked labels stay

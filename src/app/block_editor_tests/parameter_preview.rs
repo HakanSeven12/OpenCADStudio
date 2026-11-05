@@ -1758,6 +1758,15 @@ fn block_move_marker_click_respects_pickadd_replacement() {
 
 #[test]
 fn block_move_linear_targets_support_names_markers_and_history() {
+    check_move_parameter_targets(false);
+}
+
+#[test]
+fn block_move_flip_targets_support_names_markers_and_history() {
+    check_move_parameter_targets(true);
+}
+
+fn check_move_parameter_targets(flip: bool) {
     let (mut app, insert, def, root, _, action) = setup_point_transport(false, true);
     let _ = app.update(Message::CommandEscape);
     let i = app.active_tab;
@@ -1771,27 +1780,32 @@ fn block_move_linear_targets_support_names_markers_and_history() {
     .unwrap()
     .unwrap();
     begin(&mut app, insert);
-    let linear = distance::create(
-        &mut app.tabs[i].scene.document,
-        def,
-        distance::Kind::Linear,
-        Vector3::new(2., 10., 0.),
-        Vector3::new(12., 10., 0.),
-        Vector3::new(7., 12., 0.),
-    )
+    let doc = &mut app.tabs[i].scene.document;
+    let base = Vector3::new(2., 10., 0.);
+    let end = Vector3::new(12., 10., 0.);
+    let label = Vector3::new(7., 12., 0.);
+    let handle = if flip {
+        orientation::create(doc, def, orientation::Kind::Flip, base, end, label)
+    } else {
+        distance::create(doc, def, distance::Kind::Linear, base, end, label)
+    }
     .unwrap();
-    let codec::objects::ObjectType::DynamicBlock(object) =
-        app.tabs[i].scene.document.objects.get_mut(&linear).unwrap()
+    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&handle).unwrap()
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
-        panic!()
-    };
-    parameter.distance_name = "Door \"width\"".into();
+    match &mut object.data {
+        codec::objects::DynamicBlockData::LinearParameter(p) => {
+            p.distance_name = r#"Door "width""#.into();
+        }
+        codec::objects::DynamicBlockData::FlipParameter(p) => {
+            p.flip_label = r#"Door "handing""#.into();
+        }
+        _ => panic!(),
+    }
     let target = actions::all_parameters(&app.tabs[i].scene.document, def)
         .into_iter()
-        .find(|p| p.handle == linear)
+        .find(|p| p.handle == handle)
         .unwrap();
     let _ = app.dispatch_command("BACTIONBARMODE 0");
     app.tabs[i].selected_authoring = Some(action);
@@ -1805,7 +1819,7 @@ fn block_move_linear_targets_support_names_markers_and_history() {
         .active_cmd
         .as_ref()
         .unwrap()
-        .selection_marker_selected(linear));
+        .selection_marker_selected(handle));
     let _ = app.feed_command(crate::command::StepInput::SelectionComplete(vec![]));
     let _ = app.feed_command(crate::command::StepInput::Enter);
     assert!(app.tabs[i].active_cmd.is_none());
@@ -1853,13 +1867,13 @@ fn block_move_linear_targets_support_names_markers_and_history() {
         crate::modules::block_editor::action_set::point_markers_in_region(
             &app.tabs[i].scene,
             def,
-            |h| h == linear,
+            |h| h == handle,
             &region,
             context,
             false,
         )
         .iter()
-        .any(|(h, _)| *h == linear)
+        .any(|(h, _)| *h == handle)
     );
     drop(camera);
     let click = |app: &mut OpenCADStudio| {
@@ -1893,23 +1907,26 @@ fn block_move_linear_targets_support_names_markers_and_history() {
         .active_cmd
         .as_ref()
         .unwrap()
-        .selection_marker_selected(linear));
+        .selection_marker_selected(handle));
     let _ = app.feed_command(crate::command::StepInput::Enter);
     assert_eq!(
         actions::instance::frame(&app.tabs[i].scene.document, insert, &target)
-            .unwrap()
-            .base,
-        target.base
+            .unwrap(),
+        actions::instance::ParameterFrame { base: target.base, end: target.end }
     );
     let count = actions::actions(&app.tabs[i].scene.document, def).len();
     let _ = app.dispatch_command("BACTION MOVE");
+    if flip {
+        feed(&mut app, &target.name);
+        assert!(app.command_line.last_error.is_some());
+    }
     feed(&mut app, &root.name);
     click(&mut app);
     assert!(app.tabs[i]
         .active_cmd
         .as_ref()
         .unwrap()
-        .selection_marker_selected(linear));
+        .selection_marker_selected(handle));
     let _ = app.feed_command(crate::command::StepInput::Enter);
     let _ = app.feed_command(crate::command::StepInput::Point(DVec3::new(1., 1., 0.)));
     assert!(app.tabs[i].active_cmd.is_none());
@@ -1919,7 +1936,7 @@ fn block_move_linear_targets_support_names_markers_and_history() {
     );
     assert!(actions::actions(&app.tabs[i].scene.document, def)
         .iter()
-        .any(|(h, a, _, _)| *h != action && a.dependencies == vec![linear]));
+        .any(|(h, a, _, _)| *h != action && a.dependencies == vec![handle]));
     assert_eq!(
         actions::instance::frame(&app.tabs[i].scene.document, insert, &target)
             .unwrap()

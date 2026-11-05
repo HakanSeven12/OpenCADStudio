@@ -626,9 +626,97 @@ impl OpenCADStudio {
             "CLEANSCREEN" => {
                 return Some(Task::done(Message::ToggleCleanScreen));
             }
+            // ── TOOLBAR — the ribbon's panels as floating toolbars ──────────────
+            // TOOLBAR lists them; TOOLBAR / -TOOLBAR <tab/panel | panel>
+            // [Show|Hide] shows one over the drawing or puts it back (a bare
+            // name toggles it). They stay while the ribbon is closed.
+            cmd if cmd == "TOOLBAR" || cmd == "-TOOLBAR" || cmd.starts_with("TOOLBAR ") || cmd.starts_with("-TOOLBAR ") => {
+                let rest = cmd.trim_start_matches('-').trim_start_matches("TOOLBAR").trim();
+                if rest.is_empty() {
+                    let list: Vec<String> = self
+                        .ribbon
+                        .toolbars()
+                        .into_iter()
+                        .map(|(module, title, shown)| {
+                            format!("{}{module}/{title}", if shown { "● " } else { "  " })
+                        })
+                        .collect();
+                    self.command_line.push_output(&crate::tr!("toolbar", "list"));
+                    for line in list {
+                        self.command_line.push_output(&line);
+                    }
+                    return Some(Task::none());
+                }
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let (name, action) = match words.last().map(|w| w.to_ascii_uppercase()) {
+                    Some(last) if words.len() > 1 && matches!(last.as_str(), "SHOW" | "S" | "HIDE" | "H") => {
+                        (words[..words.len() - 1].join(" "), Some(last.starts_with('S')))
+                    }
+                    _ => (words.join(" "), None),
+                };
+                match self.ribbon.find_toolbar(&name) {
+                    Some((module, title)) => {
+                        let shown = self
+                            .ribbon
+                            .toolbars()
+                            .into_iter()
+                            .any(|(m, t, shown)| m == module && t == title && shown);
+                        let origin = self.toolbar_origin();
+                        if self.ribbon.show_toolbar(module, title, action.unwrap_or(!shown), origin) {
+                            self.save_config();
+                        }
+                    }
+                    None => self
+                        .command_line
+                        .push_error(&crate::tr!("toolbar", "not-found", name = name.clone())),
+                }
+                return Some(Task::none());
+            }
+            // ── WSCURRENT — the workspace: Classic (menu bar and toolbars, no
+            // ribbon) or Ribbon. Classic shows the Draw, Modify, Layers and
+            // Properties toolbars when no toolbar is shown yet.
+            cmd if cmd == "WSCURRENT" || cmd.starts_with("WSCURRENT ") => {
+                let value = cmd.trim_start_matches("WSCURRENT").trim().to_ascii_uppercase();
+                match value.as_str() {
+                    "CLASSIC" | "C" => {
+                        self.ribbon_closed = true;
+                        self.show_menu_bar = true;
+                        if !self.ribbon.toolbars().iter().any(|(_, _, shown)| *shown) {
+                            let origin = self.toolbar_origin();
+                            for title in ["Draw", "Modify", "Layers", "Properties"] {
+                                self.ribbon.show_toolbar("draw", title, true, origin);
+                            }
+                        }
+                        self.persist_settings_if_changed();
+                        self.save_config();
+                    }
+                    "RIBBON" | "R" => {
+                        self.ribbon_closed = false;
+                        self.persist_settings_if_changed();
+                    }
+                    _ => {
+                        let current = if self.ribbon_closed { "Classic" } else { "Ribbon" };
+                        self.command_line
+                            .push_output(&crate::tr!("toolbar", "workspace", current = current));
+                    }
+                }
+                return Some(Task::none());
+            }
             // ── RIBBON / RIBBONCLOSE — show or hide the ribbon ───────────────────
             "RIBBON" | "RIBBONCLOSE" => {
                 self.ribbon_closed = cmd == "RIBBONCLOSE";
+                self.persist_settings_if_changed();
+            }
+            // ── COMMANDLINE / COMMANDLINEHIDE — show or hide the command line ──
+            // Hidden, it still takes the typing; Dynamic Input shows the
+            // prompt and what is typed at the cursor.
+            "COMMANDLINE" | "COMMANDLINEHIDE" | "COMMANDLINETOGGLE" => {
+                self.command_line_hidden = match cmd {
+                    "COMMANDLINE" => false,
+                    "COMMANDLINEHIDE" => true,
+                    // Ctrl+9: one way or the other, as the command line stands.
+                    _ => !self.command_line_hidden,
+                };
                 self.persist_settings_if_changed();
             }
             // ── QUICKPROPERTIES — toggle the floating quick-properties readout ───

@@ -4258,6 +4258,15 @@ impl OpenCADStudio {
                     previews.push(guide);
                 }
             }
+            // A drawing command previews the new object in the colour it will
+            // get: the current colour, or the current layer's when ByLayer.
+            if let Some(color) = self.creation_preview_color(i) {
+                for wire in &mut previews {
+                    if wire.color == crate::scene::WireModel::CYAN {
+                        wire.color = color;
+                    }
+                }
+            }
             let preview_hidden = modifier_hidden.unwrap_or_else(|| {
                 self.tabs[i]
                     .active_cmd
@@ -4315,6 +4324,30 @@ impl OpenCADStudio {
             );
         }
         Task::none()
+    }
+
+    /// The colour a drawing command's new object will be drawn in, for its
+    /// preview; `None` for any other command.
+    fn creation_preview_color(&self, i: usize) -> Option<[f32; 4]> {
+        const DRAWING: &[&str] = &[
+            "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "ELLIPSE", "POLY", "SPLINE", "XLINE",
+            "RAY", "POINT", "MULTIPOINT", "DONUT", "REVCLOUD", "3DPOLY", "HELIX", "MLINE",
+            "SKETCH", "TRACE", "SOLID", "3DFACE",
+        ];
+        let tab = &self.tabs[i];
+        let name = tab.active_cmd.as_ref()?.name();
+        let base = name.split('_').next().unwrap_or(name);
+        if !DRAWING.contains(&base) && !name.starts_with("SPLINE") {
+            return None;
+        }
+        let document = &tab.scene.document;
+        let color = match document.header.current_entity_color {
+            codec::types::Color::ByLayer => document.layers.get(&tab.active_layer)?.color,
+            codec::types::Color::ByBlock => codec::types::Color::Index(7),
+            color => color,
+        };
+        let rgba = crate::scene::convert::tess_util::aci_to_rgba(&color);
+        Some(crate::scene::view::render::adapt_to_bg(rgba, tab.scene.bg_color))
     }
 
     /// The navigation style's action for `held` and the modifiers now down.
@@ -5260,9 +5293,6 @@ impl OpenCADStudio {
         if self.table_popup.take().is_some() {
             return Task::none();
         }
-        if self.flip_popup.take().is_some() {
-            return Task::none();
-        }
         // Same dismiss-on-outside-click for the right-click
         // context menu: its panel is opaque, so a press that
         // reaches here is outside the menu.
@@ -5610,14 +5640,6 @@ impl OpenCADStudio {
                     }
                     if grip_id == crate::app::visibility::TABLE_GRIP_ID {
                         self.open_table_popup();
-                        self.grip_hover = None;
-                        self.grip_popup = None;
-                        return Task::none();
-                    }
-                    // A flip parameter's chevron lists its two state labels
-                    // outside the block editor instead of toggling or
-                    // starting a command.
-                    if self.open_flip_popup_at(handle, grip_id, p_full) {
                         self.grip_hover = None;
                         self.grip_popup = None;
                         return Task::none();
@@ -8991,7 +9013,6 @@ properties={:.1}ms picked={}",
             (session.br_handle, session.editor_camera.clone())
         };
         self.layout_rename_state = None;
-        self.flip_popup = None;
         self.tabs[i].scene.active_viewport = None;
         self.tabs[i].scene.set_current_layout("Model".to_string());
         self.tabs[i].scene.block_edit_block = Some(br_handle);

@@ -31,6 +31,8 @@ pub mod extraction_outdated;
 pub mod import_dialogs;
 pub mod gradient_editor;
 pub mod graphic_attributes;
+pub mod hatch_panel;
+pub mod ribbon_customize;
 pub mod layer_state_manager;
 pub mod layer_translator;
 pub mod layer_walk;

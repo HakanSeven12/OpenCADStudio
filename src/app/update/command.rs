@@ -214,7 +214,6 @@ impl OpenCADStudio {
                 self.grip_pending = None;
                 self.visibility_popup = None;
                 self.table_popup = None;
-                self.flip_popup = None;
                 self.grip_popup = None;
                 self.grip_hover = None;
             }
@@ -1461,9 +1460,6 @@ impl OpenCADStudio {
             return Task::none();
         }
         if self.table_popup.take().is_some() {
-            return Task::none();
-        }
-        if self.flip_popup.take().is_some() {
             return Task::none();
         }
         if self.visibility_popup.take().is_some() {

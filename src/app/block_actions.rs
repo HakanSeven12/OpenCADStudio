@@ -276,10 +276,7 @@ impl OpenCADStudio {
             tab.id,
             definition,
             kind,
-            kind.map_or_else(
-                || actions::all_parameters(&tab.scene.document, definition),
-                |kind| actions::parameters(&tab.scene.document, definition, kind),
-            ),
+            &tab.scene.document,
         );
         self.command_line.push_info(&command.prompt());
         self.command_line.set_step_options(command.options());
@@ -311,12 +308,11 @@ impl OpenCADStudio {
         }
         let tab = &self.tabs[self.active_tab];
         let definition = tab.active_block_edit_session().unwrap().br_handle;
-        let candidates = actions::parameters(&tab.scene.document, definition, kind);
         let Some(command) = crate::modules::block_editor::action::ActionCommand::for_parameter(
             tab.id,
             definition,
             kind,
-            candidates,
+            &tab.scene.document,
             parameter,
             xy_key_point,
         ) else {
@@ -437,7 +433,7 @@ impl OpenCADStudio {
                     || tab.scene.document.objects.get(&action) != Some(expected.as_ref())
                     || point_choices.as_ref().is_some_and(|(source, expected)| {
                         let current = actions::all_parameters(&tab.scene.document, definition)
-                            .into_iter().filter(|p| (p.point || p.linear) && p.id != *source)
+                            .into_iter().filter(|p| p.is_move_target() && p.id != *source)
                             .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                         current != *expected
                     })
@@ -513,7 +509,7 @@ impl OpenCADStudio {
                 }
                 if point_choices.as_ref().is_some_and(|(source, expected)| {
                     let current = actions::all_parameters(&self.tabs[i].scene.document, definition)
-                        .into_iter().filter(|p| (p.point || p.linear) && p.id != *source)
+                        .into_iter().filter(|p| p.is_move_target() && p.id != *source)
                         .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                     current != *expected || !actions::all_parameters(&self.tabs[i].scene.document, definition)
                         .iter().any(|p| p.handle == parameter && p.id == *source)
@@ -710,12 +706,16 @@ impl OpenCADStudio {
             if !all.iter().any(|(_, _, _, id)| *id == p.id) { continue; }
             let Ok(value) = actions::instance::test_value(&tab.scene.document, test.insert, &p) else { continue; };
             let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, test.insert, &p, true) else { continue; };
-            for grip in crate::scene::block_grips::runtime::action_grips(&test.baseline, test.definition, &p, value) {
+            for grip in actions::instance::action_grips(&tab.scene.document, &test.baseline, test.definition, test.insert, &p, value, true) {
                 grips.push(crate::scene::model::object::GripDef {
                     id: grip.id,
                     world: actions::v(transform.apply(actions::native(grip.point))) - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: crate::scene::model::object::GripShape::Triangle,
+                    shape: if p.flip {
+                        crate::scene::model::object::GripShape::Arrow
+                    } else {
+                        crate::scene::model::object::GripShape::Triangle
+                    },
                     dir: grip.direction.and_then(|direction| actions::v(transform.apply_rotation(actions::native(direction))).try_normalize()),
                     axis: None,
                 });
@@ -754,7 +754,7 @@ impl OpenCADStudio {
         if !actions::has_action(&test.baseline, test.definition, p.handle) { return false; }
         let Ok(value) = actions::instance::test_value(&tab.scene.document, test.insert, &p) else { return false };
         let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, test.insert, &p, true) else { return false };
-        let Some(grip) = crate::scene::block_grips::runtime::action_grips(&test.baseline, test.definition, &p, value).into_iter().find(|grip| grip.role == role) else { return false };
+        let Some(grip) = actions::instance::action_grips(&tab.scene.document, &test.baseline, test.definition, test.insert, &p, value, true).into_iter().find(|grip| grip.role == role) else { return false };
         if p.flip {
             let state = actions::instance::test_value(&tab.scene.document, test.insert, &p);
             let document = tab.id;
@@ -807,12 +807,16 @@ impl OpenCADStudio {
             if !all.iter().any(|(_, _, _, id)| *id == p.id) { continue; }
             let Ok(value) = actions::instance::value(&tab.scene.document, handle, &p) else { continue; };
             let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, handle, &p, false) else { continue; };
-            for grip in crate::scene::block_grips::runtime::action_grips(&tab.scene.document, def, &p, value) {
+            for grip in actions::instance::action_grips(&tab.scene.document, &tab.scene.document, def, handle, &p, value, false) {
                 grips.push(crate::scene::model::object::GripDef {
                     id: grip.id,
                     world: actions::v(transform.apply(actions::native(grip.point))) - glam::DVec3::from_array(wo),
                     is_midpoint: false,
-                    shape: crate::scene::model::object::GripShape::Triangle,
+                    shape: if p.flip {
+                        crate::scene::model::object::GripShape::Arrow
+                    } else {
+                        crate::scene::model::object::GripShape::Triangle
+                    },
                     dir: grip.direction.and_then(|direction| actions::v(transform.apply_rotation(actions::native(direction))).try_normalize()),
                     axis: None,
                 });
@@ -845,7 +849,7 @@ impl OpenCADStudio {
         if !actions::has_action(&tab.scene.document, def, p.handle) { return false; }
         let Ok(value) = actions::instance::value(&tab.scene.document, handle, &p) else { return false };
         let Ok(p) = actions::instance::grip_parameter(&tab.scene.document, handle, &p, false) else { return false };
-        let Some(grip) = crate::scene::block_grips::runtime::action_grips(&tab.scene.document, def, &p, value).into_iter().find(|grip| grip.role == role) else { return false };
+        let Some(grip) = actions::instance::action_grips(&tab.scene.document, &tab.scene.document, def, handle, &p, value, false).into_iter().find(|grip| grip.role == role) else { return false };
         if p.flip {
             let state = actions::instance::value(&tab.scene.document, handle, &p);
             let document = tab.id;

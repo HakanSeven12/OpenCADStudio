@@ -1,6 +1,10 @@
 use crate::scene::view::camera::Camera;
 use iced::Rectangle;
 
+/// Face highlight strength when the visual style sets none: a soft sheen
+/// rather than a polished hotspot.
+pub const DEFAULT_HIGHLIGHT: f32 = 0.3;
+
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct Uniforms {
@@ -133,7 +137,7 @@ impl Uniforms {
             light_color_hotspot: [[0.0; 4]; 4],
             light_attenuation: [[0.0; 4]; 4],
             lighting: [0.0, 0.18, 0.18, 0.18],
-            visual_style: [1.0, 1.0, -1.0, 0.0],
+            visual_style: [1.0, 1.0, DEFAULT_HIGHLIGHT, 0.0],
             visual_style_color: [1.0, 1.0, 1.0, 1.0],
             viewport_background: [0.0, 0.0, 0.0, 0.0],
             view_tone: [0.0; 4],

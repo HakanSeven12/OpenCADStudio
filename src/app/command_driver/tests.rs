@@ -5329,3 +5329,115 @@ mod measuregeom_quick_tests {
         assert!(area.contains("Area = 40") && area.contains("Perimeter = 28"), "{area}");
     }
 }
+
+/// #1912: with Dynamic Input on, Down lists the step's options at the
+/// cursor; Enter picks the highlighted one. Ctrl+9 hides the command line.
+#[cfg(test)]
+mod dynamic_options_tests {
+    use crate::app::{ArrowKey, Message, OpenCADStudio};
+
+    fn down() -> Message {
+        Message::ArrowKeyPressed {
+            direction: ArrowKey::Down,
+            shortcut: "DOWN".into(),
+            extend_selection: false,
+        }
+    }
+
+    #[test]
+    fn down_lists_the_options_and_enter_picks_one() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.dyn_input = true;
+        let _ = app.run_command_line("CIRCLE");
+        let _ = app.update(down());
+        assert!(app.context_menu_open(), "Down opens the options");
+        // CIRCLE's first option is 3P; Enter picks it.
+        let _ = app.update(Message::CommandFinalize);
+        assert!(!app.context_menu_open());
+        let prompt = app.tabs[app.active_tab].active_cmd.as_ref().unwrap().prompt();
+        assert!(prompt.to_uppercase().contains("FIRST POINT"), "{prompt}");
+    }
+
+    #[test]
+    fn down_without_dynamic_input_or_options_does_nothing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.dyn_input = false;
+        let _ = app.run_command_line("CIRCLE");
+        let _ = app.update(down());
+        assert!(!app.context_menu_open());
+    }
+
+    #[test]
+    fn ctrl_9_hides_and_shows_the_command_line() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let key = if cfg!(target_os = "macos") { "CMD+9" } else { "CTRL+9" }.to_string();
+        let _ = app.update(Message::ShortcutPressed(key.clone()));
+        assert!(app.command_line_hidden);
+        let _ = app.update(Message::ShortcutPressed(key));
+        assert!(!app.command_line_hidden);
+    }
+}
+
+/// #2195: undo and redo bring back the view each step was made in.
+#[cfg(test)]
+mod undo_view_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    #[test]
+    fn undo_returns_to_where_the_change_was_made() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let made_at = app.tabs[i].scene.camera.borrow().target;
+        let _ = app.run_command_line("LINE 0,0 10,0 ");
+        // Look somewhere far away.
+        app.tabs[i].scene.camera.borrow_mut().target = glam::DVec3::new(1.0e6, 1.0e6, 0.0);
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[i].scene.camera.borrow().target.distance(made_at) < 1e-9);
+        app.tabs[i].scene.camera.borrow_mut().target = glam::DVec3::new(-5.0e5, 0.0, 0.0);
+        let _ = app.update(Message::Redo);
+        assert!(app.tabs[i].scene.camera.borrow().target.distance(made_at) < 1e-9);
+    }
+}
+
+/// #2033: Alt+letter opens a menu-bar menu as a keyboard-driven menu, and
+/// every row of the idle shortcut menu has a letter.
+#[cfg(test)]
+mod menu_keyboard_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use crate::ui::popup::context_menu::{MenuAction, MenuRow};
+
+    #[test]
+    fn alt_letter_opens_the_menu_bar_menu() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.show_menu_bar = true;
+        let _ = app.update(Message::ShortcutPressed("ALT+F".into()));
+        assert!(app.context_menu_open());
+        let menu = app.current_context_menu();
+        let rows = menu.selectable();
+        assert!(rows.len() > 3);
+        assert!(rows.iter().all(|row| row.mnemonic.is_some()));
+        assert!(rows.iter().any(|row| row.action == MenuAction::MenuLine("NEW".into())
+            || matches!(&row.action, MenuAction::MenuLine(line) if line.starts_with("NEW") || line.starts_with("QNEW"))));
+        let _ = app.close_context_menu();
+        assert!(app.menu_bar_popup.is_none());
+    }
+
+    #[test]
+    fn the_idle_shortcut_menu_has_letters() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let menu = app.current_context_menu();
+        let items = menu.rows.iter().filter_map(|row| match row {
+            MenuRow::Item(item) => Some(item),
+            _ => None,
+        });
+        for item in items {
+            assert!(item.mnemonic.is_some(), "{}", item.label);
+        }
+    }
+}

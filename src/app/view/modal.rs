@@ -42,6 +42,7 @@ impl OpenCADStudio {
             Some(K::LayerStateManager) => crate::tr!("modal", "layer-state-manager"),
             Some(K::LayerTranslator) => crate::t!("Layer Translator").into_owned(),
             Some(K::DrawingUnits) => crate::t!("Drawing Units").into_owned(),
+            Some(K::RibbonCustomize) => crate::tr!("ribbon-customize", "window-title"),
             Some(K::BlockDefinition) => crate::t!("Block Definition").into_owned(),
             Some(K::PdfAttach) => match self.pdf_attach.as_ref().map(|s| s.kind) {
                 Some(codec::entities::UnderlayType::Dwf) => {
@@ -452,6 +453,13 @@ impl OpenCADStudio {
                 let state = self.layer_translator.as_ref()?;
                 sized_flow(ex, 760, 460, |flow| {
                     crate::ui::window::layer_translator::view_window(state, sources.clone(), flow)
+                })
+            }
+            super::super::ModalKind::RibbonCustomize => {
+                let state = self.ribbon_customize.as_ref()?;
+                let panels = self.ribbon.custom_panels();
+                sized_flow(ex, 640, 440, |flow| {
+                    crate::ui::window::ribbon_customize::view_window(state, panels, flow)
                 })
             }
             super::super::ModalKind::DrawingUnits => {

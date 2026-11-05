@@ -131,7 +131,7 @@ fn transported_flip_grip_uses_reference_frame_in_drawing_and_test_block() {
 }
 
 #[test]
-fn flipped_linear_grip_edits_along_its_reflected_axis_with_history() {
+fn flipped_linear_grip_and_properties_follow_the_reflected_axis_with_history() {
     for testing in [false, true] {
         let (mut app, reference) = fixture();
         let source = app.active_tab;
@@ -260,6 +260,64 @@ fn flipped_linear_grip_edits_along_its_reflected_axis_with_history() {
             actions::instance::frame(&app.tabs[i].scene.document, insert, &parameter).unwrap(),
             after
         );
+
+        use crate::scene::model::object::{BlockParameterComponent, PropValue};
+        select(&mut app);
+        let key = app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find_map(|property| match property.value {
+                PropValue::BlockNumber { key, .. }
+                    if key.parameter == linear
+                        && key.component == BlockParameterComponent::Distance =>
+                {
+                    Some(key)
+                }
+                _ => None,
+            })
+            .expect("Linear distance in reference Properties");
+        let set_distance = |app: &mut OpenCADStudio| {
+            let _ = app.update(Message::PropBlockInput {
+                key,
+                value: "20".into(),
+            });
+            let _ = app.update(Message::PropBlockCommit(key));
+        };
+        let depth = app.tabs[i].history.undo_stack.len();
+        set_distance(&mut app);
+        assert!(
+            app.command_line.last_error.is_none(),
+            "{:?}",
+            app.command_line.last_error
+        );
+        assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+        let check = |app: &OpenCADStudio, distance: f64| {
+            let doc = &app.tabs[i].scene.document;
+            let frame = actions::instance::frame(doc, insert, &parameter).unwrap();
+            assert_eq!(frame.base, before.base);
+            assert!(frame.end.distance(before.base + axis * distance) < 1e-7);
+            let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
+                panic!()
+            };
+            let line = doc
+                .entities_in_block(&reference.block_name)
+                .find_map(|entity| match entity {
+                    EntityType::Line(line) => Some(line),
+                    _ => None,
+                })
+                .unwrap();
+            let expected = axis * (distance - before.end.distance(before.base));
+            assert!(actions::v(line.start).distance(expected) < 1e-7);
+        };
+        check(&app, 20.);
+        set_distance(&mut app);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+        app.undo_steps(1);
+        check(&app, after.end.distance(after.base));
+        app.redo_steps(1);
+        check(&app, 20.);
     }
 }
 

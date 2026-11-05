@@ -599,6 +599,17 @@ pub fn update(
         .filter(|handle| matches!(document.get_entity(*handle), Some(EntityType::Insert(_))))
         .collect();
 
+    // Items erased or moved on their own keep that across the rebuild.
+    let edited: rustc_hash::FxHashMap<[i32; 3], (i32, Option<[f64; 16]>)> = body(document, array.body)
+        .map(|body| {
+            body.items
+                .iter()
+                .filter(|item| item.flags & (ITEM_ERASED | ITEM_RELATIVE) != 0)
+                .map(|item| (item.location, (item.flags & (ITEM_ERASED | ITEM_RELATIVE), item.relative_transform)))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let document = &mut scene.document;
     for handle in &old_items {
         document.remove_entity(*handle);
@@ -606,7 +617,31 @@ pub fn update(
     let mut items = Vec::with_capacity(placements.len());
     let mut new_handles = Vec::with_capacity(placements.len());
     for (location, placement) in placements {
-        let insert = placed_item(&template, array.array_block, placement);
+        let (edit_flags, relative) = edited.get(&location).copied().unwrap_or((0, None));
+        if edit_flags & ITEM_ERASED != 0 {
+            let turned = (placement.x_axis.truncate() - DVec3::X).length() > 1e-12
+                || (placement.y_axis.truncate() - DVec3::Y).length() > 1e-12;
+            let position = placement.w_axis.truncate();
+            items.push(AssocArrayItem {
+                location,
+                flags: if turned { 12 } else { 8 } | edit_flags,
+                uses_default_transform: !turned,
+                x_direction: if turned {
+                    codec::types::Vector3::ZERO
+                } else {
+                    codec::types::Vector3::new(position.x, position.y, position.z)
+                },
+                transform: if turned { placement.transpose().to_cols_array() } else { [0.0; 16] },
+                relative_transform: relative,
+                ..Default::default()
+            });
+            continue;
+        }
+        let shown = match relative {
+            Some(relative) => placement * DMat4::from_cols_array(&relative).transpose(),
+            None => placement,
+        };
+        let insert = placed_item(&template, array.array_block, shown);
         let position = placement.w_axis.truncate();
         let handle = document
             .add_entity(EntityType::Insert(insert))
@@ -615,7 +650,8 @@ pub fn update(
             || (placement.y_axis.truncate() - DVec3::Y).length() > 1e-12;
         items.push(AssocArrayItem {
             location,
-            flags: if turned { 12 } else { 8 },
+            flags: if turned { 12 } else { 8 } | edit_flags,
+            relative_transform: relative,
             uses_default_transform: !turned,
             x_direction: if turned {
                 codec::types::Vector3::ZERO
@@ -686,6 +722,109 @@ pub fn update(
     }
     scene.bump_geometry();
     Ok(())
+}
+
+/// Item flag: the item was erased on its own.
+const ITEM_ERASED: i32 = 1;
+/// Item flag: the item carries its own transform on top of its place.
+const ITEM_RELATIVE: i32 = 2;
+
+/// What ARRAYEDIT does to one item.
+#[derive(Clone, Copy, Debug)]
+pub enum ItemEdit {
+    Erase,
+    /// Move by this world-space offset.
+    Move(DVec3),
+}
+
+/// The location of the shown item nearest `point` (world).
+pub fn nearest_item(document: &Document, array: &AssocArray, point: DVec3) -> Option<[i32; 3]> {
+    let to_world = array_block_from_world(document, array.insert);
+    body(document, array.body)?
+        .items
+        .iter()
+        .filter_map(|item| {
+            let Some(EntityType::Insert(insert)) = document.get_entity(item.first_handle?) else {
+                return None;
+            };
+            let at = insert.insert_point;
+            let world = to_world.transform_point3(DVec3::new(at.x, at.y, at.z));
+            Some((item.location, world.distance_squared(point)))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(location, _)| location)
+}
+
+/// Erase or move the item at `location` on its own; the array keeps it so
+/// across later edits of its counts and spacings.
+pub fn edit_item(
+    scene: &mut crate::scene::Scene,
+    array: &AssocArray,
+    location: [i32; 3],
+    edit: ItemEdit,
+) -> Result<(), String> {
+    let to_block = world_from_array_block(&scene.document, array.insert);
+    let item = body(&scene.document, array.body)
+        .and_then(|body| body.items.iter().find(|item| item.location == location))
+        .cloned()
+        .ok_or("no such array item")?;
+    let mut flags = item.flags;
+    let mut relative = item.relative_transform;
+    match edit {
+        ItemEdit::Erase => flags |= ITEM_ERASED,
+        ItemEdit::Move(offset) => {
+            // The item's own transform works in its frame: the block-space
+            // offset is brought into it before being added.
+            let place = stored_item_transform(&item);
+            let old = relative.map_or(DMat4::IDENTITY, |r| DMat4::from_cols_array(&r).transpose());
+            let shift = DMat4::from_translation(to_block.transform_vector3(offset));
+            let new = place.inverse() * shift * place * old;
+            relative = Some(new.transpose().to_cols_array());
+            flags |= ITEM_RELATIVE;
+        }
+    }
+    set_item_state(&mut scene.document, array, location, flags, relative);
+    update(scene, array, &[])
+}
+
+/// Bring every erased or moved item back to its place in the array.
+pub fn reset_items(scene: &mut crate::scene::Scene, array: &AssocArray) -> Result<(), String> {
+    let locations: Vec<[i32; 3]> = body(&scene.document, array.body)
+        .map(|body| body.items.iter().map(|item| item.location).collect())
+        .unwrap_or_default();
+    for location in locations {
+        let flags = body(&scene.document, array.body)
+            .and_then(|body| body.items.iter().find(|item| item.location == location))
+            .map_or(0, |item| item.flags);
+        set_item_state(
+            &mut scene.document,
+            array,
+            location,
+            flags & !(ITEM_ERASED | ITEM_RELATIVE),
+            None,
+        );
+    }
+    update(scene, array, &[])
+}
+
+fn set_item_state(
+    document: &mut Document,
+    array: &AssocArray,
+    location: [i32; 3],
+    flags: i32,
+    relative: Option<[f64; 16]>,
+) {
+    if let Some(ObjectType::Associative(object)) = document.objects.get_mut(&array.body) {
+        let body = match &mut object.data {
+            AssociativeData::ArrayActionBody(body) => Some(body),
+            AssociativeData::ArrayModifyActionBody(modify) => Some(&mut modify.body),
+            _ => None,
+        };
+        if let Some(item) = body.and_then(|body| body.items.iter_mut().find(|item| item.location == location)) {
+            item.flags = flags;
+            item.relative_transform = relative;
+        }
+    }
 }
 
 /// One item reference of the array, as the items are copied from.
@@ -2553,6 +2692,37 @@ mod copy_tests {
         update(&mut scene, &original, &[("Rows", 3.0)]).unwrap();
         assert_eq!(world_items(&scene.document, insert).len(), 9);
         assert_eq!(world_items(&scene.document, copy), copied_items);
+    }
+
+    #[test]
+    fn single_item_edits_last_through_count_changes_and_reset() {
+        let mut scene = crate::scene::Scene::new();
+        let insert = rectangular(&mut scene);
+        let array = array_of_insert(&scene.document, insert).unwrap();
+        assert_eq!(world_items(&scene.document, insert).len(), 6);
+        let corner = nearest_item(&scene.document, &array, DVec3::ZERO).unwrap();
+        let next = nearest_item(&scene.document, &array, DVec3::new(20.0, 0.0, 0.0)).unwrap();
+        edit_item(&mut scene, &array, corner, ItemEdit::Erase).unwrap();
+        edit_item(&mut scene, &array, next, ItemEdit::Move(DVec3::new(0.0, 5.0, 0.0))).unwrap();
+        let edited = world_items(&scene.document, insert);
+        assert_eq!(edited.len(), 5);
+        assert!(!edited.contains(&(0, 0)) && edited.contains(&(20_000, 5_000)));
+        // The edits are stored with the array, so they come back from DWG.
+        let bytes = codec::DwgWriter::write_to_vec(&scene.document).unwrap();
+        let mut reopened = crate::scene::Scene::new();
+        reopened.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes)).read().unwrap();
+        let again = array_of_insert(&reopened.document, insert).unwrap();
+        update(&mut reopened, &again, &[]).unwrap();
+        assert_eq!(world_items(&reopened.document, insert), edited);
+        // A new column keeps both edits.
+        update(&mut scene, &array, &[("Items", 4.0)]).unwrap();
+        let wider = world_items(&scene.document, insert);
+        assert_eq!(wider.len(), 7);
+        assert!(!wider.contains(&(0, 0)) && wider.contains(&(20_000, 5_000)));
+        reset_items(&mut scene, &array).unwrap();
+        let reset = world_items(&scene.document, insert);
+        assert_eq!(reset.len(), 8);
+        assert!(reset.contains(&(0, 0)) && reset.contains(&(20_000, 0)));
     }
 
     #[test]

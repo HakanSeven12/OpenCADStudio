@@ -722,6 +722,62 @@ impl Ribbon {
         }
     }
 
+    /// Every panel as a toolbar: its tab's id, its title, and whether it
+    /// floats over the drawing (shown as a toolbar).
+    pub fn toolbars(&self) -> Vec<(&'static str, &'static str, bool)> {
+        let mut out = Vec::new();
+        for (index, module) in self.modules.iter().enumerate() {
+            if super::is_contextual(module.id()) {
+                continue;
+            }
+            for group in self.ordered_groups(index) {
+                let shown = self.layout.floating_panel(module.id(), group.title).is_some();
+                out.push((module.id(), group.title, shown));
+            }
+        }
+        out
+    }
+
+    /// The toolbar `name` names: `tab/panel` or a panel title, in English or
+    /// as shown, case aside.
+    pub fn find_toolbar(&self, name: &str) -> Option<(&'static str, &'static str)> {
+        let (tab, title) = match name.split_once('/') {
+            Some((tab, title)) => (Some(tab.trim()), title.trim()),
+            None => (None, name.trim()),
+        };
+        self.toolbars()
+            .into_iter()
+            .find(|(module, panel, _)| {
+                tab.is_none_or(|tab| tab.eq_ignore_ascii_case(module))
+                    && (panel.eq_ignore_ascii_case(title)
+                        || crate::i18n::translate(panel).to_lowercase() == title.to_lowercase())
+            })
+            .map(|(module, panel, _)| (module, panel))
+    }
+
+    /// Show panel `title` of tab `module` as a floating toolbar, beside the
+    /// toolbars already shown, or put it back in its ribbon row. New ones
+    /// line up from `origin` (the drawing's top-left corner) to the right.
+    /// Whether anything changed.
+    pub fn show_toolbar(&mut self, module: &str, title: &str, show: bool, origin: Point) -> bool {
+        if !show {
+            return self.dock_floating(&extras::panel_key(module, title));
+        }
+        // Along the top, left to right, wrapping before the window's edge.
+        let (left, mut x, mut y) = (origin.x, origin.x, origin.y);
+        for panel in &self.layout.floating {
+            let (w, h) = Self::floating_size(&panel.key).unwrap_or((260.0, 90.0));
+            if (panel.y - y).abs() < 1.0 && panel.x + w + 6.0 > x {
+                x = panel.x + w + 6.0;
+            }
+            if x + 260.0 > self.win_w.max(400.0) {
+                x = left;
+                y += h + 6.0;
+            }
+        }
+        self.float_panel(module, title, x, y)
+    }
+
     /// Put floating panel `key` back in its tab's ribbon row, at its old
     /// place there; whether it was floating.
     pub(super) fn dock_floating(&mut self, key: &str) -> bool {

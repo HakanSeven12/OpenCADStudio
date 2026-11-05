@@ -1534,6 +1534,7 @@ impl PropertiesPanel {
         let placeholder = match field {
             "authoring_base_state_label" => crate::tr!("block-grip", "not-flipped"),
             "authoring_flipped_state_label" => crate::tr!("block-grip", "flipped"),
+            "authoring_action_chain" => r#"["…", "…"]"#.to_owned(),
             _ => String::new(),
         };
         let ti = text_input(&placeholder, display)

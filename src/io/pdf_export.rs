@@ -184,7 +184,7 @@ fn emit_image(
     let mut width = image.width;
     let mut height = image.height;
     let mut pixels: std::borrow::Cow<[u8]> = std::borrow::Cow::Borrowed(image.pixels.as_slice());
-    if let Some(target) = options.quality.target_dpi() {
+    if let Some(target) = options.raster_dpi.or(options.quality.target_dpi()) {
         let dist =
             |a: [f32; 2], b: [f32; 2]| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
         let width_edge = dist(corners[0], corners[1]);
@@ -510,6 +510,7 @@ fn append_pdf_page(
     let (rotation_deg, scale, clip) = (page.rotation_deg, page.scale, page.clip);
     let plot_style = page.plot_style.as_ref().or(fallback_plot_style);
     let options = page.options;
+    let line_step = vector_step(options);
     let mut ops: Vec<Op> = Vec::new();
 
     // White page background.
@@ -1031,7 +1032,7 @@ fn append_pdf_page(
                             ),
                             bezier: false,
                         };
-                        flush_line(&mut ops, &[point(from), point(to)], None);
+                        flush_line(&mut ops, &[point(from), point(to)], None, line_step);
                     }
                 }
                 continue;
@@ -1093,7 +1094,7 @@ fn append_pdf_page(
                             ops.push(Op::SetOutlineThickness { pt: Pt(thin) });
                             last_lw = Some(thin);
                         }
-                        flush_line(&mut ops, &[mm(a), mm(b)], None);
+                        flush_line(&mut ops, &[mm(a), mm(b)], None, line_step);
                         continue;
                     }
                     let n = [-dy / len, dx / len];
@@ -1127,7 +1128,7 @@ fn append_pdf_page(
                     if band {
                         pen_up = true;
                     } else {
-                        flush_line(&mut ops, &segment, dot_radius);
+                        flush_line(&mut ops, &segment, dot_radius, line_step);
                         segment.clear();
                     }
                 } else {
@@ -1141,13 +1142,13 @@ fn append_pdf_page(
                         if joined {
                             continue;
                         }
-                        flush_line(&mut ops, &segment, dot_radius);
+                        flush_line(&mut ops, &segment, dot_radius, line_step);
                         segment.clear();
                     }
                     segment.push(LinePoint { p, bezier: false });
                 }
             }
-            flush_line(&mut ops, &segment, dot_radius);
+            flush_line(&mut ops, &segment, dot_radius, line_step);
         }
         if alpha_open {
             ops.push(Op::RestoreGraphicsState);
@@ -1363,7 +1364,34 @@ fn visible_station_ranges(
     ranges
 }
 
-fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>) {
+/// One vector DPI step in points, for `PlotOptions::vector_dpi`.
+fn vector_step(options: PdfPlotOptions) -> Option<f32> {
+    options.vector_dpi.filter(|&dpi| dpi > 0).map(|dpi| 72.0 / dpi as f32)
+}
+
+fn flush_line(ops: &mut Vec<Op>, pts: &[LinePoint], dot_radius: Option<Pt>, step: Option<f32>) {
+    // Snapped to the vector resolution, points that land together merge.
+    let snapped: Vec<LinePoint>;
+    let pts = match step {
+        Some(step) => {
+            let snap = |v: f32| (v / step).round() * step;
+            let mut out: Vec<LinePoint> = Vec::with_capacity(pts.len());
+            for point in pts {
+                let mut point = point.clone();
+                point.p.x.0 = snap(point.p.x.0);
+                point.p.y.0 = snap(point.p.y.0);
+                // Bezier control points keep their slot so curves stay whole.
+                if out.last().is_none_or(|last| {
+                    point.bezier || last.bezier || last.p.x.0 != point.p.x.0 || last.p.y.0 != point.p.y.0
+                }) {
+                    out.push(point);
+                }
+            }
+            snapped = out;
+            snapped.as_slice()
+        }
+        None => pts,
+    };
     if pts.len() < 2 {
         return;
     }
@@ -1797,7 +1825,7 @@ fn emit_hatch(
                 },
             ];
             let dot_radius = Pt(SCREEN_DOT_MM * MM_TO_PT / (2.0 * scale.max(1e-6)));
-            flush_line(ops, &points, Some(dot_radius));
+            flush_line(ops, &points, Some(dot_radius), vector_step(options));
         }
         return;
     }

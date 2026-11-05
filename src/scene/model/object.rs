@@ -181,6 +181,8 @@ pub enum GripShape {
     Square,
     Rectangle,
     Triangle,
+    /// Directional toggle with a shaft and arrowhead.
+    Arrow,
     Circle,
     /// Diamond (a table cell range's fill handle).
     Diamond,

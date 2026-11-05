@@ -984,6 +984,7 @@ impl OpenCADStudio {
                 if let Some(message) = new_cmd.start_message() {
                     self.command_line.push_output(&message);
                 }
+                self.hatch_drafts = Default::default();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);
@@ -3236,5 +3237,152 @@ mod degenerate_constraint_tests {
         app.automation_op(r#"{"op":"run","cmd":"ECONSTRAINT"}"#);
         let lines = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
         assert_eq!(lines["ok"], true, "{lines}");
+    }
+}
+
+impl OpenCADStudio {
+    /// An edit in the Hatch panel: OK and Cancel end HATCH as Enter and Esc
+    /// do; the rest change the running command's settings.
+    pub(in crate::app) fn on_hatch_panel(
+        &mut self,
+        msg: crate::ui::window::hatch_panel::HatchPanelMsg,
+    ) -> Task<Message> {
+        use crate::command::StepInput;
+        use crate::ui::window::hatch_panel::HatchPanelMsg as M;
+        let i = self.active_tab;
+        let Some(mut settings) = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.hatch_settings())
+        else {
+            return Task::none();
+        };
+        let number = |typed: &str| typed.trim().replace(',', ".").parse::<f64>().ok();
+        match msg {
+            M::Accept => return self.feed_command(StepInput::Enter),
+            M::Cancel => return self.feed_command(StepInput::Escape),
+            M::Pattern(name) => settings.pattern = name,
+            M::Angle(typed) => {
+                if let Some(value) = number(&typed).filter(|value| value.is_finite()) {
+                    settings.angle_deg = value;
+                }
+                self.hatch_drafts.angle = Some(typed);
+            }
+            M::Scale(typed) => {
+                if let Some(value) = number(&typed).filter(|value| *value > 0.0) {
+                    settings.scale = value;
+                }
+                self.hatch_drafts.scale = Some(typed);
+            }
+            M::Gap(typed) => {
+                if let Some(value) = number(&typed).filter(|value| *value >= 0.0) {
+                    settings.gap_tolerance = value;
+                }
+                self.hatch_drafts.gap = Some(typed);
+            }
+            M::Method(method) => settings.method = method,
+            M::Islands(code) => settings.islands = crate::ui::window::hatch_panel::island_style(code),
+            M::Associative(on) => settings.associative = on,
+            M::Separate(on) => settings.separate = on,
+            M::KeepBoundaries(on) => settings.keep_boundaries = on,
+        }
+        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+            command.set_hatch_settings(settings);
+        }
+        self.refresh_area_preview(i);
+        Task::none()
+    }
+}
+
+impl OpenCADStudio {
+    /// An edit in Customize User Interface: the user's panels change and the
+    /// My Tools tab follows at once.
+    pub(in crate::app) fn on_ribbon_customize(
+        &mut self,
+        msg: crate::ui::window::ribbon_customize::Msg,
+    ) -> Task<Message> {
+        use crate::ui::window::ribbon_customize::Msg as M;
+        let Some(state) = self.ribbon_customize.as_mut() else {
+            return Task::none();
+        };
+        let mut panels = self.ribbon.custom_panels().to_vec();
+        let selected = state.selected.filter(|index| *index < panels.len());
+        match msg {
+            M::Select(index) => state.selected = Some(index),
+            M::NewPanel => {
+                let title = (1..)
+                    .map(|n| crate::tr!("ribbon-customize", "default-title", n = n))
+                    .find(|title| !panels.iter().any(|panel| panel.title == *title))
+                    .unwrap_or_default();
+                panels.push(crate::ui::ribbon::CustomPanel {
+                    title,
+                    commands: Vec::new(),
+                });
+                state.selected = Some(panels.len() - 1);
+            }
+            M::DeletePanel => {
+                if let Some(index) = selected {
+                    panels.remove(index);
+                    state.selected = (!panels.is_empty()).then(|| index.min(panels.len() - 1));
+                }
+            }
+            M::MovePanel(up) => {
+                if let Some(index) = selected {
+                    let other = if up { index.checked_sub(1) } else { Some(index + 1) };
+                    if let Some(other) = other.filter(|other| *other < panels.len()) {
+                        panels.swap(index, other);
+                        state.selected = Some(other);
+                    }
+                }
+            }
+            M::Title(title) => {
+                if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
+                    panel.title = title;
+                }
+            }
+            M::Draft(text) => {
+                state.draft = text;
+                return Task::none();
+            }
+            M::AddCommand => {
+                let typed = state.draft.trim().to_uppercase();
+                state.draft.clear();
+                if let (Some(panel), false) =
+                    (selected.and_then(|index| panels.get_mut(index)), typed.is_empty())
+                {
+                    let command = self.resolve_alias(&typed).unwrap_or(typed);
+                    panel.commands.push(command);
+                }
+            }
+            M::RemoveCommand(at) => {
+                if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
+                    if at < panel.commands.len() {
+                        panel.commands.remove(at);
+                    }
+                }
+            }
+            M::MoveCommand(at, up) => {
+                if let Some(panel) = selected.and_then(|index| panels.get_mut(index)) {
+                    let other = if up { at.checked_sub(1) } else { Some(at + 1) };
+                    if let Some(other) = other.filter(|other| *other < panel.commands.len()) {
+                        panel.commands.swap(at, other);
+                    }
+                }
+            }
+            M::Shortcuts => return Task::done(Message::ShortcutsPanelOpen),
+        }
+        self.ribbon.set_custom_panels(panels);
+        self.save_config();
+        Task::none()
+    }
+}
+
+impl OpenCADStudio {
+    /// Where new toolbars line up: past the left dock, under the menu bar
+    /// and the drawing tabs.
+    pub(in crate::app) fn toolbar_origin(&self) -> iced::Point {
+        let left = self.dock_column_width(crate::app::config::DockSide::Left)
+            + crate::ui::dock::DOCK_STRIP_W;
+        iced::Point::new(left + 8.0, 74.0)
     }
 }

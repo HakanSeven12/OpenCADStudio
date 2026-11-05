@@ -1468,6 +1468,22 @@ impl OpenCADStudio {
             "conversion_loss_back" => Message::ConversionLossBack,
             // Show a layout (or "Model"), as clicking its tab does.
             "layout_switch" => Message::LayoutSwitch(string(req, "value")?.into()),
+            // Pick the Plot dialog's output device: a printer name, "pdf" or "svg".
+            "plot_printer" => {
+                use crate::ui::window::plot::{PlotDlgMsg, OUT_PDF, OUT_SVG};
+                let device = match string(req, "value")? {
+                    "pdf" => OUT_PDF.to_string(),
+                    "svg" => OUT_SVG.to_string(),
+                    other => other.to_string(),
+                };
+                Message::PlotDlg(PlotDlgMsg::Printer(device))
+            }
+            // The open right-click menu turns into its editor.
+            "context_menu_customize" => {
+                Message::ContextMenuPick(crate::ui::popup::context_menu::MenuAction::Customize)
+            }
+            // The Plot dialog's Plot / Export button.
+            "plot_commit" => Message::PlotDlg(crate::ui::window::plot::PlotDlgMsg::Commit),
             // The "changed outside" modal's suggested actions (D6): reload
             // the disk copy, keep the in-memory one and overwrite, save as,
             // or dismiss. Native only — the web build has no such dialog.

@@ -1,7 +1,7 @@
 use super::*;
 use crate::scene::{
     block_basepoint, block_distance_parameter as distance, block_lookup,
-    block_orientation_parameter as orientation,
+    block_orientation_parameter as orientation, block_properties_table as tables,
 };
 
 #[test]
@@ -68,6 +68,25 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             .into_iter()
             .find(|p| p.handle == child)
             .unwrap();
+        let (_, lookup_parameter) = block_lookup::parameters(&doc, def)
+            .into_iter()
+            .find(|(handle, _)| *handle == lookup)
+            .unwrap();
+        let mut lookup_table = block_lookup::empty_table(lookup_parameter);
+        let lookup_input = block_lookup::properties(&doc, def)
+            .into_iter()
+            .find(|property| property.column.node_id == p.id)
+            .unwrap();
+        lookup_table.columns.insert(0, lookup_input.column);
+        lookup_table.column_count = 2;
+        lookup_table.row_count = 2;
+        lookup_table.expressions = ["10", "Short", "17", "Long"].map(String::from).to_vec();
+        block_lookup::apply_table(&mut doc, def, lookup, lookup_table).unwrap();
+        let columns: Vec<_> = tables::columns(&doc, def)
+            .into_iter()
+            .filter(|column| column.handle == child)
+            .collect();
+        tables::apply(&mut doc, def, &columns, &[vec![10.], vec![19.]], false).unwrap();
         for grip in crate::scene::block_grips::config::locations(&doc, def, child).unwrap() {
             crate::scene::block_grips::config::set_location(
                 &mut doc,
@@ -113,6 +132,35 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             }
             changed = eval(&changed, child, Value::Point(DVec3::new(-15., -2., 0.)));
             assert_eq!(circle(&changed), Vector3::new(-9., -3., 0.));
+            let from_lookup = if testing {
+                let mut scratch = changed.clone();
+                scratch.remove_entity(second);
+                block_lookup::evaluate_test_choice(&scratch, &baseline, first, "Long")
+            } else {
+                block_lookup::evaluate_reference_value(&changed, first, lookup, "Long")
+            }
+            .unwrap()
+            .unwrap();
+            assert_eq!(circle(&from_lookup), Vector3::new(-11., -3., 0.));
+            assert_eq!(
+                instance::frame(&from_lookup, first, &p).unwrap().end,
+                DVec3::new(-17., -2., 0.)
+            );
+            let from_table = if testing {
+                instance::evaluate_test_table_row(&from_lookup, &baseline, first, &columns, 1)
+            } else {
+                instance::evaluate_table_row(&from_lookup, first, &columns, 1)
+            }
+            .unwrap()
+            .unwrap();
+            assert_eq!(circle(&from_table), Vector3::new(-13., -3., 0.));
+            assert_eq!(
+                instance::frame(&from_table, first, &p).unwrap().end,
+                DVec3::new(-19., -2., 0.)
+            );
+            let unflipped = eval(&from_table, flips[0], Value::Flip(false));
+            let unflipped = eval(&unflipped, flips[1], Value::Flip(false));
+            assert_eq!(circle(&unflipped), Vector3::new(13., 3., 0.));
             if !testing {
                 let mut edited = changed.clone();
                 let EntityType::Circle(source) = edited.get_entity_mut(geometry[1]).unwrap() else {
@@ -143,9 +191,11 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
                 }
             );
             for extension in ["dwg", "dxf"] {
-                let bytes = crate::io::save_to_bytes(&changed, extension, changed.version).unwrap();
+                let bytes =
+                    crate::io::save_to_bytes(&from_table, extension, from_table.version).unwrap();
                 let saved =
                     crate::io::load_bytes(&format!("coupled-flips.{extension}"), bytes).unwrap();
+                assert_eq!(circle(&saved), Vector3::new(-13., -3., 0.));
                 let next = eval(&saved, child, Value::Point(DVec3::new(-18., -2., 0.)));
                 assert_eq!(circle(&next), Vector3::new(-12., -3., 0.));
                 let next = eval(&next, flips[0], Value::Flip(false));

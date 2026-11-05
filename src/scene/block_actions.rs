@@ -18,7 +18,7 @@ mod targets;
 mod array;
 mod chains;
 mod flip_frames;
-mod flip_graph;
+pub(super) mod flip_graph;
 #[cfg(test)]
 mod flip_graph_tests;
 pub(crate) mod options;

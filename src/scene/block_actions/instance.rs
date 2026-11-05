@@ -1112,6 +1112,7 @@ fn evaluate_table_row_context(
         .rows
         .get(row)
         .ok_or("The selected table row is unavailable.")?;
+    let coupled_flips = super::flip_graph::Plan::new(baseline.unwrap_or(doc), def).is_some();
     let mut staged = doc.clone();
     for (column, value) in columns.iter().zip(values) {
         let p = all_parameters(&staged, def)
@@ -1127,7 +1128,7 @@ fn evaluate_table_row_context(
         let input = if column.connection_name.eq_ignore_ascii_case("UpdatedAngle") {
             Value::Point(base + DVec3::new(value.cos(), value.sin(), 0.0) * current_frame.end.distance(base))
         } else {
-            let axis = if p.polar { (current_frame.end - base).normalize() }
+            let axis = if p.polar || (p.linear && coupled_flips) { (current_frame.end - base).normalize() }
                 else { (p.end - p.base).normalize() };
             Value::Point(base + axis * *value)
         };

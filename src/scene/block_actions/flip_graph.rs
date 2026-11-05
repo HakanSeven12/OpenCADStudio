@@ -10,7 +10,7 @@ struct Step {
     axis: Handle,
     targets: BTreeSet<Handle>,
 }
-pub(super) struct Plan {
+pub(in crate::scene) struct Plan {
     steps: Vec<Step>,
     parameters: Vec<Parameter>,
 }
@@ -286,19 +286,22 @@ impl Plan {
         Ok(frames)
     }
 
-    pub fn refresh(
+    pub fn load_canonical(
         &self,
         doc: &Document,
-        before: &Document,
-        def: Handle,
+        evaluated: &mut Document,
         insert: Handle,
-    ) -> Result<Document, &'static str> {
-        let mut evaluated = doc.clone();
-        let visible = instance::load_frames(doc, &mut evaluated, insert, &self.parameters)?;
-        let mut canonical = match self.read(doc, insert)? {
+        testing: bool,
+    ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
+        let visible = if testing {
+            instance::load_test_frames(doc, evaluated, insert, &self.parameters)?
+        } else {
+            instance::load_frames(doc, evaluated, insert, &self.parameters)?
+        };
+        let canonical = match self.read(doc, insert)? {
             Some(frames) => frames,
             None if self
-                .states(|p| super::value(&evaluated, p))?
+                .states(|p| super::value(evaluated, p))?
                 .iter()
                 .all(|v| !v) =>
             {
@@ -308,32 +311,69 @@ impl Plan {
         };
         for p in &self.parameters {
             if !p.flip {
-                super::set_value(&mut evaluated, p, Value::Point(canonical[&p.handle].end))?;
+                super::set_value(evaluated, p, Value::Point(canonical[&p.handle].end))?;
             }
         }
-        let values = canonical.iter().map(|(h, f)| (*h, f.end)).collect();
+        Ok(canonical)
+    }
+
+    pub fn rebuild_reference(
+        &self,
+        doc: &Document,
+        evaluated: &mut Document,
+        baseline: &Document,
+        def: Handle,
+        insert: Handle,
+        previous: super::RebuildInputs<'_>,
+    ) -> Result<Document, &'static str> {
         let actions: Vec<_> = self.steps.iter().map(|s| s.action).collect();
         let mut active = BTreeMap::new();
+        let mut canonical = previous.frames.clone();
         let resolved = super::rebuild_framed_with_flips(
-            &mut evaluated,
-            doc,
+            evaluated,
+            baseline,
             def,
             &canonical,
-            Some(super::RebuildInputs {
-                document: before,
-                frames: &canonical,
-                values: &values,
-                requested: &BTreeSet::new(),
-            }),
+            Some(previous),
             &actions,
             Some(&mut active),
         )?;
-        canonical.extend(resolved);
-        let visible = self.display_frames(&evaluated, &canonical, &active)?;
-        let mut result = instance::materialize(doc, insert, def, &evaluated)?;
+        for p in &self.parameters {
+            if let Some(frame) = resolved.get(&p.handle) {
+                canonical.insert(p.handle, *frame);
+            } else if previous.requested.contains(&p.handle) && !p.flip {
+                canonical.get_mut(&p.handle).ok_or(FRAME_ERROR)?.end = super::current(evaluated, p);
+            }
+        }
+        let visible = self.display_frames(evaluated, &canonical, &active)?;
+        let mut result = instance::materialize(doc, insert, def, evaluated)?;
         instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
         self.write(&mut result, insert, &canonical);
         Ok(result)
+    }
+
+    pub fn refresh(
+        &self,
+        doc: &Document,
+        before: &Document,
+        def: Handle,
+        insert: Handle,
+    ) -> Result<Document, &'static str> {
+        let mut evaluated = doc.clone();
+        let frames = self.load_canonical(doc, &mut evaluated, insert, false)?;
+        self.rebuild_reference(
+            doc,
+            &mut evaluated,
+            doc,
+            def,
+            insert,
+            super::RebuildInputs {
+                document: before,
+                frames: &frames,
+                values: &frames.iter().map(|(h, f)| (*h, f.end)).collect(),
+                requested: &BTreeSet::new(),
+            },
+        )
     }
 
     pub fn present_grips(
@@ -423,22 +463,8 @@ impl Plan {
         testing: bool,
     ) -> Result<Option<Document>, &'static str> {
         let mut staged = doc.clone();
-        let visible = if testing {
-            instance::load_test_frames(doc, &mut staged, insert, &self.parameters)?
-        } else {
-            instance::load_frames(doc, &mut staged, insert, &self.parameters)?
-        };
+        let mut frames = self.load_canonical(doc, &mut staged, insert, testing)?;
         let states = self.states(|p| super::value(&staged, p))?;
-        let mut frames = match self.read(doc, insert)? {
-            Some(frames) => frames,
-            None if states.iter().all(|v| !v) => visible,
-            None => return Err(FRAME_ERROR),
-        };
-        for p in &self.parameters {
-            if !p.flip {
-                super::set_value(&mut staged, p, Value::Point(frames[&p.handle].end))?;
-            }
-        }
         let graph = chains::Graph::new(baseline, def)?;
         let values = frames.iter().map(|(h, f)| (*h, f.end)).collect();
         let bases = frames.iter().map(|(h, f)| (*h, f.base)).collect();

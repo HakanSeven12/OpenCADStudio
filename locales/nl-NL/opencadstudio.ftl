@@ -6221,6 +6221,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: verwacht 0 of 1.
 
 plot =
+    .output-folder = Uitvoermap
+    .folder-ask = Elke keer vragen
+    .folder-drawing = Tekeningmap
+    .folder-pdf = PDF-submap
+    .output-name = Bestandsnaam
+    .name-drawing = Tekeningnaam
+    .name-layout = Layoutnaam
+    .name-drawing-layout = Tekening - layout
+    .raster-dpi = Raster-DPI
+    .vector-dpi = Vector-DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (geen pagina-instellingen)
     .none = <geen>

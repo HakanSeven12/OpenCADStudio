@@ -6235,6 +6235,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: المتوقع 0 أو 1.
 
 plot =
+    .output-folder = مجلد الإخراج
+    .folder-ask = السؤال في كل مرة
+    .folder-drawing = مجلد الرسم
+    .folder-pdf = مجلد PDF فرعي
+    .output-name = اسم الملف
+    .name-drawing = اسم الرسم
+    .name-layout = اسم التخطيط
+    .name-drawing-layout = الرسم - التخطيط
+    .raster-dpi = دقة النقطية DPI
+    .vector-dpi = دقة المتجهات DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (لا توجد إعدادات صفحة)
     .none = <لا شيء>

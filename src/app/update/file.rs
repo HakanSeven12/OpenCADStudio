@@ -6460,6 +6460,36 @@ impl OpenCADStudio {
         dir.join(format!("{stem}_{ts}.pdf"))
     }
 
+    /// File stem the plot dialog names its output by and, when it picks a
+    /// folder (and the drawing has been saved), the finished path that
+    /// skips the save dialog. The `PDF` subfolder is created on demand.
+    pub(super) fn plot_output_target(&self) -> (String, Option<std::path::PathBuf>) {
+        let tab = &self.tabs[self.active_tab];
+        let drawing = self.active_stem("");
+        let layout = &tab.scene.current_layout;
+        let stem = match self.plot_dialog.output_name {
+            1 => layout.clone(),
+            2 => format!("{drawing}-{layout}"),
+            _ => drawing,
+        };
+        let stem: String = stem
+            .chars()
+            .map(|c| if "/\\:*?\"<>|".contains(c) { '_' } else { c })
+            .collect();
+        let dir = tab.current_path.as_deref().and_then(|path| path.parent());
+        let folder = match (self.plot_dialog.output_folder, dir) {
+            _ if cfg!(target_arch = "wasm32") => None,
+            (1, Some(dir)) => Some(dir.to_path_buf()),
+            (2, Some(dir)) => Some(dir.join("PDF")),
+            _ => None,
+        };
+        let path = folder.filter(|folder| std::fs::create_dir_all(folder).is_ok()).map(|folder| {
+            let ext = if self.plot_dialog.file_svg { "svg" } else { "pdf" };
+            folder.join(format!("{stem}.{ext}"))
+        });
+        (stem, path)
+    }
+
     /// File stem of the active drawing for default output names, with an
     /// optional suffix (e.g. "_layouts" for print-all). Falls back to
     /// "drawing" when the tab has never been saved.
@@ -7083,6 +7113,22 @@ impl OpenCADStudio {
             }
             M::Quality(s) => {
                 self.plot_dialog.quality = s;
+                Task::none()
+            }
+            M::OutputFolder(s) => {
+                self.plot_dialog.output_folder = s.parse().unwrap_or(0);
+                Task::none()
+            }
+            M::OutputName(s) => {
+                self.plot_dialog.output_name = s.parse().unwrap_or(0);
+                Task::none()
+            }
+            M::RasterDpi(s) => {
+                self.plot_dialog.raster_dpi = s;
+                Task::none()
+            }
+            M::VectorDpi(s) => {
+                self.plot_dialog.vector_dpi = s;
                 Task::none()
             }
             M::Shade(s) => {
@@ -7850,6 +7896,8 @@ impl OpenCADStudio {
             stamp: d.stamp,
             merge_lines: d.merge_lines,
             quality: crate::io::pdf_export::PlotQuality::from_dialog(&d.quality),
+            raster_dpi: d.raster_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
+            vector_dpi: d.vector_dpi.trim().parse().ok().filter(|&dpi| dpi > 0),
         }
     }
 

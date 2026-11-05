@@ -6223,6 +6223,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: se esperaba 0 o 1.
 
 plot =
+    .output-folder = Carpeta de salida
+    .folder-ask = Preguntar siempre
+    .folder-drawing = Carpeta del dibujo
+    .folder-pdf = Subcarpeta PDF
+    .output-name = Nombre de archivo
+    .name-drawing = Nombre del dibujo
+    .name-layout = Nombre de la presentación
+    .name-drawing-layout = Dibujo - presentación
+    .raster-dpi = PPP ráster
+    .vector-dpi = PPP vectorial
     .open-when-done = Open in viewer when done
     .no-page-setups = (sin configuraciones de página)
     .none = <ninguno>

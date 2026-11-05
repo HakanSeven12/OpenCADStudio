@@ -6218,6 +6218,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__:預期為0或1。
 
 plot =
+    .output-folder = 輸出資料夾
+    .folder-ask = 每次詢問
+    .folder-drawing = 圖面資料夾
+    .folder-pdf = PDF 子資料夾
+    .output-name = 檔案名稱
+    .name-drawing = 圖面名稱
+    .name-layout = 配置名稱
+    .name-drawing-layout = 圖面 - 配置
+    .raster-dpi = 點陣 DPI
+    .vector-dpi = 向量 DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = （無頁面設定）
     .none = <無>

@@ -6222,6 +6222,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: 0 또는 1이 필요합니다.
 
 plot =
+    .output-folder = 출력 폴더
+    .folder-ask = 매번 묻기
+    .folder-drawing = 도면 폴더
+    .folder-pdf = PDF 하위 폴더
+    .output-name = 파일 이름
+    .name-drawing = 도면 이름
+    .name-layout = 배치 이름
+    .name-drawing-layout = 도면 - 배치
+    .raster-dpi = 래스터 DPI
+    .vector-dpi = 벡터 DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (페이지 설정 없음)
     .none = <없음>

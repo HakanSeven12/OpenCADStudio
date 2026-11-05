@@ -6224,6 +6224,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: attendu 0 ou 1.
 
 plot =
+    .output-folder = Dossier de sortie
+    .folder-ask = Demander à chaque fois
+    .folder-drawing = Dossier du dessin
+    .folder-pdf = Sous-dossier PDF
+    .output-name = Nom du fichier
+    .name-drawing = Nom du dessin
+    .name-layout = Nom de la présentation
+    .name-drawing-layout = Dessin - présentation
+    .raster-dpi = DPI raster
+    .vector-dpi = DPI vectoriel
     .open-when-done = Open in viewer when done
     .no-page-setups = (pas de configuration de page)
     .none = <aucun>

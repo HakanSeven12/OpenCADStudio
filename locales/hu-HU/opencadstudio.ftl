@@ -6206,6 +6206,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: 0 vagy 1 szükséges.
 
 plot =
+    .output-folder = Kimeneti mappa
+    .folder-ask = Mindig kérdezzen
+    .folder-drawing = Rajz mappája
+    .folder-pdf = PDF almappa
+    .output-name = Fájlnév
+    .name-drawing = Rajz neve
+    .name-layout = Elrendezés neve
+    .name-drawing-layout = Rajz - elrendezés
+    .raster-dpi = Raszter DPI
+    .vector-dpi = Vektor DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (nincs oldalbeállítás)
     .none = <nincs>

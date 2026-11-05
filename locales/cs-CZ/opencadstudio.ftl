@@ -6225,6 +6225,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: očekává se 0 nebo 1.
 
 plot =
+    .output-folder = Výstupní složka
+    .folder-ask = Pokaždé se zeptat
+    .folder-drawing = Složka výkresu
+    .folder-pdf = Podsložka PDF
+    .output-name = Název souboru
+    .name-drawing = Název výkresu
+    .name-layout = Název rozvržení
+    .name-drawing-layout = Výkres - rozvržení
+    .raster-dpi = DPI rastru
+    .vector-dpi = DPI vektoru
     .open-when-done = Po dokončení otevřít v prohlížeči
     .no-page-setups = (žádná nastavení stránky)
     .none = <žádné>

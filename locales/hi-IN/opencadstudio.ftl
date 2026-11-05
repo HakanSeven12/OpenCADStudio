@@ -6211,6 +6211,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: 0 या 1 उम्मीद है।
 
 plot =
+    .output-folder = आउटपुट फ़ोल्डर
+    .folder-ask = हर बार पूछें
+    .folder-drawing = ड्रॉइंग फ़ोल्डर
+    .folder-pdf = PDF सबफ़ोल्डर
+    .output-name = फ़ाइल नाम
+    .name-drawing = ड्रॉइंग नाम
+    .name-layout = लेआउट नाम
+    .name-drawing-layout = ड्रॉइंग - लेआउट
+    .raster-dpi = रास्टर DPI
+    .vector-dpi = वेक्टर DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (कोई पृष्ठ सेटअप नहीं)
     .none = <कोई नहीं>

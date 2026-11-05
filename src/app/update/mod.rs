@@ -13240,13 +13240,10 @@ impl OpenCADStudio {
 
             // ── Plot / Export ─────────────────────────────────────────────
             Message::PlotExport => {
-                let i = self.active_tab;
-                let stem = self.tabs[i]
-                    .current_path
-                    .as_deref()
-                    .and_then(|p: &std::path::Path| p.file_stem())
-                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "drawing".into());
+                let (stem, preset) = self.plot_output_target();
+                if let Some(path) = preset {
+                    return Task::done(Message::PlotExportPath(Some(path)));
+                }
                 // The save dialog follows the dialog's file device, so the
                 // SVG choice proposes `stem.svg` up front.
                 #[cfg(not(target_arch = "wasm32"))]
@@ -13280,13 +13277,10 @@ impl OpenCADStudio {
             Message::PlotExportPath(Some(path)) => self.on_plot_export_path_some(path),
 
             Message::PlotWindowExport => {
-                let i = self.active_tab;
-                let stem = self.tabs[i]
-                    .current_path
-                    .as_deref()
-                    .and_then(|p: &std::path::Path| p.file_stem())
-                    .map(|s: &std::ffi::OsStr| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| "drawing".into());
+                let (stem, preset) = self.plot_output_target();
+                if let Some(path) = preset {
+                    return Task::done(Message::PlotWindowExportPath(Some(path)));
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 let svg = self.plot_dialog.file_svg;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]

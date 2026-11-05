@@ -6206,6 +6206,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__:预期为0或1。
 
 plot =
+    .output-folder = 输出文件夹
+    .folder-ask = 每次询问
+    .folder-drawing = 图形文件夹
+    .folder-pdf = PDF 子文件夹
+    .output-name = 文件名
+    .name-drawing = 图形名
+    .name-layout = 布局名
+    .name-drawing-layout = 图形 - 布局
+    .raster-dpi = 光栅 DPI
+    .vector-dpi = 矢量 DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = （无页面设置）
     .none = <无>

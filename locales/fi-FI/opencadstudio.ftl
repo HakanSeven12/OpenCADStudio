@@ -6222,6 +6222,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: odotettu 0 tai 1.
 
 plot =
+    .output-folder = Tulostekansio
+    .folder-ask = Kysy aina
+    .folder-drawing = Piirustuksen kansio
+    .folder-pdf = PDF-alikansio
+    .output-name = Tiedostonimi
+    .name-drawing = Piirustuksen nimi
+    .name-layout = Asettelun nimi
+    .name-drawing-layout = Piirustus - asettelu
+    .raster-dpi = Rasterin DPI
+    .vector-dpi = Vektorin DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (ei sivuasetuksia)
     .none = <ei mitään>

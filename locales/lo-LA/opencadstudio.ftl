@@ -6224,6 +6224,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: ຕ້ອງການ 0 ຫຼື 1.
 
 plot =
+    .output-folder = ໂຟນເດີຜົນອອກ
+    .folder-ask = ຖາມທຸກຄັ້ງ
+    .folder-drawing = ໂຟນເດີແບບແຕ້ມ
+    .folder-pdf = ໂຟນເດີຍ່ອຍ PDF
+    .output-name = ຊື່ໄຟລ໌
+    .name-drawing = ຊື່ແບບແຕ້ມ
+    .name-layout = ຊື່ໂຄງຮ່າງ
+    .name-drawing-layout = ແບບແຕ້ມ - ໂຄງຮ່າງ
+    .raster-dpi = DPI ແຣສເຕີ
+    .vector-dpi = DPI ເວັກເຕີ
     .open-when-done = Open in viewer when done
     .no-page-setups = (ບໍ່ມີການຕັ້ງຄ່າໜ້າ)
     .none = <ບໍ່ມີ>

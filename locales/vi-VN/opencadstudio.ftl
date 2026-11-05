@@ -6230,6 +6230,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: cần 0 hoặc 1.
 
 plot =
+    .output-folder = Thư mục xuất
+    .folder-ask = Hỏi mỗi lần
+    .folder-drawing = Thư mục bản vẽ
+    .folder-pdf = Thư mục con PDF
+    .output-name = Tên tệp
+    .name-drawing = Tên bản vẽ
+    .name-layout = Tên bố cục
+    .name-drawing-layout = Bản vẽ - bố cục
+    .raster-dpi = DPI raster
+    .vector-dpi = DPI vector
     .open-when-done = Open in viewer when done
     .no-page-setups = (không có thiết lập trang)
     .none = <không có>

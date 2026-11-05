@@ -6211,6 +6211,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: 0 または 1 が必要です。
 
 plot =
+    .output-folder = 出力フォルダ
+    .folder-ask = 毎回確認
+    .folder-drawing = 図面フォルダ
+    .folder-pdf = PDF サブフォルダ
+    .output-name = ファイル名
+    .name-drawing = 図面名
+    .name-layout = レイアウト名
+    .name-drawing-layout = 図面 - レイアウト
+    .raster-dpi = ラスター DPI
+    .vector-dpi = ベクトル DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = （ページ設定なし）
     .none = <なし>

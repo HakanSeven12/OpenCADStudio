@@ -6163,6 +6163,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: 0 veya 1 bekleniyordu.
 
 plot =
+    .output-folder = Çıktı klasörü
+    .folder-ask = Her seferinde sor
+    .folder-drawing = Çizim klasörü
+    .folder-pdf = PDF alt klasörü
+    .output-name = Dosya adı
+    .name-drawing = Çizim adı
+    .name-layout = Düzen adı
+    .name-drawing-layout = Çizim - düzen
+    .raster-dpi = Raster DPI
+    .vector-dpi = Vektör DPI
     .open-when-done = PDF bitince görüntüleyicide aç
     .no-page-setups = (sayfa ayarı yok)
     .none = <yok>

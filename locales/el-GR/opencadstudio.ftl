@@ -6223,6 +6223,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: αναμενόταν 0 ή 1.
 
 plot =
+    .output-folder = Φάκελος εξόδου
+    .folder-ask = Ερώτηση κάθε φορά
+    .folder-drawing = Φάκελος σχεδίου
+    .folder-pdf = Υποφάκελος PDF
+    .output-name = Όνομα αρχείου
+    .name-drawing = Όνομα σχεδίου
+    .name-layout = Όνομα διάταξης
+    .name-drawing-layout = Σχέδιο - διάταξη
+    .raster-dpi = DPI ράστερ
+    .vector-dpi = DPI διανυσμάτων
     .open-when-done = Open in viewer when done
     .no-page-setups = (δεν υπάρχουν διαμορφώσεις σελίδας)
     .none = <καμία>

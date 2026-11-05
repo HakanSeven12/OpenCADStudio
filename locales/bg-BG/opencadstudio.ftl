@@ -6223,6 +6223,16 @@ styles =
     .expected-0-or-1 = __ocs_fmt_0__: очаквано 0 или 1.
 
 plot =
+    .output-folder = Изходна папка
+    .folder-ask = Питай всеки път
+    .folder-drawing = Папка на чертежа
+    .folder-pdf = Подпапка PDF
+    .output-name = Име на файла
+    .name-drawing = Име на чертежа
+    .name-layout = Име на оформлението
+    .name-drawing-layout = Чертеж - оформление
+    .raster-dpi = Растерно DPI
+    .vector-dpi = Векторно DPI
     .open-when-done = Open in viewer when done
     .no-page-setups = (няма настройки на страница)
     .none = <няма>

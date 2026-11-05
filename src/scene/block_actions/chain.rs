@@ -1,6 +1,111 @@
 //! The chain that records the order one definition's actions run in.
 use super::*;
 
+/// Schedule the actions blocked by retained loops. Each strongly connected
+/// component runs in graph order and releases its successors when complete.
+pub(super) fn append_retained_cycles(
+    successors: &[Vec<usize>],
+    predecessors: &[usize],
+    order: &mut Vec<usize>,
+) {
+    let blocked = |index: usize| predecessors[index] > 0;
+    let mut incoming = vec![Vec::new(); successors.len()];
+    for (source, edges) in successors
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| blocked(*index))
+    {
+        for &target in edges {
+            if blocked(target) {
+                incoming[target].push(source);
+            }
+        }
+    }
+
+    // Two iterative DFS passes find the components without recursing on
+    // retained file data. First record finish order on the original edges.
+    let mut visited = vec![false; successors.len()];
+    let mut finished = Vec::new();
+    for root in (0..successors.len()).filter(|index| blocked(*index)) {
+        if visited[root] {
+            continue;
+        }
+        visited[root] = true;
+        let mut pending = vec![(root, successors[root].iter().copied())];
+        while let Some((node, edges)) = pending.last_mut() {
+            if let Some(next) = edges.find(|&next| blocked(next) && !visited[next]) {
+                visited[next] = true;
+                pending.push((next, successors[next].iter().copied()));
+            } else {
+                finished.push(*node);
+                pending.pop();
+            }
+        }
+    }
+    // Walking reversed edges in reverse finish order stays in one component.
+    let mut component_of = vec![None; successors.len()];
+    let mut members = Vec::new();
+    for root in finished.into_iter().rev() {
+        if component_of[root].is_some() {
+            continue;
+        }
+        let component = members.len();
+        let mut group = Vec::new();
+        let mut pending = vec![root];
+        component_of[root] = Some(component);
+        while let Some(node) = pending.pop() {
+            group.push(node);
+            for &previous in &incoming[node] {
+                if component_of[previous].is_none() {
+                    component_of[previous] = Some(component);
+                    pending.push(previous);
+                }
+            }
+        }
+        group.sort_unstable();
+        members.push(group);
+    }
+
+    // Ignore only edges within a loop. Its exits still enforce precedence
+    // and retain their list order when released together.
+    let mut exits = vec![Vec::new(); members.len()];
+    let mut incoming_groups = vec![0; members.len()];
+    for (component, group) in members.iter().enumerate() {
+        let mut seen = std::collections::BTreeSet::new();
+        for target in group.iter().flat_map(|node| &successors[*node]) {
+            if let Some(next) = component_of[*target] {
+                if next != component && seen.insert(next) {
+                    exits[component].push(next);
+                    incoming_groups[next] += 1;
+                }
+            }
+        }
+    }
+    let mut left: Vec<_> = members.iter().map(Vec::len).collect();
+    let mut ready: std::collections::VecDeque<_> = component_of
+        .iter()
+        .enumerate()
+        .filter_map(|(node, group)| {
+            group
+                .filter(|&group| incoming_groups[group] == 0)
+                .map(|_| node)
+        })
+        .collect();
+    while let Some(node) = ready.pop_front() {
+        order.push(node);
+        let component = component_of[node].expect("scheduled action belongs to a component");
+        left[component] -= 1;
+        if left[component] == 0 {
+            for &next in &exits[component] {
+                incoming_groups[next] -= 1;
+                if incoming_groups[next] == 0 {
+                    ready.extend(members[next].iter().copied());
+                }
+            }
+        }
+    }
+}
+
 /// Follow-ups in retained list order, spelled as shown in the Actions tab.
 /// A handle outside the definition's actions has no row.
 pub(crate) fn labels(doc: &Document, definition: Handle, action: Handle) -> Option<Vec<String>> {

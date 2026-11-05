@@ -2090,9 +2090,9 @@ fn chain_order(
             }
         }
     }
-    // A cycle has no head, so whatever is left keeps the graph's own order.
-    order.extend(predecessors.iter().enumerate()
-        .filter_map(|(index, count)| (*count > 0).then_some(index)));
+    if order.len() < all.len() {
+        chain::append_retained_cycles(&successors, &predecessors, &mut order);
+    }
     Ok(order)
 }
 

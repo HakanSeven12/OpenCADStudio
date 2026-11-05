@@ -3078,6 +3078,52 @@ fn actions_that_chain_each_other_keep_the_order_the_graph_lists() {
     );
 }
 
+#[test]
+fn a_retained_loop_releases_its_exits_in_order_before_their_join() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let member = handles[1];
+    let join = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let move_exit = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let scale_exit = add_action(&mut doc, def, parameter, member, Kind::Scale);
+    let first = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let second = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let independent = add_action(&mut doc, def, parameter, member, Kind::Move);
+    chain_names(&mut doc, first, &[second, scale_exit, move_exit]);
+    chain_after(&mut doc, second, first);
+    chain_after(&mut doc, independent, scale_exit);
+    chain_after(&mut doc, scale_exit, join);
+    chain_after(&mut doc, move_exit, join);
+    for extension in ["dwg", "dxf"] {
+        let bytes = crate::io::save_to_bytes(&doc, extension, doc.version).unwrap();
+        let mut reopened = crate::io::load_bytes(&format!("cycle-exits.{extension}"), bytes)
+            .unwrap();
+        assert_eq!(
+            drive(&mut reopened, def, parameter, member),
+            (DVec3::new(88., 6., 0.), 4.)
+        );
+    }
+}
+
+#[test]
+fn independent_retained_loops_keep_their_interleaved_graph_order() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let member = handles[1];
+    let a = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let b = add_action(&mut doc, def, parameter, member, Kind::Scale);
+    let c = add_action(&mut doc, def, parameter, member, Kind::Move);
+    let d = add_action(&mut doc, def, parameter, member, Kind::Scale);
+    chain_after(&mut doc, a, c);
+    chain_after(&mut doc, c, a);
+    chain_after(&mut doc, b, d);
+    chain_after(&mut doc, d, b);
+    assert_eq!(
+        drive(&mut doc, def, parameter, member),
+        (DVec3::new(76., 12., 0.), 8.)
+    );
+}
+
 /// A shared follow-up sees the effects of both predecessors, once.
 #[test]
 fn two_chains_join_before_applying_their_shared_follow_up_once() {

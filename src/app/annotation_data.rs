@@ -1260,7 +1260,7 @@ fn rows_to_csv(rows: &[Vec<String>]) -> String {
 
 /// Writes the extraction rows as a workbook (.xlsx), comma-separated values
 /// (.csv) or tab-separated text (.txt).
-fn write_extraction_file(path: &Path, rows: &[Vec<String>]) -> Result<(), String> {
+pub(crate) fn write_extraction_file(path: &Path, rows: &[Vec<String>]) -> Result<(), String> {
     let ext = path
         .extension()
         .and_then(|value| value.to_str())

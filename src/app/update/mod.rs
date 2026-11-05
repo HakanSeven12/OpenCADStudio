@@ -10465,6 +10465,56 @@ impl OpenCADStudio {
                 // check button does, so no half-visible "ghost" row appears.
                 Task::none()
             }
+            Message::KeyListExport(aliases) => {
+                let (header, rows, name) = if aliases {
+                    (
+                        [crate::t!("Alias"), crate::t!("Command")],
+                        &self.alias_editor_rows,
+                        "aliases",
+                    )
+                } else {
+                    (
+                        [crate::t!("Key"), crate::t!("Command")],
+                        &self.shortcut_editor_rows,
+                        "shortcuts",
+                    )
+                };
+                let table: Vec<Vec<String>> = std::iter::once(header.map(|h| h.into_owned()).to_vec())
+                    .chain(rows.iter().map(|(a, b)| vec![a.clone(), b.clone()]))
+                    .collect();
+                #[cfg(target_arch = "wasm32")]
+                {
+                    // The web build downloads it as a workbook.
+                    let path = std::path::PathBuf::from(format!("{name}.xlsx"));
+                    return Task::done(Message::KeyListExportTo(Some(path), table));
+                }
+                #[cfg(not(target_arch = "wasm32"))]
+                Task::perform(
+                    async move {
+                        let path = crate::sys::file_dialog()
+                            .set_file_name(format!("{name}.xlsx"))
+                            .add_filter("Excel (*.xlsx)", &["xlsx"])
+                            .add_filter("CSV (*.csv)", &["csv"])
+                            .add_filter("Text (*.txt)", &["txt"])
+                            .save_file()
+                            .await
+                            .map(|handle| crate::sys::handle_path(&handle));
+                        (path, table)
+                    },
+                    |(path, table)| Message::KeyListExportTo(path, table),
+                )
+            }
+            Message::KeyListExportTo(path, table) => {
+                if let Some(path) = path {
+                    match crate::app::annotation_data::write_extraction_file(&path, &table) {
+                        Ok(()) => self
+                            .command_line
+                            .push_info(crate::tf!("Exported: {}", path.display()).as_ref()),
+                        Err(error) => self.command_line.push_error(&error),
+                    }
+                }
+                Task::none()
+            }
             Message::AliasEditorImport => Task::perform(
                 async {
                     let handle = rfd::AsyncFileDialog::new()

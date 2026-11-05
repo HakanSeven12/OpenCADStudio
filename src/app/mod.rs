@@ -4888,6 +4888,11 @@ pub enum Message {
     /// Pick an AutoCAD/OpenCAD PGP file, then merge supported aliases for review.
     AliasEditorImport,
     AliasEditorImported(Option<Result<Vec<u8>, String>>),
+    /// Export the shortcut (`false`) or alias (`true`) list to a spreadsheet.
+    KeyListExport(bool),
+    /// The file the export goes to (none when the picker was cancelled),
+    /// with the rows to write.
+    KeyListExportTo(Option<std::path::PathBuf>, Vec<Vec<String>>),
     /// Live edit of the alias or command in row `idx`.
     AliasEditorInput {
         idx: usize,

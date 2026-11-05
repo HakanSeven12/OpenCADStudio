@@ -228,12 +228,10 @@ impl CadCommand for TexteditmodeCommand {
         } else {
             String::new()
         };
-        t!(
-            "%{prefix}TEXTEDITMODE Enter new value for TEXTEDITMODE <%{v}>:",
-            prefix = prefix,
-            v = v
+        format!(
+            "{prefix}TEXTEDITMODE {}",
+            crate::ui::command_line::value_prompt("TEXTEDITMODE", &v)
         )
-        .into_owned()
     }
 
     fn wants_text_input(&self) -> bool {

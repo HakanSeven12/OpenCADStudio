@@ -108,10 +108,11 @@ impl CadCommand for DimOverrideCommand {
                     .into_owned()
             }
             None => t!("DIMOVERRIDE  Enter dimension variable name to override:").into_owned(),
-            Some((_, _, current)) => crate::tf!(
-                "DIMOVERRIDE  Enter new value for dimension variable <{current}>:"
-            )
-            .into_owned(),
+            // The reference names no variable here: "dimension variable".
+            Some((_, _, current)) => format!(
+                "DIMOVERRIDE  {}",
+                crate::ui::command_line::value_prompt(t!("dimension variable").as_ref(), current)
+            ),
         }
     }
 

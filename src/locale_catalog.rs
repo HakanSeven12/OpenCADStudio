@@ -1949,6 +1949,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Enter new value for {name} <{current}>:" => Some(("styles", "enter-new-value-for-name-current")),
         "Enter new value for {name}, or . for none <\"{current}\">:" => Some(("styles", "enter-new-value-for-name-or-none")),
         "Enter new value for {name}:" => Some(("styles", "enter-new-value-for-name")),
+        "dimension variable" => Some(("styles", "dimension-variable")),
         "Entity Transform" => Some(("model", "entity-transform")),
         "Erase" => Some(("modify", "erase")),
         "Exactly" => Some(("properties", "exactly")),

@@ -2384,3 +2384,38 @@ fn labelled_strip_shares_the_edge_height_between_pallets() {
     let _ = app.on_dock(DockMsg::StripLabels(false));
     assert_eq!(app.dock_strip_layout(DockSide::Left).0, icons);
 }
+
+/// The manager sits above the authoring palettes on the right edge, as the
+/// pane does when the editor opens with both surfaces up. A panel docked last
+/// would land below whichever palette got there first.
+#[test]
+fn the_parameters_manager_docks_above_the_authoring_palettes() {
+    let mut app = authoring_app();
+    let _ = app.dispatch_command("BAUTHORPALETTE");
+    let _ = app.dispatch_command("PARAMETERS");
+    let palettes = app
+        .dock
+        .location(crate::ui::dock::PanelId::AuthoringPalettes)
+        .expect("the palettes are placed");
+    let manager = app
+        .dock
+        .location(crate::ui::dock::PanelId::ParametersManager)
+        .expect("the manager is placed");
+    assert!(app.show_authoring_palettes && app.show_parameters_manager);
+    assert_eq!(
+        palettes.0,
+        crate::app::config::DockSide::Right,
+        "the palettes dock on the right"
+    );
+    assert_eq!(
+        manager.0,
+        crate::app::config::DockSide::Right,
+        "the manager docks on the right"
+    );
+    assert!(
+        manager.1 < palettes.1,
+        "the manager is above the palettes: manager group {}, palettes group {}",
+        manager.1,
+        palettes.1
+    );
+}

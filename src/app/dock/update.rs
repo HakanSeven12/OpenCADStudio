@@ -553,7 +553,7 @@ impl OpenCADStudio {
                     PanelId::BlockPalette => self.open_blocks_palette(None),
                     PanelId::ParametersManager => {
                         self.show_parameters_manager = true;
-                        self.dock_open_at_default(id);
+                        self.dock_open_above_palettes(id);
                         self.save_config();
                     }
                     PanelId::AuthoringPalettes => {
@@ -690,9 +690,19 @@ impl OpenCADStudio {
     /// Show `id` where the layout has it, first docking it on the right edge
     /// when it has no place yet (opened for the first time, or never moved).
     pub(crate) fn dock_open_at_default(&mut self, id: crate::ui::dock::PanelId) {
+        self.dock_open_at(id, usize::MAX);
+    }
+
+    /// Dock `id` at the top of the right edge when it has no place yet, so it
+    /// lists above palettes docked later.
+    pub(crate) fn dock_open_above_palettes(&mut self, id: crate::ui::dock::PanelId) {
+        self.dock_open_at(id, 0);
+    }
+
+    fn dock_open_at(&mut self, id: crate::ui::dock::PanelId, index: usize) {
         if !self.dock.is_placed(id) {
             self.dock
-                .dock(id, crate::app::config::DockSide::Right, usize::MAX);
+                .dock(id, crate::app::config::DockSide::Right, index);
         }
         self.dock_reveal(id);
     }

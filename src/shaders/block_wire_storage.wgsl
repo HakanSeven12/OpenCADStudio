@@ -286,8 +286,14 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     out.pat0 = wire_const.pat0 * scale;
     out.pat1 = wire_const.pat1 * scale;
     out.min_elem = min_element;
-    out.align_end = wire_const.align_end * scale;
-    out.align_total = wire_const.align_total;
+    let run_total = select(bitcast<f32>(seg.taper_ratio), wire_const.align_total, wire_const.world_half_width > 0.0);
+    out.align_end = aligned_end_dash(
+        wire_const.align_end * scale,
+        run_total,
+        out.pattern_length,
+        max(out.pat0.x, 0.0),
+    );
+    out.align_total = run_total;
     return out;
 }
 
@@ -318,6 +324,12 @@ fn in_dash(
         let first_dash = max(elements[0], 0.0);
         value = ((distance - align_end + first_dash) % pattern_length
             + pattern_length) % pattern_length;
+    } else if align_total < 0.0 {
+        // A closed path (see wire.wgsl).
+        if closed_dash_solid(-align_total, pattern_length) {
+            return true;
+        }
+        value = closed_dash_phase(distance, -align_total, pattern_length);
     } else {
         // The cap before the start reads as the start (see wire.wgsl).
         value = ((max(distance, 0.0) % pattern_length) + pattern_length) % pattern_length;

@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use document::entities::{Insert, Line, LwPolyline, LwVertex};
+use document::entities::{Circle, Insert, Line, LwPolyline, LwVertex};
 use document::tables::linetype::{LineTypeComplexContent, LineTypeComplexData, LineTypeElement};
 use document::tables::{BlockRecord, Layer, LineType, TextStyle};
 use document::types::{Vector2, Vector3};
@@ -507,9 +507,16 @@ fn dashed_line_end_dashes_keep_every_whole_period() {
         .into_iter()
         .find(|w| w.pattern_length > 0.0)
         .expect("a dashed wire");
-    let (_, align_end, align_total) = crate::scene::pipeline::wire_gpu::wire_distances(&wire);
+    let dashes = crate::scene::pipeline::wire_gpu::wire_distances(&wire);
+    let align_total = dashes.run_totals[0];
     assert!((align_total - 2.3).abs() < 1e-4, "{align_total}");
-    assert!((align_end - 0.275).abs() < 1e-4, "{align_end}");
+    let end_dash = crate::scene::pipeline::wire_gpu::aligned_end_dash(
+        dashes.align_ref,
+        align_total,
+        wire.pattern_length,
+        wire.pattern[0],
+    );
+    assert!((end_dash - 0.275).abs() < 1e-4, "{end_dash}");
 }
 
 // ── Inside a block ───────────────────────────────────────────────────────────
@@ -957,4 +964,78 @@ fn a_block_drawn_before_a_complex_linetype_was_loaded_can_inherit_it() {
         &glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5),
         &line_stations(100.0, 1.0, 1.0, 0.5),
     );
+}
+
+// ── Around a closed path ─────────────────────────────────────────────────────
+
+/// How many glyphs a FENCE circle of `radius` holds, and the arc length between
+/// the first two.
+fn circle_glyphs(document: &Document, handle: Handle, radius: f64) -> (usize, f64) {
+    let angles = {
+        let glyph_wires = wires(document, handle);
+        let mut glyphs: Vec<Vec<[f64; 2]>> = Vec::new();
+        for v in glyph_wires.iter().flat_map(|wire| &wire.text_verts) {
+            let p = [
+                v.pos[0] as f64 + v.pos_low[0] as f64,
+                v.pos[1] as f64 + v.pos_low[1] as f64,
+            ];
+            match glyphs.iter_mut().find(|g| dist(g[0], p) < 0.5) {
+                Some(glyph) => glyph.push(p),
+                None => glyphs.push(vec![p]),
+            }
+        }
+        let mut angles: Vec<f64> = glyphs
+            .iter()
+            .map(|g| {
+                let n = g.len() as f64;
+                let x = g.iter().map(|p| p[0]).sum::<f64>() / n;
+                let y = g.iter().map(|p| p[1]).sum::<f64>() / n;
+                y.atan2(x).rem_euclid(std::f64::consts::TAU)
+            })
+            .collect();
+        angles.sort_by(f64::total_cmp);
+        angles
+    };
+    (angles.len(), (angles[1] - angles[0]) * radius)
+}
+
+#[test]
+fn a_complex_circle_holds_whole_stretched_periods_and_full_size_glyphs() {
+    let mut document = fence_document();
+    // L = 12.566, L/P = 8.27: 8 periods, each 1.5708 rather than 1.52.
+    let circle = Circle::from_center_radius(Vector3::ZERO, 2.0);
+    let handle = add(&mut document, EntityType::Circle(circle));
+    let (count, spacing) = circle_glyphs(&document, handle, 2.0);
+    assert_eq!(count, 8);
+    assert!((spacing - 1.5708).abs() < 0.02, "{spacing}");
+}
+
+#[test]
+fn a_complex_circle_shorter_than_a_period_is_solid() {
+    let mut document = fence_document();
+    let circle = Circle::from_center_radius(Vector3::ZERO, 0.2);
+    let handle = add(&mut document, EntityType::Circle(circle));
+    let drawn = wires(&document, handle);
+    assert!(drawn.iter().all(|wire| wire.text_verts.is_empty()));
+    assert!(drawn.iter().any(|wire| wire.points.len() > 8));
+}
+
+#[test]
+fn a_complex_closed_polyline_with_plinegen_starts_at_its_second_vertex() {
+    let mut document = fence_document();
+    let rectangle = [
+        (0.0, 0.0, 0.0),
+        (16.0, 0.0, 0.0),
+        (16.0, 15.2, 0.0),
+        (0.0, 15.2, 0.0),
+    ];
+    let mut entity = polyline(&rectangle, true);
+    if let EntityType::LwPolyline(ref mut p) = entity {
+        p.is_closed = true;
+    }
+    let handle = add(&mut document, entity);
+    // The first dash runs on from (16, 0), so a glyph sits one dash past it, 1.51
+    // up the second side. Counted from the first vertex one would sit 0.7 up.
+    let stations = glyph_stations(&wires(&document, handle), [16.0, 1.51], 0.5);
+    assert!(stations[0] < 0.15, "{stations:?}");
 }

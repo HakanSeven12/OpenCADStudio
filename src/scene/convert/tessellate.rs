@@ -19,7 +19,7 @@ use document::{Document, EntityType, Handle};
 use glam::Vec3;
 
 use crate::scene::convert::acad_to_render::{convert, RenderObject};
-use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
+use crate::scene::model::wire_model::{DashClosure, SnapHint, TangentGeom, WireModel};
 
 /// Split an f64 offset-relative coordinate into the double-single (high, low)
 /// f32 pair the renderer consumes. `high + low ≈ value` to ~f64 precision; the
@@ -422,6 +422,53 @@ fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
         }
         _ => Vec::new(),
     }
+}
+
+/// A dashed polyline with arcs stays one wire, so its pattern runs along the
+/// whole path instead of restarting at each arc. A wide one keeps the bands the
+/// arc pipeline draws for it.
+fn polyline_walks_one_dash_path(
+    entity: &EntityType,
+    document: &Document,
+    pattern_length: f32,
+) -> bool {
+    pattern_length > 1e-6
+        && polyline_band_width(entity, document.header.fill_mode) <= 0.0
+        && polyline_max_width(entity) <= 1e-9
+}
+
+/// How a dash pattern closes around this entity's wire `points`.
+pub(crate) fn dash_closure_of(
+    entity: &EntityType,
+    key_vertices: &[[f64; 3]],
+    points: impl Iterator<Item = [f64; 3]>,
+) -> DashClosure {
+    let closed_polyline = match entity {
+        EntityType::Circle(_) => return DashClosure::Curve,
+        EntityType::Ellipse(ellipse) if ellipse.is_full() => return DashClosure::Curve,
+        EntityType::LwPolyline(polyline) => polyline.is_closed && polyline.plinegen,
+        EntityType::Polyline2D(polyline) => {
+            polyline.is_closed()
+                && polyline.flags.bits()
+                    & document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+                    != 0
+        }
+        _ => false,
+    };
+    let Some(second) = key_vertices.get(1).filter(|_| closed_polyline) else {
+        return DashClosure::Open;
+    };
+    points
+        .enumerate()
+        .skip(1)
+        .find(|(_, p)| {
+            (p[0] - second[0]).abs() < 1e-4
+                && (p[1] - second[1]).abs() < 1e-4
+                && (p[2] - second[2]).abs() < 1e-4
+        })
+        .map_or(DashClosure::Open, |(index, _)| DashClosure::Polyline {
+            start: index as u32,
+        })
 }
 
 fn split_mixed_polyline(
@@ -998,6 +1045,54 @@ pub fn tessellate(
     // other caller passes false and gets the normal SDF-only text.
     force_text_strokes: bool,
 ) -> Vec<WireModel> {
+    let mut wires = tessellate_wires(
+        document,
+        handle,
+        entity,
+        selected,
+        entity_color,
+        pattern_length,
+        pattern,
+        line_weight_px,
+        anno_scale,
+        annotation_scale_handle,
+        world_per_pixel,
+        bg_color,
+        force_text_strokes,
+    );
+    // A path split over several wires has no one pattern to close.
+    let mut drawn = wires.iter_mut().filter(|wire| !wire.points.is_empty());
+    if let (Some(wire), None) = (drawn.next(), drawn.next()) {
+        let points = wire.points.iter().enumerate().map(|(index, p)| {
+            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            [
+                p[0] as f64 + low[0] as f64,
+                p[1] as f64 + low[1] as f64,
+                p[2] as f64 + low[2] as f64,
+            ]
+        });
+        let closure = dash_closure_of(entity, &wire.key_vertices, points);
+        wire.dash_closure = closure;
+    }
+    wires
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tessellate_wires(
+    document: &Document,
+    handle: Handle,
+    entity: &EntityType,
+    selected: bool,
+    entity_color: [f32; 4],
+    pattern_length: f32,
+    pattern: [f32; 8],
+    line_weight_px: f32,
+    anno_scale: f32,
+    annotation_scale_handle: Option<Handle>,
+    world_per_pixel: Option<f32>,
+    bg_color: [f32; 4],
+    force_text_strokes: bool,
+) -> Vec<WireModel> {
     let color = if selected {
         WireModel::SELECTED
     } else {
@@ -1268,26 +1363,14 @@ pub fn tessellate(
                         lt_scale,
                     )
                 };
-                // Shared "A"-type: derive the begin/end solid-dash length ONCE
-                // from the multiline centre-line (`ref_total`) so every parallel
-                // element runs the same interior phase and its dashes line up
-                // perpendicular; `align_total` stays each element's own length in
-                // the shader so each still ends on a dash. Dash-first patterns
-                // only (`+dash, -gap, …`); shorter-than-a-period lines fall back
-                // to the per-wire path (solid).
-                let dash_align_end = if pattern_length > 1e-6
-                    && pattern[0] > 0.0
-                    && pattern[1] < 0.0
-                    && ref_total > pattern_length
-                {
-                    let a = pattern[0];
-                    let p = pattern_length;
-                    // Every whole period the centre line holds.
-                    let k = (ref_total / p).floor().max(1.0);
-                    Some(((ref_total - k * p + a) * 0.5).max(1e-4))
-                } else {
-                    None
-                };
+                // Shared "A"-type: every parallel element takes its layout from
+                // the multiline centre-line (`ref_total`), so they run the same
+                // interior phase and their dashes line up perpendicular, while
+                // each still ends on a dash at its own length. Dash-first
+                // patterns only (`+dash, -gap, …`).
+                let dash_align_end =
+                    (pattern_length > 1e-6 && pattern[0] > 0.0 && pattern[1] < 0.0)
+                        .then_some(ref_total);
                 elem_wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
@@ -1935,6 +2018,7 @@ pub fn tessellate(
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         dash_align_end: None,
+                        dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name,
@@ -2104,6 +2188,7 @@ pub fn tessellate(
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         dash_align_end: None,
+                        dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name: name.clone(),
@@ -2308,6 +2393,7 @@ pub fn tessellate(
                         | EntityType::Ellipse(_)
                         | EntityType::Spline(_)
                         | EntityType::LwPolyline(_)
+                        | EntityType::Polyline2D(_)
                 ) {
                     (pattern_length, pattern)
                 } else {
@@ -2338,7 +2424,10 @@ pub fn tessellate(
                             EntityType::LwPolyline(_) | EntityType::Polyline2D(_)
                         );
 
-                    if has_arc && can_split {
+                    if has_arc
+                        && can_split
+                        && !polyline_walks_one_dash_path(entity, document, edge_pattern_length)
+                    {
                         let seg_widths = polyline_segment_widths(entity);
                         let ww = polyline_band_width(entity, document.header.fill_mode);
                         out.extend(split_mixed_polyline(
@@ -2630,7 +2719,10 @@ pub fn tessellate(
                     .iter()
                     .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
 
-                if has_arc && can_split {
+                if has_arc
+                    && can_split
+                    && !polyline_walks_one_dash_path(entity, document, pattern_length)
+                {
                     let edge_color = color;
                     let point_marker =
                         crate::entities::point::relative_marker_spec(entity, document);

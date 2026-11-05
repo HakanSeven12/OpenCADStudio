@@ -26,6 +26,7 @@
 // stays precise at UTM-scale coordinates and after a cross-drawing paste.
 
 use super::analytic_slots::BlockSlot;
+use crate::scene::model::wire_model::DashClosure;
 use crate::scene::model::wire_model::WireModel;
 use iced::wgpu;
 
@@ -73,7 +74,8 @@ pub struct WireInstance {
     /// fetch unit. `[0, 0]` means use the constant width. Ratios retain the
     /// full f32 world-width scale in `WireConst` while making every instance
     /// exactly one 64-byte cache line. A constant-width band carries its
-    /// joint miters (`band_miters`) here instead.
+    /// joint miters (`band_miters`) here instead, and a thin wire its dash run's
+    /// layout (`run_total_slots`).
     pub taper_ratio: [i16; 2],
 }
 
@@ -119,7 +121,7 @@ impl WireInstance {
             wgpu::VertexAttribute {
                 offset: std::mem::offset_of!(WireInstance, taper_ratio) as u64,
                 shader_location: 7,
-                format: wgpu::VertexFormat::Snorm16x2,
+                format: wgpu::VertexFormat::Sint16x2,
             },
         ];
         wgpu::VertexBufferLayout {
@@ -410,7 +412,7 @@ impl BlockWireVertex {
             wgpu::VertexAttribute {
                 offset: std::mem::offset_of!(BlockWireVertex, taper_ratio) as u64,
                 shader_location: 5,
-                format: wgpu::VertexFormat::Snorm16x2,
+                format: wgpu::VertexFormat::Sint16x2,
             },
         ];
         wgpu::VertexBufferLayout {
@@ -544,28 +546,35 @@ fn pack_color(color: [f32; 4]) -> [u8; 4] {
     ]
 }
 
-/// Cumulative arc-length per point (NaN-break aware) plus the `"A"`-type
-/// alignment pair `(align_end, align_total)`. Shared by the wasm and native
-/// emission paths and PDF dash materialization.
+/// How a wire lays out its dash pattern, per run. See [`wire_distances`].
+#[derive(Default)]
+pub(crate) struct WireDashes {
+    /// Cumulative arc-length per point, restarting with each run.
+    pub dists: Vec<f32>,
+    /// Per point, the layout of the segment starting there: above zero an
+    /// "A"-aligned run of that length, below zero a closed path of that length,
+    /// and zero a pattern tiled from the distance.
+    pub run_totals: Vec<f32>,
+    /// The length an "A"-aligned run takes its layout from when it is not its
+    /// own (`WireModel::dash_align_end`), else 0.
+    pub align_ref: f32,
+}
+
+/// The dash layout of a wire. Shared by the wasm and native emission paths and
+/// PDF dash materialization; the end dashes themselves are worked out at the
+/// current linetype scale (`aligned_end_dash`, and `dash_layout.wgsl`).
 ///
 /// AutoCAD-style linetypes are implicitly `A` (aligned): a dashed line must
 /// begin AND end on a solid dash, keeping the interior dashes at their nominal
 /// length and stretching/shrinking only the two end dashes symmetrically to
-/// absorb the leftover (so parallel lines share an identical interior). We
-/// express that on the GPU by handing the shader the total wire length
-/// (`align_total`) and the end-dash length (`align_end`); the pattern walk then
-/// forces the two end regions lit and phases the interior to resume right after
-/// the first dash. `align_total == 0.0` disables it and the shader falls back to
-/// the legacy centred repeating pattern.
-///
-/// Alignment applies only to a single continuous run (`!has_break`) whose
-/// pattern begins with a dash. NaN-separated (plinegen=false) polylines and
-/// non-dash-first patterns keep the legacy centred phase.
-pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
+/// absorb the leftover (so parallel lines share an identical interior). Each run
+/// of a wire aligns on its own: a polyline without PLINEGEN restarts at every
+/// vertex, and a batched block wire holds one run per member.
+pub(crate) fn wire_distances(wire: &WireModel) -> WireDashes {
     let n = wire.points.len();
     let pat_len = wire.pattern_length;
     if pat_len <= 1e-6 || n < 2 {
-        return (Vec::new(), 0.0, 0.0);
+        return WireDashes::default();
     }
     let explicit = wire.pattern_stations.len() >= n + 1;
     let (mut dists, has_break, total) = if explicit {
@@ -601,13 +610,21 @@ pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
         let total = dists.last().copied().unwrap_or(0.0);
         (dists, has_break, total)
     };
+    let mut run_totals = vec![0.0_f32; n];
+    // An alternating pattern that BEGINS with a dash, or a dot, followed by a
+    // gap — every standard linetype does (DASHED/DASHDOT/CENTER/HIDDEN/…), and
+    // the drawing aligns a dot-first one the same way. Gap-first (the drawing
+    // rejects it for this alignment), single-element, or consecutive-dash
+    // patterns keep the legacy centred phase: the interior resume assumes the
+    // element after the leading one is a gap.
+    let aligns = wire.pattern[0] >= 0.0 && wire.pattern[1] < 0.0;
 
     if has_break {
-        // A run too short for one whole period of a dash-first (or
-        // dot-first) pattern is drawn as one solid dash, as a single line is
-        // below. Batched block wires and plinegen=false polylines are many
-        // runs in one wire, so pin each such run at the first element's start.
-        if wire.pattern[0] >= 0.0 && wire.pattern[1] < 0.0 {
+        if aligns {
+            // Only a thin wire has a slot per segment for its run's layout, and
+            // only a restarting wire has runs of its own: a wire running on
+            // across its breaks, or a band, pins each short run solid instead.
+            let own_runs = !explicit && !wire.plinegen && wire.world_width <= 0.0;
             let mut start = 0;
             while start < n {
                 if !wire.points[start][0].is_finite() {
@@ -618,16 +635,27 @@ pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
                 while end + 1 < n && wire.points[end + 1][0].is_finite() {
                     end += 1;
                 }
-                if end > start && (dists[end] - dists[start]).abs() <= pat_len {
+                let length = (dists[end] - dists[start]).abs();
+                if own_runs && end > start {
+                    run_totals[start..end].fill(length);
+                } else if end > start && length <= pat_len {
                     dists[start..=end].fill(0.0);
                 }
                 start = end + 1;
             }
         }
-        return (dists, 0.0, 0.0);
+        return WireDashes {
+            dists,
+            run_totals,
+            align_ref: 0.0,
+        };
     }
     if total <= 1e-6 {
-        return (dists, 0.0, 0.0);
+        return WireDashes {
+            dists,
+            run_totals,
+            align_ref: 0.0,
+        };
     }
 
     // DGN line styles draw the pattern from the START vertex with continuous
@@ -636,56 +664,48 @@ pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     // there. Return before the A-type / centring logic that standard linetypes
     // use (see `WireModel::dash_from_start`).
     if wire.dash_from_start {
-        return (dists, 0.0, 0.0);
+        return WireDashes {
+            dists,
+            run_totals,
+            align_ref: 0.0,
+        };
     }
 
-    // Shared "A"-type for MLINE elements: the caller fixes the begin/end
-    // solid-dash length (`dash_align_end`, derived once from the multiline's
-    // centre-line length) so every parallel element runs the SAME interior phase
-    // — the shader's interior walk depends on `align_end`, not on the wire's own
-    // length — while `align_total` stays this wire's own length, so each element
-    // still ends on a dash at its own endpoint.
-    if let Some(ae) = wire.dash_align_end {
-        if total <= pat_len {
-            // Shorter than one full period → solid (matches the per-wire path).
-            return (dists, total, total);
+    // Stations are a clipped wire's: what remains of the path is no longer closed.
+    let closure = if explicit {
+        DashClosure::Open
+    } else {
+        wire.dash_closure
+    };
+    match closure {
+        DashClosure::Open => {}
+        DashClosure::Curve => {
+            run_totals.fill(-total);
+            return WireDashes {
+                dists,
+                run_totals,
+                align_ref: 0.0,
+            };
         }
-        return (dists, ae.max(1e-4).min(total * 0.5), total);
+        DashClosure::Polyline { start } => {
+            let shift = dists.get(start as usize).copied().unwrap_or(0.0);
+            dists.iter_mut().for_each(|dist| *dist -= shift);
+            run_totals.fill(-total);
+            return WireDashes {
+                dists,
+                run_totals,
+                align_ref: 0.0,
+            };
+        }
     }
 
-    // Align an alternating pattern that BEGINS with a dash, or a dot, followed
-    // by a gap — every standard linetype does (DASHED/DASHDOT/CENTER/HIDDEN/…),
-    // and the drawing aligns a dot-first one the same way: the dot stretches
-    // into the end dash `D = (L - kP) / 2` and the last interior dash runs on
-    // into it. Gap-first (the drawing rejects it for this alignment),
-    // single-element, or consecutive-dash patterns keep the legacy centred
-    // phase: the A-type interior-resume assumes the element after the leading
-    // one is a gap, and force-lighting an end dash on a gap start would paint
-    // over a leading blank.
-    if wire.pattern[0] >= 0.0 && wire.pattern[1] < 0.0 {
-        let a = wire.pattern[0];
-        let p = pat_len;
-        if total <= p {
-            // Shorter than one full pattern period → drawn as a single solid
-            // dash spanning the whole line (aligned linetypes can't fit a
-            // dash-gap-dash in less than one period).
-            return (dists, total, total);
-        }
-        // "A" alignment for a dash-first pattern of period P laid out as
-        //   [D] [gap] ([dash] [gap])*(k-1) [D]
-        // gives  L = 2D + (k-1)a + k(P-a)  =>  D = (L - k*P + a) / 2.
-        // k is every whole period the length holds, so each end dash keeps
-        // at least half the first dash: D = a/2 + (L mod P)/2.
-        let mut k = (total / p).floor().max(1.0);
-        let mut d_end = (total - k * p + a) * 0.5;
-        if d_end <= 1e-4 {
-            // End dash underflowed (period ≫ first dash); drop one period so the
-            // ends stay visible.
-            k = (k - 1.0).max(0.0);
-            d_end = (total - k * p + a) * 0.5;
-        }
-        let d_end = d_end.max(1e-4).min(total * 0.5);
-        return (dists, d_end, total);
+    if aligns {
+        run_totals.fill(total);
+        return WireDashes {
+            dists,
+            run_totals,
+            align_ref: wire.dash_align_end.unwrap_or(0.0),
+        };
     }
 
     // Legacy centred phase for non-aligned patterns (behaviour unchanged from
@@ -702,7 +722,58 @@ pub(crate) fn wire_distances(wire: &WireModel) -> (Vec<f32>, f32, f32) {
     for d in dists.iter_mut() {
         *d += offset;
     }
-    (dists, 0.0, 0.0)
+    WireDashes {
+        dists,
+        run_totals,
+        align_ref: 0.0,
+    }
+}
+
+/// `aligned_end_dash` in dash_layout.wgsl, for the plot.
+pub(crate) fn aligned_end_dash(reference: f32, run_total: f32, pat_len: f32, first: f32) -> f32 {
+    if run_total <= 0.0 {
+        return 0.0;
+    }
+    if run_total <= pat_len {
+        return run_total;
+    }
+    let length = if reference > 0.0 {
+        reference
+    } else {
+        run_total
+    };
+    let mut periods = (length / pat_len).floor().max(1.0);
+    let mut end_dash = (length - periods * pat_len + first) * 0.5;
+    if end_dash <= 1e-4 {
+        periods = (periods - 1.0).max(0.0);
+        end_dash = (length - periods * pat_len + first) * 0.5;
+    }
+    end_dash.clamp(1e-4, (run_total * 0.5).max(1e-4))
+}
+
+/// Whether a closed path is too short for its pattern and drawn solid. As in
+/// `closed_dash_solid`.
+pub(crate) fn closed_dash_solid(length: f32, pat_len: f32) -> bool {
+    length < pat_len * 0.999
+}
+
+/// The periods a closed path holds, each stretched to fit: the nearest count,
+/// the lower on a tie, and at least two. As in `closed_dash_phase`.
+pub(crate) fn closed_dash_periods(length: f32, pat_len: f32) -> f32 {
+    (length / pat_len - 0.5001).ceil().max(2.0)
+}
+
+/// The stretch `closed_dash_phase` in dash_layout.wgsl applies to a distance
+/// along a closed path, for the plot.
+pub(crate) fn closed_dash_stretch(length: f32, pat_len: f32) -> f32 {
+    closed_dash_periods(length, pat_len) * pat_len / length
+}
+
+/// A thin segment's run layout in its two 16-bit slots (see `dash_run_total` in
+/// dash_layout.wgsl): the bits of `run_total`, low half first.
+pub(crate) fn run_total_slots(run_total: f32) -> [i16; 2] {
+    let bits = run_total.to_bits();
+    [bits as u16 as i16, (bits >> 16) as u16 as i16]
 }
 
 #[inline]
@@ -894,10 +965,14 @@ pub(crate) fn emit_wire_packed(
         return Vec::new();
     }
     let has_pattern = wire.pattern_length > 1e-6;
-    let (dists, align_end, align_total) = if has_pattern {
+    let WireDashes {
+        dists,
+        run_totals,
+        align_ref,
+    } = if has_pattern {
         wire_distances(wire)
     } else {
-        (Vec::new(), 0.0, 0.0)
+        WireDashes::default()
     };
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
     let miters = band_miters(wire, marker_normal_scale);
@@ -935,8 +1010,8 @@ pub(crate) fn emit_wire_packed(
             pat0,
             pat1,
             draw_depth,
-            align_end,
-            align_total,
+            align_end: align_ref,
+            align_total: run_totals.get(i).copied().unwrap_or(0.0),
             world_half_width: wire.world_width * 0.5,
             world_hw_a: tw(i),
             world_hw_b: tw(i + 1),
@@ -968,10 +1043,14 @@ pub(crate) fn emit_wire_native(
     let n = wire.points.len();
     let seg_count = n.saturating_sub(1);
     let has_pattern = wire.pattern_length > 1e-6 && seg_count > 0;
-    let (dists, align_end, align_total) = if has_pattern {
+    let WireDashes {
+        dists,
+        run_totals,
+        align_ref,
+    } = if has_pattern {
         wire_distances(wire)
     } else {
-        (Vec::new(), 0.0, 0.0)
+        WireDashes::default()
     };
     let (marker_origin_high, marker_origin_low, marker_normal_scale) = marker_metadata(wire);
     let is_tapered = !wire.taper_widths.is_empty();
@@ -992,8 +1071,9 @@ pub(crate) fn emit_wire_native(
         half_width: wire.line_weight_px.max(1.0) * 0.5,
         pattern_length: wire.pattern_length,
         draw_depth,
-        align_end,
-        align_total,
+        align_end: align_ref,
+        // A band has no per-segment slot: it holds one layout, for the wire.
+        align_total: run_totals.first().copied().unwrap_or(0.0),
         world_half_width: wire.world_width * 0.5,
         is_tapered: if is_tapered { 1.0 } else { 0.0 },
         hidden: 0.0,
@@ -1036,9 +1116,13 @@ pub(crate) fn emit_wire_native(
             distance_a: dist_a,
             distance_b: dist_b,
             wire_id,
-            taper_ratio: match miters.get(i) {
-                Some(k) => [snorm(k[0]), snorm(k[1])],
-                None => [taper_ratio(i), taper_ratio(i + 1)],
+            taper_ratio: if wire.world_width <= 0.0 {
+                run_total_slots(run_totals.get(i).copied().unwrap_or(0.0))
+            } else {
+                match miters.get(i) {
+                    Some(k) => [snorm(k[0]), snorm(k[1])],
+                    None => [taper_ratio(i), taper_ratio(i + 1)],
+                }
             },
         });
     }
@@ -1779,6 +1863,7 @@ pub(crate) fn wire_look(wire: &WireModel) -> super::analytic_slots::WireLook {
     wire.plinegen.hash(&mut dashes);
     wire.dash_from_start.hash(&mut dashes);
     wire.dash_align_end.map(f32::to_bits).hash(&mut dashes);
+    wire.dash_closure.hash(&mut dashes);
     super::analytic_slots::WireLook {
         color: wire.color.map(f32::to_bits),
         selected: wire.selected,

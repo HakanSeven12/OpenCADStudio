@@ -1,4 +1,5 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
+use crate::scene::model::wire_model::DashClosure;
 use super::super::*;
 
 /// Dim an already-bg-adapted colour toward the background when the entity's
@@ -21,16 +22,26 @@ fn fade_if_locked(
 /// break wherever its linetype restarts (every vertex when PLINEGEN is off) —
 /// the path `tessellate` splits into one wire per arc segment plus one wire of
 /// the straight segments. `None` for any other entity or render form.
+///
+/// Also says how the pattern closes around that path.
 pub(crate) fn polyline_lt_path(
     document: &document::Document,
     e: &EntityType,
-) -> Option<Vec<[f64; 3]>> {
+) -> Option<(Vec<[f64; 3]>, DashClosure)> {
     use convert::acad_to_render::RenderObject;
     if !matches!(e, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
         return None;
     }
-    match convert::acad_to_render::convert(e, document)?.object {
-        RenderObject::Lines(points) | RenderObject::SegmentedLines(points) => Some(points),
+    let rendered = convert::acad_to_render::convert(e, document)?;
+    match rendered.object {
+        RenderObject::Lines(points) | RenderObject::SegmentedLines(points) => {
+            let closure = convert::tessellate::dash_closure_of(
+                e,
+                &rendered.key_vertices,
+                points.iter().copied(),
+            );
+            Some((points, closure))
+        }
         _ => None,
     }
 }
@@ -63,15 +74,33 @@ pub(crate) fn complex_linetype_anno(
 ///
 /// `None` when there is nothing to walk (pattern blow-up guard, or a path with
 /// no length): the caller draws the path some other way.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn walk_complex_linetype(
     name: &str,
     path: &[[f64; 3]],
     linetype: &crate::io::linetypes::ComplexLt,
     scale: f32,
+    closure: DashClosure,
     color: [f32; 4],
     selected: bool,
     line_weight_px: f32,
 ) -> Option<Vec<WireModel>> {
+    // A closed path takes its pattern from its own start: for a polyline the
+    // walk goes round from the second vertex, back to it.
+    let rotated: Vec<[f64; 3]>;
+    let (path, closed) = match closure {
+        DashClosure::Open => (path, false),
+        DashClosure::Curve => (path, true),
+        DashClosure::Polyline { start } => {
+            let start = (start as usize).min(path.len().saturating_sub(1));
+            rotated = path[start..]
+                .iter()
+                .chain(path.iter().skip(1).take(start))
+                .copied()
+                .collect();
+            (rotated.as_slice(), true)
+        }
+    };
     let mut wires = Vec::new();
     for run in path.split(|p| p[0].is_nan()) {
         let length: f64 = run
@@ -97,16 +126,28 @@ pub(crate) fn walk_complex_linetype(
                 ]
             })
             .collect();
-        let mut run_wires = text::complex_lt::apply_along(
-            name,
-            &local,
-            linetype,
-            scale,
-            color,
-            selected,
-            line_weight_px,
-            Some(length as f32),
-        );
+        let mut run_wires = if closed {
+            text::complex_lt::apply_closed(
+                name,
+                &local,
+                linetype,
+                scale,
+                color,
+                selected,
+                line_weight_px,
+            )
+        } else {
+            text::complex_lt::apply_along(
+                name,
+                &local,
+                linetype,
+                scale,
+                color,
+                selected,
+                line_weight_px,
+                Some(length as f32),
+            )
+        };
         if run_wires.is_empty() {
             return None;
         }
@@ -1198,7 +1239,11 @@ fn tessellate_entity_inner(
                 BlockObjectOptions {
                     suppress_root_points: block_use.suppress_root_points,
                     scale_policy: block_use.scale_policy,
-                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, paper_space)),
+                    complex_lt_anno: Some(complex_linetype_anno(
+                        document,
+                        anno_scale,
+                        paper_space,
+                    )),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1307,7 +1352,11 @@ fn tessellate_entity_inner(
                 pslt_factor,
                 BlockObjectOptions {
                     scale_policy: block_use.scale_policy,
-                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, paper_space)),
+                    complex_lt_anno: Some(complex_linetype_anno(
+                        document,
+                        anno_scale,
+                        paper_space,
+                    )),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1435,7 +1484,11 @@ fn tessellate_entity_inner(
             pslt_factor,
             BlockObjectOptions {
                 apply_xclip: true,
-                complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, paper_space)),
+                complex_lt_anno: Some(complex_linetype_anno(
+                    document,
+                    anno_scale,
+                    paper_space,
+                )),
                 ..BlockObjectOptions::default()
             },
         );
@@ -1564,8 +1617,9 @@ fn tessellate_entity_inner(
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex
             // linetype's shapes and dashes. Reconstruct the absolute f64 path
             // (high + low).
-            let path = polyline_lt_path(document, e).unwrap_or_else(|| {
-                base.points
+            let (path, closure) = polyline_lt_path(document, e).unwrap_or_else(|| {
+                let path = base
+                    .points
                     .iter()
                     .enumerate()
                     .map(|(i, p)| {
@@ -1579,7 +1633,8 @@ fn tessellate_entity_inner(
                             p[2] as f64 + l[2] as f64,
                         ]
                     })
-                    .collect()
+                    .collect();
+                (path, base.dash_closure)
             });
             // Nothing to walk (pattern blow-up guard): draw the base wires.
             if let Some(mut wires) = walk_complex_linetype(
@@ -1587,6 +1642,7 @@ fn tessellate_entity_inner(
                 &path,
                 &clt,
                 (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
+                closure,
                 entity_color,
                 sel,
                 base.line_weight_px,

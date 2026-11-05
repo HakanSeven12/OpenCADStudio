@@ -976,65 +976,63 @@ fn append_pdf_page(
             // Linetype dash pattern. Without this every wire exported as a solid
             // line regardless of its linetype (dashed / centre / dash-dot). (#155)
             let dash_arr = dash_array_from_pattern(wire.pattern_length, &wire.pattern, MM_TO_PT);
-            // Dash entries are whole points in the plot's user space, so a
-            // pattern only a fraction of a drawing unit long (an inch sheet)
-            // rounds away; such a wire is cut into its dashes here (#1739).
             let page_h = paper_h as f64 / scale.max(1e-6) as f64;
-            let synthesized;
-            let stations: &[f32] = if wire.pattern_stations.len() > wire.points.len() {
-                &wire.pattern_stations
-            } else if !dash_arr.is_empty() && dash_rounds_off(&wire.pattern) {
-                synthesized = length_stations(wire, page_h);
-                &synthesized
-            } else {
-                &[]
-            };
-            let stationed = !dash_arr.is_empty() && !stations.is_empty();
-            if stationed {
-                // Match the screen's short-run policy. A sub-period aligned
-                // run is solid, even when clipping left its stations in a gap.
-                // Start-phased and longer continuous runs keep their phase.
-                let aligned_stations;
-                let stations = if wire.pattern[0] > 0.0 && wire.pattern[1] < 0.0 {
-                    let (mut distances, _, total) =
-                        crate::scene::pipeline::wire_gpu::wire_distances(wire);
-                    if total > 0.0 && total <= wire.pattern_length {
-                        distances.fill(0.0);
-                    }
-                    aligned_stations = distances;
-                    aligned_stations.as_slice()
-                } else {
-                    stations
-                };
+            // A dashed wire is cut into its dashes here, as the screen lays them
+            // out: a dash array can neither align a run's ends nor fit a closed
+            // path, and its whole-point entries round away a pattern only a
+            // fraction of a drawing unit long (an inch sheet, #1739).
+            if !dash_arr.is_empty() {
                 if last_dash.as_ref().is_none_or(|dash| !dash.is_empty()) {
                     ops.push(Op::SetLineDashPattern {
                         dash: LineDashPattern::default(),
                     });
                     last_dash = Some(Vec::new());
                 }
+                let dashes = crate::scene::pipeline::wire_gpu::wire_distances(wire);
+                let mut stroke: Vec<LinePoint> = Vec::new();
                 for index in 0..wire.points.len().saturating_sub(1) {
                     if !wire.points[index][0].is_finite() || !wire.points[index + 1][0].is_finite()
                     {
+                        flush_line(&mut ops, &stroke, None, line_step);
+                        stroke.clear();
                         continue;
                     }
                     let start = wire.point_world(index, page_h);
                     let end = wire.point_world(index + 1, page_h);
-                    for [from, to] in visible_station_ranges(
-                        stations[index],
-                        stations[index + 1],
+                    let point = |t: f32| LinePoint {
+                        p: Point::new(
+                            Mm((start.x + (end.x - start.x) * t as f64 + ox) as f32),
+                            Mm((start.y + (end.y - start.y) * t as f64 + oy) as f32),
+                        ),
+                        bezier: false,
+                    };
+                    let ranges = dash_ranges(
+                        dashes.dists[index],
+                        dashes.dists[index + 1],
+                        dashes.run_totals[index],
+                        dashes.align_ref,
                         wire.pattern_length,
                         &wire.pattern,
-                    ) {
-                        let point = |t: f32| LinePoint {
-                            p: Point::new(
-                                Mm((start.x + (end.x - start.x) * t as f64 + ox) as f32),
-                                Mm((start.y + (end.y - start.y) * t as f64 + oy) as f32),
-                            ),
-                            bezier: false,
-                        };
-                        flush_line(&mut ops, &[point(from), point(to)], None, line_step);
+                    );
+                    if ranges.is_empty() {
+                        flush_line(&mut ops, &stroke, None, line_step);
+                        stroke.clear();
+                    }
+                    for [from, to] in ranges {
+                        // A dash running on across a vertex stays one stroke.
+                        if from > 1e-5 || stroke.is_empty() {
+                            flush_line(&mut ops, &stroke, None, line_step);
+                            stroke.clear();
+                            stroke.push(point(from));
+                        }
+                        stroke.push(point(to));
+                        if to < 1.0 - 1e-5 {
+                            flush_line(&mut ops, &stroke, None, line_step);
+                            stroke.clear();
+                        }
                     }
                 }
+                flush_line(&mut ops, &stroke, None, line_step);
                 continue;
             }
             if last_dash.as_deref() != Some(dash_arr.as_slice()) {
@@ -1256,36 +1254,65 @@ fn dash_array_from_pattern(pattern_length: f32, pattern: &[f32; 8], mm_to_pt: f3
         .collect()
 }
 
-/// Whether a pattern element is too short for a whole-point dash entry to
-/// carry it within 5 %.
-fn dash_rounds_off(pattern: &[f32; 8]) -> bool {
-    pattern
-        .iter()
-        .any(|value| *value != 0.0 && value.abs() * MM_TO_PT < 10.0)
-}
-
-/// Distance along the wire at each point (restarting after a pen-up), plus
-/// the total, in the layout `visible_station_ranges` reads.
-fn length_stations(wire: &crate::scene::WireModel, page_h: f64) -> Vec<f32> {
-    let mut stations = Vec::with_capacity(wire.points.len() + 1);
-    let mut along = 0.0_f64;
-    let mut previous: Option<glam::DVec3> = None;
-    for index in 0..wire.points.len() {
-        if !wire.points[index][0].is_finite() {
-            previous = None;
-            along = 0.0;
-            stations.push(0.0);
-            continue;
+/// The lit parts of a segment running from distance `start` to `end`, as
+/// fractions of it, under the run layout of `wire_distances`. What the shader's
+/// `in_dash` draws.
+pub(crate) fn dash_ranges(
+    start: f32,
+    end: f32,
+    run_total: f32,
+    align_ref: f32,
+    pattern_length: f32,
+    pattern: &[f32; 8],
+) -> Vec<[f32; 2]> {
+    use crate::scene::pipeline::wire_gpu::{aligned_end_dash, closed_dash_solid, closed_dash_stretch};
+    if run_total < 0.0 {
+        let length = -run_total;
+        if closed_dash_solid(length, pattern_length) {
+            return vec![[0.0, 1.0]];
         }
-        let point = wire.point_world(index, page_h);
-        if let Some(previous) = previous {
-            along += point.distance(previous);
-        }
-        previous = Some(point);
-        stations.push(along as f32);
+        let stretch = closed_dash_stretch(length, pattern_length);
+        return visible_station_ranges(start * stretch, end * stretch, pattern_length, pattern);
     }
-    stations.push(along as f32);
-    stations
+    if run_total == 0.0 {
+        return visible_station_ranges(start, end, pattern_length, pattern);
+    }
+    let first = pattern[0].max(0.0);
+    let end_dash = aligned_end_dash(align_ref, run_total, pattern_length, first);
+    let span = end - start;
+    if span.abs() <= 1e-9 {
+        return Vec::new();
+    }
+    let at = |distance: f32| ((distance - start) / span).clamp(0.0, 1.0);
+    let mut ranges: Vec<[f32; 2]> = Vec::new();
+    let mut push = |from: f32, to: f32| {
+        if to <= from {
+            return;
+        }
+        match ranges.last_mut() {
+            Some(last) if from - last[1] <= 1e-5 => last[1] = to,
+            _ => ranges.push([from, to]),
+        }
+    };
+    // The dash at the start, the interior resuming just after the first dash,
+    // and the dash at the end.
+    push(0.0, at(end_dash));
+    let inner_from = start.max(end_dash);
+    let inner_to = end.min(run_total - end_dash);
+    if inner_to > inner_from {
+        let resume = first - end_dash;
+        let (t0, t1) = (at(inner_from), at(inner_to));
+        for [from, to] in visible_station_ranges(
+            inner_from + resume,
+            inner_to + resume,
+            pattern_length,
+            pattern,
+        ) {
+            push(t0 + (t1 - t0) * from, t0 + (t1 - t0) * to);
+        }
+    }
+    push(at(run_total - end_dash), 1.0);
+    ranges
 }
 
 fn visible_station_ranges(
@@ -2822,6 +2849,59 @@ pub(crate) fn pdf_stream_text(bytes: &[u8]) -> String {
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
+    #[test]
+    fn dash_ranges_align_a_run_on_its_end_dashes() {
+        let mut pattern = [0.0; 8];
+        pattern[0] = 20.0;
+        pattern[1] = -20.0;
+        // L = 110, k = 2, D = 25: 0-25, 45-65, 85-110.
+        let ranges = super::dash_ranges(0.0, 110.0, 110.0, 0.0, 40.0, &pattern);
+        let expected = [[0.0, 25.0], [45.0, 65.0], [85.0, 110.0]];
+        assert_eq!(ranges.len(), expected.len(), "{ranges:?}");
+        for (range, want) in ranges.iter().zip(expected) {
+            assert!((range[0] * 110.0 - want[0]).abs() < 1e-2, "{ranges:?}");
+            assert!((range[1] * 110.0 - want[1]).abs() < 1e-2, "{ranges:?}");
+        }
+        // The same run in two segments, split inside its middle dash.
+        let first = super::dash_ranges(0.0, 55.0, 110.0, 0.0, 40.0, &pattern);
+        assert_eq!(first.len(), 2);
+        assert!((first[1][1] - 1.0).abs() < 1e-4, "{first:?}");
+        let second = super::dash_ranges(55.0, 110.0, 110.0, 0.0, 40.0, &pattern);
+        assert!(second[0][0].abs() < 1e-4, "{second:?}");
+        // A run no longer than a period is one dash.
+        assert_eq!(
+            super::dash_ranges(0.0, 30.0, 30.0, 0.0, 40.0, &pattern),
+            vec![[0.0, 1.0]]
+        );
+    }
+
+    #[test]
+    fn dash_ranges_fit_a_closed_path() {
+        let mut pattern = [0.0; 8];
+        pattern[0] = 20.0;
+        pattern[1] = -20.0;
+        // L = 100 holds 2 periods of 50: 0-25, 50-75.
+        let ranges = super::dash_ranges(0.0, 100.0, -100.0, 0.0, 40.0, &pattern);
+        let expected = [[0.0, 25.0], [50.0, 75.0]];
+        assert_eq!(ranges.len(), expected.len(), "{ranges:?}");
+        for (range, want) in ranges.iter().zip(expected) {
+            assert!((range[0] * 100.0 - want[0]).abs() < 1e-2, "{ranges:?}");
+            assert!((range[1] * 100.0 - want[1]).abs() < 1e-2, "{ranges:?}");
+        }
+        // Before the start of the pattern, as on a polyline's first segment:
+        // the gap that closes the last period, and the dash ahead of it.
+        assert!(super::dash_ranges(-25.0, 0.0, -100.0, 0.0, 40.0, &pattern).is_empty());
+        assert_eq!(
+            super::dash_ranges(-50.0, -25.0, -100.0, 0.0, 40.0, &pattern),
+            vec![[0.0, 1.0]]
+        );
+        // Shorter than a period: solid.
+        assert_eq!(
+            super::dash_ranges(0.0, 39.0, -39.0, 0.0, 40.0, &pattern),
+            vec![[0.0, 1.0]]
+        );
+    }
+
     use crate::io::plot_style::PlotStyleTableExt as _;
     use super::*;
 

@@ -83,13 +83,95 @@ pub fn apply_along(
     // from the start vertex.
     ref_total: Option<f32>,
 ) -> Vec<WireModel> {
+    apply_stretched(
+        name,
+        path_pts,
+        lt,
+        scale,
+        1.0,
+        color,
+        selected,
+        line_weight_px,
+        ref_total,
+    )
+}
+
+/// Walk a closed path from its first point: a whole number of periods, their
+/// dashes and gaps stretched to fit, and the glyphs at their own size. A path
+/// shorter than one period is drawn solid.
+pub fn apply_closed(
+    name: &str,
+    path_pts: &[[f32; 3]],
+    lt: &ComplexLt,
+    scale: f32,
+    color: [f32; 4],
+    selected: bool,
+    line_weight_px: f32,
+) -> Vec<WireModel> {
+    let period: f32 = scale_segments(&lt.segments, scale)
+        .iter()
+        .map(|s| match s {
+            LtSeg::Dash(l) | LtSeg::Space(l) => *l,
+            LtSeg::Dot | LtSeg::Shape { .. } | LtSeg::Text { .. } => 0.0,
+        })
+        .sum();
+    let length: f32 = path_pts
+        .windows(2)
+        .map(|w| {
+            let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
+            (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+        })
+        .sum();
+    if period < 1e-10 || crate::scene::pipeline::wire_gpu::closed_dash_solid(length, period) {
+        return apply_along(
+            name,
+            path_pts,
+            lt,
+            scale,
+            color,
+            selected,
+            line_weight_px,
+            Some(length),
+        );
+    }
+    let periods = crate::scene::pipeline::wire_gpu::closed_dash_periods(length, period);
+    apply_stretched(
+        name,
+        path_pts,
+        lt,
+        scale,
+        length / (periods * period),
+        color,
+        selected,
+        line_weight_px,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_stretched(
+    name: &str,
+    path_pts: &[[f32; 3]],
+    lt: &ComplexLt,
+    scale: f32,
+    stretch: f32,
+    color: [f32; 4],
+    selected: bool,
+    line_weight_px: f32,
+    ref_total: Option<f32>,
+) -> Vec<WireModel> {
     if path_pts.len() < 2 || lt.segments.is_empty() {
         return vec![];
     }
 
-    let scaled: Vec<LtSeg> = scale_segments(&lt.segments, scale);
+    let mut scaled: Vec<LtSeg> = scale_segments(&lt.segments, scale);
     if scaled.is_empty() {
         return vec![];
+    }
+    for segment in &mut scaled {
+        if let LtSeg::Dash(length) | LtSeg::Space(length) = segment {
+            *length *= stretch;
+        }
     }
 
     let pattern_len: f32 = scaled
@@ -442,6 +524,7 @@ pub fn apply_along(
             pick_tris_low: Vec::new(),
             dash_from_start: false,
             dash_align_end: None,
+            dash_closure: Default::default(),
             text_verts,
             searchable_text: searchable,
             name: name.to_string(),

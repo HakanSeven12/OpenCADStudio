@@ -41,6 +41,8 @@ const INLINE_NESTED_POINT_BUDGET: usize = 128;
 /// — visibly the same image, dramatically fewer wires.
 const MIN_PIXEL_SIZE: f32 = 2.0;
 
+use crate::scene::model::wire_model::DashClosure;
+
 /// A complex linetype and its name: two linetypes can share a dash pattern, so
 /// the name is what tells them apart in a prototype key.
 #[derive(Debug)]
@@ -76,8 +78,10 @@ pub enum ComplexWalk {
     None,
     /// Walks this wire's own points.
     Points,
-    /// Walks the polyline's whole ordered path, kept in block-local coordinates.
-    Path(Arc<Vec<[f64; 3]>>),
+    /// Walks the polyline's whole ordered path, kept in block-local coordinates,
+    /// and how the pattern closes around it. A polyline with arcs draws its
+    /// wires separately, which an inherited dash pattern needs walking as one.
+    Path(Arc<Vec<[f64; 3]>>, DashClosure),
     /// A wire of a polyline whose path another wire walks.
     Covered,
 }
@@ -155,6 +159,8 @@ pub struct LocalWire {
     pub own_complex: Option<Arc<NamedComplexLinetype>>,
     /// LTSCALE times the child's own linetype scale.
     pub complex_lt_scale: f32,
+    /// How a pattern closes around this wire.
+    pub dash_closure: DashClosure,
     pub lw_is_byblock: bool,
     /// Set when this child sits on layer "0" and the matching property is
     /// ByLayer. At expand time the value is then taken from the INSERT's
@@ -1048,12 +1054,18 @@ fn tessellate_sub_local(
             )
         })
         .flatten();
-    let may_walk = linetype_follows_path
-        && (own_complex.is_some() || (complex_possible && (lt_is_byblock || lt_l0)));
-    let mut polyline_path = may_walk
+    let inherits = lt_is_byblock || lt_l0;
+    let walks_complex =
+        linetype_follows_path && (own_complex.is_some() || (complex_possible && inherits));
+    let inherits_over_split_wires = inherits
+        && wires_out.iter().any(|wire| {
+            wire.tangent_geoms
+                .iter()
+                .any(|t| matches!(t, TangentGeom::Arc { .. }))
+        });
+    let mut polyline_path = (walks_complex || inherits_over_split_wires)
         .then(|| crate::scene::convert::tess::polyline_lt_path(doc, sub))
-        .flatten()
-        .map(Arc::new);
+        .flatten();
     let walks_whole_path = polyline_path.is_some();
     let complex_lt_scale = (doc.header.linetype_scale * sub.common().linetype_scale) as f32;
 
@@ -1109,7 +1121,7 @@ fn tessellate_sub_local(
         let wire_on_base_color = wire.color == sub_color;
         // A wide polyline keeps its band. Hidden reference geometry is never
         // drawn, so it has no linetype to walk.
-        let complex_walk = if !may_walk
+        let complex_walk = if !(walks_complex || walks_whole_path)
             || wire.snap_only
             || wire.points.len() < 2
             || wire.world_width != 0.0
@@ -1117,8 +1129,8 @@ fn tessellate_sub_local(
             || !wire.fill_tris.is_empty()
         {
             ComplexWalk::None
-        } else if let Some(path) = polyline_path.take() {
-            ComplexWalk::Path(path)
+        } else if let Some((path, closure)) = polyline_path.take() {
+            ComplexWalk::Path(Arc::new(path), closure)
         } else if walks_whole_path {
             ComplexWalk::Covered
         } else {
@@ -1169,6 +1181,7 @@ fn tessellate_sub_local(
             complex_walk,
             own_complex: own_complex.clone(),
             complex_lt_scale,
+            dash_closure: wire.dash_closure,
             lw_is_byblock,
             color_l0: color_l0 && wire_on_base_color,
             transparency_l0,
@@ -1938,6 +1951,7 @@ struct StyleKey {
     fill_is_2d_solid: bool,
     fill_is_3d: bool,
     snap_only: bool,
+    dash_closure: DashClosure,
     region_boundary_click: bool,
     plot_visible: bool,
     hide_unselected: bool,
@@ -1994,6 +2008,7 @@ struct BatchEntry {
     fill_is_3d: bool,
     fill_is_2d_solid: bool,
     snap_only: bool,
+    dash_closure: DashClosure,
     region_boundary_click: bool,
     plot_visible: bool,
     hide_unselected: bool,
@@ -2191,6 +2206,7 @@ impl Batches {
                     pick_tris_low: b.pick_tris_low,
                     dash_from_start: false,
                     dash_align_end: None,
+                    dash_closure: b.dash_closure,
                     text_verts: b.text_verts,
                     searchable_text: b.searchable_text,
                     name: name.to_string(),
@@ -2280,6 +2296,7 @@ fn style_key(
         fill_is_2d_solid,
         fill_is_3d,
         snap_only: false,
+        dash_closure: DashClosure::Open,
         region_boundary_click: false,
         plot_visible,
         hide_unselected,
@@ -2869,64 +2886,10 @@ fn emit_complex_walk(
     out: &mut Batches,
     d_range: (f32, f32),
 ) {
-    let mut plain = lw.clone();
-    plain.complex_walk = ComplexWalk::None;
-    plain.own_complex = None;
-    plain.lt_is_byblock = false;
-    plain.lt_l0 = false;
-    plain.pattern_length = 0.0;
-    plain.pattern = [0.0; 8];
-    plain.pattern_stations.clear();
-    plain.plinegen = false;
-
-    let mut reference = plain.clone();
-    reference.snap_only = true;
-    reference.plot_visible = false;
-    emit_wire(&reference, accum_xform, ctx, out, d_range);
-
-    let to_world = |x: f64, y: f64, z: f64| {
-        let point = accum_xform.apply(Vector3::new(x, y, z));
-        [point.x, point.y, point.z]
+    let Some((path, closure, mut plain)) = emit_path_reference(lw, accum_xform, ctx, out, d_range)
+    else {
+        return;
     };
-    let path: Vec<[f64; 3]> = match &lw.complex_walk {
-        ComplexWalk::None | ComplexWalk::Covered => return,
-        ComplexWalk::Path(path) => path
-            .iter()
-            .map(|p| {
-                if p[0].is_nan() {
-                    [f64::NAN; 3]
-                } else {
-                    to_world(p[0], p[1], p[2])
-                }
-            })
-            .collect(),
-        ComplexWalk::Points => lw
-            .points
-            .iter()
-            .enumerate()
-            .map(|(index, p)| {
-                if p[0].is_nan() {
-                    return [f64::NAN; 3];
-                }
-                let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
-                to_world(
-                    p[0] as f64 + low[0] as f64,
-                    p[1] as f64 + low[1] as f64,
-                    p[2] as f64 + low[2] as f64,
-                )
-            })
-            .collect(),
-    };
-
-    // Everything here is already in drawing space and takes no further pattern.
-    plain.points = Vec::new();
-    plain.points_low = Vec::new();
-    plain.key_vertices = Vec::new();
-    plain.snap_pts = Vec::new();
-    plain.tangent_geoms = Vec::new();
-    plain.pick_tris = Vec::new();
-    plain.pick_tris_low = Vec::new();
-    plain.searchable_text = Vec::new();
     let identity = Transform::identity();
 
     // Glyphs carry this wire's colour, which `emit_wire` reads as "the base
@@ -2936,26 +2899,14 @@ fn emit_complex_walk(
         &path,
         linetype,
         (lw.complex_lt_scale * ctx.complex_lt_anno * ctx.pslt_factor).max(1e-4),
+        closure,
         lw.color,
         false,
         lw.line_weight_px,
     );
     let Some(walked) = walked else {
         // Nothing to walk (pattern blow-up guard): the whole path, solid.
-        let (points, points_low) = path
-            .iter()
-            .map(|p| {
-                if p[0].is_nan() {
-                    return ([f32::NAN; 3], [0.0; 3]);
-                }
-                let (hx, lx) = WireModel::split_ds(p[0]);
-                let (hy, ly) = WireModel::split_ds(p[1]);
-                let (hz, lz) = WireModel::split_ds(p[2]);
-                ([hx, hy, hz], [lx, ly, lz])
-            })
-            .unzip();
-        plain.points = points;
-        plain.points_low = points_low;
+        set_path_points(&mut plain, &path);
         emit_wire(&plain, &identity, ctx, out, d_range);
         return;
     };
@@ -2967,6 +2918,122 @@ fn emit_complex_walk(
         piece.searchable_text = wire.searchable_text;
         emit_wire(&piece, &identity, ctx, out, d_range);
     }
+}
+
+/// Draw a polyline with arcs, whose wires are separate, as one path under the
+/// dash pattern it inherits.
+fn emit_inherited_dash_path(
+    lw: &LocalWire,
+    pattern_length: f32,
+    pattern: [f32; 8],
+    accum_xform: &Transform,
+    ctx: &ExpandCtx,
+    out: &mut Batches,
+    d_range: (f32, f32),
+) {
+    let Some((path, closure, mut piece)) = emit_path_reference(lw, accum_xform, ctx, out, d_range)
+    else {
+        return;
+    };
+    set_path_points(&mut piece, &path);
+    piece.pattern_length = pattern_length;
+    piece.pattern = pattern;
+    piece.plinegen = !path.iter().any(|p| p[0].is_nan());
+    piece.dash_closure = closure;
+    emit_wire(&piece, &Transform::identity(), ctx, out, d_range);
+}
+
+fn set_path_points(wire: &mut LocalWire, path: &[[f64; 3]]) {
+    let (points, points_low) = path
+        .iter()
+        .map(|p| {
+            if p[0].is_nan() {
+                return ([f32::NAN; 3], [0.0; 3]);
+            }
+            let (hx, lx) = WireModel::split_ds(p[0]);
+            let (hy, ly) = WireModel::split_ds(p[1]);
+            let (hz, lz) = WireModel::split_ds(p[2]);
+            ([hx, hy, hz], [lx, ly, lz])
+        })
+        .unzip();
+    wire.points = points;
+    wire.points_low = points_low;
+}
+
+/// Keep a walked child's own wire as hidden reference geometry. When this wire
+/// is the one that walks, gives the drawing-space path, how the pattern closes
+/// around it, and an empty wire of the child's style to draw it with.
+fn emit_path_reference(
+    lw: &LocalWire,
+    accum_xform: &Transform,
+    ctx: &ExpandCtx,
+    out: &mut Batches,
+    d_range: (f32, f32),
+) -> Option<(Vec<[f64; 3]>, DashClosure, LocalWire)> {
+    let mut plain = lw.clone();
+    plain.complex_walk = ComplexWalk::None;
+    plain.own_complex = None;
+    plain.lt_is_byblock = false;
+    plain.lt_l0 = false;
+    plain.pattern_length = 0.0;
+    plain.pattern = [0.0; 8];
+    plain.pattern_stations.clear();
+    plain.plinegen = false;
+    plain.dash_closure = DashClosure::Open;
+
+    let mut reference = plain.clone();
+    reference.snap_only = true;
+    reference.plot_visible = false;
+    emit_wire(&reference, accum_xform, ctx, out, d_range);
+
+    let to_world = |x: f64, y: f64, z: f64| {
+        let point = accum_xform.apply(Vector3::new(x, y, z));
+        [point.x, point.y, point.z]
+    };
+    let (path, closure): (Vec<[f64; 3]>, DashClosure) = match &lw.complex_walk {
+        ComplexWalk::None | ComplexWalk::Covered => return None,
+        ComplexWalk::Path(path, closure) => (
+            path.iter()
+                .map(|p| {
+                    if p[0].is_nan() {
+                        [f64::NAN; 3]
+                    } else {
+                        to_world(p[0], p[1], p[2])
+                    }
+                })
+                .collect(),
+            *closure,
+        ),
+        ComplexWalk::Points => (
+            lw.points
+                .iter()
+                .enumerate()
+                .map(|(index, p)| {
+                    if p[0].is_nan() {
+                        return [f64::NAN; 3];
+                    }
+                    let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                    to_world(
+                        p[0] as f64 + low[0] as f64,
+                        p[1] as f64 + low[1] as f64,
+                        p[2] as f64 + low[2] as f64,
+                    )
+                })
+                .collect(),
+            lw.dash_closure,
+        ),
+    };
+
+    // Everything here is already in drawing space and takes no further pattern.
+    plain.points = Vec::new();
+    plain.points_low = Vec::new();
+    plain.key_vertices = Vec::new();
+    plain.snap_pts = Vec::new();
+    plain.tangent_geoms = Vec::new();
+    plain.pick_tris = Vec::new();
+    plain.pick_tris_low = Vec::new();
+    plain.searchable_text = Vec::new();
+    Some((path, closure, plain))
 }
 
 fn emit_wire(
@@ -2997,6 +3064,23 @@ fn emit_wire(
             let linetype = &complex.linetype;
             emit_complex_walk(lw, linetype, accum_xform, ctx, out, d_range);
             return;
+        }
+        if matches!(
+            lw.complex_walk,
+            ComplexWalk::Path(..) | ComplexWalk::Covered
+        ) && (lw.lt_is_byblock || lw.lt_l0)
+        {
+            let (pat_len, pat) = if lw.lt_is_byblock {
+                (ctx.ins_pat_len, ctx.ins_pat)
+            } else {
+                (ctx.l0.pat_len, ctx.l0.pat)
+            };
+            if pat_len > 0.0 {
+                let pat_len = pat_len * lw.entity_lt_scale;
+                let pat = pat.map(|value| value * lw.entity_lt_scale);
+                emit_inherited_dash_path(lw, pat_len, pat, accum_xform, ctx, out, d_range);
+                return;
+            }
         }
     }
 
@@ -3174,6 +3258,7 @@ fn emit_wire(
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
                     dash_align_end: None,
+                    dash_closure: lw.dash_closure,
                     text_verts: Vec::new(),
                     name: String::new(),
                     points,
@@ -3294,11 +3379,18 @@ fn emit_wire(
     );
     // Never fold reference-only boundaries into a visible geometry batch.
     key.snap_only = lw.snap_only;
+    // A closed path is a wire of its own: its pattern fits its whole length.
+    let dash_closure = if final_pat_len > 0.0 {
+        lw.dash_closure
+    } else {
+        DashClosure::Open
+    };
+    key.dash_closure = dash_closure;
     key.region_boundary_click = lw.region_boundary_click;
 
     // Keep snap-only edges separate: concatenating key_vertices across
     // disconnected boundaries would invent midpoint references between them.
-    if lw.snap_only || transformed_stations.is_some() {
+    if lw.snap_only || transformed_stations.is_some() || dash_closure != DashClosure::Open {
         if let Some(closed) = out.by_style.remove(&key) {
             out.closed.push(closed);
         }
@@ -3336,6 +3428,7 @@ fn emit_wire(
     });
     entry.local_depth = local_depth;
     entry.snap_only = lw.snap_only;
+    entry.dash_closure = dash_closure;
     entry.region_boundary_click = lw.region_boundary_click;
     if let Some(data) = &transformed_stations {
         entry.pattern_station_pieces.clone_from(&data.pieces);

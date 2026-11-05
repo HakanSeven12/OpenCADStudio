@@ -52,7 +52,7 @@ struct VertexIn {
     @location(2) pos_a_low: vec3<f32>,
     @location(3) pos_b_low: vec3<f32>,
     @location(4) distances: vec2<f32>,
-    @location(5) taper_ratio: vec2<f32>,
+    @location(5) taper_bits: vec2<i32>,
     @location(6) translation: vec3<f32>,
     @location(7) translation_low: vec3<f32>,
     @location(8) depth: vec2<f32>,
@@ -151,14 +151,15 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     var out_cap: vec2<f32>;
     var out_cap_ends: vec3<f32>;
 
+    let taper_ratio = vec2<f32>(in.taper_bits) / 32767.0;
     if is_world {
         // Wide polylines have physical world-unit width (world_half_width or taper > 0).
         // Expand the quad in 3D world space on the entity's plane (perpendicular to
         // the segment and the plane normal), so the rectangle remains hosted rigidly
         // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
         // behavior and circle.wgsl planar arcs.
-        let world_hw_a = select(wire_const.world_half_width, in.taper_ratio.x * wire_const.world_half_width, is_tapered);
-        let world_hw_b = select(wire_const.world_half_width, in.taper_ratio.y * wire_const.world_half_width, is_tapered);
+        let world_hw_a = select(wire_const.world_half_width, taper_ratio.x * wire_const.world_half_width, is_tapered);
+        let world_hw_b = select(wire_const.world_half_width, taper_ratio.y * wire_const.world_half_width, is_tapered);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
         let eff_hw = cur_world_hw + 0.5 * u.world_per_pixel;
 
@@ -185,7 +186,7 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
 
         // A constant-width band slides each corner along the segment onto
         // its joint's bisector (miter), so neighbours meet without a notch.
-        let miter = select(in.taper_ratio, vec2<f32>(0.0), is_tapered) * MITER_LIMIT;
+        let miter = select(taper_ratio, vec2<f32>(0.0), is_tapered) * MITER_LIMIT;
         let along = mix(miter.x, miter.y, which_end) * eff_hw * side;
         let pos_rel = mix(rel_a, rel_b, which_end);
         let world_pos = pos_rel + perp_world * (eff_hw * side) + world_dir * along;
@@ -255,8 +256,14 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     out.pat0 = wire_const.pat0 * scale;
     out.pat1 = wire_const.pat1 * scale;
     out.min_elem = min_element;
-    out.align_end = wire_const.align_end * scale;
-    out.align_total = wire_const.align_total;
+    let run_total = select(dash_run_total(in.taper_bits.x, in.taper_bits.y), wire_const.align_total, wire_const.world_half_width > 0.0);
+    out.align_end = aligned_end_dash(
+        wire_const.align_end * scale,
+        run_total,
+        out.pattern_length,
+        max(out.pat0.x, 0.0),
+    );
+    out.align_total = run_total;
     return out;
 }
 
@@ -287,6 +294,12 @@ fn in_dash(
         let first_dash = max(elements[0], 0.0);
         value = ((distance - align_end + first_dash) % pattern_length
             + pattern_length) % pattern_length;
+    } else if align_total < 0.0 {
+        // A closed path (see wire.wgsl).
+        if closed_dash_solid(-align_total, pattern_length) {
+            return true;
+        }
+        value = closed_dash_phase(distance, -align_total, pattern_length);
     } else {
         // The cap before the start reads as the start (see wire.wgsl).
         value = ((max(distance, 0.0) % pattern_length) + pattern_length) % pattern_length;

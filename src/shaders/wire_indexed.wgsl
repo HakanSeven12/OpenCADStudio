@@ -62,9 +62,10 @@ struct InstanceIn {
     @location(4) distance_a: f32,
     @location(5) distance_b: f32,
     @location(6) wire_id:    u32,
-    // Per-endpoint width / per-wire maximum width. Vertex UNORM16 conversion
-    // expands this to 0..1; zero keeps the constant-width fallback.
-    @location(7) taper_ratio: vec2<f32>,
+    // Per-endpoint width / per-wire maximum width, as snorm16 for a band: 0..1
+    // once converted, zero keeps the constant-width fallback. A thin wire has
+    // its dash run's layout here instead (`dash_run_total`).
+    @location(7) taper_bits: vec2<i32>,
 }
 
 const MODEL_LINEWEIGHT_BOOST: f32 = 2.0;
@@ -152,6 +153,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     let rel_b = marker_relative(in.pos_b, in.pos_b_low, c);
     let is_tapered = c.is_tapered > 0.5;
     let is_world = c.world_half_width > 0.0;
+    let taper_ratio = vec2<f32>(in.taper_bits) / 32767.0;
 
     var final_clip: vec4<f32>;
     var out_dist: f32;
@@ -164,8 +166,8 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
         // the segment and the plane normal), so the rectangle remains hosted rigidly
         // on the 3D plane when the camera rotates, orbits, or tilts, matching CAD
         // behavior and circle.wgsl planar arcs.
-        let world_hw_a = select(c.world_half_width, in.taper_ratio.x * c.world_half_width, is_tapered);
-        let world_hw_b = select(c.world_half_width, in.taper_ratio.y * c.world_half_width, is_tapered);
+        let world_hw_a = select(c.world_half_width, taper_ratio.x * c.world_half_width, is_tapered);
+        let world_hw_b = select(c.world_half_width, taper_ratio.y * c.world_half_width, is_tapered);
         let cur_world_hw = mix(world_hw_a, world_hw_b, which_end);
         let eff_hw = cur_world_hw + 0.5 * u.world_per_pixel;
 
@@ -192,7 +194,7 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
 
         // A constant-width band slides each corner along the segment onto
         // its joint's bisector (miter), so neighbours meet without a notch.
-        let miter = select(in.taper_ratio, vec2<f32>(0.0), is_tapered) * MITER_LIMIT;
+        let miter = select(taper_ratio, vec2<f32>(0.0), is_tapered) * MITER_LIMIT;
         let along = mix(miter.x, miter.y, which_end) * eff_hw * side;
         let pos_rel = mix(rel_a, rel_b, which_end);
         let world_pos = pos_rel + perp_world * (eff_hw * side) + world_dir * along;
@@ -262,8 +264,14 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     out.pat0           = c.pat0 * lt_scale;
     out.pat1           = c.pat1 * lt_scale;
     out.min_elem       = min_elem;
-    out.align_end      = c.align_end * lt_scale;
-    out.align_total    = c.align_total;
+    let run_total = select(dash_run_total(in.taper_bits.x, in.taper_bits.y), c.align_total, is_world);
+    out.align_end      = aligned_end_dash(
+        c.align_end * lt_scale,
+        run_total,
+        out.pattern_length,
+        max(out.pat0.x, 0.0),
+    );
+    out.align_total    = run_total;
     // A hidden entity's arena slab stays resident; collapse it outside the
     // clip volume and take the tombstone discard.
     if c.hidden != 0.0 {
@@ -292,6 +300,13 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32
         // The aligned pattern leads with its dash or dot (see wire.wgsl).
         let first_dash = max(elems[0], 0.0);
         d = ((dist - align_end + first_dash) % pat_len + pat_len) % pat_len;
+    } else if align_total < 0.0 {
+        // A closed path: whole periods, stretched to fit. One shorter than a
+        // period is drawn solid.
+        if closed_dash_solid(-align_total, pat_len) {
+            return true;
+        }
+        d = closed_dash_phase(dist, -align_total, pat_len);
     } else {
         // The cap before the start reads as the start (see wire.wgsl).
         let from_start = max(dist, 0.0);

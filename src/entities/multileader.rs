@@ -2790,6 +2790,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         dash_align_end: None,
+                        dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name: name.clone(),

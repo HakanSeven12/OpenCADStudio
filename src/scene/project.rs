@@ -380,6 +380,9 @@ impl Scene {
                         out.taper_widths.clear();
                     }
                 }
+                if out.points.len() != wire.points.len() {
+                    out.dash_closure = crate::scene::model::wire_model::DashClosure::Open;
+                }
                 if let Some(source_length) = source_length {
                     for station in &mut clipped_stations {
                         *station *= scale;

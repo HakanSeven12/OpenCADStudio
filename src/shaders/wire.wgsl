@@ -288,7 +288,12 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, instance: 
     out.pat0           = in.pat0 * lt_scale;
     out.pat1           = in.pat1 * lt_scale;
     out.min_elem       = min_elem;
-    out.align_end      = in.misc.y * lt_scale;
+    out.align_end      = aligned_end_dash(
+        in.misc.y * lt_scale,
+        in.misc.z,
+        out.pattern_length,
+        max(out.pat0.x, 0.0),
+    );
     out.align_total    = in.misc.z;
     return out;
 }
@@ -316,6 +321,13 @@ fn in_dash(dist: f32, pat_len: f32, p0: vec4<f32>, p1: vec4<f32>, align_end: f32
         // resumes right after that element.
         let first_dash = max(elems[0], 0.0);
         d = ((dist - align_end + first_dash) % pat_len + pat_len) % pat_len;
+    } else if align_total < 0.0 {
+        // A closed path: whole periods, stretched to fit. One shorter than a
+        // period is drawn solid.
+        if closed_dash_solid(-align_total, pat_len) {
+            return true;
+        }
+        d = closed_dash_phase(dist, -align_total, pat_len);
     } else {
         // The round cap reaches a few pixels before the line's start; read it
         // as the start, or a dash-first run shorter than its pattern (drawn as

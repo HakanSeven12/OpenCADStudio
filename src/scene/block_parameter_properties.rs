@@ -350,13 +350,16 @@ pub(crate) fn evaluate(
                     if input <= 1e-9 {
                         return Err("Specify a positive parameter length.");
                     }
-                    let axis = if p.linear {
-                        (p.end - p.base).normalize()
-                    } else {
-                        delta
-                            .try_normalize()
-                            .ok_or("The parameter direction is unavailable.")?
-                    };
+                    let axis = delta
+                        .try_normalize()
+                        .or_else(|| {
+                            if p.linear {
+                                (p.end - p.base).try_normalize()
+                            } else {
+                                None
+                            }
+                        })
+                        .ok_or("The parameter direction is unavailable.")?;
                     frame.end = frame.base + axis * input;
                 }
                 Component::Angle => {

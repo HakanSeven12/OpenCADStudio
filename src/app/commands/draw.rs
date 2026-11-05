@@ -549,9 +549,13 @@ impl OpenCADStudio {
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
-            "POLY_E" => {
+            "POLY_E" | "_POLY_E_EDGE" => {
                 use crate::modules::draw::draw::shapes::PolyECommand;
-                let new_cmd = PolyECommand::new();
+                let new_cmd = if cmd == "_POLY_E_EDGE" {
+                    PolyECommand::at_first_endpoint()
+                } else {
+                    PolyECommand::new()
+                };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }

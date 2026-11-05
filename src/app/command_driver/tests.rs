@@ -5238,3 +5238,64 @@ mod mission_m100_tests {
         assert!(all_output(&app).contains("'GHOST' not found"), "{}", all_output(&app));
     }
 }
+
+/// #2588: POLYGON takes the inscribed/circumscribed option after the centre
+/// and a typed radius, as the reference does.
+#[cfg(test)]
+mod polygon_flow_tests {
+    use crate::app::OpenCADStudio;
+
+    fn polygon(app: &OpenCADStudio) -> Vec<(f64, f64)> {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                codec::EntityType::LwPolyline(polyline) => Some(
+                    polyline
+                        .vertices
+                        .iter()
+                        .map(|v| (v.location.x, v.location.y))
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .expect("a polygon was drawn")
+    }
+
+    fn drawn(line: &str) -> Vec<(f64, f64)> {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line(line);
+        polygon(&app)
+    }
+
+    #[test]
+    fn a_typed_radius_draws_an_inscribed_polygon_with_its_bottom_edge_level() {
+        let vertices = drawn("POLYGON 6 0,0 I 10");
+        assert_eq!(vertices.len(), 6);
+        for (x, y) in &vertices {
+            assert!((x.hypot(*y) - 10.0).abs() < 1e-9, "vertex on the circle");
+        }
+        let lowest: Vec<_> = vertices.iter().filter(|(_, y)| (*y - vertices.iter().map(|v| v.1).fold(f64::MAX, f64::min)).abs() < 1e-9).collect();
+        assert_eq!(lowest.len(), 2, "bottom edge level: {vertices:?}");
+    }
+
+    #[test]
+    fn circumscribed_takes_the_radius_to_the_edge_midpoints() {
+        let vertices = drawn("POLYGON 4 0,0 C 10");
+        assert_eq!(vertices.len(), 4);
+        for (x, y) in &vertices {
+            assert!((x.abs() - 10.0).abs() < 1e-9 && (y.abs() - 10.0).abs() < 1e-9, "{vertices:?}");
+        }
+    }
+
+    #[test]
+    fn enter_at_the_option_keeps_the_default_and_a_picked_point_finishes() {
+        let vertices = drawn("POLYGON 5 0,0  0,8");
+        assert_eq!(vertices.len(), 5);
+        assert!(vertices.iter().any(|(x, y)| x.abs() < 1e-9 && (y - 8.0).abs() < 1e-9), "{vertices:?}");
+    }
+}
+

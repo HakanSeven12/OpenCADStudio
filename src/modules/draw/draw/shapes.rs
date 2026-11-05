@@ -1002,10 +1002,16 @@ impl CadCommand for RectCenCommand {
 
 pub struct PolyCommand {
     sides: u32,
+    /// 0 sides, 1 centre (or Edge), 2 inscribed/circumscribed, 3 radius.
     step: u8,
     center: DVec3,
+    circumscribed: bool,
     plane: WorkingPlane,
 }
+
+/// The inscribed/circumscribed choice is offered as the default next time.
+static POLYGON_CIRCUMSCRIBED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 impl PolyCommand {
     pub fn new() -> Self {
@@ -1013,8 +1019,35 @@ impl PolyCommand {
             sides: defaults::get_polygon_sides() as u32,
             step: 0,
             center: DVec3::ZERO,
+            circumscribed: POLYGON_CIRCUMSCRIBED.load(std::sync::atomic::Ordering::Relaxed),
             plane: WorkingPlane::default(),
         }
+    }
+
+    fn choose(&mut self, circumscribed: bool) {
+        self.circumscribed = circumscribed;
+        POLYGON_CIRCUMSCRIBED.store(circumscribed, std::sync::atomic::Ordering::Relaxed);
+        self.step = 3;
+    }
+
+    /// Vertex radius and first-vertex angle for a radius picked at `pt`: a
+    /// vertex there when inscribed, an edge midpoint when circumscribed.
+    fn picked(&self, pt: DVec3) -> (f64, f64) {
+        let r = plane_distance(self.center, pt, self.plane);
+        let a = angle_xy(self.center, pt, self.plane);
+        if self.circumscribed {
+            let half = PI / self.sides as f64;
+            (r / half.cos(), a + half)
+        } else {
+            (r, a)
+        }
+    }
+
+    /// A typed radius sets the size with the bottom edge level.
+    fn typed(&self, r: f64) -> (f64, f64) {
+        let half = PI / self.sides as f64;
+        let vertex_r = if self.circumscribed { r / half.cos() } else { r };
+        (vertex_r, -PI / 2.0 + half)
     }
 }
 
@@ -1028,29 +1061,27 @@ impl CadCommand for PolyCommand {
     }
 
     fn wants_text_input(&self) -> bool {
-        self.step == 0
+        matches!(self.step, 0 | 2)
     }
 
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
-        // The sides step also offers the alternate polygon methods; later steps
-        // are plain point picks. (#304)
-        if self.step == 0 {
-            vec![
-                CmdOption::new("Circumscribed", "CIRCUMSCRIBED"),
-                CmdOption::new("Edge", "EDGE"),
-            ]
-        } else {
-            vec![]
+        match self.step {
+            1 => vec![CmdOption::new("Edge", "E")],
+            2 => vec![
+                CmdOption::new("Inscribed in circle", "I"),
+                CmdOption::new("Circumscribed about circle", "C"),
+            ],
+            _ => vec![],
         }
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
-        self.step == 0
+        self.step == 1
     }
 
     fn dyn_field(&self) -> crate::command::DynField {
-        if self.step == 0 {
+        if matches!(self.step, 0 | 2) {
             crate::command::DynField::Scalar
         } else {
             crate::command::DynField::Point
@@ -1059,8 +1090,8 @@ impl CadCommand for PolyCommand {
 
     fn dyn_spec(&self) -> Option<crate::command::DynSpec> {
         use crate::command::{DynAnchor, DynFieldSpec, DynGuide, DynRole, DynSpec};
-        // Vertex on the circle: radius from the centre + rotation angle.
-        (self.step == 2).then(|| DynSpec {
+        // Radius from the centre + rotation angle.
+        (self.step == 3).then(|| DynSpec {
             anchor: DynAnchor::Point(self.center),
             fields: vec![
                 DynFieldSpec::new(DynRole::Radius),
@@ -1072,65 +1103,97 @@ impl CadCommand for PolyCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        // At the sides step, keyword options hand off to the dedicated variant
-        // command; numeric input still sets the side count. (#304)
-        if self.step == 0 {
-            match text.trim().to_uppercase().as_str() {
-                "C" | "CIRCUMSCRIBED" => return Some(CmdResult::Dispatch("POLY_C".into())),
-                "E" | "EDGE" => return Some(CmdResult::Dispatch("POLY_E".into())),
-                _ => {}
+        let word = text.trim().to_uppercase();
+        match self.step {
+            0 => {
+                // The earlier shortcuts to the variant commands still work.
+                match word.as_str() {
+                    "C" | "CIRCUMSCRIBED" => return Some(CmdResult::Dispatch("POLY_C".into())),
+                    "E" | "EDGE" => return Some(CmdResult::Dispatch("POLY_E".into())),
+                    _ => {}
+                }
+                match word.parse::<u32>() {
+                    Ok(n) if (3..=1024).contains(&n) => {
+                        self.sides = n;
+                        defaults::set_polygon_sides(n as f64);
+                        self.step = 1;
+                    }
+                    _ if word.is_empty() => self.step = 1,
+                    _ => {}
+                }
+                Some(CmdResult::NeedPoint)
+            }
+            1 => match word.as_str() {
+                "E" | "EDGE" => Some(CmdResult::Dispatch("_POLY_E_EDGE".into())),
+                _ => None,
+            },
+            2 => {
+                match word.as_str() {
+                    "I" | "INSCRIBED" => self.choose(false),
+                    "C" | "CIRCUMSCRIBED" => self.choose(true),
+                    "" => self.choose(self.circumscribed),
+                    _ => {}
+                }
+                Some(CmdResult::NeedPoint)
+            }
+            _ => {
+                let r = word.parse::<f64>().ok().filter(|r| r.is_finite() && *r > 0.0)?;
+                let (vertex_r, start) = self.typed(r);
+                let vertices = poly_verts(self.center, vertex_r, self.sides, start, self.plane);
+                Some(CmdResult::CommitAndExit(make_pline(&vertices, self.plane)))
             }
         }
-        if let Ok(n) = text.trim().parse::<u32>() {
-            if (3..=1024).contains(&n) {
-                self.sides = n;
-                defaults::set_polygon_sides(n as f64);
-            }
-        }
-        self.step = 1;
-        Some(CmdResult::NeedPoint)
     }
 
     fn prompt(&self) -> String {
         match self.step {
             0 => crate::tf!("POLYGON  Enter number of sides <{}>:", self.sides).into_owned(),
-            1 => crate::tf!("POLYGON  Specify center [{} sides]:", self.sides).into_owned(),
-            _ => crate::tf!(
-                "POLYGON  Specify vertex on circle [{} sides inscribed]:",
-                self.sides
-            )
-            .into_owned(),
+            1 => crate::t!("POLYGON  Specify center of polygon or [Edge]:").into_owned(),
+            2 => {
+                let default = if self.circumscribed { "C" } else { "I" };
+                crate::tf!(
+                    "POLYGON  Enter an option [Inscribed in circle/Circumscribed about circle] <{}>:",
+                    default
+                )
+                .into_owned()
+            }
+            _ => crate::t!("POLYGON  Specify radius of circle:").into_owned(),
         }
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         match self.step {
-            0 => {
-                // User clicked without typing sides: use default, treat click as center.
+            0 | 1 => {
+                // A click at the sides prompt keeps the side count.
                 self.center = pt;
                 self.step = 2;
                 CmdResult::NeedPoint
             }
-            1 => {
-                self.center = pt;
-                self.step = 2;
-                CmdResult::NeedPoint
+            2 => {
+                // A pick here takes the default option as the radius point.
+                self.step = 3;
+                self.on_point(pt)
             }
             _ => {
-                let r = plane_distance(self.center, pt, self.plane);
-                let sa = angle_xy(self.center, pt, self.plane);
-                let vertices = poly_verts(self.center, r, self.sides, sa, self.plane);
+                let (vertex_r, start) = self.picked(pt);
+                let vertices = poly_verts(self.center, vertex_r, self.sides, start, self.plane);
                 CmdResult::CommitAndExit(make_pline(&vertices, self.plane))
             }
         }
     }
 
     fn on_enter(&mut self) -> CmdResult {
-        if self.step == 0 {
-            self.step = 1;
-            return CmdResult::NeedPoint;
+        match self.step {
+            0 => {
+                self.step = 1;
+                CmdResult::NeedPoint
+            }
+            2 => {
+                self.choose(self.circumscribed);
+                CmdResult::NeedPoint
+            }
+            _ => CmdResult::Cancel,
         }
-        CmdResult::Cancel
     }
     fn on_escape(&mut self) -> CmdResult {
         CmdResult::Cancel
@@ -1140,9 +1203,8 @@ impl CadCommand for PolyCommand {
         if self.step < 2 {
             return None;
         }
-        let r = plane_distance(self.center, pt, self.plane);
-        let sa = angle_xy(self.center, pt, self.plane);
-        Some(poly_wire(self.center, r, self.sides, sa, self.plane))
+        let (vertex_r, start) = self.picked(pt);
+        Some(poly_wire(self.center, vertex_r, self.sides, start, self.plane))
     }
 }
 
@@ -1291,6 +1353,15 @@ impl PolyECommand {
             step: 0,
             a: DVec3::ZERO,
             plane: WorkingPlane::default(),
+        }
+    }
+
+    /// POLYGON's Edge option: the side count is already set, so the first
+    /// edge endpoint comes next.
+    pub fn at_first_endpoint() -> Self {
+        Self {
+            step: 1,
+            ..Self::new()
         }
     }
 }

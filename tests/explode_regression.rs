@@ -123,7 +123,26 @@ fn explode_mline_golden_two_lines_per_segment() {
     // One Line per Standard element per segment, as drawn; there is no spine
     // (#2538). Element placement is covered by the explode `mline_tests`.
     assert_eq!(pieces.len(), 6, "3 segments × 2 Standard elements");
-    assert!(pieces.iter().all(|p| matches!(p, EntityType::Line(_))));
+    // `from_points` stores no element distances, so this is the fallback
+    // placement: ±0.5 square to each leg, meeting on the miter.
+    let expected = [
+        ((0.0, 0.5), (3.5, 0.5)),
+        ((3.5, 0.5), (3.5, 4.5)),
+        ((3.5, 4.5), (8.0, 4.5)),
+        ((0.0, -0.5), (4.5, -0.5)),
+        ((4.5, -0.5), (4.5, 3.5)),
+        ((4.5, 3.5), (8.0, 3.5)),
+    ];
+    let near = |v: Vector3, (x, y): (f64, f64)| (v.x - x).abs() < 1e-9 && (v.y - y).abs() < 1e-9;
+    for (start, end) in expected {
+        assert!(
+            pieces.iter().any(|p| matches!(
+                p,
+                EntityType::Line(l) if near(l.start, start) && near(l.end, end)
+            )),
+            "missing {start:?} → {end:?} in {pieces:?}"
+        );
+    }
 }
 
 #[test]

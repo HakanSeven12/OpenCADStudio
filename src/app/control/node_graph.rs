@@ -550,9 +550,18 @@ mod modify_node_tests {
         }).collect()
     }
     fn go(lines: &[&str], node: &str, inputs: impl Fn(&crate::app::OpenCADStudio) -> Value) {
+        go_with(lines, |_| {}, node, inputs)
+    }
+    fn go_with(
+        lines: &[&str],
+        prepare: impl Fn(&mut crate::app::OpenCADStudio),
+        node: &str,
+        inputs: impl Fn(&crate::app::OpenCADStudio) -> Value,
+    ) {
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         for l in lines { let _ = app.run_command_line(l); }
+        prepare(&mut app);
         let i = app.active_tab;
         let before = state(&app);
         let inputs = inputs(&app);
@@ -609,6 +618,16 @@ mod modify_node_tests {
         go(&["BOX 0,0,0 10,10 10"], "Chamfer Edge", |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}));
         go(&["BOX 0,0,0 10,10 10"], "Shell", |a| json!({"solid": h(a,0), "face point": p(5.,5.,10.)}));
         go(&["BOX 0,0,0 10,10 10"], "Slice", |a| json!({"objects": hs(a), "first": p(5.,0.,0.), "second": p(5.,1.,0.), "third": p(5.,0.,1.), "keep": p(8.,5.,5.)}));
+        // A surface: an open line extruded.
+        let surface = |app: &mut crate::app::OpenCADStudio| {
+            use crate::command::StepInput;
+            let line = app.tabs[app.active_tab].scene.document.entities().next().unwrap().common().handle;
+            let _ = app.run_command_line("EXTRUDE");
+            let _ = app.feed_command(StepInput::SelectionComplete(vec![line]));
+            let _ = app.feed_command(StepInput::Enter);
+            let _ = app.feed_command(StepInput::Text("10".into()));
+        };
+        go_with(&["LINE 0,0 10,0 "], surface, "Thicken", |a| json!({"objects": hs(a)}));
         go(&["RECTANG 0,0 10,10"], "Presspull", |a| json!({"object": h(a,0), "point": p(5.,5.,0.)}));
         go(&["BOX 0,0,0 10,10 10"], "3D Rotate", |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(1.,0.,0.)}));
         go(&["BOX 0,0,0 10,10 10"], "3D Mirror", |a| json!({"objects": hs(a), "first": p(20.,0.,0.), "second": p(20.,1.,0.), "third": p(20.,0.,1.)}));

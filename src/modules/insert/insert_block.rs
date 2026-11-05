@@ -886,15 +886,27 @@ impl CadCommand for InsertBlockCommand {
     }
 
     fn on_preview_wires(&mut self, pt: DVec3) -> Vec<WireModel> {
-        if self.preview.is_empty() || !matches!(self.step, Step::Point) {
+        if self.preview.is_empty() {
             return Vec::new();
         }
-        let scale = [
-            self.preset_scale[0].unwrap_or(1.0),
-            self.preset_scale[1].unwrap_or(1.0),
-            self.preset_scale[2].unwrap_or(1.0),
-        ];
-        let (pt, rotation) = self.aligned_pose(pt, scale, self.preset_rotation.unwrap_or(0.0));
+        let (pt, scale, rotation) = match self.step {
+            Step::Point => (
+                pt,
+                [
+                    self.preset_scale[0].unwrap_or(1.0),
+                    self.preset_scale[1].unwrap_or(1.0),
+                    self.preset_scale[2].unwrap_or(1.0),
+                ],
+                self.preset_rotation.unwrap_or(0.0),
+            ),
+            // The block stays at its point and turns with the cursor.
+            Step::Rotation => match self.point {
+                Some(point) => (point, self.scale, self.plane.angle(point, pt).unwrap_or(0.0)),
+                None => return Vec::new(),
+            },
+            _ => return Vec::new(),
+        };
+        let (pt, rotation) = self.aligned_pose(pt, scale, rotation);
         let (sin, cos) = rotation.sin_cos();
         let base = self.preview_origin + self.base;
         let origin = self.plane.to_local(pt);
@@ -1084,6 +1096,33 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod cycling_tests {
     use super::*;
+
+    /// #2583: the preview stays up while the rotation is asked, turned
+    /// towards the cursor about the insertion point.
+    #[test]
+    fn the_preview_turns_with_the_cursor_at_the_rotation_step() {
+        let wire = WireModel::solid_f64(
+            "rotate_preview".into(),
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            WireModel::CYAN,
+            false,
+        );
+        let options = BlockInsertOptions {
+            rotation: true,
+            ..Default::default()
+        };
+        let mut cmd = InsertBlockCommand::palette("TURN".into(), vec![wire], &options);
+        let point = DVec3::new(10.0, 10.0, 0.0);
+        let _ = cmd.on_point(point);
+        assert!(matches!(cmd.step, Step::Rotation));
+        let preview = cmd.on_preview_wires(DVec3::new(10.0, 20.0, 0.0));
+        let at = |i: usize| {
+            let p = preview[0].points[i];
+            DVec3::new(p[0] as f64, p[1] as f64, 0.0)
+        };
+        assert!(at(0).distance(point) < 1e-5);
+        assert!(at(1).distance(DVec3::new(10.0, 11.0, 0.0)) < 1e-5, "{:?}", at(1));
+    }
 
     #[test]
     fn block_grip_cycling_aligns_preview_and_placement_with_native_base_scale_and_rotation() {

@@ -366,6 +366,12 @@ pub struct ModelSpaceThemeConfig {
     /// VSEDGESMOOTH: crease angle in degrees; mesh edges whose faces meet
     /// flatter are not drawn in the shaded-with-edges modes (default 1).
     pub edge_smooth: f32,
+    /// COMPARECOLORADDED / REMOVED / MODIFIED: COMPARE's overlay colours.
+    pub compare_added: [u8; 3],
+    pub compare_removed: [u8; 3],
+    pub compare_modified: [u8; 3],
+    /// COMPARETOLERANCE: points closer than this compare as the same.
+    pub compare_tolerance: f64,
     /// Selection highlight opacity in percent (10–100); below 100 the
     /// object's own colour shows through.
     pub selection_highlight_opacity: u8,
@@ -402,6 +408,10 @@ impl Default for ModelSpaceThemeConfig {
             selection_highlight_color: 0,
             edge_color: None,
             edge_smooth: 1.0,
+            compare_added: crate::scene::compare::CompareSettings::default().colors[0],
+            compare_removed: crate::scene::compare::CompareSettings::default().colors[1],
+            compare_modified: crate::scene::compare::CompareSettings::default().colors[2],
+            compare_tolerance: crate::scene::compare::CompareSettings::default().tolerance,
             selection_highlight_opacity: 100,
             selection_highlight_widen: 0,
             selection_effect: true,

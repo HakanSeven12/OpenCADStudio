@@ -59,12 +59,32 @@ fn last_dir_store() -> &'static Mutex<Option<PathBuf>> {
     })
 }
 
+/// Managed mode (`OPENAEC_BEHEERD=1`): a host such as a container image
+/// installs, updates and integrates the program, so it asks nothing at
+/// start (default app, donation, GPU notice) and never checks for updates.
+pub fn managed() -> bool {
+    std::env::var_os("OPENAEC_BEHEERD").is_some_and(|value| value == "1")
+}
+
+/// The host's working folder (`OPENAEC_MAP`), where file dialogs start.
+#[cfg(not(target_arch = "wasm32"))]
+fn managed_folder() -> Option<PathBuf> {
+    std::env::var_os("OPENAEC_MAP")
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+}
+
 /// The directory the last file dialog picked or saved into, if it still
 /// exists — used to seed the next dialog so pickers reopen where the user
-/// left off. Persisted across runs.
+/// left off. Persisted across runs. With a host working folder, dialogs
+/// stay inside it and start at its top.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn last_dialog_dir() -> Option<PathBuf> {
-    last_dir_store().lock().ok()?.clone().filter(|p| p.is_dir())
+    let last = last_dir_store().lock().ok()?.clone().filter(|p| p.is_dir());
+    match managed_folder() {
+        Some(root) => Some(last.filter(|dir| dir.starts_with(&root)).unwrap_or(root)),
+        None => last,
+    }
 }
 
 /// Record the directory of a path a file dialog just returned.

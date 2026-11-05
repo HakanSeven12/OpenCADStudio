@@ -4768,22 +4768,28 @@ impl OpenCADStudio {
         self.on_save_dialog_confirm()
     }
 
-    /// A recovery copy newer than the drawing holds work a crash cut off
-    /// (the copy goes when the drawing is saved or closed); say where it is.
+    /// A recovery copy newer than the drawing holds work a crash cut off.
+    /// This session's own copy goes when the drawing is saved or closed, so
+    /// the old one moves aside to `<name>.ocs-recovered.sv$` and the notice
+    /// says where it is.
     #[cfg(not(target_arch = "wasm32"))]
     fn notice_newer_autosave(&mut self, i: usize, path: &std::path::Path) {
         let copy = self.autosave_target(i);
         let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        if modified(&copy)
+        if !modified(&copy)
             .zip(modified(path))
             .is_some_and(|(copy_time, file_time)| copy_time > file_time)
         {
-            self.command_line.push_warning(&crate::tr!(
-                "recovery",
-                "newer-autosave",
-                file = copy.display().to_string()
-            ));
+            return;
         }
+        let name = copy.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let kept = copy.with_file_name(name.replace(".ocs-autosave.sv$", ".ocs-recovered.sv$"));
+        let file = if kept != copy && std::fs::rename(&copy, &kept).is_ok() { kept } else { copy };
+        self.command_line.push_warning(&crate::tr!(
+            "recovery",
+            "newer-autosave",
+            file = file.display().to_string()
+        ));
     }
 
     /// Where the autosave recovery copy for tab `i` lives.
@@ -5242,6 +5248,12 @@ impl OpenCADStudio {
     }
 
     /// Remove the autosave recovery files, then quit the application.
+    /// Quit without removing the recovery copies (see `Message::Terminate`).
+    pub(in crate::app) fn leave_keeping_recovery(&mut self) -> Task<Message> {
+        self.exit_requested = true;
+        iced::exit()
+    }
+
     pub(in crate::app) fn exit_app(&mut self) -> Task<Message> {
         self.cleanup_autosaves();
         self.exit_requested = true;

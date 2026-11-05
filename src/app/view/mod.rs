@@ -312,6 +312,13 @@ fn ui_font_changes() -> Subscription<Message> {
     Subscription::none()
 }
 
+fn terminate_requests() -> Subscription<Message> {
+    #[cfg(unix)]
+    return Subscription::run(crate::sys::terminate_requests).map(|()| Message::Terminate);
+    #[allow(unreachable_code)]
+    Subscription::none()
+}
+
 /// Background used by drafting overlays in model or paper space.
 /// The background the viewport actually draws behind the cursor and grid. The
 /// block editor draws on the model background too (#2216).
@@ -3937,6 +3944,7 @@ impl OpenCADStudio {
             hatch_pattern_keys,
             keyboard_events,
             ui_font_changes(),
+            terminate_requests(),
         ])
     }
 

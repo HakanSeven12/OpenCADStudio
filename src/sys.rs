@@ -1419,3 +1419,40 @@ pub fn documents_dir() -> Option<std::path::PathBuf> {
     let documents = home.join("Documents");
     Some(if documents.is_dir() { documents } else { home })
 }
+
+// ── SIGTERM ──────────────────────────────────────────────────────────────────
+
+#[cfg(unix)]
+static TERMINATE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(unix)]
+extern "C" fn on_sigterm(_: std::os::raw::c_int) {
+    // Only an atomic store is safe inside a signal handler.
+    TERMINATE.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+/// One item once SIGTERM arrives, so the app can write its recovery copies
+/// before it stops. Installing the handler replaces the default of stopping
+/// at once; a watcher thread turns the flag into the item.
+#[cfg(unix)]
+pub fn terminate_requests() -> impl iced::futures::Stream<Item = ()> + Send + 'static {
+    use iced::futures::SinkExt;
+    const SIGTERM: std::os::raw::c_int = 15;
+    extern "C" {
+        fn signal(signum: std::os::raw::c_int, handler: usize) -> usize;
+    }
+    iced::stream::channel(1, async |mut output| {
+        let (sender, receiver) = iced::futures::channel::oneshot::channel();
+        // SAFETY: the handler only stores an atomic flag.
+        unsafe { signal(SIGTERM, on_sigterm as extern "C" fn(std::os::raw::c_int) as usize) };
+        std::thread::spawn(move || {
+            while !TERMINATE.load(std::sync::atomic::Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+            let _ = sender.send(());
+        });
+        if receiver.await.is_ok() {
+            let _ = output.send(()).await;
+        }
+    })
+}

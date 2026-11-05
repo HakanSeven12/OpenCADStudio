@@ -3,6 +3,9 @@ use crate::scene::pipeline::{GpuAdapter, GpuStatus};
 
 impl OpenCADStudio {
     pub(super) fn queue_startup_prompts(&mut self) {
+        if crate::config::managed() {
+            return;
+        }
         #[cfg(not(target_arch = "wasm32"))]
         if !self.default_assoc_prompted {
             self.pending_startup_modals
@@ -112,7 +115,7 @@ impl OpenCADStudio {
         // The popup: once per verdict, unless the user silenced this one.
         let already_queued = self.dialog_open(ModalKind::GpuWarning)
             || self.pending_startup_modals.contains(&ModalKind::GpuWarning);
-        if self.gpu_warning_silenced != identity && !already_queued {
+        if self.gpu_warning_silenced != identity && !already_queued && !crate::config::managed() {
             self.pending_startup_modals.push_back(ModalKind::GpuWarning);
             self.show_next_startup_modal();
         }

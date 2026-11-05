@@ -2074,6 +2074,8 @@ pub(super) struct OpenCADStudio {
     pub(super) sdi: bool,
     /// The app asked to exit; a headless batch run stops there.
     pub(super) exit_requested: bool,
+    /// SIGTERM arrived: leave once the recovery copies are written.
+    pub(super) terminating: bool,
     /// One global interaction-index build at a time. Large drawings can each
     /// hold millions of entries, so file-open bursts must not multiply peak
     /// CPU and memory by the number of tabs.
@@ -5298,6 +5300,8 @@ pub enum Message {
     /// GitHub releases API returned a result. `Some(version)` means a
     /// newer release exists; we open the update-notice window.
     UpdateCheckResult(Option<crate::io::update_check::UpdateInfo>),
+    /// The process was asked to stop (SIGTERM).
+    Terminate,
     /// User dismissed the update-notice window.
     UpdateNoticeClose,
     DonationPromptDonate,
@@ -6333,6 +6337,7 @@ impl OpenCADStudio {
             script_paused: false,
             sdi: false,
             exit_requested: false,
+            terminating: false,
             active_interaction_index: None,
             queued_interaction_indices: std::collections::VecDeque::new(),
             pending_close: None,
@@ -6679,10 +6684,14 @@ impl OpenCADStudio {
         s.main_window = Some(id);
         tool_windows::set_main_window(id);
         let open_main = open_task.map(|_| Message::Noop);
-        let check_update = Task::perform(
-            crate::io::update_check::check_for_update(),
-            Message::UpdateCheckResult,
-        );
+        let check_update = if crate::config::managed() {
+            Task::none()
+        } else {
+            Task::perform(
+                crate::io::update_check::check_for_update(),
+                Message::UpdateCheckResult,
+            )
+        };
         let focus_cmd = s.focus_cmd_input();
         // Startup configuration from the command line (see `cli`). File
         // arguments — also how the OS file association launches us when

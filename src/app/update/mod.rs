@@ -12857,7 +12857,24 @@ impl OpenCADStudio {
             }
 
             #[cfg(not(target_arch = "wasm32"))]
-            Message::SaveFinished(outcome) => self.on_save_finished(outcome),
+            Message::SaveFinished(outcome) => {
+                let task = self.on_save_finished(outcome);
+                if self.terminating && self.active_save_jobs.is_empty() {
+                    return self.leave_keeping_recovery();
+                }
+                task
+            }
+            // A service manager stopping the program (a container closing at
+            // logout): unsaved work goes to the recovery copies, which are
+            // kept, and the program leaves once they are written.
+            Message::Terminate => {
+                self.terminating = true;
+                let task = self.on_autosave();
+                if self.active_save_jobs.is_empty() {
+                    return self.leave_keeping_recovery();
+                }
+                task
+            }
 
             #[cfg(target_arch = "wasm32")]
             Message::WebSaveScreenshot {

@@ -2073,6 +2073,13 @@ pub enum CmdResult {
         boundaries: Vec<EntityType>,
         entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     },
+    /// Commit one hatch, print `message` and keep the command at its prompt
+    /// (HATCH's drawn boundaries).
+    CommitHatchContinue {
+        hatch: HatchModel,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
+        message: String,
+    },
     /// Commit independently editable hatch entities for every selected region.
     CommitHatches {
         hatches: Vec<HatchModel>,
@@ -3800,6 +3807,12 @@ pub trait CadCommand: Send {
     /// HPGAPTOL as the command currently has it, so a gap tolerance changed
     /// at its prompt is kept for later boundary picks. Default `None`.
     fn hatch_gap_tolerance(&self) -> Option<f64> {
+        None
+    }
+
+    /// The boundary method HATCH was switched to (0 pick internal point,
+    /// 1 select objects, 2 draw), kept for its next start. Default `None`.
+    fn hatch_start_method(&self) -> Option<u8> {
         None
     }
 

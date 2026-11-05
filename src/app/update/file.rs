@@ -808,6 +808,7 @@ impl OpenCADStudio {
             aperture: self.snapper.osnap_radius_px,
             hatch_associative: self.hatch_associative,
             hatch_gap_tolerance: self.hatch_gap_tolerance,
+            hatch_start_method: self.hatch_start_method,
             show_menu_bar: self.show_menu_bar,
             ribbon_closed: self.ribbon_closed,
             options_tab: self.options_tab,
@@ -995,6 +996,7 @@ impl OpenCADStudio {
         if !(0.0..=max_gap).contains(&self.hatch_gap_tolerance) {
             self.hatch_gap_tolerance = 0.0;
         }
+        self.hatch_start_method = s.hatch_start_method.min(2);
         self.show_menu_bar = s.show_menu_bar;
         self.ribbon_closed = s.ribbon_closed;
         self.options_tab = s.options_tab;

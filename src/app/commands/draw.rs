@@ -979,7 +979,11 @@ impl OpenCADStudio {
                 let new_cmd = HatchCommand::new(boundary_sources, selected, inherited, plane)
                     .with_origin(self.tabs[i].scene.document.hatch_origin())
                     .with_associative(self.hatch_associative)
-                    .with_gap_tolerance(self.hatch_gap_tolerance);
+                    .with_gap_tolerance(self.hatch_gap_tolerance)
+                    .with_start_method(self.hatch_start_method);
+                if let Some(message) = new_cmd.start_message() {
+                    self.command_line.push_output(&message);
+                }
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);

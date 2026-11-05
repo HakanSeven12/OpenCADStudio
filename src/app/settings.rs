@@ -836,6 +836,9 @@ pub struct UserSettings {
     pub hatch_associative: bool,
     /// HPGAPTOL: largest boundary gap HATCH/BOUNDARY picks treat as closed.
     pub hatch_gap_tolerance: f64,
+    /// HATCH starts with the boundary method used last (0 pick internal
+    /// point, 1 select objects, 2 draw).
+    pub hatch_start_method: u8,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
@@ -1428,6 +1431,7 @@ impl Default for UserSettings {
             aperture: crate::snap::DEFAULT_OSNAP_RADIUS_PX,
             hatch_associative: true,
             hatch_gap_tolerance: 0.0,
+            hatch_start_method: 0,
             show_menu_bar: false,
             ribbon_closed: false,
             options_tab: crate::ui::window::options::OptionsTab::General,

@@ -3176,7 +3176,7 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                 panel.bg_color_picker_open = false;
                 panel.open_color_field = None;
                 panel.hatch_pattern_picker_open = false;
-                panel.edit_choice_open = false;
+                panel.edit_choice_open = None;
             }
             panel
         };

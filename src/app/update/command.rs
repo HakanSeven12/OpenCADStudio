@@ -2982,7 +2982,7 @@ impl OpenCADStudio {
             panel
                 .edit_buf
                 .remove(&crate::ui::properties::FieldKey::Geom(field));
-            panel.edit_choice_open = false;
+            panel.edit_choice_open = None;
             crate::scene::creation_style::current_transparency_label(transparency)
         } else {
             value
@@ -2997,7 +2997,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         if field == "ole_lock_aspect" {
             self.set_ole_lock_aspect(i, &value);
-            self.tabs[i].properties.edit_choice_open = false;
+            self.tabs[i].properties.edit_choice_open = None;
             return Task::none();
         }
         if field == "ext_pcx_locked" {
@@ -3011,7 +3011,7 @@ impl OpenCADStudio {
                     );
                 }
             });
-            self.tabs[i].properties.edit_choice_open = false;
+            self.tabs[i].properties.edit_choice_open = None;
             return Task::none();
         }
         let handles = self.property_target_handles(i);
@@ -3020,7 +3020,7 @@ impl OpenCADStudio {
         {
             self.command_line
                 .push_error(crate::app::properties::HELD_BY_FIXED);
-            self.tabs[i].properties.edit_choice_open = false;
+            self.tabs[i].properties.edit_choice_open = None;
             return Task::none();
         }
         // The Annotative Yes/No list drives the per-object annotative toggle
@@ -3155,7 +3155,7 @@ impl OpenCADStudio {
                         );
                     }
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "material" {
@@ -3199,7 +3199,7 @@ impl OpenCADStudio {
                         }
                     }
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "tol_text_style" {
@@ -3233,7 +3233,7 @@ impl OpenCADStudio {
                     self.invalidate_property_targets(i, &handles);
                     self.refresh_properties();
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field.starts_with("dim_") {
@@ -3264,7 +3264,7 @@ impl OpenCADStudio {
                         }
                     }
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "vscale_std" {
@@ -3278,7 +3278,7 @@ impl OpenCADStudio {
                             .set_viewport_scale_named_for(handle, &value);
                     }
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "vp_ucs_name" {
@@ -3306,7 +3306,7 @@ impl OpenCADStudio {
                     self.invalidate_property_targets(i, &handles);
                     self.refresh_properties();
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "vp_named_view" {
@@ -3335,7 +3335,7 @@ impl OpenCADStudio {
                     self.invalidate_property_targets(i, &handles);
                     self.refresh_properties();
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if crate::scene::model::solid_history::is_loft_geometry_choice(field) {
@@ -3349,7 +3349,7 @@ impl OpenCADStudio {
                         .scene
                         .apply_solid_history_property(handle, field, &value);
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == crate::scene::model::solid_history::PROP_OPERAND {
@@ -3361,7 +3361,7 @@ impl OpenCADStudio {
                         &value,
                     );
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 self.refresh_properties();
                 return Task::none();
             }
@@ -3374,7 +3374,7 @@ impl OpenCADStudio {
                         .scene
                         .apply_solid_history_choice(handle, field, &value);
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if crate::scene::model::solid_history::is_surface_property_choice(field) {
@@ -3420,7 +3420,7 @@ impl OpenCADStudio {
                         app.tabs[i].scene.reseed_derived_caches(handle);
                     }
                 });
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "tol_dim_style" {
@@ -3464,7 +3464,7 @@ impl OpenCADStudio {
                     self.invalidate_property_targets(i, &handles);
                     self.refresh_properties();
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "tbl_cell_border_lt" {
@@ -3492,7 +3492,7 @@ impl OpenCADStudio {
                         }
                     });
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             if field == "tbl_style_handle" {
@@ -3536,7 +3536,7 @@ impl OpenCADStudio {
                     self.invalidate_property_targets(i, &handles);
                     self.refresh_properties();
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 return Task::none();
             }
             self.push_undo_snapshot(i, "CHPROP");
@@ -3763,7 +3763,7 @@ impl OpenCADStudio {
             } else if field == "dyn_visibility" {
                 // A visibility state picked in Properties, applied like a
                 // pick from the reference's visibility grip.
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 for &handle in &handles {
                     let state = self.tabs[i]
                         .scene
@@ -3775,7 +3775,7 @@ impl OpenCADStudio {
                     }
                 }
             } else if field == "dyn_lookup" {
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 let mut changed = false;
                 for &handle in &handles {
                     if self.tabs[i].scene.is_layer_locked(handle) {
@@ -3807,7 +3807,7 @@ impl OpenCADStudio {
                     .properties
                     .edit_buf
                     .remove(&crate::ui::properties::FieldKey::Geom("block"));
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 let canon = self.tabs[i]
                     .scene
                     .document
@@ -4040,7 +4040,7 @@ impl OpenCADStudio {
             }
             self.invalidate_property_targets(i, &handles);
             self.tabs[i].dirty = true;
-            self.tabs[i].properties.edit_choice_open = false;
+            self.tabs[i].properties.edit_choice_open = None;
             if field == "spline_method" {
                 self.tabs[i].properties.prop_vertex = 0;
                 self.tabs[i].properties.prop_vertex_indicator_active = false;
@@ -4659,7 +4659,7 @@ impl OpenCADStudio {
                     // Name row on a block reference: an existing name
                     // re-points the selected inserts; a new one renames
                     // the definition they share. Commit closes the list.
-                    self.tabs[i].properties.edit_choice_open = false;
+                    self.tabs[i].properties.edit_choice_open = None;
                     self.apply_block_name_commit(i, &handles, val.trim());
                 } else if field == "frozen_layers" {
                     // Resolve layer names → handles, then apply to viewports.
@@ -5435,12 +5435,12 @@ mod transparency_property_tests {
             field: "transparency",
             value: "37".into(),
         });
-        app.tabs[i].properties.edit_choice_open = true;
+        app.tabs[i].properties.edit_choice_open = Some("transparency");
         let _ = app.update(Message::PropGeomChoiceChanged {
             field: "transparency",
             value: "50".into(),
         });
-        assert!(!app.tabs[i].properties.edit_choice_open);
+        assert!(app.tabs[i].properties.edit_choice_open.is_none());
         assert!(!app.tabs[i]
             .properties
             .edit_buf

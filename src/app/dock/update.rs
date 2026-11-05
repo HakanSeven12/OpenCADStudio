@@ -490,7 +490,7 @@ impl OpenCADStudio {
             || tab.properties.bg_color_picker_open
             || tab.properties.open_color_field.is_some()
             || tab.properties.hatch_pattern_picker_open
-            || tab.properties.edit_choice_open
+            || tab.properties.edit_choice_open.is_some()
             || tab.properties.open_block_picker.is_some()
             || tab.properties.open_choice.is_some()
             || self.color_picker.is_some()

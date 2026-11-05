@@ -648,8 +648,9 @@ pub struct PropertiesPanel {
     /// app-wide preference, allowing every open document panel to share it.
     /// Empty by default, meaning every section is initially shown.
     pub collapsed_sections: HashSet<String>,
-    /// Whether the editable-dropdown (block Name) option list is open.
-    pub edit_choice_open: bool,
+    /// The editable-dropdown row (block Name, Transparency) whose option list
+    /// is open, by field.
+    pub edit_choice_open: Option<&'static str>,
     /// The open dynamic-value list (block table / flip / lookup), as its row
     /// and whether it belongs to the Quick Properties surface — the same row
     /// is instantiated on both surfaces, so the pair tells them apart.
@@ -702,7 +703,7 @@ impl Default for PropertiesPanel {
             prop_vertex_indicator_active: false,
             expanded_groups: HashSet::default(),
             collapsed_sections: HashSet::default(),
-            edit_choice_open: false,
+            edit_choice_open: None,
             open_block_picker: None,
             open_choice: None,
             picker_in_quick: false,
@@ -741,7 +742,7 @@ impl PropertiesPanel {
         self.open_color_field = None;
         self.hatch_pattern_picker_open = false;
         self.hatch_pattern_search.clear();
-        self.edit_choice_open = false;
+        self.edit_choice_open = None;
         self.open_block_picker = None;
         self.open_choice = None;
     }
@@ -1588,15 +1589,16 @@ impl PropertiesPanel {
                 right: 2.0,
             })
             .width(Length::Fill);
+        let open = self.edit_choice_open == Some(field) && self.picker_here();
         let caret = button(
-            container(if self.edit_choice_open && self.picker_here() {
+            container(if open {
                 crate::ui::icons::themed_arrow_up(9.0)
             } else {
                 crate::ui::icons::themed_arrow_down(9.0)
             })
             .align_y(iced::Center),
         )
-        .on_press(Message::PropEditChoiceToggle)
+        .on_press(Message::PropEditChoiceToggle(field))
         .style(|theme: &Theme, status| {
             let palette = theme.palette();
             let bg = match status {
@@ -1676,7 +1678,7 @@ impl PropertiesPanel {
             .selected(initial_selected)
             .select_first_by_default(select_first)
             .query(filter.unwrap_or_default())
-            .on_escape(Message::PropEditChoiceToggle);
+            .on_escape(Message::PropEditChoiceToggle(field));
         let popup = container(list)
             .style(container::bordered_box)
             .padding(2);
@@ -1688,8 +1690,8 @@ impl PropertiesPanel {
                 popup.into(),
                 None,
                 Length::Shrink,
-                Message::PropEditChoiceToggle,
-                self.edit_choice_open && self.picker_here(),
+                Message::PropEditChoiceToggle(field),
+                open,
             ),
             active,
         )
@@ -2650,7 +2652,7 @@ mod tests {
         input_state(&mut tree).focus();
         drop(row);
         for open in [true, false, true] {
-            panel.edit_choice_open = open;
+            panel.edit_choice_open = open.then_some("transparency");
             let mut row =
                 panel.render_edit_choice_row("Transparency", "transparency", "ByLayer", &options);
             tree.diff(row.as_widget_mut());
@@ -2790,7 +2792,7 @@ fn tag_picker(quick: bool, message: Message) -> Message {
         Message::PropColorPickerToggle
         | Message::PropBgColorPickerToggle
         | Message::PropColorFieldToggle(_)
-        | Message::PropEditChoiceToggle
+        | Message::PropEditChoiceToggle(_)
         | Message::PropHatchPatternPickerToggle(_) => {
             Message::PropPickerSurface(quick, Box::new(message))
         }

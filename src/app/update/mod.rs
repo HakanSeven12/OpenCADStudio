@@ -9615,35 +9615,18 @@ impl OpenCADStudio {
                 Task::none()
             }
 
-            Message::PropEditChoiceToggle => {
+            Message::PropEditChoiceToggle(field) => {
                 let panel = &mut self.tabs[self.active_tab].properties;
-                let opening = !panel.edit_choice_open;
+                let opening = panel.edit_choice_open != Some(field);
                 if opening {
                     panel.close_popups();
                 }
-                panel.edit_choice_open = opening;
+                panel.edit_choice_open = opening.then_some(field);
                 if opening {
                     self.block_picker_dismissed = false;
-                    let active_edit_choice = panel.active_field.as_ref().and_then(|k| match k {
-                        crate::ui::properties::FieldKey::Geom(f) => Some(*f),
-                        _ => None,
-                    });
-                    let field_to_focus = active_edit_choice.or_else(|| {
-                        panel.sections.iter().find_map(|sec| {
-                            sec.props.iter().find_map(|p| {
-                                matches!(
-                                    p.value,
-                                    crate::scene::model::object::PropValue::EditChoice { .. }
-                                )
-                                .then_some(p.field)
-                            })
-                        })
-                    });
-                    if let Some(field) = field_to_focus {
-                        return iced::widget::operation::focus(
-                            crate::ui::properties::prop_geom_field_id(field),
-                        );
-                    }
+                    return iced::widget::operation::focus(
+                        crate::ui::properties::prop_geom_field_id(field),
+                    );
                 }
                 Task::none()
             }

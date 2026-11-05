@@ -93,7 +93,7 @@ impl OpenCADStudio {
                     self.tabs[i].dirty = true;
                     self.finish_pending_history(i);
                 }
-                self.tabs[i].properties.edit_choice_open = false;
+                self.tabs[i].properties.edit_choice_open = None;
                 self.refresh_properties();
             }
             Err(error) => self.command_line.push_error(crate::t!(error).as_ref()),

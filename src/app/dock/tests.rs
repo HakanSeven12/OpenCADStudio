@@ -993,7 +993,7 @@ fn drop_down_below_in_an_offset_scrollable() -> (iced::Rectangle, iced::Rectangl
             list.into(),
             None,
             iced::Length::Shrink,
-            Message::PropEditChoiceToggle,
+            Message::PropEditChoiceToggle("transparency"),
         );
         let pallet = scrollable(column![Space::new().height(300), dd]).height(500);
         row![

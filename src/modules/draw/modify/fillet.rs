@@ -3436,12 +3436,86 @@ mod tests {
         command.dist2 = 0.0;
         command.trim = false;
         command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
-        assert!(matches!(
-            command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
-            CmdResult::ReportError(_)
-        ));
+        match command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)) {
+            CmdResult::ReportError(message) => assert_eq!(message, NO_TRIM_CHAMFER_ZERO),
+            _ => panic!("zero-distance no-trim CHAMFER should report an error"),
+        }
         assert!(matches!(command.step, ChamferStep::First));
         assert_eq!(command.all_entities.len(), 2, "nothing was added");
+    }
+
+    fn wire_names(wires: &[WireModel]) -> Vec<&str> {
+        wires.iter().map(|w| w.name.as_str()).collect()
+    }
+
+    #[test]
+    fn chamfer_preview_shows_a_cut_line_only_for_nonzero_distances() {
+        let preview = |dist: f64, trim: bool| {
+            let mut command = ChamferCommand::new(dist, open_corner());
+            command.dist2 = dist;
+            command.trim = trim;
+            command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
+            assert!(matches!(command.step, ChamferStep::Second { .. }));
+            command.on_hover_entity(Handle::new(2), DVec3::new(0.0, 5.0, 0.0))
+        };
+        assert_eq!(wire_names(&preview(0.0, true)), ["chamfer_l1", "chamfer_l2"]);
+        assert!(wire_names(&preview(0.0, false)).is_empty());
+        assert_eq!(
+            wire_names(&preview(1.0, true)),
+            ["chamfer_l1", "chamfer_l2", "chamfer_line"]
+        );
+        assert_eq!(wire_names(&preview(1.0, false)), ["chamfer_line"]);
+    }
+
+    #[test]
+    fn zero_radius_polyline_fillet_keeps_a_single_corner_vertex() {
+        let mut poly = LwPolyline::new();
+        poly.add_point(codec::types::Vector2::new(0.0, 0.0));
+        poly.add_point(codec::types::Vector2::new(10.0, 0.0));
+        poly.add_point(codec::types::Vector2::new(10.0, 10.0));
+        poly.common.handle = Handle::new(3);
+        let assert_sharp_corner = |out: &LwPolyline| {
+            let points: Vec<[f64; 2]> =
+                out.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+            assert_eq!(points.len(), 3, "no duplicate corner vertex: {points:?}");
+            for (got, want) in points.iter().zip([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]) {
+                assert!(
+                    (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
+                    "{points:?}"
+                );
+            }
+            assert!(out.vertices.iter().all(|v| v.bulge.abs() < 1e-12));
+        };
+
+        // The corner rebuild itself, before the command's zero-length cleanup.
+        let h = Handle::new(3);
+        let e1 = FilletEntity::from_lwpoly(&poly, h, [5.0, 0.0]);
+        let e2 = FilletEntity::from_lwpoly(&poly, h, [10.0, 5.0]);
+        let Some((EntityType::LwPolyline(rebuilt), _, None)) =
+            compute_fillet_entities(&e1, [5.0, 0.0], &e2, [10.0, 5.0], 0.0)
+        else {
+            panic!("zero-radius polyline corner fillet should rebuild the polyline")
+        };
+        assert_sharp_corner(&rebuilt);
+
+        // Through the public command.
+        let mut command = FilletCommand::new(0.0, vec![EntityType::LwPolyline(poly)]);
+        assert!(matches!(
+            command.on_entity_pick(h, DVec3::new(5.0, 0.0, 0.0)),
+            CmdResult::NeedPoint
+        ));
+        match command.on_entity_pick(h, DVec3::new(10.0, 5.0, 0.0)) {
+            CmdResult::ReplaceMany(replacements, additions) => {
+                assert!(additions.is_empty(), "{additions:?}");
+                assert_eq!(replacements.len(), 1);
+                assert_eq!(replacements[0].0, h);
+                let [EntityType::LwPolyline(out)] = replacements[0].1.as_slice() else {
+                    panic!("one polyline and no fillet arc: {:?}", replacements[0].1)
+                };
+                assert_sharp_corner(out);
+            }
+            _ => panic!("zero-radius FILLET should replace the polyline"),
+        }
     }
 
     #[test]

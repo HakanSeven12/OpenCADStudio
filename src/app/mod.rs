@@ -1136,6 +1136,8 @@ pub(super) struct OpenCADStudio {
     pub dim_inspect_settings: settings::DimInspectSettings,
     /// The Text to MText Settings dialog's working copy.
     txt2mtxt_dialog: Option<settings::Txt2MtxtSettings>,
+    /// MATCHPROP's Property Settings window.
+    matchprop_dialog: Option<crate::ui::window::pdf_dialogs::MatchPropDialog>,
     /// Check Spelling (profile) and its open window.
     pub spell_prefs: settings::SpellPrefs,
     spell: Option<crate::ui::window::spell_dialog::SpellState>,
@@ -3075,6 +3077,8 @@ pub enum ModalKind {
     PdfImportSettings,
     /// TXT2MTXT's Text to MText Settings, over the running command.
     Txt2MtxtSettings,
+    /// MATCHPROP's Property Settings, over the running command.
+    MatchPropSettings,
     Spell,
     PdfImportFile,
     XrefAttach,
@@ -6042,6 +6046,7 @@ impl OpenCADStudio {
             spell: None,
             dim_inspect_settings: settings::DimInspectSettings::default(),
             txt2mtxt_dialog: None,
+            matchprop_dialog: None,
             auto_constrain_saved: None,
             auto_constrain_selected_row: 0,
             auto_constrain_distance_input: "0.05".to_string(),

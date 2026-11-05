@@ -8,11 +8,16 @@
 /// strings, block names) or placement (positions, rotations of the object
 /// itself). Text formatting crosses TEXT ↔ MTEXT; the dimension style crosses
 /// Dimension / Leader / Tolerance.
-pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType) {
+pub fn match_special_props(
+    src: &codec::EntityType,
+    dst: &mut codec::EntityType,
+    opts: &MatchOpts,
+) {
     use codec::EntityType as E;
 
     // Text-ish source formatting.
     let text_fmt = match src {
+        _ if !opts.has(MatchOpts::TEXT) => None,
         E::Text(t) => Some((
             t.style.clone(),
             t.height,
@@ -74,7 +79,7 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
         }
     }
     // MText-only extras (line spacing, background fill).
-    if let (E::MText(sm), E::MText(dm)) = (src, dst as &mut E) {
+    if let (true, E::MText(sm), E::MText(dm)) = (opts.has(MatchOpts::TEXT), src, dst as &mut E) {
         dm.drawing_direction = sm.drawing_direction;
         dm.line_spacing_factor = sm.line_spacing_factor;
         dm.line_spacing_style = sm.line_spacing_style;
@@ -86,6 +91,7 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
 
     // Dimension style name crosses the three dim-styled families.
     let dim_style = match src {
+        _ if !opts.has(MatchOpts::DIM) => None,
         E::Dimension(d) => Some(d.base().style_name.clone()),
         E::Leader(l) => Some(l.dimension_style.clone()),
         E::Tolerance(t) => Some(t.dimension_style_name.clone()),
@@ -101,7 +107,7 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
     }
 
     // Hatch pattern / gradient — everything but the boundary.
-    if let (E::Hatch(sh), E::Hatch(dh)) = (src, dst as &mut E) {
+    if let (true, E::Hatch(sh), E::Hatch(dh)) = (opts.has(MatchOpts::HATCH), src, dst as &mut E) {
         dh.pattern = sh.pattern.clone();
         dh.pattern_type = sh.pattern_type;
         dh.pattern_angle = sh.pattern_angle;
@@ -115,11 +121,13 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
     // Polyline display style crosses lightweight and legacy 2D polylines.
     // Per-vertex/tapered widths are resampled over the destination vertices;
     // they must not be flattened into the source's constant-width field.
-    if let Some(style) = PolylineMatchStyle::from_entity(src) {
+    if let Some(style) =
+        PolylineMatchStyle::from_entity(src).filter(|_| opts.has(MatchOpts::POLYLINE))
+    {
         style.apply_to(dst);
     }
 
-    if let (E::Leader(sl), E::Leader(dl)) = (src, dst as &mut E) {
+    if let (true, E::Leader(sl), E::Leader(dl)) = (opts.has(MatchOpts::DIM), src, dst as &mut E) {
         dl.arrow_enabled = sl.arrow_enabled;
         dl.path_type = sl.path_type;
         dl.hookline_direction = sl.hookline_direction;
@@ -130,7 +138,9 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
         dl.arrow_size = sl.arrow_size;
         dl.byblock_color = sl.byblock_color;
     }
-    if let (E::Tolerance(st), E::Tolerance(dt)) = (src, dst as &mut E) {
+    if let (true, E::Tolerance(st), E::Tolerance(dt)) =
+        (opts.has(MatchOpts::DIM), src, dst as &mut E)
+    {
         dt.dimension_style_handle = st.dimension_style_handle;
         dt.text_height = st.text_height;
         dt.dimension_gap = st.dimension_gap;
@@ -138,7 +148,9 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
 
     // Paper-space geometry and view position stay; viewport display/plot
     // styling and effective scale follow the source.
-    if let (E::Viewport(sv), E::Viewport(dv)) = (src, dst as &mut E) {
+    if let (true, E::Viewport(sv), E::Viewport(dv)) =
+        (opts.has(MatchOpts::VIEWPORT), src, dst as &mut E)
+    {
         let scale = crate::scene::vp_effective_scale(sv.custom_scale, sv.view_height, sv.height);
         dv.custom_scale = scale;
         if scale.abs() > 1e-9 {
@@ -159,7 +171,7 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
         dv.ambient_color = sv.ambient_color;
     }
 
-    if let (E::Table(st), E::Table(dt)) = (src, dst as &mut E) {
+    if let (true, E::Table(st), E::Table(dt)) = (opts.has(MatchOpts::TABLE), src, dst as &mut E) {
         dt.table_style_handle = st.table_style_handle;
         dt.base_style = st.base_style.clone();
         dt.override_flag = st.override_flag;
@@ -187,7 +199,9 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
 
     // MultiLeader style + every style-affecting override; content and
     // geometry (leader points, text, block handle) stay.
-    if let (E::MultiLeader(sm), E::MultiLeader(dm)) = (src, dst as &mut E) {
+    if let (true, E::MultiLeader(sm), E::MultiLeader(dm)) =
+        (opts.has(MatchOpts::MLEADER), src, dst as &mut E)
+    {
         dm.style_handle = sm.style_handle;
         dm.path_type = sm.path_type;
         dm.line_color = sm.line_color;
@@ -281,6 +295,34 @@ pub fn match_special_props(src: &codec::EntityType, dst: &mut codec::EntityType)
         du.contrast = su.contrast;
         du.fade = su.fade;
         du.clip_inverted = su.clip_inverted;
+    }
+
+    // Centre marks: size, gap, extension and whether extensions show; the
+    // source circle, rotation and grip-adjusted lengths stay. A relative
+    // size or gap keeps its ratio to the destination's own diameter.
+    // Centre lines are rebuilt from their source lines caller-side.
+    if let (true, E::Line(sl), E::Line(dl)) = (opts.has(MatchOpts::CENTER), src, dst as &mut E) {
+        use codec::entities::CenterMarkAssociation as Mark;
+        if let (Some(s), Some(mut d)) = (
+            Mark::read(&sl.common.extended_data),
+            Mark::read(&dl.common.extended_data),
+        ) {
+            let (sd, dd) = (s.radius * 2.0, d.radius * 2.0);
+            let scaled = |value: f64, relative: bool| {
+                if relative && sd > 1.0e-12 {
+                    value / sd * dd
+                } else {
+                    value
+                }
+            };
+            d.cross_size = scaled(s.cross_size, s.cross_size_relative);
+            d.cross_gap = scaled(s.cross_gap, s.cross_gap_relative);
+            d.cross_size_relative = s.cross_size_relative;
+            d.cross_gap_relative = s.cross_gap_relative;
+            d.extension_length = s.extension_length;
+            d.show_extensions = s.show_extensions;
+            crate::scene::centermark::update_carrier(dl, &d);
+        }
     }
 }
 
@@ -458,39 +500,83 @@ pub fn match_layer_kernel(
     Ok(count)
 }
 
-/// MATCHPROP per-pair transfer switches. The entity-level transfers
-/// (`copy_common`, `copy_thickness`, `copy_special`) run inside
-/// [`match_properties_kernel`]; the document-level transfers
-/// (`copy_hatch_background`, `copy_dim_overrides`) stay caller-side in
-/// `handle_match_properties` (they need `&mut Document` for
-/// `set_entity_xdata` / `dim_override::replace`) but are gated by the same
-/// flags so headless callers and the handler agree on what "match" means.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MatchOpts {
-    /// Layer, color, lineweight, linetype (+handle/scale), transparency,
-    /// color name/book, visual styles, material, shadow, plotstyle.
-    pub copy_common: bool,
-    /// Extrusion thickness (DXF 39) where the destination carries one.
-    pub copy_thickness: bool,
-    /// Style-affecting fields via [`match_special_props`] (text formatting,
-    /// dim style, hatch pattern/gradient, polyline widths, …).
-    pub copy_special: bool,
-    /// Hatch background colour (`HATCHBACKGROUNDCOLOR` xdata). Caller-side.
-    pub copy_hatch_background: bool,
-    /// Dimension-style overrides (`DSTYLE` xdata payload). Caller-side.
-    pub copy_dim_overrides: bool,
+/// MATCHMODE: which properties MATCHPROP transfers, one bit each. A
+/// profile value, kept here so the kernel, the hover preview and the
+/// command read the same one.
+static MATCH_MODE: std::sync::atomic::AtomicU32 =
+    std::sync::atomic::AtomicU32::new(MatchOpts::DEFAULT_MODE);
+
+pub fn match_mode() -> u32 {
+    MATCH_MODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+pub fn set_match_mode(mode: u32) {
+    MATCH_MODE.store(mode & MatchOpts::ALL_BITS, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// MATCHPROP transfer switches: the MATCHMODE bitmask. The entity-level
+/// transfers run inside [`match_properties_kernel`]; the document-level
+/// ones (hatch background, dimension overrides, centre line rebuild) stay
+/// caller-side in `handle_match_properties` under the same bits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatchOpts(pub u32);
+
 impl MatchOpts {
-    /// Every transfer enabled — the interactive MATCHPROP behaviour.
+    pub const COLOR: u32 = 1;
+    pub const LAYER: u32 = 2;
+    pub const LTYPE: u32 = 4;
+    pub const THICKNESS: u32 = 8;
+    pub const LTSCALE: u32 = 16;
+    pub const TEXT: u32 = 32;
+    pub const DIM: u32 = 64;
+    pub const HATCH: u32 = 128;
+    pub const LINEWEIGHT: u32 = 256;
+    pub const PLOTSTYLE: u32 = 512;
+    pub const POLYLINE: u32 = 1024;
+    pub const VIEWPORT: u32 = 2048;
+    pub const TABLE: u32 = 4096;
+    pub const MATERIAL: u32 = 8192;
+    // 16384 has no switch of its own; it is kept as stored.
+    pub const MLEADER: u32 = 32768;
+    pub const TRANSPARENCY: u32 = 65536;
+    pub const CENTER: u32 = 131072;
+    pub const ALL_BITS: u32 = 262143;
+    /// Everything but the plot style.
+    pub const DEFAULT_MODE: u32 = 261631;
+
+    /// The order and names of the settings line (command-line tokens).
+    pub const NAMES: [(u32, &'static str); 17] = [
+        (Self::COLOR, "Color"),
+        (Self::LAYER, "Layer"),
+        (Self::LTYPE, "Ltype"),
+        (Self::LTSCALE, "Ltscale"),
+        (Self::LINEWEIGHT, "Lineweight"),
+        (Self::TRANSPARENCY, "Transparency"),
+        (Self::THICKNESS, "Thickness"),
+        (Self::PLOTSTYLE, "PlotStyle"),
+        (Self::DIM, "Dim"),
+        (Self::TEXT, "Text"),
+        (Self::HATCH, "Hatch"),
+        (Self::POLYLINE, "Polyline"),
+        (Self::VIEWPORT, "Viewport"),
+        (Self::TABLE, "Table"),
+        (Self::MATERIAL, "Material"),
+        (Self::MLEADER, "Multileader"),
+        (Self::CENTER, "Center object"),
+    ];
+
+    /// Every transfer enabled — what pasting with properties uses.
     pub fn all() -> Self {
-        Self {
-            copy_common: true,
-            copy_thickness: true,
-            copy_special: true,
-            copy_hatch_background: true,
-            copy_dim_overrides: true,
-        }
+        Self(Self::ALL_BITS)
+    }
+
+    /// The MATCHMODE in force.
+    pub fn current() -> Self {
+        Self(match_mode())
+    }
+
+    pub fn has(&self, bit: u32) -> bool {
+        self.0 & bit != 0
     }
 }
 
@@ -498,6 +584,17 @@ impl Default for MatchOpts {
     fn default() -> Self {
         Self::all()
     }
+}
+
+/// `Current active settings:  Color Layer … ` — the enabled names in their
+/// fixed order, two spaces after the colon and one after the list.
+pub fn active_settings_line(mode: u32) -> String {
+    let names: Vec<&str> = MatchOpts::NAMES
+        .iter()
+        .filter(|(bit, _)| mode & bit != 0)
+        .map(|(_, name)| *name)
+        .collect();
+    format!("{}  {} ", crate::t!("Current active settings:"), names.join(" "))
 }
 
 /// MATCHPROP kernel: transfer the source entity's properties onto one
@@ -512,41 +609,54 @@ pub fn match_properties_kernel(
     dst: &mut codec::EntityType,
     opts: &MatchOpts,
 ) {
-    if opts.copy_common {
-        let common = src.common().clone();
+    let common = src.common().clone();
+    if opts.has(MatchOpts::LAYER) {
         dst.as_entity_mut().set_layer(common.layer.clone());
+    }
+    if opts.has(MatchOpts::COLOR) {
         crate::scene::view::dispatch::apply_color(dst, common.color);
+        let dst_common = dst.common_mut();
+        dst_common.color_name = common.color_name.clone();
+        dst_common.color_book_handle = common.color_book_handle;
+    }
+    if opts.has(MatchOpts::LINEWEIGHT) {
         crate::scene::view::dispatch::apply_line_weight(dst, common.line_weight);
-        {
-            let dst_common = dst.common_mut();
+    }
+    {
+        let dst_common = dst.common_mut();
+        if opts.has(MatchOpts::LTYPE) {
             dst_common.linetype = common.linetype.clone();
             dst_common.linetype_handle = common.linetype_handle;
+        }
+        if opts.has(MatchOpts::LTSCALE) {
             dst_common.linetype_scale = common.linetype_scale;
+        }
+        if opts.has(MatchOpts::TRANSPARENCY) {
             dst_common.transparency = common.transparency;
-            dst_common.color_name = common.color_name.clone();
-            dst_common.color_book_handle = common.color_book_handle;
+        }
+        // Visual styles and shadows ride with the material: all three say
+        // how the object renders.
+        if opts.has(MatchOpts::MATERIAL) {
+            dst_common.material_flags = common.material_flags;
+            dst_common.material_handle = common.material_handle;
             dst_common.full_visual_style_handle = common.full_visual_style_handle;
             dst_common.face_visual_style_handle = common.face_visual_style_handle;
             dst_common.edge_visual_style_handle = common.edge_visual_style_handle;
-            dst_common.material_flags = common.material_flags;
-            dst_common.material_handle = common.material_handle;
             dst_common.shadow_flags = common.shadow_flags;
+        }
+        if opts.has(MatchOpts::PLOTSTYLE) {
             dst_common.plotstyle_flags = common.plotstyle_flags;
             dst_common.plotstyle_handle = common.plotstyle_handle;
         }
     }
-    if opts.copy_thickness {
+    if opts.has(MatchOpts::THICKNESS) {
         if let Some(value) = crate::scene::view::dispatch::entity_thickness(src) {
             crate::scene::view::dispatch::set_entity_thickness(dst, value);
         }
     }
-    if opts.copy_special {
-        match_special_props(src, dst);
-    }
-    // `copy_hatch_background` / `copy_dim_overrides` are intentionally not
-    // applied here: both ride xdata records through `&mut Document`
-    // (`set_entity_xdata`, `dim_override::replace`). The handler checks the
-    // same flags before running those paths.
+    match_special_props(src, dst, opts);
+    // The hatch background and dimension overrides ride xdata through
+    // `&mut Document`; the handler applies them under the same bits.
 }
 
 #[cfg(test)]
@@ -669,13 +779,7 @@ mod match_properties_kernel_tests {
     fn respects_disabled_common_and_special_flags() {
         let src = line_src();
         let mut dst = line_dst();
-        let opts = MatchOpts {
-            copy_common: false,
-            copy_thickness: true,
-            copy_special: false,
-            copy_hatch_background: false,
-            copy_dim_overrides: false,
-        };
+        let opts = MatchOpts(MatchOpts::THICKNESS);
 
         match_properties_kernel(&src, &mut dst, &opts);
 

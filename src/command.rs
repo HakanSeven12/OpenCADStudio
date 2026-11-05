@@ -2295,6 +2295,10 @@ pub enum CmdResult {
     /// Opens the Text to MText Settings dialog from TXT2MTXT's selection
     /// prompt; the command keeps its prompt.
     OpenTxt2MtxtSettings,
+    /// Opens the Property Settings window from MATCHPROP's destination
+    /// prompt, showing this source object's values; the command keeps its
+    /// prompt.
+    OpenMatchPropSettings(Handle),
     /// Opens the Auto Constrain settings dialog from the selection prompt.
     OpenAutoConstrainSettings,
     /// Adds an ordered Coincident relation.  Point/point selections create a

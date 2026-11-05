@@ -76,6 +76,7 @@ impl OpenCADStudio {
             Some(K::UnderlayLayers) => crate::t!("Underlay Layers").into_owned(),
             Some(K::PdfImportSettings) => crate::t!("PDF Import Settings").into_owned(),
             Some(K::Txt2MtxtSettings) => crate::tr!("txt2mtxt", "title"),
+            Some(K::MatchPropSettings) => crate::tr!("matchprop-settings", "title"),
             Some(K::Spell) => crate::ui::window::spell_dialog::title(),
             Some(K::PdfImportFile) => crate::t!("Import PDF").into_owned(),
             Some(K::ImportFile) => crate::t!("Import File").into_owned(),
@@ -628,6 +629,12 @@ impl OpenCADStudio {
                 let settings = self.txt2mtxt_dialog.as_ref()?;
                 sized_flow(ex, 600, 470, |flow| {
                     crate::ui::window::pdf_dialogs::view_txt2mtxt_settings(settings, flow)
+                })
+            }
+            super::super::ModalKind::MatchPropSettings => {
+                let state = self.matchprop_dialog.as_ref()?;
+                sized_flow(ex, 560, 520, |flow| {
+                    crate::ui::window::pdf_dialogs::view_matchprop_settings(state, flow)
                 })
             }
             super::super::ModalKind::PdfImportFile => {

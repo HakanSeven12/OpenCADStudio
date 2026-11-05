@@ -360,6 +360,59 @@ impl OpenCADStudio {
         self.active_modal = Some(crate::app::ModalKind::Txt2MtxtSettings);
     }
 
+    /// MATCHPROP's Settings option: the Property Settings window over the
+    /// running command, with the source object's basic values.
+    pub(in crate::app) fn open_matchprop_settings(&mut self, src: codec::Handle) {
+        use codec::types::Color;
+        let doc = &self.tabs[self.active_tab].scene.document;
+        let Some(entity) = doc.get_entity(src) else {
+            return;
+        };
+        let common = entity.common();
+        let swatch = match common.color {
+            Color::ByLayer => doc.layers.get(&common.layer).and_then(|layer| layer.color.rgb()),
+            Color::ByBlock => None,
+            color => color.rgb(),
+        }
+        .map(|(r, g, b)| [r, g, b]);
+        let plot_style = !doc.header.plotstyle_mode;
+        let values = [
+            crate::ui::window::attman_dialog::color_label(common.color),
+            common.layer.clone(),
+            if common.linetype.is_empty() {
+                "ByLayer".to_string()
+            } else {
+                common.linetype.clone()
+            },
+            crate::entities::common::format_decimal(common.linetype_scale),
+            crate::ui::window::attman_dialog::lineweight_label(common.line_weight),
+            match common.transparency {
+                codec::Transparency::ByLayer => "ByLayer".to_string(),
+                codec::Transparency::ByBlock => "ByBlock".to_string(),
+                codec::Transparency::Explicit(alpha) => {
+                    ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
+                }
+            },
+            crate::entities::common::format_decimal(
+                crate::scene::view::dispatch::entity_thickness(entity).unwrap_or(0.0),
+            ),
+            match (plot_style, common.plotstyle_flags) {
+                (false, _) => "ByColor",
+                (true, 0) => "ByLayer",
+                (true, 1) => "ByBlock",
+                _ => "Normal",
+            }
+            .to_string(),
+        ];
+        self.matchprop_dialog = Some(crate::ui::window::pdf_dialogs::MatchPropDialog {
+            mode: crate::entities::match_props::match_mode(),
+            values,
+            swatch,
+            plot_style,
+        });
+        self.active_modal = Some(crate::app::ModalKind::MatchPropSettings);
+    }
+
     /// PDFIMPORT's File option after the file is chosen; an encrypted file
     /// asks for its password first.
     pub(in crate::app) fn open_pdf_import_file(&mut self, path: &str) -> Task<Message> {
@@ -461,6 +514,9 @@ impl OpenCADStudio {
                     }
                     "layers" => crate::t!("Turns the layers of a PDF underlay on or off."),
                     "txt2mtxt" => std::borrow::Cow::Owned(crate::tr!("txt2mtxt", "help")),
+                    "matchprop" => {
+                        std::borrow::Cow::Owned(crate::tr!("matchprop-settings", "help"))
+                    }
                     _ => crate::t!("Imports the geometry, fills, raster images and text of a PDF file as drawing objects."),
                 };
                 self.command_line.push_info(text.as_ref());
@@ -772,6 +828,41 @@ impl OpenCADStudio {
                         self.txt2mtxt_settings = s;
                         self.save_config();
                     }
+                }
+                self.close_active_modal();
+            }
+
+            // ── Property Settings (MATCHPROP) ─────────────────────────────
+            PdfDialogMsg::MpToggle(bit) => {
+                if let Some(s) = self.matchprop_dialog.as_mut() {
+                    if s.switchable() & bit != 0 {
+                        s.mode ^= bit;
+                    }
+                }
+            }
+            PdfDialogMsg::MpAll => {
+                if let Some(s) = self.matchprop_dialog.as_mut() {
+                    s.mode |= s.switchable();
+                }
+            }
+            PdfDialogMsg::MpNone => {
+                if let Some(s) = self.matchprop_dialog.as_mut() {
+                    s.mode &= !s.switchable();
+                }
+            }
+            // The settings line again, then (on close) the destination
+            // prompt; the command goes on with the new set.
+            PdfDialogMsg::MpOk => {
+                if let Some(s) = &self.matchprop_dialog {
+                    let mode = s.mode;
+                    if mode != crate::entities::match_props::match_mode() {
+                        crate::entities::match_props::set_match_mode(mode);
+                        self.save_config();
+                    }
+                    self.command_line.push_output(
+                        &crate::entities::match_props::active_settings_line(mode),
+                    );
+                    self.refresh_active_cmd_preview(i);
                 }
                 self.close_active_modal();
             }

@@ -996,6 +996,7 @@ impl OpenCADStudio {
                     | "REVCLOUDARCVARIANCE"
                     | "REVCLOUDGRIPS"
                     | "GROUPDISPLAYMODE"
+                    | "MATCHMODE"
                     | "REVCLOUDAPPROXARCLEN"
                     | "PELLIPSE"
                     | "SELECTIONCYCLING"
@@ -1120,6 +1121,10 @@ impl OpenCADStudio {
                     }
                     if name == "GROUPDISPLAYMODE" {
                         self.group_display_setvar(value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "MATCHMODE" {
+                        self.match_mode_setvar(value.as_deref());
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name.starts_with("REVCLOUD") {

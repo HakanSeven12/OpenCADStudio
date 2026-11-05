@@ -1043,6 +1043,14 @@ impl OpenCADStudio {
                     None => codec::Handle::NULL,
                 };
                 let cmd = MatchPropCommand::new(src).with_last(last);
+                if !src.is_null() {
+                    self.command_line.push_output(
+                        &crate::entities::match_props::active_settings_line(
+                            crate::entities::match_props::match_mode(),
+                        ),
+                    );
+                    self.command_line.set_step_options(cmd.options());
+                }
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
                 self.refresh_active_cmd_preview(i);

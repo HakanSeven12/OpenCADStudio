@@ -208,13 +208,13 @@ fn name_of(doc: &Document, handle: Handle) -> String {
 }
 
 #[test]
-fn a_parameter_name_defaults_to_the_next_free_type_number() {
+fn a_parameter_name_leaves_the_first_of_its_type_unnumbered() {
     let (mut doc, def, handles) = fixture();
     let polar = handles[2];
-    assert_eq!(name_of(&doc, polar), "Polar1");
+    assert_eq!(name_of(&doc, polar), "Polar");
     assert_eq!(
         next_parameter_name(&doc, def, "Polar"),
-        Ok("Polar2".to_owned())
+        Ok("Polar1".to_owned())
     );
     assert_eq!(set_parameter_name(&mut doc, def, polar, "P9"), Ok(true));
     assert_eq!(
@@ -224,13 +224,27 @@ fn a_parameter_name_defaults_to_the_next_free_type_number() {
 }
 
 #[test]
-fn a_parameter_name_starts_at_one_without_an_authoring_graph() {
+fn a_taken_offered_name_falls_back_to_the_first_free_number() {
+    let (mut doc, def, handles) = fixture();
+    assert_eq!(
+        set_parameter_name(&mut doc, def, handles[1], "Polar1"),
+        Ok(true)
+    );
+    assert_eq!(
+        next_parameter_name(&doc, def, "Polar"),
+        Ok("Polar2".to_owned()),
+        "the offered Polar1 is taken, so the next free number follows"
+    );
+}
+
+#[test]
+fn a_parameter_name_starts_bare_without_an_authoring_graph() {
     let mut scene = Scene::new();
     scene.define_block_raw("PLAIN", Vector3::ZERO, vec![]);
     let definition = scene.document.block_records.get("PLAIN").unwrap().handle;
     assert_eq!(
         next_parameter_name(&scene.document, definition, "Polar"),
-        Ok("Polar1".to_owned())
+        Ok("Polar".to_owned())
     );
 }
 
@@ -250,7 +264,7 @@ fn a_parameter_name_is_trimmed_and_must_be_new() {
         Err("Parameter text cannot contain a null character.")
     );
     let linear_name = name_of(&doc, handles[1]);
-    assert_eq!(linear_name, "Linear1");
+    assert_eq!(linear_name, "Linear");
     assert_eq!(
         set_parameter_name(&mut doc, def, polar, &linear_name.to_ascii_uppercase()),
         Err("Parameter names must be unique.")

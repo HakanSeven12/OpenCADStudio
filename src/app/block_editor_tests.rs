@@ -3945,7 +3945,7 @@ fn a_rotation_takes_a_name_and_one_property_label() {
     feed(&mut app, "N");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "Enter parameter name <Rotation1>:"
+        "Enter parameter name <Rotation>:"
     );
     feed(&mut app, "Body");
     feed(&mut app, "L");
@@ -3989,9 +3989,16 @@ fn a_rotation_takes_a_name_and_one_property_label() {
         "the name collected at the prompt is stored on the parameter"
     );
 
-    // The label question shows the plain word; the parameter takes the next
-    // free numbered name, so Enter still stores a label.
+    // The label question shows the plain word; the parameter takes the name
+    // the prompt offered, so Enter still stores a label.
     let _ = app.dispatch_command("BPARAMETER ROTATION");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Rotation1>:",
+        "the name counts the rotation already placed"
+    );
+    feed(&mut app, "");
     feed(&mut app, "L");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
@@ -4030,7 +4037,7 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
     feed(&mut app, "N");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "Enter parameter name <Linear1>:",
+        "Enter parameter name <Linear>:",
         "the name question defaults to the name the parameter is created with"
     );
     feed(&mut app, "Body");
@@ -4070,6 +4077,14 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
     assert_eq!(
         native.parameter.parameter.element.name, "Body",
         "the name collected at the prompt is stored on the parameter"
+    );
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Linear1>:",
+        "the name counts the linear already placed"
     );
 }
 
@@ -4258,7 +4273,7 @@ fn an_xy_placement_writes_its_name_and_two_labels() {
     feed(&mut app, "N");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "Enter parameter name <XY1>:"
+        "Enter parameter name <XY>:"
     );
     feed(&mut app, "Frame");
     feed(&mut app, "L");
@@ -4306,7 +4321,7 @@ fn an_xy_placement_keeps_the_offered_default_name_and_labels() {
     feed(&mut app, "N");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "Enter parameter name <XY1>:"
+        "Enter parameter name <XY>:"
     );
     feed(&mut app, "");
     feed(&mut app, "L");
@@ -4342,9 +4357,40 @@ fn an_xy_placement_keeps_the_offered_default_name_and_labels() {
     let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
         panic!("expected an xy parameter");
     };
-    assert_eq!(native.parameter.parameter.element.name, "XY1");
+    assert_eq!(native.parameter.parameter.element.name, "XY");
     assert_eq!(native.x_label, "X Distance1");
     assert_eq!(native.y_label, "Y Distance1");
+}
+
+#[test]
+fn xy_parameter_names_count_the_ones_already_placed() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let prompt = |app: &OpenCADStudio| app.tabs[i].active_cmd.as_ref().unwrap().prompt();
+
+    for (end, tag) in [("6,2", "<XY>:"), ("8,3", "<XY1>:"), ("10,4", "<XY2>:")] {
+        let _ = app.dispatch_command("BPARAMETER XY");
+        feed(&mut app, "N");
+        assert_eq!(
+            prompt(&app),
+            format!("Enter parameter name {tag}"),
+            "the name counts the xy parameters already placed"
+        );
+        feed(&mut app, "");
+        feed(&mut app, "0,0");
+        feed(&mut app, end);
+        feed(&mut app, "");
+        assert!(app.tabs[i].active_cmd.is_none());
+    }
+
+    let names =
+        crate::scene::block_distance_parameter::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .map(|parameter| parameter.native.parameter.element.name.clone())
+            .collect::<Vec<_>>();
+    assert_eq!(names, vec!["XY", "XY1", "XY2"]);
 }
 
 #[test]
@@ -4547,20 +4593,20 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
             .map(|parameter| parameter.native.parameter.element.name.clone())
             .collect::<Vec<_>>()
     };
-    assert_eq!(names(&app), vec!["Polar1", "Polar2", "Polar3"]);
+    assert_eq!(names(&app), vec!["Polar", "Polar1", "Polar2"]);
 
     let _ = app.dispatch_command("BPARAMETER POLAR");
     feed(&mut app, "N");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "Enter parameter name <Polar4>:"
+        "Enter parameter name <Polar3>:"
     );
     feed(&mut app, "P9");
     feed(&mut app, "0,0");
     feed(&mut app, "8,0");
     feed(&mut app, "3,3");
     assert!(app.tabs[i].active_cmd.is_none());
-    assert_eq!(names(&app), vec!["Polar1", "Polar2", "Polar3", "P9"]);
+    assert_eq!(names(&app), vec!["Polar", "Polar1", "Polar2", "P9"]);
     assert_eq!(
         label_sets(&app).last().unwrap(),
         &["Distance3".to_string(), "Angle3".to_string()]
@@ -4579,7 +4625,7 @@ fn a_polar_takes_its_distance_and_angle_labels_at_the_base_prompt() {
     assert!(app.tabs[i].active_cmd.is_none());
     assert_eq!(
         names(&app),
-        vec!["Polar1", "Polar2", "Polar3", "P9", "Polar4"]
+        vec!["Polar", "Polar1", "Polar2", "P9", "Polar4"]
     );
     assert_eq!(
         app.command_line.last_error.as_deref(),

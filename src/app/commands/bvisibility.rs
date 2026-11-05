@@ -728,9 +728,9 @@ impl OpenCADStudio {
                             block,
                             kind.name(),
                         )
-                        .unwrap_or_else(|_| format!("{}1", kind.name()));
+                        .unwrap_or_else(|_| kind.name().to_owned());
                         // The label question shows the plain word; the created
-                        // parameter takes the next free numbered name.
+                        // parameter takes the name the prompt offered.
                         command = command.with_name(name).with_label("Angle".to_owned());
                     } else if kind == crate::scene::block_orientation_parameter::Kind::Flip {
                         // Scene creation always names a Flip parameter `Flip`,
@@ -754,7 +754,7 @@ impl OpenCADStudio {
                         block,
                         kind.name(),
                     )
-                    .unwrap_or_else(|_| format!("{}1", kind.name()));
+                    .unwrap_or_else(|_| kind.name().to_owned());
                     command = command.with_name(name);
                     command = match kind {
                         crate::scene::block_distance_parameter::Kind::Polar => {

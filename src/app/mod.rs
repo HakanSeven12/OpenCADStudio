@@ -995,6 +995,8 @@ pub(super) struct OpenCADStudio {
     show_menu_bar: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
     ribbon_closed: bool,
+    /// COMMANDLINEHIDE (Ctrl+9) hid the command line; COMMANDLINE shows it.
+    pub(super) command_line_hidden: bool,
     /// Use REFEDIT rather than BEDIT when double-clicking an attribute-free block.
     double_click_block_refedit: bool,
     /// Open ATTEDIT when double-clicking a block with attributes.
@@ -5986,6 +5988,7 @@ impl OpenCADStudio {
             hatch_start_method: 0,
             show_menu_bar: false,
             ribbon_closed: false,
+            command_line_hidden: false,
             double_click_block_refedit: false,
             double_click_block_attedit: true,
             right_click_mode: settings::RightClickMode::ShortcutMenu,

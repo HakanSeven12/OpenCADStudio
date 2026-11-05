@@ -631,6 +631,18 @@ impl OpenCADStudio {
                 self.ribbon_closed = cmd == "RIBBONCLOSE";
                 self.persist_settings_if_changed();
             }
+            // ── COMMANDLINE / COMMANDLINEHIDE — show or hide the command line ──
+            // Hidden, it still takes the typing; Dynamic Input shows the
+            // prompt and what is typed at the cursor.
+            "COMMANDLINE" | "COMMANDLINEHIDE" | "COMMANDLINETOGGLE" => {
+                self.command_line_hidden = match cmd {
+                    "COMMANDLINE" => false,
+                    "COMMANDLINEHIDE" => true,
+                    // Ctrl+9: one way or the other, as the command line stands.
+                    _ => !self.command_line_hidden,
+                };
+                self.persist_settings_if_changed();
+            }
             // ── QUICKPROPERTIES — toggle the floating quick-properties readout ───
             "QUICKPROPERTIES" => {
                 return Some(Task::done(Message::ToggleQuickProperties));

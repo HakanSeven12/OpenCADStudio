@@ -5329,3 +5329,54 @@ mod measuregeom_quick_tests {
         assert!(area.contains("Area = 40") && area.contains("Perimeter = 28"), "{area}");
     }
 }
+
+/// #1912: with Dynamic Input on, Down lists the step's options at the
+/// cursor; Enter picks the highlighted one. Ctrl+9 hides the command line.
+#[cfg(test)]
+mod dynamic_options_tests {
+    use crate::app::{ArrowKey, Message, OpenCADStudio};
+
+    fn down() -> Message {
+        Message::ArrowKeyPressed {
+            direction: ArrowKey::Down,
+            shortcut: "DOWN".into(),
+            extend_selection: false,
+        }
+    }
+
+    #[test]
+    fn down_lists_the_options_and_enter_picks_one() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.dyn_input = true;
+        let _ = app.run_command_line("CIRCLE");
+        let _ = app.update(down());
+        assert!(app.context_menu_open(), "Down opens the options");
+        // CIRCLE's first option is 3P; Enter picks it.
+        let _ = app.update(Message::CommandFinalize);
+        assert!(!app.context_menu_open());
+        let prompt = app.tabs[app.active_tab].active_cmd.as_ref().unwrap().prompt();
+        assert!(prompt.to_uppercase().contains("FIRST POINT"), "{prompt}");
+    }
+
+    #[test]
+    fn down_without_dynamic_input_or_options_does_nothing() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.dyn_input = false;
+        let _ = app.run_command_line("CIRCLE");
+        let _ = app.update(down());
+        assert!(!app.context_menu_open());
+    }
+
+    #[test]
+    fn ctrl_9_hides_and_shows_the_command_line() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let key = if cfg!(target_os = "macos") { "CMD+9" } else { "CTRL+9" }.to_string();
+        let _ = app.update(Message::ShortcutPressed(key.clone()));
+        assert!(app.command_line_hidden);
+        let _ = app.update(Message::ShortcutPressed(key));
+        assert!(!app.command_line_hidden);
+    }
+}

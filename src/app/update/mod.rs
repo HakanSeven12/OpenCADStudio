@@ -825,6 +825,24 @@ impl OpenCADStudio {
                 return task;
             }
         }
+        // With Dynamic Input on, Down opens the running command's options at
+        // the cursor, the first one highlighted; arrows and Enter then drive
+        // that menu.
+        if let Message::ArrowKeyPressed {
+            direction: crate::app::ArrowKey::Down,
+            ..
+        }
+        | Message::CommandLineArrowProbe {
+            direction: crate::app::ArrowKey::Down,
+            ..
+        } = &msg
+        {
+            if !self.context_menu_open() {
+                if let Some(task) = self.open_dynamic_options() {
+                    return task;
+                }
+            }
+        }
         // The open right-click context menu owns the keyboard the same way:
         // arrows / Enter / mnemonic letters drive it, any other key closes it
         // and falls through to the command line (the behaviour of commercial solutions).

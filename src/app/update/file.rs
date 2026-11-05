@@ -811,6 +811,7 @@ impl OpenCADStudio {
             hatch_start_method: self.hatch_start_method,
             show_menu_bar: self.show_menu_bar,
             ribbon_closed: self.ribbon_closed,
+            command_line_hidden: self.command_line_hidden,
             options_tab: self.options_tab,
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
@@ -1001,6 +1002,7 @@ impl OpenCADStudio {
         self.hatch_start_method = s.hatch_start_method.min(2);
         self.show_menu_bar = s.show_menu_bar;
         self.ribbon_closed = s.ribbon_closed;
+        self.command_line_hidden = s.command_line_hidden;
         self.options_tab = s.options_tab;
         self.spacemouse_preferences = s.spacemouse;
         // These four drive real features with commands and status-bar pills,

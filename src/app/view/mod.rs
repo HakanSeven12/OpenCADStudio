@@ -2239,11 +2239,15 @@ bg={bg_ms:.1}ms n={view_count}"
                     }
                 })
                 .collect();
-            let prompt = tab
+            let mut prompt = tab
                 .active_cmd
                 .as_ref()
                 .map(|c| c.prompt())
                 .unwrap_or_default();
+            // The command line is hidden: what is typed shows here.
+            if self.command_line_hidden && !self.command_line.input.is_empty() {
+                prompt = format!("{prompt} {}", self.command_line.input);
+            }
 
             let tracking_hint = match self.otrack_kind {
                 Some(crate::snap::TrackingKind::Perpendicular) => {
@@ -3209,17 +3213,27 @@ bg={bg_ms:.1}ms n={view_count}"
             .height(Fill)
             .into()
         } else {
-            let command_line_overlay = iced::widget::container(command_line)
-                .width(Fill)
-                .height(Fill)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Bottom)
-                .padding(iced::Padding {
-                    top: 0.0,
-                    right: 0.0,
-                    bottom: 2.0,
-                    left: 0.0,
-                });
+            // Hidden (COMMANDLINEHIDE / Ctrl+9), the field stays in the tree,
+            // collapsed, so it keeps the keyboard; Dynamic Input shows the
+            // prompt and the typing at the cursor.
+            let command_line_overlay = if self.command_line_hidden {
+                iced::widget::container(command_line)
+                    .width(Fill)
+                    .height(iced::Length::Fixed(0.0))
+                    .clip(true)
+            } else {
+                iced::widget::container(command_line)
+                    .width(Fill)
+                    .height(Fill)
+                    .align_x(iced::alignment::Horizontal::Center)
+                    .align_y(iced::alignment::Vertical::Bottom)
+                    .padding(iced::Padding {
+                        top: 0.0,
+                        right: 0.0,
+                        bottom: 2.0,
+                        left: 0.0,
+                    })
+            };
             iced::widget::stack![workspace, command_line_overlay]
                 .width(Fill)
                 .height(Fill)

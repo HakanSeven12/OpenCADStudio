@@ -56,6 +56,7 @@ pub(super) fn default_bindings() -> BTreeMap<String, String> {
         ("CTRL+TAB".to_string(), "NEXTDRAWING"),
         ("CTRL+SHIFT+TAB".to_string(), "PREVDRAWING"),
         (format!("{ACCEL}+0"), "CLEANSCREEN"),
+        (format!("{ACCEL}+9"), "COMMANDLINETOGGLE"),
         (format!("{ACCEL}+1"), "PROPERTIES"),
         (format!("{ACCEL}+K"), "HYPERLINK"),
         (format!("{ACCEL}+N"), "QNEW"),

@@ -308,6 +308,33 @@ impl OpenCADStudio {
         }
     }
 
+    /// Dynamic Input's option list: the shortcut menu of the running command,
+    /// opened at the cursor with its first option highlighted. `None` when
+    /// Dynamic Input is off, text is typed, or the step has no options.
+    pub(in crate::app) fn open_dynamic_options(&mut self) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        let has_options = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.options().iter().any(|o| !o.keyword.is_empty()));
+        if !self.dyn_input || !has_options || !self.command_line.input.trim().is_empty() {
+            return None;
+        }
+        let first = {
+            let mut sel = self.tabs[i].scene.selection.borrow_mut();
+            // Beside the cursor; before the pointer has moved, the corner.
+            let at = sel.input.last_move_pos.unwrap_or(iced::Point::new(40.0, 40.0));
+            sel.menu.open(at);
+            drop(sel);
+            self.current_context_menu()
+                .selectable()
+                .iter()
+                .position(|row| matches!(row.action, MenuAction::Option(_)))
+        };
+        self.tabs[i].scene.selection.borrow_mut().menu.ui.highlighted = first;
+        Some(self.unfocus_widgets())
+    }
+
     /// Route keyboard-derived messages to the open menu. Returns `Some(task)`
     /// when the message was consumed; `None` lets it fall through to the
     /// normal handlers (after closing the menu when the key is not a menu key,

@@ -1150,16 +1150,12 @@ impl OpenCADStudio {
                                     self.command_line.push_error(line);
                                 }
                                 if refusal.ask_again {
-                                    self.command_line.push_output(&format!(
-                                        "Enter new value for {name} <{current}>:"
-                                    ));
+                                    self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                     self.pending_setvar = Some(name.clone());
                                 }
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1174,16 +1170,12 @@ impl OpenCADStudio {
                                 None => {
                                     self.command_line
                                         .push_error("Requires an integer between -90 and 90.");
-                                    self.command_line.push_output(&format!(
-                                        "Enter new value for XDWGFADECTL <{current}>:"
-                                    ));
+                                    self.command_line.push_output(&crate::ui::command_line::value_prompt("XDWGFADECTL", &current));
                                     self.pending_setvar = Some(name.clone());
                                 }
                             }
                         } else {
-                            self.command_line.push_output(&format!(
-                                "Enter new value for XDWGFADECTL <{current}>:"
-                            ));
+                            self.command_line.push_output(&crate::ui::command_line::value_prompt("XDWGFADECTL", &current));
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -1208,9 +1200,7 @@ impl OpenCADStudio {
                                 None => self.command_line.push_error("CETRANSPARENCY: expected ByLayer (-1), ByBlock (-2), or an integer from 0 to 90."),
                             }
                         } else {
-                            self.command_line.push_output(&format!(
-                                "Enter new value for CETRANSPARENCY <{}>:",
-                                crate::scene::creation_style::current_transparency_label(current)
+                            self.command_line.push_output(&crate::ui::command_line::value_prompt("CETRANSPARENCY", &crate::scene::creation_style::current_transparency_label(current)
                             ));
                             self.pending_setvar = Some(name.clone());
                         }
@@ -1254,7 +1244,7 @@ impl OpenCADStudio {
                             }
                         } else {
                             self.command_line
-                                .push_output(&format!("Enter new value for {name} <{current}>:"));
+                                .push_output(&crate::ui::command_line::value_prompt(&name, &current));
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -1272,9 +1262,7 @@ impl OpenCADStudio {
                                 });
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for PDFIMPORTIMAGEPATH, or . for none <\"{}\">:",
-                                    image_path()
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt_or_none("PDFIMPORTIMAGEPATH", &image_path()
                                 ));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1329,15 +1317,11 @@ impl OpenCADStudio {
                                 self.command_line.push_error(
                                     crate::t!("Requires 0 or 1 only, or option keyword.").as_ref(),
                                 );
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1373,15 +1357,11 @@ impl OpenCADStudio {
                                 self.command_line.push_error(
                                     crate::t!("Requires 0 or 1 only, or option keyword.").as_ref(),
                                 );
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1411,15 +1391,11 @@ impl OpenCADStudio {
                             Some(None) => {
                                 self.command_line
                                     .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1446,15 +1422,11 @@ impl OpenCADStudio {
                             Some(None) => {
                                 self.command_line
                                     .push_error("Requires an integer between 0 and 2.");
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for DGNIMPORTMODE <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("DGNIMPORTMODE", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for DGNIMPORTMODE <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("DGNIMPORTMODE", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1476,15 +1448,11 @@ impl OpenCADStudio {
                             Some(None) => {
                                 self.command_line
                                     .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for SURFACEASSOCIATIVITY <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("SURFACEASSOCIATIVITY", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for SURFACEASSOCIATIVITY <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("SURFACEASSOCIATIVITY", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1520,15 +1488,11 @@ impl OpenCADStudio {
                             Some(None) => {
                                 self.command_line
                                     .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for {name} <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1572,15 +1536,11 @@ impl OpenCADStudio {
                             Some(None) => {
                                 self.command_line
                                     .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for FIELDDISPLAY <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("FIELDDISPLAY", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for FIELDDISPLAY <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("FIELDDISPLAY", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1589,7 +1549,7 @@ impl OpenCADStudio {
                     if name == "TRIMEXTENDMODE" {
                         use crate::modules::draw::modify::trim;
                         let current = i16::from(trim::quick_mode());
-                        let prompt = format!("Enter new value for TRIMEXTENDMODE <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("TRIMEXTENDMODE", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
@@ -1618,7 +1578,7 @@ impl OpenCADStudio {
                         // Saved in the drawing (DWG header); ELLIPSE reads it.
                         let header = &self.tabs[i].scene.document.header;
                         let current = i16::from(header.create_ellipse_as_polyline);
-                        let prompt = format!("Enter new value for PELLIPSE <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("PELLIPSE", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
@@ -1646,7 +1606,7 @@ impl OpenCADStudio {
                     }
                     if name == "UCSDETECT" {
                         let current = i16::from(self.dynamic_ucs);
-                        let prompt = format!("Enter new value for UCSDETECT <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("UCSDETECT", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
@@ -1670,7 +1630,7 @@ impl OpenCADStudio {
                     }
                     if name == "SELECTSIMILARMODE" {
                         let current = self.select_similar_mode;
-                        let prompt = format!("Enter new value for SELECTSIMILARMODE <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("SELECTSIMILARMODE", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<u16>().ok().filter(|v| *v <= 255))
@@ -1698,7 +1658,7 @@ impl OpenCADStudio {
                     }
                     if name == "OSNAPZ" {
                         let current = i16::from(self.osnap_z);
-                        let prompt = format!("Enter new value for OSNAPZ <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("OSNAPZ", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
@@ -1728,7 +1688,7 @@ impl OpenCADStudio {
                         // 1 and 2 both turn cycling on; the candidate list
                         // always shows.
                         let current = if self.selection_cycling { 2 } else { 0 };
-                        let prompt = format!("Enter new value for SELECTIONCYCLING <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("SELECTIONCYCLING", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=2).contains(v)))
@@ -1758,7 +1718,7 @@ impl OpenCADStudio {
                     // SDI 1: one drawing at a time (OPEN closes the current one).
                     if name == "SDI" {
                         let current = i16::from(self.sdi);
-                        let prompt = format!("Enter new value for SDI <{current}>:");
+                        let prompt = crate::ui::command_line::value_prompt("SDI", &current);
                         match value
                             .as_deref()
                             .map(|v| v.trim().parse::<i16>().ok().filter(|v| (0..=1).contains(v)))
@@ -1792,15 +1752,11 @@ impl OpenCADStudio {
                             Some(None) => {
                                 self.command_line
                                     .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for FILEDIA <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("FILEDIA", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                             None => {
-                                self.command_line.push_output(&format!(
-                                    "Enter new value for FILEDIA <{current}>:"
-                                ));
+                                self.command_line.push_output(&crate::ui::command_line::value_prompt("FILEDIA", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
                         }
@@ -1841,7 +1797,7 @@ impl OpenCADStudio {
                             }
                         } else {
                             self.command_line
-                                .push_output(&format!("Enter new value for {name} <{current}>:"));
+                                .push_output(&crate::ui::command_line::value_prompt(&name, &current));
                             self.pending_setvar = Some(name.clone());
                         }
                         return Some(self.finish_dispatch(cmd));
@@ -4232,7 +4188,7 @@ impl OpenCADStudio {
                                 )
                                 .as_ref(),
                             );
-                            self.command_line.push_output("Enter new value for CANNOSCALE:");
+                            self.command_line.push_output(&crate::ui::command_line::value_prompt_bare("CANNOSCALE"));
                             self.pending_setvar = Some("CANNOSCALE".into());
                         }
                     }
@@ -4262,7 +4218,7 @@ impl OpenCADStudio {
                             self.command_line.push_error(
                                 crate::t!("ANNOALLVISIBLE: enter 0 or 1.").as_ref(),
                             );
-                            self.command_line.push_output("Enter new value for ANNOALLVISIBLE <0>:");
+                            self.command_line.push_output(&crate::ui::command_line::value_prompt("ANNOALLVISIBLE", &"0"));
                             self.pending_setvar = Some("ANNOALLVISIBLE".into());
                         }
                     }
@@ -4281,9 +4237,7 @@ impl OpenCADStudio {
                             crate::t!("ANNOAUTOSCALE: enter an integer from -4 through 4.")
                                 .as_ref(),
                         );
-                        self.command_line.push_output(&format!(
-                            "Enter new value for ANNOAUTOSCALE <{current}>:"
-                        ));
+                        self.command_line.push_output(&crate::ui::command_line::value_prompt("ANNOAUTOSCALE", &current));
                         self.pending_setvar = Some("ANNOAUTOSCALE".into());
                     }
                     _ => {
@@ -4330,7 +4284,7 @@ impl OpenCADStudio {
                             self.command_line.push_error(
                                 crate::tf!("HPLAYER: no layer named \"{value}\".").as_ref(),
                             );
-                            self.command_line.push_output("Enter new value for HPLAYER:");
+                            self.command_line.push_output(&crate::ui::command_line::value_prompt_bare("HPLAYER"));
                             self.pending_setvar = Some("HPLAYER".into());
                         }
                     }

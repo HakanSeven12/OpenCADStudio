@@ -78,9 +78,7 @@ impl OpenCADStudio {
                         }
                     }
                     None => {
-                        self.command_line.push_output(&format!(
-                            "Enter new value for {name}, or . for none <\"{current}\">:"
-                        ));
+                        self.command_line.push_output(&crate::ui::command_line::value_prompt_or_none(&name, &current));
                         self.pending_setvar = Some(name);
                     }
                 }
@@ -95,7 +93,7 @@ impl OpenCADStudio {
                 };
                 let ask = |app: &mut Self, name: String| {
                     app.command_line
-                        .push_output(&format!("Enter new value for {name} <{current}>:"));
+                        .push_output(&crate::ui::command_line::value_prompt(&name, &current));
                     app.pending_setvar = Some(name);
                 };
                 match value {

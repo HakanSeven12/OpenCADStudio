@@ -118,7 +118,7 @@ impl OpenCADStudio {
                 let current = crate::entities::field::fieldeval(&self.tabs[i].scene.document);
                 let ask = |app: &mut Self| {
                     app.command_line
-                        .push_output(&format!("Enter new value for FIELDEVAL <{current}>:"));
+                        .push_output(&crate::ui::command_line::value_prompt("FIELDEVAL", &current));
                     app.pending_setvar = Some("FIELDEVAL".into());
                 };
                 match value.parse::<i32>() {

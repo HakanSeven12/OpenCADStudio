@@ -173,7 +173,7 @@ impl OpenCADStudio {
                     ));
                 }
                 self.command_line
-                    .push_output(&format!("Enter new value for DXEVAL <{current}>:"));
+                    .push_output(&crate::ui::command_line::value_prompt("DXEVAL", &current));
                 self.pending_setvar = Some("DXEVAL".into());
             }
         }

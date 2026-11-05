@@ -21,9 +21,7 @@ impl OpenCADStudio {
     /// selection is next made, as in the reference.
     pub(super) fn group_display_setvar(&mut self, value: Option<&str>) {
         let ask = |app: &mut Self| {
-            app.command_line.push_output(&format!(
-                "Enter new value for GROUPDISPLAYMODE <{}>:",
-                group_display_mode()
+            app.command_line.push_output(&crate::ui::command_line::value_prompt("GROUPDISPLAYMODE", &group_display_mode()
             ));
             app.pending_setvar = Some("GROUPDISPLAYMODE".to_string());
         };

@@ -16,6 +16,53 @@ pub enum Kind {
     XY,
 }
 
+/// Where a Linear parameter's base sits between its definition points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum BaseLocation {
+    #[default]
+    Startpoint,
+    Midpoint,
+}
+
+/// The value set answered at a Linear parameter's Value set option.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ValueSet {
+    None,
+    Increment {
+        increment: f64,
+        minimum: f64,
+        maximum: f64,
+    },
+    List(Vec<f64>),
+}
+
+impl ValueSet {
+    fn record(&self) -> BlockParameterValueSet {
+        match self {
+            Self::None => BlockParameterValueSet {
+                flags: 1,
+                ..Default::default()
+            },
+            Self::Increment {
+                increment,
+                minimum,
+                maximum,
+            } => BlockParameterValueSet {
+                flags: 1 | 2 | 4,
+                minimum: *minimum,
+                maximum: *maximum,
+                increment: *increment,
+                ..Default::default()
+            },
+            Self::List(values) => BlockParameterValueSet {
+                flags: 8,
+                values: values.clone(),
+                ..Default::default()
+            },
+        }
+    }
+}
+
 impl Kind {
     pub(crate) fn parse(text: &str) -> Option<Self> {
         match text.to_ascii_uppercase().as_str() {
@@ -212,6 +259,20 @@ pub(crate) fn create(
     end: Vector3,
     label: Vector3,
 ) -> Result<Handle, &'static str> {
+    create_with(document, definition, kind, base, end, label, None, None)
+}
+
+/// Creates a parameter with the placement answers a Linear command collected.
+pub(crate) fn create_with(
+    document: &mut Document,
+    definition: Handle,
+    kind: Kind,
+    base: Vector3,
+    end: Vector3,
+    label: Vector3,
+    base_location: Option<BaseLocation>,
+    value_set: Option<&ValueSet>,
+) -> Result<Handle, &'static str> {
     if let Some(error) = points_error(kind, base, end, label) {
         return Err(error);
     }
@@ -277,10 +338,14 @@ pub(crate) fn create(
             },
         }),
         property_states: [0, slots.eval + 1, 0, 0],
-        parameter_base_location: 0,
+        parameter_base_location: if base_location == Some(BaseLocation::Midpoint) {
+            1
+        } else {
+            0
+        },
         ..Default::default()
     };
-    let value_set = || BlockParameterValueSet {
+    let default_value_set = || BlockParameterValueSet {
         flags: 1,
         ..Default::default()
     };
@@ -289,7 +354,9 @@ pub(crate) fn create(
             parameter: native,
             distance_name,
             distance: values[0],
-            value_set: value_set(),
+            value_set: value_set
+                .map(ValueSet::record)
+                .unwrap_or_else(default_value_set),
             ..Default::default()
         }),
         Kind::Polar => DynamicBlockData::PolarParameter(BlockPolarParameter {
@@ -297,7 +364,7 @@ pub(crate) fn create(
             distance_name,
             angle_name,
             offset: values[0],
-            distance_value_set: value_set(),
+            distance_value_set: default_value_set(),
             angle_value_set: BlockParameterValueSet {
                 flags: 3,
                 maximum: std::f64::consts::TAU,
@@ -311,8 +378,8 @@ pub(crate) fn create(
             y_label,
             x_value: values[0],
             y_value: values[1],
-            x_value_set: value_set(),
-            y_value_set: value_set(),
+            x_value_set: default_value_set(),
+            y_value_set: default_value_set(),
             ..Default::default()
         }),
     };
@@ -806,6 +873,45 @@ mod tests {
         assert_eq!(g.labels[0].1, parameter.labels[1]);
         assert!(g.labels[0].0.x.hypot(g.labels[0].0.y) < radius);
         assert_eq!(g.grips, vec![(tip, false)]);
+    }
+
+    #[test]
+    fn a_linear_placement_stores_the_base_location_and_value_set_it_was_given() {
+        let (mut scene, definition) = fixture();
+        let placed = |scene: &mut Scene, base_location, value_set| {
+            create_with(
+                &mut scene.document,
+                definition,
+                Kind::Linear,
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+                Vector3::new(5.0, 2.0, 0.0),
+                base_location,
+                value_set,
+            )
+            .unwrap()
+        };
+        let list = ValueSet::List(vec![1.0, 2.5, 3.0]);
+        let parameter = placed(&mut scene, Some(BaseLocation::Midpoint), Some(&list));
+        let Some(ObjectType::DynamicBlock(object)) = scene.document.objects.get(&parameter) else {
+            panic!("expected a dynamic block record");
+        };
+        let DynamicBlockData::LinearParameter(native) = &object.data else {
+            panic!("expected a linear parameter");
+        };
+        assert_eq!(native.parameter.parameter_base_location, 1);
+        assert_eq!(native.value_set.flags, 8);
+        assert_eq!(native.value_set.values, vec![1.0, 2.5, 3.0]);
+
+        let parameter = placed(&mut scene, None, None);
+        let Some(ObjectType::DynamicBlock(object)) = scene.document.objects.get(&parameter) else {
+            panic!("expected a dynamic block record");
+        };
+        let DynamicBlockData::LinearParameter(native) = &object.data else {
+            panic!("expected a linear parameter");
+        };
+        assert_eq!(native.parameter.parameter_base_location, 0);
+        assert_eq!(native.value_set.flags, 1, "the default set has no type");
     }
 
     #[test]

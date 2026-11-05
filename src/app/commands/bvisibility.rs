@@ -177,13 +177,20 @@ impl OpenCADStudio {
             return Task::none();
         }
         self.push_undo_snapshot(i, &format!("{} parameter", kind.name()));
-        let parameter = crate::scene::block_distance_parameter::create(
+        let parameter = crate::scene::block_distance_parameter::create_with(
             &mut self.tabs[i].scene.document,
             definition,
             kind,
             vector(base),
             vector(end),
             vector(label),
+            options
+                .base_location
+                .filter(|_| kind == crate::scene::block_distance_parameter::Kind::Linear),
+            options
+                .value_set
+                .as_ref()
+                .filter(|_| kind == crate::scene::block_distance_parameter::Kind::Linear),
         )
         .expect("validated parameter placement");
         if let Some(count) = grips

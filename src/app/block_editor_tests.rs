@@ -3552,7 +3552,7 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
     let _ = app.dispatch_command("BPARAMETER LINEAR");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Base/Palette/Value set]:"
     );
     feed(&mut app, "C");
     assert_eq!(
@@ -3702,7 +3702,7 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
     feed(&mut app, "Width");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Palette]:",
+        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Base/Palette/Value set]:",
         "a Linear parameter asks one label question, not a distance and an angle"
     );
     feed(&mut app, "0,0");
@@ -3731,6 +3731,95 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
         native.parameter.parameter.element.name, "Body",
         "the name collected at the prompt is stored on the parameter"
     );
+}
+
+#[test]
+fn a_linear_takes_its_base_location_and_value_set() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "B");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter base location [Startpoint/Midpoint] <Startpoint>:"
+    );
+    feed(&mut app, "M");
+    feed(&mut app, "V");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter distance value set type [None/Increment/List] <None>:"
+    );
+    feed(&mut app, "I");
+    feed(&mut app, "5");
+    feed(&mut app, "0");
+    feed(&mut app, "100");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Linear  Specify start point or [Name/Label/Chain/Description/Base/Palette/Value set]:",
+        "both questions return to placement"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "5,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let linear = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
+        .expect("placed linear parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&linear.handle).expect("linear record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+        panic!("expected a linear parameter");
+    };
+    assert_eq!(
+        native.parameter.parameter_base_location, 1,
+        "the midpoint answer is stored as the parameter's base location"
+    );
+    assert_eq!(native.value_set.flags, 1 | 2 | 4);
+    assert_eq!(native.value_set.increment, 5.0);
+    assert_eq!(native.value_set.minimum, 0.0);
+    assert_eq!(native.value_set.maximum, 100.0);
+    let first = linear.handle;
+
+    let _ = app.dispatch_command("BPARAMETER LINEAR");
+    feed(&mut app, "V");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter list of distance values (separated by commas):"
+    );
+    feed(&mut app, "1, 2.5,3");
+    feed(&mut app, "20,0");
+    feed(&mut app, "30,0");
+    feed(&mut app, "25,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let second = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .filter(|parameter| {
+            parameter.kind == crate::scene::block_distance_parameter::Kind::Linear
+        })
+        .find(|parameter| parameter.handle != first)
+        .expect("second linear parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&second.handle).expect("second linear record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+        panic!("expected a linear parameter");
+    };
+    assert_eq!(native.value_set.flags, 8);
+    assert_eq!(native.value_set.values, vec![1.0, 2.5, 3.0]);
 }
 
 #[test]

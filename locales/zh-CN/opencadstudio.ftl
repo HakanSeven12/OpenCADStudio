@@ -3456,7 +3456,7 @@ modify =
     .mirror = 镜像
     .move-freely = 自由移动
     .move-text-arrows-out = 将文字和箭头移出
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  指定偏移距离或 [通过] <__ocs_arg_d__>：
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  单击要偏移的一侧或 [多个]  [距离 __ocs_arg_d__]：
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  单击通过点或 [多个]：
@@ -4416,6 +4416,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  输入块名：“__ocs_arg_needle__” [__ocs_arg_shown__ 个匹配]
     .pdfattach-specify-insertion-point = PDFATTACH  指定插入点：
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

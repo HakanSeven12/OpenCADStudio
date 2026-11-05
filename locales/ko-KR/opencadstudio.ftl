@@ -3468,7 +3468,7 @@ modify =
     .mirror = 거울
     .move-freely = 자유롭게 이동
     .move-text-arrows-out = 텍스트 및 화살표를 밖으로 이동
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET 오프셋 거리 지정 또는 [Through] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__ 측면 클릭 또는 [Multiple] [거리 __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__ 클릭 통과 점 또는 [Multiple]:
@@ -4432,6 +4432,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  블록 이름 입력: “__ocs_arg_needle__” [__ocs_arg_shown__개 일치]
     .pdfattach-specify-insertion-point = PDFATTACH 삽입점 지정:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

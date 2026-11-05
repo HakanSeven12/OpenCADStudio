@@ -3451,7 +3451,7 @@ modify =
     .mirror = Aynala
     .move-freely = Serbestçe taşı
     .move-text-arrows-out = Metni ve okları dışarı taşı
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Ötelenecek nesneyi seçin:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Ötelenecek nesneyi seçin veya [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Ofset mesafesini belirtin veya [İçinden] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Tarafa tıklayın veya [Birden Çok] [mesafe __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Geçiş noktasına tıklayın veya [Birden Çok]:
@@ -4400,6 +4400,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Blok adını girin: “__ocs_arg_needle__” [__ocs_arg_shown__ eşleşme]
     .pdfattach-specify-insertion-point = PDFATTACH  Ekleme noktasını belirtin:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Katılaştırılacak nesneleri seçin veya [MOde]:
+    .current-wire-frame-density-isolines-mode = Geçerli tel kafes yoğunluğu:  ISOLINES=__ocs_arg_n__, Kapalı profil oluşturma kipi = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

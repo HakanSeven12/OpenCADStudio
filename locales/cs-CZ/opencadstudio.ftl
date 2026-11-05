@@ -4435,6 +4435,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Zadejte název bloku: „__ocs_arg_needle__“ [počet shod: __ocs_arg_shown__]
     .pdfattach-specify-insertion-point = PDFATTACH  Určete bod vložení:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  { draw.select }: { modal.objects } [{ properties.mode }] (Enter: { common.finish }):
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

@@ -15,6 +15,16 @@ use crate::t;
 
 // ── EXTRUDE command ────────────────────────────────────────────────────────
 
+/// The line EXTRUDE, REVOLVE and SWEEP print as they start.
+fn wire_density_line(isolines: usize, solid: bool) -> String {
+    t!(
+        "Current wire frame density:  ISOLINES=%{n}, Closed profiles creation mode = %{mode}",
+        n = isolines,
+        mode = if solid { "Solid" } else { "Surface" }
+    )
+    .into_owned()
+}
+
 pub struct ExtrudeCommand {
     command_name: &'static str,
     step: ExtrudeStep,
@@ -66,6 +76,9 @@ enum ExtrudeStep {
 }
 
 impl ExtrudeCommand {
+    pub fn wire_density_line(&self, isolines: usize) -> String {
+        wire_density_line(isolines, self.mode == ExtrudeMode::Solid)
+    }
     pub fn new_named(name: &str, color: [f32; 4]) -> Self {
         let defaults = *extrude_defaults()
             .lock()
@@ -1180,6 +1193,9 @@ enum RevolveStep {
 }
 
 impl RevolveCommand {
+    pub fn wire_density_line(&self, isolines: usize) -> String {
+        wire_density_line(isolines, self.mode == ExtrudeMode::Solid)
+    }
     pub fn new(color: [f32; 4], isolines: usize) -> Self {
         let defaults = *revolve_defaults()
             .lock()
@@ -1745,6 +1761,9 @@ enum SweepStep {
 }
 
 impl SweepCommand {
+    pub fn wire_density_line(&self, isolines: usize) -> String {
+        wire_density_line(isolines, self.mode == ExtrudeMode::Solid)
+    }
     pub fn new(color: [f32; 4], isolines: usize) -> Self {
         Self {
             step: SweepStep::PickProfiles,

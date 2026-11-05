@@ -3470,7 +3470,7 @@ modify =
     .mirror = Mirror
     .move-freely = Move freely
     .move-text-arrows-out = Move text & arrows out
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Specify offset distance or [Through] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Click side or [Multiple]  [distance __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Click through point or [Multiple]:
@@ -4443,6 +4443,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Enter block name:  "__ocs_arg_needle__"  [__ocs_arg_shown__ matches]
     .pdfattach-specify-insertion-point = PDFATTACH  Specify insertion point:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  Creation mode [Solid/Surface]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  Specify height or [Direction/Path/Taper angle/Expression]
     .extrude-start-point-of-direction = EXTRUDE  Start point of direction:

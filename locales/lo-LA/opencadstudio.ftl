@@ -3470,7 +3470,7 @@ modify =
     .mirror = ສະທ້ອນເງົາ (Mirror)
     .move-freely = ຍ້າຍໄດ້ຢ່າງອິດສະຫຼະ
     .move-text-arrows-out = ຍ້າຍຂໍ້ຄວາມ ແລະ ຫົວລູກສອນອອກໄປຂ້າງນອກ
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  ກຳນົດໄລຍະຫ່າງ offset ຫຼື [Through] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  ກົດເລືອກດ້ານ ຫຼື [Multiple]  [ໄລຍະຫ່າງ __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  ກົດຈຸດທີ່ຜ່ານ ຫຼື [Multiple]:
@@ -4443,6 +4443,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  ປ້ອນຊື່ບລັອກ:  "__ocs_arg_needle__"  [ກົງກັນ __ocs_arg_shown__ ລາຍການ]
     .pdfattach-specify-insertion-point = PDFATTACH  ກໍານົດຈຸດແຊກ:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  ໂໝດການສ້າງ [ວັດຖຸແຂງ/ພື້ນຜິວ]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  ກໍານົດຄວາມສູງ ຫຼື [ທິດທາງ/ເສັ້ນທາງ/ມຸມສອບ/ນິພົດ]
     .extrude-start-point-of-direction = EXTRUDE  ຈຸດເລີ່ມຕົ້ນຂອງທິດທາງ:

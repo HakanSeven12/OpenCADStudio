@@ -3465,7 +3465,7 @@ modify =
     .mirror = Tükrözés
     .move-freely = Szabad mozgatás
     .move-text-arrows-out = Szöveg és nyilak mozgatása kifelé
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET Adja meg az eltolási távolságot vagy a [Through] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Kattintson az oldalra vagy [Multiple] [távolság __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Jelölje ki az áthaladási pontot vagy [Multiple]:
@@ -4423,6 +4423,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Adja meg a blokk nevét: „__ocs_arg_needle__” [__ocs_arg_shown__ találat]
     .pdfattach-specify-insertion-point = PDFATTACH Beszúrási pont megadása:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [Solid ({ properties.solid }) / Surface ({ properties.surface })]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [Direction ({ properties.direction }) / Path ({ common.path }) / Taper angle ({ common.taper-angle }) / Expression ({ common.expression })]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

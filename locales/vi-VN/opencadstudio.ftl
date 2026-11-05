@@ -3476,7 +3476,7 @@ modify =
     .mirror = Đối xứng
     .move-freely = Di chuyển tự do
     .move-text-arrows-out = Di chuyển văn bản và mũi tên ra ngoài
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Chỉ định khoảng cách dời hoặc [Qua điểm] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Nhấp chọn phía hoặc [Nhiều]  [khoảng cách __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Nhấp điểm đi qua hoặc [Nhiều]:
@@ -4449,6 +4449,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT Nhập tên khối: "__ocs_arg_needle__" [__ocs_arg_shown__ khớp]
     .pdfattach-specify-insertion-point = PDFATTACH Chỉ định điểm chèn:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE Chế độ tạo [Solid/Surface]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE Chỉ định chiều cao hoặc [Hướng/Đường đi/Góc côn/Biểu thức]
     .extrude-start-point-of-direction = EXTRUDE Điểm bắt đầu của hướng:

@@ -3469,7 +3469,7 @@ modify =
     .mirror = Καθρεπτισμός
     .move-freely = Ελεύθερη μετακίνηση
     .move-text-arrows-out = Μετακίνηση κειμένου και βελών εκτός
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Ορίστε απόσταση μετατόπισης ή [Διέλευση] <__ocs_arg_d__>:
     .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Κάντε κλικ σε πλευρά ή [Πολλαπλά]  [απόσταση __ocs_arg_d__]:
     .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Κάντε κλικ σε σημείο διέλευσης ή [Πολλαπλά]:
@@ -4442,6 +4442,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Εισαγάγετε όνομα μπλοκ: «__ocs_arg_needle__» [__ocs_arg_shown__ αντιστοιχίες]
     .pdfattach-specify-insertion-point = PDFATTACH  Ορίστε σημείο εισαγωγής:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

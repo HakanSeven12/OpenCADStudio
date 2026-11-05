@@ -659,7 +659,7 @@ impl CadCommand for OffsetCommand {
                 t!("OFFSET  Specify second reference point:").into_owned()
             }
             Step::SelectObject { .. } => {
-                t!("OFFSET  Select object to offset:").into_owned()
+                t!("OFFSET  Select object to offset or [Exit/Undo] <Exit>:").into_owned()
             }
             Step::PickSide {
                 targets,
@@ -740,14 +740,11 @@ impl CadCommand for OffsetCommand {
                 CmdOption::new("Layer", "L"),
                 CmdOption::enter(&format!("{:.4}", defaults::get_offset_dist())),
             ],
-            Step::SelectObject { .. } => {
-                let mut opts = Vec::new();
-                if self.made > 0 {
-                    opts.push(CmdOption::new("Undo", "U"));
-                }
-                opts.push(CmdOption::enter("Exit"));
-                opts
-            }
+            Step::SelectObject { .. } => vec![
+                CmdOption::new("Exit", "E"),
+                CmdOption::new("Undo", "U"),
+                CmdOption::enter("Exit"),
+            ],
             Step::PickSide { multiple, .. } if self.drag_start => {
                 let mut opts = Vec::new();
                 if !multiple {
@@ -876,6 +873,9 @@ impl CadCommand for OffsetCommand {
                 return Some(CmdResult::NeedPoint);
             }
             None => {}
+        }
+        if matches!(upper.as_str(), "E" | "EXIT") && matches!(self.step, Step::SelectObject { .. }) {
+            return Some(CmdResult::Cancel);
         }
         if matches!(upper.as_str(), "U" | "UNDO")
             && matches!(self.step, Step::SelectObject { .. } | Step::PickSide { .. })
@@ -1149,13 +1149,13 @@ mod option_tests {
             }
             _ => panic!("erase should replace the source with its offset"),
         }
-        // Back at the object pick, with Undo now available.
-        assert_eq!(keywords(&cmd), ["U", ""]);
+        // Back at the object pick: Exit and Undo are always offered.
+        assert_eq!(keywords(&cmd), ["E", "U", ""]);
         assert!(matches!(
             cmd.on_text_input("U"),
             Some(CmdResult::UndoDocument)
         ));
-        assert_eq!(keywords(&cmd), [""]);
+        assert_eq!(keywords(&cmd), ["E", "U", ""]);
     }
 
     #[test]

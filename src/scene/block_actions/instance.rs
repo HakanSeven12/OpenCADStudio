@@ -185,6 +185,19 @@ pub(crate) fn grip_parameter(
     Ok(result)
 }
 
+pub(crate) fn action_grips(
+    doc: &Document, baseline: &Document, definition: Handle, insert: Handle,
+    parameter: &Parameter, value: Value, testing: bool,
+) -> Vec<crate::scene::block_grips::runtime::Grip> {
+    let mut grips = crate::scene::block_grips::runtime::action_grips(baseline, definition, parameter, value);
+    if let Some(plan) = super::flip_graph::Plan::new(baseline, definition) {
+        if plan.present_grips(doc, baseline, definition, insert, parameter, value, testing, &mut grips).is_err() {
+            return Vec::new();
+        }
+    }
+    grips
+}
+
 pub(crate) fn value(
     doc: &Document,
     insert: Handle,
@@ -625,6 +638,10 @@ fn evaluate_input(
 ) -> Result<Option<Document>, &'static str> {
     let def =
         definition(doc, insert).ok_or("Select a uniformly scaled dynamic block reference.")?;
+    if let Some(plan) = super::flip_graph::Plan::new(doc, def) {
+        let input = requested.map_or(input, |f| Value::Frame { base: f.base, end: f.end });
+        return plan.evaluate(doc, doc, def, insert, parameter, input, false);
+    }
     let parameters = all_parameters(doc, def);
     let selected = parameters
         .iter()
@@ -679,6 +696,7 @@ fn evaluate_input(
         &mut resolved_frames,
         &mut resolved_active,
         plan.as_ref().map(|p| p.action),
+        &[],
     )? {
         return Ok(None);
     }
@@ -748,6 +766,9 @@ pub(crate) fn evaluate_test_value(
     parameter: Handle,
     input: Value,
 ) -> Result<Option<Document>, &'static str> {
+    if let Some(plan) = super::flip_graph::Plan::new(baseline, definition) {
+        return plan.evaluate(doc, baseline, definition, insert, parameter, input, true);
+    }
     let parameters = all_parameters(baseline, definition);
     let selected = parameters
         .iter()
@@ -803,6 +824,7 @@ pub(crate) fn evaluate_test_value(
         &mut resolved_frames,
         &mut resolved_active,
         plan.as_ref().map(|p| p.action),
+        &[],
     )? {
         return Ok(None);
     }
@@ -880,7 +902,10 @@ pub(crate) fn reset(
         })
         && (crate::scene::block_visibility::parameter(doc, def).is_none()
             || super::representation::visibility_state(doc, doc, def, insert) == Some(0))
-        && history.is_none();
+        && history.is_none()
+        && doc.get_entity(insert).is_none_or(|entity| {
+            entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_none()
+        });
     if unchanged {
         return Ok(None);
     }
@@ -910,6 +935,7 @@ pub(crate) fn reset(
         super::representation::apply_visibility(&mut result, def, insert, 0)?;
     }
     clear_table_history(&mut result, insert, history)?;
+    crate::scene::view::dispatch::set_entity_xdata(&mut result, insert, super::flip_graph::INPUTS, None);
     Ok(Some(result))
 }
 
@@ -952,6 +978,7 @@ pub(crate) fn reset_test(
     }
     super::rebuild(&mut result, baseline, def)?;
     super::sync_representation(&mut result, def, &name)?;
+    crate::scene::view::dispatch::set_entity_xdata(&mut result, insert, super::flip_graph::INPUTS, None);
     if let Some(parameter) =
         crate::scene::block_visibility::parameter(&result, def).map(|p| p.handle)
     {
@@ -1268,7 +1295,7 @@ pub(crate) fn materialize(
     Ok(scene.document)
 }
 
-fn save_resolved_frames(
+pub(super) fn save_resolved_frames(
     doc: &mut Document,
     parameters: &[Parameter],
     insert: Handle,

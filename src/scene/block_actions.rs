@@ -18,6 +18,9 @@ mod targets;
 mod array;
 mod chains;
 mod flip_frames;
+mod flip_graph;
+#[cfg(test)]
+mod flip_graph_tests;
 pub(crate) mod options;
 pub(crate) mod chain;
 
@@ -1325,6 +1328,7 @@ struct Evaluation<'a> {
     resolved_active: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     frames: Option<&'a std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     managed_flip: Option<Handle>,
+    managed_flips: &'a [Handle],
 }
 
 pub(crate) fn evaluate_framed(
@@ -1339,6 +1343,7 @@ pub(crate) fn evaluate_framed(
     resolved_frames: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     resolved_active: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     managed_flip: Option<Handle>,
+    managed_flips: &[Handle],
 ) -> Result<bool, &'static str> {
     let bases = frames
         .iter()
@@ -1367,6 +1372,7 @@ pub(crate) fn evaluate_framed(
             resolved_active: Some(resolved_active),
             frames: Some(frames),
             managed_flip,
+            managed_flips,
             rebuild: false,
             ..Evaluation::default()
         },
@@ -1416,6 +1422,7 @@ pub(crate) fn rebuild_framed(
             resolved_frames: Some(&mut resolved_frames),
             resolved_active: None,
             managed_flip: None,
+            managed_flips: &[],
         },
     )?;
     Ok(resolved_frames)
@@ -1655,7 +1662,8 @@ fn evaluate_impl(
                 .find(|p| p.id == *id)
                 .is_some_and(|p| value(&staged, &p) == Ok(Value::Flip(false)));
         let active_dependencies;
-        let dependencies = if inactive_flip || evaluation.managed_flip == Some(*action_handle) {
+        let dependencies = if inactive_flip || evaluation.managed_flip == Some(*action_handle)
+            || evaluation.managed_flips.contains(action_handle) {
             active_dependencies = a.dependencies.iter().copied()
                 .filter(|h| baseline.get_entity(*h).is_some())
                 .collect::<Vec<_>>();

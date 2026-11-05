@@ -3921,9 +3921,38 @@ fn linked_linear_flip_coexists_with_an_independent_geometry_flip() {
         let baseline = doc.clone();
         let mut overlapping = doc.clone();
         action_object_mut(&mut overlapping, independent_action).dependencies = vec![targets[1]];
-        let before = overlapping.clone();
-        assert!(instance::evaluate_value(&overlapping, insert, flip, Value::Flip(true)).is_err());
-        assert_eq!(overlapping, before);
+        let overlapping_baseline = overlapping.clone();
+        for handle in [flip, independent] {
+            overlapping = if testing {
+                instance::evaluate_test_value(
+                    &overlapping,
+                    &overlapping_baseline,
+                    def,
+                    insert,
+                    handle,
+                    Value::Flip(true),
+                )
+            } else {
+                instance::evaluate_value(&overlapping, insert, handle, Value::Flip(true))
+            }
+            .unwrap()
+            .unwrap();
+        }
+        assert_eq!(
+            instance::frame(&overlapping, insert, &p).unwrap().end,
+            DVec3::new(10., -2., 0.)
+        );
+        let EntityType::Insert(reference) = overlapping.get_entity(insert).unwrap() else {
+            panic!()
+        };
+        let circle = overlapping
+            .entities_in_block(&reference.block_name)
+            .find_map(|entity| match entity {
+                EntityType::Circle(circle) => Some(circle),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(circle.center, Vector3::new(-4., -3., 0.));
 
         let eval = |d: &Document, parameter, input| {
             if testing {

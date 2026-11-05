@@ -927,6 +927,8 @@ pub struct UserSettings {
     pub offset_gap_type: u8,
     /// TRIMEXTENDMODE: TRIM and EXTEND start in Quick mode (else Standard).
     pub trim_extend_quick: bool,
+    /// MATCHMODE: the properties MATCHPROP transfers, one bit each.
+    pub match_mode: u32,
     /// REVCLOUDCREATEMODE: the type REVCLOUD starts with (0 Freehand, 1 Rectangular, 2 Polygonal).
     pub revcloud_create_mode: u8,
     /// REVCLOUDARCVARIANCE: cloud chords of random length.
@@ -1475,6 +1477,7 @@ impl Default for UserSettings {
             group_display_mode: 2,
             offset_gap_type: 0,
             trim_extend_quick: true,
+            match_mode: crate::entities::match_props::MatchOpts::DEFAULT_MODE,
             revcloud_create_mode: 1,
             revcloud_arc_variance: true,
             revcloud_grips: true,

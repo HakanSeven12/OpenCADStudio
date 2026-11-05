@@ -142,6 +142,7 @@ pub(super) const NAMES: &[&str] = &[
     "external_change_cancel",
     "pdf_dialog_ok",
     "txt2mtxt_settings",
+    "matchprop_settings",
     "view_background",
     "image_adjust",
     "import_file_dialog",
@@ -3285,6 +3286,27 @@ impl OpenCADStudio {
                     "wrap" => Message::PdfDialog(M::T2mWrap(on)),
                     "uniform" => Message::PdfDialog(M::T2mUniform(on)),
                     "ok" => Message::PdfDialog(M::T2mOk),
+                    "cancel" => Message::CloseModal,
+                    _ => return Err(failure("invalid_value", "Unknown setting")),
+                }
+            }
+            // MATCHPROP's Property Settings: "toggle=<MATCHMODE bit>",
+            // "all", "none", "ok", "cancel".
+            "matchprop_settings" => {
+                use crate::ui::window::pdf_dialogs::PdfDialogMsg as M;
+                if !self.focus_dialog(crate::app::ModalKind::MatchPropSettings) {
+                    return Err(failure("no_dialog", "Property Settings is not open"));
+                }
+                let value = string(req, "value")?;
+                let (key, arg) = value.split_once('=').unwrap_or((value, ""));
+                match key {
+                    "toggle" => match arg.trim().parse::<u32>() {
+                        Ok(bit) if bit.is_power_of_two() => Message::PdfDialog(M::MpToggle(bit)),
+                        _ => return Err(failure("invalid_value", value)),
+                    },
+                    "all" => Message::PdfDialog(M::MpAll),
+                    "none" => Message::PdfDialog(M::MpNone),
+                    "ok" => Message::PdfDialog(M::MpOk),
                     "cancel" => Message::CloseModal,
                     _ => return Err(failure("invalid_value", "Unknown setting")),
                 }

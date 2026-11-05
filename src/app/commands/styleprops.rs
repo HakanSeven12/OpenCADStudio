@@ -997,6 +997,7 @@ impl OpenCADStudio {
                     | "REVCLOUDGRIPS"
                     | "GROUPDISPLAYMODE"
                     | "OFFSETGAPTYPE"
+                    | "MATCHMODE"
                     | "REVCLOUDAPPROXARCLEN"
                     | "PELLIPSE"
                     | "SELECTIONCYCLING"
@@ -1125,6 +1126,10 @@ impl OpenCADStudio {
                     }
                     if name == "OFFSETGAPTYPE" {
                         self.offset_gap_setvar(value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "MATCHMODE" {
+                        self.match_mode_setvar(value.as_deref());
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name.starts_with("REVCLOUD") {

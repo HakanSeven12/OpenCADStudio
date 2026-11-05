@@ -329,6 +329,17 @@ impl OpenCADStudio {
                     self.command_line.push_info(&prompt);
                 }
             }
+            // OK or Cancel: MATCHPROP asks for its destinations again.
+            Some(MatchPropSettings) => {
+                self.matchprop_dialog = None;
+                if let Some(prompt) = self.tabs[self.active_tab]
+                    .active_cmd
+                    .as_ref()
+                    .map(|command| command.prompt())
+                {
+                    self.command_line.push_info(&prompt);
+                }
+            }
             Some(PdfImportFile) => self.pdf_import_file = None,
             Some(ImportFile) => self.import_dialogs.file = None,
             Some(DgnImport) => self.import_dialogs.dgn = None,

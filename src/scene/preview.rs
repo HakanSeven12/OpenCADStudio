@@ -552,18 +552,21 @@ impl Scene {
     ) -> Option<(Vec<WireModel>, Vec<HatchModel>)> {
         let source_entity = self.document.get_entity(source)?.clone();
         let mut target_entity = self.document.get_entity(target)?.clone();
+        let opts = crate::entities::match_props::MatchOpts::current();
         crate::entities::match_props::match_properties_kernel(
             &source_entity,
             &mut target_entity,
-            &crate::entities::match_props::MatchOpts::all(),
+            &opts,
         );
 
         // The interactive handler also transfers this hatch-specific xdata
         // outside the shared entity kernel. Mirror it on the preview clone so
         // the fill reflects the same background that a click will apply.
-        if let (EntityType::Hatch(source_hatch), EntityType::Hatch(target_hatch)) =
-            (&source_entity, &mut target_entity)
-        {
+        if let (true, EntityType::Hatch(source_hatch), EntityType::Hatch(target_hatch)) = (
+            opts.has(crate::entities::match_props::MatchOpts::HATCH),
+            &source_entity,
+            &mut target_entity,
+        ) {
             match crate::entities::hatch::background_color(source_hatch) {
                 Some(color) => crate::entities::hatch::set_background_color(target_hatch, &color),
                 None => crate::entities::hatch::clear_background_color(target_hatch),

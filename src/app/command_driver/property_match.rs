@@ -110,9 +110,10 @@ impl OpenCADStudio {
             // Entity-level transfer lives in the shared kernel so headless
             // callers share it; the `&mut Document` xdata paths, undo,
             // tessellation, selection and echo stay caller-side here.
-            // `all()` preserves the interactive behaviour; the xdata paths
-            // below honour the matching flags for future narrow callers.
-            let match_opts = crate::entities::match_props::MatchOpts::all();
+            // MATCHMODE decides what crosses; the xdata paths below honour
+            // the same bits.
+            use crate::entities::match_props::MatchOpts;
+            let match_opts = MatchOpts::current();
             self.apply_property_op(i, "MATCHPROP", &dest, |app, handle| {
                 let mut is_dim = false;
                 let mut is_hatch = false;
@@ -123,7 +124,7 @@ impl OpenCADStudio {
                         crate::entities::match_props::match_properties_kernel(se, e, &match_opts);
                     }
                 }
-                if is_hatch && match_opts.copy_hatch_background {
+                if is_hatch && match_opts.has(MatchOpts::HATCH) {
                     if let Some(values) = &hatch_background_xdata {
                         crate::scene::view::dispatch::set_entity_xdata(
                             &mut app.tabs[i].scene.document,
@@ -139,7 +140,7 @@ impl OpenCADStudio {
                 // (Collapsed: the old outer `dstyle_xdata.is_some() || dst-is-dim`
                 // gate is subsumed — the replace only ever ran when both dst
                 // and src are dim/leader.)
-                if match_opts.copy_dim_overrides
+                if match_opts.has(MatchOpts::DIM)
                     && matches!(
                         app.tabs[i].scene.document.get_entity(handle),
                         Some(codec::EntityType::Dimension(_) | codec::EntityType::Leader(_))
@@ -154,6 +155,11 @@ impl OpenCADStudio {
                         handle,
                         dstyle_xdata.clone().unwrap_or_default(),
                     );
+                }
+                // A centre line is rebuilt on its own sources with the
+                // source's extensions (centre marks are done in the kernel).
+                if match_opts.has(MatchOpts::CENTER) {
+                    app.tabs[i].scene.match_centerline_extensions(src, handle);
                 }
                 // A restyled dimension renders from its baked *D block —
                 // drop the stale block so the new style shows (#398).

@@ -16,7 +16,7 @@ pub fn tool() -> ToolDef {
 use codec::Handle;
 use glam::DVec3;
 
-use crate::command::{CadCommand, CmdResult, SelectionHoverPreview};
+use crate::command::{CadCommand, CmdOption, CmdResult, SelectionHoverPreview};
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
 
@@ -45,6 +45,14 @@ impl MatchPropCommand {
     fn phase1_done(&self) -> bool {
         !self.src.is_null()
     }
+
+    /// The source is set: the active settings line comes before the
+    /// destination prompt.
+    fn source_taken() -> CmdResult {
+        CmdResult::ReportMeasurement(crate::entities::match_props::active_settings_line(
+            crate::entities::match_props::match_mode(),
+        ))
+    }
 }
 
 impl CadCommand for MatchPropCommand {
@@ -56,13 +64,18 @@ impl CadCommand for MatchPropCommand {
         if !self.phase1_done() {
             crate::t!("MATCHPROP  Select source object:").into_owned()
         } else {
-            crate::t!("MATCHPROP  Select destination object(s):").into_owned()
+            crate::t!("MATCHPROP  Select destination object(s) or [Settings]:").into_owned()
         }
     }
 
     // ── Phase 1: single entity pick ───────────────────────────────────────
 
     fn needs_entity_pick(&self) -> bool {
+        !self.phase1_done()
+    }
+
+    /// A typed coordinate at the source prompt picks the object there.
+    fn typed_point_picks_entity(&self) -> bool {
         !self.phase1_done()
     }
 
@@ -86,7 +99,7 @@ impl CadCommand for MatchPropCommand {
             return CmdResult::NeedPoint; // nothing hit, keep waiting
         }
         self.src = handle;
-        CmdResult::NeedPoint // move to phase 2 (selection gathering)
+        Self::source_taken() // move to phase 2 (selection gathering)
     }
 
     // ── Phase 2: destination selection gathering ──────────────────────────
@@ -103,6 +116,25 @@ impl CadCommand for MatchPropCommand {
             dest: handles,
             src: self.src,
         }
+    }
+
+    fn options(&self) -> Vec<CmdOption> {
+        if self.phase1_done() {
+            vec![CmdOption::new(crate::t!("Settings").as_ref(), "S")]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn wants_text_input(&self) -> bool {
+        self.phase1_done()
+    }
+
+    /// S / Settings opens the Property Settings window over the command.
+    fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
+        let word = text.trim().trim_start_matches('_').to_ascii_uppercase();
+        (self.phase1_done() && !word.is_empty() && "SETTINGS".starts_with(word.as_str()))
+            .then_some(CmdResult::OpenMatchPropSettings(self.src))
     }
 
     fn selection_hover_preview_enabled(&self) -> bool {
@@ -139,7 +171,7 @@ impl CadCommand for MatchPropCommand {
     fn on_enter(&mut self) -> CmdResult {
         if !self.phase1_done() && !self.last.is_null() {
             self.src = self.last;
-            return CmdResult::NeedPoint;
+            return Self::source_taken();
         }
         CmdResult::Cancel
     }

@@ -46,6 +46,36 @@ impl OpenCADStudio {
 }
 
 impl OpenCADStudio {
+    /// `MATCHMODE [value]`: the properties MATCHPROP transfers, a profile
+    /// value; outside 0–262143 it is refused and asked for again.
+    pub(super) fn match_mode_setvar(&mut self, value: Option<&str>) {
+        use crate::entities::match_props::{match_mode, set_match_mode, MatchOpts};
+        let ask = |app: &mut Self| {
+            let (name, current) = ("MATCHMODE", match_mode());
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some("MATCHMODE".to_string());
+        };
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            ask(self);
+            return;
+        };
+        match value.parse::<u32>() {
+            Ok(mode) if mode <= MatchOpts::ALL_BITS => {
+                if mode != match_mode() {
+                    set_match_mode(mode);
+                    self.save_config();
+                }
+            }
+            _ => {
+                let (min, max) = (0, MatchOpts::ALL_BITS);
+                self.command_line
+                    .push_error(crate::tf!("Requires an integer between {min} and {max}.").as_ref());
+                ask(self);
+            }
+        }
+    }
+
     /// `OFFSETGAPTYPE [value]`, a profile setting: 0 extends, 1 fillets and
     /// 2 chamfers the corners of a polyline offset outward. A value outside
     /// 0–2 is refused and asked for again.

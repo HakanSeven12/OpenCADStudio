@@ -517,6 +517,33 @@ impl Scene {
         true
     }
 
+    /// MATCHPROP's Center object: the destination centre line takes the
+    /// source's end extensions and is rebuilt on its own source lines.
+    pub(crate) fn match_centerline_extensions(&mut self, src: Handle, dst: Handle) {
+        let Some(EntityType::Line(source)) = self.document.get_entity(src) else {
+            return;
+        };
+        let Some(from) = CenterLineAssociation::read(&source.common.extended_data) else {
+            return;
+        };
+        let Some(EntityType::Line(line)) = self.document.get_entity(dst) else {
+            return;
+        };
+        let Some(mut association) = CenterLineAssociation::read(&line.common.extended_data) else {
+            return;
+        };
+        association.start_extension = from.start_extension;
+        association.end_extension = from.end_extension;
+        let Some(mut rebuilt) = rebuild_line(&self.document, &association) else {
+            return;
+        };
+        if let Some(EntityType::Line(line)) = self.document.get_entity_mut(dst) {
+            rebuilt.common = line.common.clone();
+            association.write(&mut rebuilt.common.extended_data);
+            *line = rebuilt;
+        }
+    }
+
     pub(crate) fn reset_centerlines(&mut self, handles: &[Handle]) -> usize {
         let extension = self.centerline_settings().extension;
         let candidates: Vec<_> = handles

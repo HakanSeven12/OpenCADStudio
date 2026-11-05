@@ -335,3 +335,50 @@ impl OpenCADStudio {
         })
     }
 }
+
+#[cfg(test)]
+mod shape_node_tests {
+    use serde_json::{json, Value};
+
+    /// The polyline each drawing-shape node makes, from `inputs`.
+    fn made(node: &str, inputs: Value) -> codec::entities::LwPolyline {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let spec = super::ops::resolve(node).expect("node type");
+        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        for (field, value) in inputs.as_object().unwrap() {
+            let port = super::Port { node: id, field: field.clone() };
+            let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+        }
+        let i = app.active_tab;
+        let made = app.tabs[i].scene.document.entities().find_map(|entity| match entity {
+            codec::EntityType::LwPolyline(polyline) => Some(polyline.clone()),
+            _ => None,
+        });
+        made.unwrap_or_else(|| panic!("{node} made no polyline"))
+    }
+
+    /// #2589: Rectangle, Polygon, Donut and Revision Cloud nodes.
+    #[test]
+    fn the_shape_nodes_draw_their_polylines() {
+        let corners = |p: &codec::entities::LwPolyline| -> Vec<(f64, f64)> {
+            p.vertices.iter().map(|v| (v.location.x, v.location.y)).collect()
+        };
+        let rectangle = made("Rectangle", json!({"corner": {"x": 1, "y": 2, "z": 3}, "width": 4, "height": 2}));
+        assert_eq!(corners(&rectangle), [(1.0, 2.0), (5.0, 2.0), (5.0, 4.0), (1.0, 4.0)]);
+        assert_eq!(rectangle.elevation, 3.0);
+
+        let square = made("Polygon", json!({"center": {"x": 0, "y": 0}, "radius": 1, "sides": 4, "circumscribed": true}));
+        for (x, y) in corners(&square) {
+            assert!((x.abs() - 1.0).abs() < 1e-9 && (y.abs() - 1.0).abs() < 1e-9, "{x},{y}");
+        }
+
+        let donut = made("Donut", json!({"center": {"x": 0, "y": 0}, "inside": 2, "outside": 4}));
+        assert_eq!(donut.constant_width, 1.0);
+
+        let cloud = made("Revision Cloud", json!({"points": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}], "arc length": 1}));
+        assert!(cloud.vertices.len() > 10 && cloud.vertices.iter().any(|v| v.bulge != 0.0));
+    }
+}
+

@@ -54,6 +54,31 @@ pub const LIBRARY: &[Spec] = &[
     host("Polyline By Points", "Create", &[l("points"), b("closed", false)], OBJECT),
     host("Spline By Points", "Create", &[l("points")], OBJECT),
     host("3D Polyline By Points", "Create", &[l("points")], OBJECT),
+    host(
+        "Rectangle",
+        "Create",
+        &[v("corner"), n("width", 10.0), n("height", 5.0), n("rotation", 0.0)],
+        OBJECT,
+    ),
+    host(
+        "Polygon",
+        "Create",
+        &[
+            v("center"),
+            n("radius", 5.0),
+            n("sides", 6.0),
+            b("circumscribed", false),
+            n("rotation", 0.0),
+        ],
+        OBJECT,
+    ),
+    host("Donut", "Create", &[v("center"), n("inside", 0.5), n("outside", 1.0)], OBJECT),
+    host(
+        "Revision Cloud",
+        "Create",
+        &[l("points"), n("arc length", 0.5), b("closed", true)],
+        OBJECT,
+    ),
     host("Aligned Dimension", "Create", &[v("first"), v("second"), v("location")], OBJECT),
     host(
         "Linear Dimension",
@@ -112,6 +137,18 @@ pub fn object(handle: Handle) -> Value {
 
 fn vec3(value: &Value) -> Option<DVec3> {
     point(value).map(DVec3::from_array)
+}
+
+/// A closed plan polyline through `vertices` at height `z`.
+fn closed_polyline(vertices: &[[f64; 2]], z: f64) -> EntityType {
+    let mut polyline = codec::entities::LwPolyline::new();
+    polyline.is_closed = true;
+    polyline.elevation = z;
+    polyline.vertices = vertices
+        .iter()
+        .map(|p| codec::entities::LwVertex::new(codec::types::Vector2::new(p[0], p[1])))
+        .collect();
+    EntityType::LwPolyline(polyline)
 }
 
 fn same_plane(a: &kernel::space::Plane, b: &kernel::space::Plane) -> bool {
@@ -197,6 +234,88 @@ impl AppHost<'_> {
                 one(self.create(EntityType::Polyline3D(
                     codec::entities::Polyline3D::from_points(points),
                 )))
+            }
+            "Rectangle" => one(match vec3(&a[0]) {
+                Some(corner) => {
+                    let (w, h) = (num(&a[1]).unwrap_or(0.0), num(&a[2]).unwrap_or(0.0));
+                    let (sin, cos) = num(&a[3]).unwrap_or(0.0).to_radians().sin_cos();
+                    let at = |x: f64, y: f64| [corner.x + x * cos - y * sin, corner.y + x * sin + y * cos];
+                    if w * h == 0.0 || !(w * h).is_finite() {
+                        Value::Null
+                    } else {
+                        self.create(closed_polyline(
+                            &[at(0.0, 0.0), at(w, 0.0), at(w, h), at(0.0, h)],
+                            corner.z,
+                        ))
+                    }
+                }
+                None => Value::Null,
+            }),
+            // The bottom edge lies level at rotation 0, as POLYGON draws a
+            // typed radius; circumscribed puts the radius at the edge middles.
+            "Polygon" => {
+                let sides = num(&a[2]).unwrap_or(0.0).round();
+                let radius = num(&a[1]).unwrap_or(0.0);
+                one(match vec3(&a[0]) {
+                    Some(c) if (3.0..=1024.0).contains(&sides) && radius > 0.0 => {
+                        let step = std::f64::consts::TAU / sides;
+                        let r = if graph::value::boolean(&a[3]).unwrap_or(false) {
+                            radius / (step / 2.0).cos()
+                        } else {
+                            radius
+                        };
+                        let start = num(&a[4]).unwrap_or(0.0).to_radians()
+                            - std::f64::consts::FRAC_PI_2
+                            + step / 2.0;
+                        let vertices: Vec<[f64; 2]> = (0..sides as usize)
+                            .map(|i| {
+                                let angle = start + step * i as f64;
+                                [c.x + r * angle.cos(), c.y + r * angle.sin()]
+                            })
+                            .collect();
+                        self.create(closed_polyline(&vertices, c.z))
+                    }
+                    _ => Value::Null,
+                })
+            }
+            "Donut" => {
+                let (inside, outside) = (num(&a[1]).unwrap_or(0.0), num(&a[2]).unwrap_or(0.0));
+                let (inner, outer) = (inside.min(outside) / 2.0, inside.max(outside) / 2.0);
+                one(match vec3(&a[0]) {
+                    Some(c) if inner >= 0.0 && outer > 0.0 && outer.is_finite() => self.create(
+                        crate::modules::draw::draw::donut::make_donut(c.x, c.y, c.z, inner, outer),
+                    ),
+                    _ => Value::Null,
+                })
+            }
+            "Revision Cloud" => {
+                let points: Vec<[f64; 3]> = list(&a[0]).iter().filter_map(point).collect();
+                let closed = graph::value::boolean(&a[2]).unwrap_or(true);
+                let curve = kernel::geom2d::Curve::Polyline(kernel::geom2d::Polyline {
+                    vertices: points
+                        .iter()
+                        .map(|p| kernel::geom2d::PolylineVertex::straight([p[0], p[1]]))
+                        .collect(),
+                    closed,
+                });
+                let cloud = (points.len() >= 2)
+                    .then(|| {
+                        crate::entities::revcloud::cloud_along(
+                            &curve,
+                            num(&a[1]).unwrap_or(0.0),
+                            false,
+                            false,
+                            false,
+                        )
+                    })
+                    .flatten();
+                one(match cloud {
+                    Some(mut cloud) => {
+                        cloud.elevation = points[0][2];
+                        self.create(EntityType::LwPolyline(cloud))
+                    }
+                    None => Value::Null,
+                })
             }
             "Aligned Dimension" => one(match (vec3(&a[0]), vec3(&a[1]), vec3(&a[2])) {
                 (Some(first), Some(second), Some(location)) if first != second => self.create(

@@ -355,6 +355,49 @@ impl Plan {
         Ok(result)
     }
 
+    fn migrate_frame(
+        old: &Parameter,
+        new: &Parameter,
+        frame: ParameterFrame,
+    ) -> Result<ParameterFrame, &'static str> {
+        if (old.base.z - new.base.z).abs() > 1e-8 || (old.end.z - new.end.z).abs() > 1e-8 {
+            return Err(FRAME_ERROR);
+        }
+        if new.point && old.point {
+            return Ok(ParameterFrame {
+                base: new.base,
+                end: new.end + (frame.end - old.end),
+            });
+        }
+        if !(new.linear && old.linear || new.flip && old.flip) {
+            return Err(FRAME_ERROR);
+        }
+        let old_axis = old.end - old.base;
+        let new_axis = new.end - new.base;
+        if old_axis.z.abs() > 1e-8 || new_axis.z.abs() > 1e-8 {
+            return Err(FRAME_ERROR);
+        }
+        let old_direction = old_axis.try_normalize().ok_or(FRAME_ERROR)?;
+        let new_direction = new_axis.try_normalize().ok_or(FRAME_ERROR)?;
+        let cosine = old_direction.dot(new_direction);
+        let sine = old_direction.cross(new_direction).z;
+        let rotate =
+            |v: DVec3| DVec3::new(cosine * v.x - sine * v.y, sine * v.x + cosine * v.y, v.z);
+        let base = new.base + rotate(frame.base - old.base);
+        let length = frame.base.distance(frame.end);
+        let delta = if new.flip {
+            rotate(frame.end - frame.base) * (new_axis.length() / old_axis.length())
+        } else if (length - old_axis.length()).abs() <= 1e-8 {
+            new_axis
+        } else {
+            new_direction * length
+        };
+        Ok(ParameterFrame {
+            base,
+            end: base + delta,
+        })
+    }
+
     pub fn refresh(
         &self,
         doc: &Document,
@@ -379,6 +422,7 @@ impl Plan {
         };
         let mut cleaned = None;
         let mut evaluated = doc.clone();
+        let mut migrated_inputs = BTreeMap::new();
         let (frames, previous_frames) = if let Some(plan) = previous_plan {
             let previous_frames = match cached {
                 Some(frames) => frames,
@@ -405,19 +449,40 @@ impl Plan {
                 }
             }
             let mut frames = BTreeMap::new();
+            let mut previous_autonomous = None;
             for p in &self.parameters {
                 let authored = ParameterFrame {
                     base: p.base,
                     end: p.end,
                 };
                 let (frame, value) = if let Some(old) = old_parameters.get(&p.handle) {
-                    if old.id != p.id
-                        || old.base.distance(p.base) > 1e-8
-                        || old.end.distance(p.end) > 1e-8
-                    {
+                    if old.id != p.id {
                         return Err(FRAME_ERROR);
                     }
-                    let frame = previous_frames[&p.handle];
+                    let mut frame = previous_frames[&p.handle];
+                    if old.base.distance(p.base) > 1e-8 || old.end.distance(p.end) > 1e-8 {
+                        if previous_autonomous.is_none() {
+                            previous_autonomous = Some(
+                                chains::Graph::new(before, def)?.autonomous(
+                                    before,
+                                    Some(
+                                        &previous_frames.iter().map(|(h, f)| (*h, f.end)).collect(),
+                                    ),
+                                    Some(
+                                        &previous_frames
+                                            .iter()
+                                            .map(|(h, f)| (*h, f.base))
+                                            .collect(),
+                                    ),
+                                )?,
+                            );
+                        }
+                        let autonomous = previous_autonomous
+                            .as_ref()
+                            .and_then(|frames| frames.get(&p.handle));
+                        frame = Self::migrate_frame(old, p, autonomous.copied().unwrap_or(frame))?;
+                        migrated_inputs.insert(p.handle, frame);
+                    }
                     let value = if p.flip {
                         instance::value(doc, insert, old).unwrap_or(Value::Flip(false))
                     } else {
@@ -456,6 +521,7 @@ impl Plan {
                 frames: previous_frames,
                 values: &previous_frames.iter().map(|(h, f)| (*h, f.end)).collect(),
                 requested: &BTreeSet::new(),
+                migrated_inputs: Some(&migrated_inputs),
             },
         )
     }

@@ -1323,6 +1323,7 @@ struct Evaluation<'a> {
     previous_bases: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     previous_graph: Option<&'a Document>,
     previous_values: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
+    migrated_inputs: Option<&'a std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     requested: Option<&'a std::collections::BTreeSet<Handle>>,
     resolved_frames: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
     resolved_active: Option<&'a mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
@@ -1386,6 +1387,7 @@ pub(crate) struct RebuildInputs<'a> {
     pub frames: &'a std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     pub values: &'a std::collections::BTreeMap<Handle, DVec3>,
     pub requested: &'a std::collections::BTreeSet<Handle>,
+    pub migrated_inputs: Option<&'a std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
 }
 
 pub(crate) fn rebuild_framed(
@@ -1430,6 +1432,7 @@ fn rebuild_framed_with_flips(
             previous_bases: previous_bases.as_ref().or(Some(&bases)),
             previous_graph: previous.map(|p| p.document),
             previous_values: previous.map(|p| p.values),
+            migrated_inputs: previous.and_then(|p| p.migrated_inputs),
             requested: previous.map(|p| p.requested),
             resolved_frames: Some(&mut resolved_frames),
             resolved_active,
@@ -1573,11 +1576,14 @@ fn evaluate_impl(
     set_value(&mut staged, &p, input)?;
     let previous_chain =
         chains::Graph::new(evaluation.previous_graph.unwrap_or(baseline), definition)?;
-    let autonomous = previous_chain.autonomous(
+    let mut autonomous = previous_chain.autonomous(
         doc,
         evaluation.previous_values,
         evaluation.previous_bases.or(evaluation.bases),
     )?;
+    if let Some(migrated) = evaluation.migrated_inputs {
+        autonomous.extend(migrated.iter().map(|(handle, frame)| (*handle, *frame)));
+    }
     let requested = if let Some(requested) = evaluation.requested {
         requested.clone()
     } else if force {

@@ -130,6 +130,7 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             } {
                 changed = eval(&changed, h, Value::Flip(true));
             }
+            let at_default = changed.clone();
             changed = eval(&changed, child, Value::Point(DVec3::new(-15., -2., 0.)));
             assert_eq!(circle(&changed), Vector3::new(-9., -3., 0.));
             let from_lookup = if testing {
@@ -234,6 +235,89 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
                 assert_eq!(circle(&deleted), Vector3::new(-9., -3., 0.));
                 let next = eval(&deleted, child, Value::Point(DVec3::new(-18., -2., 0.)));
                 assert_eq!(circle(&next), Vector3::new(-12., -3., 0.));
+
+                use crate::scene::block_authoring::edit::{move_part, Part};
+                let mut edited = at_default.clone();
+                move_part(
+                    &mut edited,
+                    def,
+                    child,
+                    Part::End,
+                    Vector3::new(0., 22., 0.),
+                )
+                .unwrap();
+                let new_default = instance::refresh_after_edit(&edited, &at_default, def).unwrap();
+                let linear = all_parameters(&new_default, def)
+                    .into_iter()
+                    .find(|q| q.handle == child)
+                    .unwrap();
+                assert_eq!(
+                    instance::frame(&new_default, first, &linear).unwrap().end,
+                    DVec3::new(0., -22., 0.)
+                );
+                assert_eq!(circle(&new_default), Vector3::new(-4., -3., 0.));
+
+                let mut edited = transported.clone();
+                move_part(&mut edited, def, parent, Part::Point, Vector3::UNIT_X * 5.).unwrap();
+                let moved_parent =
+                    instance::refresh_after_edit(&edited, &transported, def).unwrap();
+                let point = all_parameters(&moved_parent, def)
+                    .into_iter()
+                    .find(|q| q.handle == parent)
+                    .unwrap();
+                assert_eq!(
+                    instance::frame(&moved_parent, first, &point).unwrap().end,
+                    DVec3::new(5., 3., 0.)
+                );
+                assert_eq!(
+                    instance::frame(&moved_parent, first, &p).unwrap().end,
+                    DVec3::new(-15., -5., 0.)
+                );
+
+                let mut edited = transported.clone();
+                move_part(
+                    &mut edited,
+                    def,
+                    child,
+                    Part::End,
+                    Vector3::new(0., 12., 0.),
+                )
+                .unwrap();
+                let reframed = instance::refresh_after_edit(&edited, &transported, def).unwrap();
+                let linear = all_parameters(&reframed, def)
+                    .into_iter()
+                    .find(|q| q.handle == child)
+                    .unwrap();
+                assert_eq!(
+                    instance::frame(&reframed, first, &linear).unwrap(),
+                    instance::ParameterFrame {
+                        base: DVec3::new(0., -5., 0.),
+                        end: DVec3::new(0., -20., 0.),
+                    }
+                );
+                assert_eq!(circle(&reframed), Vector3::new(-4., -8., 0.));
+                let mut edited = reframed.clone();
+                move_part(&mut edited, def, flips[0], Part::Base, Vector3::UNIT_Y).unwrap();
+                move_part(
+                    &mut edited,
+                    def,
+                    flips[0],
+                    Part::End,
+                    Vector3::new(10., 1., 0.),
+                )
+                .unwrap();
+                let reframed = instance::refresh_after_edit(&edited, &reframed, def).unwrap();
+                assert_eq!(circle(&reframed), Vector3::new(-4., -6., 0.));
+                for extension in ["dwg", "dxf"] {
+                    let bytes =
+                        crate::io::save_to_bytes(&reframed, extension, reframed.version).unwrap();
+                    let reopened =
+                        crate::io::load_bytes(&format!("reframed-flips.{extension}"), bytes)
+                            .unwrap();
+                    assert_eq!(circle(&reopened), Vector3::new(-4., -6., 0.));
+                    let toggled = eval(&reopened, flips[0], Value::Flip(false));
+                    assert_eq!(circle(&toggled), Vector3::new(-4., 8., 0.));
+                }
             }
             let value = instance::value(&changed, first, &p).unwrap();
             let grips = instance::action_grips(&changed, &baseline, def, first, &p, value, testing);

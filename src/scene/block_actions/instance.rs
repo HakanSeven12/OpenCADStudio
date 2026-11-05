@@ -1292,6 +1292,7 @@ pub(crate) fn refresh_after_edit(
                 frames: &previous_frames,
                 values: &previous_values,
                 requested: &std::collections::BTreeSet::new(),
+                migrated_inputs: None,
             }),
         )?;
         let state = super::representation::visibility_state(&staged, before, def, insert);

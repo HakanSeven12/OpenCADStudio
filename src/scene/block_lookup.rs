@@ -487,6 +487,7 @@ fn evaluate_row_context(
         frames: &frames,
         values: &previous_values,
         requested: &requested,
+        migrated_inputs: None,
     };
     let result = if let Some(plan) = flip_plan {
         plan.rebuild_reference(

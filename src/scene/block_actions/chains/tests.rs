@@ -265,6 +265,7 @@ fn block_move_point_chains_rebuild_bulk_inputs_from_the_previous_effective_frame
                 frames: &frames,
                 values: &old_values,
                 requested: &requested,
+                migrated_inputs: None,
             }),
         )
         .unwrap();

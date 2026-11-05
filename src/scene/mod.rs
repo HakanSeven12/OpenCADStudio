@@ -14848,7 +14848,24 @@ vis_index={:.1} visible_probe={:.1}",
             let complex_linetype = *complex_linetypes.entry(lt_name).or_insert_with(|| {
                 crate::io::linetypes::resolve_complex_lt(&self.document, lt_name).is_some()
             });
+            let complex_mline = matches!(
+                entity,
+                EntityType::MLine(mline) if crate::entities::mline::mline_lines(mline, &self.document)
+                    .iter()
+                    .any(|line| {
+                        crate::io::linetypes::resolve_complex_lt(
+                            &self.document,
+                            crate::entities::mline::element_linetype_name(
+                                &self.document,
+                                &mline.common.layer,
+                                &line.linetype,
+                            ),
+                        )
+                        .is_some()
+                    })
+            );
             if complex_linetype
+                || complex_mline
                 || matches!(entity, EntityType::Hatch(_))
                 || crate::scene::annotative::is_annotative(&self.document, entity)
             {

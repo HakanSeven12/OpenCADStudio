@@ -35,7 +35,7 @@ struct WireConst {
     half_width: f32,
     pattern_length: f32,
     draw_depth: f32,
-    align_end: f32,
+    _reserved: f32,
     align_total: f32,
     world_half_width: f32,
     is_tapered: f32,
@@ -258,7 +258,6 @@ fn vs_main(@builtin(vertex_index) vertex_index: u32, in: VertexIn) -> VertexOut 
     out.min_elem = min_element;
     let run_total = select(dash_run_total(in.taper_bits.x, in.taper_bits.y), wire_const.align_total, wire_const.world_half_width > 0.0);
     out.align_end = aligned_end_dash(
-        wire_const.align_end * scale,
         run_total,
         out.pattern_length,
         max(out.pat0.x, 0.0),

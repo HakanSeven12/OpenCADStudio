@@ -4,11 +4,11 @@
 use std::collections::HashSet;
 
 use document::entities::{
-    Circle, Ellipse, Insert, Line, LwPolyline, LwVertex, Polyline2D, Polyline3D, PolylineFlags,
-    Vertex2D,
+    Circle, Ellipse, Insert, Line, LwPolyline, LwVertex, MLine, Polyline2D, Polyline3D,
+    PolylineFlags, Vertex2D,
 };
 use document::tables::linetype::LineTypeElement;
-use document::tables::{BlockRecord, LineType};
+use document::tables::{BlockRecord, Layer, LineType};
 use document::types::{Vector2, Vector3};
 use document::{Document, EntityType, Handle};
 
@@ -174,7 +174,7 @@ fn each_segment_of_a_polyline_without_plinegen_aligns_on_its_own() {
         .collect();
     assert_eq!(runs, vec![(0.0, 110.0); 4]);
     // k = 2: (110 - 80 + 20) / 2.
-    assert_eq!(aligned_end_dash(0.0, 110.0, 40.0, 20.0), 25.0);
+    assert_eq!(aligned_end_dash(110.0, 40.0, 20.0), 25.0);
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn a_heavy_polyline_without_plinegen_is_solid_when_its_vertices_crowd_the_patter
         if wire.points[index][0].is_finite() && wire.points[index + 1][0].is_finite() {
             let total = dashes.run_totals[index];
             assert!(total < 40.0);
-            assert_eq!(aligned_end_dash(0.0, total, 40.0, 20.0), total);
+            assert_eq!(aligned_end_dash(total, 40.0, 20.0), total);
         }
     }
 }
@@ -416,4 +416,123 @@ fn a_mirrored_block_keeps_its_dashes_at_drawing_length() {
     assert_eq!(wires.len(), 1);
     assert_eq!(wires[0].pattern_length, 40.0);
     assert_eq!(wires[0].dash_closure, DashClosure::Curve);
+}
+
+// ── MLINE elements ───────────────────────────────────────────────────────────
+
+fn add_mline_style(document: &mut Document, name: &str, elements: &[(f64, &str)]) {
+    use document::objects::{MLineStyle, MLineStyleElement, ObjectType};
+    let mut style = MLineStyle::new(name);
+    style.handle = document.allocate_handle();
+    for &(offset, linetype) in elements {
+        let mut element = MLineStyleElement::new(offset);
+        element.linetype = linetype.to_string();
+        style.add_element(element);
+    }
+    document
+        .objects
+        .insert(style.handle, ObjectType::MLineStyle(style));
+}
+
+fn mline(style: &str, points: &[(f64, f64)]) -> MLine {
+    let points: Vec<Vector3> = points
+        .iter()
+        .map(|&(x, y)| Vector3::new(x, y, 0.0))
+        .collect();
+    let mut mline = MLine::from_points(&points);
+    mline.style_name = style.to_string();
+    mline.scale_factor = 1.0;
+    mline
+}
+
+fn dashed_elements(document: &Document, entity: EntityType) -> Vec<WireModel> {
+    tessellated(document, entity)
+        .into_iter()
+        .filter(|wire| !wire.snap_only && !wire.points.is_empty())
+        .collect()
+}
+
+#[test]
+fn each_mline_element_aligns_on_its_own_length() {
+    let mut document = dashed_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "D"), (-10.0, "D")]);
+    let bent = mline("ML", &[(0.0, 0.0), (500.0, 0.0), (500.0, 700.0)]);
+    let elements = dashed_elements(&document, EntityType::MLine(bent));
+    assert_eq!(elements.len(), 2);
+    let mut totals: Vec<f32> = elements
+        .iter()
+        .map(|wire| wire_distances(wire).run_totals[0])
+        .collect();
+    totals.sort_by(f32::total_cmp);
+    assert!(totals[1] - totals[0] > 15.0, "{totals:?}");
+}
+
+#[test]
+fn a_closed_mline_aligns_rather_than_fits() {
+    let mut document = dashed_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "D")]);
+    let points: Vec<Vector3> = [(0.0, 0.0), (600.0, 0.0), (600.0, 600.0), (0.0, 600.0)]
+        .iter()
+        .map(|&(x, y)| Vector3::new(x, y, 0.0))
+        .collect();
+    let mut closed = MLine::closed_from_points(&points);
+    closed.style_name = "ML".to_string();
+    closed.scale_factor = 1.0;
+    let elements = dashed_elements(&document, EntityType::MLine(closed));
+    assert_eq!(elements[0].dash_closure, DashClosure::Open);
+    assert!(wire_distances(&elements[0]).run_totals[0] > 0.0);
+}
+
+#[test]
+fn a_bylayer_mline_element_follows_the_layer_and_ignores_the_entity() {
+    let mut document = dashed_document();
+    let mut layer = Layer::new("L");
+    layer.line_type = "D".to_string();
+    document.layers.add(layer).unwrap();
+    add_mline_style(&mut document, "ML", &[(0.0, "ByLayer")]);
+    let mut entity = mline("ML", &[(0.0, 0.0), (1000.0, 0.0)]);
+    entity.common.layer = "L".to_string();
+    entity.common.linetype = "Continuous".to_string();
+    let elements = dashed_elements(&document, EntityType::MLine(entity));
+    assert_eq!(elements[0].pattern_length, 40.0);
+}
+
+#[test]
+fn a_byblock_mline_element_is_solid_outside_a_block() {
+    let mut document = dashed_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "ByBlock")]);
+    let mut entity = mline("ML", &[(0.0, 0.0), (1000.0, 0.0)]);
+    entity.common.linetype = "D".to_string();
+    let elements = dashed_elements(&document, EntityType::MLine(entity));
+    assert_eq!(elements[0].pattern_length, 0.0);
+}
+
+#[test]
+fn block_mline_elements_keep_or_inherit_their_linetypes() {
+    let mut document = dashed_document();
+    let mut long = LineType::new("LONG");
+    long.handle = document.allocate_handle();
+    long.add_element(LineTypeElement::dash(70.0));
+    long.add_element(LineTypeElement::space(30.0));
+    long.pattern_length = 100.0;
+    document.line_types.add(long).unwrap();
+    add_mline_style(&mut document, "OWN", &[(0.0, "D")]);
+    add_mline_style(&mut document, "BB", &[(0.0, "ByBlock")]);
+    for (block, style) in [("B_OWN", "OWN"), ("B_BB", "BB")] {
+        block_with(
+            &mut document,
+            block,
+            vec![EntityType::MLine(mline(
+                style,
+                &[(0.0, 0.0), (1000.0, 0.0)],
+            ))],
+        );
+    }
+    for (block, expected) in [("B_OWN", 40.0), ("B_BB", 100.0)] {
+        let mut insert = Insert::new(block, Vector3::ZERO);
+        insert.common.linetype = "LONG".to_string();
+        let wires = dashed_block_wires(&document, insert);
+        assert_eq!(wires.len(), 1, "{block}");
+        assert_eq!(wires[0].pattern_length, expected, "{block}");
+    }
 }

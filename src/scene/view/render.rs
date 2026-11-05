@@ -1768,7 +1768,6 @@ fn hash_preview_wires(wires: &[WireModel], h: &mut impl std::hash::Hasher) {
             value.to_bits().hash(h);
         }
         w.depth_override.map(f32::to_bits).hash(h);
-        w.dash_align_end.map(f32::to_bits).hash(h);
         w.dash_closure.hash(h);
         w.plinegen.hash(h);
         w.dash_from_start.hash(h);

@@ -101,7 +101,6 @@ impl CadCommand for RayCommand {
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: "ray_preview".into(),
             points: vec![[base.x, base.y, base.z], [far.x, far.y, far.z]],
@@ -439,7 +438,6 @@ impl CadCommand for XLineCommand {
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: "xline_preview".into(),
             points: vec![

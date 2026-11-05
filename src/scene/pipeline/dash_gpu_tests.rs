@@ -50,7 +50,6 @@ fn plotted_spans(wire: &WireModel, scale: f32) -> Vec<[f32; 2]> {
             dashes.dists[index],
             dashes.dists[index + 1],
             dashes.run_totals[index],
-            dashes.align_ref,
             scaled.pattern_length,
             &scaled.pattern,
         ) {

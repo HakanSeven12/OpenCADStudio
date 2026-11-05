@@ -5,22 +5,19 @@
 
 // The length of the dash at each end of an "A"-aligned run:
 //   [D] [gap] ([dash] [gap])*(k-1) [D]  =>  D = (L - k*P + a) / 2
-// `reference` is the length the layout is taken from when it is not the run's
-// own (0): parallel MLINE elements share their centre line's. A run no longer
-// than one period is one solid dash.
-fn aligned_end_dash(reference: f32, run_total: f32, pat_len: f32, first: f32) -> f32 {
+// A run no longer than one period is one solid dash.
+fn aligned_end_dash(run_total: f32, pat_len: f32, first: f32) -> f32 {
     if run_total <= 0.0 {
         return 0.0;
     }
     if run_total <= pat_len {
         return run_total;
     }
-    let length = select(run_total, reference, reference > 0.0);
-    var periods = max(floor(length / pat_len), 1.0);
-    var end_dash = (length - periods * pat_len + first) * 0.5;
+    var periods = max(floor(run_total / pat_len), 1.0);
+    var end_dash = (run_total - periods * pat_len + first) * 0.5;
     if end_dash <= 1e-4 {
         periods = max(periods - 1.0, 0.0);
-        end_dash = (length - periods * pat_len + first) * 0.5;
+        end_dash = (run_total - periods * pat_len + first) * 0.5;
     }
     return clamp(end_dash, 1e-4, run_total * 0.5);
 }

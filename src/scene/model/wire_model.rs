@@ -772,11 +772,9 @@ pub struct WireModel {
     /// from the START vertex with continuous phase and no A-type end forcing —
     /// DGN line styles are not end-aligned.
     pub dash_from_start: bool,
-    /// The length a parallel MLINE element takes its "A"-type layout from: its
-    /// multiline's centre line. Every element then has one begin/end dash and
-    /// one interior phase (perpendicular dashes line up), and each still ends
-    /// on a dash at its own length. `None` (the default) = the wire's own length.
-    pub dash_align_end: Option<f32>,
+    /// An MLINE element's linetype as its style names it, for whoever walks a
+    /// complex one or inherits a ByBlock one. `None` on any other wire.
+    pub element_linetype: Option<String>,
     /// How the pattern closes around a closed path.
     pub dash_closure: DashClosure,
     /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
@@ -960,7 +958,7 @@ impl WireModel {
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
             dash_from_start: false,
-            dash_align_end: None,
+            element_linetype: None,
             dash_closure: DashClosure::Open,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
@@ -1400,7 +1398,7 @@ impl Default for WireModel {
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
             dash_from_start: false,
-            dash_align_end: None,
+            element_linetype: None,
             dash_closure: DashClosure::Open,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),

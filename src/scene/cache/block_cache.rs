@@ -1137,6 +1137,42 @@ fn tessellate_sub_local(
             ComplexWalk::Points
         };
 
+        let is_element = wire.element_linetype.is_some();
+        // An MLINE's linetypes are its elements': ByBlock and a layer-0 ByLayer
+        // inherit from the INSERT, anything else is the element's own.
+        let (lt_is_byblock, lt_l0, own_complex, complex_walk) =
+            match wire.element_linetype.as_deref() {
+                Some(element) => {
+                    let byblock = element.eq_ignore_ascii_case("byblock");
+                    let bylayer = element.is_empty() || element.eq_ignore_ascii_case("bylayer");
+                    let own = if byblock {
+                        None
+                    } else {
+                        named_complex_linetype(
+                            doc,
+                            crate::entities::mline::element_linetype_name(
+                                doc,
+                                &sub.common().layer,
+                                element,
+                            ),
+                        )
+                    };
+                    let inherited_l0 = bylayer && on_l0;
+                    let walks = wire.points.len() >= 2
+                        && (own.is_some() || (complex_possible && (byblock || inherited_l0)));
+                    (
+                        byblock,
+                        inherited_l0,
+                        own,
+                        if walks {
+                            ComplexWalk::Points
+                        } else {
+                            ComplexWalk::None
+                        },
+                    )
+                }
+                None => (lt_is_byblock, lt_l0, own_complex.clone(), complex_walk),
+            };
         result.push(LocalWire {
             points: wire.points,
             points_low: wire.points_low,
@@ -1159,8 +1195,12 @@ fn tessellate_sub_local(
             preserve_color,
             canvas_color,
             aci,
-            pattern_length: pat_len,
-            pattern: pat,
+            pattern_length: if is_element {
+                wire.pattern_length
+            } else {
+                pat_len
+            },
+            pattern: if is_element { wire.pattern } else { pat },
             line_weight_px: lw_px,
             pattern_stations: wire.pattern_stations,
             world_width: wire.world_width,
@@ -1179,7 +1219,7 @@ fn tessellate_sub_local(
             lt_is_byblock,
             entity_lt_scale: sub.common().linetype_scale as f32,
             complex_walk,
-            own_complex: own_complex.clone(),
+            own_complex,
             complex_lt_scale,
             dash_closure: wire.dash_closure,
             lw_is_byblock,
@@ -2205,7 +2245,7 @@ impl Batches {
                     pick_tris: b.pick_tris,
                     pick_tris_low: b.pick_tris_low,
                     dash_from_start: false,
-                    dash_align_end: None,
+                    element_linetype: None,
                     dash_closure: b.dash_closure,
                     text_verts: b.text_verts,
                     searchable_text: b.searchable_text,
@@ -3257,7 +3297,6 @@ fn emit_wire(
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    dash_align_end: None,
                     dash_closure: lw.dash_closure,
                     text_verts: Vec::new(),
                     name: String::new(),

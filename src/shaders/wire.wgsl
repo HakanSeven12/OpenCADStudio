@@ -68,8 +68,8 @@ struct InstanceIn {
     @location(3) dists:          vec4<f32>,
     @location(4) pat0:           vec4<f32>,
     @location(5) pat1:           vec4<f32>,
-    // draw_depth, align_end ("A"-type end-dash length), align_total (total
-    // wire length), world_half_width (wide-polyline band; 0 = normal wire)
+    // draw_depth, reserved, run layout (see dash_layout.wgsl), world_half_width
+    // (wide-polyline band; 0 = normal wire)
     @location(6) misc:           vec4<f32>,
     // Double-single low residuals of the endpoints.
     @location(7) pos_a_low:      vec3<f32>,
@@ -289,7 +289,6 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, instance: 
     out.pat1           = in.pat1 * lt_scale;
     out.min_elem       = min_elem;
     out.align_end      = aligned_end_dash(
-        in.misc.y * lt_scale,
         in.misc.z,
         out.pattern_length,
         max(out.pat0.x, 0.0),

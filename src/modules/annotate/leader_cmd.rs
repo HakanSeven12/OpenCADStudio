@@ -442,7 +442,6 @@ fn preview_wire(pts: &[Vec3], arrow_size: f32) -> WireModel {
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name: "leader_preview".into(),
         points,

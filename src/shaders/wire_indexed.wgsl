@@ -43,7 +43,7 @@ struct WireConst {
     half_width:     f32,
     pattern_length: f32,
     draw_depth:     f32,
-    align_end:      f32,
+    _reserved:      f32,
     align_total:    f32,
     world_half_width: f32,
     is_tapered:     f32,
@@ -266,7 +266,6 @@ fn marker_relative(position_high: vec3<f32>, position_low: vec3<f32>, c: WireCon
     out.min_elem       = min_elem;
     let run_total = select(dash_run_total(in.taper_bits.x, in.taper_bits.y), c.align_total, is_world);
     out.align_end      = aligned_end_dash(
-        c.align_end * lt_scale,
         run_total,
         out.pattern_length,
         max(out.pat0.x, 0.0),

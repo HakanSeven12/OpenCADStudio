@@ -599,7 +599,6 @@ fn split_mixed_polyline(
                 pick_tris: arc_pt,
                 pick_tris_low: arc_ptl,
                 dash_from_start: false,
-                dash_align_end: None,
                 text_verts: Vec::new(),
                 name: name.to_string(),
                 points,
@@ -741,7 +740,6 @@ fn split_mixed_polyline(
             pick_tris: pt,
             pick_tris_low: ptl,
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: name.to_string(),
             points: line_pts,
@@ -936,7 +934,6 @@ fn point_cloud_wires(
         pick_tris,
         pick_tris_low,
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name: handle.value().to_string(),
         points,
@@ -1164,41 +1161,6 @@ fn tessellate_wires(
             .map(|v| [v.position.x, v.position.y, v.position.z])
             .collect();
 
-        // Local-frame origin (mline start) for the CPU-dashed / glyph-laid
-        // elements. `apply_along` walks positions in f32, which quantises fine
-        // spacing — dash gaps AND inter-glyph advance — at UTM coordinates
-        // (the low half of the double-single is dropped). Subtracting this f64
-        // origin first keeps the walk near zero and precise; the result is
-        // shifted back to absolute double-single afterwards. Mirrors the
-        // Tolerance frame, which also builds geometry locally and applies its
-        // f64 origin later.
-        let origin = [
-            m.vertices[0].position.x,
-            m.vertices[0].position.y,
-            m.vertices[0].position.z,
-        ];
-        // Centre-line (vertex path) length — the shared "A"-type reference so
-        // every parallel element uses the same end-dash length and thus the same
-        // interior phase (perpendicular dashes line up). f64 deltas so it stays
-        // precise at UTM coordinates.
-        let ref_total: f32 = {
-            let mut acc = 0.0_f64;
-            for w in m.vertices.windows(2) {
-                let dx = w[1].position.x - w[0].position.x;
-                let dy = w[1].position.y - w[0].position.y;
-                let dz = w[1].position.z - w[0].position.z;
-                acc += (dx * dx + dy * dy + dz * dz).sqrt();
-            }
-            if m.is_closed() && m.vertices.len() > 1 {
-                let first = &m.vertices[0].position;
-                let last = &m.vertices[m.vertices.len() - 1].position;
-                let dx = first.x - last.x;
-                let dy = first.y - last.y;
-                let dz = first.z - last.z;
-                acc += (dx * dx + dy * dy + dz * dz).sqrt();
-            }
-            acc as f32
-        };
         let mut out: Vec<WireModel> = Vec::with_capacity(lines.len());
         if let Some(style) = crate::entities::mline::resolved_mline_style(m, document) {
             let triangles = crate::entities::mline::mline_fill_triangles_with_style(m, style);
@@ -1232,7 +1194,6 @@ fn tessellate_wires(
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name: name.clone(),
                     points: Vec::new(),
@@ -1278,99 +1239,30 @@ fn tessellate_wires(
                 _ => 0,
             };
 
-            // Every dashed element is CPU-dashed by `apply_along` (not the GPU
-            // pattern) so all parallel lines walk the polyline with the *same*
-            // arithmetic and stay in phase — otherwise a shader-dashed line and an
-            // apply_along-dashed sibling drift apart at large (UTM) coordinates and
-            // one line's dash lands in the other's gap, striking through embedded
-            // text. Document definition wins over the bundled catalog; a
-            // continuous element yields `None` and falls to the solid path below.
-            // Selection forces a plain solid highlight, so skip dashing then.
-            let clt = if selected {
-                None
-            } else if let Some(doc_seg) =
-                crate::io::linetypes::document_lt_segments(document, &l.linetype)
+            // A complex element is walked where its scale and path on the sheet
+            // are known (`walk_mline_element`, `emit_complex_walk`), which reads
+            // the element's linetype off the wire. Each element aligns on its own
+            // length. Selection forces a plain solid highlight.
+            let drawn_linetype = crate::entities::mline::element_linetype_name(
+                document,
+                &m.common.layer,
+                &l.linetype,
+            );
+            let is_complex = !selected
+                && crate::io::linetypes::resolve_complex_lt(document, drawn_linetype).is_some();
+            let (pattern_length, pattern) = if selected || is_complex {
+                (0.0, [0.0; 8])
+            } else {
+                crate::scene::view::render::resolve_pattern(
+                    &document.line_types,
+                    drawn_linetype,
+                    lt_scale,
+                )
+            };
+            let mut elem_wires: Vec<WireModel> = Vec::new();
             {
-                // In-document linetype: CPU-expand (apply_along) only when it
-                // embeds TEXT glyphs that must be laid out along the curve. Pure
-                // dash / space / dot (and undrawn shape) elements fall through to
-                // the GPU dash shader below — cheaper (one WireModel + pattern
-                // instead of N CPU segments) and now UTM-precise, so they stay in
-                // phase with any glyph-bearing sibling element.
-                if doc_seg
-                    .segments
-                    .iter()
-                    .any(|s| matches!(s, crate::io::linetypes::LtSegment::Text { .. }))
-                {
-                    Some(doc_seg)
-                } else {
-                    None
-                }
-            } else {
-                // Not in the document: bundled-catalog linetype (may embed
-                // text / shape) → keep the CPU path; `resolve_pattern` below can't
-                // see it, so GPU-dashing would drop the pattern to solid.
-                crate::io::linetypes::complex_lt(&l.linetype).cloned()
-            };
-
-            let mut elem_wires: Vec<WireModel> = if let Some(clt) = clt {
-                // Walk the dash / glyph layout in a local frame so the f32 math
-                // stays precise, then lift each wire back to world DS.
-                let local: Vec<[f32; 3]> = l
-                    .points
-                    .iter()
-                    .map(|p| {
-                        [
-                            (p[0] - origin[0]) as f32,
-                            (p[1] - origin[1]) as f32,
-                            (p[2] - origin[2]) as f32,
-                        ]
-                    })
-                    .collect();
-                let mut w = crate::scene::text::complex_lt::apply_along(
-                    &name,
-                    &local,
-                    &clt,
-                    lt_scale.max(1e-4),
-                    wcolor,
-                    selected,
-                    line_weight_px,
-                    // Shared "A"-type reference: this text-bearing element aligns
-                    // with the GPU-dashed sibling elements (same centre-line
-                    // reference) instead of tiling independently from the start.
-                    Some(ref_total),
-                );
-                for wm in &mut w {
-                    wm.aci = aci;
-                    shift_wire_to_world(wm, origin);
-                }
-                w
-            } else {
-                Vec::new()
-            };
-
-            // Simple path: the linetype isn't complex, or `apply_along` bailed
-            // (pattern blow-up guard) and returned nothing — draw the element as a
-            // dashed / solid polyline so it is never lost.
-            if elem_wires.is_empty() {
+                let element_linetype = Some(l.linetype.clone());
                 let (pts, pts_low) = points_to_ds(l.points);
-                let (pattern_length, pattern) = if selected {
-                    (0.0, [0.0; 8])
-                } else {
-                    crate::scene::view::render::resolve_pattern(
-                        &document.line_types,
-                        &l.linetype,
-                        lt_scale,
-                    )
-                };
-                // Shared "A"-type: every parallel element takes its layout from
-                // the multiline centre-line (`ref_total`), so they run the same
-                // interior phase and their dashes line up perpendicular, while
-                // each still ends on a dash at its own length. Dash-first
-                // patterns only (`+dash, -gap, …`).
-                let dash_align_end =
-                    (pattern_length > 1e-6 && pattern[0] > 0.0 && pattern[1] < 0.0)
-                        .then_some(ref_total);
                 elem_wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
@@ -1386,12 +1278,8 @@ fn tessellate_wires(
                     render_instance: None,
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
-                    // MLINE dashes: A-type aligned, but the end-dash length is
-                    // shared across all parallel elements (`dash_align_end`) so
-                    // their interiors stay in phase (perpendicular dashes line up)
-                    // while each still ends on a dash at its own endpoint.
                     dash_from_start: false,
-                    dash_align_end,
+                    element_linetype,
                     text_verts: Vec::new(),
                     name: name.clone(),
                     points: pts,
@@ -1854,7 +1742,6 @@ fn tessellate_wires(
                                         pick_tris: Vec::new(),
                                         pick_tris_low: Vec::new(),
                                         dash_from_start: false,
-                                        dash_align_end: None,
                                         text_verts: Vec::new(),
                                         name: name.clone(),
                                         points: vec![],
@@ -1911,7 +1798,6 @@ fn tessellate_wires(
                                         pick_tris: Vec::new(),
                                         pick_tris_low: Vec::new(),
                                         dash_from_start: false,
-                                        dash_align_end: None,
                                         text_verts: Vec::new(),
                                         name: name.clone(),
                                         points: fp,
@@ -1976,7 +1862,6 @@ fn tessellate_wires(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: pts,
@@ -2017,7 +1902,7 @@ fn tessellate_wires(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
+                        element_linetype: None,
                         dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
@@ -2087,7 +1972,6 @@ fn tessellate_wires(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: bin.pts,
@@ -2137,7 +2021,6 @@ fn tessellate_wires(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: Vec::new(),
@@ -2187,7 +2070,7 @@ fn tessellate_wires(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
+                        element_linetype: None,
                         dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
@@ -2227,7 +2110,6 @@ fn tessellate_wires(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name,
                         points: Vec::new(),
@@ -2296,7 +2178,6 @@ fn tessellate_wires(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name,
                             points: vec![
@@ -2464,7 +2345,6 @@ fn tessellate_wires(
                             pick_tris,
                             pick_tris_low,
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: local_pts,
@@ -2507,7 +2387,6 @@ fn tessellate_wires(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name: name.clone(),
                         points: Vec::new(),
@@ -2554,7 +2433,6 @@ fn tessellate_wires(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name,
                         points: Vec::new(),
@@ -2618,7 +2496,6 @@ fn tessellate_wires(
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name,
                     points: local_pts,
@@ -2762,7 +2639,6 @@ fn tessellate_wires(
                     pick_tris,
                     pick_tris_low,
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name,
                     points: local_pts,
@@ -2846,7 +2722,6 @@ fn tessellate_wires(
                     pick_tris,
                     pick_tris_low,
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name,
                     points: local_pts,
@@ -2952,7 +2827,6 @@ fn tessellate_wires(
         pick_tris,
         pick_tris_low,
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         points,

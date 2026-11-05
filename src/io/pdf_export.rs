@@ -1010,7 +1010,6 @@ fn append_pdf_page(
                         dashes.dists[index],
                         dashes.dists[index + 1],
                         dashes.run_totals[index],
-                        dashes.align_ref,
                         wire.pattern_length,
                         &wire.pattern,
                     );
@@ -1261,7 +1260,6 @@ pub(crate) fn dash_ranges(
     start: f32,
     end: f32,
     run_total: f32,
-    align_ref: f32,
     pattern_length: f32,
     pattern: &[f32; 8],
 ) -> Vec<[f32; 2]> {
@@ -1278,7 +1276,7 @@ pub(crate) fn dash_ranges(
         return visible_station_ranges(start, end, pattern_length, pattern);
     }
     let first = pattern[0].max(0.0);
-    let end_dash = aligned_end_dash(align_ref, run_total, pattern_length, first);
+    let end_dash = aligned_end_dash(run_total, pattern_length, first);
     let span = end - start;
     if span.abs() <= 1e-9 {
         return Vec::new();
@@ -2855,7 +2853,7 @@ mod tests {
         pattern[0] = 20.0;
         pattern[1] = -20.0;
         // L = 110, k = 2, D = 25: 0-25, 45-65, 85-110.
-        let ranges = super::dash_ranges(0.0, 110.0, 110.0, 0.0, 40.0, &pattern);
+        let ranges = super::dash_ranges(0.0, 110.0, 110.0, 40.0, &pattern);
         let expected = [[0.0, 25.0], [45.0, 65.0], [85.0, 110.0]];
         assert_eq!(ranges.len(), expected.len(), "{ranges:?}");
         for (range, want) in ranges.iter().zip(expected) {
@@ -2863,14 +2861,14 @@ mod tests {
             assert!((range[1] * 110.0 - want[1]).abs() < 1e-2, "{ranges:?}");
         }
         // The same run in two segments, split inside its middle dash.
-        let first = super::dash_ranges(0.0, 55.0, 110.0, 0.0, 40.0, &pattern);
+        let first = super::dash_ranges(0.0, 55.0, 110.0, 40.0, &pattern);
         assert_eq!(first.len(), 2);
         assert!((first[1][1] - 1.0).abs() < 1e-4, "{first:?}");
-        let second = super::dash_ranges(55.0, 110.0, 110.0, 0.0, 40.0, &pattern);
+        let second = super::dash_ranges(55.0, 110.0, 110.0, 40.0, &pattern);
         assert!(second[0][0].abs() < 1e-4, "{second:?}");
         // A run no longer than a period is one dash.
         assert_eq!(
-            super::dash_ranges(0.0, 30.0, 30.0, 0.0, 40.0, &pattern),
+            super::dash_ranges(0.0, 30.0, 30.0, 40.0, &pattern),
             vec![[0.0, 1.0]]
         );
     }
@@ -2881,7 +2879,7 @@ mod tests {
         pattern[0] = 20.0;
         pattern[1] = -20.0;
         // L = 100 holds 2 periods of 50: 0-25, 50-75.
-        let ranges = super::dash_ranges(0.0, 100.0, -100.0, 0.0, 40.0, &pattern);
+        let ranges = super::dash_ranges(0.0, 100.0, -100.0, 40.0, &pattern);
         let expected = [[0.0, 25.0], [50.0, 75.0]];
         assert_eq!(ranges.len(), expected.len(), "{ranges:?}");
         for (range, want) in ranges.iter().zip(expected) {
@@ -2890,14 +2888,14 @@ mod tests {
         }
         // Before the start of the pattern, as on a polyline's first segment:
         // the gap that closes the last period, and the dash ahead of it.
-        assert!(super::dash_ranges(-25.0, 0.0, -100.0, 0.0, 40.0, &pattern).is_empty());
+        assert!(super::dash_ranges(-25.0, 0.0, -100.0, 40.0, &pattern).is_empty());
         assert_eq!(
-            super::dash_ranges(-50.0, -25.0, -100.0, 0.0, 40.0, &pattern),
+            super::dash_ranges(-50.0, -25.0, -100.0, 40.0, &pattern),
             vec![[0.0, 1.0]]
         );
         // Shorter than a period: solid.
         assert_eq!(
-            super::dash_ranges(0.0, 39.0, -39.0, 0.0, 40.0, &pattern),
+            super::dash_ranges(0.0, 39.0, -39.0, 40.0, &pattern),
             vec![[0.0, 1.0]]
         );
     }

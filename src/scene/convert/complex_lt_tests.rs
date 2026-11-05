@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use document::entities::{Circle, Insert, Line, LwPolyline, LwVertex};
+use document::entities::{Circle, Insert, Line, LwPolyline, LwVertex, MLine};
 use document::tables::linetype::{LineTypeComplexContent, LineTypeComplexData, LineTypeElement};
 use document::tables::{BlockRecord, Layer, LineType, TextStyle};
 use document::types::{Vector2, Vector3};
@@ -511,7 +511,6 @@ fn dashed_line_end_dashes_keep_every_whole_period() {
     let align_total = dashes.run_totals[0];
     assert!((align_total - 2.3).abs() < 1e-4, "{align_total}");
     let end_dash = crate::scene::pipeline::wire_gpu::aligned_end_dash(
-        dashes.align_ref,
         align_total,
         wire.pattern_length,
         wire.pattern[0],
@@ -1038,4 +1037,102 @@ fn a_complex_closed_polyline_with_plinegen_starts_at_its_second_vertex() {
     // up the second side. Counted from the first vertex one would sit 0.7 up.
     let stations = glyph_stations(&wires(&document, handle), [16.0, 1.51], 0.5);
     assert!(stations[0] < 0.15, "{stations:?}");
+}
+
+// ── MLINE elements ───────────────────────────────────────────────────────────
+
+/// An MLINE style whose elements have these offsets and linetypes.
+fn add_mline_style(document: &mut Document, name: &str, elements: &[(f64, &str)]) {
+    use document::objects::{MLineStyle, MLineStyleElement, ObjectType};
+    let mut style = MLineStyle::new(name);
+    style.handle = document.allocate_handle();
+    for &(offset, linetype) in elements {
+        let mut element = MLineStyleElement::new(offset);
+        element.linetype = linetype.to_string();
+        style.add_element(element);
+    }
+    document
+        .objects
+        .insert(style.handle, ObjectType::MLineStyle(style));
+}
+
+fn mline(style: &str, points: &[(f64, f64)]) -> MLine {
+    let points: Vec<Vector3> = points
+        .iter()
+        .map(|&(x, y)| Vector3::new(x, y, 0.0))
+        .collect();
+    let mut mline = MLine::from_points(&points);
+    mline.style_name = style.to_string();
+    mline.scale_factor = 1.0;
+    mline
+}
+
+#[test]
+fn an_mline_element_walks_its_complex_linetype_like_a_line() {
+    let mut document = fence_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "FENCE")]);
+    let handle = document
+        .add_entity(EntityType::MLine(mline("ML", &[(0.0, 0.0), (100.0, 0.0)])))
+        .unwrap();
+    assert_same_stations(
+        &glyph_stations(&wires(&document, handle), [0.0, 0.0], 0.5),
+        &line_stations(100.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn an_mline_element_follows_the_annotation_scale() {
+    let mut document = fence_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "FENCE")]);
+    let handle = document
+        .add_entity(EntityType::MLine(mline("ML", &[(0.0, 0.0), (100.0, 0.0)])))
+        .unwrap();
+    assert_fence_at_15(&glyph_stations(
+        &wires_at(&document, handle, 15.0, false),
+        [0.0, 0.0],
+        8.0,
+    ));
+}
+
+#[test]
+fn changing_the_annotation_scale_relays_a_complex_mline() {
+    let mut scene = crate::scene::Scene::new();
+    scene.document = fence_document();
+    add_mline_style(&mut scene.document, "ML", &[(0.0, "FENCE")]);
+    scene.add_entity(EntityType::MLine(mline("ML", &[(0.0, 0.0), (100.0, 0.0)])));
+
+    scene.set_annotation_scale_named("1:1").expect("1:1");
+    let at_1_1 = glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5).len();
+    assert!(at_1_1 > 60, "{at_1_1} glyphs at 1:1");
+    scene.set_annotation_scale_named("1:15").expect("1:15");
+    assert_fence_at_15(&glyph_stations(&scene.entity_wires(), [0.0, 0.0], 8.0));
+}
+
+#[test]
+fn an_mline_elements_own_entity_linetype_plays_no_part() {
+    let mut document = fence_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "Continuous")]);
+    let mut entity = mline("ML", &[(0.0, 0.0), (100.0, 0.0)]);
+    entity.common.linetype = "FENCE".to_string();
+    let handle = document.add_entity(EntityType::MLine(entity)).unwrap();
+    assert!(wires(&document, handle)
+        .iter()
+        .all(|wire| wire.text_verts.is_empty()));
+}
+
+#[test]
+fn an_mline_element_in_a_block_keeps_its_length_and_its_glyphs() {
+    let mut document = fence_document();
+    add_mline_style(&mut document, "ML", &[(0.0, "FENCE")]);
+    let owner = new_block(&mut document, "B");
+    let mut child = mline("ML", &[(0.0, 0.0), (100.0, 0.0)]);
+    child.common.owner_handle = owner;
+    document.add_entity(EntityType::MLine(child)).unwrap();
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.set_x_scale(0.5);
+    insert.set_y_scale(0.5);
+    assert_same_stations(
+        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+        &line_stations(50.0, 1.0, 1.0, 0.5),
+    );
 }

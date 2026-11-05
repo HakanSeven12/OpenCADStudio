@@ -159,6 +159,55 @@ pub(crate) fn walk_complex_linetype(
     (!wires.is_empty()).then_some(wires)
 }
 
+/// An MLINE element's wire as drawn: its complex linetype walked along it, the
+/// wire as it is otherwise.
+fn walk_mline_element(
+    document: &document::Document,
+    layer: &str,
+    wire: WireModel,
+    scale: f32,
+) -> Vec<WireModel> {
+    let linetype = wire.element_linetype.as_deref().and_then(|element| {
+        crate::io::linetypes::resolve_complex_lt(
+            document,
+            crate::entities::mline::element_linetype_name(document, layer, element),
+        )
+    });
+    let Some(linetype) = linetype else {
+        return vec![wire];
+    };
+    let path: Vec<[f64; 3]> = (0..wire.points.len())
+        .map(|index| {
+            let p = wire.points[index];
+            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            [
+                p[0] as f64 + low[0] as f64,
+                p[1] as f64 + low[1] as f64,
+                p[2] as f64 + low[2] as f64,
+            ]
+        })
+        .collect();
+    let Some(mut pieces) = walk_complex_linetype(
+        &wire.name,
+        &path,
+        &linetype,
+        scale,
+        DashClosure::Open,
+        wire.color,
+        wire.selected,
+        wire.line_weight_px,
+    ) else {
+        return vec![wire];
+    };
+    for piece in &mut pieces {
+        piece.aci = wire.aci;
+    }
+    // The element's first wire carries the entity's snaps and vertices.
+    pieces[0].snap_pts = wire.snap_pts;
+    pieces[0].key_vertices = wire.key_vertices;
+    pieces
+}
+
 #[derive(Clone, Copy)]
 struct BlockObjectStyle {
     color: [f32; 4],
@@ -1192,7 +1241,6 @@ fn tessellate_entity_inner(
             pick_tris,
             pick_tris_low,
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: h.value().to_string(),
             points,
@@ -1447,7 +1495,6 @@ fn tessellate_entity_inner(
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: h.value().to_string(),
             points: vec![],
@@ -1603,6 +1650,24 @@ fn tessellate_entity_inner(
         }
     }
 
+    // An MLINE's linetypes are its elements': its own plays no part.
+    if let EntityType::MLine(mline) = e {
+        if bases.iter().any(|wire| wire.element_linetype.is_some()) && !sel {
+            let scale = (lt_scale
+                * pslt_factor
+                * complex_linetype_anno(document, anno_scale, paper_space))
+            .max(1e-4);
+            let mut walked = Vec::with_capacity(bases.len());
+            for wire in bases {
+                walked.extend(walk_mline_element(document, &mline.common.layer, wire, scale));
+            }
+            bases = walked;
+            for wire in &mut bases {
+                set_wire_aabb(wire, aabb);
+            }
+        }
+    }
+
     // A hidden mask frame remains selectable and appears while selected, but
     // contributes no visible line work during normal display. The interior
     // pick triangles remain intact.
@@ -1610,7 +1675,10 @@ fn tessellate_entity_inner(
     // path along its tangent. A polyline with arc segments tessellates to one
     // wire per arc plus one wire of its straight segments, so it walks its own
     // ordered path (`polyline_lt_path`); every other entity is one wire.
-    if let Some(clt) = crate::io::linetypes::resolve_complex_lt(document, lt_name) {
+    let own_complex = (!matches!(e, EntityType::MLine(_)))
+        .then(|| crate::io::linetypes::resolve_complex_lt(document, lt_name))
+        .flatten();
+    if let Some(clt) = own_complex {
         let complex_lt_anno = complex_linetype_anno(document, anno_scale, paper_space);
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
@@ -1827,7 +1895,6 @@ fn lod_stub_wire(
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         // Diagonal of the entity's 3D AABB so depth tests against
@@ -1926,7 +1993,6 @@ fn lod_stub_wire_3d(
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         points,

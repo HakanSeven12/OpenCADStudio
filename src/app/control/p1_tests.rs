@@ -2503,6 +2503,162 @@ fn erasing_a_constrained_line_takes_its_constraint_and_its_dimension() {
     );
 }
 
+/// Erasing one of two lines that share a named parameter leaves the parameter
+/// alone: the constraint on the line outside the selection still drives it, so
+/// the purge must not read the name from the deleted constraint alone.
+#[test]
+fn erasing_one_of_two_lines_that_share_a_parameter_keeps_the_parameter() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    fn constrained(
+        app: &mut OpenCADStudio,
+        line: codec::Handle,
+        x: f64,
+        name: &str,
+        size: f64,
+    ) -> codec::Handle {
+        let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+            kind: ConstraintKind::DistanceX,
+            first: ParametricRef::point(line, 0),
+            second: ParametricRef::point(line, 1),
+            first_point: glam::DVec3::new(x, 0.0, 0.0),
+            second_point: glam::DVec3::new(x + 40.0, 0.0, 0.0),
+            location: glam::DVec3::new(x + 20.0, -10.0, 0.0),
+            axis: glam::DVec3::X,
+            direction: None,
+            name: name.to_string(),
+            expression: size.to_string(),
+            renamed: false,
+            label: "Linear constraint",
+        });
+        app.drive_headless_task(task).unwrap();
+        let set = app.tabs[app.active_tab]
+            .scene
+            .parametric_constraint_set(ParametricScope::ModelSpace)
+            .expect("the constraint was added");
+        set.constraints
+            .iter()
+            .find(|constraint| {
+                matches!(
+                    &constraint.driving_param,
+                    Some(DrivingValue::Named(driven)) if driven == name
+                )
+            })
+            .and_then(|constraint| set.dimensions.get(&constraint.id).copied())
+            .expect("the constraint draws a dimension")
+    }
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 800.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 40,0"}"#);
+    let first = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
+        [0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = codec::Handle::new(u64::from_str_radix(&first, 16).unwrap());
+    let deleted_dimension = constrained(&mut app, line, 0.0, "d1", 100.0);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 200,0 240,0"}"#);
+    let other = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
+        .as_array()
+        .expect("the read returns both lines")
+        .iter()
+        .find_map(|row| row["handle"].as_str().filter(|handle| **handle != first))
+        .map(|handle| codec::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+        .expect("the second line has its own handle");
+    let survivor_dimension = constrained(&mut app, other, 200.0, "d2", 60.0);
+    // Adding or renaming rejects a duplicate, so sharing arises from loaded
+    // data or from a block set naming a drawing-level parameter.
+    {
+        let scene = &mut app.tabs[i].scene;
+        let set = scene
+            .parametric_constraints
+            .iter_mut()
+            .find(|set| set.scope == ParametricScope::ModelSpace)
+            .expect("the model-space set");
+        let survivor = set
+            .constraints
+            .iter_mut()
+            .find(|constraint| constraint.refs.iter().all(|r| r.entity == other))
+            .expect("the second line's constraint");
+        survivor.driving_param = Some(DrivingValue::Named("d1".to_string()));
+        scene.named_parameters_mut().remove("d2");
+    }
+    let shared = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the model-space set")
+        .constraints
+        .iter()
+        .find(|constraint| constraint.refs.iter().all(|r| r.entity == other))
+        .and_then(|constraint| match &constraint.driving_param {
+            Some(DrivingValue::Named(name)) => Some(name.clone()),
+            _ => None,
+        });
+    assert_eq!(
+        shared.as_deref(),
+        Some("d1"),
+        "both constraints drive d1 before the command runs"
+    );
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d1"),
+        "and d1 is defined before the command runs"
+    );
+
+    app.tabs[i].scene.select_entity(line, false);
+    let _ = app.dispatch_command("ERASE");
+
+    assert!(
+        app.tabs[i].scene.document.get_entity(line).is_none(),
+        "the selected line is erased"
+    );
+    assert!(
+        app.tabs[i].scene.named_parameters().contains("d1"),
+        "the shared parameter stays, because the line outside the selection still drives it"
+    );
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(deleted_dimension)
+            .is_none(),
+        "the erased line's dimension goes with it"
+    );
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(survivor_dimension)
+            .is_some(),
+        "and the surviving line keeps the dimension it draws"
+    );
+    let survivors = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the drawing keeps its constraint set")
+        .constraints
+        .clone();
+    assert_eq!(
+        survivors.len(),
+        1,
+        "only the second line's constraint stays"
+    );
+    assert!(
+        survivors.iter().all(|constraint| {
+            constraint.refs.iter().all(|r| r.entity == other)
+                && matches!(
+                    &constraint.driving_param,
+                    Some(DrivingValue::Named(name)) if name == "d1"
+                )
+        }),
+        "and it is the one that still drives the shared parameter"
+    );
+}
+
 /// The dimension a constraint draws belongs to the constraint, not to the
 /// user's layers: locking its layer does not keep it drawn over a line that is
 /// gone.

@@ -375,7 +375,7 @@ impl MviewCommand {
         }
     }
 
-    fn viewport_from_corners(a: DVec3, b: DVec3) -> Option<Viewport> {
+    pub(crate) fn viewport_from_corners(a: DVec3, b: DVec3) -> Option<Viewport> {
         let width = (b.x - a.x).abs();
         let height = (b.y - a.y).abs();
         if width < 1e-6 || height < 1e-6 {

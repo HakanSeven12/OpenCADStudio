@@ -15,6 +15,7 @@ use graph::ops::{b, l, n, s, v};
 use graph::value::{list, num, number, point, point_value, text};
 use graph::{Eval, NodeId, Spec};
 use kernel::geom2d::{cross, Tolerance};
+use crate::scene::model::solid_history;
 use serde_json::{json, Value};
 
 pub const CATEGORIES: &[&str] = &["Select", "Query", "Create", "Modify", "Curve"];
@@ -92,8 +93,60 @@ pub const LIBRARY: &[Spec] = &[
         &[v("vertex"), v("first"), v("second"), v("location")],
         OBJECT,
     ),
+    host(
+        "Box",
+        "Create",
+        &[v("corner"), n("length", 10.0), n("width", 10.0), n("height", 10.0)],
+        OBJECT,
+    ),
+    host(
+        "Wedge",
+        "Create",
+        &[v("corner"), n("length", 10.0), n("width", 10.0), n("height", 10.0)],
+        OBJECT,
+    ),
+    host("Cylinder", "Create", &[v("center"), n("radius", 5.0), n("height", 10.0)], OBJECT),
+    host(
+        "Cone",
+        "Create",
+        &[v("center"), n("radius", 5.0), n("top radius", 0.0), n("height", 10.0)],
+        OBJECT,
+    ),
+    host("Sphere", "Create", &[v("center"), n("radius", 5.0)], OBJECT),
+    host("Torus", "Create", &[v("center"), n("radius", 10.0), n("tube radius", 2.0)], OBJECT),
+    host(
+        "Pyramid",
+        "Create",
+        &[
+            v("center"),
+            n("radius", 5.0),
+            n("top radius", 0.0),
+            n("height", 10.0),
+            n("sides", 4.0),
+        ],
+        OBJECT,
+    ),
+    host("Region", "Create", &[v("object")], OBJECT),
+    host("Extrude", "Create", &[v("object"), n("height", 10.0)], OBJECT),
+    host("Viewport", "Create", &[v("first"), v("second")], OBJECT),
+    host("Raster Image", "Create", &[s("file", ""), v("point"), n("width", 10.0)], OBJECT),
+    host("Embedded Image", "Create", &[s("file", ""), v("point"), n("width", 10.0)], OBJECT),
+    host(
+        "PDF Underlay",
+        "Create",
+        &[s("file", ""), s("page", "1"), v("point"), n("scale", 1.0)],
+        OBJECT,
+    ),
     host("Radius Dimension", "Create", &[v("object"), v("location")], OBJECT),
     host("Diameter Dimension", "Create", &[v("object"), v("location")], OBJECT),
+    host("Ordinate Dimension", "Create", &[v("feature"), v("leader")], OBJECT),
+    host("Arc Length Dimension", "Create", &[v("object"), v("location")], OBJECT),
+    host(
+        "Jogged Radius Dimension",
+        "Create",
+        &[v("object"), v("center"), v("location"), v("jog")],
+        OBJECT,
+    ),
     host(
         "Block Reference",
         "Create",
@@ -151,6 +204,11 @@ fn closed_polyline(vertices: &[[f64; 2]], z: f64) -> EntityType {
         .map(|p| codec::entities::LwVertex::new(codec::types::Vector2::new(p[0], p[1])))
         .collect();
     EntityType::LwPolyline(polyline)
+}
+
+/// A history transform placing a primitive at `origin`.
+fn placed(origin: DVec3) -> [f64; 16] {
+    glam::DMat4::from_translation(origin).to_cols_array()
 }
 
 fn same_plane(a: &kernel::space::Plane, b: &kernel::space::Plane) -> bool {
@@ -374,6 +432,194 @@ impl AppHost<'_> {
                 };
                 one(entity.map_or(Value::Null, |entity| self.create(entity)))
             }
+            "Box" | "Wedge" => {
+                let size = [num(&a[1]), num(&a[2]), num(&a[3])].map(|v| v.unwrap_or(0.0));
+                one(match vec3(&a[0]) {
+                    // The corner is the low one; the history places by centre.
+                    Some(corner) if size.iter().all(|v| v.is_finite() && *v > 0.0) => {
+                        let center = corner + DVec3::from_array(size) * 0.5;
+                        let place = placed(center);
+                        self.primitive(if spec.name == "Box" {
+                            solid_history::box_op(place, size[0], size[1], size[2])
+                        } else {
+                            solid_history::wedge_op(place, size[0], size[1], size[2])
+                        })
+                    }
+                    _ => Value::Null,
+                })
+            }
+            "Cylinder" => one(match (vec3(&a[0]), num(&a[1]), num(&a[2])) {
+                (Some(c), Some(r), Some(h)) if r > 0.0 && h != 0.0 => {
+                    self.primitive(solid_history::cylinder_op(placed(c), r, h))
+                }
+                _ => Value::Null,
+            }),
+            "Cone" => one(match (vec3(&a[0]), num(&a[1]), num(&a[2]), num(&a[3])) {
+                (Some(c), Some(r), Some(top), Some(h)) if r > 0.0 && top >= 0.0 && h != 0.0 => {
+                    self.primitive(solid_history::cone_op(placed(c), r, r, top, h))
+                }
+                _ => Value::Null,
+            }),
+            "Sphere" => one(match (vec3(&a[0]), num(&a[1])) {
+                (Some(c), Some(r)) if r > 0.0 => self.primitive(solid_history::sphere_op(placed(c), r)),
+                _ => Value::Null,
+            }),
+            "Torus" => one(match (vec3(&a[0]), num(&a[1]), num(&a[2])) {
+                (Some(c), Some(r), Some(tube)) if tube > 0.0 && tube < r => {
+                    self.primitive(solid_history::torus_op(placed(c), r, tube))
+                }
+                _ => Value::Null,
+            }),
+            "Pyramid" => {
+                let sides = num(&a[4]).unwrap_or(0.0).round();
+                one(match (vec3(&a[0]), num(&a[1]), num(&a[2]), num(&a[3])) {
+                    (Some(c), Some(r), Some(top), Some(h))
+                        if r > 0.0 && top >= 0.0 && h != 0.0 && (3.0..=32.0).contains(&sides) =>
+                    {
+                        self.primitive(solid_history::pyramid_op(placed(c), r, top, h, sides as usize, false))
+                    }
+                    _ => Value::Null,
+                })
+            }
+            // The planar area a closed object bounds, as REGION makes it.
+            "Region" => {
+                let body = self.entity(&a[0]).and_then(|entity| {
+                    let (plane, loops, true) =
+                        crate::scene::model::presspull_model::profile_geometry(entity)?
+                    else {
+                        return None;
+                    };
+                    Some((plane.origin, kernel::brep::planar_region(plane, &loops)?))
+                });
+                one(match body {
+                    Some((origin, body)) => {
+                        let mut region = codec::entities::Region::new();
+                        region.point_of_reference =
+                            codec::types::Vector3::new(origin[0], origin[1], origin[2]);
+                        let handle = self.app.add_region_model(region, body);
+                        self.created(handle)
+                    }
+                    None => Value::Null,
+                })
+            }
+            // A closed object makes a solid, an open one a surface, along
+            // its plane's normal (Z for a line).
+            "Extrude" => {
+                let height = num(&a[1]).unwrap_or(0.0);
+                let Some(entity) = self.entity(&a[0]).cloned().filter(|_| height != 0.0) else {
+                    return one(Value::Null);
+                };
+                use crate::scene::model::sweep_model;
+                if let Some(body) = sweep_model::extruded(&entity, height) {
+                    let op = solid_history::brep_op(&body);
+                    return one(self.solid(body, op));
+                }
+                let direction = DVec3::new(0.0, 0.0, height);
+                one(match sweep_model::extruded_surface(&entity, direction.to_array(), 0.0) {
+                    Some(body) => {
+                        let surface =
+                            crate::modules::insert::solid3d_cmds::empty_extruded_surface(direction, 0.0);
+                        let handle = self.app.add_surface_model(surface, body);
+                        self.created(handle)
+                    }
+                    None => Value::Null,
+                })
+            }
+            // A viewport in the layout on screen; model space has none.
+            "Viewport" => one(match (vec3(&a[0]), vec3(&a[1])) {
+                (Some(first), Some(second)) if self.scene().current_layout != "Model" => {
+                    match crate::modules::layout::mview::MviewCommand::viewport_from_corners(first, second) {
+                        Some(viewport) => self.create(EntityType::Viewport(Box::new(viewport))),
+                        None => Value::Null,
+                    }
+                }
+                _ => Value::Null,
+            }),
+            "Raster Image" | "Embedded Image" => {
+                use crate::modules::draw::draw::raster_image::ImageCommand;
+                let (path, width) = (text(&a[0]), num(&a[2]).unwrap_or(0.0));
+                let Some(point) = vec3(&a[1]).filter(|_| width > 0.0 && !path.is_empty()) else {
+                    return one(Value::Null);
+                };
+                let command = if spec.name == "Raster Image" {
+                    match crate::io::image_file_size(std::path::PathBuf::from(&path)) {
+                        Ok((_, w, h)) => ImageCommand::new(path, w, h),
+                        Err(_) => return one(Value::Null),
+                    }
+                } else {
+                    let name = std::path::Path::new(&path)
+                        .file_name()
+                        .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+                    match std::fs::read(&path)
+                        .map_err(|e| e.to_string())
+                        .and_then(|bytes| crate::io::ole_embed::EmbeddedImage::from_bytes(name, bytes))
+                    {
+                        Ok(image) => ImageCommand::new_embedded(image),
+                        Err(_) => return one(Value::Null),
+                    }
+                };
+                one(self.drive(Box::new(command), None, &[point, point + DVec3::X * width]))
+            }
+            "PDF Underlay" => {
+                let (path, page, scale) = (text(&a[0]), text(&a[1]), num(&a[3]).unwrap_or(1.0));
+                let Some(point) = vec3(&a[2]).filter(|_| scale > 0.0 && !path.is_empty()) else {
+                    return one(Value::Null);
+                };
+                let kind = codec::entities::UnderlayType::Pdf;
+                let pages = crate::modules::insert::pdf_attach::underlays_for_pages(
+                    kind,
+                    &[page],
+                    point,
+                    scale,
+                    0.0,
+                );
+                let before: std::collections::HashSet<Handle> =
+                    self.scene().document.entities().map(|e| e.common().handle).collect();
+                let i = self.i;
+                self.app.attach_pdf_pages(i, "PDFATTACH".into(), kind, &path, pages);
+                let added: Vec<Handle> = self
+                    .scene()
+                    .document
+                    .entities()
+                    .map(|e| e.common().handle)
+                    .filter(|h| !before.contains(h))
+                    .collect();
+                one(added.into_iter().fold(Value::Null, |_, h| self.created(h)))
+            }
+            "Ordinate Dimension" => one(match (vec3(&a[0]), vec3(&a[1])) {
+                (Some(feature), Some(leader)) => self.drive(
+                    Box::new(crate::modules::annotate::ordinate_dim::OrdinateDimCommand::new()),
+                    None,
+                    &[feature, leader],
+                ),
+                _ => Value::Null,
+            }),
+            "Arc Length Dimension" => one(match vec3(&a[1]) {
+                Some(location) => self.drive(
+                    Box::new(crate::modules::annotate::arc_length_dim::ArcLengthDimensionCommand::new()),
+                    Some((&a[0], location)),
+                    &[location],
+                ),
+                None => Value::Null,
+            }),
+            "Jogged Radius Dimension" => one(match (vec3(&a[1]), vec3(&a[2]), vec3(&a[3])) {
+                (Some(center), Some(location), Some(jog)) => {
+                    let defaults = crate::scene::creation_style::current_dimension_defaults(
+                        &self.scene().document,
+                    );
+                    let multiplier = self.scene().creation_annotation_multiplier();
+                    self.drive(
+                        Box::new(
+                            crate::modules::annotate::jogged_radius_dim::JoggedRadiusDimensionCommand::new(
+                                defaults, multiplier,
+                            ),
+                        ),
+                        Some((&a[0], location)),
+                        &[center, location, jog],
+                    )
+                }
+                _ => Value::Null,
+            }),
             "Block Reference" => one(match point(&a[1]) {
                 Some(p) => self.build(json!({
                     "type": "INSERT",
@@ -530,6 +776,65 @@ impl AppHost<'_> {
         tab.graph.created.push(h);
         tab.dirty = true;
         object(h)
+    }
+
+    /// A created handle, kept to be erased on the next step.
+    fn created(&mut self, handle: Handle) -> Value {
+        if handle.is_null() {
+            return Value::Null;
+        }
+        let tab = &mut self.app.tabs[self.i];
+        tab.graph.created.push(handle);
+        tab.dirty = true;
+        object(handle)
+    }
+
+    /// A solid from `body` with `history`, as the solid commands commit one.
+    fn solid(&mut self, body: kernel::brep::Body, history: codec::objects::SolidHistoryOperation) -> Value {
+        let Some(sat) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
+            return Value::Null;
+        };
+        let mut solid = codec::entities::Solid3D::new();
+        solid.set_sat_document(&sat);
+        solid.wires = crate::scene::model::solid_model::edge_wires(&body);
+        let handle = self.app.add_solid_model(EntityType::Solid3D(solid), body, history);
+        self.created(handle)
+    }
+
+    /// A primitive solid whose history keeps its sizes editable.
+    fn primitive(&mut self, history: codec::objects::SolidHistoryOperation) -> Value {
+        match kernel::acis::rebuild_body(&history) {
+            Ok(body) => self.solid(body, history),
+            Err(_) => Value::Null,
+        }
+    }
+
+    /// Runs `command` as a user would, with a pick of `pick`'s object at its
+    /// point and then `points`, and creates what it commits.
+    fn drive(
+        &mut self,
+        mut command: Box<dyn crate::command::CadCommand>,
+        pick: Option<(&Value, DVec3)>,
+        points: &[DVec3],
+    ) -> Value {
+        use crate::command::CmdResult;
+        if let Some((value, at)) = pick {
+            let (Some(h), Some(entity)) = (handle(value), self.entity(value).cloned()) else {
+                return Value::Null;
+            };
+            command.inject_picked_entity(entity);
+            let _ = command.on_entity_pick(h, at);
+        }
+        for &point in points {
+            match command.on_point(point) {
+                CmdResult::NeedPoint => {}
+                CmdResult::CommitDimension { entity, .. } | CmdResult::CommitAndExit(entity) => {
+                    return self.create(entity)
+                }
+                _ => return Value::Null,
+            }
+        }
+        Value::Null
     }
 
     /// [`create`](Self::create) from an `entities_create` definition.

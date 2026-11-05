@@ -431,3 +431,91 @@ mod object_node_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod create_node_tests {
+    use crate::ui::node_graph::ObjectKind;
+    use serde_json::{json, Value};
+
+    fn app_with(line: &str) -> crate::app::OpenCADStudio {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        if !line.is_empty() {
+            let _ = app.run_command_line(line);
+        }
+        app
+    }
+
+    /// The type of what `node` adds to a drawing holding `line`'s object.
+    fn made(line: &str, node: &str, inputs: impl Fn(Value) -> Value) -> Vec<String> {
+        let mut app = app_with(line);
+        let i = app.active_tab;
+        let first = app.tabs[i].scene.document.entities().next().map(|e| json!({"handle": e.common().handle.value()}));
+        let before = app.tabs[i].scene.document.entities().count();
+        let spec = super::ops::resolve(node).expect("node type");
+        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        for (field, value) in inputs(first.unwrap_or(Value::Null)).as_object().unwrap() {
+            let port = super::Port { node: id, field: field.clone() };
+            let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
+        }
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .skip(before)
+            .map(|entity| match entity {
+                codec::EntityType::Dimension(dimension) => match dimension.as_ref() {
+                    codec::entities::Dimension::Ordinate(_) => "Ordinate Dimension".into(),
+                    codec::entities::Dimension::Arc(_) => "Arc Length Dimension".into(),
+                    codec::entities::Dimension::LargeRadial(_) => "Jogged Dimension".into(),
+                    _ => "Dimension".into(),
+                },
+                other => crate::entities::names::ui_name(other).into(),
+            })
+            .collect()
+    }
+
+    fn p(x: f64, y: f64) -> Value {
+        json!({"x": x, "y": y})
+    }
+
+    /// The node library makes every kind of object the drawing commands make.
+    #[test]
+    fn the_create_nodes_make_their_objects() {
+        for node in ["Box", "Wedge", "Cylinder", "Cone", "Sphere", "Torus", "Pyramid"] {
+            assert_eq!(made("", node, |_| json!({"corner": p(1.0, 2.0), "center": p(1.0, 2.0)})), ["3D Solid"], "{node}");
+        }
+        assert_eq!(made("CIRCLE 0,0 5", "Region", |o| json!({"object": o})), ["Region"]);
+        assert_eq!(made("CIRCLE 0,0 5", "Extrude", |o| json!({"object": o})), ["3D Solid"]);
+        assert_eq!(made("LINE 0,0 10,0 ", "Extrude", |o| json!({"object": o})), ["Surface"]);
+        assert_eq!(
+            made("", "Ordinate Dimension", |_| json!({"feature": p(3.0, 4.0), "leader": p(3.0, 9.0)})),
+            ["Ordinate Dimension"]
+        );
+        assert_eq!(
+            made("ARC 10,0 0,10 -10,0", "Arc Length Dimension", |o| json!({"object": o, "location": p(0.0, 14.0)})),
+            ["Arc Length Dimension"]
+        );
+        assert_eq!(
+            made("CIRCLE 0,0 5", "Jogged Radius Dimension", |o| json!({
+                "object": o, "center": p(20.0, 20.0), "location": p(3.0, 4.0), "jog": p(10.0, 12.0),
+            })),
+            ["Jogged Dimension"]
+        );
+        for kind in [
+            ObjectKind::AttributeDefinition,
+            ObjectKind::Table,
+            ObjectKind::Polyline2D,
+            ObjectKind::Mesh,
+            ObjectKind::PolygonMesh,
+            ObjectKind::PolyfaceMesh,
+        ] {
+            let mut app = app_with("");
+            let i = app.active_tab;
+            app.tabs[i].graph.add_node(super::PaletteItem::Object(kind), Vec::new(), iced::Point::ORIGIN);
+            let _ = app.graph_run(i);
+            assert!(app.tabs[i].scene.document.entities().any(|e| kind.matches(e)), "{}", kind.name());
+        }
+    }
+}
+

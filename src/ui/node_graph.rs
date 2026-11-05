@@ -61,6 +61,12 @@ pub enum ObjectKind {
     MLine,
     MultiLeader,
     Helix,
+    AttributeDefinition,
+    Table,
+    Polyline2D,
+    Mesh,
+    PolygonMesh,
+    PolyfaceMesh,
 }
 
 pub(crate) const OBJECTS: &[ObjectKind] = &[
@@ -86,6 +92,12 @@ pub(crate) const OBJECTS: &[ObjectKind] = &[
     ObjectKind::MLine,
     ObjectKind::MultiLeader,
     ObjectKind::Helix,
+    ObjectKind::AttributeDefinition,
+    ObjectKind::Table,
+    ObjectKind::Polyline2D,
+    ObjectKind::Mesh,
+    ObjectKind::PolygonMesh,
+    ObjectKind::PolyfaceMesh,
 ];
 
 /// Every object node type, in palette order.
@@ -119,6 +131,12 @@ impl ObjectKind {
             ObjectKind::MLine => "Multiline",
             ObjectKind::MultiLeader => "Multileader",
             ObjectKind::Helix => "Helix",
+            ObjectKind::AttributeDefinition => "Attribute Definition",
+            ObjectKind::Table => "Table",
+            ObjectKind::Polyline2D => "2D Polyline",
+            ObjectKind::Mesh => "Mesh",
+            ObjectKind::PolygonMesh => "Polygon Mesh",
+            ObjectKind::PolyfaceMesh => "Polyface Mesh",
         }
     }
 
@@ -152,6 +170,12 @@ impl ObjectKind {
                 | (ObjectKind::MLine, EntityType::MLine(_))
                 | (ObjectKind::MultiLeader, EntityType::MultiLeader(_))
                 | (ObjectKind::Helix, EntityType::Helix(_))
+                | (ObjectKind::AttributeDefinition, EntityType::AttributeDefinition(_))
+                | (ObjectKind::Table, EntityType::Table(_))
+                | (ObjectKind::Polyline2D, EntityType::Polyline2D(_))
+                | (ObjectKind::Mesh, EntityType::Mesh(_))
+                | (ObjectKind::PolygonMesh, EntityType::PolygonMesh(_))
+                | (ObjectKind::PolyfaceMesh, EntityType::PolyfaceMesh(_))
         )
     }
 
@@ -179,6 +203,12 @@ impl ObjectKind {
             ObjectKind::MLine => "MLINE",
             ObjectKind::MultiLeader => "MLEADER",
             ObjectKind::Helix => "HELIX",
+            ObjectKind::AttributeDefinition => "ATTDEF",
+            ObjectKind::Table => "TABLE",
+            ObjectKind::Polyline2D => "PLINE",
+            ObjectKind::Mesh => "MESH",
+            ObjectKind::PolygonMesh => "3DMESH",
+            ObjectKind::PolyfaceMesh => "PFACE",
         }
     }
 
@@ -316,9 +346,77 @@ impl ObjectKind {
             // The HELIX defaults (radius, turns, direction) about the Z axis.
             ObjectKind::Helix => crate::modules::draw::draw::helix::HelixCommand::new()
                 .build(10.0, glam::DVec3::Z)?,
+            ObjectKind::AttributeDefinition => EntityType::AttributeDefinition(
+                e::AttributeDefinition::new("TAG".into(), "Value".into(), String::new()),
+            ),
+            // Four rows by three columns in the current table style.
+            ObjectKind::Table => {
+                let mut table = e::TableBuilder::new(4, 3).at(origin).build();
+                let name = &document.header.current_table_style_name;
+                table.table_style_handle = document.objects.iter().find_map(|(handle, object)| {
+                    matches!(object, codec::objects::ObjectType::TableStyle(style)
+                        if style.name.eq_ignore_ascii_case(name))
+                    .then_some(*handle)
+                });
+                EntityType::Table(Box::new(table))
+            }
+            ObjectKind::Polyline2D => {
+                let mut polyline = e::Polyline2D::new();
+                for (x, y) in [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0)] {
+                    polyline.add_vertex(e::Vertex2D::new(point(x, y)));
+                }
+                EntityType::Polyline2D(polyline)
+            }
+            // A 10-unit cube.
+            ObjectKind::Mesh => EntityType::Mesh(
+                e::MeshBuilder::new()
+                    .vertices(&CUBE.map(|[x, y, z]| Vector3::new(x * 10.0, y * 10.0, z * 10.0)))
+                    .face(vec![0, 3, 2, 1])
+                    .face(vec![4, 5, 6, 7])
+                    .face(vec![0, 1, 5, 4])
+                    .face(vec![1, 2, 6, 5])
+                    .face(vec![2, 3, 7, 6])
+                    .face(vec![3, 0, 4, 7])
+                    .compute_edges()
+                    .build(),
+            ),
+            // A 3 x 3 grid over 10 x 10.
+            ObjectKind::PolygonMesh => {
+                let mut mesh = e::PolygonMeshEntity::new();
+                mesh.m_vertex_count = 3;
+                mesh.n_vertex_count = 3;
+                mesh.vertices = (0..9)
+                    .map(|i| e::PolygonMeshVertex::at(point(5.0 * (i / 3) as f64, 5.0 * (i % 3) as f64)))
+                    .collect();
+                EntityType::PolygonMesh(mesh)
+            }
+            // The faces of a 10-unit cube.
+            ObjectKind::PolyfaceMesh => {
+                let mut mesh = e::PolyfaceMesh::new();
+                let v: Vec<i16> = CUBE
+                    .iter()
+                    .map(|[x, y, z]| mesh.add_vertex_xyz(x * 10.0, y * 10.0, z * 10.0))
+                    .collect();
+                for [a, b, c, d] in [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]] {
+                    mesh.add_quad(v[a], v[b], v[c], v[d]);
+                }
+                EntityType::PolyfaceMesh(mesh)
+            }
         })
     }
 }
+
+/// A unit cube's corners: bottom face, then top face.
+const CUBE: [[f64; 3]; 8] = [
+    [0.0, 0.0, 0.0],
+    [1.0, 0.0, 0.0],
+    [1.0, 1.0, 0.0],
+    [0.0, 1.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [1.0, 0.0, 1.0],
+    [1.0, 1.0, 1.0],
+    [0.0, 1.0, 1.0],
+];
 
 /// What a palette entry adds.
 #[derive(Clone, Copy, Debug)]

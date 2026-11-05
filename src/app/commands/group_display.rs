@@ -53,8 +53,9 @@ impl OpenCADStudio {
     pub(super) fn match_mode_setvar(&mut self, value: Option<&str>) {
         use crate::entities::match_props::{match_mode, set_match_mode, MatchOpts};
         let ask = |app: &mut Self| {
+            let (name, current) = ("MATCHMODE", match_mode());
             app.command_line
-                .push_output(&format!("Enter new value for MATCHMODE <{}>:", match_mode()));
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
             app.pending_setvar = Some("MATCHMODE".to_string());
         };
         let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {

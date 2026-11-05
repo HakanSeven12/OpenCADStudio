@@ -197,6 +197,14 @@ pub(crate) fn create(
     create_with_label(document, definition, kind, base, end, reference, None)
 }
 
+/// The next free `Flip state<n>` label the placement prompt offers.
+pub(crate) fn next_flip_state_label(document: &Document, definition: Handle) -> String {
+    super::block_distance_parameter::unique_label(
+        &super::block_distance_parameter::label_names(document, definition),
+        "Flip state",
+    )
+}
+
 pub(crate) fn create_with_label(
     document: &mut Document,
     definition: Handle,
@@ -211,15 +219,7 @@ pub(crate) fn create_with_label(
     {
         return Err(error);
     }
-    let mut names = super::block_distance_parameter::parameters(document, definition)
-        .into_iter()
-        .flat_map(|p| p.labels)
-        .collect::<Vec<_>>();
-    names.extend(
-        parameters(document, definition)
-            .into_iter()
-            .map(|p| p.label),
-    );
+    let names = super::block_distance_parameter::label_names(document, definition);
     let prefix = match kind {
         Kind::Rotation => "Angle",
         Kind::Alignment => "Alignment",

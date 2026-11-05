@@ -3595,6 +3595,111 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
 }
 
 #[test]
+fn a_flip_takes_its_name_and_property_label() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER FLIP");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <Flip>:"
+    );
+    feed(&mut app, "Body");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter Flip property label <Flip state1>:"
+    );
+    feed(&mut app, "Mirror");
+    feed(&mut app, "D");
+    feed(&mut app, "mirrored");
+    feed(&mut app, "P");
+    feed(&mut app, "No");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Flip  Specify base point of reflection line or [Name/Label/Description/Palette]:"
+    );
+    feed(&mut app, "0,0");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Flip  Specify reflection line endpoint:"
+    );
+    feed(&mut app, "10,0");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER Flip  Specify flip parameter label location:"
+    );
+    feed(&mut app, "-2,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let first = {
+        let doc = &app.tabs[i].scene.document;
+        crate::scene::block_orientation_parameter::parameters(doc, definition)
+            .into_iter()
+            .find(|parameter| {
+                parameter.kind == crate::scene::block_orientation_parameter::Kind::Flip
+            })
+            .expect("placed flip parameter")
+            .handle
+    };
+    {
+        let doc = &app.tabs[i].scene.document;
+        let codec::objects::ObjectType::DynamicBlock(object) =
+            doc.objects.get(&first).expect("flip record")
+        else {
+            panic!("expected a dynamic block record");
+        };
+        let codec::objects::DynamicBlockData::FlipParameter(native) = &object.data else {
+            panic!("expected a flip parameter");
+        };
+        assert_eq!(
+            native.flip_label, "Mirror",
+            "the label collected at the prompt is stored on the parameter"
+        );
+        assert_eq!(
+            native.parameter.parameter.element.name, "Body",
+            "the name collected at the prompt is stored on the parameter"
+        );
+        assert_eq!(
+            native.flip_label_description, "mirrored",
+            "the description collected at the prompt is stored on the parameter"
+        );
+        assert!(
+            !native.parameter.parameter.show_properties,
+            "No at the palette question hides the property"
+        );
+    }
+
+    // Enter at the label question keeps the shown default; the scene stores the
+    // next free Flip state label.
+    let _ = app.dispatch_command("BPARAMETER FLIP");
+    feed(&mut app, "L");
+    feed(&mut app, "");
+    feed(&mut app, "0,0");
+    feed(&mut app, "10,0");
+    feed(&mut app, "-2,2");
+    assert!(app.tabs[i].active_cmd.is_none());
+    let doc = &app.tabs[i].scene.document;
+    let second = crate::scene::block_orientation_parameter::parameters(doc, definition)
+        .into_iter()
+        .filter(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Flip)
+        .find(|parameter| parameter.handle != first)
+        .expect("second flip parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&second.handle).expect("second flip record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::FlipParameter(native) = &object.data else {
+        panic!("expected a flip parameter");
+    };
+    assert_eq!(native.flip_label, "Flip state1");
+}
+
+#[test]
 fn a_rotation_takes_a_name_and_one_property_label() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

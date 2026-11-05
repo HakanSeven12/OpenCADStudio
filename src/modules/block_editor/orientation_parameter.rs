@@ -224,10 +224,12 @@ impl CadCommand for OrientationParameterCommand {
                 Asking::Name => {
                     crate::tf!("Enter parameter name <{}>:", self.name_default).into_owned()
                 }
-                Asking::Label => {
-                    crate::tf!("Enter rotation property label <{}>:", self.label_default)
-                        .into_owned()
-                }
+                Asking::Label => match self.kind {
+                    Kind::Flip => crate::tf!("Enter Flip property label <{}>:", self.label_default)
+                        .into_owned(),
+                    _ => crate::tf!("Enter rotation property label <{}>:", self.label_default)
+                        .into_owned(),
+                },
                 other => crate::t!(other.question()).into_owned(),
             };
         }
@@ -238,10 +240,12 @@ impl CadCommand for OrientationParameterCommand {
                 "Choose alignment type [Perpendicular/Tangent] <Tangent>:"
             }
         } else if self.base.is_none() {
-            if self.kind == Kind::Rotation {
-                "Specify base point or [Name/Label/Chain/Description/Palette]:"
-            } else {
-                "Specify parameter base point:"
+            match self.kind {
+                Kind::Rotation => "Specify base point or [Name/Label/Chain/Description/Palette]:",
+                Kind::Flip => {
+                    "Specify base point of reflection line or [Name/Label/Description/Palette]:"
+                }
+                _ => "Specify parameter base point:",
             }
         } else {
             match (self.kind, self.second.is_some()) {
@@ -278,7 +282,9 @@ impl CadCommand for OrientationParameterCommand {
         }
     }
     fn point_step_accepts_keywords(&self) -> bool {
-        self.asking.is_none() && self.kind == Kind::Rotation && self.base.is_none()
+        self.asking.is_none()
+            && matches!(self.kind, Kind::Rotation | Kind::Flip)
+            && self.base.is_none()
     }
     fn options(&self) -> Vec<CmdOption> {
         if self.kind == Kind::Rotation
@@ -392,11 +398,11 @@ impl CadCommand for OrientationParameterCommand {
         if self.asking.is_some() {
             return Some(self.accept(Some(text)));
         }
-        if self.kind == Kind::Rotation && self.base.is_none() {
+        if matches!(self.kind, Kind::Rotation | Kind::Flip) && self.base.is_none() {
             let asking = match text.trim().to_ascii_uppercase().as_str() {
                 "N" | "NAME" => Asking::Name,
                 "L" | "LABEL" => Asking::Label,
-                "C" | "CHAIN" => Asking::Chain,
+                "C" | "CHAIN" if self.kind == Kind::Rotation => Asking::Chain,
                 "D" | "DESCRIPTION" => Asking::Description,
                 "P" | "PALETTE" => Asking::Palette,
                 _ => {
@@ -641,13 +647,62 @@ mod tests {
     }
 
     #[test]
+    fn a_flip_base_point_prompt_lists_the_options_it_accepts() {
+        assert_eq!(
+            OrientationParameterCommand::new(0, Handle::new(1), Kind::Flip).prompt(),
+            "BPARAMETER Flip  Specify base point of reflection line or [Name/Label/Description/Palette]:"
+        );
+    }
+
+    #[test]
+    fn a_flip_takes_a_name_and_a_property_label() {
+        let mut command = OrientationParameterCommand::new(0, Handle::new(1), Kind::Flip)
+            .with_name("Flip".into())
+            .with_label("Flip state1".into());
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter parameter name <Flip>:");
+        assert_eq!(command.input_kind(), InputKind::FreeText);
+        assert!(matches!(
+            command.on_text_input("Body"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.name.as_deref(), Some("Body"));
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter Flip property label <Flip state1>:");
+        assert!(matches!(
+            command.on_text_input("Mirror"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.options.label.as_deref(), Some("Mirror"));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Flip  Specify base point of reflection line or [Name/Label/Description/Palette]:",
+            "both questions return to the placement prompt"
+        );
+    }
+
+    #[test]
+    fn a_flip_refuses_a_chain_answer_it_does_not_offer() {
+        let Some(CmdResult::ReportError(error)) =
+            OrientationParameterCommand::new(0, Handle::new(1), Kind::Flip).on_text_input("C")
+        else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error, "Point or option keyword required.");
+    }
+
+    #[test]
     fn other_orientation_kinds_keep_their_single_instruction() {
-        for kind in [Kind::Flip, Kind::Alignment] {
-            assert_eq!(
-                OrientationParameterCommand::new(0, Handle::new(1), kind).prompt(),
-                format!("BPARAMETER {}  Specify parameter base point:", kind.name())
-            );
-        }
+        assert_eq!(
+            OrientationParameterCommand::new(0, Handle::new(1), Kind::Alignment).prompt(),
+            "BPARAMETER Alignment  Specify parameter base point:"
+        );
     }
 
     #[test]

@@ -87,26 +87,24 @@ impl OpenCADStudio {
             let description = options.description.as_deref().map(|value| {
                 metadata::set_text(document, definition, parameter, metadata::Field::Description, value)
             });
-            let parameter_name = options
-                .name
-                .as_deref()
-                .filter(|_| kind == crate::scene::block_orientation_parameter::Kind::Rotation)
-                .map(|value| {
+            let named = matches!(
+                kind,
+                crate::scene::block_orientation_parameter::Kind::Rotation
+                    | crate::scene::block_orientation_parameter::Kind::Flip
+            );
+            let parameter_name =
+                options.name.as_deref().filter(|_| named).map(|value| {
                     metadata::set_parameter_name(document, definition, parameter, value)
                 });
-            let label = options
-                .label
-                .as_deref()
-                .filter(|_| kind == crate::scene::block_orientation_parameter::Kind::Rotation)
-                .map(|value| {
-                    metadata::set_text(
-                        document,
-                        definition,
-                        parameter,
-                        metadata::Field::Name,
-                        value,
-                    )
-                });
+            let label = options.label.as_deref().filter(|_| named).map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Name,
+                    value,
+                )
+            });
             let chain = options
                 .chain
                 .map(|value| metadata::set_chain(document, definition, parameter, value));
@@ -680,6 +678,14 @@ impl OpenCADStudio {
                         // The label question shows the plain word; the created
                         // parameter takes the next free numbered name.
                         command = command.with_name(name).with_label("Angle".to_owned());
+                    } else if kind == crate::scene::block_orientation_parameter::Kind::Flip {
+                        // Scene creation always names a Flip parameter `Flip`,
+                        // so the prompt default must not be numbered.
+                        let label = crate::scene::block_orientation_parameter::next_flip_state_label(
+                            &self.tabs[i].scene.document,
+                            block,
+                        );
+                        command = command.with_name("Flip".to_owned()).with_label(label);
                     }
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));

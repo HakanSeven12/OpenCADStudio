@@ -106,7 +106,7 @@ fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     }
 }
 
-fn label_names(document: &Document, definition: Handle) -> Vec<String> {
+pub(crate) fn label_names(document: &Document, definition: Handle) -> Vec<String> {
     let mut names = parameters(document, definition)
         .into_iter()
         .flat_map(|p| p.labels)
@@ -119,7 +119,7 @@ fn label_names(document: &Document, definition: Handle) -> Vec<String> {
     names
 }
 
-fn unique_label(names: &[String], prefix: &str) -> String {
+pub(crate) fn unique_label(names: &[String], prefix: &str) -> String {
     (1..)
         .map(|n| format!("{prefix}{n}"))
         .find(|name| names.iter().all(|old| !old.eq_ignore_ascii_case(name)))

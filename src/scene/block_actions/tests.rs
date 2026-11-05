@@ -2941,28 +2941,47 @@ fn a_chain_that_two_actions_answer_to_is_refused() {
     assert_eq!(error, "An action chain names more than one action.");
 }
 
-/// An Array action is the one kind a chain cannot carry in either direction, so
-/// authoring says which end of the link is the problem.
 #[test]
-fn an_array_action_stays_out_of_a_chain_written_from_authoring() {
+fn array_and_scale_use_the_authored_order_after_reload() {
     let (mut doc, def, handles) = fixture();
     let parameter = linear(&mut doc, def);
-    let move_action = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
-    let array_action =
-        create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.).unwrap();
-    assert_eq!(
-        super::chain::set(&mut doc, def, move_action, Some(array_action)).unwrap_err(),
-        "An Array action cannot be the follow-up of a chain yet."
-    );
-    assert_eq!(
-        super::chain::set(&mut doc, def, array_action, Some(move_action)).unwrap_err(),
-        "An Array action cannot chain a follow-up action yet."
-    );
-    chain_after(&mut doc, array_action, move_action);
-    assert!(
-        super::chain::set(&mut doc, def, array_action, None).unwrap(),
-        "clearing a chain an authored file left on an Array action still works"
-    );
+    let scale = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
+    let array = create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 10., 1.)
+        .unwrap();
+    let insert = doc.add_entity(EntityType::Insert(codec::entities::Insert::new(
+        "ACTIONS", Vector3::ZERO,
+    ))).unwrap();
+    for (head, next, expected) in [
+        (scale, array, [8., 18., 28.]),
+        (array, scale, [8., 28., 48.]),
+    ] {
+        let mut authored = doc.clone();
+        let name = action_object(&authored, next).element.name.clone();
+        assert!(super::chain::set_by_name(&mut authored, def, head, &name).unwrap());
+        for extension in ["dwg", "dxf"] {
+            let bytes = crate::io::save_to_bytes(&authored, extension, authored.version).unwrap();
+            let reopened = crate::io::load_bytes(&format!("array-chain.{extension}"), bytes).unwrap();
+            let evaluated = instance::evaluate(&reopened, insert, parameter, DVec3::X * 20.)
+                .unwrap().unwrap();
+            let EntityType::Insert(reference) = evaluated.get_entity(insert).unwrap() else {
+                panic!()
+            };
+            let mut positions: Vec<_> = evaluated.entities_in_block(&reference.block_name)
+                .filter_map(|entity| match entity {
+                    EntityType::Circle(circle) => {
+                        assert_eq!(circle.center.y, 6.);
+                        assert_eq!(circle.radius, 4.);
+                        Some(circle.center.x)
+                    }
+                    _ => None,
+                }).collect();
+            positions.sort_by(f64::total_cmp);
+            assert_eq!(positions, expected);
+            let refreshed = instance::refresh(&evaluated, def).unwrap();
+            assert_eq!(refreshed.block_records.get(&reference.block_name).unwrap().entity_handles,
+                evaluated.block_records.get(&reference.block_name).unwrap().entity_handles);
+        }
+    }
 }
 
 /// A chain the evaluator could not run is not a chain the operator can write, so
@@ -3145,24 +3164,21 @@ fn two_chains_join_before_applying_their_shared_follow_up_once() {
     );
 }
 
-/// An array action replaces the member with a grid of copies, so a chain that
-/// runs into one has no step defined for what it leaves behind. Ordering the
-/// chain cannot make that work, so it stays refused instead of dropping the link.
 #[test]
-fn a_chain_that_runs_into_an_array_action_is_refused() {
+fn nested_arrays_reserve_the_full_copy_budget_atomically() {
     let (mut doc, def, handles) = fixture();
     let parameter = linear(&mut doc, def);
-    let move_action = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
-    let array_action =
-        create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.).unwrap();
-    mark_chained(&mut doc, parameter);
-    chain_after(&mut doc, move_action, array_action);
+    let first = create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 1., 1.)
+        .unwrap();
+    let second = create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.)
+        .unwrap();
+    chain_after(&mut doc, first, second);
     let baseline = doc.clone();
-    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
     assert_eq!(
-        error,
-        "An Array action cannot be the follow-up of a chain yet."
+        evaluate(&mut doc, &baseline, def, parameter, DVec3::X * 1_000.),
+        Err(super::array::LIMIT_ERROR)
     );
+    assert_eq!(doc, baseline);
 }
 
 /// Sibling actions use the stored list order when both become eligible.
@@ -3227,22 +3243,32 @@ fn action_follow_up_list_preserves_literal_names_and_retained_metadata() {
     }
 }
 
-/// An array action replaces the member with a grid of copies, so nothing is left
-/// for a follow-up action to work on. Naming one says what is missing rather
-/// than dropping the link or building the grid anyway.
 #[test]
-fn an_array_action_that_names_a_follow_up_action_is_refused() {
+fn a_named_array_of_an_array_passes_every_copy_to_its_follow_up_once() {
     let (mut doc, def, handles) = fixture();
     let parameter = linear(&mut doc, def);
-    let follow_up = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
-    let array_action =
-        create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 2., 1.).unwrap();
-    mark_chained(&mut doc, parameter);
-    chain_names(&mut doc, array_action, &[follow_up]);
+    let first = create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 5., 1.)
+        .unwrap();
+    let second = create_array(&mut doc, def, parameter, &[handles[1]], DVec3::ZERO, 10., 1.)
+        .unwrap();
+    let scale = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
+    chain_after(&mut doc, first, second);
+    chain_after(&mut doc, second, scale);
     let baseline = doc.clone();
-    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
-    assert_eq!(error, "An Array action cannot chain follow-up actions yet.");
-    assert_eq!(doc, baseline, "a refused chain leaves the definition alone");
+    evaluate(&mut doc, &baseline, def, parameter, DVec3::X * 20.).unwrap();
+    let mut ids = std::collections::BTreeSet::new();
+    let mut positions: Vec<_> = doc.entities_in_block("ACTIONS")
+        .filter_map(|entity| match entity {
+            EntityType::Circle(circle) => {
+                assert!(ids.insert(authoring::element_id(entity).unwrap()));
+                assert_eq!(circle.center.y, 6.);
+                assert_eq!(circle.radius, 4.);
+                Some(circle.center.x)
+            }
+            _ => None,
+        }).collect();
+    positions.sort_by(f64::total_cmp);
+    assert_eq!(positions, [8., 18., 28., 28., 38., 38., 48., 48., 48., 58., 58., 68., 68., 78., 88.]);
 }
 
 #[test]

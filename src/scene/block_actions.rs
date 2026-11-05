@@ -1645,7 +1645,8 @@ fn evaluate_impl(
         });
     }
     let all = actions(baseline, definition);
-    let order = chain_order(baseline, definition, &all)?;
+    let (order, successors) = action_schedule(baseline, definition, &all)?;
+    let ordered_arrays = array::Sequence::new(&all, &successors);
     let mut affected = std::collections::BTreeSet::new();
     let mut geometric_targets = std::collections::BTreeMap::new();
     let mut prepared = std::collections::BTreeMap::new();
@@ -1705,9 +1706,6 @@ fn evaluate_impl(
                 || grip_roles::scalar_mask(&q, &object.data) == Some(0)
             {
                 return Err("This Array action uses options not supported yet.");
-            }
-            if !a.action_ids.is_empty() {
-                return Err("An Array action cannot chain follow-up actions yet.");
             }
             array_plans.insert(*action_handle, array::Plan::new(
                 &q, base_for(&q), current(&staged, &q), arr, target_count,
@@ -1815,6 +1813,44 @@ fn evaluate_impl(
         }
         prepared.insert(*action_handle, (q, base, end, transform));
     }
+    ordered_arrays.reserve_nested(
+        &all, &order, &geometric_targets, &array_plans, &mut remaining_array_entities,
+    )?;
+    let mut tags = (!array_plans.is_empty()).then(|| array::Tags::new(&staged, definition));
+    let apply = |entity: &mut EntityType, action_handle: Handle, kind: Kind| -> Result<(), &'static str> {
+        let (q, base, end, transform) = &prepared[&action_handle];
+        let (base, end) = (*base, *end);
+        let ObjectType::DynamicBlock(object) = &baseline.objects[&action_handle] else {
+            unreachable!()
+        };
+        match &object.data {
+            DynamicBlockData::StretchAction(action) => {
+                let crate::command::EntityTransform::Translate(delta) = transform else {
+                    unreachable!()
+                };
+                stretch::apply(entity, action, *delta)?;
+            }
+            DynamicBlockData::PolarStretchAction(action) => {
+                if action.connections.iter().any(|c| c.code != q.id) {
+                    return Err("This Polar Stretch action uses a different parameter binding.");
+                }
+                stretch::apply_polar_frame(entity, action, q.base, q.end, base, end)?;
+            }
+            _ => super::view::dispatch::apply_transform(entity, transform),
+        }
+        if matches!(kind, Kind::Rotate | Kind::Scale)
+            && options::base(baseline, action_handle).is_some_and(|action| action.dependent)
+        {
+            super::view::dispatch::apply_transform(
+                entity, &crate::command::EntityTransform::Translate(base - q.base),
+            );
+        }
+        let bounds = entity.as_entity().bounding_box();
+        if !v(bounds.min).is_finite() || !v(bounds.max).is_finite() {
+            return Err("The parameter value produces non-finite geometry.");
+        }
+        Ok(())
+    };
     for h in affected {
         let mut entity = baseline
             .get_entity(h)
@@ -1827,81 +1863,63 @@ fn evaluate_impl(
         if let Some(e) = staged.get_entity(h) {
             entity.common_mut().invisible = e.common().invisible;
         }
-        for index in &order {
-            let (action_handle, a, kind, _id) = &all[*index];
-            if !a.dependencies.contains(&h) || *kind == Kind::Array {
+        let source_id = authoring::element_id(&entity).map_or(h.value(), |id| id as u64);
+        let mut copies: Vec<array::Copy> = Vec::new();
+        for &index in &order {
+            let (action_handle, a, kind, _) = all[index];
+            if !a.dependencies.contains(&h) {
                 continue;
             }
-            let (q, base, end, transform) = prepared.get(action_handle).unwrap();
-            let (base, end) = (*base, *end);
-            let ObjectType::DynamicBlock(o) = &baseline.objects[action_handle] else { unreachable!() };
-            if let DynamicBlockData::StretchAction(s) = &o.data {
-                let crate::command::EntityTransform::Translate(delta) = transform else { unreachable!() };
-                stretch::apply(&mut entity, s, *delta)?;
-            } else if let DynamicBlockData::PolarStretchAction(s) = &o.data {
-                if s.connections.iter().any(|c| c.code != q.id) {
-                    return Err("This Polar Stretch action uses a different parameter binding.");
+            if kind == Kind::Array {
+                if !ordered_arrays.contains(index) || !geometric_targets[&action_handle].contains(&h) {
+                    continue;
                 }
-                let direction = q.end - q.base;
-                if direction.length() <= 1e-9 {
-                    return Err("The Polar parameter needs a nonzero distance.");
+                let tags = tags.as_mut().expect("array plans have a tag allocator");
+                let parents: Vec<_> = copies.iter().enumerate()
+                    .filter(|(_, copy)| ordered_arrays.follows(copy.producer, index))
+                    .map(|(i, _)| i)
+                    .collect();
+                for (cell, delta) in array_plans[&action_handle].displacements() {
+                    copies.push(array::Copy {
+                        entity: array::displaced(&entity, delta)?,
+                        producer: index,
+                        id: tags.ordered(source_id, action_handle, cell),
+                    });
+                    for &parent in &parents {
+                        let copy = &copies[parent];
+                        let generated = array::Copy {
+                            entity: array::displaced(&copy.entity, delta)?,
+                            producer: index,
+                            id: tags.ordered(copy.id as u64, action_handle, cell),
+                        };
+                        copies.push(generated);
+                    }
                 }
-                stretch::apply_polar_frame(&mut entity, s, q.base, q.end, base, end)?;
             } else {
-                super::view::dispatch::apply_transform(&mut entity, transform);
-            }
-            if matches!(kind, Kind::Rotate | Kind::Scale)
-                && options::base(baseline, *action_handle).is_some_and(|action| action.dependent)
-            {
-                super::view::dispatch::apply_transform(&mut entity,
-                    &crate::command::EntityTransform::Translate(base - q.base));
-            }
-            let bounds = entity.as_entity().bounding_box();
-            if !v(bounds.min).is_finite() || !v(bounds.max).is_finite() {
-                return Err("The parameter value produces non-finite geometry.");
+                apply(&mut entity, action_handle, kind)?;
+                for copy in copies.iter_mut().filter(|copy| ordered_arrays.follows(copy.producer, index)) {
+                    apply(&mut copy.entity, action_handle, kind)?;
+                }
             }
         }
         *staged
             .get_entity_mut(h)
             .ok_or("An action target was removed.")? = entity;
+        for copy in copies {
+            array::publish(&mut staged, definition, copy.entity, Some(copy.id))?;
+        }
     }
-    for (action_handle, _, kind, _) in &all {
-        if *kind != Kind::Array {
+    for (index, (action_handle, _, kind, _)) in all.iter().enumerate() {
+        if *kind != Kind::Array || ordered_arrays.contains(index) {
             continue;
         }
-        for (k, disp) in array_plans[action_handle].displacements() {
-            for target_h in &geometric_targets[action_handle] {
-                let mut clone = staged
-                    .get_entity(*target_h)
-                    .cloned()
-                    .ok_or("An action target is unavailable.")?;
-                super::view::dispatch::apply_transform(
-                    &mut clone,
-                    &crate::command::EntityTransform::Translate(disp),
-                );
-                let bounds = clone.as_entity().bounding_box();
-                if !v(bounds.min).is_finite() || !v(bounds.max).is_finite() {
-                    return Err("The parameter value produces non-finite geometry.");
-                }
-                let new_h = staged.allocate_handle();
-                clone.common_mut().handle = new_h;
-                clone.common_mut().owner_handle = definition;
-                clone.common_mut().raw_record = None;
-                clone.common_mut().xdictionary_handle = None;
-                clone.common_mut().reactors.clear();
-                crate::scene::Scene::reset_clone_subhandles(&mut staged, &mut clone);
-                let base_id = authoring::element_id(&clone);
-                staged
-                    .add_entity(clone)
-                    .map_err(|_| "Could not add array item.")?;
-                if let Some(base_id) = base_id {
-                    let clone_id = base_id.wrapping_add((k as i32).wrapping_mul(100_000));
-                    authoring::set_entity_tag(
-                        &mut staged,
-                        new_h,
-                        authoring::element_tag(clone_id, new_h),
-                    );
-                }
+        for (cell, delta) in array_plans[action_handle].displacements() {
+            for target in &geometric_targets[action_handle] {
+                let source = staged.get_entity(*target).ok_or("An array target is unavailable.")?;
+                let copy = array::displaced(source, delta)?;
+                let id = tags.as_mut().expect("array plans have a tag allocator")
+                    .legacy(source, *action_handle, cell);
+                array::publish(&mut staged, definition, copy, id)?;
             }
         }
     }
@@ -1965,16 +1983,21 @@ fn supported_parameter(doc: &Document, handle: Handle) -> bool {
 /// space the parameter's own element lists are read in. Actions no chain points
 /// at keep the order the evaluation graph lists. Known non-action nodes and
 /// actions of other parameters are retained connections rather than follow-ups.
-/// Other names are checked before any ordering happens, so a chain that
-/// resolves to nothing, that two actions answer to, that names more than one
-/// follow-up, that joins two sequences, or that runs into an array action is
-/// refused. A chain that loops back on itself has no first action, so the loop is
-/// left in the order the graph lists rather than guessed at.
+/// Unresolved or ambiguous names are refused. Retained loops preserve graph
+/// order within each cycle.
 fn chain_order(
     doc: &Document,
     definition: Handle,
     all: &[(Handle, &BlockAction, Kind, i32)],
 ) -> Result<Vec<usize>, &'static str> {
+    action_schedule(doc, definition, all).map(|(order, _)| order)
+}
+
+fn action_schedule(
+    doc: &Document,
+    definition: Handle,
+    all: &[(Handle, &BlockAction, Kind, i32)],
+) -> Result<(Vec<usize>, Vec<Vec<usize>>), &'static str> {
     let mut by_chain_id = std::collections::BTreeMap::new();
     let mut shared_chain_ids = std::collections::BTreeSet::new();
     let mut listed = std::collections::BTreeSet::new();
@@ -2043,9 +2066,6 @@ fn chain_order(
     let mut predecessors = vec![0; all.len()];
     let mut successors = vec![Vec::new(); all.len()];
     for (index, (_, action, kind, owner)) in all.iter().enumerate() {
-        if *kind == Kind::Array {
-            continue;
-        }
         let mut seen = std::collections::BTreeSet::new();
         for id in &action.action_ids {
             if shared_chain_ids.contains(id) {
@@ -2060,9 +2080,6 @@ fn chain_order(
             };
             if all[next].3 != *owner || !seen.insert(next) {
                 continue;
-            }
-            if all[next].2 == Kind::Array {
-                return Err("An Array action cannot be the follow-up of a chain yet.");
             }
             successors[index].push(next);
             predecessors[next] += 1;
@@ -2089,7 +2106,7 @@ fn chain_order(
     if order.len() < all.len() {
         chain::append_retained_cycles(&successors, &predecessors, &mut order);
     }
-    Ok(order)
+    Ok((order, successors))
 }
 
 pub(crate) fn constrain_value_set(value: f64, set: &codec::objects::BlockParameterValueSet) -> f64 {

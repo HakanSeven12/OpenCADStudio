@@ -152,10 +152,7 @@ fn loops(doc: &Document, definition: Handle, action: Handle) -> bool {
         .collect();
     let mut visited = std::collections::BTreeSet::from([action]);
     let mut pending = Vec::from_iter(all.iter().find(|(handle, ..)| *handle == action));
-    while let Some((_, current, kind, owner)) = pending.pop() {
-        if *kind == Kind::Array {
-            continue;
-        }
+    while let Some((_, current, _, owner)) = pending.pop() {
         for id in &current.action_ids {
             let Some(&next) = by_id.get(id) else { continue };
             if next.3 != *owner {
@@ -190,7 +187,7 @@ fn set_follow_ups(
     follow_ups: &[Handle],
 ) -> Result<bool, &'static str> {
     let all = actions(doc, definition);
-    let (_, head, kind, owner) = all
+    let (_, head, _, owner) = all
         .iter()
         .find(|(handle, ..)| *handle == action)
         .ok_or("Select an action belonging to the active block definition.")?;
@@ -209,9 +206,6 @@ fn set_follow_ups(
         }
         if next_owner != owner {
             return Err("Select a follow-up action of the same parameter.");
-        }
-        if *kind == Kind::Array {
-            return Err("An Array action cannot chain a follow-up action yet.");
         }
         let id = next.element.eval.node_id;
         if seen.insert(id) {

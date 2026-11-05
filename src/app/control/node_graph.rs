@@ -519,3 +519,98 @@ mod create_node_tests {
     }
 }
 
+
+#[cfg(test)]
+mod modify_node_tests {
+    use serde_json::{json, Value};
+    fn p(x: f64, y: f64, z: f64) -> Value { json!({"x": x, "y": y, "z": z}) }
+    fn h(app: &crate::app::OpenCADStudio, n: usize) -> Value {
+        let e = app.tabs[app.active_tab].scene.document.entities().nth(n).unwrap();
+        json!({"handle": e.common().handle.value()})
+    }
+    fn hs(app: &crate::app::OpenCADStudio) -> Value {
+        Value::Array(app.tabs[app.active_tab].scene.document.entities().map(|e| json!({"handle": e.common().handle.value()})).collect())
+    }
+    fn state(app: &crate::app::OpenCADStudio) -> Vec<String> {
+        app.tabs[app.active_tab].scene.document.entities().map(|e| {
+            let mut j = crate::app::automation::entity_json(&app.tabs[app.active_tab].scene.document, e, "geometry", None);
+            for k in ["handle", "layer", "color", "linetype", "lineweight", "type", "transparency", "owner", "display_type", "space"] { if let Some(o) = j.as_object_mut() { o.remove(k); } }
+            let t = j.to_string();
+            // A solid's JSON has no geometry; its ACIS data stands in for it.
+            let body = match e {
+                codec::EntityType::Solid3D(solid) => {
+                    use std::hash::{Hash, Hasher};
+                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                    format!("{:?}", solid.acis_data).hash(&mut hasher);
+                    hasher.finish().to_string()
+                }
+                _ => String::new(),
+            };
+            format!("{}{}{body}", crate::entities::names::ui_name(e), &t[..t.len().min(90)])
+        }).collect()
+    }
+    fn go(lines: &[&str], node: &str, inputs: impl Fn(&crate::app::OpenCADStudio) -> Value) {
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        for l in lines { let _ = app.run_command_line(l); }
+        let i = app.active_tab;
+        let before = state(&app);
+        let inputs = inputs(&app);
+        let spec = super::ops::resolve(node).unwrap();
+        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        for (field, value) in inputs.as_object().unwrap() {
+            let _ = app.on_graph(super::GraphMsg::Set(super::Port { node: id, field: field.clone() }, value.clone()));
+        }
+        let after = state(&app);
+        // A second evaluation must not pile up.
+        let _ = app.graph_run(i);
+        let again = state(&app);
+        // The drawing changed, and a second evaluation takes the first back
+        // before it runs again, so nothing piles up.
+        assert_ne!(before, after, "{node} changed nothing");
+        assert_eq!(after, again, "{node} is not stable across evaluations");
+    }
+    /// Every Modify and Model node runs its command on the drawing.
+    #[test]
+    fn the_modify_and_model_nodes_run_their_commands() {
+        let l2 = ["LINE 0,0 10,0 ", "LINE 10,0 10,10 "];
+        go(&["LINE 0,0 10,0 ", "LINE 5,-5 5,5 "], "Trim", |a| json!({"object": h(a,0), "point": p(8.,0.,0.)}));
+        go(&["LINE 0,0 4,0 ", "LINE 10,-5 10,5 "], "Extend", |a| json!({"object": h(a,0), "point": p(3.,0.,0.)}));
+        go(&l2, "Fillet", |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(10.,5.,0.), "radius": 2}));
+        go(&l2, "Chamfer", |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(10.,5.,0.)}));
+        go(&["LINE 0,0 5,0 ", "LINE 10,5 15,5 "], "Blend", |a| json!({"first": h(a,0), "first point": p(4.,0.,0.), "second": h(a,1), "second point": p(11.,5.,0.)}));
+        go(&["LINE 0,0 10,0 "], "Break", |a| json!({"object": h(a,0), "first point": p(3.,0.,0.), "second point": p(6.,0.,0.)}));
+        go(&["LINE 0,0 10,0 "], "Break At Point", |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}));
+        go(&["LINE 0,0 10,0 "], "Lengthen", |a| json!({"object": h(a,0), "point": p(9.,0.,0.), "delta": 2}));
+        go(&["LINE 0,0 5,0 ", "LINE 5,0 10,0 "], "Join", |a| json!({"objects": hs(a)}));
+        go(&["RECTANG 0,0 10,10"], "Explode", |a| json!({"objects": hs(a)}));
+        go(&["LINE 0,0 10,0 "], "Convert To Polyline", |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}));
+        go(&["LINE 0,0 10,0 "], "Reverse", |a| json!({"objects": hs(a)}));
+        go(&["RECTANG 0,0 10,10"], "Stretch", |_| json!({"first corner": p(8.,-1.,0.), "second corner": p(12.,11.,0.), "base": p(0.,0.,0.), "second": p(5.,0.,0.)}));
+        go(&["LINE 0,0 10,0 "], "Align", |a| json!({"objects": hs(a), "first source": p(0.,0.,0.), "first target": p(0.,5.,0.), "second source": p(10.,0.,0.), "second target": p(0.,15.,0.)}));
+        go(&["CIRCLE 0,0 1"], "Rectangular Array", |a| json!({"objects": hs(a)}));
+        go(&["CIRCLE 10,0 1"], "Polar Array", |a| json!({"objects": [h(a,0)], "center": p(0.,0.,0.), "count": 4}));
+        go(&["CIRCLE 0,0 1", "LINE 0,0 20,0 "], "Path Array", |a| json!({"objects": [h(a,0)], "path": h(a,1)}));
+        go(&["RECTANG 0,0 10,10"], "Boundary", |_| json!({"point": p(5.,5.,0.)}));
+        go(&["RECTANG 0,0 10,10"], "Hatch At Point", |_| json!({"point": p(5.,5.,0.)}));
+        go(&["RECTANG 0,0 10,10"], "Hatch Objects", |a| json!({"objects": hs(a)}));
+        go(&["LINE 0,0 10,0 ", "LINE 0,4 10,4 "], "Centerline", |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(5.,4.,0.)}));
+        go(&["CIRCLE 0,0 5"], "Center Mark", |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}));
+        let boxes = ["BOX 0,0,0 10,10 10", "BOX 5,5,5 15,15 10"];
+        go(&boxes, "Union", |a| json!({"objects": hs(a)}));
+        go(&boxes, "Subtract", |a| json!({"from": [h(a,0)], "objects": [h(a,1)]}));
+        go(&boxes, "Intersection", |a| json!({"objects": hs(a)}));
+        go(&["RECTANG 5,0 10,10"], "Revolve", |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(0.,10.,0.)}));
+        go(&["CIRCLE 0,0 1", "LINE 0,0,0 0,0,10 "], "Sweep", |a| json!({"objects": [h(a,0)], "path": h(a,1)}));
+        go(&["CIRCLE 0,0 5", "CIRCLE 0,0,10 3"], "Loft", |a| json!({"sections": hs(a)}));
+        go(&["CIRCLE 0,0 1", "LINE 0,0,0 0,0,10 "], "Extrude Along Path", |a| json!({"objects": [h(a,0)], "path": h(a,1)}));
+        go(&["CIRCLE 0,0 5"], "Extrude Tapered", |a| json!({"objects": hs(a)}));
+        go(&["BOX 0,0,0 10,10 10"], "Fillet Edge", |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}));
+        go(&["BOX 0,0,0 10,10 10"], "Chamfer Edge", |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}));
+        go(&["BOX 0,0,0 10,10 10"], "Shell", |a| json!({"solid": h(a,0), "face point": p(5.,5.,10.)}));
+        go(&["BOX 0,0,0 10,10 10"], "Slice", |a| json!({"objects": hs(a), "first": p(5.,0.,0.), "second": p(5.,1.,0.), "third": p(5.,0.,1.), "keep": p(8.,5.,5.)}));
+        go(&["RECTANG 0,0 10,10"], "Presspull", |a| json!({"object": h(a,0), "point": p(5.,5.,0.)}));
+        go(&["BOX 0,0,0 10,10 10"], "3D Rotate", |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(1.,0.,0.)}));
+        go(&["BOX 0,0,0 10,10 10"], "3D Mirror", |a| json!({"objects": hs(a), "first": p(20.,0.,0.), "second": p(20.,1.,0.), "third": p(20.,0.,1.)}));
+    }
+}

@@ -18,7 +18,7 @@ use kernel::geom2d::{cross, Tolerance};
 use crate::scene::model::solid_history;
 use serde_json::{json, Value};
 
-pub const CATEGORIES: &[&str] = &["Select", "Query", "Create", "Modify", "Curve"];
+pub const CATEGORIES: &[&str] = &["Select", "Query", "Create", "Modify", "Model", "Curve"];
 
 const OBJECT: &[&str] = &["object"];
 const OBJECTS: &[&str] = &["objects"];
@@ -160,6 +160,97 @@ pub const LIBRARY: &[Spec] = &[
     host("Mirror", "Modify", &[v("object"), v("first"), v("second")], OBJECT),
     host("Copy", "Modify", &[v("object"), v("vector")], OBJECT),
     host("Offset", "Modify", &[v("object"), n("distance", 1.0), v("side")], OBJECTS),
+    host("Trim", "Modify", &[v("object"), v("point")], OBJECTS),
+    host("Extend", "Modify", &[v("object"), v("point")], OBJECTS),
+    host(
+        "Fillet",
+        "Modify",
+        &[v("first"), v("first point"), v("second"), v("second point"), n("radius", 1.0)],
+        OBJECTS,
+    ),
+    host(
+        "Chamfer",
+        "Modify",
+        &[
+            v("first"),
+            v("first point"),
+            v("second"),
+            v("second point"),
+            n("distance", 1.0),
+            n("second distance", 1.0),
+        ],
+        OBJECTS,
+    ),
+    host(
+        "Blend",
+        "Modify",
+        &[v("first"), v("first point"), v("second"), v("second point")],
+        OBJECTS,
+    ),
+    host("Break", "Modify", &[v("object"), v("first point"), v("second point")], OBJECTS),
+    host("Break At Point", "Modify", &[v("object"), v("point")], OBJECTS),
+    host("Lengthen", "Modify", &[v("object"), v("point"), n("delta", 1.0)], OBJECTS),
+    host("Join", "Modify", &[l("objects")], OBJECTS),
+    host("Explode", "Modify", &[l("objects")], OBJECTS),
+    host("Convert To Polyline", "Modify", &[v("object"), v("point")], OBJECTS),
+    host("Reverse", "Modify", &[l("objects")], OBJECTS),
+    host(
+        "Stretch",
+        "Modify",
+        &[v("first corner"), v("second corner"), v("base"), v("second")],
+        OBJECTS,
+    ),
+    host(
+        "Align",
+        "Modify",
+        &[l("objects"), v("first source"), v("first target"), v("second source"), v("second target"), b("scale", false)],
+        OBJECTS,
+    ),
+    host(
+        "Rectangular Array",
+        "Modify",
+        &[l("objects"), n("rows", 2.0), n("columns", 3.0), n("row spacing", 10.0), n("column spacing", 10.0)],
+        OBJECTS,
+    ),
+    host(
+        "Polar Array",
+        "Modify",
+        &[l("objects"), v("center"), n("count", 6.0), n("angle", 360.0)],
+        OBJECTS,
+    ),
+    host("Path Array", "Modify", &[l("objects"), v("path"), n("count", 5.0)], OBJECTS),
+    host("Boundary", "Modify", &[v("point")], OBJECTS),
+    host("Hatch At Point", "Modify", &[v("point")], OBJECTS),
+    host("Hatch Objects", "Modify", &[l("objects")], OBJECTS),
+    host("Centerline", "Modify", &[v("first"), v("first point"), v("second"), v("second point")], OBJECTS),
+    host("Center Mark", "Modify", &[v("object"), v("point")], OBJECTS),
+    // ── Model ────────────────────────────────────────────────────────────
+    host("Union", "Model", &[l("objects")], OBJECTS),
+    host("Subtract", "Model", &[l("from"), l("objects")], OBJECTS),
+    host("Intersection", "Model", &[l("objects")], OBJECTS),
+    host(
+        "Revolve",
+        "Model",
+        &[l("objects"), v("axis start"), v("axis end"), n("angle", 360.0)],
+        OBJECTS,
+    ),
+    host("Sweep", "Model", &[l("objects"), v("path")], OBJECTS),
+    host("Loft", "Model", &[l("sections")], OBJECTS),
+    host("Extrude Along Path", "Model", &[l("objects"), v("path")], OBJECTS),
+    host("Extrude Tapered", "Model", &[l("objects"), n("height", 10.0), n("taper", 5.0)], OBJECTS),
+    host("Fillet Edge", "Model", &[v("solid"), v("edge point"), n("radius", 1.0)], OBJECTS),
+    host("Chamfer Edge", "Model", &[v("solid"), v("edge point"), n("distance", 1.0)], OBJECTS),
+    host("Shell", "Model", &[v("solid"), v("face point"), n("thickness", 1.0)], OBJECTS),
+    host("Slice", "Model", &[l("objects"), v("first"), v("second"), v("third"), v("keep")], OBJECTS),
+    host("Thicken", "Model", &[l("objects"), n("thickness", 1.0)], OBJECTS),
+    host("Presspull", "Model", &[v("object"), v("point"), n("distance", 5.0)], OBJECTS),
+    host(
+        "3D Rotate",
+        "Model",
+        &[l("objects"), v("axis start"), v("axis end"), n("angle", 90.0)],
+        OBJECTS,
+    ),
+    host("3D Mirror", "Model", &[l("objects"), v("first"), v("second"), v("third")], OBJECTS),
     // ── Curve ────────────────────────────────────────────────────────────
     host("Curve Length", "Curve", &[v("curve")], RESULT),
     host("Curve Area", "Curve", &[v("curve")], RESULT),
@@ -206,6 +297,27 @@ fn closed_polyline(vertices: &[[f64; 2]], z: f64) -> EntityType {
     EntityType::LwPolyline(polyline)
 }
 
+/// A pick of `object` at `at`.
+fn pick(object: &Value, at: &Value) -> Option<crate::command::StepInput> {
+    Some(crate::command::StepInput::EntityPick(handle(object)?, vec3(at)?))
+}
+
+/// A pick of `object` anywhere on it.
+fn pick_on(object: &Value) -> Option<crate::command::StepInput> {
+    Some(crate::command::StepInput::EntityPick(handle(object)?, DVec3::ZERO))
+}
+
+/// The objects of `value` (one or a list) as a finished selection.
+fn selection(value: &Value) -> Option<crate::command::StepInput> {
+    let handles: Vec<Handle> = list(value).iter().filter_map(handle).collect();
+    (!handles.is_empty()).then_some(crate::command::StepInput::SelectionComplete(handles))
+}
+
+/// A typed answer.
+fn typed(value: impl std::fmt::Display) -> crate::command::StepInput {
+    crate::command::StepInput::Text(value.to_string())
+}
+
 /// A history transform placing a primitive at `origin`.
 fn placed(origin: DVec3) -> [f64; 16] {
     glam::DMat4::from_translation(origin).to_cols_array()
@@ -218,6 +330,7 @@ fn same_plane(a: &kernel::space::Plane, b: &kernel::space::Plane) -> bool {
 
 impl AppHost<'_> {
     pub(super) fn op(&mut self, _node: NodeId, spec: &'static Spec, a: &[Value]) -> Vec<Value> {
+        use crate::command::StepInput::{Enter, EntityPick, Point};
         let one = |value: Value| vec![value];
         let objects = |handles: Vec<Handle>| vec![Value::Array(handles.into_iter().map(object).collect())];
         match spec.name {
@@ -620,6 +733,266 @@ impl AppHost<'_> {
                 }
                 _ => Value::Null,
             }),
+
+            // ── Modify and Model: the commands, run with these picks ─────
+            "Trim" | "Extend" => {
+                let name = spec.name.to_uppercase();
+                let steps = pick(&a[0], &a[1]).map(|p| vec![p, Enter]);
+                one(self.run(&name, steps))
+            }
+            "Fillet" => {
+                let steps = (|| {
+                    Some(vec![
+                        typed("R"),
+                        typed(num(&a[4])?),
+                        pick(&a[0], &a[1])?,
+                        pick(&a[2], &a[3])?,
+                    ])
+                })();
+                one(self.run("FILLET", steps))
+            }
+            "Chamfer" => {
+                let steps = (|| {
+                    Some(vec![
+                        typed("D"),
+                        typed(num(&a[4])?),
+                        typed(num(&a[5])?),
+                        pick(&a[0], &a[1])?,
+                        pick(&a[2], &a[3])?,
+                    ])
+                })();
+                one(self.run("CHAMFER", steps))
+            }
+            "Blend" => {
+                let steps = (|| Some(vec![pick(&a[0], &a[1])?, pick(&a[2], &a[3])?]))();
+                one(self.run("BLEND", steps))
+            }
+            "Break" => {
+                let steps = (|| Some(vec![pick(&a[0], &a[1])?, Point(vec3(&a[2])?)]))();
+                one(self.run("BREAK", steps))
+            }
+            "Break At Point" => {
+                let steps = (|| Some(vec![pick(&a[0], &a[1])?, Point(vec3(&a[1])?)]))();
+                one(self.run("BREAKATPOINT", steps))
+            }
+            "Lengthen" => {
+                let steps = (|| Some(vec![typed("DE"), typed(num(&a[2])?), pick(&a[0], &a[1])?, Enter]))();
+                one(self.run("LENGTHEN", steps))
+            }
+            "Join" => one(self.run("JOIN", selection(&a[0]).map(|s| vec![s, Enter]))),
+            "Explode" => one(self.run("EXPLODE", selection(&a[0]).map(|s| vec![s, Enter]))),
+            "Reverse" => one(self.run("REVERSE", selection(&a[0]).map(|s| vec![s, Enter]))),
+            "Convert To Polyline" => {
+                let steps = pick(&a[0], &a[1]).map(|p| vec![p, typed("Y"), Enter]);
+                one(self.run("PEDIT", steps))
+            }
+            "Stretch" => {
+                let steps = (|| {
+                    Some(vec![
+                        typed("C"),
+                        Point(vec3(&a[0])?),
+                        Point(vec3(&a[1])?),
+                        Enter,
+                        Point(vec3(&a[2])?),
+                        Point(vec3(&a[3])?),
+                    ])
+                })();
+                one(self.run("STRETCH", steps))
+            }
+            "Align" => {
+                let steps = (|| {
+                    Some(vec![
+                        selection(&a[0])?,
+                        Point(vec3(&a[1])?),
+                        Point(vec3(&a[2])?),
+                        Point(vec3(&a[3])?),
+                        Point(vec3(&a[4])?),
+                        Enter,
+                        typed(if graph::value::boolean(&a[5]).unwrap_or(false) { "Y" } else { "N" }),
+                    ])
+                })();
+                one(self.run("ALIGN", steps))
+            }
+            "Rectangular Array" => {
+                let steps = (|| {
+                    Some(vec![
+                        selection(&a[0])?,
+                        typed(num(&a[1])?.round()),
+                        typed(num(&a[2])?.round()),
+                        typed(num(&a[3])?),
+                        typed(num(&a[4])?),
+                    ])
+                })();
+                one(self.run("ARRAYRECT", steps))
+            }
+            "Polar Array" => {
+                let steps = (|| {
+                    Some(vec![
+                        selection(&a[0])?,
+                        Point(vec3(&a[1])?),
+                        typed(num(&a[2])?.round()),
+                        typed(num(&a[3])?),
+                    ])
+                })();
+                one(self.run("ARRAYPOLAR", steps))
+            }
+            "Path Array" => {
+                let steps = (|| {
+                    Some(vec![
+                        selection(&a[0])?,
+                        pick_on(&a[1])?,
+                        typed("DIVIDE"),
+                        typed(num(&a[2])?.round()),
+                    ])
+                })();
+                one(self.run("ARRAYPATH", steps))
+            }
+            "Boundary" => one(self.run("BOUNDARY", vec3(&a[0]).map(|p| vec![Point(p), Enter]))),
+            // The current hatch settings; pattern and scale are rows of the
+            // hatch it makes.
+            "Hatch At Point" => one(self.run("HATCH", vec3(&a[0]).map(|p| vec![Point(p), Enter]))),
+            "Hatch Objects" => {
+                one(self.run("HATCH", selection(&a[0]).map(|s| vec![typed("O"), s, Enter])))
+            }
+            "Centerline" => {
+                let steps = (|| Some(vec![pick(&a[0], &a[1])?, pick(&a[2], &a[3])?]))();
+                one(self.run("CENTERLINE", steps))
+            }
+            "Center Mark" => one(self.run("CENTERMARK", pick(&a[0], &a[1]).map(|p| vec![p, Enter]))),
+            "Union" | "Intersection" => {
+                let name = if spec.name == "Union" { "UNION" } else { "INTERSECT" };
+                one(self.run(name, selection(&a[0]).map(|s| vec![s])))
+            }
+            "Subtract" => {
+                let steps = (|| Some(vec![selection(&a[0])?, selection(&a[1])?]))();
+                one(self.run("SUBTRACT", steps))
+            }
+            "Revolve" => {
+                let steps = (|| {
+                    Some(vec![
+                        selection(&a[0])?,
+                        Point(vec3(&a[1])?),
+                        Point(vec3(&a[2])?),
+                        typed(num(&a[3])?),
+                    ])
+                })();
+                one(self.run("REVOLVE", steps))
+            }
+            "Sweep" => {
+                let steps = (|| Some(vec![selection(&a[0])?, pick_on(&a[1])?]))();
+                one(self.run("SWEEP", steps))
+            }
+            // Sections are picked one by one, then cross sections only.
+            "Loft" => {
+                let picks: Option<Vec<_>> = list(&a[0]).iter().map(pick_on).collect();
+                one(self.run(
+                    "LOFT",
+                    picks.filter(|p| p.len() >= 2).map(|mut p| {
+                        p.extend([Enter, Enter]);
+                        p
+                    }),
+                ))
+            }
+            "Extrude Along Path" => {
+                let steps = (|| Some(vec![selection(&a[0])?, typed("P"), pick_on(&a[1])?]))();
+                one(self.run("EXTRUDE", steps))
+            }
+            "Extrude Tapered" => {
+                let steps = (|| {
+                    Some(vec![selection(&a[0])?, typed("T"), typed(num(&a[2])?), typed(num(&a[1])?)])
+                })();
+                one(self.run("EXTRUDE", steps))
+            }
+            "Fillet Edge" | "Chamfer Edge" => {
+                let (name, option) = if spec.name == "Fillet Edge" {
+                    ("FILLETEDGE", "R")
+                } else {
+                    ("CHAMFEREDGE", "D")
+                };
+                let steps = (|| {
+                    let h = handle(&a[0])?;
+                    let at = vec3(&a[1])?;
+                    let size = num(&a[2])?;
+                    let mut steps = vec![typed(option), typed(size)];
+                    if name == "CHAMFEREDGE" {
+                        steps.push(typed(size));
+                    }
+                    steps.extend([EntityPick(h, at), Enter, Enter]);
+                    Some(steps)
+                })();
+                one(self.run(name, steps))
+            }
+            "Shell" => {
+                let steps = (|| {
+                    Some(vec![
+                        pick(&a[0], &a[1])?,
+                        pick(&a[0], &a[1])?,
+                        Enter,
+                        typed(num(&a[2])?),
+                    ])
+                })();
+                one(self.run("SHELL", steps))
+            }
+            "Slice" => {
+                let steps = (|| {
+                    Some(vec![
+                        selection(&a[0])?,
+                        typed("3"),
+                        Point(vec3(&a[1])?),
+                        Point(vec3(&a[2])?),
+                        Point(vec3(&a[3])?),
+                        Point(vec3(&a[4])?),
+                    ])
+                })();
+                one(self.run("SLICE", steps))
+            }
+            "Thicken" => {
+                let steps = (|| Some(vec![selection(&a[0])?, typed(num(&a[1])?)]))();
+                one(self.run("THICKEN", steps))
+            }
+            "Presspull" => {
+                let steps = (|| Some(vec![pick(&a[0], &a[1])?, typed(num(&a[2])?)]))();
+                one(self.run("PRESSPULL", steps))
+            }
+            // About the axis through the two points, in place.
+            "3D Rotate" => {
+                let (Some(start), Some(end), Some(angle)) = (vec3(&a[1]), vec3(&a[2]), num(&a[3])) else {
+                    return objects(Vec::new());
+                };
+                let Some(axis) = (end - start).try_normalize() else {
+                    return objects(Vec::new());
+                };
+                let rotate = EntityTransform::Rotate {
+                    center: start,
+                    axis,
+                    angle_rad: angle.to_radians(),
+                };
+                vec![Value::Array(
+                    list(&a[0]).iter().map(|value| self.edit(value, rotate.clone())).collect(),
+                )]
+            }
+            // A mirrored copy across the plane through the three points.
+            "3D Mirror" => {
+                let (Some(p1), Some(p2), Some(p3)) = (vec3(&a[1]), vec3(&a[2]), vec3(&a[3])) else {
+                    return objects(Vec::new());
+                };
+                let along = (p2 - p1).normalize_or_zero();
+                let across = (p3 - p1) - along * (p3 - p1).dot(along);
+                let handles: Vec<Handle> = list(&a[0]).iter().filter_map(handle).collect();
+                if along == DVec3::ZERO || across.length() < 1e-12 || handles.is_empty() {
+                    return objects(Vec::new());
+                }
+                let mirror = EntityTransform::Mirror {
+                    p1,
+                    p2,
+                    working_normal: across.normalize(),
+                };
+                let tab = &mut self.app.tabs[self.i];
+                let copies = tab.scene.copy_entities(&handles, &mirror);
+                tab.dirty |= !copies.is_empty();
+                tab.graph.created.extend(&copies);
+                objects(copies)
+            }
             "Block Reference" => one(match point(&a[1]) {
                 Some(p) => self.build(json!({
                     "type": "INSERT",
@@ -778,6 +1151,109 @@ impl AppHost<'_> {
         object(h)
     }
 
+    /// Runs the command `name` with `steps` as if typed, and keeps what it
+    /// changed: changed and erased objects are put back and new ones erased
+    /// on the next evaluation. The objects it made or changed come back;
+    /// `None` steps (an input missing) run nothing.
+    fn run(&mut self, name: &str, steps: Option<Vec<crate::command::StepInput>>) -> Value {
+        let Some(steps) = steps else {
+            return Value::Null;
+        };
+        // Arrays are plain copies here: an associative one would leave a
+        // block definition behind on every evaluation.
+        use crate::modules::draw::defaults;
+        let associative = defaults::get_array_assoc();
+        defaults::set_array_assoc(0.0);
+        let result = self.run_command(name, steps);
+        defaults::set_array_assoc(associative);
+        result
+    }
+
+    fn run_command(&mut self, name: &str, steps: Vec<crate::command::StepInput>) -> Value {
+        let i = self.i;
+        let app = &mut *self.app;
+        // The graph runs between commands; one the user has open stays put.
+        let open = app.tabs[i].active_cmd.take();
+        let selected = app.tabs[i].scene.selected_handles_in_order();
+        app.tabs[i].scene.deselect_all();
+        let before: rustc_hash::FxHashMap<Handle, std::sync::Arc<EntityType>> = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| {
+                let handle = entity.common().handle;
+                Some((handle, app.tabs[i].scene.document.get_entity_arc(handle)?))
+            })
+            .collect();
+        // Solids keep a construction history beside them; their records go
+        // back with them.
+        let records: Vec<(Handle, Vec<(Handle, codec::objects::ObjectType)>)> = before
+            .iter()
+            .filter(|(_, entity)| {
+                matches!(
+                    entity.as_ref(),
+                    EntityType::Solid3D(_) | EntityType::Region(_) | EntityType::Surface(_)
+                )
+            })
+            .map(|(handle, _)| (*handle, app.tabs[i].scene.solid_history_objects(*handle)))
+            .collect();
+        self.tasks.push(app.run_command_line(name));
+        for step in steps {
+            if app.tabs[i].active_cmd.is_none() {
+                break;
+            }
+            let selecting = matches!(step, crate::command::StepInput::SelectionComplete(_));
+            self.tasks.push(app.feed_command(step));
+            // A selection prompt keeps gathering until Enter.
+            if selecting
+                && app.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .is_some_and(|command| command.is_selection_gathering())
+            {
+                self.tasks.push(app.feed_command(crate::command::StepInput::Enter));
+            }
+        }
+        for _ in 0..8 {
+            if app.tabs[i].active_cmd.is_none() {
+                break;
+            }
+            self.tasks.push(app.update(crate::app::Message::CommandEscape));
+        }
+        app.tabs[i].active_cmd = open;
+        app.tabs[i].scene.deselect_all();
+        app.tabs[i].scene.select_entities(&selected);
+        let tab = &mut app.tabs[i];
+        let (document, graph) = (&tab.scene.document, &mut tab.graph);
+        let mut changed = Vec::new();
+        for (handle, entity) in &before {
+            match document.get_entity_arc(*handle) {
+                None => graph.applied.push((*handle, (**entity).clone())),
+                Some(now) if !std::sync::Arc::ptr_eq(&now, entity) => {
+                    graph.applied.push((*handle, (**entity).clone()));
+                    changed.push(*handle);
+                }
+                Some(_) => {}
+            }
+        }
+        let made: Vec<Handle> = document
+            .entities()
+            .map(|entity| entity.common().handle)
+            .filter(|handle| !before.contains_key(handle))
+            .collect();
+        graph.created.extend(&made);
+        for (handle, history) in records {
+            if !changed.contains(&handle) && document.get_entity(handle).is_some() {
+                continue;
+            }
+            graph.applied_records.extend(history);
+        }
+        if !changed.is_empty() || !made.is_empty() {
+            tab.dirty = true;
+        }
+        Value::Array(made.into_iter().chain(changed).map(object).collect())
+    }
+
     /// A created handle, kept to be erased on the next step.
     fn created(&mut self, handle: Handle) -> Value {
         if handle.is_null() {
@@ -855,6 +1331,9 @@ impl AppHost<'_> {
             return Value::Null;
         };
         tab.graph.applied.push((h, before));
+        // A solid's history moves with it; its records go back with it too.
+        let records = tab.scene.solid_history_objects(h);
+        tab.graph.applied_records.extend(records);
         tab.scene.transform_entities(&[h], &t);
         tab.dirty = true;
         object(h)

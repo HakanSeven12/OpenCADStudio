@@ -352,12 +352,24 @@ impl OpenCADStudio {
         let tab = &mut self.tabs[i];
         let applied = std::mem::take(&mut tab.graph.applied);
         let created = std::mem::take(&mut tab.graph.created);
+        for (handle, record) in std::mem::take(&mut tab.graph.applied_records).into_iter().rev() {
+            tab.scene.document.objects.insert(handle, record);
+        }
         if applied.is_empty() && created.is_empty() {
             return;
         }
-        for (_, entity) in applied.into_iter().rev() {
-            tab.scene.update_entity(entity);
+        let mut restored = Vec::new();
+        for (handle, entity) in applied.into_iter().rev() {
+            // An operation that consumed the object erased it: bring it back.
+            if tab.scene.document.get_entity(handle).is_some() {
+                tab.scene.update_entity(entity);
+            } else {
+                tab.scene.restore_erased_entities(vec![std::sync::Arc::new(entity)]);
+            }
+            restored.push(handle);
         }
+        // A solid's session body and mesh follow its restored ACIS data.
+        tab.scene.refresh_meshes_for_handles(&restored);
         let live: Vec<Handle> = created
             .into_iter()
             .filter(|handle| tab.scene.document.get_entity(*handle).is_some())
@@ -528,10 +540,15 @@ impl OpenCADStudio {
                     graph.created.clear();
                 }
                 // Evaluating unwinds what the open graph did first.
-                let (applied, created) = {
+                let (applied, created, records) = {
                     let open = &mut self.tabs[i].graph;
-                    (std::mem::take(&mut open.applied), std::mem::take(&mut open.created))
+                    (
+                        std::mem::take(&mut open.applied),
+                        std::mem::take(&mut open.created),
+                        std::mem::take(&mut open.applied_records),
+                    )
                 };
+                graph.applied_records.splice(0..0, records);
                 graph.applied.splice(0..0, applied);
                 graph.created.extend(created);
                 self.tabs[i].graph = graph;

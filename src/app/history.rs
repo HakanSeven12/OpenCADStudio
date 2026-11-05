@@ -529,6 +529,10 @@ impl OpenCADStudio {
         // composed of writes + constraints + replays is ONE plugin-labeled
         // step. The returned delta never commits: no scene recording was
         // begun, so `commit_undo_delta` no-ops.
+        // A node graph step is one undo step: what its operations run joins it.
+        if self.graph_undo_open {
+            return None;
+        }
         if self.joins_plugin_scope(i) {
             let label = label.into();
             let structure_before = (!delta_safe || self.tabs[i].active_block_edit.is_some())

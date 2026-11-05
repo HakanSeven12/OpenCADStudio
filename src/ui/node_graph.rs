@@ -496,6 +496,9 @@ pub struct Graph {
     /// Objects the last evaluation edited in place, with their prior state,
     /// in edit order. The next evaluation restores them first.
     pub applied: Vec<(Handle, EntityType)>,
+    /// History records (solid construction history) the last evaluation's
+    /// operations changed, with their prior state; restored with `applied`.
+    pub applied_records: Vec<(Handle, codec::objects::ObjectType)>,
     /// Objects the last evaluation's operations created; the next one
     /// erases them first.
     pub created: Vec<Handle>,

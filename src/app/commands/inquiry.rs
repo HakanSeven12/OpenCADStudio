@@ -641,7 +641,26 @@ impl OpenCADStudio {
             }
 
             "BSAVE" => {
-                self.save_block_edit(i);
+                if self.save_block_edit(i) {
+                    // Also persist to block-autosave file immediately so a crash
+                    // after Save Block but before exiting the editor does not lose the edits.
+                    // Do NOT call prepare_snapshot_save here — save_block_edit already
+                    // updated the checkpoint; re-preparing would desync it.
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let target = self.block_autosave_target(i);
+                        let version = self.tabs[i].scene.document.version;
+                        let _ = self.queue_native_save(
+                            i,
+                            target,
+                            version,
+                            crate::app::SavePurpose::Autosave,
+                            crate::app::SaveContinuation::None,
+                            false,
+                            false,
+                        );
+                    }
+                }
             }
             "BCLOSE" => {
                 if self.tabs[i].active_block_edit.is_none() {

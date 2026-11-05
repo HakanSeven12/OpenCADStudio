@@ -56,6 +56,7 @@
 ### 🐛 Bug Fixes
 
 #### Blocks & Attributes
+* **Block Editor Crash Recovery:** `BEDIT` "Save Block" now also writes a dedicated `.ocs-block-autosave.sv$` recovery copy beside the drawing, so a crash inside the block-editor space no longer discards edits that were saved but not yet committed by leaving the editor. The copy is re-written on every `BSAVE` (not only on the `SAVETIME` tick), removed on a clean `BEDIT_SAVE`/`BEDIT_DISCARD`, and offered on the next open when it is newer than the regular autosave. *(Contributed by [@Ch4rlos](https://github.com/Ch4rlos))*
 * **Circular Block Prevention:** Added cycle detection in `block_service` preventing recursive block definitions (`INSERT` in `BEDIT` or redefinition) and safely truncated render-time cycles with session warnings (`9c08e8a3`). *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **Block Explosion & ATTDEF Restoration:** Restored transformed `ATTDEF` definitions when exploding `INSERT` / `MINSERT` blocks, dropped instance attribute values, and corrected rotated array spacings (`8d287dec`, `59bb6faa`). *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*
 * **Constant Attributes in ATTEDIT:** Enforced constant attribute flags in attribute editor by disabling constant fields and ignoring edits (`59bb6faa`). *(Contributed by [@KarimJerbi](https://github.com/KarimJerbi))*

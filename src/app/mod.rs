@@ -8,6 +8,7 @@ pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use automation::{export_headless, serve};
 mod annotation_data;
+mod block_autosave;
 mod block_editor;
 #[cfg(test)]
 mod block_editor_tests;

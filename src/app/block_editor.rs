@@ -292,6 +292,11 @@ impl OpenCADStudio {
             self.tabs[i].scene.object_isolation = history.return_isolation;
         }
         self.tabs[i].active_block_edit = None;
+        // Remove the block-editor autosave file since the session is ending cleanly
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = std::fs::remove_file(self.block_autosave_target(i));
+        }
         self.restore_after_block_edit_close(
             i,
             None,

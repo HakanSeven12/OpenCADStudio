@@ -117,7 +117,28 @@ impl OpenCADStudio {
             .menu
             .ui
             .open_submenu;
+        if let Some(menu) = self.menu_bar_popup.and_then(|index| {
+            crate::ui::menu_bar::keyboard_menu(index, &self.command_aliases, open)
+        }) {
+            return menu;
+        }
         build_context_menu(&self.context_menu_context(), open)
+    }
+
+    /// Alt+letter with the menu bar shown: that menu opens under its title
+    /// as a shortcut menu, driven by arrows, Enter and the row letters.
+    pub(in crate::app) fn open_menu_bar_menu(&mut self, letter: char) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        if !self.show_menu_bar {
+            return None;
+        }
+        let (index, x) = crate::ui::menu_bar::menu_for_letter(letter, self.tabs[i].is_start)?;
+        self.menu_bar_popup = Some(index);
+        let mut sel = self.tabs[i].scene.selection.borrow_mut();
+        sel.menu.open(iced::Point::new(x, 2.0));
+        sel.menu.ui.highlighted = Some(0);
+        drop(sel);
+        Some(self.unfocus_widgets())
     }
 
     /// Close the menu and give the keyboard back to the command line.
@@ -129,6 +150,7 @@ impl OpenCADStudio {
         }
         sel.menu.close();
         drop(sel);
+        self.menu_bar_popup = None;
         self.focus_cmd_input()
     }
 
@@ -196,6 +218,10 @@ impl OpenCADStudio {
                 }
             }
             MenuAction::Command(cmd) => self.update(Message::Command(cmd)),
+            MenuAction::MenuLine(line) => {
+                self.menu_bar_popup = None;
+                self.update(Message::MenuCommand(line))
+            }
             MenuAction::Mtp => self.update(Message::SnapOverrideMtp),
             MenuAction::From => self.update(Message::SnapOverrideFrom),
             MenuAction::SnapOverride(t) => self.update(Message::SnapOverridePick(t)),
@@ -320,6 +346,7 @@ impl OpenCADStudio {
         if !self.dyn_input || !has_options || !self.command_line.input.trim().is_empty() {
             return None;
         }
+        self.menu_bar_popup = None;
         let first = {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
             // Beside the cursor; before the pointer has moved, the corner.

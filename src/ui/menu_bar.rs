@@ -750,6 +750,75 @@ pub fn view<'a>(context: MenuContext<'_>) -> Element<'a, Message> {
         .into()
 }
 
+/// The menu whose (translated) title starts with `letter`, for Alt+letter,
+/// and where its title sits along the bar.
+pub fn menu_for_letter(letter: char, is_start: bool) -> Option<(usize, f32)> {
+    let letter = letter.to_uppercase().next()?;
+    let mut x = 0.0;
+    for (index, (title, _)) in MENUS.iter().enumerate() {
+        if is_start && !START_MENUS.contains(title) {
+            continue;
+        }
+        let label = crate::t!(*title).into_owned();
+        if label.chars().next().and_then(|c| c.to_uppercase().next()) == Some(letter) {
+            return Some((index, x));
+        }
+        x += crate::ui::style::text_metrics::width(&label, 12.0, false) + 18.0;
+    }
+    None
+}
+
+/// Menu `index` as a keyboard-driven shortcut menu: its commands, its
+/// submenus (deeper levels flattened into them), every row with a letter.
+pub fn keyboard_menu(
+    index: usize,
+    aliases: &rustc_hash::FxHashMap<String, String>,
+    open: Option<crate::ui::popup::context_menu::SubmenuId>,
+) -> Option<crate::ui::popup::context_menu::ContextMenu> {
+    use crate::ui::popup::context_menu::{menu_line_item, ContextMenu, MenuRow, SubmenuId};
+    let menus = menu_rows(aliases);
+    let rows = menus.get(index)?;
+    fn item(row: &Row) -> Option<crate::ui::popup::context_menu::MenuItem> {
+        let Row::Cmd { icon, label, tail, on_press } = row else {
+            return None;
+        };
+        let line = match on_press.as_deref() {
+            Some(Message::MenuCommand(line)) => Some(line.clone()),
+            _ => None,
+        };
+        Some(menu_line_item(label.clone(), line, tail.clone(), *icon))
+    }
+    fn flatten(rows: &[Row], out: &mut Vec<crate::ui::popup::context_menu::MenuItem>) {
+        for row in rows {
+            match row {
+                Row::Sub(_, inner) => flatten(inner, out),
+                _ => out.extend(item(row)),
+            }
+        }
+    }
+    let mut out = Vec::new();
+    for (n, row) in rows.iter().enumerate() {
+        match row {
+            Row::Sep => out.push(MenuRow::Separator),
+            Row::Sub(label, inner) => {
+                let id = SubmenuId::MenuBar(n as u16);
+                let mut items = Vec::new();
+                flatten(inner, &mut items);
+                out.push(MenuRow::Submenu {
+                    id,
+                    label: label.clone(),
+                    icon: None,
+                    items,
+                    open: open == Some(id),
+                });
+            }
+            _ => out.extend(item(row).map(MenuRow::Item)),
+        }
+    }
+    crate::ui::popup::context_menu::give_mnemonics(&mut out);
+    Some(ContextMenu::from_rows(out))
+}
+
 /// The rows of every menu, in `MENUS` order: built again only when the
 /// language or the alias → command table changes, since the bar is built
 /// every frame.

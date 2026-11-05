@@ -5904,6 +5904,7 @@ impl OpenCADStudio {
                     return self.update(Message::CommandFinalize);
                 }
                 sel.input.right_click_entered = false;
+                self.menu_bar_popup = None;
                 sel.menu.open(click_pos);
                 drop(sel);
                 // Take the keyboard away from the command-line field so keys

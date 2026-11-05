@@ -5402,3 +5402,42 @@ mod undo_view_tests {
         assert!(app.tabs[i].scene.camera.borrow().target.distance(made_at) < 1e-9);
     }
 }
+
+/// #2033: Alt+letter opens a menu-bar menu as a keyboard-driven menu, and
+/// every row of the idle shortcut menu has a letter.
+#[cfg(test)]
+mod menu_keyboard_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use crate::ui::popup::context_menu::{MenuAction, MenuRow};
+
+    #[test]
+    fn alt_letter_opens_the_menu_bar_menu() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app.show_menu_bar = true;
+        let _ = app.update(Message::ShortcutPressed("ALT+F".into()));
+        assert!(app.context_menu_open());
+        let menu = app.current_context_menu();
+        let rows = menu.selectable();
+        assert!(rows.len() > 3);
+        assert!(rows.iter().all(|row| row.mnemonic.is_some()));
+        assert!(rows.iter().any(|row| row.action == MenuAction::MenuLine("NEW".into())
+            || matches!(&row.action, MenuAction::MenuLine(line) if line.starts_with("NEW") || line.starts_with("QNEW"))));
+        let _ = app.close_context_menu();
+        assert!(app.menu_bar_popup.is_none());
+    }
+
+    #[test]
+    fn the_idle_shortcut_menu_has_letters() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let menu = app.current_context_menu();
+        let items = menu.rows.iter().filter_map(|row| match row {
+            MenuRow::Item(item) => Some(item),
+            _ => None,
+        });
+        for item in items {
+            assert!(item.mnemonic.is_some(), "{}", item.label);
+        }
+    }
+}

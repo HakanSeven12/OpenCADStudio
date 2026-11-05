@@ -1967,6 +1967,9 @@ pub(super) struct OpenCADStudio {
     /// every dispatch (`resolve_alias`); user-editable via ALIASEDIT. See
     /// [`alias`].
     command_aliases: rustc_hash::FxHashMap<String, String>,
+    /// The menu-bar menu Alt+letter opened as a keyboard-driven shortcut
+    /// menu; the shortcut menu shows it instead of its own rows.
+    pub(super) menu_bar_popup: Option<usize>,
     /// Working buffer for the ALIASEDIT modal: `(alias, command)` rows being
     /// edited. Seeded from `command_aliases` on open, committed back on close.
     alias_editor_rows: Vec<(String, String)>,
@@ -6406,6 +6409,7 @@ impl OpenCADStudio {
             shortcut_close_confirm: false,
             // Command aliases (populated from ocad.pgp just after construction)
             command_aliases: rustc_hash::FxHashMap::default(),
+            menu_bar_popup: None,
             alias_editor_rows: Vec::new(),
             alias_pending_add: false,
             alias_reset_confirm: false,

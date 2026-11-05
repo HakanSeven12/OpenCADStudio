@@ -49,6 +49,8 @@ pub enum SubmenuId {
     DrawOrder,
     Isolate,
     SnapOverrides,
+    /// A submenu of a menu-bar menu opened from the keyboard.
+    MenuBar(u16),
 }
 
 /// Glyph drawn in a row's icon gutter (commercial solutions show one for object snaps
@@ -93,6 +95,8 @@ pub enum MenuAction {
     FeedInput(String),
     /// Run a command line string (`Message::Command`).
     Command(String),
+    /// Run a menu-bar line (`Message::MenuCommand`).
+    MenuLine(String),
     /// One-shot "Mid Between 2 Points" snap override.
     Mtp,
     /// One-shot base point and offset modifier.
@@ -238,11 +242,18 @@ impl ContextMenu {
                 }),
                 MenuRow::Separator => {}
                 MenuRow::Submenu {
-                    id, items, open, ..
+                    id,
+                    items,
+                    open,
+                    label,
+                    ..
                 } => {
                     out.push(Selectable {
                         action: MenuAction::ToggleSubmenu(*id),
-                        mnemonic: None,
+                        mnemonic: label
+                            .chars()
+                            .find(|c| c.is_alphanumeric())
+                            .and_then(|c| c.to_uppercase().next()),
                         enabled: !items.is_empty(),
                         header: Some(*id),
                     });
@@ -294,7 +305,7 @@ impl ContextMenu {
     /// excluding) `from` and wrapping, so repeated presses cycle through rows
     /// sharing a letter (PLINE's CEnter / CLose both answer to `C`).
     pub fn find_mnemonic(&self, ch: char, from: Option<usize>) -> Option<usize> {
-        let ch = ch.to_ascii_uppercase();
+        let ch = ch.to_uppercase().next().unwrap_or(ch);
         let rows = self.selectable();
         if rows.is_empty() {
             return None;
@@ -460,9 +471,60 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
         ),
         MenuContext::Grip(grip) => grip_rows(grip),
     };
-    let mut menu = ContextMenu { rows, width: 0.0 };
-    menu.width = menu.fit_width();
-    menu
+    let idle = matches!(ctx, MenuContext::Idle { .. });
+    let mut rows = rows;
+    if idle {
+        give_mnemonics(&mut rows);
+    }
+    ContextMenu::from_rows(rows)
+}
+
+impl ContextMenu {
+    /// A menu of `rows`, as wide as they need.
+    pub fn from_rows(rows: Vec<MenuRow>) -> Self {
+        let mut menu = ContextMenu { rows, width: 0.0 };
+        menu.width = menu.fit_width();
+        menu
+    }
+}
+
+/// Rows without a letter take the first letter of their label, so every row
+/// of a menu can be picked from the keyboard (shared letters cycle).
+pub fn give_mnemonics(rows: &mut [MenuRow]) {
+    let first = |label: &str| {
+        label
+            .chars()
+            .find(|c| c.is_alphanumeric())
+            .map(|c| c.to_uppercase().next().unwrap_or(c))
+    };
+    for row in rows {
+        match row {
+            MenuRow::Item(item) if item.mnemonic.is_none() => item.mnemonic = first(&item.label),
+            MenuRow::Submenu { items, .. } => {
+                for item in items.iter_mut().filter(|item| item.mnemonic.is_none()) {
+                    item.mnemonic = first(&item.label);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A row that runs a menu-bar line; `None` greys it out.
+pub fn menu_line_item(
+    label: String,
+    line: Option<String>,
+    hint: String,
+    icon: Option<&'static [u8]>,
+) -> MenuItem {
+    let enabled = line.is_some();
+    let mut item = MenuItem::new(label, MenuAction::MenuLine(line.unwrap_or_default()))
+        .enabled(enabled);
+    if !hint.is_empty() {
+        item = item.hint(hint);
+    }
+    item.icon = icon.map(MenuIcon::Tool);
+    item
 }
 
 /// Keyboard letter for an option keyword: its first ASCII alphanumeric.

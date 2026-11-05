@@ -344,6 +344,14 @@ impl OpenCADStudio {
             _ => None,
         };
         let builtin = builtin.filter(|_| !self.shortcut_bindings.contains_key(key));
+        // Alt+letter opens that menu of the menu bar, unless it is bound.
+        if let Some(letter) = key.strip_prefix("ALT+").filter(|rest| rest.chars().count() == 1) {
+            if !self.shortcut_bindings.contains_key(key) {
+                if let Some(task) = letter.chars().next().and_then(|ch| self.open_menu_bar_menu(ch)) {
+                    return task;
+                }
+            }
+        }
         let action = builtin.as_ref().or_else(|| self.shortcut_bindings.get(key)).or_else(|| {
             let base = key.rsplit('+').next()?;
             is_named_key(base)

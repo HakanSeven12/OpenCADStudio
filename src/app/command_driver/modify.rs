@@ -167,17 +167,14 @@ impl OpenCADStudio {
                 .scene
                 .bump_entities(&[(source, crate::scene::ChangeKind::Modified)]);
             self.tabs[i].dirty = true;
-            // The reference counts no segments when a line source stays a line.
-            let count = if line_source
-                && matches!(self.tabs[i].scene.document.get_entity(source), Some(codec::EntityType::Line(_)))
-            {
-                0
-            } else {
-                consumed.len()
-            };
+            let count = consumed.len();
             let message = match self.tabs[i].scene.document.get_entity(source) {
                 Some(codec::EntityType::Arc(_)) if count == 1 => crate::tf!("{count} arc joined to source"),
                 Some(codec::EntityType::Arc(_)) => crate::tf!("{count} arcs joined to source"),
+                Some(codec::EntityType::Line(_)) if line_source && count == 1 => {
+                    crate::tf!("{count} line joined to source")
+                }
+                Some(codec::EntityType::Line(_)) if line_source => crate::tf!("{count} lines joined to source"),
                 _ => crate::tf!("{count} segments added to polyline"),
             };
             self.command_line.push_output(message.as_ref());

@@ -74,6 +74,7 @@ impl CadCommand for JoinCommand {
             }
             None => t!("JOIN  Select objects to join:").into_owned(),
             Some(EntityType::Arc(_)) => t!("JOIN  Select arcs to join to source or [cLose]:").into_owned(),
+            Some(EntityType::Line(_)) => t!("JOIN  Select lines to join to source:").into_owned(),
             Some(_) => t!("JOIN  Select objects to join to source:").into_owned(),
         }
     }

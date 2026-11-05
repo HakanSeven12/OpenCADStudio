@@ -935,12 +935,7 @@ pub(crate) fn retarget_frame_points(
                 .ok_or("The Stretch parameter is unavailable.")?
                 .end
                 .z;
-            let action_nodes: std::collections::BTreeSet<i32> = actions(doc, definition)
-                .into_iter()
-                .map(|(_, act, _, _)| act.element.eval.node_id)
-                .filter(|&id| id > 0)
-                .collect();
-            stretch::validate_action_options(a, Some(&action_nodes))?;
+            stretch::validate_options(a)?;
             if let Some(corners) = frame {
                 let (points, handles) = stretch::bind_frame(doc, &targets, corners, plane)?;
                 a.points = points;
@@ -2048,7 +2043,7 @@ fn chain_order(
     let mut predecessors = vec![0; all.len()];
     let mut successors = vec![Vec::new(); all.len()];
     for (index, (_, action, kind, owner)) in all.iter().enumerate() {
-        if matches!(*kind, Kind::Stretch | Kind::PolarStretch | Kind::Array) {
+        if *kind == Kind::Array {
             continue;
         }
         let mut seen = std::collections::BTreeSet::new();
@@ -2057,7 +2052,8 @@ fn chain_order(
                 return Err("An action chain names more than one action.");
             }
             let Some(&next) = by_chain_id.get(id) else {
-                if graph_nodes.contains(id) {
+                // Native Stretch records also carry binding codes in this list.
+                if graph_nodes.contains(id) || matches!(kind, Kind::Stretch | Kind::PolarStretch) {
                     continue;
                 }
                 return Err("An action chain names an object outside this block.");

@@ -2984,25 +2984,29 @@ fn a_chain_refuses_an_unnamed_node_and_can_join_an_existing_sequence() {
     assert_eq!(drive(&mut doc, def, parameter, member), (DVec3::new(48., 6., 0.), 4.));
 }
 
-/// A Stretch is the other kind the order cannot take a chain from, and writing one
-/// would stop the whole parameter evaluating, so the chain is refused at authoring.
 #[test]
-fn a_stretch_action_refuses_to_chain_from_the_authoring_route() {
-    let (mut doc, def, targets, parameter, action) = stretch_fixture();
-    let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
-    assert_eq!(
-        super::chain::set(&mut doc, def, action, Some(follow_up)).unwrap_err(),
-        "This Stretch action cannot chain follow-up actions yet."
-    );
-    assert!(
-        !super::chain::set(&mut doc, def, action, None).unwrap(),
-        "a stretch with no chain has nothing to clear"
-    );
-    action_object_mut(&mut doc, action).action_ids = vec![chain_id(&doc, follow_up)];
-    assert!(
-        super::chain::set(&mut doc, def, action, None).unwrap(),
-        "clearing a chain left on a stretch is not refused for being a stretch"
-    );
+fn stretch_and_scale_follow_the_authored_order_with_frozen_vertices() {
+    let (mut doc, def, targets, parameter, stretch) = stretch_fixture();
+    let scale = add_action(&mut doc, def, parameter, targets[0], Kind::Scale);
+    let driver = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+        .unwrap()
+        .id;
+    action_object_mut(&mut doc, stretch).action_ids = vec![driver];
+    for (head, next, expected_end) in [(stretch, scale, 40.), (scale, stretch, 30.)] {
+        let mut authored = doc.clone();
+        let name = action_object(&authored, next).element.name.clone();
+        assert!(super::chain::set_by_name(&mut authored, def, head, &name).unwrap());
+        assert_eq!(action_object(&authored, stretch).action_ids.first(), Some(&driver));
+        let mut evaluated = authored.clone();
+        evaluate(&mut evaluated, &authored, def, parameter, DVec3::X * 20.).unwrap();
+        let EntityType::Line(line) = evaluated.get_entity(targets[0]).unwrap() else {
+            panic!()
+        };
+        assert_eq!(line.start, Vector3::ZERO);
+        assert_eq!(line.end, Vector3::UNIT_X * expected_end);
+    }
 }
 
 /// Naming a follow-up action is the authoring route to the order: what it writes
@@ -3241,40 +3245,31 @@ fn an_array_action_that_names_a_follow_up_action_is_refused() {
     assert_eq!(doc, baseline, "a refused chain leaves the definition alone");
 }
 
-/// The Stretch actions are put together from their parameter bindings, so a
-/// chain hanging off one is reported as the chain it is instead of as an
-/// unsupported option, which is the message the operator can act on.
 #[test]
-fn a_chained_stretch_action_names_the_chain_as_what_is_unsupported() {
-    let (mut doc, def, targets, parameter, action) = stretch_fixture();
-    let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
-    let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
-        panic!("the action is a dynamic block object")
-    };
-    let DynamicBlockData::StretchAction(stretch) = &object.data else {
-        panic!("the action is a stretch")
-    };
-    let mut chained = stretch.clone();
-    chained.action.action_ids = vec![chain_id(&doc, follow_up)];
-    assert_eq!(
-        super::stretch::validate_options(&chained).unwrap_err(),
-        "This Stretch action cannot chain follow-up actions yet."
-    );
-
-    let (mut doc, def, targets, parameter, action) = polar_stretch_fixture();
-    let follow_up = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
-    let ObjectType::DynamicBlock(object) = &doc.objects[&action] else {
-        panic!("the action is a dynamic block object")
-    };
-    let DynamicBlockData::PolarStretchAction(polar) = &object.data else {
-        panic!("the action is a polar stretch")
-    };
-    let mut chained = polar.clone();
-    chained.action.action_ids = vec![chain_id(&doc, follow_up)];
-    assert_eq!(
-        super::stretch::validate_polar(&doc, def, &chained).unwrap_err(),
-        "This Polar Stretch action cannot chain follow-up actions yet."
-    );
+fn polar_stretch_and_move_follow_the_authored_order_after_reload() {
+    let (mut doc, def, targets, parameter, polar) = polar_stretch_fixture();
+    let movement = add_action(&mut doc, def, parameter, targets[0], Kind::Move);
+    let insert = doc.add_entity(EntityType::Insert(codec::entities::Insert::new(
+        "POLAR_STRETCH", Vector3::ZERO,
+    ))).unwrap();
+    for (head, next, expected_y) in [(polar, movement, 11.), (movement, polar, -9.)] {
+        let mut authored = doc.clone();
+        let name = action_object(&authored, next).element.name.clone();
+        assert!(super::chain::set_by_name(&mut authored, def, head, &name).unwrap());
+        for extension in ["dwg", "dxf"] {
+            let bytes = crate::io::save_to_bytes(&authored, extension, authored.version).unwrap();
+            let reopened = crate::io::load_bytes(&format!("polar-chain.{extension}"), bytes).unwrap();
+            let changed = instance::evaluate(&reopened, insert, parameter, DVec3::Y * 10.)
+                .unwrap().unwrap();
+            let EntityType::Insert(reference) = changed.get_entity(insert).unwrap() else {
+                panic!()
+            };
+            let line = changed.entities_in_block(&reference.block_name).find_map(|e| {
+                if let EntityType::Line(line) = e { Some(line) } else { None }
+            }).unwrap();
+            assert!(v(line.start).distance(DVec3::new(-10., expected_y, 0.)) < 1e-8);
+        }
+    }
 }
 
 /// Nought is the id a file leaves on an action that carries no evaluation

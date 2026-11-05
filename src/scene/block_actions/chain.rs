@@ -153,7 +153,7 @@ fn loops(doc: &Document, definition: Handle, action: Handle) -> bool {
     let mut visited = std::collections::BTreeSet::from([action]);
     let mut pending = Vec::from_iter(all.iter().find(|(handle, ..)| *handle == action));
     while let Some((_, current, kind, owner)) = pending.pop() {
-        if matches!(kind, Kind::Array | Kind::Stretch | Kind::PolarStretch) {
+        if *kind == Kind::Array {
             continue;
         }
         for id in &current.action_ids {
@@ -210,13 +210,8 @@ fn set_follow_ups(
         if next_owner != owner {
             return Err("Select a follow-up action of the same parameter.");
         }
-        match kind {
-            Kind::Array => return Err("An Array action cannot chain a follow-up action yet."),
-            Kind::Stretch => return Err("This Stretch action cannot chain follow-up actions yet."),
-            Kind::PolarStretch => {
-                return Err("This Polar Stretch action cannot chain follow-up actions yet.")
-            }
-            _ => {}
+        if *kind == Kind::Array {
+            return Err("An Array action cannot chain a follow-up action yet.");
         }
         let id = next.element.eval.node_id;
         if seen.insert(id) {

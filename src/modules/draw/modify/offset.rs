@@ -935,7 +935,8 @@ impl CadCommand for OffsetCommand {
                 if let Some(d) = crate::entities::common::parse_typed_length(&t) {
                     return Some(self.accept_distance(d));
                 }
-                Some(CmdResult::NeedPoint)
+                // A typed coordinate is a point: the first of two for the distance.
+                None
             }
             Step::PickSide {
                 locked, multiple, ..
@@ -944,8 +945,9 @@ impl CadCommand for OffsetCommand {
                     *multiple = true;
                     return Some(CmdResult::NeedPoint);
                 }
+                // A typed coordinate is not a distance: it picks the side.
                 let Some(d) = crate::entities::common::parse_typed_length(&t) else {
-                    return Some(CmdResult::NeedPoint);
+                    return None;
                 };
                 let mag = d.abs().max(1e-9);
                 defaults::set_offset_dist(mag);

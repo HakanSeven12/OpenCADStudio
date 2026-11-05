@@ -96,7 +96,7 @@ impl OpenCADStudio {
         let ask = |app: &mut Self| {
             let current = app.ole_variable(i, name);
             app.command_line
-                .push_output(&format!("Enter new value for {name} <{current}>:"));
+                .push_output(&crate::ui::command_line::value_prompt(&name, &current));
             app.pending_setvar = Some(name.to_string());
         };
         let Some(value) = value else {

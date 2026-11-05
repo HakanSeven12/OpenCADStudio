@@ -17,10 +17,7 @@ impl OpenCADStudio {
         }
         let ask = |app: &mut Self| {
             let current = app.tabs[i].scene.document.header.current_table_style_name.clone();
-            app.command_line.push_output(&crate::t!(
-                "Enter new value for CTABLESTYLE <\"%{name}\">:",
-                name = current
-            ));
+            app.command_line.push_output(&crate::ui::command_line::value_prompt("CTABLESTYLE", &format!("\"{current}\"")));
             app.pending_setvar = Some(NAME.to_string());
         };
         let value = value.trim().trim_matches('"').trim();

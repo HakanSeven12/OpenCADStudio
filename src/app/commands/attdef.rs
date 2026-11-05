@@ -99,7 +99,7 @@ impl OpenCADStudio {
         match parts.next().map(str::trim).filter(|v| !v.is_empty()) {
             None => {
                 self.command_line
-                    .push_output(&format!("Enter new value for AFLAGS <{current}>:"));
+                    .push_output(&crate::ui::command_line::value_prompt("AFLAGS", &current));
                 self.pending_setvar = Some("AFLAGS".to_string());
             }
             Some(v) => match v.parse::<u8>().ok().filter(|v| *v <= 63) {
@@ -108,7 +108,7 @@ impl OpenCADStudio {
                     self.command_line
                         .push_error("Requires an integer between 0 and 63.");
                     self.command_line
-                        .push_output(&format!("Enter new value for AFLAGS <{current}>:"));
+                        .push_output(&crate::ui::command_line::value_prompt("AFLAGS", &current));
                     self.pending_setvar = Some("AFLAGS".to_string());
                 }
             },

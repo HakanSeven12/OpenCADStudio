@@ -102,7 +102,7 @@ impl OpenCADStudio {
                 }
             } else {
                 self.command_line
-                    .push_output(&format!("Enter new value for {name} <{current}>:"));
+                    .push_output(&crate::ui::command_line::value_prompt(&name, &current));
                 self.pending_setvar = Some(name);
             }
             return Some(Task::none());
@@ -132,7 +132,7 @@ impl OpenCADStudio {
             }
         } else {
             self.command_line
-                .push_output(&format!("Enter new value for {name} <{current}>:"));
+                .push_output(&crate::ui::command_line::value_prompt(&name, &current));
             self.pending_setvar = Some(name);
         }
         Some(Task::none())

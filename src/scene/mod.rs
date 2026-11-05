@@ -50,6 +50,8 @@ pub enum BlockScalePolicy {
 // Topic submodules split out of this root (each contributes `impl Scene`
 // blocks and/or free functions). Pure text-move from the original mod.rs.
 #[cfg(test)]
+mod annotation_visibility_tests;
+#[cfg(test)]
 mod block_base_point_tests;
 #[cfg(test)]
 mod block_definition_handles_tests;
@@ -228,6 +230,10 @@ pub(crate) fn tessellate_entity(
     }
     wires
 }
+
+/// The xdata application a paper layout's "show every annotative object" lives
+/// under.
+const LAYOUT_ANNOTATION_VISIBILITY_APP: &str = "AcadAnnoAV";
 
 impl Scene {
     /// True for the modeler solid families whose wire path is an empty shell
@@ -6965,21 +6971,39 @@ impl Scene {
 
     pub fn annotation_all_visible(&self) -> bool {
         use codec::objects::XRecordValue;
-        // A value set here for this layout, else the drawing's own
-        // ANNOALLVISIBLE, else on.
-        self.current_layout_object_handle()
+        use codec::xdata::XDataValue;
+        // A value set here for this layout comes first. Past that, Model reads
+        // the drawing's ANNOALLVISIBLE and is on without one. A paper layout
+        // keeps its own value in the layout's xdata, and only an "on": it has
+        // nothing to read otherwise, and is off.
+        let layout = self.current_layout_object_handle();
+        let set_here = layout
             .and_then(|layout| self.document.xrecord(layout, "OPEN_CAD_ANNOTATION_STATE"))
             .and_then(|record| {
                 record.entries.iter().find_map(|entry| match entry.value {
                     XRecordValue::Bool(value) if entry.code == 290 => Some(value),
                     _ => None,
                 })
+            });
+        if let Some(value) = set_here {
+            return value;
+        }
+        if self.current_layout == "Model" {
+            return self
+                .document
+                .drawing_variable("ANNOALLVISIBLE")
+                .and_then(|value| value.trim().parse::<i32>().ok())
+                .is_none_or(|value| value != 0);
+        }
+        layout
+            .and_then(|layout| self.document.object_xdata.get(&layout))
+            .and_then(|xdata| xdata.get_record(LAYOUT_ANNOTATION_VISIBILITY_APP))
+            .is_some_and(|record| {
+                record
+                    .values
+                    .iter()
+                    .any(|value| matches!(value, XDataValue::Integer16(value) if *value != 0))
             })
-            .or_else(|| {
-                let value = self.document.drawing_variable("ANNOALLVISIBLE")?;
-                value.trim().parse::<i32>().ok().map(|value| value != 0)
-            })
-            .unwrap_or(true)
     }
 
     pub fn set_annotation_all_visible(&mut self, value: bool) {
@@ -6999,7 +7023,35 @@ impl Scene {
                 record.entries.push(XRecordEntry::bool(290, value));
             }
         }
+        self.write_annotation_visibility_to_drawing(layout, value);
         self.invalidate_annotation_dependencies();
+    }
+
+    /// Store the value where the file format keeps it, so it stays with the
+    /// drawing outside this program: see [`Self::annotation_all_visible`].
+    fn write_annotation_visibility_to_drawing(&mut self, layout: Handle, value: bool) {
+        use codec::xdata::{ExtendedDataRecord, XDataValue};
+        if self.current_layout == "Model" {
+            let value = if value { "1" } else { "0" };
+            crate::io::set_drawing_variable(&mut self.document, "ANNOALLVISIBLE", value);
+            return;
+        }
+        if value {
+            let _ = self
+                .document
+                .app_ids
+                .add(codec::tables::AppId::new(LAYOUT_ANNOTATION_VISIBILITY_APP));
+            let mut record = ExtendedDataRecord::new(LAYOUT_ANNOTATION_VISIBILITY_APP);
+            record.add_value(XDataValue::Integer16(1));
+            let xdata = self.document.object_xdata.entry(layout).or_default();
+            xdata.remove_record(LAYOUT_ANNOTATION_VISIBILITY_APP);
+            xdata.add_record(record);
+        } else if let Some(xdata) = self.document.object_xdata.get_mut(&layout) {
+            xdata.remove_record(LAYOUT_ANNOTATION_VISIBILITY_APP);
+            if xdata.is_empty() {
+                self.document.object_xdata.remove(&layout);
+            }
+        }
     }
 
     pub fn add_annotation_scale_to_objects(

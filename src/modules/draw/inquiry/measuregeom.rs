@@ -429,9 +429,17 @@ impl MeasureGeomCommand {
             return self.arc_value(value).unwrap_or(CmdResult::NeedPoint);
         }
         match sub {
-            // The endpoint of an arc leaving along the last segment.
+            // The endpoint of an arc leaving along the last segment. One
+            // lying on that direction is straight: the arc prompt is not
+            // printed again.
             Sub::None if (p - a).length_squared() > 1e-12 => {
-                return self.push_arc(p, compute_bulge(a, self.heading(), p));
+                let bulge = compute_bulge(a, self.heading(), p);
+                self.push_arc(p, bulge);
+                return if bulge == 0.0 {
+                    CmdResult::NeedPointQuiet
+                } else {
+                    CmdResult::NeedPoint
+                };
             }
             Sub::ArcCenter if (p - a).length_squared() > 1e-12 => {
                 self.arc_sub = Sub::ArcCenterEnd { c: p }
@@ -739,7 +747,7 @@ impl MeasureGeomCommand {
         // The first point stays: Undo there has nothing left to undo.
         let can_undo = self.points.len() > 1;
         if matches!(input, "U" | "UNDO") && !can_undo {
-            return Some(CmdResult::ReportError(crate::tr!("measurement", "all-undone")));
+            return Some(CmdResult::ReportMessage(crate::tr!("measurement", "all-undone")));
         }
         if self.arc {
             self.arc_sub = match input {
@@ -840,7 +848,7 @@ impl MeasureGeomCommand {
         if self.mode == Mode::Distance
             && self.multiple
             && changed
-            && matches!(result, CmdResult::NeedPoint)
+            && matches!(result, CmdResult::NeedPoint | CmdResult::NeedPointQuiet)
         {
             return CmdResult::ReportMeasurement(self.running_distance());
         }

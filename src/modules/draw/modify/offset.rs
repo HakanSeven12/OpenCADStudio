@@ -25,7 +25,7 @@ use codec::{EntityType, Handle};
 // from the kernel; only the entity conversion stays here.
 use crate::t;
 use glam::{DVec3, Vec3};
-use kernel::geom2d::{offset_polyline, Polyline as KernelPolyline, PolylineVertex as KernelVertex};
+use kernel::geom2d::{offset_polyline_with_gap, Polyline as KernelPolyline, PolylineVertex as KernelVertex};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::draw::defaults;
@@ -175,7 +175,12 @@ fn offset_lwpolylines(p: &LwPolyline, dist: f64, side_pt: Vec3) -> Vec<EntityTyp
             .collect(),
     };
 
-    offset_polyline(&source, dist, [side_pt.x as f64, side_pt.y as f64])
+    let gap = match gap_type() {
+        1 => kernel::geom2d::OffsetGap::Fillet,
+        2 => kernel::geom2d::OffsetGap::Chamfer,
+        _ => kernel::geom2d::OffsetGap::Extend,
+    };
+    offset_polyline_with_gap(&source, dist, [side_pt.x as f64, side_pt.y as f64], gap)
         .into_iter()
         .map(|result| {
             let mut new_polyline = p.clone();
@@ -439,6 +444,39 @@ enum Step {
     },
 }
 
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+
+// The Erase and Layer answers and the Through choice carry over to the next
+// OFFSET for the session, as in the reference.
+static ERASE_SOURCE: AtomicBool = AtomicBool::new(false);
+static LAYER_CURRENT: AtomicBool = AtomicBool::new(false);
+static THROUGH: AtomicBool = AtomicBool::new(false);
+/// OFFSETGAPTYPE: how a polyline offset outward closes its corner gaps
+/// (0 extend, 1 fillet, 2 chamfer); a profile setting.
+static GAP_TYPE: AtomicU8 = AtomicU8::new(0);
+
+pub fn gap_type() -> u8 {
+    GAP_TYPE.load(Ordering::Relaxed)
+}
+
+pub fn set_gap_type(value: u8) {
+    GAP_TYPE.store(value.min(2), Ordering::Relaxed);
+}
+
+/// `Current settings: Erase source=No  Layer=Source  OFFSETGAPTYPE=0`, the
+/// line OFFSET prints as it starts.
+pub fn current_settings_line() -> String {
+    let erase = if ERASE_SOURCE.load(Ordering::Relaxed) { "Yes" } else { "No" };
+    let layer = if LAYER_CURRENT.load(Ordering::Relaxed) { "Current" } else { "Source" };
+    t!(
+        "Current settings: Erase source=%{erase}  Layer=%{layer}  OFFSETGAPTYPE=%{gap}",
+        erase = erase,
+        layer = layer,
+        gap = gap_type()
+    )
+    .into_owned()
+}
+
 pub struct OffsetCommand {
     step: Step,
     all_entities: Vec<EntityType>,
@@ -499,8 +537,8 @@ impl OffsetCommand {
             cursor: None,
             drag_start: false,
             awaiting: None,
-            erase_source: false,
-            layer_current: false,
+            erase_source: ERASE_SOURCE.load(Ordering::Relaxed),
+            layer_current: LAYER_CURRENT.load(Ordering::Relaxed),
             targets_are_sources: false,
             made: 0,
         }
@@ -548,11 +586,8 @@ impl OffsetCommand {
         let distance = distance.abs().max(1e-9);
 
         defaults::set_offset_dist(distance);
-        self.advance_from_distance(Some(distance));
-
-        let d = format!("{:.4}", distance);
-
-        CmdResult::ReportMeasurement(t!("OFFSET distance = %{d}", d = d).into_owned())
+        THROUGH.store(false, Ordering::Relaxed);
+        self.advance_from_distance(Some(distance))
     }
 
     /// Offset the side step's targets with `pt` choosing the side: toward it,
@@ -634,32 +669,36 @@ impl CadCommand for OffsetCommand {
     fn prompt(&self) -> String {
         match self.awaiting {
             Some(Await::Erase) => {
-                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <No>:")
-                    .into_owned()
+                let d = if self.erase_source { "Yes" } else { "No" };
+                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <%{d}>:", d = d)
+                    .into_owned();
             }
             Some(Await::Layer) => {
+                let d = if self.layer_current { "Current" } else { "Source" };
                 return t!(
-                    "OFFSET  Enter layer option for offset objects [Current/Source] <Source>:"
+                    "OFFSET  Enter layer option for offset objects [Current/Source] <%{d}>:",
+                    d = d
                 )
-                .into_owned()
+                .into_owned();
             }
             None => {}
         }
         match &self.step {
             Step::Distance => {
-                let d = format!("{:.4}", defaults::get_offset_dist());
-                t!(
-                    "OFFSET  Specify offset distance or first reference point [Through] <%{d}>:",
-                    d = d
-                )
-                .into_owned()
+                let d = if THROUGH.load(Ordering::Relaxed) {
+                    "Through".to_owned()
+                } else {
+                    format!("{:.4}", defaults::get_offset_dist())
+                };
+                t!("OFFSET  Specify offset distance or [Through/Erase/Layer] <%{d}>:", d = d)
+                    .into_owned()
             }
 
             Step::ReferenceSecond { .. } => {
                 t!("OFFSET  Specify second reference point:").into_owned()
             }
             Step::SelectObject { .. } => {
-                t!("OFFSET  Select object to offset:").into_owned()
+                t!("OFFSET  Select object to offset or [Exit/Undo] <Exit>:").into_owned()
             }
             Step::PickSide {
                 targets,
@@ -689,32 +728,20 @@ impl CadCommand for OffsetCommand {
                     }
                     .into_owned();
                 }
-                match (locked, multiple) {
-                    (Some(d), false) => {
-                        let d = format!("{:.4}", d);
-                        t!(
-                            "OFFSET%{n}  Click side or [Multiple]  [distance %{d}]:",
-                            n = n,
-                            d = d
-                        )
-                        .into_owned()
+                let _ = n;
+                match (locked.is_some(), multiple) {
+                    (true, false) => {
+                        t!("OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:")
                     }
-                    (Some(d), true) => {
-                        let d = format!("{:.4}", d);
-                        t!(
-                            "OFFSET%{n} Multiple  Click next side [distance %{d}]:",
-                            n = n,
-                            d = d
-                        )
-                        .into_owned()
+                    (true, true) => {
+                        t!("OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:")
                     }
-                    (None, false) => {
-                        t!("OFFSET%{n}  Click through point or [Multiple]:", n = n).into_owned()
+                    (false, false) => {
+                        t!("OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:")
                     }
-                    (None, true) => {
-                        t!("OFFSET%{n} Multiple  Click next through point:", n = n).into_owned()
-                    }
+                    (false, true) => t!("OFFSET  Specify through point or [Exit/Undo] <next object>:"),
                 }
+                .into_owned()
             }
         }
     }
@@ -740,14 +767,11 @@ impl CadCommand for OffsetCommand {
                 CmdOption::new("Layer", "L"),
                 CmdOption::enter(&format!("{:.4}", defaults::get_offset_dist())),
             ],
-            Step::SelectObject { .. } => {
-                let mut opts = Vec::new();
-                if self.made > 0 {
-                    opts.push(CmdOption::new("Undo", "U"));
-                }
-                opts.push(CmdOption::enter("Exit"));
-                opts
-            }
+            Step::SelectObject { .. } => vec![
+                CmdOption::new("Exit", "E"),
+                CmdOption::new("Undo", "U"),
+                CmdOption::enter("Exit"),
+            ],
             Step::PickSide { multiple, .. } if self.drag_start => {
                 let mut opts = Vec::new();
                 if !multiple {
@@ -762,14 +786,12 @@ impl CadCommand for OffsetCommand {
                 opts
             }
             Step::PickSide { multiple, .. } => {
-                let mut opts = Vec::new();
+                let mut opts = vec![CmdOption::new("Exit", "E")];
                 if !multiple {
                     opts.push(CmdOption::new("Multiple", "M"));
                 }
-                if self.made > 0 {
-                    opts.push(CmdOption::new("Undo", "U"));
-                }
-                opts.push(CmdOption::enter("Exit"));
+                opts.push(CmdOption::new("Undo", "U"));
+                opts.push(CmdOption::enter(if *multiple { "next object" } else { "Exit" }));
                 opts
             }
             Step::ReferenceSecond { .. } => Vec::new(),
@@ -860,22 +882,32 @@ impl CadCommand for OffsetCommand {
             Some(Await::Erase) => {
                 match upper.as_str() {
                     "Y" | "YES" => self.erase_source = true,
-                    "N" | "NO" | "" => self.erase_source = false,
+                    "N" | "NO" => self.erase_source = false,
+                    "" => {}
                     _ => return Some(CmdResult::NeedPoint),
                 }
+                ERASE_SOURCE.store(self.erase_source, Ordering::Relaxed);
                 self.awaiting = None;
                 return Some(CmdResult::NeedPoint);
             }
             Some(Await::Layer) => {
                 match upper.as_str() {
                     "C" | "CURRENT" => self.layer_current = true,
-                    "S" | "SOURCE" | "" => self.layer_current = false,
+                    "S" | "SOURCE" => self.layer_current = false,
+                    "" => {}
                     _ => return Some(CmdResult::NeedPoint),
                 }
+                LAYER_CURRENT.store(self.layer_current, Ordering::Relaxed);
                 self.awaiting = None;
                 return Some(CmdResult::NeedPoint);
             }
             None => {}
+        }
+        if matches!(upper.as_str(), "E" | "EXIT")
+            && (matches!(self.step, Step::SelectObject { .. })
+                || (matches!(self.step, Step::PickSide { .. }) && !self.drag_start))
+        {
+            return Some(CmdResult::Cancel);
         }
         if matches!(upper.as_str(), "U" | "UNDO")
             && matches!(self.step, Step::SelectObject { .. } | Step::PickSide { .. })
@@ -897,12 +929,14 @@ impl CadCommand for OffsetCommand {
         match &mut self.step {
             Step::Distance => {
                 if t.eq_ignore_ascii_case("t") || t.eq_ignore_ascii_case("through") {
+                    THROUGH.store(true, Ordering::Relaxed);
                     return Some(self.advance_from_distance(None));
                 }
                 if let Some(d) = crate::entities::common::parse_typed_length(&t) {
                     return Some(self.accept_distance(d));
                 }
-                Some(CmdResult::NeedPoint)
+                // A typed coordinate is a point: the first of two for the distance.
+                None
             }
             Step::PickSide {
                 locked, multiple, ..
@@ -911,8 +945,9 @@ impl CadCommand for OffsetCommand {
                     *multiple = true;
                     return Some(CmdResult::NeedPoint);
                 }
+                // A typed coordinate is not a distance: it picks the side.
                 let Some(d) = crate::entities::common::parse_typed_length(&t) else {
-                    return Some(CmdResult::NeedPoint);
+                    return None;
                 };
                 let mag = d.abs().max(1e-9);
                 defaults::set_offset_dist(mag);
@@ -1025,6 +1060,9 @@ impl CadCommand for OffsetCommand {
             // Enter / Space on the distance step accepts the last distance —
             // the "repeat the same value with just Space" flow (#418).
             Step::Distance => {
+                if THROUGH.load(Ordering::Relaxed) {
+                    return self.advance_from_distance(None);
+                }
                 let d = defaults::get_offset_dist();
                 self.accept_distance(d)
             }
@@ -1038,6 +1076,15 @@ impl CadCommand for OffsetCommand {
                     *locked = Some(defaults::get_offset_dist());
                 }
                 self.place(cursor, false)
+            }
+            // Multiple: Enter moves on to the next object.
+            Step::PickSide {
+                multiple: true,
+                locked,
+                ..
+            } => {
+                self.step = Step::SelectObject { locked: *locked };
+                CmdResult::NeedPoint
             }
             _ => CmdResult::Cancel,
         }
@@ -1149,13 +1196,13 @@ mod option_tests {
             }
             _ => panic!("erase should replace the source with its offset"),
         }
-        // Back at the object pick, with Undo now available.
-        assert_eq!(keywords(&cmd), ["U", ""]);
+        // Back at the object pick: Exit and Undo are always offered.
+        assert_eq!(keywords(&cmd), ["E", "U", ""]);
         assert!(matches!(
             cmd.on_text_input("U"),
             Some(CmdResult::UndoDocument)
         ));
-        assert_eq!(keywords(&cmd), [""]);
+        assert_eq!(keywords(&cmd), ["E", "U", ""]);
     }
 
     #[test]

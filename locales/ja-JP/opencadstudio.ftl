@@ -3278,7 +3278,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = 読み込んだセットに変換先の画層がありません
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  位置合わせ点に基づいてオブジェクトを尺度変更しますか？ [はい/いいえ]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET  2 番目の参照点を指定:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3463,12 +3464,12 @@ modify =
     .mirror = 鏡像
     .move-freely = 自由に移動
     .move-text-arrows-out = 文字と矢印を外側へ
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  オフセット距離または [通過点] を指定 <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  側をクリックまたは [複数] [距離 __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  通過点をクリックまたは [複数]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ 複数  次の側をクリック [距離 __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ 複数  次の通過点をクリック:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  通過点をクリックまたは距離を入力、負の値で反対側 [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ 複数  通過点をクリックまたは距離を入力、負の値で反対側 [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = オフセット (DIMEXO)
@@ -3524,8 +3525,8 @@ modify =
     .mode-keyword = モード
     .array-keyword = 配列
     .use-first-point-as-displacement = 1 点目を変位として使用
-    .offset-erase-source-object-after-offsetting = OFFSET  オフセット後に元のオブジェクトを削除しますか? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  オフセットオブジェクトの画層オプションを入力 [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  グループ名を入力 [__ocs_arg_name__]:
@@ -4425,6 +4426,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  ブロック名を入力: 「__ocs_arg_needle__」[__ocs_arg_shown__件一致]
     .pdfattach-specify-insertion-point = PDFATTACH  挿入点を指定:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

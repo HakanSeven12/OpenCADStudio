@@ -3275,7 +3275,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = 目标图层不在已加载的集合中
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  是否基于对齐点缩放对象？[Y/N]：
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET  指定第二个参照点：
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3460,12 +3461,12 @@ modify =
     .mirror = 镜像
     .move-freely = 自由移动
     .move-text-arrows-out = 将文字和箭头移出
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  指定偏移距离或 [通过] <__ocs_arg_d__>：
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  单击要偏移的一侧或 [多个]  [距离 __ocs_arg_d__]：
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  单击通过点或 [多个]：
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ 多个  单击下一侧 [距离 __ocs_arg_d__]：
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ 多个  单击下一个通过点：
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  单击通过点或输入距离，负值偏移到另一侧 [Multiple/Erase/Layer] <__ocs_arg_d__>：
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ 多个  单击通过点或输入距离，负值偏移到另一侧 [Erase/Layer] <__ocs_arg_d__>：
     .offset-dimexo = 偏移 (DIMEXO)
@@ -3521,8 +3522,8 @@ modify =
     .mode-keyword = 模式
     .array-keyword = 阵列
     .use-first-point-as-displacement = 将第一点用作位移
-    .offset-erase-source-object-after-offsetting = OFFSET  偏移后是否删除源对象? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  输入偏移对象的图层选项 [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  输入组名 [__ocs_arg_name__]：
@@ -4420,6 +4421,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  输入块名：“__ocs_arg_needle__” [__ocs_arg_shown__ 个匹配]
     .pdfattach-specify-insertion-point = PDFATTACH  指定插入点：
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

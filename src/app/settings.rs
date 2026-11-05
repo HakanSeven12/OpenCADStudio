@@ -919,6 +919,9 @@ pub struct UserSettings {
     /// GROUPDISPLAYMODE: a picked group shows member grips (0), a centre
     /// grip (1) or a centre grip and a box (2).
     pub group_display_mode: i16,
+    /// OFFSETGAPTYPE: how a polyline offset outward closes its corners
+    /// (0 extend, 1 fillet, 2 chamfer).
+    pub offset_gap_type: u8,
     /// TRIMEXTENDMODE: TRIM and EXTEND start in Quick mode (else Standard).
     pub trim_extend_quick: bool,
     /// REVCLOUDCREATEMODE: the type REVCLOUD starts with (0 Freehand, 1 Rectangular, 2 Polygonal).
@@ -1466,6 +1469,7 @@ impl Default for UserSettings {
             ole_hide: 0,
             ole_quality: 3,
             group_display_mode: 2,
+            offset_gap_type: 0,
             trim_extend_quick: true,
             revcloud_create_mode: 1,
             revcloud_arc_variance: true,

@@ -44,3 +44,35 @@ impl OpenCADStudio {
         }
     }
 }
+
+impl OpenCADStudio {
+    /// `OFFSETGAPTYPE [value]`, a profile setting: 0 extends, 1 fillets and
+    /// 2 chamfers the corners of a polyline offset outward. A value outside
+    /// 0–2 is refused and asked for again.
+    pub(super) fn offset_gap_setvar(&mut self, value: Option<&str>) {
+        use crate::modules::draw::modify::offset::{gap_type, set_gap_type};
+        let ask = |app: &mut Self| {
+            let (name, current) = ("OFFSETGAPTYPE", gap_type());
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some("OFFSETGAPTYPE".to_string());
+        };
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            ask(self);
+            return;
+        };
+        match value.parse::<u8>() {
+            Ok(gap @ 0..=2) => {
+                if gap != gap_type() {
+                    set_gap_type(gap);
+                    self.save_config();
+                }
+            }
+            _ => {
+                self.command_line
+                    .push_error(crate::t!("Requires an integer between 0 and 2.").as_ref());
+                ask(self);
+            }
+        }
+    }
+}

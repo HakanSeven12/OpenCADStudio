@@ -3295,7 +3295,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = lớp mục tiêu không có trong bộ được tải
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN Chia tỷ lệ đối tượng dựa trên các điểm căn chỉnh? [Có / Không]:
     .offset-distance = OFFSET distance = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Chỉ định khoảng cách dời hoặc điểm tham chiếu thứ nhất [Qua điểm] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET Chỉ định điểm tham chiếu thứ hai:
     .pedit-edit-mesh-vertex-enter-option = PEDIT Chỉnh sửa đỉnh lưới __ocs_arg_vertex__ Nhập tùy chọn:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT Chỉ định vị trí mới cho đỉnh lưới __ocs_arg_vertex__:
@@ -3480,12 +3481,12 @@ modify =
     .mirror = Đối xứng
     .move-freely = Di chuyển tự do
     .move-text-arrows-out = Di chuyển văn bản và mũi tên ra ngoài
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Chỉ định khoảng cách dời hoặc [Qua điểm] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Nhấp chọn phía hoặc [Nhiều]  [khoảng cách __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Nhấp điểm đi qua hoặc [Nhiều]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Nhiều  Nhấp chọn phía tiếp theo [khoảng cách __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Nhiều  Nhấp điểm đi qua tiếp theo:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Nhấp điểm đi qua hoặc nhập khoảng cách, số âm cho phía bên kia [Nhiều/Xóa/Lớp] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Nhiều  Nhấp điểm đi qua hoặc nhập khoảng cách, số âm cho phía bên kia [Xóa/Lớp] <__ocs_arg_d__>:
     .offset-dimexo = Khoảng hở (DIMEXO)
@@ -3541,8 +3542,8 @@ modify =
     .mode-keyword = Chế độ
     .array-keyword = Mảng
     .use-first-point-as-displacement = Dùng điểm thứ nhất làm độ dịch chuyển
-    .offset-erase-source-object-after-offsetting = OFFSET  Xóa đối tượng nguồn sau khi dời? [Có/Không] <Không>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Nhập tùy chọn lớp cho đối tượng dời [Hiện hành/Nguồn] <Nguồn>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP Nhập tên nhóm [__ocs_arg_name__]:
@@ -4453,6 +4454,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT Nhập tên khối: "__ocs_arg_needle__" [__ocs_arg_shown__ khớp]
     .pdfattach-specify-insertion-point = PDFATTACH Chỉ định điểm chèn:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE Chế độ tạo [Solid/Surface]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE Chỉ định chiều cao hoặc [Hướng/Đường đi/Góc côn/Biểu thức]
     .extrude-start-point-of-direction = EXTRUDE Điểm bắt đầu của hướng:

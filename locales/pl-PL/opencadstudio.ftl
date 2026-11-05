@@ -3287,7 +3287,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = warstwy docelowej nie ma we wczytanym zestawie
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN Skalować obiekty na podstawie punktów wyrównania? [Y/N]:
     .offset-distance = OFFSET { common.distance } = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  { common.specify }: { common.offset } · { common.distance } · { draw.first-point } [{ modify.through }] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET Określ drugi punkt odniesienia:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  { layers.edit }: { properties.mesh } · { properties.vertex } __ocs_arg_vertex__ · { action.options }:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  { common.specify }: { properties.mesh } · { properties.vertex } · __ocs_arg_vertex__ · { common.new-location }:
@@ -3472,12 +3473,12 @@ modify =
     .mirror = Lustro
     .move-freely = Poruszaj się swobodnie
     .move-text-arrows-out = Przesuń tekst i strzałki na zewnątrz
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET Określ odległość przesunięcia lub [Through] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__ Strona kliknięcia lub [Multiple] [odległość __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__ Punkt przelotowy lub [Multiple]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Wielokrotne kliknięcie następnej strony [odległość __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Wielokrotne kliknięcie następnego punktu przelotowego:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Kliknij punkt przelotowy lub wpisz odległość, ujemną dla drugiej strony [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Wielokrotnie  Kliknij punkt przelotowy lub wpisz odległość, ujemną dla drugiej strony [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = Przesunięcie (DIMEXO)
@@ -3533,8 +3534,8 @@ modify =
     .mode-keyword = Tryb
     .array-keyword = Szyk
     .use-first-point-as-displacement = Pierwszy punkt jako przesunięcie
-    .offset-erase-source-object-after-offsetting = OFFSET  Usunąć obiekt źródłowy po odsunięciu? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Warstwa odsuniętych obiektów [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP Enter nazwa grupy [__ocs_arg_name__]:
@@ -4436,6 +4437,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Podaj nazwę bloku: „__ocs_arg_needle__” [dopasowania: __ocs_arg_shown__]
     .pdfattach-specify-insertion-point = PDFATTACH Określ punkt wstawienia:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  { common.creation-mode } [{ properties.solid }/{ properties.surface }]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  { common.specify }: { common.height } [{ properties.direction }/{ common.path }/{ common.taper-angle }/{ common.expression }]:
     .extrude-start-point-of-direction = EXTRUDE  { common.specify }: { properties.direction } · { common.start-point }:

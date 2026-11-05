@@ -3289,7 +3289,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = ຊັ້ນງານເປົ້າໝາຍບໍ່ໄດ້ຢູ່ໃນຊຸດທີ່ໂຫຼດມາ
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  ປັບມາດຕາສ່ວນວັດຖຸຕາມຈຸດຈັດລຽງບໍ່? [Yes / No]:
     .offset-distance = ໄລຍະ OFFSET = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  ກຳນົດໄລຍະຫ່າງ offset ຫຼື ຈຸດອ້າງອີງທຳອິດ [Through] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET  ກຳນົດຈຸດອ້າງອີງທີສອງ:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  ແກ້ໄຂຈຸດຍອດ mesh __ocs_arg_vertex__  ປ້ອນຕົວເລືອກ:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  ກຳນົດຕຳແໜ່ງໃໝ່ສຳລັບຈຸດຍອດ mesh __ocs_arg_vertex__:
@@ -3474,12 +3475,12 @@ modify =
     .mirror = ສະທ້ອນເງົາ (Mirror)
     .move-freely = ຍ້າຍໄດ້ຢ່າງອິດສະຫຼະ
     .move-text-arrows-out = ຍ້າຍຂໍ້ຄວາມ ແລະ ຫົວລູກສອນອອກໄປຂ້າງນອກ
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  ກຳນົດໄລຍະຫ່າງ offset ຫຼື [Through] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  ກົດເລືອກດ້ານ ຫຼື [Multiple]  [ໄລຍະຫ່າງ __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  ກົດຈຸດທີ່ຜ່ານ ຫຼື [Multiple]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Multiple  ກົດເລືອກດ້ານຖັດໄປ [ໄລຍະຫ່າງ __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Multiple  ກົດຈຸດທີ່ຜ່ານຖັດໄປ:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  ກົດຈຸດທີ່ຜ່ານ ຫຼື ພິມໄລຍະຫ່າງ, ຄ່າລົບສຳລັບດ້ານກົງກັນຂ້າມ [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Multiple  ກົດຈຸດທີ່ຜ່ານ ຫຼື ພິມໄລຍະຫ່າງ, ຄ່າລົບສຳລັບດ້ານກົງກັນຂ້າມ [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = ໄລຍະຫ່າງເລື່ອນ (DIMEXO)
@@ -3535,8 +3536,8 @@ modify =
     .mode-keyword = ໂໝດ (mOde)
     .array-keyword = ຈັດລຽງ (Array)
     .use-first-point-as-displacement = ໃຊ້ຈຸດທຳອິດເປັນໄລຍະເລື່ອນ
-    .offset-erase-source-object-after-offsetting = OFFSET  ລຶບວັດຖຸດັ້ງເດີມຫຼັງຈາກ offset ແລ້ວບໍ່? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  ປ້ອນຕົວເລືອກຊັ້ນງານສຳລັບວັດຖຸ offset [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  ປ້ອນຊື່ກຸ່ມ [__ocs_arg_name__]:
@@ -4447,6 +4448,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  ປ້ອນຊື່ບລັອກ:  "__ocs_arg_needle__"  [ກົງກັນ __ocs_arg_shown__ ລາຍການ]
     .pdfattach-specify-insertion-point = PDFATTACH  ກໍານົດຈຸດແຊກ:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  ໂໝດການສ້າງ [ວັດຖຸແຂງ/ພື້ນຜິວ]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  ກໍານົດຄວາມສູງ ຫຼື [ທິດທາງ/ເສັ້ນທາງ/ມຸມສອບ/ນິພົດ]
     .extrude-start-point-of-direction = EXTRUDE  ຈຸດເລີ່ມຕົ້ນຂອງທິດທາງ:

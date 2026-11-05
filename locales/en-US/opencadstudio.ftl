@@ -3289,7 +3289,8 @@ draw =
     .target-layer-is-not-in-the-loaded-set = target layer is not in the loaded set
     .align-scale-objects-based-on-alignment-points-yes-no = ALIGN  Scale objects based on alignment points? [Yes / No]:
     .offset-distance = OFFSET distance = __ocs_arg_d__
-    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or first reference point [Through] <__ocs_arg_d__>:
+    .offset-current-settings = Current settings: Erase source=__ocs_arg_erase__  Layer=__ocs_arg_layer__  OFFSETGAPTYPE=__ocs_arg_gap__
+    .offset-specify-offset-distance-or-first-reference-point-through = OFFSET  Specify offset distance or [Through/Erase/Layer] <__ocs_arg_d__>:
     .offset-specify-second-reference-point = OFFSET  Specify second reference point:
     .pedit-edit-mesh-vertex-enter-option = PEDIT  Edit mesh vertex __ocs_arg_vertex__  Enter option:
     .pedit-specify-new-location-for-mesh-vertex = PEDIT  Specify new location for mesh vertex __ocs_arg_vertex__:
@@ -3474,12 +3475,12 @@ modify =
     .mirror = Mirror
     .move-freely = Move freely
     .move-text-arrows-out = Move text & arrows out
-    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset:
+    .offset-select-object-to-offset-enter-to-finish = OFFSET  Select object to offset or [Exit/Undo] <Exit>:
     .offset-specify-offset-distance-or-through-d = OFFSET  Specify offset distance or [Through] <__ocs_arg_d__>:
-    .offset-n-click-side-or-multiple-distance-d = OFFSET__ocs_arg_n__  Click side or [Multiple]  [distance __ocs_arg_d__]:
-    .offset-n-click-through-point-or-multiple = OFFSET__ocs_arg_n__  Click through point or [Multiple]:
-    .offset-n-multiple-click-next-side-distance-d = OFFSET__ocs_arg_n__ Multiple  Click next side [distance __ocs_arg_d__]:
-    .offset-n-multiple-click-next-through-point = OFFSET__ocs_arg_n__ Multiple  Click next through point:
+    .offset-n-click-side-or-multiple-distance-d = OFFSET  Specify point on side to offset or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-click-through-point-or-multiple = OFFSET  Specify through point or [Exit/Multiple/Undo] <Exit>:
+    .offset-n-multiple-click-next-side-distance-d = OFFSET  Specify point on side to offset or [Exit/Undo] <next object>:
+    .offset-n-multiple-click-next-through-point = OFFSET  Specify through point or [Exit/Undo] <next object>:
     .offset-n-click-through-point-or-type-distance = OFFSET__ocs_arg_n__  Click through point or type distance, negative for the other side [Multiple/Erase/Layer] <__ocs_arg_d__>:
     .offset-n-multiple-click-through-point-or-type-distance = OFFSET__ocs_arg_n__ Multiple  Click through point or type distance, negative for the other side [Erase/Layer] <__ocs_arg_d__>:
     .offset-dimexo = Offset (DIMEXO)
@@ -3535,8 +3536,8 @@ modify =
     .mode-keyword = mOde
     .array-keyword = Array
     .use-first-point-as-displacement = Use first point as displacement
-    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <No>:
-    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <Source>:
+    .offset-erase-source-object-after-offsetting = OFFSET  Erase source object after offsetting? [Yes/No] <__ocs_arg_d__>:
+    .offset-enter-layer-option-for-offset-objects = OFFSET  Enter layer option for offset objects [Current/Source] <__ocs_arg_d__>:
 
 groups =
     .group-enter-group-name-name = GROUP  Enter group name [__ocs_arg_name__]:
@@ -4447,6 +4448,7 @@ insert =
     .minsert-enter-block-name-matches = MINSERT  Enter block name:  "__ocs_arg_needle__"  [__ocs_arg_shown__ matches]
     .pdfattach-specify-insertion-point = PDFATTACH  Specify insertion point:
     .extrude-select-objects-to-extrude-or-mode-enter-to-finish = EXTRUDE  Select objects to extrude or [MOde]:
+    .current-wire-frame-density-isolines-mode = Current wire frame density:  ISOLINES=__ocs_arg_n__, Closed profiles creation mode = __ocs_arg_mode__
     .extrude-creation-mode-solid-surface = EXTRUDE  Creation mode [Solid/Surface]
     .extrude-specify-height-or-direction-path-taper-angle-expression = EXTRUDE  Specify height or [Direction/Path/Taper angle/Expression]
     .extrude-start-point-of-direction = EXTRUDE  Start point of direction:

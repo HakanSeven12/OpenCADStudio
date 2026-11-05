@@ -827,11 +827,15 @@ impl OpenCADStudio {
                         anchor,
                         direction,
                     );
-                    self.command_line.push_info(&cmd.prompt());
+                    self.command_line
+                    .push_info(&cmd.wire_density_line(crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines)));
+                self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
                     let cmd = ExtrudeCommand::new_named(cmd, color);
-                    self.command_line.push_info(&cmd.prompt());
+                    self.command_line
+                    .push_info(&cmd.wire_density_line(crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines)));
+                self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 }
             }
@@ -878,6 +882,8 @@ impl OpenCADStudio {
                             .collect(),
                     );
                 }
+                self.command_line
+                    .push_info(&cmd.wire_density_line(crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines)));
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -907,6 +913,8 @@ impl OpenCADStudio {
                 if !selected.is_empty() {
                     cmd.set_preselection(selected);
                 }
+                self.command_line
+                    .push_info(&cmd.wire_density_line(crate::entities::solid3d::clamp_header_isolines(self.tabs[i].scene.document.header.isolines)));
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }
@@ -944,6 +952,7 @@ impl OpenCADStudio {
                     selected,
                     available,
                 );
+                self.command_line.push_info(&cmd.wire_density_line(isolines));
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
             }

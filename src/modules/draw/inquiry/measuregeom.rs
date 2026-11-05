@@ -430,16 +430,14 @@ impl MeasureGeomCommand {
         }
         match sub {
             // The endpoint of an arc leaving along the last segment. One
-            // lying on that direction is straight: the arc prompt is not
-            // printed again.
+            // lying on that direction makes no arc: the point is dropped and
+            // the arc prompt is not printed again.
             Sub::None if (p - a).length_squared() > 1e-12 => {
                 let bulge = compute_bulge(a, self.heading(), p);
-                self.push_arc(p, bulge);
-                return if bulge == 0.0 {
-                    CmdResult::NeedPointQuiet
-                } else {
-                    CmdResult::NeedPoint
-                };
+                if bulge == 0.0 {
+                    return CmdResult::NeedPointQuiet;
+                }
+                return self.push_arc(p, bulge);
             }
             Sub::ArcCenter if (p - a).length_squared() > 1e-12 => {
                 self.arc_sub = Sub::ArcCenterEnd { c: p }

@@ -12962,6 +12962,7 @@ impl OpenCADStudio {
             // A service manager stopping the program (a container closing at
             // logout): unsaved work goes to the recovery copies, which are
             // kept, and the program leaves once they are written.
+            #[cfg(not(target_arch = "wasm32"))]
             Message::Terminate => {
                 self.terminating = true;
                 let task = self.on_autosave();

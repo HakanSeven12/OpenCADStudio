@@ -2085,6 +2085,7 @@ pub(super) struct OpenCADStudio {
     /// The app asked to exit; a headless batch run stops there.
     pub(super) exit_requested: bool,
     /// SIGTERM arrived: leave once the recovery copies are written.
+    #[cfg(not(target_arch = "wasm32"))]
     pub(super) terminating: bool,
     /// One global interaction-index build at a time. Large drawings can each
     /// hold millions of entries, so file-open bursts must not multiply peak
@@ -5324,6 +5325,7 @@ pub enum Message {
     /// newer release exists; we open the update-notice window.
     UpdateCheckResult(Option<crate::io::update_check::UpdateInfo>),
     /// The process was asked to stop (SIGTERM).
+    #[cfg(not(target_arch = "wasm32"))]
     Terminate,
     /// User dismissed the update-notice window.
     UpdateNoticeClose,
@@ -6363,6 +6365,7 @@ impl OpenCADStudio {
             script_paused: false,
             sdi: false,
             exit_requested: false,
+            #[cfg(not(target_arch = "wasm32"))]
             terminating: false,
             active_interaction_index: None,
             queued_interaction_indices: std::collections::VecDeque::new(),

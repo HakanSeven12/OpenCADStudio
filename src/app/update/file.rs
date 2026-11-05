@@ -5268,13 +5268,14 @@ impl OpenCADStudio {
         }
     }
 
-    /// Remove the autosave recovery files, then quit the application.
     /// Quit without removing the recovery copies (see `Message::Terminate`).
+    #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn leave_keeping_recovery(&mut self) -> Task<Message> {
         self.exit_requested = true;
         iced::exit()
     }
 
+    /// Remove the autosave recovery files, then quit the application.
     pub(in crate::app) fn exit_app(&mut self) -> Task<Message> {
         self.cleanup_autosaves();
         self.exit_requested = true;

@@ -44,6 +44,27 @@ impl OpenCADStudio {
         }
     }
 
+    /// The selection as SVG on the system clipboard, so other programs
+    /// paste it as editable paths; OCS itself pastes from its own copy.
+    pub(in crate::app) fn copy_svg_to_system_clipboard(
+        &self,
+        i: usize,
+        handles: &[codec::Handle],
+    ) -> Task<Message> {
+        let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles) else {
+            return Task::none();
+        };
+        #[cfg(target_arch = "wasm32")]
+        {
+            crate::sys::write_clipboard_text(&svg);
+            Task::none()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            iced::clipboard::write(svg).discard()
+        }
+    }
+
     pub(in crate::app) fn copy_entities_to_clipboard(
         &mut self,
         i: usize,
@@ -274,6 +295,7 @@ impl OpenCADStudio {
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
                     self.command_line
                         .push_info(crate::tf!("{} object(s) copied to clipboard.", count).as_ref());
+                    return Some(self.copy_svg_to_system_clipboard(i, &handles));
                 }
             }
 
@@ -324,6 +346,7 @@ impl OpenCADStudio {
                         )
                         .as_ref(),
                     );
+                    return Some(self.copy_svg_to_system_clipboard(i, &handles));
                 }
             }
 
@@ -346,6 +369,7 @@ impl OpenCADStudio {
                         &handles,
                     );
                     let count = self.copy_entities_to_clipboard(i, &handles, base);
+                    let svg = self.copy_svg_to_system_clipboard(i, &handles);
                     self.push_undo_snapshot(i, "CUTCLIP");
                     self.tabs[i].scene.erase_entities(&handles);
                     self.tabs[i].scene.deselect_all();
@@ -353,6 +377,7 @@ impl OpenCADStudio {
                     self.refresh_properties();
                     self.command_line
                         .push_info(crate::tf!("{} object(s) cut to clipboard.", count).as_ref());
+                    return Some(svg);
                 }
             }
 

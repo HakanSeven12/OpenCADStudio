@@ -8672,6 +8672,13 @@ impl OpenCADStudio {
                 use super::SystemClipboardText as Text;
 
                 match result {
+                    // SVG markup (from another program, or another OCS)
+                    // comes in as drawing, placed by the insertion prompts.
+                    Text::Text(text)
+                        if text.trim_start().starts_with('<') && text.contains("<svg") =>
+                    {
+                        self.paste_svg_text(self.active_tab, text)
+                    }
                     Text::Text(text) => {
                         // As if typed: rows submit one after another.
                         let typed = format!("{}{text}", self.command_line.input);

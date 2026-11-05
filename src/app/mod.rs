@@ -984,6 +984,8 @@ pub(super) struct OpenCADStudio {
     pick_box: i32,
     /// HPASSOC: new hatches follow their boundary objects.
     hatch_associative: bool,
+    /// The Hatch panel's numbers as typed.
+    hatch_drafts: crate::ui::window::hatch_panel::Drafts,
     /// HPGAPTOL: gaps up to this size count as closed for HATCH/BOUNDARY
     /// internal-point picks (0 = exact).
     hatch_gap_tolerance: f64,
@@ -4897,6 +4899,8 @@ pub enum Message {
     AliasEditorImported(Option<Result<Vec<u8>, String>>),
     /// Export the shortcut (`false`) or alias (`true`) list to a spreadsheet.
     KeyListExport(bool),
+    /// An edit in the Hatch panel shown while HATCH runs.
+    HatchPanel(crate::ui::window::hatch_panel::HatchPanelMsg),
     /// The file the export goes to (none when the picker was cancelled),
     /// with the rows to write.
     KeyListExportTo(Option<std::path::PathBuf>, Vec<Vec<String>>),
@@ -5990,6 +5994,7 @@ impl OpenCADStudio {
             cursor_size: 5,
             pick_box: 3,
             hatch_associative: true,
+            hatch_drafts: Default::default(),
             hatch_gap_tolerance: 0.0,
             hatch_start_method: 0,
             show_menu_bar: false,

@@ -10477,6 +10477,7 @@ impl OpenCADStudio {
                 // check button does, so no half-visible "ghost" row appears.
                 Task::none()
             }
+            Message::HatchPanel(msg) => self.on_hatch_panel(msg),
             Message::KeyListExport(aliases) => {
                 let (header, rows, name) = if aliases {
                     (

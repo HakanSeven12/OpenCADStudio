@@ -837,6 +837,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "HALOGAP",
     "HATCHLAYER",
     "HPASSOC",
+    "HPDLGMODE",
     "HPGAPTOL",
     "HYPERLINKBASE",
     "IMAGEFRAME",

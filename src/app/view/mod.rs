@@ -2547,6 +2547,17 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
+            // HATCH's settings float at the drawing's top left (HPDLGMODE).
+            if self.model_space.hatch_dialog_mode != 0 {
+                if let Some(settings) =
+                    tab.active_cmd.as_ref().and_then(|command| command.hatch_settings())
+                {
+                    viewport_stack = viewport_stack.push(position_canvas_overlay(
+                        iced::Point::new(12.0, 40.0),
+                        crate::ui::window::hatch_panel::view(settings, &self.hatch_drafts),
+                    ));
+                }
+            }
             let (vw,vh)=tab.scene.selection.borrow().view.vp_size;
             let bar_bounds=tab.scene.active_model_tile_bounds(vw,vh);
             let bar_color=crate::ui::overlay::authoring::AuthoringVisualOptions::new(&self.block_editor_preferences,&tab.scene.document,crosshair_background(tab,is_paper)).action;

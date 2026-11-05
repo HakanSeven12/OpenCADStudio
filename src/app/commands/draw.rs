@@ -984,6 +984,7 @@ impl OpenCADStudio {
                 if let Some(message) = new_cmd.start_message() {
                     self.command_line.push_output(&message);
                 }
+                self.hatch_drafts = Default::default();
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);
@@ -3236,5 +3237,59 @@ mod degenerate_constraint_tests {
         app.automation_op(r#"{"op":"run","cmd":"ECONSTRAINT"}"#);
         let lines = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
         assert_eq!(lines["ok"], true, "{lines}");
+    }
+}
+
+impl OpenCADStudio {
+    /// An edit in the Hatch panel: OK and Cancel end HATCH as Enter and Esc
+    /// do; the rest change the running command's settings.
+    pub(in crate::app) fn on_hatch_panel(
+        &mut self,
+        msg: crate::ui::window::hatch_panel::HatchPanelMsg,
+    ) -> Task<Message> {
+        use crate::command::StepInput;
+        use crate::ui::window::hatch_panel::HatchPanelMsg as M;
+        let i = self.active_tab;
+        let Some(mut settings) = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.hatch_settings())
+        else {
+            return Task::none();
+        };
+        let number = |typed: &str| typed.trim().replace(',', ".").parse::<f64>().ok();
+        match msg {
+            M::Accept => return self.feed_command(StepInput::Enter),
+            M::Cancel => return self.feed_command(StepInput::Escape),
+            M::Pattern(name) => settings.pattern = name,
+            M::Angle(typed) => {
+                if let Some(value) = number(&typed).filter(|value| value.is_finite()) {
+                    settings.angle_deg = value;
+                }
+                self.hatch_drafts.angle = Some(typed);
+            }
+            M::Scale(typed) => {
+                if let Some(value) = number(&typed).filter(|value| *value > 0.0) {
+                    settings.scale = value;
+                }
+                self.hatch_drafts.scale = Some(typed);
+            }
+            M::Gap(typed) => {
+                if let Some(value) = number(&typed).filter(|value| *value >= 0.0) {
+                    settings.gap_tolerance = value;
+                }
+                self.hatch_drafts.gap = Some(typed);
+            }
+            M::Method(method) => settings.method = method,
+            M::Islands(code) => settings.islands = crate::ui::window::hatch_panel::island_style(code),
+            M::Associative(on) => settings.associative = on,
+            M::Separate(on) => settings.separate = on,
+            M::KeepBoundaries(on) => settings.keep_boundaries = on,
+        }
+        if let Some(command) = self.tabs[i].active_cmd.as_mut() {
+            command.set_hatch_settings(settings);
+        }
+        self.refresh_area_preview(i);
+        Task::none()
     }
 }

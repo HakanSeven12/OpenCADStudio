@@ -1062,6 +1062,7 @@ impl OpenCADStudio {
                     | "COMPARECOLORREMOVED"
                     | "COMPARECOLORMODIFIED"
                     | "COMPARETOLERANCE"
+                    | "HPDLGMODE"
                     | "WINDOWSAREACOLOR"
                     | "WINDOWAREACOLOR"
                     | "CROSSINGAREACOLOR"
@@ -2677,6 +2678,19 @@ impl OpenCADStudio {
                                     }
                                 }
                             }
+                            "HPDLGMODE" => match &value {
+                                Some(v) => match v.trim().parse::<u8>() {
+                                    Ok(mode) if mode <= 2 => {
+                                        self.model_space.hatch_dialog_mode = mode;
+                                        Ok((format!("HPDLGMODE = {mode}"), true))
+                                    }
+                                    _ => Err("SETVAR: 0, 1 or 2 required.".into()),
+                                },
+                                None => Ok((
+                                    format!("HPDLGMODE = {}", self.model_space.hatch_dialog_mode),
+                                    false,
+                                )),
+                            },
                             "COMPARETOLERANCE" => match &value {
                                 Some(v) => match v.trim().parse::<f64>() {
                                     Ok(tolerance) if tolerance > 0.0 && tolerance.is_finite() => {

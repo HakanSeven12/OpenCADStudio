@@ -210,6 +210,21 @@ enum HatchStep {
 }
 
 /// The method HATCH starts with, as the profile stores it.
+/// HATCH's settings as the Hatch panel shows and edits them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HatchSettings {
+    pub pattern: String,
+    pub angle_deg: f64,
+    pub scale: f64,
+    /// 0 pick internal point, 1 select objects, 2 draw.
+    pub method: u8,
+    pub islands: codec::entities::HatchStyleType,
+    pub associative: bool,
+    pub separate: bool,
+    pub keep_boundaries: bool,
+    pub gap_tolerance: f64,
+}
+
 fn method_code(mode: HatchMode) -> u8 {
     match mode {
         HatchMode::PickInside => 0,
@@ -394,6 +409,70 @@ impl HatchCommand {
             codec::entities::HatchStyleType::Outer => "Outer",
             codec::entities::HatchStyleType::Ignore => "Ignore",
         }
+    }
+
+    fn current_settings(&self) -> HatchSettings {
+        let inherited = self.inherited.as_ref().map(|(model, _, _)| model);
+        HatchSettings {
+            pattern: self
+                .pattern_override
+                .as_ref()
+                .map(|(name, _)| name.clone())
+                .or_else(|| inherited.map(|model| model.name.clone()))
+                .unwrap_or_else(|| "ANSI31".to_string()),
+            angle_deg: f64::from(
+                self.angle_override
+                    .or(inherited.map(|model| model.angle_offset))
+                    .unwrap_or(0.0),
+            )
+            .to_degrees(),
+            scale: f64::from(
+                self.scale_override
+                    .or(inherited.map(|model| model.scale))
+                    .unwrap_or(1.0),
+            ),
+            method: method_code(self.mode),
+            islands: self.island_style,
+            associative: self.associative,
+            separate: self.separate_hatches,
+            keep_boundaries: self.retain_boundaries,
+            gap_tolerance: self.gap_tolerance,
+        }
+    }
+
+    /// Take what the Hatch panel changed; keeping boundaries and separate
+    /// hatches exclude each other as at the prompt.
+    fn apply_settings(&mut self, settings: HatchSettings) {
+        let now = self.current_settings();
+        if settings.pattern != now.pattern {
+            if let Some(entry) = crate::scene::model::hatch_patterns::find(&settings.pattern) {
+                self.pattern_override = Some((entry.name.clone(), entry.gpu.clone()));
+            }
+        }
+        if settings.angle_deg != now.angle_deg && settings.angle_deg.is_finite() {
+            self.angle_override = Some((settings.angle_deg as f32).to_radians());
+        }
+        if settings.scale != now.scale && settings.scale > 0.0 {
+            self.scale_override = Some(settings.scale as f32);
+        }
+        if settings.method != now.method {
+            let _ = self.choose(match settings.method {
+                1 => HatchMode::SelectObjects,
+                2 => HatchMode::Manual,
+                _ => HatchMode::PickInside,
+            });
+        }
+        self.island_style = settings.islands;
+        self.associative = settings.associative;
+        if settings.separate != now.separate {
+            self.separate_hatches = settings.separate;
+            self.retain_boundaries &= !settings.separate;
+        }
+        if settings.keep_boundaries != now.keep_boundaries {
+            self.retain_boundaries = settings.keep_boundaries;
+            self.separate_hatches &= !settings.keep_boundaries;
+        }
+        self.gap_tolerance = settings.gap_tolerance.clamp(0.0, MAX_GAP_TOLERANCE);
     }
 
     /// Switch to a boundary method typed at a prompt.
@@ -1053,6 +1132,14 @@ impl CadCommand for HatchCommand {
 
     fn hatch_start_method(&self) -> Option<u8> {
         self.method_chosen.map(method_code)
+    }
+
+    fn hatch_settings(&self) -> Option<HatchSettings> {
+        Some(self.current_settings())
+    }
+
+    fn set_hatch_settings(&mut self, settings: HatchSettings) {
+        self.apply_settings(settings);
     }
 
     fn dyn_field(&self) -> crate::command::DynField {
@@ -2207,4 +2294,33 @@ mod tests {
         };
         assert_eq!(region.wires.len(), 2);
     }
+
+    #[test]
+    fn hatch_panel_settings_reach_the_hatch() {
+        let mut command = HatchCommand::new(
+            Default::default(),
+            Vec::new(),
+            None,
+            WorkingPlane::default(),
+        );
+        let mut settings = command.hatch_settings().unwrap();
+        assert_eq!((settings.pattern.as_str(), settings.scale), ("ANSI31", 1.0));
+        settings.pattern = "ANSI37".into();
+        settings.scale = 2.5;
+        settings.angle_deg = 30.0;
+        settings.method = 2;
+        settings.keep_boundaries = true;
+        command.set_hatch_settings(settings);
+        // Separate hatches turned on drops keeping boundaries, as at the prompt.
+        let mut settings = command.hatch_settings().unwrap();
+        settings.separate = true;
+        command.set_hatch_settings(settings);
+        let settings = command.hatch_settings().unwrap();
+        assert_eq!(settings.method, 2);
+        assert!(settings.separate && !settings.keep_boundaries);
+        assert!((settings.angle_deg - 30.0).abs() < 1e-4);
+        let hatch = command.make_hatch(vec![vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]]);
+        assert_eq!((hatch.name.as_str(), hatch.scale), ("ANSI37", 2.5));
+    }
 }
+

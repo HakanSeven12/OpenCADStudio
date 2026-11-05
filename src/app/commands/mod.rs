@@ -1301,6 +1301,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "COMPARECOLORREMOVED",
         "COMPARECOLORMODIFIED",
         "COMPARETOLERANCE",
+        "HPDLGMODE",
         "WINDOWSAREACOLOR",
         "WINDOWAREACOLOR",
         "CROSSINGAREACOLOR",

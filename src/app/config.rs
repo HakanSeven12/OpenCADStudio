@@ -372,6 +372,8 @@ pub struct ModelSpaceThemeConfig {
     pub compare_modified: [u8; 3],
     /// COMPARETOLERANCE: points closer than this compare as the same.
     pub compare_tolerance: f64,
+    /// HPDLGMODE: 0 hides the Hatch panel while HATCH runs, 1 and 2 show it.
+    pub hatch_dialog_mode: u8,
     /// Selection highlight opacity in percent (10–100); below 100 the
     /// object's own colour shows through.
     pub selection_highlight_opacity: u8,
@@ -412,6 +414,7 @@ impl Default for ModelSpaceThemeConfig {
             compare_removed: crate::scene::compare::CompareSettings::default().colors[1],
             compare_modified: crate::scene::compare::CompareSettings::default().colors[2],
             compare_tolerance: crate::scene::compare::CompareSettings::default().tolerance,
+            hatch_dialog_mode: 2,
             selection_highlight_opacity: 100,
             selection_highlight_widen: 0,
             selection_effect: true,

@@ -5,6 +5,111 @@ use crate::scene::{
 };
 
 #[test]
+fn authored_flip_links_require_complete_ordered_selections() {
+    let (mut doc, def, geometry) = super::tests::fixture();
+    let linear = distance::create(
+        &mut doc,
+        def,
+        distance::Kind::Linear,
+        Vector3::UNIT_Y,
+        Vector3::new(4., 1., 0.),
+        Vector3::UNIT_Y * 2.,
+    )
+    .unwrap();
+    let flip = orientation::create(
+        &mut doc,
+        def,
+        orientation::Kind::Flip,
+        Vector3::ZERO,
+        Vector3::UNIT_X * 10.,
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let early = create(&mut doc, def, Kind::Flip, flip, &geometry[..1], DVec3::ZERO).unwrap();
+    let movement = create(
+        &mut doc,
+        def,
+        Kind::Move,
+        linear,
+        &geometry[1..],
+        DVec3::ZERO,
+    )
+    .unwrap();
+    let before = doc.clone();
+    let selection = [geometry[1], linear];
+    assert!(retarget(&mut doc, def, early, &selection, None).is_err());
+    assert!(create(
+        &mut doc,
+        def,
+        Kind::Flip,
+        flip,
+        &[geometry[0], linear],
+        DVec3::ZERO
+    )
+    .is_err());
+    assert!(create(&mut doc, def, Kind::Flip, flip, &[flip], DVec3::ZERO).is_err());
+    assert_eq!(doc, before);
+    let linked = create(&mut doc, def, Kind::Flip, flip, &selection, DVec3::ZERO).unwrap();
+    let dependencies = |doc: &Document| {
+        actions(doc, def)
+            .into_iter()
+            .find(|(h, _, _, _)| *h == linked)
+            .unwrap()
+            .1
+            .dependencies
+            .clone()
+    };
+    assert!(dependencies(&doc).contains(&movement));
+    assert!(!retarget(&mut doc, def, linked, &selection, None).unwrap());
+    assert!(retarget(&mut doc, def, linked, &geometry[1..], None).unwrap());
+    assert_eq!(dependencies(&doc), geometry[1..]);
+}
+
+#[test]
+fn authored_flip_link_reflects_an_unbound_flip_axis() {
+    let (mut doc, def, _) = super::tests::fixture();
+    let source = orientation::create(
+        &mut doc,
+        def,
+        orientation::Kind::Flip,
+        Vector3::ZERO,
+        Vector3::UNIT_X * 10.,
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    let target = orientation::create(
+        &mut doc,
+        def,
+        orientation::Kind::Flip,
+        Vector3::UNIT_Y * 2.,
+        Vector3::new(5., 2., 0.),
+        Vector3::UNIT_Y * 3.,
+    )
+    .unwrap();
+    create(&mut doc, def, Kind::Flip, source, &[target], DVec3::ZERO).unwrap();
+    let insert = doc
+        .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            "ACTIONS",
+            Vector3::ZERO,
+        )))
+        .unwrap();
+    let parameter = all_parameters(&doc, def)
+        .into_iter()
+        .find(|p| p.handle == target)
+        .unwrap();
+    let reflected = instance::evaluate_value(&doc, insert, source, Value::Flip(true))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        instance::frame(&reflected, insert, &parameter).unwrap(),
+        instance::ParameterFrame {
+            base: -DVec3::Y * 2.,
+            end: DVec3::new(5., -2., 0.),
+        }
+    );
+}
+
+#[test]
 fn coupled_flips_preserve_geometry_inputs_and_reload() {
     for testing in [false, true] {
         let (mut doc, def, geometry) = super::tests::fixture();
@@ -551,7 +656,7 @@ fn coupled_refresh_migrates_polar_and_rotation_values() {
         DVec3::ZERO,
     )
     .unwrap();
-    let linked = create(
+    create(
         &mut doc,
         def,
         Kind::Move,
@@ -571,14 +676,13 @@ fn coupled_refresh_migrates_polar_and_rotation_values() {
             Vector3::UNIT_X,
         )
         .unwrap();
-        let action = create(&mut doc, def, Kind::Flip, flip, &geometry[1..], DVec3::ZERO).unwrap();
-        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else {
-            panic!()
-        };
-        targets::action_mut(&mut object.data)
-            .unwrap()
-            .dependencies
-            .extend([linear, linked]);
+        let selection = [geometry[1], linear];
+        if flips.is_empty() {
+            create(&mut doc, def, Kind::Flip, flip, &selection, DVec3::ZERO).unwrap();
+        } else {
+            let action = create(&mut doc, def, Kind::Flip, flip, &geometry[1..], DVec3::ZERO).unwrap();
+            assert!(retarget(&mut doc, def, action, &selection, None).unwrap());
+        }
         flips.push(flip);
     }
     let mut inserts = Vec::new();

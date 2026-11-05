@@ -109,6 +109,24 @@ impl Parameter {
     pub(crate) fn is_move_target(&self) -> bool {
         self.point || self.linear || self.flip
     }
+
+    pub(super) fn is_flip_target(&self) -> bool {
+        self.linear || self.flip
+    }
+
+    pub(crate) fn is_action_target(&self, kind: Kind, source: i32) -> bool {
+        self.id != source && match kind {
+            Kind::Move => self.is_move_target(),
+            Kind::Flip => self.is_flip_target(),
+            _ => false,
+        }
+    }
+}
+
+fn flip_parameter_target(doc: &Document, definition: Handle, source: i32, handle: Handle) -> bool {
+    all_parameters(doc, definition)
+        .iter()
+        .any(|p| p.handle == handle && p.is_action_target(Kind::Flip, source))
 }
 
 pub(crate) fn v(p: Vector3) -> DVec3 {
@@ -610,10 +628,14 @@ pub(crate) fn create_with_frame_points(
         if let Some(entity) = doc.get_entity(*h) {
             !members.contains(h) || !supported(entity) || entity.common().owner_handle != definition
         } else {
-            kind != Kind::Move || chains::frame_target(doc, definition, p.id, *h).is_none()
+            match kind {
+                Kind::Move => chains::frame_target(doc, definition, p.id, *h).is_none(),
+                Kind::Flip => !flip_parameter_target(doc, definition, p.id, *h),
+                _ => true,
+            }
         }
     }) {
-        return Err(if kind == Kind::Move {
+        return Err(if matches!(kind, Kind::Move | Kind::Flip) {
             "Select supported targets belonging to this block."
         } else {
             "Select lines, lightweight polylines, arcs, circles, ellipses, points or text belonging to this block."
@@ -670,7 +692,12 @@ pub(crate) fn create_with_frame_points(
     };
     register_classes(&mut staged, &[(dxf, cpp, 55)]);
     let handle = staged.allocate_handle();
-    let mut dependencies = targets.to_vec();
+    let flip_links = kind == Kind::Flip && targets.iter().any(|h| doc.get_entity(*h).is_none());
+    let mut dependencies = if flip_links {
+        flip_graph::authored_dependencies(doc, definition, p.id, targets, &[])?
+    } else {
+        targets.to_vec()
+    };
     dependencies.sort();
     dependencies.dedup();
     let action = BlockAction {
@@ -784,6 +811,9 @@ pub(crate) fn create_with_frame_points(
     if kind == Kind::Move {
         chains::Graph::new(&staged, definition)?;
     }
+    if flip_links {
+        flip_graph::validate_authored_selection(&staged, definition, handle, p.id, &dependencies)?;
+    }
     *doc = staged;
     Ok(handle)
 }
@@ -869,6 +899,8 @@ pub(crate) fn editable_action_targets(
                 Some(*handle)
             } else if kind == Kind::Move {
                 chains::frame_target(doc, definition, parameter_id, *handle)
+            } else if kind == Kind::Flip && flip_parameter_target(doc, definition, parameter_id, *handle) {
+                Some(*handle)
             } else {
                 None
             }
@@ -913,12 +945,37 @@ pub(crate) fn retarget_frame_points(
         if let Some(entity) = doc.get_entity(*h) {
             !members.contains(h) || entity.common().owner_handle != definition || !supported(entity)
         } else {
-            kind != Kind::Move || chains::frame_target(doc, definition, id, *h).is_none()
+            match kind {
+                Kind::Move => chains::frame_target(doc, definition, id, *h).is_none(),
+                Kind::Flip => !flip_parameter_target(doc, definition, id, *h),
+                _ => true,
+            }
         }
     }) {
         return Err("Select supported targets belonging to this block.");
     }
     let old_targets = action.dependencies.clone();
+    let flip_links = kind == Kind::Flip
+        && targets.iter().chain(&old_targets).any(|h| {
+            doc.get_entity(*h).is_none() && flip_parameter_target(doc, definition, id, *h)
+        });
+    if flip_links {
+        let dependencies = flip_graph::authored_dependencies(doc, definition, id, &targets, &old_targets)?;
+        if dependencies == old_targets {
+            return Ok(false);
+        }
+        if frame.is_some() {
+            return Err("Only Stretch actions have an action frame.");
+        }
+        let mut staged = doc.clone();
+        let ObjectType::DynamicBlock(object) = staged.objects.get_mut(&handle).unwrap() else {
+            unreachable!()
+        };
+        targets::action_mut(&mut object.data).unwrap().dependencies.clone_from(&dependencies);
+        flip_graph::validate_authored_selection(&staged, definition, handle, id, &dependencies)?;
+        *doc = staged;
+        return Ok(true);
+    }
     let old_geometry = targets::geometry(doc, definition, kind, id, &old_targets)?;
     let bookkeeping = old_targets
         .iter()

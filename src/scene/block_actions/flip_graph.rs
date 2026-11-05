@@ -6,6 +6,70 @@ use std::collections::{BTreeMap, BTreeSet};
 mod recovery;
 pub(super) const INPUTS: &str = "OCS_BLOCK_INPUT_FRAMES";
 pub(super) const FRAME_ERROR: &str = "The block parameter frame is unavailable.";
+
+/// Native action nodes follow their selected Linear parameter. Geometry stays
+/// explicit so a parameter pick cannot silently expand the reflection.
+pub(super) fn authored_dependencies(
+    doc: &Document,
+    def: Handle,
+    source: i32,
+    selected: &[Handle],
+    previous: &[Handle],
+) -> Result<Vec<Handle>, &'static str> {
+    let parameters = all_parameters(doc, def);
+    let actions = actions(doc, def);
+    let mut additions = BTreeSet::from_iter(selected.iter().copied());
+    let mut dependencies = previous
+        .iter()
+        .copied()
+        .filter(|h| additions.contains(h) || doc.get_entity(*h).is_none())
+        .collect::<Vec<_>>();
+    for p in parameters
+        .iter()
+        .filter(|p| p.is_action_target(Kind::Flip, source))
+    {
+        let include = additions.contains(&p.handle);
+        if !include && !previous.contains(&p.handle) {
+            continue;
+        }
+        if !include {
+            let grips = crate::scene::block_grips::config::locations(doc, def, p.handle)?;
+            dependencies.retain(|h| *h != p.handle && !grips.iter().any(|g| g.handle == *h));
+        }
+        for (handle, _, _, _) in actions
+            .iter()
+            .filter(|(_, _, _, id)| p.linear && *id == p.id)
+        {
+            if include {
+                additions.insert(*handle);
+            } else {
+                dependencies.retain(|h| h != handle);
+            }
+        }
+    }
+    for handle in &dependencies {
+        additions.remove(handle);
+    }
+    dependencies.extend(additions);
+    Ok(dependencies)
+}
+
+pub(super) fn validate_authored_selection(
+    doc: &Document,
+    def: Handle,
+    action: Handle,
+    source: i32,
+    dependencies: &[Handle],
+) -> Result<(), &'static str> {
+    if Plan::for_rebuild(doc, def)
+        .is_some_and(|plan| plan.steps.iter().any(|step| step.action == action))
+        || super::targets::geometry(doc, def, Kind::Flip, source, dependencies).is_ok()
+    {
+        return Ok(());
+    }
+    Err("Select all objects driven by the linked parameters and ensure their actions precede the Flip.")
+}
+
 struct Step {
     action: Handle,
     axis: Handle,

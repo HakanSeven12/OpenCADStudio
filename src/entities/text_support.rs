@@ -562,10 +562,12 @@ pub struct MTextLine {
     /// fresh column here when the entity defines any; with no columns it reads
     /// as a plain line break, which is what `\N` degrades to anyway.
     pub starts_column: bool,
-    /// Blank space above the paragraph, in drawing units (`\p…b#;`). Widens the
-    /// gap before the paragraph's first line so stacked paragraphs read apart.
+    /// Blank space above the paragraph, in drawing units: `\p…b#;` times the
+    /// entity height. Widens the gap before the paragraph's first line so
+    /// stacked paragraphs read apart.
     pub space_before: f32,
-    /// Blank space below the paragraph, in drawing units (`\p…a#;`).
+    /// Blank space below the paragraph, in drawing units: `\p…a#;` times the
+    /// entity height.
     pub space_after: f32,
     /// Per-paragraph line spacing (`\psm#` multiple / `\pse#` exact), overriding
     /// the entity-level factor for this paragraph's own lines.
@@ -578,7 +580,9 @@ pub struct MTextLine {
 pub enum ParaLineSpacing {
     /// Multiple of the default baseline gap (`sm#`).
     Multiple(f32),
-    /// Exact baseline-to-baseline distance in drawing units (`se#`).
+    /// `se#`: a factor of the default line pitch, as for `Multiple`, but
+    /// each line's baseline sits `#` entity heights below the top of its
+    /// slot instead of one, so the first line drops `# - 1` heights.
     Exact(f32),
 }
 
@@ -737,11 +741,13 @@ pub fn adapt_mtext_paragraphs(
     let mut carried_ls: Option<ParaLineSpacing> = None;
     for para in &doc.paragraphs {
         let props = &para.properties;
+        // `b#` and `a#` are multiples of the text height, like the `\px`
+        // indents: `\pxb2;` leaves two heights of space before the paragraph.
         if let Some(v) = props.spacing_before {
-            carried_sb = v as f32;
+            carried_sb = v as f32 * entity_height;
         }
         if let Some(v) = props.spacing_after {
-            carried_sa = v as f32;
+            carried_sa = v as f32 * entity_height;
         }
         match props.line_spacing {
             Some(MTextLineSpacing::Multiple(m)) => {
@@ -2128,10 +2134,14 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                 last_line_h
             };
             // A paragraph's own `\psm#`/`\pse#` overrides the entity factor for
-            // its lines; `Exact` fixes the baseline gap outright.
+            // its lines. Both scale the default pitch; `Exact` uses the entity
+            // height rather than the line's tallest run, and drops its baseline
+            // further into the slot (`exact_drop` below).
             let entity_gap = entity_h * ls_factor * (5.0 / 3.0) * base_font.line_spacing();
             match s.line_spacing {
-                Some(ParaLineSpacing::Exact(e)) if e > 0.0 => e,
+                Some(ParaLineSpacing::Exact(e)) if e > 0.0 => {
+                    entity_h * e * (5.0 / 3.0) * base_font.line_spacing()
+                }
                 Some(ParaLineSpacing::Multiple(m)) if m > 0.0 => {
                     mh * m * (5.0 / 3.0) * base_font.line_spacing()
                 }
@@ -2238,6 +2248,17 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             })
             .collect()
     };
+    // A line under `\pxse#;` sits `#` entity heights below the top of its slot
+    // (one height for every other line), so its first line drops `# - 1`
+    // heights, and the gap from or to such a line is the slot of the line above
+    // less its baseline depth, plus the depth of the line below.
+    let exact_drop: Vec<Option<f32>> = sub_lines
+        .iter()
+        .map(|s| match s.line_spacing {
+            Some(ParaLineSpacing::Exact(e)) if e > 0.0 => Some(e * entity_h),
+            _ => None,
+        })
+        .collect();
     let line_y_offset: Vec<f32> = {
         let mut col_y = vec![0.0_f32; cols.count.max(1)];
         let mut started = vec![false; cols.count.max(1)];
@@ -2250,7 +2271,13 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
             .map(|(i, s)| {
                 let c = s.column.min(col_y.len().saturating_sub(1));
                 if started[c] {
-                    col_y[c] -= per_line_h[i];
+                    col_y[c] -= if exact_drop[i].is_some() || exact_drop[i - 1].is_some() {
+                        let depth_above = exact_drop[i - 1].unwrap_or(line_text_h[i - 1]);
+                        let depth = exact_drop[i].unwrap_or(line_text_h[i]);
+                        per_line_h[i - 1] - depth_above + depth
+                    } else {
+                        per_line_h[i]
+                    };
                     if s.is_first_in_paragraph {
                         col_y[c] -= s.space_before + pending_after[c];
                     }
@@ -2260,6 +2287,9 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     // a top margin — that gap is the entity's own `\p…b#;`, not a
                     // heuristic, so the heading sits where the drawing places it.
                     col_y[c] -= s.space_before;
+                    if let Some(depth) = exact_drop[i] {
+                        col_y[c] -= depth - line_text_h[i];
+                    }
                 }
                 pending_after[c] = s.space_after;
                 col_y[c]

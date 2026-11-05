@@ -5380,3 +5380,25 @@ mod dynamic_options_tests {
         assert!(!app.command_line_hidden);
     }
 }
+
+/// #2195: undo and redo bring back the view each step was made in.
+#[cfg(test)]
+mod undo_view_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    #[test]
+    fn undo_returns_to_where_the_change_was_made() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let made_at = app.tabs[i].scene.camera.borrow().target;
+        let _ = app.run_command_line("LINE 0,0 10,0 ");
+        // Look somewhere far away.
+        app.tabs[i].scene.camera.borrow_mut().target = glam::DVec3::new(1.0e6, 1.0e6, 0.0);
+        let _ = app.update(Message::Undo);
+        assert!(app.tabs[i].scene.camera.borrow().target.distance(made_at) < 1e-9);
+        app.tabs[i].scene.camera.borrow_mut().target = glam::DVec3::new(-5.0e5, 0.0, 0.0);
+        let _ = app.update(Message::Redo);
+        assert!(app.tabs[i].scene.camera.borrow().target.distance(made_at) < 1e-9);
+    }
+}

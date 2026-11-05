@@ -1138,6 +1138,9 @@ pub(super) struct DeltaSnapshot {
     pub(super) selected_after: Vec<Handle>,
     pub(super) dirty_before: bool,
     pub(super) dirty_after: bool,
+    /// The view when this step was made. Undo and redo bring it back, so
+    /// stepping through the history shows each change where it was made.
+    pub(super) view: Option<Box<crate::scene::view::camera::Camera>>,
     pub(super) active_layer: Option<(String, String)>,
     /// LAYISO state changed by this history entry, if any. Other commands leave
     /// the isolation state untouched, so their history entries keep this None.

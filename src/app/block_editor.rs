@@ -298,6 +298,7 @@ impl OpenCADStudio {
             selected_after: Vec::new(),
             dirty_before: checkpoint.dirty,
             dirty_after: true,
+            view: None,
             active_layer,
             layiso_state: None,
             structure,

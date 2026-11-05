@@ -398,6 +398,61 @@ fn changing_the_annotation_scale_relays_a_complex_linetype() {
 }
 
 #[test]
+fn msltscale_off_keeps_a_complex_linetype_at_its_drawing_length() {
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(100.0, 0.0, 0.0));
+    let handle = add(&mut document, EntityType::Line(line));
+    let unscaled = glyph_stations(&wires(&document, handle), [0.0, 0.0], 0.5);
+
+    assert!(document.set_drawing_variable("MSLTSCALE", "0"));
+    let off = glyph_stations(&wires_at(&document, handle, 15.0, false), [0.0, 0.0], 0.5);
+    assert_eq!(off.len(), unscaled.len());
+
+    assert!(document.set_drawing_variable("MSLTSCALE", "1"));
+    let on = glyph_stations(&wires_at(&document, handle, 15.0, false), [0.0, 0.0], 8.0);
+    assert_fence_at_15(&on);
+}
+
+#[test]
+fn msltscale_drives_the_model_space_shader_ratio() {
+    use crate::scene::view::render::model_linetype_ratio;
+    let mut document = Document::new();
+    document.header.annotation_scale_value = 0.02;
+    // Not stored: on.
+    let ratio = model_linetype_ratio(&document).expect("on by default");
+    assert!((ratio - 50.0).abs() < 1e-3, "{ratio}");
+
+    assert!(document.set_drawing_variable("MSLTSCALE", "0"));
+    assert_eq!(model_linetype_ratio(&document), None);
+
+    assert!(document.set_drawing_variable("MSLTSCALE", "1"));
+    assert!(model_linetype_ratio(&document).is_some());
+}
+
+#[test]
+fn msltscale_toggle_relays_a_complex_linetype() {
+    let mut scene = crate::scene::Scene::new();
+    scene.document = fence_document();
+    let mut line = EntityType::Line(Line::from_points(
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(100.0, 0.0, 0.0),
+    ));
+    line.common_mut().linetype = "FENCE".to_string();
+    scene.add_entity(line);
+
+    scene.set_annotation_scale_named("1:15").expect("1:15");
+    assert_fence_at_15(&glyph_stations(&scene.entity_wires(), [0.0, 0.0], 8.0));
+
+    scene.set_model_linetype_scaling(false);
+    assert!(!scene.model_linetype_scaling());
+    let off = glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5).len();
+    assert!(off > 60, "{off} glyphs with MSLTSCALE off");
+
+    scene.set_model_linetype_scaling(true);
+    assert_fence_at_15(&glyph_stations(&scene.entity_wires(), [0.0, 0.0], 8.0));
+}
+
+#[test]
 fn dashed_line_end_dashes_keep_every_whole_period() {
     // The shader path uses the same rule: 2.3 holds three 0.75 periods of a
     // 0.5 dash, so each end dash is (2.3 - 2.25 + 0.5) / 2 = 0.275.

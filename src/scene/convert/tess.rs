@@ -954,15 +954,6 @@ fn tessellate_entity_inner(
     // resident geometry at its model-space scale prevents every MSPACE wheel
     // tick from rebuilding and uploading the viewport's complete wire set.
     let pslt_factor = 1.0_f32;
-    // A complex linetype is walked here on the CPU, so it never sees the wire
-    // shader's model-space `linetype_scale` uniform. Bake the same ratio in:
-    // outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the Model layout
-    // and 1.0 on a paper sheet, which is exactly when the shader applies it.
-    let complex_lt_anno = if !paper_space && anno_scale.is_finite() && anno_scale > 1e-9 {
-        anno_scale
-    } else {
-        1.0
-    };
     // ── Proxy entity: draw its cached preview ───────────────────────────────
     //
     // An unsupported application-specific entity arrives as `Unknown`. Its data is
@@ -1467,6 +1458,20 @@ fn tessellate_entity_inner(
     // wire per arc plus one wire of its straight segments, so it walks its own
     // ordered path (`polyline_lt_path`); every other entity is one wire.
     if let Some(clt) = crate::io::linetypes::resolve_complex_lt(document, lt_name) {
+        // A complex linetype is walked here on the CPU, so it never sees the
+        // wire shader's model-space `linetype_scale` uniform. Bake the same
+        // ratio in: outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the
+        // Model layout and 1.0 on a paper sheet, exactly when the shader
+        // applies it, and MSLTSCALE turns it off in both.
+        let complex_lt_anno = if !paper_space
+            && anno_scale.is_finite()
+            && anno_scale > 1e-9
+            && crate::scene::annotative::model_linetypes_follow_annotation(document)
+        {
+            anno_scale
+        } else {
+            1.0
+        };
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex

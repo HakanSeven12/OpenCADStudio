@@ -6982,6 +6982,18 @@ impl Scene {
             .unwrap_or(true)
     }
 
+    /// MSLTSCALE: whether model-space linetypes follow the annotation scale.
+    pub fn model_linetype_scaling(&self) -> bool {
+        annotative::model_linetypes_follow_annotation(&self.document)
+    }
+
+    /// Set MSLTSCALE. The shader reads it every frame; complex linetypes have
+    /// it baked into their wires, so those are re-tessellated.
+    pub fn set_model_linetype_scaling(&mut self, on: bool) {
+        crate::io::set_drawing_variable(&mut self.document, "MSLTSCALE", if on { "1" } else { "0" });
+        self.invalidate_annotation_dependencies();
+    }
+
     pub fn set_annotation_all_visible(&mut self, value: bool) {
         use codec::objects::{XRecordEntry, XRecordValue};
         let Some(layout) = self.current_layout_object_handle() else {

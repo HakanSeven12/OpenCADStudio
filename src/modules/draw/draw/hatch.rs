@@ -1132,6 +1132,8 @@ impl CadCommand for HatchCommand {
         let upper = input.to_ascii_uppercase();
         let point_or_keyword =
             || CmdResult::ReportError(t!("Point or option keyword required.").into_owned());
+        // A typed coordinate is a point for whichever step asks for one.
+        let typed_point = input.contains(',') || input.starts_with('@') || input.starts_with('<');
         match self.step {
             HatchStep::Gap => {
                 if let Some(value) = parse_gap_tolerance(input) {
@@ -1197,6 +1199,7 @@ impl CadCommand for HatchCommand {
                     None => CmdResult::ReportError(crate::tr!("hatch-cmd", "numeric")),
                 });
             }
+            HatchStep::CircleRadius(_) | HatchStep::CircleDiameter(_) if typed_point => return None,
             HatchStep::CircleRadius(centre) | HatchStep::CircleDiameter(centre) => {
                 if matches!(self.step, HatchStep::CircleRadius(_))
                     && matches!(upper.as_str(), "D" | "DIAMETER")
@@ -1211,7 +1214,7 @@ impl CadCommand for HatchCommand {
                 });
             }
             HatchStep::RectFirst | HatchStep::RectOther(_) | HatchStep::CircleCenter => {
-                return Some(point_or_keyword());
+                return (!typed_point).then(point_or_keyword);
             }
             HatchStep::Main => {}
         }
@@ -1232,6 +1235,7 @@ impl CadCommand for HatchCommand {
                     CmdResult::NeedPoint
                 }
                 "T" | "SETTINGS" => self.settings(),
+                _ if typed_point => return None,
                 _ => point_or_keyword(),
             }),
             HatchMode::Manual => match upper.as_str() {

@@ -253,6 +253,10 @@ pub struct LayerPanel {
     /// The column chooser (a right-click on the header) is open; it stays
     /// open while columns are ticked, until Close.
     pub columns_menu: bool,
+    /// The drawing's layer groups by layer name.
+    pub groups: Vec<(String, Vec<String>)>,
+    /// The group shown, `None` for every layer.
+    pub group: Option<String>,
 }
 
 impl Default for LayerPanel {
@@ -283,11 +287,94 @@ impl Default for LayerPanel {
             sort_asc: true,
             filter: String::new(),
             columns_menu: false,
+            groups: Vec::new(),
+            group: None,
         }
     }
 }
 
 impl LayerPanel {
+    /// Take the drawing's groups; a shown group that is gone shows all.
+    pub fn set_groups(&mut self, groups: Vec<(String, Vec<String>)>) {
+        if let Some(shown) = &self.group {
+            if !groups.iter().any(|(name, _)| name == shown) {
+                self.group = None;
+            }
+        }
+        self.groups = groups;
+    }
+
+    /// The selected rows' layer names.
+    pub fn selected_names(&self) -> Vec<String> {
+        let mut rows = self.selected_multi.clone();
+        rows.extend(self.selected);
+        rows.sort_unstable();
+        rows.dedup();
+        rows.into_iter()
+            .filter_map(|row| self.layers.get(row).map(|layer| layer.name.clone()))
+            .collect()
+    }
+
+    /// The group bar under the toolbar: the group shown, a new group from
+    /// the selection, adding the selection to a group, taking it out of the
+    /// shown group and deleting that group.
+    fn group_bar(&self) -> Element<'_, Message> {
+        let all = crate::tr!("layer-groups", "all-layers");
+        let mut shown_options = vec![all.clone()];
+        shown_options.extend(self.groups.iter().map(|(name, _)| name.clone()));
+        let shown = self.group.clone().unwrap_or_else(|| all.clone());
+        let has_selection = !self.selected_names().is_empty();
+        let names: Vec<String> = self.groups.iter().map(|(name, _)| name.clone()).collect();
+        let show = crate::ui::dropdown_list::pick_list(Some(shown), shown_options, |v| v.to_string())
+            .on_select(move |picked| {
+                Message::LayerGroupShow((picked != all).then_some(picked))
+            })
+            .text_size(FONT_SZ)
+            .padding([3, 6])
+            .width(Length::Fixed(170.0));
+        let add_to: Element<'_, Message> = if has_selection && !names.is_empty() {
+            crate::ui::dropdown_list::pick_list(None::<String>, names, |v| v.to_string())
+                .on_select(Message::LayerGroupAdd)
+                .placeholder(crate::tr!("layer-groups", "add-to"))
+                .text_size(FONT_SZ)
+                .padding([3, 6])
+                .width(Length::Fixed(150.0))
+                .into()
+        } else {
+            iced::widget::Space::new().width(0).into()
+        };
+        let in_group = self.group.is_some();
+        container(
+            row![
+                show,
+                toolbar_btn_cond(
+                    crate::ui::icons::FOLDER_OPEN,
+                    crate::tr!("layer-groups", "new-group").into(),
+                    Message::LayerGroupNew,
+                    has_selection,
+                ),
+                add_to,
+                toolbar_btn_cond(
+                    crate::ui::icons::MINUS,
+                    crate::tr!("layer-groups", "remove").into(),
+                    Message::LayerGroupRemove,
+                    in_group && has_selection,
+                ),
+                toolbar_btn_cond(
+                    crate::ui::icons::TRASH,
+                    crate::tr!("layer-groups", "delete").into(),
+                    Message::LayerGroupDelete,
+                    in_group,
+                ),
+            ]
+            .spacing(4)
+            .align_y(iced::Center),
+        )
+        .width(Length::Fill)
+        .padding([2, 8])
+        .into()
+    }
+
     /// Sync layers + update per-viewport freeze columns.
     /// `vp_info`: list of (vp_handle, vp_label, frozen_layer_handles) from scene.
     pub fn sync_with_viewports(
@@ -445,9 +532,16 @@ impl LayerPanel {
     /// these; raw `selected_multi` ranges would sweep in hidden rows (#50).
     pub fn visible_indices(&self) -> Vec<usize> {
         let filter = self.filter.to_lowercase();
+        let members = self.group.as_ref().and_then(|shown| {
+            self.groups
+                .iter()
+                .find(|(name, _)| name == shown)
+                .map(|(_, layers)| layers)
+        });
         self.layers
             .iter()
             .enumerate()
+            .filter(|(_, layer)| members.is_none_or(|members| members.contains(&layer.name)))
             .filter(|(_, layer)| filter.is_empty() || layer.name.to_lowercase().contains(&filter))
             .map(|(i, _)| i)
             .collect()
@@ -668,9 +762,9 @@ impl LayerPanel {
             .width(Length::Fill)
             .height(Length::Fill);
         if self.columns_menu {
-            column![toolbar, column_chooser(), grid].height(Length::Fill).into()
+            column![toolbar, self.group_bar(), column_chooser(), grid].height(Length::Fill).into()
         } else {
-            column![toolbar, grid].height(Length::Fill).into()
+            column![toolbar, self.group_bar(), grid].height(Length::Fill).into()
         }
     }
 }

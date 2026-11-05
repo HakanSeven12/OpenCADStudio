@@ -1407,6 +1407,9 @@ impl OpenCADStudio {
                 .sync_with_viewports(&doc_layers, vp_info);
             self.sync_ribbon_layers();
         }
+        // Layer groups live in the drawing's objects, outside the table.
+        let groups = self.layer_group_names(i);
+        self.tabs[i].layers.set_groups(groups);
         self.refresh_properties();
     }
 

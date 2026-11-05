@@ -49,6 +49,9 @@ impl OpenCADStudio {
         if let Some(task) = self.dispatch_layer_filter(cmd, i) {
             return Some(task);
         }
+        if let Some(task) = self.dispatch_layer_group(cmd, i) {
+            return Some(task);
+        }
         match cmd {
             cmd if cmd.starts_with("GRAPHICATTRIBUTELAYER ") => {
                 let name = cmd.trim_start_matches("GRAPHICATTRIBUTELAYER").trim();

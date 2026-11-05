@@ -12111,6 +12111,40 @@ impl OpenCADStudio {
                 self.ribbon.layer_filter = f;
                 Task::none()
             }
+            Message::LayerGroupShow(group) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.group = group;
+                Task::none()
+            }
+            Message::LayerGroupNew => {
+                let i = self.active_tab;
+                let name = self.next_layer_group_name(i);
+                let layers = self.tabs[i].layers.selected_names();
+                self.set_layer_group(i, &name, &layers, true);
+                self.tabs[i].layers.group = Some(name);
+                Task::none()
+            }
+            Message::LayerGroupAdd(name) => {
+                let i = self.active_tab;
+                let layers = self.tabs[i].layers.selected_names();
+                self.set_layer_group(i, &name, &layers, true);
+                Task::none()
+            }
+            Message::LayerGroupRemove => {
+                let i = self.active_tab;
+                if let Some(name) = self.tabs[i].layers.group.clone() {
+                    let layers = self.tabs[i].layers.selected_names();
+                    self.set_layer_group(i, &name, &layers, false);
+                }
+                Task::none()
+            }
+            Message::LayerGroupDelete => {
+                let i = self.active_tab;
+                if let Some(name) = self.tabs[i].layers.group.take() {
+                    return self.dispatch_command(&format!("LAYERGROUP DELETE {name}"));
+                }
+                Task::none()
+            }
             Message::LayerManagerFilterChanged(f) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.filter = f;

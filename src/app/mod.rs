@@ -57,6 +57,7 @@ mod find_replace;
 pub(crate) mod helpers;
 mod history;
 mod layer_filters;
+pub(crate) mod layer_groups;
 mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
@@ -4665,6 +4666,16 @@ pub enum Message {
     RibbonLayerFilterChanged(String),
     /// Live text of the Layer Manager's search box (#343).
     LayerManagerFilterChanged(String),
+    /// Show only this layer group's layers (`None`: every layer).
+    LayerGroupShow(Option<String>),
+    /// A new layer group from the selected layers.
+    LayerGroupNew,
+    /// Add the selected layers to this group.
+    LayerGroupAdd(String),
+    /// Take the selected layers out of the shown group.
+    LayerGroupRemove,
+    /// Delete the shown group (its layers stay).
+    LayerGroupDelete,
     /// User changed the active color in the Properties toolbar.
     RibbonColorChanged(AcadColor),
     RibbonLayerColorChanged {

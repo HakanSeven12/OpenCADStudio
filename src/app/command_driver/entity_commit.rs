@@ -961,6 +961,25 @@ impl OpenCADStudio {
         }
     }
 
+    /// Commit a drawn HATCH boundary; the command stays at its prompt.
+    pub(super) fn handle_commit_hatch_continue(
+        &mut self,
+        hatch: crate::scene::HatchModel,
+        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
+        message: String,
+    ) {
+        let i = self.active_tab;
+        let label = self.history_label_from_active_cmd(i, "HATCH");
+        let pending = self.begin_undo(i, label, 1, true);
+        let layer = self.tabs[i].active_layer.clone();
+        self.tabs[i].scene.add_hatch(hatch, Some(&layer), entity_style);
+        self.tabs[i].dirty = true;
+        if let Some(pd) = pending {
+            self.commit_undo_delta(i, pd);
+        }
+        self.handle_report_measurement(message);
+    }
+
     pub(super) fn handle_commit_hatches(
         &mut self,
         hatches: Vec<crate::scene::HatchModel>,

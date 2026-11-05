@@ -203,24 +203,29 @@ pub fn is_bigfont(path: &str) -> bool {
     load_file(path).is_some_and(|f| f.kind == ShxKind::Bigfont)
 }
 
-/// The code pages a big font's double-byte codes may be in, most likely
-/// first, guessed from the file name. The codec maps a name to its encoding
-/// (`ansi_950` Big5, `ansi_936` GBK, `ansi_932` Shift_JIS, `ansi_949` EUC-KR).
-fn bigfont_code_pages(path: &str) -> [&'static str; 4] {
+/// The code page of a big font's double-byte codes. Japanese and Korean fonts
+/// are known by name. A Chinese font is GB (`ansi_936`) when its name says so
+/// or when every code's trail byte is 0xA1 or above, as in GB2312 fonts such
+/// as `fsdb.shx`; Big5 (`ansi_950`) has trail bytes from 0x40 (`chineset.shx`).
+/// One page only: a code from another page would land on some other glyph.
+fn bigfont_code_page(path: &str, file: &ShxFile) -> &'static str {
     let name = path
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(path)
         .to_ascii_lowercase();
-    if name.contains("gb") || name.contains("hz") || name.contains("china") {
-        ["ansi_936", "ansi_950", "ansi_932", "ansi_949"]
+    if name.contains("whg") || name.contains("kor") || name.contains("han") {
+        "ansi_949"
     } else if name.contains("bigfont") || name.contains("extfont") || name.contains("jp") {
-        ["ansi_932", "ansi_950", "ansi_936", "ansi_949"]
-    } else if name.contains("whg") || name.contains("kor") || name.contains("han") {
-        ["ansi_949", "ansi_950", "ansi_936", "ansi_932"]
+        "ansi_932"
+    } else if name.contains("gb")
+        || name.contains("hz")
+        || name.contains("china")
+        || !file.shapes.keys().any(|&code| code > 0xFF && code & 0xFF < 0xA1)
+    {
+        "ansi_936"
     } else {
-        // `chineset.shx` and most Taiwanese fonts.
-        ["ansi_950", "ansi_936", "ansi_932", "ansi_949"]
+        "ansi_950"
     }
 }
 
@@ -232,20 +237,15 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
     if file.kind != ShxKind::Bigfont {
         return None;
     }
+    let enc = codec::io::dxf::code_page::encoding_from_code_page(bigfont_code_page(path, &file))?;
     let mut buf = [0u8; 4];
-    let s = ch.encode_utf8(&mut buf);
-    for page in bigfont_code_pages(path) {
-        let Some(enc) = codec::io::dxf::code_page::encoding_from_code_page(page) else {
-            continue;
-        };
-        let (bytes, _, unmappable) = enc.encode(s);
-        if unmappable || bytes.len() != 2 {
-            continue;
-        }
-        let code = u16::from_be_bytes([bytes[0], bytes[1]]);
-        if file.shapes.contains_key(&code) {
-            return font_glyph(path, code);
-        }
+    let (bytes, _, unmappable) = enc.encode(ch.encode_utf8(&mut buf));
+    if unmappable || bytes.len() != 2 {
+        return None;
+    }
+    let code = u16::from_be_bytes([bytes[0], bytes[1]]);
+    if file.shapes.contains_key(&code) {
+        return font_glyph(path, code);
     }
     None
 }
@@ -690,12 +690,17 @@ mod tests {
         path.to_string_lossy().into_owned()
     }
 
-    /// A one-glyph `bigfont 1.0` keyed by the Big5 code of `中` (0xA4A4),
-    /// laid out like `chineset.shx`: header, 8-byte entries in a sparse
-    /// table, font header shape 0 (`name NUL above below modes`).
+    /// A `bigfont 1.0` with the Big5 codes of `中` (0xA4A4) and `一` (0xA440).
     fn synthetic_bigfont() -> Vec<u8> {
+        bigfont_with(&[0xA4A4, 0xA440])
+    }
+
+    /// A `bigfont 1.0` with one glyph at each of `codes`, laid out like
+    /// `chineset.shx`: header, 8-byte entries in a sparse table, font header
+    /// shape 0 (`name NUL above below modes`).
+    fn bigfont_with(codes: &[u16]) -> Vec<u8> {
         let mut b = b"AutoCAD-86 bigfont 1.0\r\n\x1a".to_vec();
-        let entries: u16 = 4;
+        let entries = 2 + 2 * codes.len() as u16;
         b.extend_from_slice(&8u16.to_le_bytes());
         b.extend_from_slice(&entries.to_le_bytes());
         b.extend_from_slice(&1u16.to_le_bytes()); // one lead-byte range
@@ -709,7 +714,7 @@ mod tests {
         b.extend_from_slice(&head_data);
         let glyph_off = b.len() as u32;
         b.extend_from_slice(&glyph_data);
-        // Slot 0 = shape 0; slot 2 = the glyph (slots 1 and 3 stay empty).
+        // Slot 0 = shape 0; even slots from 2 = the glyphs (odd slots stay empty).
         let mut entry = |slot: usize, code: u16, len: u16, off: u32| {
             let at = table_at + slot * 8;
             b[at..at + 2].copy_from_slice(&code.to_le_bytes());
@@ -717,7 +722,9 @@ mod tests {
             b[at + 4..at + 8].copy_from_slice(&off.to_le_bytes());
         };
         entry(0, 0, head_data.len() as u16, head_off);
-        entry(2, 0xA4A4, glyph_data.len() as u16, glyph_off);
+        for (i, &code) in codes.iter().enumerate() {
+            entry(2 + 2 * i, code, glyph_data.len() as u16, glyph_off);
+        }
         b
     }
 
@@ -751,6 +758,17 @@ mod tests {
             bigfont_glyph(&path, '國').is_none(),
             "unknown code must miss, not alias"
         );
+    }
+
+    /// #2586: a GB2312 font whose name does not say GB (`fsdb.shx`) is read
+    /// by GB code, and a character it lacks misses instead of taking the
+    /// glyph its Big5 code would hit.
+    #[test]
+    fn a_gb_bigfont_is_known_by_its_codes() {
+        // `中` is GB D6D0; `國` is not GB2312, its Big5 code B0EA is.
+        let path = tmp("fsdb.shx", &bigfont_with(&[0xD6D0, 0xB0EA]));
+        assert!(bigfont_glyph(&path, '中').is_some());
+        assert!(bigfont_glyph(&path, '國').is_none());
     }
 
     #[test]

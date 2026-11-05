@@ -1874,10 +1874,17 @@ fn lookup_basepoint_palette_and_table_dialog_real_controls() {
                 .row_count,
             1
         );
+        find_in_view(&app, "<Unmatched>");
+        find_in_view(&app, "Custom");
+        let _ = app.update(Message::BlockLookup(A::Cell(0, 0, "20".into())));
         let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "Small".into())));
         let point = find_in_view(&app, "Audit");
         authoring_click(&mut app, point);
-        assert!(app.block_lookup.as_ref().unwrap().notice.is_some());
+        assert!(
+            app.block_lookup.as_ref().unwrap().notice.is_some(),
+            "audit should pass with a notice: {:?}",
+            app.block_lookup.as_ref().unwrap().error
+        );
         authoring_capture(&app, "lookup-property-table");
         let point = find_in_view(&app, "OK");
         authoring_click(&mut app, point);

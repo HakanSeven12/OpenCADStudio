@@ -190,7 +190,10 @@ fn lookup_audit_and_failed_binding_are_atomic() {
         let mut bad = good.clone();
         bad.expressions[cell] = value.into();
         let before = document.clone();
-        assert!(apply_table(&mut document, definition, parameter, bad).is_err());
+        assert!(
+            apply_table(&mut document, definition, parameter, bad).is_err(),
+            "cell {cell} set to {value:?} must be refused"
+        );
         assert_eq!(document, before);
     }
     let mut bad = good.clone();

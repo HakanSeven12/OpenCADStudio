@@ -596,10 +596,38 @@ pub(crate) fn empty_table(parameter: &BlockLookupParameter) -> BlockLookupAction
         ..Default::default()
     }
 }
+/// An all-empty row is the blank entry row, not part of the applied table.
+pub(crate) fn without_blank_rows(table: &BlockLookupAction) -> BlockLookupAction {
+    let cols = table.columns.len();
+    let rows = table.row_count.max(0) as usize;
+    if cols == 0 || table.expressions.len() != rows * cols {
+        return table.clone();
+    }
+    let kept: Vec<usize> = (0..rows)
+        .filter(|row| (0..cols).any(|col| !table.expressions[row * cols + col].trim().is_empty()))
+        .collect();
+    if kept.len() == rows {
+        return table.clone();
+    }
+    let mut compacted = table.clone();
+    compacted.expressions = kept
+        .iter()
+        .flat_map(|row| {
+            table.expressions[row * cols..(row + 1) * cols]
+                .iter()
+                .cloned()
+        })
+        .collect();
+    compacted.row_count = kept.len() as i32;
+    compacted
+}
+
 pub(crate) fn validate(
     table: &BlockLookupAction,
     original: Option<&BlockLookupAction>,
 ) -> Result<(), String> {
+    let compacted = without_blank_rows(table);
+    let table = &compacted;
     let rows = usize::try_from(table.row_count).map_err(|_| "Invalid table size.")?;
     let cols = table.columns.len();
     if rows == 0
@@ -680,8 +708,9 @@ fn apply_table_inner(
     document: &mut Document,
     definition: Handle,
     parameter: Handle,
-    mut edited: BlockLookupAction,
+    edited: BlockLookupAction,
 ) -> Result<Handle, String> {
+    let mut edited = without_blank_rows(&edited);
     let previous = table(document, definition, parameter).map_err(str::to_string)?;
     validate(&edited, previous.as_ref().map(|(_, t)| t))?;
     expressions::validate_context(document, definition, &edited, previous.as_ref().map(|(_, t)| t))?;

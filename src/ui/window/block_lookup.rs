@@ -38,9 +38,10 @@ pub(crate) struct Draft {
 }
 impl Draft {
     pub(crate) fn changed(&self) -> bool {
+        let edited = block_lookup::without_blank_rows(&self.edited);
         match &self.original {
-            Some((_, original)) => original != &self.edited,
-            None => self.edited != block_lookup::empty_table(&self.original_parameter),
+            Some((_, original)) => block_lookup::without_blank_rows(original) != edited,
+            None => edited != block_lookup::empty_table(&self.original_parameter),
         }
     }
 }
@@ -108,9 +109,14 @@ impl State {
                     .position(|c| c.lookup_property)
                     .unwrap_or(cols);
                 for row in (0..rows).rev() {
+                    // The blank entry row stays blank; begun rows get the default.
+                    let blank =
+                        (0..cols).all(|col| table.expressions[row * cols + col].trim().is_empty());
                     table.expressions.insert(
                         row * cols + index,
-                        if property.column.lookup_property {
+                        if blank {
+                            String::new()
+                        } else if property.column.lookup_property {
                             format!("Value{}", row + 1)
                         } else {
                             property.value.clone()
@@ -135,23 +141,19 @@ impl State {
             }
             Action::Cell(row, col, value) if row < rows && col < cols => {
                 table.expressions[row * cols + col] = value;
+                let filled =
+                    (0..cols).any(|c| !table.expressions[row * cols + c].trim().is_empty());
+                if filled && row + 1 == rows && rows < 1000 {
+                    table
+                        .expressions
+                        .extend(std::iter::repeat_n(String::new(), cols));
+                    table.row_count += 1;
+                }
             }
             Action::AddRow if rows < 1000 => {
-                for column in &table.columns {
-                    let value = if column.lookup_property {
-                        format!("Value{}", rows + 1)
-                    } else {
-                        self.properties
-                            .iter()
-                            .find(|p| {
-                                p.column.node_id == column.node_id
-                                    && p.column.connection_name == column.connection_name
-                            })
-                            .map(|p| p.value.clone())
-                            .unwrap_or_default()
-                    };
-                    table.expressions.push(value);
-                }
+                table
+                    .expressions
+                    .extend(std::iter::repeat_n(String::new(), cols));
                 table.row_count += 1;
             }
             Action::DeleteRow(row) if row < rows => {
@@ -176,10 +178,11 @@ impl State {
                 table.columns[index].writable = value;
             }
             Action::Audit => {
-                match block_lookup::validate(table, draft.original.as_ref().map(|(_, t)| t))
+                let compacted = block_lookup::without_blank_rows(table);
+                match block_lookup::validate(&compacted, draft.original.as_ref().map(|(_, t)| t))
                     .and_then(|_| {
                         block_lookup::validate_with_properties(
-                            table,
+                            &compacted,
                             draft.original.as_ref().map(|(_, t)| t),
                             &self.properties,
                         )
@@ -275,6 +278,24 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
                         .on_press(send(Action::DeleteRow(row_index))),
                 );
         grid = grid.push(cells);
+    }
+    if let Some(unmatched_first) = table
+        .columns
+        .iter()
+        .position(|column| !column.lookup_property)
+    {
+        let mut unmatched = row![text(" ").width(28)].spacing(6);
+        for (index, column) in table.columns.iter().enumerate() {
+            let label = if index == unmatched_first {
+                crate::t!("<Unmatched>").into_owned()
+            } else if column.lookup_property {
+                column.unmatched_name.clone()
+            } else {
+                String::new()
+            };
+            unmatched = unmatched.push(container(text(label).size(13)).width(160));
+        }
+        grid = grid.push(unmatched);
     }
     let available = state
         .properties

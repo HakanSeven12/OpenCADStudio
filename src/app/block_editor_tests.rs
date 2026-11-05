@@ -3058,8 +3058,109 @@ fn edit_lookup(app: &mut OpenCADStudio) {
     let _ = app.update(Message::BlockLookup(A::Property(0)));
     let _ = app.update(Message::BlockLookup(A::AddProperty));
     let _ = app.update(Message::BlockLookup(A::AddRow));
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 0, "20".into())));
     let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "Small".into())));
 }
+
+#[test]
+fn add_row_opens_a_blank_row_and_typing_a_value_keeps_a_blank_one_after_it() {
+    use crate::ui::window::block_lookup::Action as A;
+    let (mut app, definition, parameter) = lookup_editor_fixture();
+    let i = app.active_tab;
+    let _ = app.dispatch_command("BLOOKUPTABLE");
+    let _ = app.update(Message::BlockLookup(A::Property(0)));
+    let _ = app.update(Message::BlockLookup(A::AddProperty));
+    let _ = app.update(Message::BlockLookup(A::AddRow));
+    let draft = &app.block_lookup.as_ref().unwrap().drafts[0];
+    assert_eq!(draft.edited.row_count, 1, "the button adds one row");
+    assert_eq!(
+        draft.edited.expressions,
+        vec![String::new(), String::new()],
+        "the new row is blank rather than carrying the current value and a generated label"
+    );
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 0, "20".into())));
+    let draft = &app.block_lookup.as_ref().unwrap().drafts[0];
+    assert_eq!(
+        draft.edited.row_count, 2,
+        "a row that takes a value keeps a blank one below it for the next entry"
+    );
+    assert_eq!(draft.edited.expressions[2..], ["", ""]);
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "Small".into())));
+    assert_eq!(
+        app.block_lookup.as_ref().unwrap().drafts[0]
+            .edited
+            .row_count,
+        2,
+        "editing a row that is not last adds no further row"
+    );
+    let _ = app.update(Message::BlockLookup(A::Apply));
+    assert!(app.block_lookup.is_none());
+    let (_, stored) =
+        crate::scene::block_lookup::table(&app.tabs[i].scene.document, definition, parameter)
+            .unwrap()
+            .unwrap();
+    assert_eq!(stored.row_count, 1, "the blank entry row is not stored");
+    assert_eq!(
+        stored.expressions,
+        vec!["20".to_string(), "Small".to_string()]
+    );
+}
+
+#[test]
+fn a_partly_filled_row_is_refused_though_the_blank_one_is_dropped() {
+    use crate::ui::window::block_lookup::Action as A;
+    let (mut app, _definition, _parameter) = lookup_editor_fixture();
+    let i = app.active_tab;
+    let _ = app.dispatch_command("BLOOKUPTABLE");
+    let _ = app.update(Message::BlockLookup(A::Property(0)));
+    let _ = app.update(Message::BlockLookup(A::AddProperty));
+    let _ = app.update(Message::BlockLookup(A::AddRow));
+    let _ = app.update(Message::BlockLookup(A::Cell(0, 0, "20".into())));
+    let before = app.tabs[i].scene.document.clone();
+    let _ = app.update(Message::BlockLookup(A::Apply));
+    let state = app.block_lookup.as_ref().expect("the dialog stays open");
+    assert_eq!(
+        state.error.as_deref(),
+        Some("Each cell must be a finite number."),
+        "the partly filled row is the one refused"
+    );
+    assert!(state.confirm_close, "the operator is offered the way out");
+    assert_eq!(
+        app.tabs[i].scene.document, before,
+        "nothing was written while the row is refused"
+    );
+}
+
+#[test]
+fn a_blank_entry_row_alone_leaves_the_table_as_it_was() {
+    use crate::ui::window::block_lookup::Action as A;
+    let (mut app, definition, parameter) = lookup_editor_fixture();
+    let i = app.active_tab;
+    let _ = app.dispatch_command("BLOOKUPTABLE");
+    edit_lookup(&mut app);
+    let _ = app.update(Message::BlockLookup(A::Apply));
+    let depth = app.tabs[i].history.undo_stack.len();
+    let saved = app.tabs[i].scene.document.clone();
+    let _ = app.dispatch_command("BLOOKUPTABLE");
+    let _ = app.update(Message::BlockLookup(A::AddRow));
+    let _ = app.update(Message::BlockLookup(A::Apply));
+    assert!(app.block_lookup.is_none(), "the dialog still closes");
+    assert_eq!(
+        app.tabs[i].history.undo_stack.len(),
+        depth,
+        "an untouched blank row is not an edit"
+    );
+    assert_eq!(app.tabs[i].scene.document, saved);
+    assert_eq!(
+        crate::scene::block_lookup::table(&app.tabs[i].scene.document, definition, parameter)
+            .unwrap()
+            .unwrap()
+            .1
+            .expressions,
+        vec!["20", "Small"]
+    );
+}
+
 #[test]
 fn lookup_editor_cancel_apply_one_undo_and_stale_guard() {
     use crate::ui::window::block_lookup::Action as A;
@@ -3097,7 +3198,7 @@ fn lookup_editor_cancel_apply_one_undo_and_stale_guard() {
             .unwrap()
             .1
             .expressions,
-        vec!["2", "Small"]
+        vec!["20", "Small"]
     );
     let saved = app.tabs[i].scene.document.clone();
     app.undo_steps(1);

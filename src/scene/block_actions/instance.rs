@@ -1320,8 +1320,13 @@ pub(crate) fn refresh_after_edit(
         let frames = load_frames(&staged, &mut evaluated, insert, &parameters)?;
         let previous_frames = previous_parameters
             .iter()
-            .filter(|p| !p.flip)
-            .map(|p| frame(before, insert, p).map(|f| (p.handle, f)))
+            .map(|p| {
+                let previous = match frame(before, insert, p) {
+                    Err(_) if p.flip => Ok(ParameterFrame { base: p.base, end: p.end }),
+                    previous => previous,
+                };
+                previous.map(|frame| (p.handle, frame))
+            })
             .collect::<Result<std::collections::BTreeMap<_, _>, _>>()?;
         let previous_values = previous_frames.iter().map(|(h, f)| (*h, f.end)).collect();
         let resolved_frames = super::rebuild_framed(

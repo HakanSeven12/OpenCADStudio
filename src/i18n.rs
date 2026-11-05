@@ -585,8 +585,12 @@ mod tests {
             assert!(prompt.contains("\"…\""), "{language:?}: {prompt}");
             let point = loader.get_attr("common", "point");
             let linear = loader.get_attr("common", "linear");
+            let flip = loader.get_attr("block-history-kinds", "flip");
             for rendered in [&prompt, &created] {
-                assert!(rendered.contains(&point) && rendered.contains(&linear), "{language:?}: {rendered}");
+                assert!(
+                    [&point, &linear, &flip].iter().all(|label| rendered.contains(label.as_str())),
+                    "{language:?}: {rendered}"
+                );
             }
             assert!(!loader.get_attr("block-action-targets", "unique-point").is_empty());
         }

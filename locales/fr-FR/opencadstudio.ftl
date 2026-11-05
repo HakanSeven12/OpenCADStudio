@@ -8564,8 +8564,8 @@ parameters-manager-feedback =
     .history = Modification du gestionnaire de paramètres
 
 block-action-targets =
-    .prompt = BACTIONSET  Sélectionnez des objets ou saisissez Parameter suivi du nom du paramètre, puis appuyez sur Entrée (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Sélectionnez des objets ou saisissez Parameter suivi du nom du paramètre, puis appuyez sur Entrée (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Sélectionnez des objets ou saisissez Parameter suivi du nom du paramètre, puis appuyez sur Entrée (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Sélectionnez des objets ou saisissez Parameter suivi du nom du paramètre, puis appuyez sur Entrée (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Saisissez un nom de paramètre unique.
     .empty = Une action nécessite au moins une cible.
     .invalid = Sélectionnez des cibles prises en charge appartenant à ce bloc.

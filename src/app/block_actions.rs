@@ -276,10 +276,7 @@ impl OpenCADStudio {
             tab.id,
             definition,
             kind,
-            kind.map_or_else(
-                || actions::all_parameters(&tab.scene.document, definition),
-                |kind| actions::parameters(&tab.scene.document, definition, kind),
-            ),
+            &tab.scene.document,
         );
         self.command_line.push_info(&command.prompt());
         self.command_line.set_step_options(command.options());
@@ -311,12 +308,11 @@ impl OpenCADStudio {
         }
         let tab = &self.tabs[self.active_tab];
         let definition = tab.active_block_edit_session().unwrap().br_handle;
-        let candidates = actions::parameters(&tab.scene.document, definition, kind);
         let Some(command) = crate::modules::block_editor::action::ActionCommand::for_parameter(
             tab.id,
             definition,
             kind,
-            candidates,
+            &tab.scene.document,
             parameter,
             xy_key_point,
         ) else {
@@ -437,7 +433,7 @@ impl OpenCADStudio {
                     || tab.scene.document.objects.get(&action) != Some(expected.as_ref())
                     || point_choices.as_ref().is_some_and(|(source, expected)| {
                         let current = actions::all_parameters(&tab.scene.document, definition)
-                            .into_iter().filter(|p| (p.point || p.linear) && p.id != *source)
+                            .into_iter().filter(|p| p.is_move_target() && p.id != *source)
                             .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                         current != *expected
                     })
@@ -513,7 +509,7 @@ impl OpenCADStudio {
                 }
                 if point_choices.as_ref().is_some_and(|(source, expected)| {
                     let current = actions::all_parameters(&self.tabs[i].scene.document, definition)
-                        .into_iter().filter(|p| (p.point || p.linear) && p.id != *source)
+                        .into_iter().filter(|p| p.is_move_target() && p.id != *source)
                         .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                     current != *expected || !actions::all_parameters(&self.tabs[i].scene.document, definition)
                         .iter().any(|p| p.handle == parameter && p.id == *source)

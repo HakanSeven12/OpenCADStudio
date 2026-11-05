@@ -8542,8 +8542,8 @@ parameters-manager-feedback =
     .history = パラメーター管理を編集
 
 block-action-targets =
-    .prompt = BACTIONSET  オブジェクトを選択するか、Parameter に続けてパラメータ名を入力し、Enter キーを押します (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  オブジェクトを選択するか、Parameter に続けてパラメータ名を入力し、Enter キーを押します (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  オブジェクトを選択するか、Parameter に続けてパラメータ名を入力し、Enter キーを押します (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  オブジェクトを選択するか、Parameter に続けてパラメータ名を入力し、Enter キーを押します (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = 一意のパラメータ名を入力してください。
     .empty = アクションには少なくとも1つの対象が必要です。
     .invalid = このブロックに属するサポート対象を選択してください。

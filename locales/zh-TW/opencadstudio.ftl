@@ -8549,8 +8549,8 @@ parameters-manager-feedback =
     .history = 參數管理員編輯
 
 block-action-targets =
-    .prompt = BACTIONSET  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = 請輸入唯一的參數名稱。
     .empty = 動作至少需要一個目標。
     .invalid = 請選取屬於此圖塊的受支援目標。

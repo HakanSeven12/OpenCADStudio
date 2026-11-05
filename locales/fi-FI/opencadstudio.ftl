@@ -8561,8 +8561,8 @@ parameters-manager-feedback =
     .history = Parametrien hallinnan muokkaus
 
 block-action-targets =
-    .prompt = BACTIONSET  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Anna yksilöllinen parametrin nimi.
     .empty = Toiminto tarvitsee vähintään yhden kohteen.
     .invalid = Valitse tuettuja kohteita tästä lohkosta.

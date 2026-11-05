@@ -1,7 +1,7 @@
 //! Reuse the command host's point picking and object-set selection.
 use crate::command::{CadCommand, CmdOption, CmdResult, PointPickContext};
 use crate::scene::block_actions::{self as actions, Kind, Parameter, XyKeyPoint};
-use codec::Handle;
+use codec::{Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -34,8 +34,12 @@ impl ActionCommand {
         document: u64,
         definition: Handle,
         kind: Option<Kind>,
-        candidates: Vec<Parameter>,
+        doc: &Document,
     ) -> Self {
+        let candidates = match kind {
+            None | Some(Kind::Move) => actions::all_parameters(doc, definition),
+            Some(kind) => actions::parameters(doc, definition, kind),
+        };
         Self {
             document,
             definition,
@@ -62,11 +66,11 @@ impl ActionCommand {
         document: u64,
         definition: Handle,
         kind: Kind,
-        candidates: Vec<Parameter>,
+        doc: &Document,
         parameter: Handle,
         xy_key_point: Option<XyKeyPoint>,
     ) -> Option<Self> {
-        let mut command = Self::new(document, definition, Some(kind), candidates);
+        let mut command = Self::new(document, definition, Some(kind), doc);
         if !command
             .candidates
             .iter()
@@ -95,7 +99,7 @@ impl ActionCommand {
             source,
             self.candidates
                 .iter()
-                .filter(|p| (p.point || p.linear) && p.id != source)
+                .filter(|p| p.is_move_target() && p.id != source)
                 .map(|p| (p.handle, p.id, p.name.clone()))
                 .collect(),
         ))
@@ -113,7 +117,7 @@ impl ActionCommand {
             source,
             self.candidates
                 .iter()
-                .filter(|p| (p.point || p.linear) && p.id != source)
+                .filter(|p| p.is_move_target() && p.id != source)
                 .map(|p| (p.handle, p.id, p.name.clone()))
                 .collect(),
         ))
@@ -679,7 +683,7 @@ impl CadCommand for ActionCommand {
             |h| {
                 self.candidates
                     .iter()
-                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == h)
+                    .any(|p| p.is_move_target() && p.id != source && p.handle == h)
             },
             position,
             context,
@@ -689,7 +693,7 @@ impl CadCommand for ActionCommand {
                 !self
                     .candidates
                     .iter()
-                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == *h)
+                    .any(|p| p.is_move_target() && p.id != source && p.handle == *h)
             });
         }
         if remove {
@@ -705,14 +709,14 @@ impl CadCommand for ActionCommand {
             && self
                 .candidates
                 .iter()
-                .any(|p| (p.point || p.linear) && p.handle == handle)
+                .any(|p| p.is_move_target() && p.handle == handle)
     }
     fn clear_selection_markers(&mut self) {
         self.targets.retain(|h| {
             !self
                 .candidates
                 .iter()
-                .any(|p| (p.point || p.linear) && p.handle == *h)
+                .any(|p| p.is_move_target() && p.handle == *h)
         });
     }
     fn on_selection_marker_region(
@@ -734,7 +738,7 @@ impl CadCommand for ActionCommand {
             |h| {
                 self.candidates
                     .iter()
-                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == h)
+                    .any(|p| p.is_move_target() && p.id != source && p.handle == h)
             },
             polygon,
             context,
@@ -745,7 +749,7 @@ impl CadCommand for ActionCommand {
                 !self
                     .candidates
                     .iter()
-                    .any(|p| (p.point || p.linear) && p.id != source && p.handle == *h)
+                    .any(|p| p.is_move_target() && p.id != source && p.handle == *h)
             });
         }
         for (handle, _) in &hits {

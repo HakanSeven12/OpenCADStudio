@@ -8527,8 +8527,8 @@ parameters-manager-feedback =
     .history = Parametre yöneticisi düzenlemesi
 
 block-action-targets =
-    .prompt = BACTIONSET  Nesneleri seçin veya Parameter ve ardından parametre adını yazıp Enter tuşuna basın (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Nesneleri seçin veya Parameter ve ardından parametre adını yazıp Enter tuşuna basın (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Nesneleri seçin veya Parameter ve ardından parametre adını yazıp Enter tuşuna basın (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Nesneleri seçin veya Parameter ve ardından parametre adını yazıp Enter tuşuna basın (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Benzersiz bir parametre adı girin.
     .empty = Bir eylem en az bir hedef gerektirir.
     .invalid = Bu bloğa ait desteklenen hedefleri seçin.

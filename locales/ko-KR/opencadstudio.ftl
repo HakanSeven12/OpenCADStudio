@@ -8553,8 +8553,8 @@ parameters-manager-feedback =
     .history = 매개변수 관리자 편집
 
 block-action-targets =
-    .prompt = BACTIONSET  객체를 선택하거나 Parameter 다음에 매개변수 이름을 입력하고 Enter를 누르세요 (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  객체를 선택하거나 Parameter 다음에 매개변수 이름을 입력하고 Enter를 누르세요 (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  객체를 선택하거나 Parameter 다음에 매개변수 이름을 입력하고 Enter를 누르세요 (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  객체를 선택하거나 Parameter 다음에 매개변수 이름을 입력하고 Enter를 누르세요 (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = 고유한 매개변수 이름을 입력하세요.
     .empty = 동작에는 대상이 하나 이상 필요합니다.
     .invalid = 이 블록에 속한 지원되는 대상을 선택하십시오.

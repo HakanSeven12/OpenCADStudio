@@ -8564,8 +8564,8 @@ parameters-manager-feedback =
     .history = Edición del administrador de parámetros
 
 block-action-targets =
-    .prompt = BACTIONSET  Seleccione objetos o escriba Parameter seguido del nombre de un parámetro y pulse Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Seleccione objetos o escriba Parameter seguido del nombre de un parámetro y pulse Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Seleccione objetos o escriba Parameter seguido del nombre de un parámetro y pulse Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Seleccione objetos o escriba Parameter seguido del nombre de un parámetro y pulse Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Introduzca un nombre de parámetro único.
     .empty = Una acción necesita al menos un destino.
     .invalid = Seleccione destinos compatibles que pertenezcan a este bloque.

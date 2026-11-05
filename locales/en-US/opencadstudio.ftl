@@ -8607,8 +8607,8 @@ parameters-manager-feedback =
     .history = Parameters Manager edit
 
 block-action-targets =
-    .prompt = BACTIONSET  Select objects or type Parameter followed by a parameter name, then press Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Select objects or type Parameter followed by a parameter name, then press Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Select objects or type Parameter followed by a parameter name, then press Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Select objects or type Parameter followed by a parameter name, then press Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Enter a unique parameter name.
     .empty = An action needs at least one target.
     .invalid = Select supported targets belonging to this block.

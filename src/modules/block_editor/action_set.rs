@@ -9,7 +9,7 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["BACTIONSET"]
 });
 
-/// Pick the visible point marker or its leader in the active viewport.
+/// Pick the visible parameter marker or its leader in the active viewport.
 pub(crate) fn pick_point_marker(
     scene: &crate::scene::Scene,
     definition: Handle,
@@ -56,7 +56,7 @@ pub(crate) fn pick_point_marker(
         .map(|(_, handle, name)| (handle, name))
 }
 
-/// Select a point marker by its projected leader and endpoints.
+/// Select a parameter marker by its projected leader and endpoints.
 pub(crate) fn point_markers_in_region(
     scene: &crate::scene::Scene,
     definition: Handle,
@@ -162,7 +162,7 @@ impl ActionSetCommand {
     ) -> Self {
         let points = actions::all_parameters(doc, definition)
             .into_iter()
-            .filter(|p| p.point || p.linear)
+            .filter(|p| p.is_move_target())
             .map(|p| (p.name, p.handle, p.id))
             .collect::<Vec<_>>();
         let candidates = actions::actions(doc, definition)

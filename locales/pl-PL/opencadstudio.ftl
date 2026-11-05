@@ -8566,8 +8566,8 @@ parameters-manager-feedback =
     .history = Edycja menedżera parametrów
 
 block-action-targets =
-    .prompt = BACTIONSET  Wybierz obiekty lub wpisz Parameter i nazwę parametru, a następnie naciśnij Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Wybierz obiekty lub wpisz Parameter i nazwę parametru, a następnie naciśnij Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Wybierz obiekty lub wpisz Parameter i nazwę parametru, a następnie naciśnij Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Wybierz obiekty lub wpisz Parameter i nazwę parametru, a następnie naciśnij Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Wprowadź unikatową nazwę parametru.
     .empty = Operacja wymaga co najmniej jednego celu.
     .invalid = Wybierz obsługiwane cele należące do tego bloku.

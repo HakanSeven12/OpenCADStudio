@@ -104,6 +104,13 @@ pub(crate) struct Parameter {
     pub flip: bool,
     pub reference: DVec3,
 }
+
+impl Parameter {
+    pub(crate) fn is_move_target(&self) -> bool {
+        self.point || self.linear || self.flip
+    }
+}
+
 pub(crate) fn v(p: Vector3) -> DVec3 {
     DVec3::new(p.x, p.y, p.z)
 }

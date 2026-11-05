@@ -8568,8 +8568,8 @@ parameters-manager-feedback =
     .history = Изменение в диспетчере параметров
 
 block-action-targets =
-    .prompt = BACTIONSET  Выберите объекты или введите Parameter и имя параметра, затем нажмите Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Выберите объекты или введите Parameter и имя параметра, затем нажмите Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Выберите объекты или введите Parameter и имя параметра, затем нажмите Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Выберите объекты или введите Parameter и имя параметра, затем нажмите Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Введите уникальное имя параметра.
     .empty = Для операции требуется хотя бы один объект.
     .invalid = Выберите поддерживаемые объекты, принадлежащие этому блоку.

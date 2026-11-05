@@ -8555,8 +8555,8 @@ parameters-manager-feedback =
     .history = ແກ້ໄຂຕົວຈັດການພາຣາມິເຕີ
 
 block-action-targets =
-    .prompt = BACTIONSET  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = ປ້ອນຊື່ພາຣາມິເຕີທີ່ບໍ່ຊ້ຳ.
     .empty = ການກະທຳຕ້ອງມີເປົ້າໝາຍຢ່າງໜ້ອຍໜຶ່ງລາຍການ.
     .invalid = ເລືອກເປົ້າໝາຍທີ່ຮອງຮັບຂອງບລັອກນີ້.

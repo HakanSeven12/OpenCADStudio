@@ -8563,8 +8563,8 @@ parameters-manager-feedback =
     .history = Modifica gestione parametri
 
 block-action-targets =
-    .prompt = BACTIONSET  Selezionare gli oggetti o digitare Parameter seguito dal nome di un parametro, quindi premere Invio (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Selezionare gli oggetti o digitare Parameter seguito dal nome di un parametro, quindi premere Invio (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Selezionare gli oggetti o digitare Parameter seguito dal nome di un parametro, quindi premere Invio (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Selezionare gli oggetti o digitare Parameter seguito dal nome di un parametro, quindi premere Invio (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Immettere un nome di parametro univoco.
     .empty = Un’azione richiede almeno una destinazione.
     .invalid = Selezionare destinazioni supportate appartenenti a questo blocco.

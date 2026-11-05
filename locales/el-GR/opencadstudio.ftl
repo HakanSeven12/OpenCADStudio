@@ -8564,8 +8564,8 @@ parameters-manager-feedback =
     .history = Επεξεργασία διαχειριστή παραμέτρων
 
 block-action-targets =
-    .prompt = BACTIONSET  Επιλέξτε αντικείμενα ή πληκτρολογήστε Parameter και όνομα παραμέτρου και πατήστε Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Επιλέξτε αντικείμενα ή πληκτρολογήστε Parameter και όνομα παραμέτρου και πατήστε Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Επιλέξτε αντικείμενα ή πληκτρολογήστε Parameter και όνομα παραμέτρου και πατήστε Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Επιλέξτε αντικείμενα ή πληκτρολογήστε Parameter και όνομα παραμέτρου και πατήστε Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Εισαγάγετε μοναδικό όνομα παραμέτρου.
     .empty = Η ενέργεια χρειάζεται τουλάχιστον έναν στόχο.
     .invalid = Επιλέξτε υποστηριζόμενους στόχους που ανήκουν σε αυτό το μπλοκ.

@@ -8567,8 +8567,8 @@ parameters-manager-feedback =
     .history = تحرير مدير المعلمات
 
 block-action-targets =
-    .prompt = BACTIONSET  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = أدخل اسم معلمة فريداً.
     .empty = يحتاج الإجراء إلى هدف واحد على الأقل.
     .invalid = حدد أهدافًا مدعومة تنتمي إلى هذه الكتلة.

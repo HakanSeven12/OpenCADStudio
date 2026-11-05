@@ -8562,8 +8562,8 @@ parameters-manager-feedback =
     .history = Parameterbeheer bewerken
 
 block-action-targets =
-    .prompt = BACTIONSET  Selecteer objecten of typ Parameter gevolgd door een parameternaam en druk op Enter (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Selecteer objecten of typ Parameter gevolgd door een parameternaam en druk op Enter (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Selecteer objecten of typ Parameter gevolgd door een parameternaam en druk op Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Selecteer objecten of typ Parameter gevolgd door een parameternaam en druk op Enter (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Voer een unieke parameternaam in.
     .empty = Een actie heeft ten minste één doel nodig.
     .invalid = Selecteer ondersteunde doelen in dit blok.

@@ -8542,8 +8542,8 @@ parameters-manager-feedback =
     .history = Paraméterkezelő szerkesztése
 
 block-action-targets =
-    .prompt = BACTIONSET  Válasszon objektumokat, vagy írja be a Parameter szót és egy paraméter nevét, majd nyomjon Entert (Parameter "…") ({ common.point } / { common.linear }):
-    .create-prompt = BACTION  Válasszon objektumokat, vagy írja be a Parameter szót és egy paraméter nevét, majd nyomjon Entert (Parameter "…") ({ common.point } / { common.linear }):
+    .prompt = BACTIONSET  Válasszon objektumokat, vagy írja be a Parameter szót és egy paraméter nevét, majd nyomjon Entert (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
+    .create-prompt = BACTION  Válasszon objektumokat, vagy írja be a Parameter szót és egy paraméter nevét, majd nyomjon Entert (Parameter "…") ({ common.point } / { common.linear } / { block-history-kinds.flip }):
     .unique-point = Adjon meg egyedi paraméternevet.
     .empty = Egy művelethez legalább egy cél szükséges.
     .invalid = Válasszon a blokkhoz tartozó támogatott célokat.

@@ -74,6 +74,7 @@ impl CadCommand for JoinCommand {
             }
             None => t!("JOIN  Select objects to join:").into_owned(),
             Some(EntityType::Arc(_)) => t!("JOIN  Select arcs to join to source or [cLose]:").into_owned(),
+            Some(EntityType::Line(_)) => t!("JOIN  Select lines to join to source:").into_owned(),
             Some(_) => t!("JOIN  Select objects to join to source:").into_owned(),
         }
     }
@@ -545,7 +546,7 @@ fn endpoints(entity: &EntityType) -> Option<Vec<DVec3>> {
 }
 
 fn join_touching(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<EntityType>)> {
-    if let Some(joined) = join_chain(entities) {
+    if let Some(joined) = join_chain(entities, true) {
         return Some(joined);
     }
     let ends: Vec<Option<Vec<DVec3>>> =
@@ -585,7 +586,7 @@ fn join_touching(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec
     }
     let (mut removed, mut merged) = (Vec::new(), Vec::new());
     for chain in chains.values().filter(|chain| chain.len() < entities.len()) {
-        if let Some((gone, made)) = join_chain(chain) {
+        if let Some((gone, made)) = join_chain(chain, false) {
             removed.extend(gone);
             merged.extend(made);
         }
@@ -599,7 +600,12 @@ fn join_touching(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec
 /// becomes an `LwPolyline` (arcs kept as bulges); a chain with varying Z
 /// becomes a `Polyline3D` (straight segments only). `None` when the
 /// selection isn't a single connected chain or holds an unsupported entity.
-fn join_chain(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<EntityType>)> {
+/// `whole` is false for one chain of a larger selection: the reference then
+/// converts even a collinear run to a polyline.
+fn join_chain(
+    entities: &[(Handle, &EntityType)],
+    whole: bool,
+) -> Option<(Vec<Handle>, Vec<EntityType>)> {
     if entities.len() < 2 {
         return None;
     }
@@ -639,7 +645,8 @@ fn join_chain(entities: &[(Handle, &EntityType)]) -> Option<(Vec<Handle>, Vec<En
     let planar = verts.iter().all(|(p, _)| (p.z - z0).abs() <= JOIN_EPS);
 
     // An open run of collinear straight segments collapses back to one Line.
-    if !closed
+    if whole
+        && !closed
         && !has_arc
         && chain
             .iter()

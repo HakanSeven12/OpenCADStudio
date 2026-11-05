@@ -152,6 +152,10 @@ impl OpenCADStudio {
                     .collect();
                 crate::modules::draw::modify::join::join_to_source(entity, &candidates)
             });
+        let line_source = matches!(
+            self.tabs[i].scene.document.get_entity(source),
+            Some(codec::EntityType::Line(_))
+        );
         if let Some((replacement, consumed)) = joined {
             self.push_undo_snapshot(i, "JOIN");
             if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(source) {
@@ -167,6 +171,10 @@ impl OpenCADStudio {
             let message = match self.tabs[i].scene.document.get_entity(source) {
                 Some(codec::EntityType::Arc(_)) if count == 1 => crate::tf!("{count} arc joined to source"),
                 Some(codec::EntityType::Arc(_)) => crate::tf!("{count} arcs joined to source"),
+                Some(codec::EntityType::Line(_)) if line_source && count == 1 => {
+                    crate::tf!("{count} line joined to source")
+                }
+                Some(codec::EntityType::Line(_)) if line_source => crate::tf!("{count} lines joined to source"),
                 _ => crate::tf!("{count} segments added to polyline"),
             };
             self.command_line.push_output(message.as_ref());

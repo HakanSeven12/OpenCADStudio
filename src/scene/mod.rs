@@ -3653,6 +3653,10 @@ impl Scene {
         }
         key = key.rotate_left(13) ^ all_visible as u64;
         key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
+        // Loading a linetype does not move the block epoch, and a cache built
+        // before the drawing had a complex one kept no path for its children.
+        key = key.rotate_left(13)
+            ^ cache::block_cache::document_has_complex_linetype(&self.document) as u64;
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {

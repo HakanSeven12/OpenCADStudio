@@ -3808,32 +3808,41 @@ pub(crate) fn linetype_name_for_common_viewport<'a>(
 ) -> &'a str {
     let elt = &common.linetype;
     if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
-        if viewport.is_some() {
-            if let Some(handle) = viewport_override(
-                document,
-                &common.layer,
-                viewport,
-                document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
-            )
-            .and_then(|value| value.as_handle())
-            {
-                if let Some(line_type) = document
-                    .line_types
-                    .iter()
-                    .find(|line_type| line_type.handle == handle)
-                {
-                    return line_type.name.as_str();
-                }
-            }
-        }
-        document
-            .layers
-            .get(&common.layer)
-            .map(|l| l.line_type.as_str())
-            .unwrap_or("Continuous")
+        layer_linetype_name_for_viewport(document, &common.layer, viewport)
     } else {
         elt.as_str()
     }
+}
+
+/// A layer's linetype name, with its viewport override when it has one.
+pub(crate) fn layer_linetype_name_for_viewport<'a>(
+    document: &'a Document,
+    layer: &str,
+    viewport: Option<Handle>,
+) -> &'a str {
+    if viewport.is_some() {
+        if let Some(handle) = viewport_override(
+            document,
+            layer,
+            viewport,
+            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+        )
+        .and_then(|value| value.as_handle())
+        {
+            if let Some(line_type) = document
+                .line_types
+                .iter()
+                .find(|line_type| line_type.handle == handle)
+            {
+                return line_type.name.as_str();
+            }
+        }
+    }
+    document
+        .layers
+        .get(layer)
+        .map(|l| l.line_type.as_str())
+        .unwrap_or("Continuous")
 }
 
 pub(in crate::scene) fn linetype_name_for_viewport<'a>(

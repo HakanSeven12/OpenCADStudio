@@ -4,9 +4,9 @@
 
 use std::collections::HashSet;
 
-use document::entities::{Line, LwPolyline, LwVertex};
+use document::entities::{Insert, Line, LwPolyline, LwVertex};
 use document::tables::linetype::{LineTypeComplexContent, LineTypeComplexData, LineTypeElement};
-use document::tables::{LineType, TextStyle};
+use document::tables::{BlockRecord, Layer, LineType, TextStyle};
 use document::types::{Vector2, Vector3};
 use document::{Document, EntityType, Handle};
 
@@ -510,4 +510,451 @@ fn dashed_line_end_dashes_keep_every_whole_period() {
     let (_, align_end, align_total) = crate::scene::pipeline::wire_gpu::wire_distances(&wire);
     assert!((align_total - 2.3).abs() < 1e-4, "{align_total}");
     assert!((align_end - 0.275).abs() < 1e-4, "{align_end}");
+}
+
+// ── Inside a block ───────────────────────────────────────────────────────────
+
+/// A second linetype with FENCE's dash pattern and a longer text.
+fn add_wide_fence(document: &mut Document) {
+    let style_handle = document.text_styles.get("FENCE-TEXT").unwrap().handle;
+    let mut fence = LineType::new("WIDE");
+    fence.handle = document.allocate_handle();
+    fence.add_element(LineTypeElement::dash(1.5));
+    fence.add_element(LineTypeElement {
+        length: -0.01,
+        complex: Some(LineTypeComplexData {
+            content: LineTypeComplexContent::Text { text: "XX".into() },
+            style_handle,
+            scale: 0.25,
+            offset: [-0.1, -0.125],
+            source_flags: 2,
+            ..Default::default()
+        }),
+    });
+    fence.add_element(LineTypeElement::space(0.01));
+    fence.pattern_length = 1.52;
+    document.line_types.add(fence).unwrap();
+}
+
+fn new_block(document: &mut Document, name: &str) -> Handle {
+    let mut block = BlockRecord::new(name);
+    block.handle = document.allocate_handle();
+    let handle = block.handle;
+    document.block_records.add(block).unwrap();
+    handle
+}
+
+/// A block of `name` holding one 100-long line on layer `layer`.
+fn line_block(document: &mut Document, name: &str, layer: &str, linetype: &str, lt_scale: f64) {
+    let owner = new_block(document, name);
+    let mut line = Line::from_points(Vector3::ZERO, Vector3::new(100.0, 0.0, 0.0));
+    line.common.owner_handle = owner;
+    line.common.layer = layer.to_string();
+    line.common.linetype = linetype.to_string();
+    line.common.linetype_scale = lt_scale;
+    document.add_entity(EntityType::Line(line)).unwrap();
+}
+
+fn insert_wires(document: &Document, insert: Insert, anno: f32) -> Vec<WireModel> {
+    crate::scene::tessellate_entity(
+        document,
+        &HashSet::default(),
+        None,
+        [0.0, 0.0, 0.0, 1.0],
+        anno,
+        None,
+        &EntityType::Insert(insert),
+        None,
+        None,
+        None,
+        false,
+        &HashSet::default(),
+    )
+}
+
+/// Glyph stations of a top-level `length`-long FENCE line.
+fn line_stations(length: f64, lt_scale: f64, anno: f32, reach: f64) -> Vec<f64> {
+    let mut document = fence_document();
+    let mut line = Line::from_points(Vector3::ZERO, Vector3::new(length, 0.0, 0.0));
+    line.common.linetype_scale = lt_scale;
+    let handle = add(&mut document, EntityType::Line(line));
+    glyph_stations(&wires_at(&document, handle, anno, false), [0.0, 0.0], reach)
+}
+
+fn assert_same_stations(got: &[f64], expected: &[f64]) {
+    assert_eq!(got.len(), expected.len(), "{got:?} vs {expected:?}");
+    assert!(!got.is_empty());
+    for (g, e) in got.iter().zip(expected) {
+        assert!((g - e).abs() < 1e-2, "{got:?} vs {expected:?}");
+    }
+}
+
+#[test]
+fn complex_linetype_keeps_its_glyphs_on_a_block_child() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let wires = insert_wires(&document, Insert::new("B", Vector3::ZERO), 1.0);
+    assert_same_stations(
+        &glyph_stations(&wires, [0.0, 0.0], 0.5),
+        &line_stations(100.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_in_a_block_follows_the_annotation_scale() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let wires = insert_wires(&document, Insert::new("B", Vector3::ZERO), 15.0);
+    assert_fence_at_15(&glyph_stations(&wires, [0.0, 0.0], 8.0));
+}
+
+#[test]
+fn complex_linetype_in_a_block_stays_at_drawing_length_with_msltscale_off() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    assert!(document.set_drawing_variable("MSLTSCALE", "0"));
+    let wires = insert_wires(&document, Insert::new("B", Vector3::ZERO), 15.0);
+    assert_same_stations(
+        &glyph_stations(&wires, [0.0, 0.0], 0.5),
+        &line_stations(100.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_keeps_its_length_in_a_scaled_insert() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.set_x_scale(2.0);
+    insert.set_y_scale(2.0);
+    assert_same_stations(
+        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+        &line_stations(200.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_is_not_stretched_by_a_non_uniform_insert() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.set_x_scale(2.0);
+    assert_same_stations(
+        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+        &line_stations(200.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_uses_the_scale_of_the_block_child() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 2.0);
+    let wires = insert_wires(&document, Insert::new("B", Vector3::ZERO), 1.0);
+    assert_same_stations(
+        &glyph_stations(&wires, [0.0, 0.0], 1.0),
+        &line_stations(100.0, 2.0, 1.0, 1.0),
+    );
+}
+
+#[test]
+fn complex_linetype_keeps_its_glyphs_in_a_nested_block() {
+    let mut document = fence_document();
+    line_block(&mut document, "INNER", "0", "FENCE", 1.0);
+    let owner = new_block(&mut document, "OUTER");
+    let mut nested = Insert::new("INNER", Vector3::ZERO);
+    nested.set_x_scale(0.5);
+    nested.set_y_scale(0.5);
+    nested.common.owner_handle = owner;
+    document.add_entity(EntityType::Insert(nested)).unwrap();
+
+    let mut insert = Insert::new("OUTER", Vector3::ZERO);
+    insert.set_x_scale(4.0);
+    insert.set_y_scale(4.0);
+    assert_same_stations(
+        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+        &line_stations(200.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_reaches_a_byblock_child() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "ByBlock", 1.0);
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.common.linetype = "FENCE".to_string();
+    // Neither the INSERT's scale nor its own linetype scale reaches the child.
+    insert.common.linetype_scale = 3.0;
+    insert.set_x_scale(2.0);
+    insert.set_y_scale(2.0);
+    assert_same_stations(
+        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+        &line_stations(200.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_reaches_a_child_on_layer_0_through_the_insert_layer() {
+    let mut document = fence_document();
+    let mut layer = Layer::new("FENCES");
+    layer.handle = document.allocate_handle();
+    layer.line_type = "FENCE".to_string();
+    document.layers.add(layer).unwrap();
+    line_block(&mut document, "B", "0", "ByLayer", 1.0);
+
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.common.layer = "FENCES".to_string();
+    assert_same_stations(
+        &glyph_stations(
+            &insert_wires(&document, insert.clone(), 1.0),
+            [0.0, 0.0],
+            0.5,
+        ),
+        &line_stations(100.0, 1.0, 1.0, 0.5),
+    );
+
+    // On layer 0 itself there is nothing to inherit: the child stays plain.
+    insert.common.layer = "0".to_string();
+    let plain = insert_wires(&document, insert, 1.0);
+    assert!(glyph_stations(&plain, [0.0, 0.0], 0.5).is_empty());
+    assert!(plain.iter().all(|wire| !wire.snap_only));
+}
+
+#[test]
+fn complex_linetype_passes_through_a_nested_byblock_insert() {
+    let mut document = fence_document();
+    line_block(&mut document, "INNER", "0", "ByBlock", 1.0);
+    let owner = new_block(&mut document, "OUTER");
+    let mut nested = Insert::new("INNER", Vector3::ZERO);
+    nested.common.linetype = "ByBlock".to_string();
+    nested.common.owner_handle = owner;
+    document.add_entity(EntityType::Insert(nested)).unwrap();
+
+    let mut insert = Insert::new("OUTER", Vector3::ZERO);
+    insert.common.linetype = "FENCE".to_string();
+    assert_same_stations(
+        &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
+        &line_stations(100.0, 1.0, 1.0, 0.5),
+    );
+}
+
+#[test]
+fn complex_linetype_glyphs_take_the_inherited_colour_of_a_block_child() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    document.entities_mut().next().unwrap().common_mut().color = document::types::Color::ByBlock;
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.common.color = document::types::Color::from_index(1);
+    let wires = insert_wires(&document, insert, 1.0);
+    let glyph = wires
+        .iter()
+        .flat_map(|wire| &wire.text_verts)
+        .next()
+        .unwrap();
+    assert!(
+        glyph.color[0] > 0.9 && glyph.color[1] < 0.1 && glyph.color[2] < 0.1,
+        "{:?}",
+        glyph.color
+    );
+}
+
+#[test]
+fn complex_linetype_walks_a_block_polyline_with_an_arc_as_one_path() {
+    let vertices = [
+        (0.0, 0.0, 0.0),
+        (20.0, 0.0, 1.0),
+        (20.0, 20.0, 0.0),
+        (0.0, 20.0, 0.0),
+    ];
+    let mut top = fence_document();
+    let handle = add(&mut top, polyline(&vertices, true));
+    let expected = glyph_stations(&wires(&top, handle), [0.0, 0.0], 0.5);
+
+    let mut document = fence_document();
+    let owner = new_block(&mut document, "B");
+    let mut child = polyline(&vertices, true);
+    child.common_mut().owner_handle = owner;
+    child.common_mut().linetype = "FENCE".to_string();
+    document.add_entity(child).unwrap();
+    let got = glyph_stations(
+        &insert_wires(&document, Insert::new("B", Vector3::ZERO), 1.0),
+        [0.0, 0.0],
+        0.5,
+    );
+    assert_same_stations(&got, &expected);
+}
+
+#[test]
+fn a_walked_block_child_keeps_its_snaps_on_hidden_geometry() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let wires = insert_wires(&document, Insert::new("B", Vector3::ZERO), 1.0);
+    let hidden: Vec<&WireModel> = wires.iter().filter(|wire| wire.snap_only).collect();
+    assert_eq!(hidden.len(), 1);
+    assert!(!hidden[0].display_visible && !hidden[0].plot_visible);
+    assert!(!hidden[0].snap_pts.is_empty() || !hidden[0].key_vertices.is_empty());
+    // The walk draws its dashes as strokes: nothing is left for the shader.
+    assert!(wires.iter().all(|wire| wire.pattern_length == 0.0));
+}
+
+/// Every INSERT drawn through one cache, as a drawing draws them.
+fn cached_stations(document: &Document, inserts: &[Insert], start: [f64; 2]) -> Vec<Vec<f64>> {
+    let cache = crate::scene::cache::block_cache::BlockCache::build(
+        document,
+        1.0,
+        None,
+        true,
+        [0.0, 0.0, 0.0, 1.0],
+        None,
+        &Default::default(),
+    );
+    inserts
+        .iter()
+        .map(|insert| {
+            let wires = crate::scene::tessellate_entity(
+                document,
+                &HashSet::default(),
+                None,
+                [0.0, 0.0, 0.0, 1.0],
+                1.0,
+                None,
+                &EntityType::Insert(insert.clone()),
+                Some(&cache),
+                None,
+                None,
+                false,
+                &HashSet::default(),
+            );
+            let origin = [
+                insert.insert_point.x + start[0],
+                insert.insert_point.y + start[1],
+            ];
+            glyph_stations(&wires, origin, 0.5)
+        })
+        .collect()
+}
+
+#[test]
+fn every_copy_of_a_block_keeps_its_complex_linetype() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let inserts = [
+        Insert::new("B", Vector3::ZERO),
+        Insert::new("B", Vector3::new(0.0, 50.0, 0.0)),
+        Insert::new("B", Vector3::new(500.0, 50.0, 0.0)),
+    ];
+    for inserted in &inserts {
+        document
+            .add_entity(EntityType::Insert(inserted.clone()))
+            .unwrap();
+    }
+    let expected = line_stations(100.0, 1.0, 1.0, 0.5);
+    for got in cached_stations(&document, &inserts, [0.0, 0.0]) {
+        assert_same_stations(&got, &expected);
+    }
+}
+
+#[test]
+fn copies_inheriting_different_complex_linetypes_keep_them_apart() {
+    let mut document = fence_document();
+    add_wide_fence(&mut document);
+    line_block(&mut document, "B", "0", "ByBlock", 1.0);
+    let mut fence = Insert::new("B", Vector3::ZERO);
+    fence.common.linetype = "FENCE".to_string();
+    let mut wide = Insert::new("B", Vector3::new(0.0, 50.0, 0.0));
+    wide.common.linetype = "WIDE".to_string();
+    document
+        .add_entity(EntityType::Insert(fence.clone()))
+        .unwrap();
+    document
+        .add_entity(EntityType::Insert(wide.clone()))
+        .unwrap();
+
+    let cache = crate::scene::cache::block_cache::BlockCache::build(
+        &document,
+        1.0,
+        None,
+        true,
+        [0.0, 0.0, 0.0, 1.0],
+        None,
+        &Default::default(),
+    );
+    let quads = |insert: &Insert| -> usize {
+        crate::scene::tessellate_entity(
+            &document,
+            &HashSet::default(),
+            None,
+            [0.0, 0.0, 0.0, 1.0],
+            1.0,
+            None,
+            &EntityType::Insert(insert.clone()),
+            Some(&cache),
+            None,
+            None,
+            false,
+            &HashSet::default(),
+        )
+        .iter()
+        .map(|wire| wire.text_verts.len())
+        .sum()
+    };
+    let (fence_quads, wide_quads) = (quads(&fence), quads(&wide));
+    assert!(fence_quads > 0);
+    assert_eq!(wide_quads, 2 * fence_quads);
+}
+
+#[test]
+fn changing_the_annotation_scale_relays_a_complex_linetype_in_a_block() {
+    let mut scene = crate::scene::Scene::new();
+    scene.document = fence_document();
+    line_block(&mut scene.document, "B", "0", "FENCE", 1.0);
+    scene.add_entity(EntityType::Insert(Insert::new("B", Vector3::ZERO)));
+
+    scene.set_annotation_scale_named("1:1").expect("1:1");
+    let at_1_1 = glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5).len();
+    assert!(at_1_1 > 60, "{at_1_1} glyphs at 1:1");
+
+    scene.set_annotation_scale_named("1:15").expect("1:15");
+    assert_fence_at_15(&glyph_stations(&scene.entity_wires(), [0.0, 0.0], 8.0));
+
+    scene.set_annotation_scale_named("1:1").expect("1:1");
+    let back = glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5).len();
+    assert_eq!(back, at_1_1);
+}
+
+#[test]
+fn a_block_drawn_before_a_complex_linetype_was_loaded_can_inherit_it() {
+    let vertices = [(0.0, 0.0, 0.0), (100.0, 0.0, 0.0)];
+    let mut scene = crate::scene::Scene::new();
+    let owner = new_block(&mut scene.document, "B");
+    let mut child = polyline(&vertices, true);
+    child.common_mut().owner_handle = owner;
+    child.common_mut().linetype = "ByBlock".to_string();
+    scene.document.add_entity(child).unwrap();
+    scene.add_entity(EntityType::Insert(Insert::new(
+        "B",
+        Vector3::new(0.0, 50.0, 0.0),
+    )));
+    assert!(glyph_stations(&scene.entity_wires(), [0.0, 50.0], 0.5).is_empty());
+
+    let source = fence_document();
+    let mut style = source.text_styles.get("FENCE-TEXT").unwrap().clone();
+    style.handle = scene.document.allocate_handle();
+    let style_handle = style.handle;
+    scene.document.text_styles.add(style).unwrap();
+    let mut fence = source.line_types.get("FENCE").unwrap().clone();
+    fence.handle = scene.document.allocate_handle();
+    for element in &mut fence.elements {
+        if let Some(complex) = &mut element.complex {
+            complex.style_handle = style_handle;
+        }
+    }
+    scene.document.line_types.add(fence).unwrap();
+
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.common.linetype = "FENCE".to_string();
+    scene.add_entity(EntityType::Insert(insert));
+    assert_same_stations(
+        &glyph_stations(&scene.entity_wires(), [0.0, 0.0], 0.5),
+        &line_stations(100.0, 1.0, 1.0, 0.5),
+    );
 }

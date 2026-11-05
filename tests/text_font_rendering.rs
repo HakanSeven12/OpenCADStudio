@@ -89,6 +89,7 @@ fn expand_block_mtext(
         1.0,
         OpenCADStudio::scene::BlockScalePolicy::FromInsert,
         false,
+        1.0,
     )
     .expect("block defn is cached")
 }

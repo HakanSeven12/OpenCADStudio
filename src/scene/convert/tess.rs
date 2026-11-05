@@ -21,7 +21,10 @@ fn fade_if_locked(
 /// break wherever its linetype restarts (every vertex when PLINEGEN is off) —
 /// the path `tessellate` splits into one wire per arc segment plus one wire of
 /// the straight segments. `None` for any other entity or render form.
-fn polyline_lt_path(document: &document::Document, e: &EntityType) -> Option<Vec<[f64; 3]>> {
+pub(crate) fn polyline_lt_path(
+    document: &document::Document,
+    e: &EntityType,
+) -> Option<Vec<[f64; 3]>> {
     use convert::acad_to_render::RenderObject;
     if !matches!(e, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
         return None;
@@ -30,6 +33,89 @@ fn polyline_lt_path(document: &document::Document, e: &EntityType) -> Option<Vec
         RenderObject::Lines(points) | RenderObject::SegmentedLines(points) => Some(points),
         _ => None,
     }
+}
+
+/// The annotation ratio a complex linetype bakes in. It is walked on the CPU,
+/// so it never sees the wire shader's model-space `linetype_scale` uniform:
+/// outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the Model layout and
+/// 1.0 on a paper sheet, exactly when the shader applies it, and MSLTSCALE turns
+/// it off in both.
+pub(crate) fn complex_linetype_anno(
+    document: &document::Document,
+    anno_scale: f32,
+    paper_space: bool,
+) -> f32 {
+    if !paper_space
+        && anno_scale.is_finite()
+        && anno_scale > 1e-9
+        && crate::scene::annotative::model_linetypes_follow_annotation(document)
+    {
+        anno_scale
+    } else {
+        1.0
+    }
+}
+
+/// Walk a complex linetype along an absolute path. A NaN break starts the
+/// pattern over (PLINEGEN off: at every vertex), and each run is end-aligned on
+/// its own length, the "A" alignment: it begins and ends with a dash, and a run
+/// shorter than one pattern is drawn solid.
+///
+/// `None` when there is nothing to walk (pattern blow-up guard, or a path with
+/// no length): the caller draws the path some other way.
+pub(crate) fn walk_complex_linetype(
+    name: &str,
+    path: &[[f64; 3]],
+    linetype: &crate::io::linetypes::ComplexLt,
+    scale: f32,
+    color: [f32; 4],
+    selected: bool,
+    line_weight_px: f32,
+) -> Option<Vec<WireModel>> {
+    let mut wires = Vec::new();
+    for run in path.split(|p| p[0].is_nan()) {
+        let length: f64 = run
+            .windows(2)
+            .map(|w| {
+                let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+            })
+            .sum();
+        if length <= 1e-9 {
+            continue;
+        }
+        // Walk the dash / glyph layout in a local frame so `apply_along`'s f32
+        // math stays precise, then lift each wire back to world DS.
+        let origin = run[0];
+        let local: Vec<[f32; 3]> = run
+            .iter()
+            .map(|a| {
+                [
+                    (a[0] - origin[0]) as f32,
+                    (a[1] - origin[1]) as f32,
+                    (a[2] - origin[2]) as f32,
+                ]
+            })
+            .collect();
+        let mut run_wires = text::complex_lt::apply_along(
+            name,
+            &local,
+            linetype,
+            scale,
+            color,
+            selected,
+            line_weight_px,
+            Some(length as f32),
+        );
+        if run_wires.is_empty() {
+            return None;
+        }
+        for wire in &mut run_wires {
+            convert::tessellate::shift_wire_to_world(wire, origin);
+        }
+        wires.append(&mut run_wires);
+    }
+    (!wires.is_empty()).then_some(wires)
 }
 
 #[derive(Clone, Copy)]
@@ -55,6 +141,8 @@ pub(crate) struct BlockObjectOptions {
     pub(crate) suppress_root_points: bool,
     pub(crate) apply_xclip: bool,
     pub(crate) scale_policy: crate::scene::BlockScalePolicy,
+    /// The ratio from [`complex_linetype_anno`]. `None` draws at drawing length.
+    pub(crate) complex_lt_anno: Option<f32>,
 }
 
 fn block_object_style(
@@ -163,6 +251,7 @@ pub(crate) fn expand_block_object(
         anno_scale,
         options.scale_policy,
         options.suppress_root_points,
+        options.complex_lt_anno.unwrap_or(1.0),
     )
     .unwrap_or_default();
 
@@ -1109,6 +1198,7 @@ fn tessellate_entity_inner(
                 BlockObjectOptions {
                     suppress_root_points: block_use.suppress_root_points,
                     scale_policy: block_use.scale_policy,
+                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, paper_space)),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1217,6 +1307,7 @@ fn tessellate_entity_inner(
                 pslt_factor,
                 BlockObjectOptions {
                     scale_policy: block_use.scale_policy,
+                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, paper_space)),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1264,6 +1355,11 @@ fn tessellate_entity_inner(
                     pslt_factor,
                     BlockObjectOptions {
                         scale_policy: block_use.scale_policy,
+                        complex_lt_anno: Some(complex_linetype_anno(
+                            document,
+                            anno_scale,
+                            paper_space,
+                        )),
                         ..BlockObjectOptions::default()
                     },
                 )
@@ -1339,6 +1435,7 @@ fn tessellate_entity_inner(
             pslt_factor,
             BlockObjectOptions {
                 apply_xclip: true,
+                complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, paper_space)),
                 ..BlockObjectOptions::default()
             },
         );
@@ -1461,20 +1558,7 @@ fn tessellate_entity_inner(
     // wire per arc plus one wire of its straight segments, so it walks its own
     // ordered path (`polyline_lt_path`); every other entity is one wire.
     if let Some(clt) = crate::io::linetypes::resolve_complex_lt(document, lt_name) {
-        // A complex linetype is walked here on the CPU, so it never sees the
-        // wire shader's model-space `linetype_scale` uniform. Bake the same
-        // ratio in: outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the
-        // Model layout and 1.0 on a paper sheet, exactly when the shader
-        // applies it, and MSLTSCALE turns it off in both.
-        let complex_lt_anno = if !paper_space
-            && anno_scale.is_finite()
-            && anno_scale > 1e-9
-            && crate::scene::annotative::model_linetypes_follow_annotation(document)
-        {
-            anno_scale
-        } else {
-            1.0
-        };
+        let complex_lt_anno = complex_linetype_anno(document, anno_scale, paper_space);
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex
@@ -1497,59 +1581,19 @@ fn tessellate_entity_inner(
                     })
                     .collect()
             });
-            // A NaN break starts the pattern over (PLINEGEN off: at every
-            // vertex), and each run is end-aligned on its own length, the
-            // "A" alignment: it begins and ends with a dash, and a run shorter
-            // than one pattern is drawn solid.
-            let mut wires = Vec::new();
-            let mut walked = true;
-            for run in path.split(|p| p[0].is_nan()) {
-                let length: f64 = run
-                    .windows(2)
-                    .map(|w| {
-                        let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
-                        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-                    })
-                    .sum();
-                if length <= 1e-9 {
-                    continue;
+            // Nothing to walk (pattern blow-up guard): draw the base wires.
+            if let Some(mut wires) = walk_complex_linetype(
+                &base.name,
+                &path,
+                &clt,
+                (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
+                entity_color,
+                sel,
+                base.line_weight_px,
+            ) {
+                for wire in &mut wires {
+                    set_wire_aabb(wire, aabb);
                 }
-                // Walk the dash / glyph layout in a local frame so
-                // `apply_along`'s f32 math stays precise, then lift each wire
-                // back to world DS.
-                let origin = run[0];
-                let local: Vec<[f32; 3]> = run
-                    .iter()
-                    .map(|a| {
-                        [
-                            (a[0] - origin[0]) as f32,
-                            (a[1] - origin[1]) as f32,
-                            (a[2] - origin[2]) as f32,
-                        ]
-                    })
-                    .collect();
-                let mut run_wires = text::complex_lt::apply_along(
-                    &base.name,
-                    &local,
-                    &clt,
-                    (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
-                    entity_color,
-                    sel,
-                    base.line_weight_px,
-                    Some(length as f32),
-                );
-                // Nothing to walk (pattern blow-up guard): draw the base wires.
-                if run_wires.is_empty() {
-                    walked = false;
-                    break;
-                }
-                for w in &mut run_wires {
-                    convert::tessellate::shift_wire_to_world(w, origin);
-                    set_wire_aabb(w, aabb);
-                }
-                wires.append(&mut run_wires);
-            }
-            if walked && !wires.is_empty() {
                 return wires;
             }
         }

@@ -77,6 +77,7 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
                 1.0,
                 crate::scene::BlockScalePolicy::FromInsert,
                 false,
+                1.0,
             )
             .unwrap();
             let boundaries: Vec<_> = expanded.iter().filter(|wire| wire.snap_only).collect();

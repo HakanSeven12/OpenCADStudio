@@ -211,6 +211,11 @@ impl<'a> Graph<'a> {
         self.nodes.contains_key(&handle)
     }
 
+    pub(super) fn has_unchained_incoming_move(&self, handle: Handle) -> bool {
+        self.nodes.get(&handle).is_some_and(|node| !node.chained)
+            && self.nodes.values().any(|node| node.links.iter().any(|link| link.target == handle))
+    }
+
     /// The frame driving an action can differ from its displayed frame when
     /// an incoming parameter is not configured to chain its actions.
     pub(super) fn active_frame(

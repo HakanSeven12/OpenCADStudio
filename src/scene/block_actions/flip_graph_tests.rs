@@ -133,6 +133,33 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             let at_default = changed.clone();
             changed = eval(&changed, child, Value::Point(DVec3::new(-15., -2., 0.)));
             assert_eq!(circle(&changed), Vector3::new(-9., -3., 0.));
+            let mut native_only = changed.clone();
+            instance::clear_canonical_inputs(&mut native_only, first);
+            for extension in ["dwg", "dxf"] {
+                let bytes =
+                    crate::io::save_to_bytes(&native_only, extension, native_only.version).unwrap();
+                let reopened =
+                    crate::io::load_bytes(&format!("native-only-flips.{extension}"), bytes)
+                        .unwrap();
+                assert!(!has_inputs(&reopened, first));
+                let recovered = eval(&reopened, child, Value::Point(DVec3::new(-18., -2., 0.)));
+                assert_eq!(circle(&recovered), Vector3::new(-12., -3., 0.));
+                assert!(has_inputs(&recovered, first));
+            }
+            instance::remove_cache(&mut native_only, first, p.id).unwrap();
+            let missing = if testing {
+                instance::evaluate_test_value(
+                    &native_only,
+                    &baseline,
+                    def,
+                    first,
+                    flips[0],
+                    Value::Flip(false),
+                )
+            } else {
+                instance::evaluate_value(&native_only, first, flips[0], Value::Flip(false))
+            };
+            assert!(matches!(missing, Err(super::flip_graph::FRAME_ERROR)));
             let from_lookup = if testing {
                 let mut scratch = changed.clone();
                 scratch.remove_entity(second);
@@ -283,7 +310,7 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
                     def,
                     Kind::Move,
                     parent,
-                    &[child],
+                    &[child, flips[0]],
                     DVec3::ZERO,
                 )
                 .unwrap();
@@ -299,6 +326,10 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
                 );
                 assert_eq!(circle(&with_parent), Vector3::new(-9., -3., 0.));
                 let transported = eval(&with_parent, parent, Value::Point(DVec3::Y * 3.));
+                let mut native_only = transported.clone();
+                instance::clear_canonical_inputs(&mut native_only, first);
+                let recovered = eval(&native_only, child, Value::Point(DVec3::new(-18., -5., 0.)));
+                assert_eq!(circle(&recovered), Vector3::new(-12., -3., 0.));
                 assert_eq!(
                     instance::frame(&transported, first, &p).unwrap().end,
                     DVec3::new(-15., -5., 0.)

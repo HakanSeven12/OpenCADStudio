@@ -1607,7 +1607,10 @@ fn evaluate_impl(
             detached_points.push((current, frame));
         }
     }
-    let mut active_frames = std::collections::BTreeMap::new();
+    let mut active_frames = detached_points
+        .iter()
+        .map(|(parameter, frame)| (parameter.handle, *frame))
+        .collect();
     let chain_values = chain.resolve(
         doc,
         &mut staged,

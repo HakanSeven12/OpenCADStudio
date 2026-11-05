@@ -13,7 +13,7 @@ fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'s
         .map(|(_, h)| *h))
 }
 
-fn cache(doc: &Document, insert: Handle, id: i32) -> Result<Option<Handle>, &'static str> {
+pub(super) fn cache(doc: &Document, insert: Handle, id: i32) -> Result<Option<Handle>, &'static str> {
     let Some(mut owner) = doc.extension_dictionary_handle(insert) else {
         return Ok(None);
     };
@@ -54,6 +54,10 @@ pub(super) fn remove_cache(doc: &mut Document, insert: Handle, id: i32) -> Resul
     owner.entries.retain(|(_, entry)| *entry != handle);
     doc.objects.remove(&handle);
     Ok(())
+}
+
+pub(crate) fn clear_canonical_inputs(doc: &mut Document, insert: Handle) {
+    crate::scene::view::dispatch::set_entity_xdata(doc, insert, super::flip_graph::INPUTS, None);
 }
 
 /// Evaluated definition-plane coordinates, independent of display grip locations.
@@ -951,7 +955,7 @@ pub(crate) fn reset(
         super::representation::apply_visibility(&mut result, def, insert, 0)?;
     }
     clear_table_history(&mut result, insert, history)?;
-    crate::scene::view::dispatch::set_entity_xdata(&mut result, insert, super::flip_graph::INPUTS, None);
+    clear_canonical_inputs(&mut result, insert);
     Ok(Some(result))
 }
 
@@ -994,7 +998,7 @@ pub(crate) fn reset_test(
     }
     super::rebuild(&mut result, baseline, def)?;
     super::sync_representation(&mut result, def, &name)?;
-    crate::scene::view::dispatch::set_entity_xdata(&mut result, insert, super::flip_graph::INPUTS, None);
+    clear_canonical_inputs(&mut result, insert);
     if let Some(parameter) =
         crate::scene::block_visibility::parameter(&result, def).map(|p| p.handle)
     {

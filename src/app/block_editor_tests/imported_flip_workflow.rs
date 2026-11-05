@@ -74,6 +74,9 @@ fn imported_coupled_flip_reference_workflow() {
                     .expect("Flip arrow must remain visible after toggling");
                 assert!((reversed.dir.unwrap() + grip.dir.unwrap()).length() < 1e-8);
             }
+            // Exercise native-only recovery with the imported graph and real
+            // frames after applying the Flips through the app.
+            actions::instance::clear_canonical_inputs(&mut app.tabs[i].scene.document, insert);
             select(&mut app);
             let params = actions::all_parameters(&app.tabs[i].scene.document, def);
             let (grip, p) = app.tabs[i]

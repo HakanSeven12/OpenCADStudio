@@ -3,6 +3,7 @@ use super::instance::ParameterFrame;
 use super::*;
 use codec::xdata::XDataValue as X;
 use std::collections::{BTreeMap, BTreeSet};
+mod recovery;
 pub(super) const INPUTS: &str = "OCS_BLOCK_INPUT_FRAMES";
 pub(super) const FRAME_ERROR: &str = "The block parameter frame is unavailable.";
 struct Step {
@@ -321,14 +322,13 @@ impl Plan {
     }
     fn display_frames(
         &self,
-        evaluated: &Document,
+        states: &[bool],
         canonical: &BTreeMap<Handle, ParameterFrame>,
         active: &BTreeMap<Handle, ParameterFrame>,
     ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
         let mut frames = canonical.clone();
-        let states = self.states(|p| super::value(evaluated, p))?;
         for (step, enabled) in self.steps.iter().zip(states) {
-            if !enabled {
+            if !*enabled {
                 continue;
             }
             let axis = *active
@@ -377,14 +377,17 @@ impl Plan {
                 )?;
                 visible
             }
-            None if self
-                .states(|p| super::value(evaluated, p))?
-                .iter()
-                .all(|v| !v) =>
-            {
-                visible
+            None => {
+                let states = self.states(|p| super::value(evaluated, p))?;
+                if states.iter().any(|enabled| *enabled) {
+                    let definition = doc
+                        .dynamic_definition_for_insert(insert)
+                        .ok_or(FRAME_ERROR)?;
+                    self.recover_native(doc, evaluated, definition, insert, &states)?
+                } else {
+                    visible
+                }
             }
-            None => return Err(FRAME_ERROR),
         };
         for p in &self.parameters {
             if !p.flip {
@@ -423,13 +426,14 @@ impl Plan {
                 canonical.get_mut(&p.handle).ok_or(FRAME_ERROR)?.end = super::current(evaluated, p);
             }
         }
-        let visible = self.display_frames(evaluated, &canonical, &active)?;
+        let states = self.states(|p| super::value(evaluated, p))?;
+        let visible = self.display_frames(&states, &canonical, &active)?;
         let mut result = instance::materialize(doc, insert, def, evaluated)?;
         instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
         if self.keep_cache {
             self.write(&mut result, insert, &canonical);
         } else {
-            crate::scene::view::dispatch::set_entity_xdata(&mut result, insert, INPUTS, None);
+            instance::clear_canonical_inputs(&mut result, insert);
         }
         Ok(result)
     }
@@ -640,7 +644,10 @@ impl Plan {
         {
             return Ok(());
         }
-        let frames = self.read(doc, insert)?.ok_or(FRAME_ERROR)?;
+        let frames = match self.read(doc, insert)? {
+            Some(frames) => frames,
+            None => self.recover_native(doc, baseline, def, insert, &states)?,
+        };
         let graph = chains::Graph::new(baseline, def)?;
         let values = frames.iter().map(|(h, f)| (*h, f.end)).collect();
         let bases = frames.iter().map(|(h, f)| (*h, f.base)).collect();
@@ -739,7 +746,8 @@ impl Plan {
         if let Value::Point(end) = super::value(&staged, selected)? {
             frames.get_mut(&parameter).ok_or(FRAME_ERROR)?.end = end;
         }
-        let visible = self.display_frames(&staged, &frames, &active)?;
+        let states = self.states(|p| super::value(&staged, p))?;
+        let visible = self.display_frames(&states, &frames, &active)?;
         let mut result = if testing {
             staged.clone()
         } else {

@@ -973,13 +973,22 @@ impl CommandLine {
                                 .size(11)
                                 .wrapping(iced::widget::text::Wrapping::None)
                         };
-                        let label = row![
-                            part(before),
-                            part(short).style(|theme: &Theme| iced::widget::text::Style {
-                                color: Some(theme.palette().primary.base.color),
-                            }),
-                            part(after),
-                        ];
+                        let accent = |theme: &Theme| iced::widget::text::Style {
+                            color: Some(theme.palette().primary.base.color),
+                        };
+                        // A translated label whose capitals are not what is
+                        // typed shows the keyword itself instead.
+                        let keyword = opt.keyword.to_uppercase();
+                        let short_upper = short.to_uppercase();
+                        let label = if keyword.is_empty()
+                            || (!short.is_empty()
+                                && (keyword.starts_with(&short_upper)
+                                    || short_upper.starts_with(&keyword)))
+                        {
+                            row![part(before), part(short).style(accent), part(after)]
+                        } else {
+                            row![part(&opt.label), part(&format!(" ({keyword})")).style(accent)]
+                        };
                         let btn = button(label)
                             .on_press(Message::CommandOptionPick(opt.keyword.clone()))
                             .padding([1, 6])

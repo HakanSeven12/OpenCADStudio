@@ -17,6 +17,8 @@ pub struct Options {
     pub palette: Option<bool>,
     pub distance_label: Option<String>,
     pub angle_label: Option<String>,
+    pub horizontal_label: Option<String>,
+    pub vertical_label: Option<String>,
     pub base_location: Option<BaseLocation>,
     pub value_set: Option<ValueSet>,
     pub angle_value_set: Option<ValueSet>,
@@ -30,6 +32,7 @@ enum Asking {
     Palette,
     DistanceLabel,
     AngleLabel,
+    VerticalLabel,
     Base,
     ValueSetType,
     ValueSetIncrement,
@@ -65,6 +68,8 @@ pub struct DistanceParameterCommand {
     name_default: String,
     distance_label_default: String,
     angle_label_default: String,
+    horizontal_label_default: String,
+    vertical_label_default: String,
     increment: Option<f64>,
     minimum: Option<f64>,
     angle_increment: Option<f64>,
@@ -85,6 +90,8 @@ impl DistanceParameterCommand {
             name_default: String::new(),
             distance_label_default: String::new(),
             angle_label_default: String::new(),
+            horizontal_label_default: String::new(),
+            vertical_label_default: String::new(),
             increment: None,
             minimum: None,
             angle_increment: None,
@@ -104,17 +111,56 @@ impl DistanceParameterCommand {
         self.angle_label_default = angle;
         self
     }
+    pub(crate) fn with_xy_labels(mut self, horizontal: String, vertical: String) -> Self {
+        self.horizontal_label_default = horizontal;
+        self.vertical_label_default = vertical;
+        self
+    }
     fn accept(&mut self, text: Option<&str>) -> CmdResult {
         let asking = self.asking.expect("an option question is open");
-        if matches!(asking, Asking::DistanceLabel | Asking::AngleLabel) {
+        if matches!(
+            asking,
+            Asking::DistanceLabel | Asking::AngleLabel | Asking::VerticalLabel
+        ) {
             let value = text.unwrap_or("").trim();
             match asking {
+                Asking::DistanceLabel if self.kind == Kind::XY => {
+                    if !value.is_empty() && !value.eq_ignore_ascii_case(&self.horizontal_label_default)
+                    {
+                        self.options.horizontal_label = Some(value.to_owned());
+                    }
+                    self.asking = Some(Asking::VerticalLabel);
+                }
                 Asking::DistanceLabel => {
                     if !value.is_empty() && value != self.distance_label_default {
                         self.options.distance_label = Some(value.to_owned());
                     }
                     // Only a Polar parameter asks for an angle label as well.
                     self.asking = (self.kind == Kind::Polar).then_some(Asking::AngleLabel);
+                }
+                Asking::VerticalLabel => {
+                    let horizontal = self
+                        .options
+                        .horizontal_label
+                        .as_deref()
+                        .unwrap_or(&self.horizontal_label_default);
+                    let resolved = if value.is_empty() {
+                        self.vertical_label_default.as_str()
+                    } else {
+                        value
+                    };
+                    if resolved.eq_ignore_ascii_case(horizontal) {
+                        return CmdResult::ReportError(
+                            crate::t!("The horizontal and vertical labels must differ.")
+                                .into_owned(),
+                        );
+                    }
+                    if !value.is_empty()
+                        && !value.eq_ignore_ascii_case(&self.vertical_label_default)
+                    {
+                        self.options.vertical_label = Some(value.to_owned());
+                    }
+                    self.asking = None;
                 }
                 Asking::AngleLabel => {
                     let distance = self
@@ -351,6 +397,7 @@ impl DistanceParameterCommand {
                 | Asking::Description
                 | Asking::DistanceLabel
                 | Asking::AngleLabel
+                | Asking::VerticalLabel
                 | Asking::Base
                 | Asking::ValueSetType
                 | Asking::ValueSetIncrement
@@ -382,6 +429,11 @@ impl DistanceParameterCommand {
             Asking::Palette => {
                 crate::t!("Display property in Properties palette? [Yes/No] <Yes>:").into_owned()
             }
+            Asking::DistanceLabel if self.kind == Kind::XY => crate::tf!(
+                "Enter horizontal distance property label <{}>:",
+                self.horizontal_label_default
+            )
+            .into_owned(),
             Asking::DistanceLabel => crate::tf!(
                 "Enter distance property label <{}>:",
                 self.distance_label_default
@@ -390,6 +442,11 @@ impl DistanceParameterCommand {
             Asking::AngleLabel => crate::tf!(
                 "Enter angle property label <{}>:",
                 self.angle_label_default
+            )
+            .into_owned(),
+            Asking::VerticalLabel => crate::tf!(
+                "Enter vertical distance property label <{}>:",
+                self.vertical_label_default
             )
             .into_owned(),
             Asking::Base => {
@@ -417,11 +474,11 @@ impl DistanceParameterCommand {
             }
         }
     }
-    /// The kinds that offer a name and a label: Linear and Polar. Linear asks
-    /// for a distance label only; Polar asks for a distance label then an angle
-    /// label.
+    /// The kinds that offer a name and a label: Linear, Polar and XY. Linear
+    /// asks for a distance label only, Polar for a distance label then an angle
+    /// label, XY for a horizontal then a vertical distance label.
     fn accepts_label(&self) -> bool {
-        matches!(self.kind, Kind::Linear | Kind::Polar)
+        matches!(self.kind, Kind::Linear | Kind::Polar | Kind::XY)
     }
     fn finish(&self, label: DVec3, grips: Option<usize>) -> CmdResult {
         CmdResult::PlaceBlockDistanceParameter {
@@ -452,6 +509,8 @@ impl CadCommand for DistanceParameterCommand {
         let step = if self.base.is_none() {
             if self.kind == Kind::Linear {
                 "Specify start point or [Name/Label/Chain/Description/Base/Palette/Value set]:"
+            } else if self.kind == Kind::XY {
+                "Specify base point or [Name/Label/Chain/Description/Palette]:"
             } else if self.accepts_label() {
                 "Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
             } else {
@@ -478,6 +537,7 @@ impl CadCommand for DistanceParameterCommand {
                 | Asking::Description
                 | Asking::DistanceLabel
                 | Asking::AngleLabel
+                | Asking::VerticalLabel
                 | Asking::ValueSetIncrement
                 | Asking::ValueSetMinimum
                 | Asking::ValueSetMaximum
@@ -552,6 +612,8 @@ impl CadCommand for DistanceParameterCommand {
                 Asking::DistanceLabel => {
                     self.options.distance_label = None;
                     self.options.angle_label = None;
+                    self.options.horizontal_label = None;
+                    self.options.vertical_label = None;
                 }
                 Asking::Base => self.options.base_location = None,
                 Asking::ValueSetType => {
@@ -562,7 +624,7 @@ impl CadCommand for DistanceParameterCommand {
                     self.angle_increment = None;
                     self.angle_minimum = None;
                 }
-                Asking::AngleLabel => unreachable!(),
+                Asking::AngleLabel | Asking::VerticalLabel => unreachable!(),
                 Asking::ValueSetIncrement
                 | Asking::ValueSetMinimum
                 | Asking::ValueSetMaximum
@@ -944,7 +1006,7 @@ mod tests {
             ),
             (
                 Kind::XY,
-                "BPARAMETER XY  Specify base point or [Chain/Description/Palette]:",
+                "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:",
             ),
         ] {
             assert_eq!(
@@ -1001,21 +1063,16 @@ mod tests {
     }
 
     #[test]
-    fn a_name_keyword_is_refused_on_types_without_a_name_question() {
-        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY);
-        assert!(
-            matches!(
-                command.on_text_input("N"),
-                Some(CmdResult::ReportError(reason))
-                    if reason == "Point or option keyword required."
-            ),
-            "XY asks no name question"
-        );
-        let mut command = linear();
-        assert!(
-            matches!(command.on_text_input("N"), Some(CmdResult::NeedPoint)),
-            "Linear offers a name"
-        );
+    fn every_distance_type_offers_a_name() {
+        for kind in [Kind::Linear, Kind::Polar, Kind::XY] {
+            let mut command = DistanceParameterCommand::new(0, Handle::new(1), kind);
+            assert!(
+                matches!(command.on_text_input("N"), Some(CmdResult::NeedPoint)),
+                "{} offers a name",
+                kind.name()
+            );
+            assert_eq!(command.input_kind(), InputKind::FreeText);
+        }
     }
 
     #[test]
@@ -1197,20 +1254,127 @@ mod tests {
     }
 
     #[test]
-    fn a_label_keyword_is_refused_on_types_without_labels() {
-        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY);
-        assert!(
-            matches!(
-                command.on_text_input("L"),
-                Some(CmdResult::ReportError(reason))
-                    if reason == "Point or option keyword required."
-            ),
-            "XY asks no label question"
+    fn an_xy_takes_a_name_and_two_distance_labels() {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY)
+            .with_name("XY2".into())
+            .with_xy_labels("X Distance3".into(), "Y Distance3".into());
+        assert!(matches!(
+            command.on_text_input("N"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(command.prompt(), "Enter parameter name <XY2>:");
+        assert!(matches!(
+            command.on_text_input(" Frame "),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter horizontal distance property label <X Distance3>:"
         );
-        let mut command = linear();
-        assert!(
-            matches!(command.on_text_input("L"), Some(CmdResult::NeedPoint)),
-            "Linear offers a label"
+        assert!(matches!(
+            command.on_text_input("Width X"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter vertical distance property label <Y Distance3>:"
+        );
+        assert!(matches!(
+            command.on_text_input("Width Y"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        );
+        assert_eq!(command.options.name.as_deref(), Some("Frame"));
+        assert_eq!(command.options.horizontal_label.as_deref(), Some("Width X"));
+        assert_eq!(command.options.vertical_label.as_deref(), Some("Width Y"));
+    }
+
+    #[test]
+    fn an_xy_keeps_the_offered_defaults_when_the_answers_are_empty() {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY)
+            .with_name("XY2".into())
+            .with_xy_labels("X Distance3".into(), "Y Distance3".into());
+        for keyword in ["N", "L"] {
+            assert!(matches!(
+                command.on_text_input(keyword),
+                Some(CmdResult::NeedPoint)
+            ));
+            assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        }
+        assert!(matches!(command.on_enter(), CmdResult::NeedPoint));
+        assert_eq!(command.options.name, None);
+        assert_eq!(command.options.horizontal_label, None);
+        assert_eq!(command.options.vertical_label, None);
+    }
+
+    #[test]
+    fn an_xy_refuses_a_vertical_label_that_repeats_the_horizontal_one() {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY)
+            .with_name("XY2".into())
+            .with_xy_labels("X Distance3".into(), "Y Distance3".into());
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input("Width"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert!(matches!(
+            command.on_text_input(" width "),
+            Some(CmdResult::ReportError(reason))
+                if reason == "The horizontal and vertical labels must differ."
+        ));
+        assert_eq!(command.options.vertical_label, None);
+        assert_eq!(
+            command.prompt(),
+            "Enter vertical distance property label <Y Distance3>:",
+            "the question stays open for a label that differs"
+        );
+    }
+
+    #[test]
+    fn an_xy_refuses_a_horizontal_label_that_collides_with_the_offered_vertical_one() {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY)
+            .with_name("XY2".into())
+            .with_xy_labels("X Distance3".into(), "Y Distance3".into());
+        for answer in ["L", "Y Distance3"] {
+            assert!(matches!(
+                command.on_text_input(answer),
+                Some(CmdResult::NeedPoint)
+            ));
+        }
+        assert!(matches!(
+            command.on_enter(),
+            CmdResult::ReportError(reason)
+                if reason == "The horizontal and vertical labels must differ."
+        ));
+        assert_eq!(command.options.vertical_label, None);
+    }
+
+    #[test]
+    fn an_xy_reads_the_offered_default_labels_in_any_case() {
+        let mut command = DistanceParameterCommand::new(0, Handle::new(1), Kind::XY)
+            .with_name("XY2".into())
+            .with_xy_labels("X Distance3".into(), "Y Distance3".into());
+        for answer in ["L", "x distance3", "y distance3"] {
+            assert!(matches!(
+                command.on_text_input(answer),
+                Some(CmdResult::NeedPoint)
+            ));
+        }
+        assert_eq!(command.options.horizontal_label, None);
+        assert_eq!(command.options.vertical_label, None);
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:"
         );
     }
 

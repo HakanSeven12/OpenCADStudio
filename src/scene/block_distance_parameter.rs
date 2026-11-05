@@ -142,6 +142,16 @@ pub(crate) fn next_polar_labels(document: &Document, definition: Handle) -> [Str
     ]
 }
 
+/// The next free horizontal and vertical label names, the defaults an XY
+/// placement's two label questions show.
+pub(crate) fn next_xy_labels(document: &Document, definition: Handle) -> [String; 2] {
+    let names = label_names(document, definition);
+    [
+        unique_label(&names, "X Distance"),
+        unique_label(&names, "Y Distance"),
+    ]
+}
+
 pub(crate) fn parameters(document: &Document, definition: Handle) -> Vec<Parameter<'_>> {
     let Some(graph) = graph_handle(document, definition) else {
         return Vec::new();
@@ -303,17 +313,14 @@ pub(crate) fn create_with(
     let unique = |prefix: &str| unique_label(&names, prefix);
     let distance_name = unique("Distance");
     let angle_name = unique("Angle");
-    let x_label = unique("DistanceX");
-    let y_label = unique("DistanceY");
+    let x_label = unique("X Distance");
+    let y_label = unique("Y Distance");
     let values = match kind {
         Kind::XY => [end.x - base.x, end.y - base.y],
         _ => offsets(kind, base, end, label),
     };
-    let parameter_name = if matches!(kind, Kind::Linear | Kind::Polar) {
-        super::block_authoring::metadata::next_parameter_name(document, definition, kind.name())?
-    } else {
-        kind.name().to_owned()
-    };
+    let parameter_name =
+        super::block_authoring::metadata::next_parameter_name(document, definition, kind.name())?;
     let (graph, slots) = authoring::prepare(document, definition)?;
     let (class, cpp) = kind.class();
     let (grip_class, grip_cpp) = match kind {

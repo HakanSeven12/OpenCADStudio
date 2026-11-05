@@ -4185,6 +4185,110 @@ fn a_polar_angle_increment_is_asked_and_stored_in_radians() {
 }
 
 #[test]
+fn an_xy_placement_writes_its_name_and_two_labels() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER XY");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <XY1>:"
+    );
+    feed(&mut app, "Frame");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter horizontal distance property label <X Distance1>:"
+    );
+    feed(&mut app, "Width X");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter vertical distance property label <Y Distance1>:"
+    );
+    feed(&mut app, "Width Y");
+    feed(&mut app, "0,0");
+    feed(&mut app, "6,2");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let xy = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::XY)
+        .expect("placed xy parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&xy.handle).expect("xy record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
+        panic!("expected an xy parameter");
+    };
+    assert_eq!(native.parameter.parameter.element.name, "Frame");
+    assert_eq!(native.x_label, "Width X");
+    assert_eq!(native.y_label, "Width Y");
+}
+
+#[test]
+fn an_xy_placement_keeps_the_offered_default_name_and_labels() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER XY");
+    feed(&mut app, "N");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter parameter name <XY1>:"
+    );
+    feed(&mut app, "");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter horizontal distance property label <X Distance1>:"
+    );
+    feed(&mut app, "");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter vertical distance property label <Y Distance1>:"
+    );
+    feed(&mut app, "");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "6,2");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let xy = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::XY)
+        .expect("placed xy parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&xy.handle).expect("xy record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
+        panic!("expected an xy parameter");
+    };
+    assert_eq!(native.parameter.parameter.element.name, "XY1");
+    assert_eq!(native.x_label, "X Distance1");
+    assert_eq!(native.y_label, "Y Distance1");
+}
+
+#[test]
 fn a_linear_takes_its_base_location_and_value_set() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

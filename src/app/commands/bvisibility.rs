@@ -223,6 +223,7 @@ impl OpenCADStudio {
                 kind,
                 crate::scene::block_distance_parameter::Kind::Linear
                     | crate::scene::block_distance_parameter::Kind::Polar
+                    | crate::scene::block_distance_parameter::Kind::XY
             );
             let parameter_name = options.name.as_deref().filter(|_| labels);
             let parameter_name = parameter_name
@@ -236,13 +237,42 @@ impl OpenCADStudio {
                     value,
                 )
             });
-            let distance_label = options.distance_label.as_deref().filter(|_| labels);
+            let distance_label = options
+                .distance_label
+                .as_deref()
+                .filter(|_| kind != crate::scene::block_distance_parameter::Kind::XY);
             let distance_label = distance_label.map(|value| {
                 metadata::set_text(
                     document,
                     definition,
                     parameter,
                     metadata::Field::Name,
+                    value,
+                )
+            });
+            let horizontal_label = options
+                .horizontal_label
+                .as_deref()
+                .filter(|_| kind == crate::scene::block_distance_parameter::Kind::XY);
+            let horizontal_label = horizontal_label.map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Name,
+                    value,
+                )
+            });
+            let vertical_label = options
+                .vertical_label
+                .as_deref()
+                .filter(|_| kind == crate::scene::block_distance_parameter::Kind::XY);
+            let vertical_label = vertical_label.map(|value| {
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::SecondaryName,
                     value,
                 )
             });
@@ -269,6 +299,8 @@ impl OpenCADStudio {
                 .chain(description)
                 .chain(distance_label)
                 .chain(angle_label)
+                .chain(horizontal_label)
+                .chain(vertical_label)
                 .chain(chain)
                 .chain(palette)
                 .find_map(Result::err)
@@ -708,35 +740,40 @@ impl OpenCADStudio {
                     crate::scene::block_distance_parameter::Kind::parse(parameter_type)
                 {
                     let mut command = crate::modules::block_editor::distance_parameter::DistanceParameterCommand::new(self.tabs[i].id, block, kind);
-                    if matches!(
-                        kind,
-                        crate::scene::block_distance_parameter::Kind::Linear
-                            | crate::scene::block_distance_parameter::Kind::Polar
-                    ) {
-                        let [distance, angle] =
-                            if kind == crate::scene::block_distance_parameter::Kind::Polar {
+                    let name = crate::scene::block_authoring::metadata::next_parameter_name(
+                        &self.tabs[i].scene.document,
+                        block,
+                        kind.name(),
+                    )
+                    .unwrap_or_else(|_| format!("{}1", kind.name()));
+                    command = command.with_name(name);
+                    command = match kind {
+                        crate::scene::block_distance_parameter::Kind::Polar => {
+                            let [distance, angle] =
                                 crate::scene::block_distance_parameter::next_polar_labels(
                                     &self.tabs[i].scene.document,
                                     block,
-                                )
-                            } else {
-                                // A Linear parameter asks for one label only.
-                                [
-                                    crate::scene::block_distance_parameter::next_distance_label(
-                                        &self.tabs[i].scene.document,
-                                        block,
-                                    ),
-                                    String::new(),
-                                ]
-                            };
-                        let name = crate::scene::block_authoring::metadata::next_parameter_name(
-                            &self.tabs[i].scene.document,
-                            block,
-                            kind.name(),
-                        )
-                        .unwrap_or_else(|_| format!("{}1", kind.name()));
-                        command = command.with_name(name).with_labels(distance, angle);
-                    }
+                                );
+                            command.with_labels(distance, angle)
+                        }
+                        crate::scene::block_distance_parameter::Kind::Linear => {
+                            // A Linear parameter asks for one label only.
+                            let distance =
+                                crate::scene::block_distance_parameter::next_distance_label(
+                                    &self.tabs[i].scene.document,
+                                    block,
+                                );
+                            command.with_labels(distance, String::new())
+                        }
+                        crate::scene::block_distance_parameter::Kind::XY => {
+                            let [horizontal, vertical] =
+                                crate::scene::block_distance_parameter::next_xy_labels(
+                                    &self.tabs[i].scene.document,
+                                    block,
+                                );
+                            command.with_xy_labels(horizontal, vertical)
+                        }
+                    };
                     self.command_line.push_info(&command.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(Task::none());

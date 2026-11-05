@@ -7042,6 +7042,8 @@ measurement =
     .quick-prompt = { $command }  Vigye a kurzort a geometria fölé; kattintás: kiírás, Enter: kilépés:
     .quick-horizontal = Vízszintes = { $value }
     .quick-vertical = Függőleges = { $value }
+    .quick-length = Hossz = { $value }
+    .quick-parallel = Távolság = { $value }
     .area-preview =
         { $current }
         Előzetes összterület = { $total }

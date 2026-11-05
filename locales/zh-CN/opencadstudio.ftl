@@ -7047,6 +7047,8 @@ measurement =
     .quick-prompt = { $command }  将光标移到几何图形上；单击报告，Enter 退出：
     .quick-horizontal = 水平 = { $value }
     .quick-vertical = 垂直 = { $value }
+    .quick-length = 长度 = { $value }
+    .quick-parallel = 距离 = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

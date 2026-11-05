@@ -7064,6 +7064,8 @@ measurement =
     .quick-prompt = { $command }  Déplacez le curseur sur la géométrie ; cliquez pour afficher, Entrée pour quitter :
     .quick-horizontal = Horizontale = { $value }
     .quick-vertical = Verticale = { $value }
+    .quick-length = Longueur = { $value }
+    .quick-parallel = Distance = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

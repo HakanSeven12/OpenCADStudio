@@ -6987,6 +6987,8 @@ measurement =
     .quick-prompt = { $command }  İmleci geometrinin üzerinde gezdirin; bildirmek için tıklayın, çıkmak için Enter:
     .quick-horizontal = Yatay = { $value }
     .quick-vertical = Dikey = { $value }
+    .quick-length = Uzunluk = { $value }
+    .quick-parallel = Mesafe = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

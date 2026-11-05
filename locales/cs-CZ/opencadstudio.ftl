@@ -7066,6 +7066,8 @@ measurement =
     .quick-prompt = { $command }  Přesuňte kurzor nad geometrii; kliknutím vypíšete, Enter ukončí:
     .quick-horizontal = Vodorovně = { $value }
     .quick-vertical = Svisle = { $value }
+    .quick-length = Délka = { $value }
+    .quick-parallel = Vzdálenost = { $value }
     .area-preview =
         { $current }
         Náhled celkové plochy = { $total }

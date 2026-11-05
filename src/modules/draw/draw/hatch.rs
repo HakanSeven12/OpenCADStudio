@@ -114,7 +114,7 @@ fn polygon_contains_polygon(outer: &[[f64; 2]], inner: &[[f64; 2]]) -> bool {
 }
 
 /// Resolve the innermost clicked ring and its direct holes.
-fn resolve_hatch_rings(outlines: &[Vec<[f64; 2]>], p: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
+pub(crate) fn resolve_hatch_rings(outlines: &[Vec<[f64; 2]>], p: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
     let mut containing: Vec<(usize, f64)> = outlines
         .iter()
         .enumerate()

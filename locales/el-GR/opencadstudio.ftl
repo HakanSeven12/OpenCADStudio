@@ -7064,6 +7064,8 @@ measurement =
     .quick-prompt = { $command }  Μετακινήστε τον κέρσορα πάνω από τη γεωμετρία· κλικ για αναφορά, Enter για έξοδο:
     .quick-horizontal = Οριζόντια = { $value }
     .quick-vertical = Κατακόρυφα = { $value }
+    .quick-length = Μήκος = { $value }
+    .quick-parallel = Απόσταση = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

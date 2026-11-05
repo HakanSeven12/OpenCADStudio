@@ -7061,6 +7061,8 @@ measurement =
     .quick-prompt = { $command }  Siirrä kohdistin geometrian päälle; napsauta raportoidaksesi, Enter lopettaa:
     .quick-horizontal = Vaaka = { $value }
     .quick-vertical = Pysty = { $value }
+    .quick-length = Pituus = { $value }
+    .quick-parallel = Etäisyys = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

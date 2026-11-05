@@ -5299,3 +5299,33 @@ mod polygon_flow_tests {
     }
 }
 
+/// #2593: MEASUREGEOM Quick names the edges its lines reach and measures
+/// the closed area a click lands in.
+#[cfg(test)]
+mod measuregeom_quick_tests {
+    use crate::app::OpenCADStudio;
+    use crate::command::{CadCommand, CmdResult};
+    use glam::DVec3;
+
+    #[test]
+    fn quick_reads_the_edges_it_reaches_and_a_click_measures_the_area() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("RECTANG 0,0 10,4");
+        let scene = &app.tabs[app.active_tab].scene;
+        let mut command = crate::modules::draw::inquiry::measuregeom::MeasureGeomCommand::new();
+        let _ = command.on_text_input("Q");
+        let cursor = DVec3::new(3.0, 1.0, 0.0);
+        let wires = command.object_pick_hover_previews(scene, cursor);
+        let plain = |s: String| s.replace(['\u{2068}', '\u{2069}'], "");
+        let readout = plain(command.measurement_readout(cursor).expect("readout"));
+        assert!(readout.contains("Length = 10"), "{readout}");
+        assert!(readout.contains("Length = 4"), "{readout}");
+        assert!(wires.len() >= 4);
+        let CmdResult::ReportMeasurement(area) = command.on_point(cursor) else {
+            panic!("expected the area");
+        };
+        let area = plain(area);
+        assert!(area.contains("Area = 40") && area.contains("Perimeter = 28"), "{area}");
+    }
+}

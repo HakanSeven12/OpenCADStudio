@@ -7065,6 +7065,8 @@ measurement =
     .quick-prompt = { $command }  ເລື່ອນເຄີເຊີໄປເທິງຮູບຊົງ; ຄລິກເພື່ອລາຍງານ, Enter ເພື່ອອອກ:
     .quick-horizontal = ແນວນອນ = { $value }
     .quick-vertical = ແນວຕັ້ງ = { $value }
+    .quick-length = ຄວາມຍາວ = { $value }
+    .quick-parallel = ໄລຍະຫ່າງ = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

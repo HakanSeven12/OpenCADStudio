@@ -7063,6 +7063,8 @@ measurement =
     .quick-prompt = { $command }  형상 위로 커서를 이동하십시오. 클릭하면 보고, Enter로 종료:
     .quick-horizontal = 수평 = { $value }
     .quick-vertical = 수직 = { $value }
+    .quick-length = 길이 = { $value }
+    .quick-parallel = 거리 = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

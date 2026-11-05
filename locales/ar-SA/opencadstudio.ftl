@@ -7076,6 +7076,8 @@ measurement =
     .quick-prompt = { $command }  حرّك المؤشر فوق الأشكال؛ انقر للإبلاغ، Enter للخروج:
     .quick-horizontal = أفقي = { $value }
     .quick-vertical = عمودي = { $value }
+    .quick-length = الطول = { $value }
+    .quick-parallel = المسافة = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

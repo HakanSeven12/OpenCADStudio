@@ -7063,6 +7063,8 @@ measurement =
     .quick-prompt = { $command }  Przesuń kursor nad geometrię; kliknij, aby podać wynik, Enter, aby zakończyć:
     .quick-horizontal = Poziomo = { $value }
     .quick-vertical = Pionowo = { $value }
+    .quick-length = Długość = { $value }
+    .quick-parallel = Odległość = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

@@ -71,6 +71,10 @@ pub struct MeasureGeomCommand {
     plane: WorkingPlane,
     /// QUICK readout for the last hovered cursor position.
     quick: std::cell::RefCell<Option<String>>,
+    /// QUICK: the closed areas a click can measure, gathered on first hover.
+    quick_sources: std::cell::RefCell<
+        Option<rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>>,
+    >,
 }
 
 impl MeasureGeomCommand {
@@ -84,6 +88,7 @@ impl MeasureGeomCommand {
             picked: None,
             plane: WorkingPlane::default(),
             quick: std::cell::RefCell::new(None),
+            quick_sources: std::cell::RefCell::new(None),
         }
     }
 
@@ -235,7 +240,10 @@ impl MeasureGeomCommand {
             area_sum += a.x * b.y - b.x * a.y;
             perimeter += (points[(idx + 1) % n] - points[idx]).length();
         }
-        let area = (area_sum * 0.5).abs();
+        Self::area_perimeter_msg((area_sum * 0.5).abs(), perimeter)
+    }
+
+    fn area_perimeter_msg(area: f64, perimeter: f64) -> String {
         let area_s = crate::entities::common::format_area(area);
         let perimeter_s = crate::entities::common::format_length(perimeter);
         t!(
@@ -268,7 +276,7 @@ impl MeasureGeomCommand {
         scene: &crate::scene::Scene,
         plane: WorkingPlane,
         cursor: DVec3,
-    ) -> [Option<f64>; 4] {
+    ) -> ([Option<f64>; 4], [Option<Handle>; 4]) {
         let c = plane.to_local(cursor);
         // Long enough to leave the drawing from anywhere the cursor can be.
         let reach = scene
@@ -280,6 +288,7 @@ impl MeasureGeomCommand {
             .unwrap_or(0.0)
             + 1.0;
         let mut hits = [None; 4];
+        let mut handles = [None; 4];
         for (axis, direction) in [plane.x, plane.y].into_iter().enumerate() {
             let (a, b) = (cursor - direction * reach, cursor + direction * reach);
             let pad = reach * 1e-9;
@@ -308,16 +317,150 @@ impl MeasureGeomCommand {
                         .and_then(|previous| Self::crossing(previous, local, c, axis))
                         .filter(|offset| offset.abs() > pad)
                     {
-                        let slot = &mut hits[axis * 2 + usize::from(offset > 0.0)];
-                        if slot.is_none_or(|best: f64| offset.abs() < best.abs()) {
-                            *slot = Some(offset);
+                        let index = axis * 2 + usize::from(offset > 0.0);
+                        if hits[index].is_none_or(|best: f64| offset.abs() < best.abs()) {
+                            hits[index] = Some(offset);
+                            handles[index] = crate::scene::Scene::handle_from_wire_name(&wire.name);
                         }
                     }
                     previous = Some(local);
                 }
             }
         }
-        hits
+        (hits, handles)
+    }
+
+    /// What QUICK shows of an object one of its lines reaches at `hit`
+    /// (world): a line or straight polyline segment's length, as that edge,
+    /// or an arc's or circle's radius, as a line from the centre. The edge
+    /// comes back too, for the distance between two parallel ones.
+    fn quick_object(entity: &EntityType, hit: DVec3) -> Option<(Vec<DVec3>, String, Option<[DVec3; 2]>)> {
+        let v = |p: codec::Vector3| DVec3::new(p.x, p.y, p.z);
+        let length = |a: DVec3, b: DVec3| {
+            let value = crate::entities::common::format_length(a.distance(b));
+            (vec![a, b], crate::tr!("measurement", "quick-length", value = value), Some([a, b]))
+        };
+        let radius = |center: DVec3, r: f64| (vec![center, hit], Self::radius_msg(r), None);
+        match entity {
+            EntityType::Line(line) => Some(length(v(line.start), v(line.end))),
+            EntityType::Circle(c) if c.normal.z > 0.0 => Some(radius(v(c.center), c.radius)),
+            EntityType::Arc(a) if a.normal.z > 0.0 => Some(radius(v(a.center), a.radius)),
+            // ponytail: plan-view polylines only; others need the OCS turned into the plane.
+            EntityType::LwPolyline(pl) if pl.normal.z > 0.0 && pl.vertices.len() > 1 => {
+                let n = pl.vertices.len();
+                let segments = if pl.is_closed { n } else { n - 1 };
+                let at = |i: usize| {
+                    let p = pl.vertices[i % n].location;
+                    DVec3::new(p.x, p.y, pl.elevation)
+                };
+                let flat = DVec3::new(hit.x, hit.y, pl.elevation);
+                let nearest = (0..segments).min_by(|&i, &j| {
+                    let d = |k: usize| {
+                        let (a, b) = (at(k), at(k + 1));
+                        let t = ((flat - a).dot(b - a) / (b - a).length_squared().max(1e-300))
+                            .clamp(0.0, 1.0);
+                        flat.distance(a + (b - a) * t)
+                    };
+                    d(i).total_cmp(&d(j))
+                })?;
+                let (a, b) = (at(nearest), at(nearest + 1));
+                let bulge = pl.vertices[nearest].bulge;
+                if bulge.abs() < 1e-12 {
+                    Some(length(a, b))
+                } else {
+                    let r = a.distance(b) * (1.0 + bulge * bulge) / (4.0 * bulge.abs());
+                    Some((Vec::new(), Self::radius_msg(r), None))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// QUICK additions for the objects `handles` reach at `hits`: each
+    /// object's measure once, and the distance across two parallel edges one
+    /// cast line reaches (when they are not square to it, so the plain
+    /// reading is not already that distance).
+    fn quick_objects(
+        scene: &crate::scene::Scene,
+        plane: WorkingPlane,
+        cursor: DVec3,
+        hits: [Option<f64>; 4],
+        handles: [Option<Handle>; 4],
+    ) -> (Vec<WireModel>, Vec<String>) {
+        let c = plane.to_local(cursor);
+        let mut wires = Vec::new();
+        let mut lines: Vec<String> = Vec::new();
+        let mut edges: [Option<[DVec3; 2]>; 4] = [None; 4];
+        for slot in 0..4 {
+            let (Some(offset), Some(handle)) = (hits[slot], handles[slot]) else {
+                continue;
+            };
+            let Some(entity) = scene.document.get_entity(handle) else {
+                continue;
+            };
+            let mut local = c;
+            local[slot / 2] += offset;
+            let Some((points, line, edge)) = Self::quick_object(entity, plane.to_world(local)) else {
+                continue;
+            };
+            edges[slot] = edge;
+            if lines.contains(&line) {
+                continue;
+            }
+            if points.len() == 2 {
+                wires.push(Self::preview_wire("measuregeom_quick_object", points));
+            }
+            lines.push(line);
+        }
+        for axis in 0..2 {
+            let (Some([a, b]), Some([p, q])) = (edges[axis * 2], edges[axis * 2 + 1]) else {
+                continue;
+            };
+            let Some(dir) = Self::direction(b - a) else {
+                continue;
+            };
+            let cast = if axis == 0 { plane.x } else { plane.y };
+            let parallel =
+                Self::direction(q - p).is_some_and(|other| other.cross(dir).length() < 1e-9);
+            if !parallel || dir.dot(cast).abs() < 1e-9 {
+                continue;
+            }
+            let foot = |x: DVec3, a: DVec3| a + dir * (x - a).dot(dir);
+            let mid = foot(cursor, a);
+            let across = foot(mid, p);
+            wires.push(Self::preview_wire("measuregeom_quick_parallel", vec![mid, across]));
+            let value = crate::entities::common::format_length(mid.distance(across));
+            lines.push(crate::tr!("measurement", "quick-parallel", value = value));
+        }
+        (wires, lines)
+    }
+
+    /// QUICK click: the area and perimeter of the closed region around `pt`.
+    fn quick_area(&self, pt: DVec3) -> Option<String> {
+        let sources = self.quick_sources.borrow();
+        let local = self.plane.to_local(pt);
+        let xy = [local.x, local.y];
+        let faces = crate::scene::boundary_faces_around(sources.as_ref()?, xy, 0.0);
+        let rings = crate::modules::draw::draw::hatch::resolve_hatch_rings(&faces, xy)?;
+        let measure = |ring: &Vec<[f64; 2]>| {
+            let n = ring.len();
+            (0..n).fold((0.0, 0.0), |(area, perimeter), i| {
+                let (a, b) = (ring[i], ring[(i + 1) % n]);
+                (
+                    area + a[0] * b[1] - b[0] * a[1],
+                    perimeter + (b[0] - a[0]).hypot(b[1] - a[1]),
+                )
+            })
+        };
+        let (outer, holes) = rings.split_first()?;
+        let (area, mut perimeter) = measure(outer);
+        let mut area = (area * 0.5).abs();
+        for hole in holes {
+            let (a, p) = measure(hole);
+            area -= (a * 0.5).abs();
+            perimeter += p;
+        }
+        Some(Self::area_perimeter_msg(area, perimeter))
     }
 
     /// QUICK measurement lines (world) and readout for crossings `hits`.
@@ -526,8 +669,17 @@ impl CadCommand for MeasureGeomCommand {
         if self.mode != Mode::Quick || !cursor.is_finite() {
             return Vec::new();
         }
-        let hits = Self::quick_hits(scene, self.plane, cursor);
-        let (wires, readout) = Self::quick_result(self.plane, cursor, hits);
+        if self.quick_sources.borrow().is_none() {
+            *self.quick_sources.borrow_mut() = Some(scene.boundary_sources_on_plane(self.plane, 1e-6));
+        }
+        let (hits, handles) = Self::quick_hits(scene, self.plane, cursor);
+        let (mut wires, readout) = Self::quick_result(self.plane, cursor, hits);
+        let (object_wires, object_lines) = Self::quick_objects(scene, self.plane, cursor, hits, handles);
+        wires.extend(object_wires);
+        let readout = match readout {
+            Some(text) if !object_lines.is_empty() => Some(format!("{text}\n{}", object_lines.join("\n"))),
+            other => other,
+        };
         *self.quick.borrow_mut() = readout;
         wires
     }
@@ -595,6 +747,9 @@ impl CadCommand for MeasureGeomCommand {
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
         if self.mode == Mode::Quick {
+            if let Some(area) = self.quick_area(pt) {
+                return CmdResult::ReportMeasurement(area);
+            }
             return match self.quick.borrow().clone() {
                 Some(text) => CmdResult::ReportMeasurement(text),
                 None => CmdResult::NeedPoint,

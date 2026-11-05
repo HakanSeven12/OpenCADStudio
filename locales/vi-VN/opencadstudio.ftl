@@ -7071,6 +7071,8 @@ measurement =
     .quick-prompt = { $command } Di chuyển con trỏ qua hình học; bấm để báo cáo, Enter để thoát:
     .quick-horizontal = Ngang = { $value }
     .quick-vertical = Dọc = { $value }
+    .quick-length = Chiều dài = { $value }
+    .quick-parallel = Khoảng cách = { $value }
     .area-preview =
         { $current }
         Tổng diện tích xem trước = { $total }

@@ -7052,6 +7052,8 @@ measurement =
     .quick-prompt = { $command }  カーソルを図形の上に移動; クリックで報告、Enter で終了:
     .quick-horizontal = 水平 = { $value }
     .quick-vertical = 垂直 = { $value }
+    .quick-length = 長さ = { $value }
+    .quick-parallel = 距離 = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

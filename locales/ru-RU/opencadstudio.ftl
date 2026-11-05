@@ -7065,6 +7065,8 @@ measurement =
     .quick-prompt = { $command }  Наведите курсор на геометрию; щелчок — вывести, Enter — выход:
     .quick-horizontal = По горизонтали = { $value }
     .quick-vertical = По вертикали = { $value }
+    .quick-length = Длина = { $value }
+    .quick-parallel = Расстояние = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

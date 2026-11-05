@@ -7063,6 +7063,8 @@ measurement =
     .quick-prompt = { $command }  Spostare il cursore sulla geometria; clic per riportare, Invio per uscire:
     .quick-horizontal = Orizzontale = { $value }
     .quick-vertical = Verticale = { $value }
+    .quick-length = Lunghezza = { $value }
+    .quick-parallel = Distanza = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

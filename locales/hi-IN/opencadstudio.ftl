@@ -7052,6 +7052,8 @@ measurement =
     .quick-prompt = { $command }  कर्सर को ज्यामिति पर ले जाएँ; रिपोर्ट के लिए क्लिक करें, बाहर निकलने के लिए Enter:
     .quick-horizontal = क्षैतिज = { $value }
     .quick-vertical = ऊर्ध्वाधर = { $value }
+    .quick-length = लंबाई = { $value }
+    .quick-parallel = दूरी = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

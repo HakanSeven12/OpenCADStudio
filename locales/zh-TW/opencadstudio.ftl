@@ -7059,6 +7059,8 @@ measurement =
     .quick-prompt = { $command }  將游標移到幾何圖形上；按一下回報，Enter 結束：
     .quick-horizontal = 水平 = { $value }
     .quick-vertical = 垂直 = { $value }
+    .quick-length = 長度 = { $value }
+    .quick-parallel = 距離 = { $value }
     .area-preview =
         { $current }
         Preview total area = { $total }

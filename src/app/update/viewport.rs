@@ -4258,6 +4258,15 @@ impl OpenCADStudio {
                     previews.push(guide);
                 }
             }
+            // A drawing command previews the new object in the colour it will
+            // get: the current colour, or the current layer's when ByLayer.
+            if let Some(color) = self.creation_preview_color(i) {
+                for wire in &mut previews {
+                    if wire.color == crate::scene::WireModel::CYAN {
+                        wire.color = color;
+                    }
+                }
+            }
             let preview_hidden = modifier_hidden.unwrap_or_else(|| {
                 self.tabs[i]
                     .active_cmd
@@ -4315,6 +4324,30 @@ impl OpenCADStudio {
             );
         }
         Task::none()
+    }
+
+    /// The colour a drawing command's new object will be drawn in, for its
+    /// preview; `None` for any other command.
+    fn creation_preview_color(&self, i: usize) -> Option<[f32; 4]> {
+        const DRAWING: &[&str] = &[
+            "LINE", "PLINE", "RECT", "CIRCLE", "ARC", "ELLIPSE", "POLY", "SPLINE", "XLINE",
+            "RAY", "POINT", "MULTIPOINT", "DONUT", "REVCLOUD", "3DPOLY", "HELIX", "MLINE",
+            "SKETCH", "TRACE", "SOLID", "3DFACE",
+        ];
+        let tab = &self.tabs[i];
+        let name = tab.active_cmd.as_ref()?.name();
+        let base = name.split('_').next().unwrap_or(name);
+        if !DRAWING.contains(&base) && !name.starts_with("SPLINE") {
+            return None;
+        }
+        let document = &tab.scene.document;
+        let color = match document.header.current_entity_color {
+            codec::types::Color::ByLayer => document.layers.get(&tab.active_layer)?.color,
+            codec::types::Color::ByBlock => codec::types::Color::Index(7),
+            color => color,
+        };
+        let rgba = crate::scene::convert::tess_util::aci_to_rgba(&color);
+        Some(crate::scene::view::render::adapt_to_bg(rgba, tab.scene.bg_color))
     }
 
     /// The navigation style's action for `held` and the modifiers now down.

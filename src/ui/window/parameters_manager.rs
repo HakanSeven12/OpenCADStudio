@@ -2,8 +2,8 @@
 use crate::app::Message;
 use crate::scene::block_parameters_manager::{self as manager, Group, Row};
 use crate::ui::dock::{self, Chrome, PanelId};
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Element, Fill, Length};
+use iced::widget::{button, canvas, column, container, row, scrollable, text, text_input};
+use iced::{Element, Fill, Length, Point, Rectangle, Size};
 
 /// Every column stays visible in the panel's default width, so the fixed cells
 /// plus their spacing must not outgrow it; `Description` takes what is left.
@@ -17,6 +17,140 @@ const COLUMNS: [(f32, &str); 7] = [
     (0.0, "Description"),
 ];
 const SPACING: f32 = 2.0;
+
+/// The leading glyph column. Its width is fixed so a row without a glyph keeps
+/// the same cells in the same places as one with a glyph.
+const GLYPH_WIDTH: f32 = 16.0;
+
+/// The row kinds whose leading glyph was read off the pane. Every other kind
+/// (a point's axes, a flip, a rotation) keeps the empty column rather than a
+/// guessed shape.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GlyphKind {
+    GroupBox,
+    Polar,
+    Xy,
+    Tag,
+}
+
+impl GlyphKind {
+    fn of_row(entry: &Row) -> Option<Self> {
+        match entry.type_name {
+            "Polar" => Some(Self::Polar),
+            "XY" => Some(Self::Xy),
+            "Variable" => Some(Self::Tag),
+            _ => None,
+        }
+    }
+}
+
+struct Glyph(GlyphKind);
+
+impl<Message> canvas::Program<Message> for Glyph {
+    type State = ();
+
+    fn draw(
+        &self,
+        _state: &(),
+        renderer: &iced::Renderer,
+        theme: &iced::Theme,
+        bounds: Rectangle,
+        _cursor: iced::mouse::Cursor,
+    ) -> Vec<canvas::Geometry> {
+        let mut frame = canvas::Frame::new(renderer, bounds.size());
+        let palette = theme.palette();
+        let line = palette.background.base.text;
+        let centre = Point::new(bounds.width / 2.0, bounds.height / 2.0);
+        let reach = bounds.width.min(bounds.height) / 2.0 - 1.0;
+        let stroke = canvas::Stroke::default().with_color(line).with_width(1.0);
+        let square = |reach: f32| {
+            canvas::Path::rectangle(
+                Point::new(centre.x - reach, centre.y - reach),
+                Size::new(reach * 2.0, reach * 2.0),
+            )
+        };
+        match self.0 {
+            GlyphKind::GroupBox => {
+                frame.stroke(&square(reach), stroke.clone());
+                frame.stroke(
+                    &canvas::Path::line(
+                        Point::new(centre.x - reach + 2.0, centre.y),
+                        Point::new(centre.x + reach - 2.0, centre.y),
+                    ),
+                    stroke,
+                );
+            }
+            GlyphKind::Polar => {
+                let diamond = canvas::Path::new(|p| {
+                    p.move_to(Point::new(centre.x, centre.y - reach));
+                    p.line_to(Point::new(centre.x + reach, centre.y));
+                    p.line_to(Point::new(centre.x, centre.y + reach));
+                    p.line_to(Point::new(centre.x - reach, centre.y));
+                    p.close();
+                });
+                frame.stroke(&diamond, stroke);
+                frame.fill(&canvas::Path::circle(centre, 1.6), line);
+            }
+            GlyphKind::Xy => {
+                let grid = canvas::Stroke::default()
+                    .with_color(palette.primary.strong.color)
+                    .with_width(1.0);
+                frame.stroke(&square(reach), grid.clone());
+                frame.stroke(
+                    &canvas::Path::line(
+                        Point::new(centre.x, centre.y - reach),
+                        Point::new(centre.x, centre.y + reach),
+                    ),
+                    grid.clone(),
+                );
+                frame.stroke(
+                    &canvas::Path::line(
+                        Point::new(centre.x - reach, centre.y),
+                        Point::new(centre.x + reach, centre.y),
+                    ),
+                    grid,
+                );
+            }
+            GlyphKind::Tag => {
+                let tag = canvas::Path::new(|p| {
+                    p.move_to(Point::new(centre.x - reach, centre.y - reach * 0.55));
+                    p.line_to(Point::new(centre.x - reach * 0.15, centre.y - reach * 0.55));
+                    p.line_to(Point::new(centre.x + reach, centre.y + reach * 0.55));
+                    p.line_to(Point::new(centre.x + reach * 0.15, centre.y + reach * 0.55));
+                    p.close();
+                });
+                frame.stroke(&tag, stroke);
+                frame.fill(
+                    &canvas::Path::circle(
+                        Point::new(centre.x + reach * 0.42, centre.y + reach * 0.22),
+                        1.1,
+                    ),
+                    line,
+                );
+            }
+        }
+        vec![frame.into_geometry()]
+    }
+}
+
+/// A row's leading glyph cell, or the empty cell that keeps the column open for
+/// a kind left unread. Only a drawn glyph carries an id.
+fn glyph_cell(kind: GlyphKind, id: String) -> Element<'static, Message> {
+    container(
+        canvas(Glyph(kind))
+            .width(Length::Fixed(GLYPH_WIDTH))
+            .height(Length::Fixed(14.0)),
+    )
+    .width(Length::Fixed(GLYPH_WIDTH))
+    .id(iced::widget::Id::from(id))
+    .into()
+}
+
+fn glyph_spacer() -> Element<'static, Message> {
+    container(text(" ").size(11))
+        .width(Length::Fixed(GLYPH_WIDTH))
+        .into()
+}
 
 /// The two numeric cells of a row. They print the same quantity at two
 /// precisions, so typing into either writes the same number.
@@ -132,14 +266,16 @@ fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
 }
 
 fn header_line() -> Element<'static, Message> {
-    row(COLUMNS.into_iter().map(|(width, name)| {
+    let mut cells = vec![glyph_spacer()];
+    cells.extend(COLUMNS.into_iter().map(|(width, name)| {
         let label = if name == "Order" {
             crate::tr!("parameters-manager", "order")
         } else {
             crate::t!(name).into_owned()
         };
         cell(&label, width)
-    })).spacing(SPACING).into()
+    }));
+    row(cells).spacing(SPACING).into()
 }
 
 fn group_line(group: Group) -> Element<'static, Message> {
@@ -147,9 +283,15 @@ fn group_line(group: Group) -> Element<'static, Message> {
         Group::ActionParameters => crate::tr!("parameters-manager", "action-parameters"),
         Group::Attributes => crate::t!(group.name()).into_owned(),
     };
-    container(text(label).size(11))
-        .padding([6, 2])
-        .into()
+    row(vec![
+        glyph_cell(
+            GlyphKind::GroupBox,
+            format!("parameters-manager-group-{:?}", group),
+        ),
+        container(text(label).size(11)).padding([6, 0]).into(),
+    ])
+    .spacing(SPACING)
+    .into()
 }
 
 /// The two fields the list is narrowed with. Their effect is on the rows below
@@ -205,7 +347,12 @@ fn row_line(entry: &Row, panel: &Panel, definition: codec::Handle) -> Element<'s
             cell(&entry.value, COLUMNS[2].0),
         )
     };
+    let glyph = match GlyphKind::of_row(entry) {
+        Some(kind) => glyph_cell(kind, format!("parameters-manager-glyph-{name}")),
+        None => glyph_spacer(),
+    };
     row(vec![
+        glyph,
         cell(name, COLUMNS[0].0),
         expression,
         value,
@@ -349,10 +496,9 @@ mod tests {
         );
         // Every column, including the flexible last one, has to be reachable at
         // the width the panel opens at; a wider row set silently clips.
-        let fixed: f32 = COLUMNS
-            .iter()
-            .map(|(width, _)| width)
-            .sum::<f32>()
+        let fixed: f32 = GLYPH_WIDTH
+            + SPACING
+            + COLUMNS.iter().map(|(width, _)| width).sum::<f32>()
             + SPACING * (COLUMNS.len() as f32 - 1.0);
         assert!(
             fixed < default_width,
@@ -485,6 +631,54 @@ mod tests {
         assert!(
             locate(&angle_only, &crate::tr!("parameters-manager", "footer", shown = "1", total = "3")).is_some(),
             "the footer counts what is left out of what there is"
+        );
+    }
+
+    /// The pane draws a leading glyph for each row kind that was read off it,
+    /// and a box on each group header. The kinds that were never read — a
+    /// point's axes, a flip, a rotation — keep no glyph rather than a guess.
+    #[test]
+    fn every_measured_row_kind_draws_its_glyph_and_a_group_box_its_header() {
+        let mut rows = sample();
+        rows.push(Row {
+            group: Group::ActionParameters,
+            name: "X Distance1".into(),
+            expression: "5".into(),
+            value: "5.0000".into(),
+            type_name: "XY",
+            numeric: true,
+            show: true,
+            order: String::new(),
+            description: String::new(),
+        });
+        let width = PanelId::ParametersManager.default_width();
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(
+                &rows,
+                &Panel::default(),
+                codec::Handle::new(1),
+                width,
+                chrome(),
+            ),
+        );
+        for id in [
+            "parameters-manager-glyph-Angle1",
+            "parameters-manager-glyph-X Distance1",
+            "parameters-manager-glyph-TAG1",
+            "parameters-manager-group-ActionParameters",
+            "parameters-manager-group-Attributes",
+        ] {
+            assert!(
+                ui.find(iced::widget::Id::new(id)).is_ok(),
+                "the pane draws {id}"
+            );
+        }
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-glyph-Point1"))
+                .is_err(),
+            "a row kind that was never read keeps no glyph"
         );
     }
 

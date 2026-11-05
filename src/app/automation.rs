@@ -324,7 +324,16 @@ pub(crate) fn entity_type_matches(entity: &codec::EntityType, requested: &str) -
         return true;
     }
     let record_name = crate::entities::names::dxf_name(entity);
-    record_name != "ENTITY" && record_name.eq_ignore_ascii_case(requested)
+    if record_name != "ENTITY" && record_name.eq_ignore_ascii_case(requested) {
+        return true;
+    }
+    // The node library's object names ("Construction Line", "2D Solid").
+    use crate::ui::node_graph::{ObjectKind, OBJECTS};
+    OBJECTS.iter().any(|kind| {
+        *kind != ObjectKind::Object
+            && kind.name().eq_ignore_ascii_case(requested)
+            && kind.matches(entity)
+    })
 }
 
 /// One entity as JSON. Summary mode carries identity only, geometry adds the
@@ -5810,5 +5819,18 @@ mod mtext_loss_tests {
         let new = dir.join("new.dwg");
         assert_eq!(super::export_headless(&input, &new, Some("2018"), false), 0);
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod type_name_tests {
+    /// #2592: Objects By Type takes the names the node library shows.
+    #[test]
+    fn the_node_library_names_find_their_objects() {
+        let xline = codec::EntityType::XLine(Default::default());
+        assert!(super::entity_type_matches(&xline, "Construction Line"));
+        assert!(super::entity_type_matches(&xline, "XLine"));
+        assert!(!super::entity_type_matches(&xline, "Line"));
+        assert!(!super::entity_type_matches(&xline, "Object"));
     }
 }

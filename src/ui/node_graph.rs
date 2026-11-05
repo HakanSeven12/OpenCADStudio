@@ -59,7 +59,7 @@ pub enum ObjectKind {
     Wipeout,
 }
 
-const OBJECTS: &[ObjectKind] = &[
+pub(crate) const OBJECTS: &[ObjectKind] = &[
     ObjectKind::Object,
     ObjectKind::Line,
     ObjectKind::Circle,

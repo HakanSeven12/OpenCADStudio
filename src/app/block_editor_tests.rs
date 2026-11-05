@@ -8386,7 +8386,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     assert!(!fields(&app).contains(&"authoring_action_chain"), "a parameter has no chain to name");
     let _ = app.update(Message::BlockActionBarSelect(scale_action));
     assert!(fields(&app).contains(&"authoring_action_chain"));
-    assert_eq!(chain::label(&app.tabs[i].scene.document, definition, scale_action), Some(String::new()));
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(vec![]));
     let before = app.tabs[i].scene.document.clone();
     let depth = app.tabs[i].history.undo_stack.len();
     // The parameter runs from ten to twenty units, so the move shifts the member
@@ -8408,7 +8408,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     assert_eq!(app.tabs[i].scene.document, before, "an unknown name chains nothing");
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
     let _ = type_name(&mut app, &move_name);
-    assert_eq!(chain::label(&app.tabs[i].scene.document, definition, scale_action), Some(move_name.clone()));
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(vec![move_name.clone()]));
     let chained = app.tabs[i].scene.document.clone();
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
     assert_eq!(drive(&chained), (10., 12.), "the scale runs first and hands its result to the move");
@@ -8418,9 +8418,47 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     app.redo_steps(1);
     assert_eq!(app.tabs[i].scene.document.objects[&scale_action], chained.objects[&scale_action]);
     let _ = type_name(&mut app, " ");
-    assert_eq!(chain::label(&app.tabs[i].scene.document, definition, scale_action), Some(String::new()));
+    assert_eq!(chain::labels(&app.tabs[i].scene.document, definition, scale_action), Some(vec![]));
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 2);
     assert_eq!(drive(&app.tabs[i].scene.document), drive(&before), "clearing the row hands the order back");
+
+    let doc = &mut app.tabs[i].scene.document;
+    let extra = actions::create(
+        doc,
+        definition,
+        Kind::Move,
+        parameter,
+        &targets,
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
+    let action_list = actions::actions(doc, definition);
+    let ids: Vec<_> = [extra, move_action]
+        .iter()
+        .map(|handle| {
+            action_list
+                .iter()
+                .find(|(candidate, ..)| candidate == handle)
+                .unwrap()
+                .1
+                .element
+                .eval
+                .node_id
+        })
+        .collect();
+    let expected = format!("{}, {}", name(doc, extra), move_name);
+    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&scale_action).unwrap() else {
+        panic!()
+    };
+    let codec::objects::DynamicBlockData::ScaleAction(scale) = &mut object.data else {
+        panic!()
+    };
+    scale.action.action.action_ids = ids;
+    let _ = app.update(Message::BlockActionBarSelect(scale_action));
+    assert!(app.tabs[i].properties.sections.iter().flat_map(|s| &s.props).any(|property| {
+        property.field == "authoring_action_chain"
+            && matches!(&property.value, crate::scene::model::object::PropValue::ReadOnly(text) if *text == expected)
+    }));
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }
 

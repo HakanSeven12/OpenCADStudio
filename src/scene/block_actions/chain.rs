@@ -1,23 +1,24 @@
 //! The chain that records the order one definition's actions run in.
 use super::*;
 
-/// The follow-up this action names, spelled the way the Actions tab lists it.
-/// `None` is for a handle that is not one of the definition's actions; an action
-/// that names nothing, or names a node the definition does not carry, reads back
-/// as the empty string the row shows.
-pub(crate) fn label(doc: &Document, definition: Handle, action: Handle) -> Option<String> {
+/// Follow-ups in retained list order, spelled as shown in the Actions tab.
+/// A handle outside the definition's actions has no row.
+pub(crate) fn labels(doc: &Document, definition: Handle, action: Handle) -> Option<Vec<String>> {
     let all = actions(doc, definition);
-    let (_, head, _, _) = all.iter().find(|(handle, ..)| *handle == action)?;
+    let (_, head, _, owner) = all.iter().find(|(handle, ..)| *handle == action)?;
+    let mut seen = std::collections::BTreeSet::new();
     Some(
         head.action_ids
-            .first()
-            .filter(|id| **id > 0)
-            .and_then(|id| {
+            .iter()
+            .filter(|id| **id > 0 && seen.insert(**id))
+            .filter_map(|id| {
                 all.iter()
-                    .find(|(_, other, _, _)| &other.element.eval.node_id == id)
+                    .find(|(_, other, _, next_owner)| {
+                        next_owner == owner && &other.element.eval.node_id == id
+                    })
+                    .map(|(_, other, _, _)| other.element.name.clone())
             })
-            .map(|(_, other, _, _)| other.element.name.clone())
-            .unwrap_or_default(),
+            .collect(),
     )
 }
 
@@ -39,32 +40,29 @@ fn action_of(data: &mut DynamicBlockData) -> Option<&mut BlockAction> {
 /// has no first action, so the order it names is one nothing can run.
 fn loops(doc: &Document, definition: Handle, action: Handle) -> bool {
     let all = actions(doc, definition);
-    let follow_up = |handle: Handle| {
-        let id = *all
-            .iter()
-            .find(|(other, ..)| *other == handle)?
-            .1
-            .action_ids
-            .first()?;
-        if id <= 0 {
-            return None;
+    let by_id: std::collections::BTreeMap<_, _> = all
+        .iter()
+        .filter(|(_, record, ..)| record.element.eval.node_id > 0)
+        .map(|record| (record.1.element.eval.node_id, record))
+        .collect();
+    let mut visited = std::collections::BTreeSet::from([action]);
+    let mut pending = Vec::from_iter(all.iter().find(|(handle, ..)| *handle == action));
+    while let Some((_, current, kind, owner)) = pending.pop() {
+        if matches!(kind, Kind::Array | Kind::Stretch | Kind::PolarStretch) {
+            continue;
         }
-        all.iter()
-            .find(|(_, other, _, _)| other.element.eval.node_id == id)
-            .map(|(other, ..)| *other)
-    };
-    let mut visited = std::collections::BTreeSet::new();
-    let mut current = action;
-    while let Some(next) = follow_up(current) {
-        if next == action {
-            return true;
+        for id in &current.action_ids {
+            let Some(&next) = by_id.get(id) else { continue };
+            if next.3 != *owner {
+                continue;
+            }
+            if next.0 == action {
+                return true;
+            }
+            if visited.insert(next.0) {
+                pending.push(next);
+            }
         }
-        // A loop further along the chain is one the file already carried; the walk
-        // has nowhere to go from it, so this write is not what closed it.
-        if !visited.insert(next) {
-            return false;
-        }
-        current = next;
     }
     false
 }

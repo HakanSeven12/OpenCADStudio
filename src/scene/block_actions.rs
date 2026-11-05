@@ -2045,12 +2045,13 @@ fn chain_order(
             _ => None,
         })
         .unwrap_or_default();
-    let mut followed_by = std::collections::BTreeMap::new();
-    let mut next_action = std::collections::BTreeMap::new();
+    let mut predecessors = vec![0; all.len()];
+    let mut successors = vec![Vec::new(); all.len()];
     for (index, (_, action, kind, owner)) in all.iter().enumerate() {
         if matches!(*kind, Kind::Stretch | Kind::PolarStretch | Kind::Array) {
             continue;
         }
+        let mut seen = std::collections::BTreeSet::new();
         for id in &action.action_ids {
             if shared_chain_ids.contains(id) {
                 return Err("An action chain names more than one action.");
@@ -2061,43 +2062,37 @@ fn chain_order(
                 }
                 return Err("An action chain names an object outside this block.");
             };
-            if all[next].3 != *owner {
+            if all[next].3 != *owner || !seen.insert(next) {
                 continue;
-            }
-            if next_action.insert(index, next).is_some() {
-                return Err("An action chain cannot name more than one follow-up action yet.");
             }
             if all[next].2 == Kind::Array {
                 return Err("An Array action cannot be the follow-up of a chain yet.");
             }
-            if followed_by.insert(next, index).is_some() {
-                return Err("An action chain joins two sequences.");
-            }
+            successors[index].push(next);
+            predecessors[next] += 1;
         }
     }
     let mut order = Vec::with_capacity(all.len());
-    let mut placed = std::collections::BTreeSet::new();
-    for head in 0..all.len() {
-        if followed_by.contains_key(&head) {
-            continue;
-        }
+    let heads: Vec<_> = predecessors.iter().enumerate()
+        .filter_map(|(index, count)| (*count == 0).then_some(index))
+        .collect();
+    for head in heads {
         let mut queue = std::collections::VecDeque::from([head]);
         while let Some(index) = queue.pop_front() {
-            if !placed.insert(index) {
-                continue;
-            }
             order.push(index);
-            if let Some(&next) = next_action.get(&index) {
-                queue.push_back(next);
+            // A join runs once all named predecessors have run. When a
+            // branch releases several actions together, keep its list order.
+            for &next in &successors[index] {
+                predecessors[next] -= 1;
+                if predecessors[next] == 0 {
+                    queue.push_back(next);
+                }
             }
         }
     }
     // A cycle has no head, so whatever is left keeps the graph's own order.
-    for index in 0..all.len() {
-        if placed.insert(index) {
-            order.push(index);
-        }
-    }
+    order.extend(predecessors.iter().enumerate()
+        .filter_map(|(index, count)| (*count > 0).then_some(index)));
     Ok(order)
 }
 

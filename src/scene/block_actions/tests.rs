@@ -2967,10 +2967,9 @@ fn an_array_action_stays_out_of_a_chain_written_from_authoring() {
 
 /// A chain the evaluator could not run is not a chain the operator can write, so
 /// the shapes the order refuses are refused here too, and the record is left as it
-/// was: an action with no node is not a name, and two chains cannot share a
-/// follow-up.
+/// was. An action without a graph node cannot be named as a follow-up.
 #[test]
-fn a_chain_is_refused_when_it_would_leave_the_definition_unrunnable() {
+fn a_chain_refuses_an_unnamed_node_and_can_join_an_existing_sequence() {
     let (mut doc, def, parameter, member, move_action, scale_action) = chained_pair();
     let scale_node = chain_id(&doc, scale_action);
     set_chain_id(&mut doc, scale_action, 0);
@@ -2981,20 +2980,8 @@ fn a_chain_is_refused_when_it_would_leave_the_definition_unrunnable() {
     set_chain_id(&mut doc, scale_action, scale_node);
     assert!(super::chain::set(&mut doc, def, move_action, Some(scale_action)).unwrap());
     let extra = add_action(&mut doc, def, parameter, member, Kind::Move);
-    assert_eq!(
-        super::chain::set(&mut doc, def, extra, Some(scale_action)).unwrap_err(),
-        "An action chain joins two sequences."
-    );
-    assert!(
-        actions(&doc, def)
-            .into_iter()
-            .find(|(handle, ..)| *handle == extra)
-            .unwrap()
-            .1
-            .action_ids
-            .is_empty(),
-        "a refused chain is not half written"
-    );
+    assert!(super::chain::set(&mut doc, def, extra, Some(scale_action)).unwrap());
+    assert_eq!(drive(&mut doc, def, parameter, member), (DVec3::new(48., 6., 0.), 4.));
 }
 
 /// A Stretch is the other kind the order cannot take a chain from, and writing one
@@ -3091,10 +3078,9 @@ fn actions_that_chain_each_other_keep_the_order_the_graph_lists() {
     );
 }
 
-/// Two chains that both claim the same follow-up cannot both come first, so the
-/// ordering refuses rather than picking one of the two orders.
+/// A shared follow-up sees the effects of both predecessors, once.
 #[test]
-fn two_chains_that_claim_one_follow_up_action_are_refused() {
+fn two_chains_join_before_applying_their_shared_follow_up_once() {
     let (mut doc, def, handles) = fixture();
     let parameter = linear(&mut doc, def);
     let first_move = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
@@ -3103,9 +3089,10 @@ fn two_chains_that_claim_one_follow_up_action_are_refused() {
     mark_chained(&mut doc, parameter);
     chain_after(&mut doc, first_move, scale_action);
     chain_after(&mut doc, second_move, scale_action);
-    let baseline = doc.clone();
-    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
-    assert_eq!(error, "An action chain joins two sequences.");
+    assert_eq!(
+        drive(&mut doc, def, parameter, handles[1]),
+        (DVec3::new(48., 6., 0.), 4.)
+    );
 }
 
 /// An array action replaces the member with a grid of copies, so a chain that
@@ -3128,26 +3115,37 @@ fn a_chain_that_runs_into_an_array_action_is_refused() {
     );
 }
 
-/// A chain that names two follow-ups says the member is in two places at once,
-/// because each action works on what the previous one left. There is no order
-/// that makes that true, so the fork is refused instead of picking one of the
-/// two follow-ups to run first.
+/// Sibling actions use the stored list order when both become eligible.
 #[test]
-fn a_chain_that_names_two_follow_up_actions_is_refused() {
+fn retained_follow_up_branches_run_in_list_order_after_reload() {
     let (mut doc, def, handles) = fixture();
     let parameter = linear(&mut doc, def);
     let head = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
     let first = add_action(&mut doc, def, parameter, handles[1], Kind::Move);
     let second = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
     mark_chained(&mut doc, parameter);
+    chain_names(&mut doc, head, &[second, first, second]);
+    for extension in ["dwg", "dxf"] {
+        let bytes = crate::io::save_to_bytes(&doc, extension, doc.version).unwrap();
+        let mut saved = crate::io::load_bytes(&format!("branched-chain.{extension}"), bytes).unwrap();
+        assert_eq!(
+            drive(&mut saved, def, parameter, handles[1]),
+            (DVec3::new(38., 6., 0.), 4.)
+        );
+    }
+}
+
+#[test]
+fn an_authored_follow_up_cannot_close_a_retained_branch_loop() {
+    let (mut doc, def, parameter, member, head, first) = chained_pair();
+    let second = add_action(&mut doc, def, parameter, member, Kind::Move);
     chain_names(&mut doc, head, &[first, second]);
-    let baseline = doc.clone();
-    let error = evaluate(&mut doc, &baseline, def, parameter, DVec3::new(20., 0., 0.)).unwrap_err();
+    let before = doc.clone();
     assert_eq!(
-        error,
-        "An action chain cannot name more than one follow-up action yet."
+        super::chain::set(&mut doc, def, second, Some(head)),
+        Err("An action chain cannot loop back to the action that started it.")
     );
-    assert_eq!(doc, baseline, "a refused chain leaves the definition alone");
+    assert_eq!(doc, before);
 }
 
 /// An array action replaces the member with a grid of copies, so nothing is left
@@ -3214,12 +3212,12 @@ fn a_chain_that_names_no_node_reads_back_as_no_chain() {
     set_chain_id(&mut doc, scale_action, 0);
     action_object_mut(&mut doc, move_action).action_ids = vec![0];
     assert_eq!(
-        super::chain::label(&doc, def, move_action),
-        Some(String::new()),
+        super::chain::labels(&doc, def, move_action),
+        Some(vec![]),
         "the row shows no chain rather than the action left on the default node"
     );
     assert_eq!(
-        super::chain::label(&doc, def, parameter),
+        super::chain::labels(&doc, def, parameter),
         None,
         "a parameter has no chain of its own to show"
     );
@@ -3264,8 +3262,8 @@ fn a_chain_that_loops_back_to_the_action_that_started_it_is_refused() {
     );
     assert!(super::chain::set(&mut doc, def, move_action, None).unwrap());
     assert_eq!(
-        super::chain::label(&doc, def, move_action),
-        Some(String::new()),
+        super::chain::labels(&doc, def, move_action),
+        Some(vec![]),
         "the row reads the cleared chain back as no chain"
     );
 }

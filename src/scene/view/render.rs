@@ -4026,6 +4026,20 @@ pub struct InheritStyle {
     pub lw_px: f32,
 }
 
+/// An INSERT's dash pattern as its ByBlock children inherit it: the linetype is
+/// the INSERT's, but the linetype scale that applies is the child's own.
+pub(crate) fn insert_pattern_for_children(
+    common: &codec::entities::EntityCommon,
+    pat_len: f32,
+    pat: [f32; 8],
+) -> (f32, [f32; 8]) {
+    let own_scale = common.linetype_scale as f32;
+    if !own_scale.is_finite() || own_scale.abs() <= 1.0e-9 {
+        return (pat_len, pat);
+    }
+    (pat_len / own_scale, pat.map(|value| value / own_scale))
+}
+
 /// Convert a concrete (already layer-resolved) lineweight to display pixels.
 /// Kept below 1 px for thin weights so plots and SVG get the true width;
 /// the GPU paths draw at least 1 px (#1749).

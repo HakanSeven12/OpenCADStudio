@@ -499,19 +499,19 @@ impl MeasureGeomCommand {
     }
 
     fn area_message(measurement: AreaMeasurement, circle: bool) -> String {
-        let area = crate::entities::common::format_area(measurement.area);
+        let area = area_text(measurement.area);
         match measurement.perimeter {
             Some(perimeter) if circle => crate::tr!(
                 "measurement",
                 "area-circumference",
                 area = area,
-                perimeter = crate::entities::common::format_length(perimeter)
+                perimeter = length_text(perimeter)
             ),
             Some(perimeter) => crate::tr!(
                 "measurement",
                 "area-perimeter",
                 area = area,
-                perimeter = crate::entities::common::format_length(perimeter)
+                perimeter = length_text(perimeter)
             ),
             None => crate::tr!("measurement", "area-only", area = area),
         }
@@ -526,7 +526,7 @@ impl MeasureGeomCommand {
     }
 
     fn total_message(&self) -> String {
-        let total = crate::entities::common::format_area(self.total);
+        let total = area_text(self.total);
         if self.volume {
             crate::tr!("measurement", "total-volume", total = total)
         } else {
@@ -566,7 +566,7 @@ impl MeasureGeomCommand {
         let message = crate::tr!(
             "measurement",
             "volume-result",
-            volume = crate::entities::common::format_area(volume)
+            volume = area_text(volume)
         );
         self.report(volume, message)
     }
@@ -859,8 +859,8 @@ impl MeasureGeomCommand {
     fn radius_msg(radius: f64) -> String {
         t!(
             "Radius = %{radius},  Diameter = %{diameter}",
-            radius = crate::entities::common::format_length(radius),
-            diameter = crate::entities::common::format_length(radius * 2.0)
+            radius = length_text(radius),
+            diameter = length_text(radius * 2.0)
         )
         .into_owned()
     }
@@ -946,7 +946,8 @@ impl MeasureGeomCommand {
 
     /// DISTANCE readout for the two collected points.
     fn distance_msg(plane: WorkingPlane, p1: DVec3, p2: DVec3) -> String {
-        use crate::entities::common::{format_angle, format_length};
+        use crate::entities::common::format_angle;
+        let format_length = length_text;
         let delta = plane.to_local(p2) - plane.to_local(p1);
         let in_plane = delta.y.atan2(delta.x);
         let from_plane = delta.z.atan2(delta.truncate().length());
@@ -1069,7 +1070,7 @@ impl MeasureGeomCommand {
                 "measuregeom_quick",
                 vec![plane.to_world(start), plane.to_world(end)],
             ));
-            let value = crate::entities::common::format_length(to - from);
+            let value = length_text(to - from);
             lines.push(if axis == 0 {
                 crate::tr!("measurement", "quick-horizontal", value = value)
             } else {
@@ -1155,7 +1156,7 @@ impl CadCommand for MeasureGeomCommand {
                 Some(crate::tr!(
                     "measurement",
                     "distance",
-                    value = crate::entities::common::format_length(Self::chain_length(&points))
+                    value = length_text(Self::chain_length(&points))
                 ))
             }
             Mode::Area
@@ -1439,7 +1440,7 @@ impl CadCommand for MeasureGeomCommand {
                 self.done(crate::tr!(
                     "measurement",
                     "distance",
-                    value = crate::entities::common::format_length(length)
+                    value = length_text(length)
                 ))
             }
             Mode::Distance if self.multiple => Self::keyword_error(),
@@ -1777,4 +1778,13 @@ mod measurement_tests {
         ))
         .contains("3.0000"));
     }
+}
+
+/// Command-line results keep every LUPREC place.
+fn area_text(value: f64) -> String {
+    crate::entities::common::with_all_places(|| crate::entities::common::format_area(value))
+}
+
+fn length_text(value: f64) -> String {
+    crate::entities::common::with_all_places(|| crate::entities::common::format_length(value))
 }

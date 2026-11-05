@@ -398,6 +398,22 @@ fn changing_the_annotation_scale_relays_a_complex_linetype() {
 }
 
 #[test]
+fn msltscale_off_keeps_a_complex_linetype_at_its_drawing_length() {
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(100.0, 0.0, 0.0));
+    let handle = add(&mut document, EntityType::Line(line));
+    let unscaled = glyph_stations(&wires(&document, handle), [0.0, 0.0], 0.5);
+
+    assert!(document.set_drawing_variable("MSLTSCALE", "0"));
+    let off = glyph_stations(&wires_at(&document, handle, 15.0, false), [0.0, 0.0], 0.5);
+    assert_eq!(off.len(), unscaled.len());
+
+    assert!(document.set_drawing_variable("MSLTSCALE", "1"));
+    let on = glyph_stations(&wires_at(&document, handle, 15.0, false), [0.0, 0.0], 8.0);
+    assert_fence_at_15(&on);
+}
+
+#[test]
 fn dashed_line_end_dashes_keep_every_whole_period() {
     // The shader path uses the same rule: 2.3 holds three 0.75 periods of a
     // 0.5 dash, so each end dash is (2.3 - 2.25 + 0.5) / 2 = 0.275.

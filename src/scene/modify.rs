@@ -1381,7 +1381,8 @@ impl Scene {
                 }
                 let rebuilt_history =
                     self.copy_solid_history(src_handle, h) && self.transform_solid_history(h, t);
-                if !rebuilt_history
+                // A moved history only moves a mesh the copy does not have yet.
+                if (!rebuilt_history || !self.meshes.contains_key(&h))
                     && self.document.get_entity(h).is_some_and(|entity| {
                         matches!(
                             entity,

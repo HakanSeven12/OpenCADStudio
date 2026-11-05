@@ -418,6 +418,7 @@ gpu =
     .command-line-no-renderer = Nem érhető el GPU-renderelő — a rajzterület nem jeleníthető meg. Ellenőrizze a grafikus illesztőprogramot.
 
 recovery =
+    .newer-autosave = A rajznál újabb helyreállítási másolat található: { $file }. Nyissa meg a nem mentett munka visszaállításához.
     .opened-with-repairs = A rajz helyreállítási jelentéssel nyílt meg
     .open-failed = A rajz nem nyitható meg
     .repaired-description = A rajz megnyitásakor problémák észlelhetők. Tekintse át a jelentést; ha a rajz adatai javítva lettek, mentse új fájlba.

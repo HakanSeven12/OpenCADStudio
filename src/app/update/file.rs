@@ -2426,12 +2426,8 @@ impl OpenCADStudio {
             .header
             .current_table_style_name
             .clone();
-
-        // ── Block-editor autosave recovery ──────────────────────────────
-        // If the previous session had a block editor open with unsaved changes
-        // (stored in .ocs-block-autosave.sv$), offer to restore it.
         #[cfg(not(target_arch = "wasm32"))]
-        self.maybe_prompt_block_autosave_recovery(i, &path);
+        self.notice_newer_autosave(i, &path);
         self.tabs[i].active_mleader_style = self.tabs[i]
             .scene
             .document
@@ -4772,6 +4768,24 @@ impl OpenCADStudio {
         self.on_save_dialog_confirm()
     }
 
+    /// A recovery copy newer than the drawing holds work a crash cut off
+    /// (the copy goes when the drawing is saved or closed); say where it is.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn notice_newer_autosave(&mut self, i: usize, path: &std::path::Path) {
+        let copy = self.autosave_target(i);
+        let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+        if modified(&copy)
+            .zip(modified(path))
+            .is_some_and(|(copy_time, file_time)| copy_time > file_time)
+        {
+            self.command_line.push_warning(&crate::tr!(
+                "recovery",
+                "newer-autosave",
+                file = copy.display().to_string()
+            ));
+        }
+    }
+
     /// Where the autosave recovery copy for tab `i` lives.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn autosave_target(&self, i: usize) -> std::path::PathBuf {
@@ -4790,24 +4804,6 @@ impl OpenCADStudio {
                     .map(|c| if c.is_alphanumeric() { c } else { '_' })
                     .collect();
                 std::env::temp_dir().join(format!("OpenCADStudio_{safe}_{}.sv$", self.tabs[i].id))
-            }
-        }
-    }
-
-    /// Where the block-editor autosave recovery copy for tab `i` lives.
-    /// Separate from the regular autosave so a block edit crash doesn't overwrite
-    /// the main drawing's recovery copy, and vice versa.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(in crate::app) fn block_autosave_target(&self, i: usize) -> std::path::PathBuf {
-        match &self.tabs[i].current_path {
-            Some(p) => crate::app::block_autosave::block_autosave_path(p),
-            None => {
-                let safe: String = self.tabs[i]
-                    .tab_display_name()
-                    .chars()
-                    .map(|c| if c.is_alphanumeric() { c } else { '_' })
-                    .collect();
-                std::env::temp_dir().join(format!("OpenCADStudio_{safe}_{}_block.sv$", self.tabs[i].id))
             }
         }
     }
@@ -4833,42 +4829,24 @@ impl OpenCADStudio {
     pub(super) fn on_autosave(&mut self) -> Task<Message> {
         let mut tasks = Vec::new();
         for i in 0..self.tabs.len() {
-            // Regular document autosave
-            if self.tabs[i].block_test.is_none()
-                && self.tabs[i].dirty
-                && !self.active_save_jobs.contains_key(&self.tabs[i].id) {
-                self.prepare_snapshot_save(i);
-                let version = self.tabs[i].scene.document.version;
-                let target = self.autosave_target(i);
-                tasks.push(self.queue_native_save(
-                    i,
-                    target,
-                    version,
-                    crate::app::SavePurpose::Autosave,
-                    crate::app::SaveContinuation::None,
-                    false,
-                    false,
-                ));
-            }
-            // Block editor autosave: separate file so block edits don't overwrite
-            // the main drawing's recovery copy, and vice versa.
-            if self.tabs[i].active_block_edit_session().is_some()
-                && self.block_edit_dirty(i)
-                && !self.active_save_jobs.contains_key(&self.tabs[i].id)
+            if self.tabs[i].block_test.is_some()
+                || !self.tabs[i].dirty
+                || self.active_save_jobs.contains_key(&self.tabs[i].id)
             {
-                self.prepare_snapshot_save(i);
-                let version = self.tabs[i].scene.document.version;
-                let target = self.block_autosave_target(i);
-                tasks.push(self.queue_native_save(
-                    i,
-                    target,
-                    version,
-                    crate::app::SavePurpose::Autosave,
-                    crate::app::SaveContinuation::None,
-                    false,
-                    false,
-                ));
+                continue;
             }
+            self.prepare_snapshot_save(i);
+            let version = self.tabs[i].scene.document.version;
+            let target = self.autosave_target(i);
+            tasks.push(self.queue_native_save(
+                i,
+                target,
+                version,
+                crate::app::SavePurpose::Autosave,
+                crate::app::SaveContinuation::None,
+                false,
+                false,
+            ));
         }
         Task::batch(tasks)
     }
@@ -5232,7 +5210,6 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         for i in 0..self.tabs.len() {
             let _ = std::fs::remove_file(self.autosave_target(i));
-            let _ = std::fs::remove_file(self.block_autosave_target(i));
         }
         #[cfg(not(target_arch = "wasm32"))]
         for path in &self.sheet_set.locks {
@@ -5262,37 +5239,6 @@ impl OpenCADStudio {
                 }
             });
         }
-    }
-
-    /// If a `.ocs-block-autosave.sv$` file exists for the opened drawing,
-    /// it means the previous session crashed while a block editor was open
-    /// with unsaved changes. Offer to restore it.
-    #[cfg(not(target_arch = "wasm32"))]
-    fn maybe_prompt_block_autosave_recovery(&mut self, tab_index: usize, _path: &std::path::Path) {
-        let block_autosave = self.block_autosave_target(tab_index);
-        if !block_autosave.exists() {
-            return;
-        }
-        let main_autosave = self.autosave_target(tab_index);
-        let main_mtime = std::fs::metadata(&main_autosave).ok().and_then(|m| m.modified().ok());
-        let block_mtime = match std::fs::metadata(&block_autosave).ok().and_then(|m| m.modified().ok()) {
-            Some(t) => t,
-            None => return,
-        };
-        if !crate::app::block_autosave::should_offer_block_recovery(block_mtime, main_mtime) {
-            return;
-        }
-        // Offer recovery via modal (will need a new ModalKind or reusing RecoveryPrompt)
-        self.command_line.push_warning(
-            crate::tf!(
-                "Recuperación de editor de bloques: se encontró una edición de bloque sin guardar ({}). Usa BEDIT para abrirlo y restaurar, o ignora para descartar.",
-                block_autosave.file_name().unwrap().to_string_lossy()
-            )
-            .as_ref(),
-        );
-        // NOTE: Full modal recovery with "Restore/Discard" buttons would need
-        // a new ModalKind::BlockAutosaveRecovery and corresponding UI.
-        // For now the file is there — user can manually open it via File > Open.
     }
 
     /// Remove the autosave recovery files, then quit the application.

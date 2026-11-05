@@ -425,6 +425,7 @@ gpu =
     .command-line-no-renderer = Kein GPU-Renderer verfügbar — der Zeichenbereich kann nicht angezeigt werden. Prüfen Sie den Grafiktreiber.
 
 recovery =
+    .newer-autosave = Eine Wiederherstellungskopie, die neuer als diese Zeichnung ist, wurde gefunden: { $file }. Öffnen Sie sie, um die nicht gespeicherte Arbeit zurückzuholen.
     .opened-with-repairs = Zeichnung mit einem Wiederherstellungsbericht geöffnet
     .open-failed = Zeichnung konnte nicht geöffnet werden
     .repaired-description = Beim Öffnen der Zeichnung wurden Probleme erkannt. Prüfen Sie den Bericht; wenn Zeichnungsdaten repariert wurden, speichern Sie die Zeichnung als neue Datei.

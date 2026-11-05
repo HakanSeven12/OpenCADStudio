@@ -671,26 +671,25 @@ impl OpenCADStudio {
             }
 
             "BSAVE" => {
+                // The saved block reaches the recovery copy now rather than at
+                // the next SAVETIME tick, so a crash before leaving the editor
+                // keeps it.
+                #[cfg(not(target_arch = "wasm32"))]
                 if self.save_block_edit(i) {
-                    // Also persist to block-autosave file immediately so a crash
-                    // after Save Block but before exiting the editor does not lose the edits.
-                    // Do NOT call prepare_snapshot_save here — save_block_edit already
-                    // updated the checkpoint; re-preparing would desync it.
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let target = self.block_autosave_target(i);
-                        let version = self.tabs[i].scene.document.version;
-                        let _ = self.queue_native_save(
-                            i,
-                            target,
-                            version,
-                            crate::app::SavePurpose::Autosave,
-                            crate::app::SaveContinuation::None,
-                            false,
-                            false,
-                        );
-                    }
+                    let target = self.autosave_target(i);
+                    let version = self.tabs[i].scene.document.version;
+                    return Some(self.queue_native_save(
+                        i,
+                        target,
+                        version,
+                        crate::app::SavePurpose::Autosave,
+                        crate::app::SaveContinuation::None,
+                        false,
+                        false,
+                    ));
                 }
+                #[cfg(target_arch = "wasm32")]
+                self.save_block_edit(i);
             }
             "BTESTBLOCK" => return Some(self.open_block_test(i)),
             "BCLOSETESTBLOCK" => return Some(self.close_block_test(i)),

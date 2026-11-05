@@ -425,6 +425,7 @@ gpu =
     .command-line-no-renderer = Brak dostępnego renderera GPU — obszar rysunku nie może zostać wyświetlony. Sprawdź sterownik graficzny.
 
 recovery =
+    .newer-autosave = Znaleziono kopię odzyskiwania nowszą niż ten rysunek: { $file }. Otwórz ją, aby odzyskać niezapisaną pracę.
     .opened-with-repairs = Rysunek otwarto z raportem odzyskiwania
     .open-failed = Nie można otworzyć rysunku
     .repaired-description = Podczas otwierania rysunku wykryto problemy. Przejrzyj raport; jeśli dane rysunku zostały naprawione, zapisz go jako nowy plik.

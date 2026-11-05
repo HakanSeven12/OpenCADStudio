@@ -425,6 +425,7 @@ gpu =
     .command-line-no-renderer = Aucun moteur de rendu GPU n’est disponible — la zone de dessin ne peut pas être affichée. Vérifiez le pilote graphique.
 
 recovery =
+    .newer-autosave = Une copie de récupération plus récente que ce dessin a été trouvée : { $file }. Ouvrez-la pour récupérer le travail non enregistré.
     .opened-with-repairs = Dessin ouvert avec un rapport de récupération
     .open-failed = Impossible d'ouvrir le dessin
     .repaired-description = Des problèmes ont été détectés pendant l'ouverture du dessin. Consultez le rapport ; si des données ont été réparées, enregistrez le dessin dans un nouveau fichier.

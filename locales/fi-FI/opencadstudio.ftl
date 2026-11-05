@@ -425,6 +425,7 @@ gpu =
     .command-line-no-renderer = GPU-piirtäjää ei ole käytettävissä — piirustusaluetta ei voida näyttää. Tarkista näytönohjaimen ajuri.
 
 recovery =
+    .newer-autosave = Tätä piirustusta uudempi palautuskopio löytyi: { $file }. Avaa se saadaksesi tallentamattoman työn takaisin.
     .opened-with-repairs = Piirustus avattiin palautusraportin kanssa
     .open-failed = Piirustusta ei voitu avata
     .repaired-description = Piirustusta avattaessa havaittiin ongelmia. Tarkista raportti ja tallenna piirustus uutena tiedostona, jos tietoja korjattiin.

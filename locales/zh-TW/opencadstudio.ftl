@@ -424,6 +424,7 @@ gpu =
     .command-line-no-renderer = 沒有可用的 GPU 算繪器——無法顯示繪圖區域。請檢查顯示卡驅動程式。
 
 recovery =
+    .newer-autosave = 找到比此圖面更新的復原副本：{ $file }。開啟它以找回未儲存的工作。
     .opened-with-repairs = 圖形已開啟，並產生修復報告
     .open-failed = 無法開啟圖形
     .repaired-description = 開啟圖形時偵測到問題。請查看報告；如果圖形資料已修復，請將其另存為新檔案。

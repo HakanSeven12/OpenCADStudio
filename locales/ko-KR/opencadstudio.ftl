@@ -425,6 +425,7 @@ gpu =
     .command-line-no-renderer = 사용할 수 있는 GPU 렌더러가 없습니다 — 도면 영역을 표시할 수 없습니다. 그래픽 드라이버를 확인하세요.
 
 recovery =
+    .newer-autosave = 이 도면보다 최신인 복구 사본이 있습니다: { $file }. 저장하지 않은 작업을 되찾으려면 여십시오.
     .opened-with-repairs = 복구 보고서와 함께 도면을 열었습니다
     .open-failed = 도면을 열 수 없습니다
     .repaired-description = 도면을 여는 동안 문제가 감지되었습니다. 보고서를 검토하고 도면 데이터가 복구되었다면 새 파일로 저장하세요.

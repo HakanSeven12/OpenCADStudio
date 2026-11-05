@@ -425,6 +425,7 @@ gpu =
     .command-line-no-renderer = GPU レンダラーを利用できません — 図面領域を表示できません。グラフィックスドライバーを確認してください。
 
 recovery =
+    .newer-autosave = この図面より新しい回復用コピーが見つかりました: { $file }。開くと保存されていない作業を取り戻せます。
     .opened-with-repairs = 修復レポートとともに図面を開きました
     .open-failed = 図面を開けませんでした
     .repaired-description = 図面を開くときに問題が検出されました。レポートを確認し、図面データが修復された場合は新しいファイルとして保存してください。

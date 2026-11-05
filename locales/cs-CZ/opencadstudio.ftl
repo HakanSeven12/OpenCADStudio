@@ -427,6 +427,7 @@ gpu =
     .command-line-no-renderer = Není k dispozici žádný GPU renderer — oblast výkresu nelze zobrazit. Zkontrolujte grafický ovladač.
 
 recovery =
+    .newer-autosave = Byla nalezena záložní kopie novější než tento výkres: { $file }. Otevřete ji a obnovte neuloženou práci.
     .opened-with-repairs = Výkres byl otevřen s opravami
     .open-failed = Výkres se nepodařilo otevřít
     .repaired-description = Při otevírání výkresu byly zjištěny problémy. Projděte zprávu a pokud byla data opravena, uložte výkres jako nový soubor.

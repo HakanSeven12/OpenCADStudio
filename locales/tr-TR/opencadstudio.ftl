@@ -422,6 +422,7 @@ gpu =
     .command-line-no-renderer = Kullanılabilir GPU işleyici yok — çizim alanı görüntülenemiyor. Grafik sürücüsünü denetleyin.
 
 recovery =
+    .newer-autosave = Bu çizimden daha yeni bir kurtarma kopyası bulundu: { $file }. Kaydedilmemiş çalışmayı geri almak için onu açın.
     .opened-with-repairs = Çizim kurtarma raporuyla açıldı
     .open-failed = Çizim açılamadı
     .repaired-description = Çizim açılırken sorunlar algılandı. Raporu inceleyin; çizim verileri onarıldıysa yeni bir dosya olarak kaydedin.

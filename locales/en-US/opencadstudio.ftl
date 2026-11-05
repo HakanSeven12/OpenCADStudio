@@ -424,6 +424,7 @@ gpu =
     .command-line-no-renderer = No GPU renderer is available — the drawing area cannot be displayed. Check the graphics driver.
 
 recovery =
+    .newer-autosave = A recovery copy newer than this drawing was found: { $file }. Open it to get the unsaved work back.
     .opened-with-repairs = Drawing opened with a recovery report
     .open-failed = Drawing could not be opened
     .repaired-description = Problems were detected while opening the drawing. Review the report; if drawing data was repaired, save it as a new file.

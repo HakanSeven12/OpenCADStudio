@@ -1234,6 +1234,23 @@ pub(crate) fn refresh_after_edit(
             _ => None,
         })
         .collect::<Vec<_>>();
+    if let Some(plan) = super::flip_graph::Plan::new(&staged, def) {
+        for insert in inserts {
+            let state = super::representation::visibility_state(&staged, before, def, insert);
+            staged = plan.refresh(&staged, before, def, insert)?;
+            if let Some(state) = state {
+                super::representation::apply_visibility(&mut staged, def, insert, state)?;
+            }
+        }
+        return Ok(staged);
+    }
+    if inserts.iter().any(|insert| {
+        doc.get_entity(*insert).is_some_and(|entity| {
+            entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_some()
+        })
+    }) {
+        return Err(super::flip_graph::FRAME_ERROR);
+    }
     let has_chain = super::chains::Graph::new(before, def)?.receivers().next().is_some()
         || super::chains::Graph::new(doc, def)?.receivers().next().is_some();
     let previous_parameters = if has_chain { all_parameters(before, def) } else { Vec::new() };

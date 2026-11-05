@@ -1395,6 +1395,18 @@ pub(crate) fn rebuild_framed(
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     previous: Option<RebuildInputs<'_>>,
 ) -> Result<std::collections::BTreeMap<Handle, instance::ParameterFrame>, &'static str> {
+    rebuild_framed_with_flips(doc, baseline, definition, frames, previous, &[], None)
+}
+
+fn rebuild_framed_with_flips(
+    doc: &mut Document,
+    baseline: &Document,
+    definition: Handle,
+    frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    previous: Option<RebuildInputs<'_>>,
+    managed_flips: &[Handle],
+    resolved_active: Option<&mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
+) -> Result<std::collections::BTreeMap<Handle, instance::ParameterFrame>, &'static str> {
     let Some(p) = all_parameters(baseline, definition).into_iter().next() else {
         return Ok(std::collections::BTreeMap::new());
     };
@@ -1420,9 +1432,9 @@ pub(crate) fn rebuild_framed(
             previous_values: previous.map(|p| p.values),
             requested: previous.map(|p| p.requested),
             resolved_frames: Some(&mut resolved_frames),
-            resolved_active: None,
+            resolved_active,
             managed_flip: None,
-            managed_flips: &[],
+            managed_flips,
         },
     )?;
     Ok(resolved_frames)

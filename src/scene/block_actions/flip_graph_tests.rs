@@ -113,6 +113,21 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             }
             changed = eval(&changed, child, Value::Point(DVec3::new(-15., -2., 0.)));
             assert_eq!(circle(&changed), Vector3::new(-9., -3., 0.));
+            if !testing {
+                let mut edited = changed.clone();
+                let EntityType::Circle(source) = edited.get_entity_mut(geometry[1]).unwrap() else {
+                    panic!()
+                };
+                source.center.y += 4.;
+                let refreshed = instance::refresh_after_edit(&edited, &changed, def).unwrap();
+                assert_eq!(circle(&refreshed), Vector3::new(-9., -7., 0.));
+                assert_eq!(
+                    instance::frame(&refreshed, first, &p).unwrap(),
+                    instance::frame(&changed, first, &p).unwrap()
+                );
+                let moved = eval(&refreshed, child, Value::Point(DVec3::new(-18., -2., 0.)));
+                assert_eq!(circle(&moved), Vector3::new(-12., -7., 0.));
+            }
             let value = instance::value(&changed, first, &p).unwrap();
             let grips = instance::action_grips(&changed, &baseline, def, first, &p, value, testing);
             assert!(!grips.is_empty());

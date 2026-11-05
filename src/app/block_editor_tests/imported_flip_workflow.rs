@@ -106,6 +106,18 @@ fn imported_coupled_flip_reference_workflow() {
                 (changed.end.distance(changed.base) - frame.end.distance(frame.base) - 3.).abs()
                     < 1e-6
             );
+            let current = &app.tabs[i].scene.document;
+            let refreshed = actions::instance::refresh(current, def).unwrap();
+            for parameter in &params {
+                assert_eq!(
+                    actions::instance::frame(&refreshed, insert, parameter).unwrap(),
+                    actions::instance::frame(current, insert, parameter).unwrap(),
+                );
+                assert_eq!(
+                    actions::instance::value(&refreshed, insert, parameter).unwrap(),
+                    actions::instance::value(current, insert, parameter).unwrap(),
+                );
+            }
             app.undo_steps(1);
             assert_eq!(
                 actions::instance::frame(&app.tabs[i].scene.document, insert, &p).unwrap(),

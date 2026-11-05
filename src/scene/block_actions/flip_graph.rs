@@ -4,7 +4,7 @@ use super::*;
 use codec::xdata::XDataValue as X;
 use std::collections::{BTreeMap, BTreeSet};
 pub(super) const INPUTS: &str = "OCS_BLOCK_INPUT_FRAMES";
-const FRAME_ERROR: &str = "The block parameter frame is unavailable.";
+pub(super) const FRAME_ERROR: &str = "The block parameter frame is unavailable.";
 struct Step {
     action: Handle,
     axis: Handle,
@@ -261,6 +261,81 @@ impl Plan {
         }
         crate::scene::view::dispatch::set_entity_xdata(doc, insert, INPUTS, Some(data));
     }
+    fn display_frames(
+        &self,
+        evaluated: &Document,
+        canonical: &BTreeMap<Handle, ParameterFrame>,
+        active: &BTreeMap<Handle, ParameterFrame>,
+    ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
+        let mut frames = canonical.clone();
+        let states = self.states(|p| super::value(evaluated, p))?;
+        for (step, enabled) in self.steps.iter().zip(states) {
+            if !enabled {
+                continue;
+            }
+            let axis = *active
+                .get(&step.axis)
+                .or_else(|| canonical.get(&step.axis))
+                .ok_or(FRAME_ERROR)?;
+            for target in &step.targets {
+                let f = frames.get_mut(target).ok_or(FRAME_ERROR)?;
+                f.base = Self::reflected(f.base, axis)?;
+                f.end = Self::reflected(f.end, axis)?;
+            }
+        }
+        Ok(frames)
+    }
+
+    pub fn refresh(
+        &self,
+        doc: &Document,
+        before: &Document,
+        def: Handle,
+        insert: Handle,
+    ) -> Result<Document, &'static str> {
+        let mut evaluated = doc.clone();
+        let visible = instance::load_frames(doc, &mut evaluated, insert, &self.parameters)?;
+        let mut canonical = match self.read(doc, insert)? {
+            Some(frames) => frames,
+            None if self
+                .states(|p| super::value(&evaluated, p))?
+                .iter()
+                .all(|v| !v) =>
+            {
+                visible
+            }
+            None => return Err(FRAME_ERROR),
+        };
+        for p in &self.parameters {
+            if !p.flip {
+                super::set_value(&mut evaluated, p, Value::Point(canonical[&p.handle].end))?;
+            }
+        }
+        let values = canonical.iter().map(|(h, f)| (*h, f.end)).collect();
+        let actions: Vec<_> = self.steps.iter().map(|s| s.action).collect();
+        let mut active = BTreeMap::new();
+        let resolved = super::rebuild_framed_with_flips(
+            &mut evaluated,
+            doc,
+            def,
+            &canonical,
+            Some(super::RebuildInputs {
+                document: before,
+                frames: &canonical,
+                values: &values,
+                requested: &BTreeSet::new(),
+            }),
+            &actions,
+            Some(&mut active),
+        )?;
+        canonical.extend(resolved);
+        let visible = self.display_frames(&evaluated, &canonical, &active)?;
+        let mut result = instance::materialize(doc, insert, def, &evaluated)?;
+        instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
+        self.write(&mut result, insert, &canonical);
+        Ok(result)
+    }
+
     pub fn present_grips(
         &self,
         doc: &Document,
@@ -409,28 +484,13 @@ impl Plan {
         if let Value::Point(end) = super::value(&staged, selected)? {
             frames.get_mut(&parameter).ok_or(FRAME_ERROR)?.end = end;
         }
-        let canonical = frames.clone();
-        let states = self.states(|p| super::value(&staged, p))?;
-        for (step, enabled) in self.steps.iter().zip(states) {
-            if !enabled {
-                continue;
-            }
-            let axis = *active
-                .get(&step.axis)
-                .or_else(|| canonical.get(&step.axis))
-                .ok_or(FRAME_ERROR)?;
-            for target in &step.targets {
-                let f = frames.get_mut(target).ok_or(FRAME_ERROR)?;
-                f.base = Self::reflected(f.base, axis)?;
-                f.end = Self::reflected(f.end, axis)?;
-            }
-        }
+        let visible = self.display_frames(&staged, &frames, &active)?;
         let mut result = if testing {
             staged.clone()
         } else {
             instance::materialize(doc, insert, def, &staged)?
         };
-        instance::save_resolved_frames(&mut result, &self.parameters, insert, &frames)?;
+        instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
         if selected.flip {
             instance::save(
                 &mut result,
@@ -439,7 +499,7 @@ impl Plan {
                 super::value(&staged, selected)?,
             )?;
         }
-        self.write(&mut result, insert, &canonical);
+        self.write(&mut result, insert, &frames);
         if testing {
             let EntityType::Insert(reference) = result.get_entity(insert).ok_or(FRAME_ERROR)?
             else {

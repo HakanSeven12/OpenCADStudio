@@ -907,6 +907,7 @@ impl OpenCADStudio {
             if let Some(command) = self.command_line.selected_suggestion() {
                 self.command_line.input.clear();
                 self.command_line.autocomplete_cursor = None;
+                self.command_line.push_command(&command);
                 return self.dispatch_command(&command);
             }
         } else if self.command_line.has_contextual_suggestions() {
@@ -946,6 +947,9 @@ impl OpenCADStudio {
                         }
                         return Task::batch(tasks);
                     }
+                    // Echo the line like a single word; a variable answered on
+                    // it is restated to its name when its prompt takes the value.
+                    self.command_line.push_command(raw.trim());
                     return self.run_command_line(&raw);
                 }
             }

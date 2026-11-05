@@ -7,7 +7,7 @@ thread_local! {
     static ROTATE_ANGLE:    Cell<f64> = Cell::new(0.0);   // degrees
     static SCALE_FACTOR:    Cell<f64> = Cell::new(1.0);
     static OFFSET_DIST:     Cell<f64> = Cell::new(1.0);
-    static FILLET_RADIUS:   Cell<f64> = Cell::new(1.0);
+    static FILLET_RADIUS:   Cell<f64> = Cell::new(0.0);
     static CHAMFER_DIST1:   Cell<f64> = Cell::new(10.0);
     static CHAMFER_DIST2:   Cell<f64> = Cell::new(10.0);
     static ARRAY_ROWS:      Cell<f64> = Cell::new(2.0);

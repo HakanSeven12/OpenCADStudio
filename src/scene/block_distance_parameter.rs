@@ -295,6 +295,28 @@ pub(crate) fn set_polar_value_sets(
     Ok(())
 }
 
+/// Writes the horizontal and vertical value sets of an XY parameter.
+pub(crate) fn set_xy_value_sets(
+    document: &mut Document,
+    parameter: Handle,
+    horizontal: Option<&ValueSet>,
+    vertical: Option<&ValueSet>,
+) -> Result<(), &'static str> {
+    let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&parameter) else {
+        return Err("The parameter is unavailable.");
+    };
+    let DynamicBlockData::XYParameter(xy) = &mut object.data else {
+        return Err("The parameter is not an XY parameter.");
+    };
+    if let Some(set) = horizontal {
+        xy.x_value_set = set.record();
+    }
+    if let Some(set) = vertical {
+        xy.y_value_set = set.record();
+    }
+    Ok(())
+}
+
 /// Creates a parameter with the placement answers a Linear command collected.
 pub(crate) fn create_with(
     document: &mut Document,
@@ -1111,5 +1133,62 @@ mod value_set_tests {
         assert_eq!(native.distance_value_set.maximum, 100.0);
         assert_eq!(native.angle_value_set.flags, 8);
         assert_eq!(native.angle_value_set.values, vec![0.0, 1.0]);
+    }
+
+    #[test]
+    fn value_sets_are_written_only_to_an_xy_parameter() {
+        let (mut scene, definition) = super::tests::fixture();
+        let linear = create(
+            &mut scene.document,
+            definition,
+            Kind::Linear,
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+        let xy = create(
+            &mut scene.document,
+            definition,
+            Kind::XY,
+            Vector3::ZERO,
+            Vector3::new(1.0, 1.0, 0.0),
+            Vector3::UNIT_Y,
+        )
+        .unwrap();
+
+        assert_eq!(
+            set_xy_value_sets(
+                &mut scene.document,
+                linear,
+                Some(&ValueSet::List(vec![1.0])),
+                None
+            ),
+            Err("The parameter is not an XY parameter.")
+        );
+        assert_eq!(
+            set_xy_value_sets(
+                &mut scene.document,
+                xy,
+                Some(&ValueSet::Increment {
+                    increment: 2.0,
+                    minimum: 0.0,
+                    maximum: 10.0
+                }),
+                Some(&ValueSet::List(vec![3.0, 4.0])),
+            ),
+            Ok(())
+        );
+
+        let ObjectType::DynamicBlock(object) = &scene.document.objects[&xy] else {
+            panic!("expected a dynamic block record");
+        };
+        let DynamicBlockData::XYParameter(native) = &object.data else {
+            panic!("expected an xy parameter");
+        };
+        assert_eq!(native.x_value_set.flags, 1 | 2 | 4);
+        assert_eq!(native.x_value_set.maximum, 10.0);
+        assert_eq!(native.y_value_set.flags, 8);
+        assert_eq!(native.y_value_set.values, vec![3.0, 4.0]);
     }
 }

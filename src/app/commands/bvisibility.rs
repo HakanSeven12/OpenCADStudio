@@ -204,6 +204,15 @@ impl OpenCADStudio {
             )
             .expect("a placed polar parameter carries its value sets");
         }
+        if kind == crate::scene::block_distance_parameter::Kind::XY {
+            crate::scene::block_distance_parameter::set_xy_value_sets(
+                &mut self.tabs[i].scene.document,
+                parameter,
+                options.value_set.as_ref(),
+                options.vertical_value_set.as_ref(),
+            )
+            .expect("a placed xy parameter carries its value sets");
+        }
         if let Some(count) = grips
             .filter(|_| kind == crate::scene::block_distance_parameter::Kind::XY)
             .filter(|count| *count != 1)

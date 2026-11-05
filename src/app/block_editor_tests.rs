@@ -4141,6 +4141,65 @@ fn a_polar_takes_a_distance_and_then_an_angle_value_set() {
 }
 
 #[test]
+fn an_xy_takes_a_horizontal_and_then_a_vertical_value_set() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER XY");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
+    );
+    feed(&mut app, "V");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter horizontal value set type [None/List/Increment] <None>:"
+    );
+    feed(&mut app, "L");
+    feed(&mut app, "1, 2, 3");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter vertical value set type [None/List/Increment] <None>:",
+        "the vertical set is asked once the horizontal set is answered"
+    );
+    feed(&mut app, "I");
+    feed(&mut app, "2");
+    feed(&mut app, "0");
+    feed(&mut app, "10");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:",
+        "both answers return to placement"
+    );
+    feed(&mut app, "0,0");
+    feed(&mut app, "6,2");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let xy = crate::scene::block_distance_parameter::parameters(doc, definition)
+        .into_iter()
+        .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::XY)
+        .expect("placed xy parameter");
+    let codec::objects::ObjectType::DynamicBlock(object) =
+        doc.objects.get(&xy.handle).expect("xy record")
+    else {
+        panic!("expected a dynamic block record");
+    };
+    let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
+        panic!("expected an xy parameter");
+    };
+    assert_eq!(native.x_value_set.flags, 8);
+    assert_eq!(native.x_value_set.values, vec![1.0, 2.0, 3.0]);
+    assert_eq!(native.y_value_set.flags, 1 | 2 | 4);
+    assert_eq!(native.y_value_set.increment, 2.0);
+    assert_eq!(native.y_value_set.minimum, 0.0);
+    assert_eq!(native.y_value_set.maximum, 10.0);
+}
+
+#[test]
 fn a_polar_angle_increment_is_asked_and_stored_in_radians() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -4194,7 +4253,7 @@ fn an_xy_placement_writes_its_name_and_two_labels() {
     let _ = app.dispatch_command("BPARAMETER XY");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
     );
     feed(&mut app, "N");
     assert_eq!(
@@ -4263,7 +4322,7 @@ fn an_xy_placement_keeps_the_offered_default_name_and_labels() {
     feed(&mut app, "");
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
-        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette]:"
+        "BPARAMETER XY  Specify base point or [Name/Label/Chain/Description/Palette/Value set]:"
     );
     feed(&mut app, "0,0");
     feed(&mut app, "6,2");

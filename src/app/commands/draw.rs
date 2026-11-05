@@ -791,7 +791,10 @@ impl OpenCADStudio {
                 let new_cmd = match cmd {
                     "MEASURERADIUS" => MeasureGeomCommand::radius(),
                     "MEASUREANGLE" => MeasureGeomCommand::angle(),
-                    _ => MeasureGeomCommand::new(),
+                    // A first arc or length segment leaves where the
+                    // drawing's last line or arc ended.
+                    _ => MeasureGeomCommand::new()
+                        .with_last_direction(self.cont_anchor.map(|(_, direction)| direction)),
                 };
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));

@@ -119,6 +119,9 @@ pub struct MeasureGeomCommand {
     arc_sub: Sub,
     /// Exit direction of the last segment, in the working plane.
     tangent: Option<Vec2>,
+    /// Direction the drawing's last line or arc ended in (world): where a
+    /// first arc or length segment leaves.
+    start_direction: Option<DVec3>,
     volume: bool,
     sum: Sum,
     step: AreaStep,
@@ -162,6 +165,7 @@ impl MeasureGeomCommand {
             arc: false,
             arc_sub: Sub::None,
             tangent: None,
+            start_direction: None,
             volume: false,
             sum: Sum::Single,
             step: AreaStep::Points,
@@ -176,6 +180,12 @@ impl MeasureGeomCommand {
             quick: std::cell::RefCell::new(None),
             quick_sources: std::cell::RefCell::new(None),
         }
+    }
+
+    /// The direction the drawing's last line or arc ended in.
+    pub fn with_last_direction(mut self, direction: Option<DVec3>) -> Self {
+        self.start_direction = direction;
+        self
     }
 
     pub fn radius() -> Self {
@@ -270,6 +280,16 @@ impl MeasureGeomCommand {
         ]
     }
 
+    /// `Invalid option keyword.` at the option prompt, with the last result
+    /// printed again.
+    fn invalid_option(&self) -> CmdResult {
+        let error = t!("Invalid option keyword.").into_owned();
+        match self.last_result.clone() {
+            Some(result) => CmdResult::ReportErrorAndMeasurement(error, result),
+            None => CmdResult::ReportError(error),
+        }
+    }
+
     fn keyword_error() -> CmdResult {
         CmdResult::ReportError(t!("Point or option keyword required.").into_owned())
     }
@@ -349,7 +369,17 @@ impl MeasureGeomCommand {
     }
 
     fn heading(&self) -> DVec2 {
-        self.tangent.map_or(DVec2::X, |tangent| tangent.as_dvec2())
+        self.entry_tangent()
+            .map_or(DVec2::X, |tangent| tangent.as_dvec2())
+    }
+
+    /// Direction the next segment leaves in: the last segment's, or for the
+    /// first one the drawing's last line or arc direction.
+    fn entry_tangent(&self) -> Option<Vec2> {
+        self.tangent.or_else(|| {
+            let local = self.plane.vector_to_local(self.start_direction?).truncate();
+            local.try_normalize().map(|direction| direction.as_vec2())
+        })
     }
 
     /// Arc option answered with a typed value.
@@ -370,11 +400,11 @@ impl MeasureGeomCommand {
             },
             sub @ Sub::ArcCenterAngle { .. } => {
                 let (e, bulge) =
-                    arc_for(sub, a, DVec2::new(value.to_radians(), 0.0), self.tangent)?;
+                    arc_for(sub, a, DVec2::new(value.to_radians(), 0.0), self.entry_tangent())?;
                 return Some(self.push_arc(e, bulge));
             }
             sub @ Sub::ArcCenterLength { .. } => {
-                let (e, bulge) = arc_for(sub, a, DVec2::new(value, 0.0), self.tangent)?;
+                let (e, bulge) = arc_for(sub, a, DVec2::new(value, 0.0), self.entry_tangent())?;
                 return Some(self.push_arc(e, bulge));
             }
             _ => return None,
@@ -416,7 +446,7 @@ impl MeasureGeomCommand {
             }
             Sub::None | Sub::ArcCenter | Sub::ArcSecond => {}
             _ => {
-                if let Some((e, bulge)) = arc_for(sub, a, p, self.tangent) {
+                if let Some((e, bulge)) = arc_for(sub, a, p, self.entry_tangent()) {
                     return self.push_arc(e, bulge);
                 }
             }
@@ -433,7 +463,7 @@ impl MeasureGeomCommand {
     fn arc_chord(&mut self, degrees: f64) -> Option<CmdResult> {
         let a = self.last2()?;
         let p = a + DVec2::from_angle(degrees.to_radians());
-        let (e, bulge) = arc_for(self.arc_sub, a, p, self.tangent)?;
+        let (e, bulge) = arc_for(self.arc_sub, a, p, self.entry_tangent())?;
         Some(self.push_arc(e, bulge))
     }
 
@@ -448,39 +478,26 @@ impl MeasureGeomCommand {
         if self.chord_step() {
             let default = format!("{:.4}", self.tangent_degrees());
             let default = default.trim_end_matches('0').trim_end_matches('.');
-            return t!(
-                "Specify direction of chord for arc (hold Ctrl to switch direction) <%{default}>:",
-                default = default
-            )
-            .into_owned();
+            return crate::tr!("measurement", "arc-chord-direction", default = default);
         }
-        let source = match self.arc_sub {
-            Sub::ArcCenterAngle { .. } => "Specify included angle (hold Ctrl to switch direction):",
-            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => "Specify included angle:",
-            Sub::ArcAngleEnd { .. } => {
-                "Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:"
+        match self.arc_sub {
+            Sub::ArcCenterAngle { .. } => crate::tr!("measurement", "arc-included-angle-ctrl"),
+            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => {
+                crate::tr!("measurement", "arc-included-angle")
             }
-            Sub::ArcCenter | Sub::ArcAngleCenter { .. } => "Specify center point of arc:",
-            Sub::ArcCenterEnd { .. } => {
-                "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:"
-            }
-            Sub::ArcCenterLength { .. } => {
-                "Specify length of chord (hold Ctrl to switch direction):"
-            }
-            Sub::ArcDirection => "Specify the tangent direction for the start point of arc:",
-            Sub::ArcDirectionEnd { .. } => {
-                "Specify endpoint of the arc (hold Ctrl to switch direction):"
-            }
-            Sub::ArcRadius | Sub::ArcAngleRadius { .. } => "Specify radius of arc:",
-            Sub::ArcRadiusEnd { .. } => {
-                "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:"
-            }
-            Sub::ArcSecond => "Specify second point on arc:",
-            Sub::ArcSecondEnd { .. } => "Specify end point of arc:",
-            _ if self.points.len() >= 2 => return crate::tr!("measurement", "arc-endpoint-close"),
-            _ => return crate::tr!("measurement", "arc-endpoint"),
-        };
-        t!(source).into_owned()
+            Sub::ArcAngleEnd { .. } => crate::tr!("measurement", "arc-end-center-radius"),
+            Sub::ArcCenter | Sub::ArcAngleCenter { .. } => crate::tr!("measurement", "arc-center"),
+            Sub::ArcCenterEnd { .. } => crate::tr!("measurement", "arc-end-angle-length"),
+            Sub::ArcCenterLength { .. } => crate::tr!("measurement", "arc-chord-length"),
+            Sub::ArcDirection => crate::tr!("measurement", "arc-tangent-direction"),
+            Sub::ArcDirectionEnd { .. } => crate::tr!("measurement", "arc-end-direction"),
+            Sub::ArcRadius | Sub::ArcAngleRadius { .. } => crate::tr!("measurement", "arc-radius"),
+            Sub::ArcRadiusEnd { .. } => crate::tr!("measurement", "arc-end-angle"),
+            Sub::ArcSecond => crate::tr!("measurement", "arc-second"),
+            Sub::ArcSecondEnd { .. } => crate::tr!("measurement", "arc-end"),
+            _ if self.points.len() >= 2 => crate::tr!("measurement", "arc-endpoint-close"),
+            _ => crate::tr!("measurement", "arc-endpoint"),
+        }
     }
 
     /// Area and perimeter of the boundary (closed back to its first point),
@@ -719,8 +736,11 @@ impl MeasureGeomCommand {
             return None;
         }
         let distance = self.mode == Mode::Distance;
-        // Distance keeps its first point.
-        let can_undo = self.points.len() > usize::from(distance);
+        // The first point stays: Undo there has nothing left to undo.
+        let can_undo = self.points.len() > 1;
+        if matches!(input, "U" | "UNDO") && !can_undo {
+            return Some(CmdResult::ReportError(crate::tr!("measurement", "all-undone")));
+        }
         if self.arc {
             self.arc_sub = match input {
                 "A" | "ANGLE" => Sub::ArcAngle,
@@ -1509,13 +1529,10 @@ impl CadCommand for MeasureGeomCommand {
         let input = text.trim().to_ascii_uppercase();
         match self.mode {
             Mode::Choose => {
-                return Some(self.choose(&input).unwrap_or_else(|| {
-                    let error = t!("Invalid option keyword.").into_owned();
-                    match self.last_result.clone() {
-                        Some(result) => CmdResult::ReportErrorAndMeasurement(error, result),
-                        None => CmdResult::ReportError(error),
-                    }
-                }));
+                return Some(match self.choose(&input) {
+                    Some(result) => result,
+                    None => self.invalid_option(),
+                });
             }
             // A letter that is no option is left alone: quick measure keeps
             // following the cursor.
@@ -1676,6 +1693,10 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn on_point(&mut self, pt: DVec3) -> CmdResult {
+        // A point is no option either.
+        if self.mode == Mode::Choose {
+            return self.invalid_option();
+        }
         if self.mode == Mode::Quick {
             if let Some(area) = self.quick_area(pt) {
                 return CmdResult::ReportMeasurement(area);

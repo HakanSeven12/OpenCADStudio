@@ -7151,6 +7151,22 @@ measurement =
     .invalid-selection =
         {"*"}Invalid selection*
         Expects a point or Last
+    .all-undone =
+        All segments already undone.
+        Command has been completely undone.
+    .arc-chord-direction = Specify direction of chord for arc (hold Ctrl to switch direction) <{ $default }>:
+    .arc-included-angle-ctrl = Specify included angle (hold Ctrl to switch direction):
+    .arc-included-angle = Specify included angle:
+    .arc-end-center-radius = Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:
+    .arc-center = Specify center point of arc:
+    .arc-end-angle-length = Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:
+    .arc-chord-length = Specify length of chord (hold Ctrl to switch direction):
+    .arc-tangent-direction = Specify the tangent direction for the start point of arc:
+    .arc-end-direction = Specify endpoint of the arc (hold Ctrl to switch direction):
+    .arc-radius = Specify radius of arc:
+    .arc-end-angle = Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:
+    .arc-second = Specify second point on arc:
+    .arc-end = Specify end point of arc:
 pgp-import =
     .button = Import PGP…
     .filter = Command aliases (*.pgp)

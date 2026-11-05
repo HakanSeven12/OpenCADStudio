@@ -7062,6 +7062,22 @@ measurement =
     .invalid-selection =
         {"*"}Geçersiz seçim*
         Bir nokta veya Last bekleniyor
+    .all-undone =
+        Tüm parçalar zaten geri alındı.
+        Komut tamamen geri alındı.
+    .arc-chord-direction = Yayın kiriş yönünü belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) <{ $default }>:
+    .arc-included-angle-ctrl = Kapsanan açıyı belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-included-angle = Kapsanan açıyı belirtin:
+    .arc-end-center-radius = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya [CEnter/Radius]:
+    .arc-center = Yayın merkez noktasını belirtin:
+    .arc-end-angle-length = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya [Angle/Length]:
+    .arc-chord-length = Kiriş uzunluğunu belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-tangent-direction = Yayın başlangıç noktasındaki teğet yönünü belirtin:
+    .arc-end-direction = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-radius = Yayın yarıçapını belirtin:
+    .arc-end-angle = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya [Angle]:
+    .arc-second = Yay üzerindeki ikinci noktayı belirtin:
+    .arc-end = Yayın bitiş noktasını belirtin:
 pgp-import =
     .button = Import PGP…
     .filter = Command aliases (*.pgp)

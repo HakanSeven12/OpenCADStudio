@@ -163,6 +163,10 @@ impl OpenCADStudio {
                     crate::app::filter_dialog::FilterMsg::Open(None),
                 )));
             }
+            // FILTER <name>: a saved filter, applied without the dialog.
+            other if other.starts_with("FILTER ") => {
+                return Some(self.apply_saved_filter(&cmd["FILTER ".len()..]));
+            }
 
             // CAL <expression> — evaluate an expression on the
             //   shared calculator engine (`app::calc`): arithmetic, points,

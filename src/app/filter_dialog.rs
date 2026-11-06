@@ -52,6 +52,15 @@ pub enum FilterMsg {
     Show(bool),
     Focus(Option<FilterBucket>),
     Apply,
+    /// Load a saved filter from the drawing.
+    Saved(String),
+    /// Save over the loaded saved filter.
+    Save,
+    /// Start (`Some("")`), type (`Some(name)`) or drop (`None`) a new name.
+    SaveAs(Option<String>),
+    SaveAsCommit,
+    /// Delete the loaded saved filter from the drawing.
+    DeleteSaved,
 }
 
 /// What Quick Select hands over to FILTER.
@@ -81,6 +90,11 @@ pub struct FilterDialogState {
     pub types: Vec<(String, usize)>,
     /// Properties offered per type (`None` = any type), filled as needed.
     pub properties: Vec<(Option<String>, Vec<QSelectPropertyChoice>)>,
+    /// The drawing's saved filters, and the one loaded.
+    pub saved: Vec<String>,
+    pub saved_name: Option<String>,
+    /// A new name being typed for Save as.
+    pub save_as: Option<String>,
 }
 
 impl FilterDialogState {
@@ -165,6 +179,68 @@ impl OpenCADStudio {
                 return Task::none();
             }
             FilterMsg::Apply => return self.filter_apply(),
+            FilterMsg::Saved(name) => {
+                let i = self.active_tab;
+                if let Some((saved, filter)) =
+                    super::saved_filters::find_saved_filter(&self.tabs[i].scene.document, &name)
+                {
+                    if let Some(state) = self.filter_dialog.as_mut() {
+                        state.filter = filter;
+                        state.saved_name = Some(saved);
+                        state.save_as = None;
+                    }
+                }
+                self.filter_refresh_scope();
+                self.filter_refresh_live();
+                return Task::none();
+            }
+            FilterMsg::Save => {
+                let target = self
+                    .filter_dialog
+                    .as_ref()
+                    .and_then(|state| state.saved_name.clone());
+                match target {
+                    Some(name) => self.filter_save(name),
+                    None => {
+                        if let Some(state) = self.filter_dialog.as_mut() {
+                            state.save_as = Some(String::new());
+                        }
+                    }
+                }
+                return Task::none();
+            }
+            FilterMsg::SaveAsCommit => {
+                let name = self
+                    .filter_dialog
+                    .as_ref()
+                    .and_then(|state| state.save_as.as_deref())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned);
+                if let Some(name) = name {
+                    self.filter_save(name);
+                }
+                return Task::none();
+            }
+            FilterMsg::DeleteSaved => {
+                let i = self.active_tab;
+                let Some(name) = self
+                    .filter_dialog
+                    .as_ref()
+                    .and_then(|state| state.saved_name.clone())
+                else {
+                    return Task::none();
+                };
+                self.edit_saved_filters(i, "FILTER DELETE", |document| {
+                    super::saved_filters::delete_saved_filter(document, &name);
+                });
+                let saved = self.saved_filter_names(i);
+                if let Some(state) = self.filter_dialog.as_mut() {
+                    state.saved = saved;
+                    state.saved_name = None;
+                }
+                return Task::none();
+            }
             _ => {}
         }
         let Some(state) = self.filter_dialog.as_mut() else {
@@ -247,7 +323,14 @@ impl OpenCADStudio {
             FilterMsg::Focus(bucket) => {
                 state.focus = if state.focus == bucket { None } else { bucket };
             }
-            FilterMsg::Open(_) | FilterMsg::Close | FilterMsg::Apply => {}
+            FilterMsg::SaveAs(name) => state.save_as = name,
+            FilterMsg::Open(_)
+            | FilterMsg::Close
+            | FilterMsg::Apply
+            | FilterMsg::Saved(_)
+            | FilterMsg::Save
+            | FilterMsg::SaveAsCommit
+            | FilterMsg::DeleteSaved => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);
@@ -283,6 +366,9 @@ impl OpenCADStudio {
             focus: None,
             types: Vec::new(),
             properties: Vec::new(),
+            saved: self.saved_filter_names(i),
+            saved_name: None,
+            save_as: None,
         });
         self.reset_modal_geometry();
         self.filter_refresh_scope();
@@ -386,6 +472,30 @@ impl OpenCADStudio {
             state.live_count = matches.len();
             state.by_type = top(by_type);
             state.by_layer = top(by_layer);
+        }
+    }
+
+    /// Save the dialog's filter in the drawing as `name` (one undo step) and
+    /// say where it went, without a popup.
+    fn filter_save(&mut self, name: String) {
+        let i = self.active_tab;
+        let Some(filter) = self
+            .filter_dialog
+            .as_ref()
+            .map(|state| state.filter.clone())
+        else {
+            return;
+        };
+        self.edit_saved_filters(i, "FILTER SAVE", |document| {
+            super::saved_filters::store_saved_filter(document, &name, &filter);
+        });
+        self.command_line
+            .push_info(crate::tf!("Filter \"{name}\" saved in this drawing.").as_ref());
+        let saved = self.saved_filter_names(i);
+        if let Some(state) = self.filter_dialog.as_mut() {
+            state.saved = saved;
+            state.saved_name = Some(name);
+            state.save_as = None;
         }
     }
 
@@ -539,6 +649,50 @@ mod tests {
         assert_eq!(state.filter.items.len(), 2);
         assert_eq!(state.live_count, quick);
         assert_eq!(state.live_count, 3);
+    }
+
+    /// #2611: a filter saved from the dialog lives in the drawing, loads
+    /// back, runs as `FILTER <name>` and shows in the right-click menu.
+    #[test]
+    fn saved_filters_from_the_dialog() {
+        let (mut app, _) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        let row = FilterRow::Root(0);
+        filter(
+            &mut app,
+            FilterMsg::Edit(row, FilterRowEdit::Type(Some("Circle".into()))),
+        );
+        // Save with nothing loaded asks for a name first.
+        filter(&mut app, FilterMsg::Save);
+        assert_eq!(
+            app.filter_dialog.as_ref().unwrap().save_as.as_deref(),
+            Some("")
+        );
+        filter(&mut app, FilterMsg::SaveAs(Some("Circles".into())));
+        filter(&mut app, FilterMsg::SaveAsCommit);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert_eq!(state.saved, ["Circles"]);
+        assert_eq!(state.saved_name.as_deref(), Some("Circles"));
+        filter(&mut app, FilterMsg::Close);
+
+        // Back in a fresh dialog it loads; from the command line it applies.
+        filter(&mut app, FilterMsg::Open(None));
+        filter(&mut app, FilterMsg::Saved("circles".into()));
+        assert_eq!(app.filter_dialog.as_ref().unwrap().live_count, 1);
+        filter(&mut app, FilterMsg::Close);
+        let _ = app.update(Message::Command("FILTER Circles".into()));
+        assert_eq!(app.tabs[i].scene.selected.len(), 1);
+        let menu = app.context_menu_context();
+        let crate::ui::popup::context_menu::MenuContext::Idle { saved_filters, .. } = menu else {
+            panic!("an idle right-click menu");
+        };
+        assert_eq!(saved_filters, ["Circles"]);
+
+        filter(&mut app, FilterMsg::Open(None));
+        filter(&mut app, FilterMsg::Saved("Circles".into()));
+        filter(&mut app, FilterMsg::DeleteSaved);
+        assert!(app.saved_filter_names(i).is_empty());
     }
 
     #[test]
@@ -786,6 +940,72 @@ mod view {
                 state.candidate_count
             )));
 
+        // ── Saved filters (kept in the drawing) ────────────────────────────
+        let icon_button = |icon: &'static [u8], tip: Cow<'static, str>, on: Option<Message>| {
+            iced::widget::tooltip(
+                button(crate::ui::icons::themed(icon, 13.0))
+                    .on_press_maybe(on)
+                    .style(button::secondary)
+                    .padding([5, 8]),
+                container(text(tip).size(11))
+                    .padding([3, 7])
+                    .style(panel_style),
+                iced::widget::tooltip::Position::Bottom,
+            )
+        };
+        let mut saved_row = row![text(t!("Saved")).size(12)]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+        saved_row = saved_row.push(
+            crate::ui::dropdown_list::pick_list(
+                state.saved_name.clone(),
+                state.saved.clone(),
+                |name: &String| name.clone(),
+            )
+            .on_select(|name| msg(FilterMsg::Saved(name)))
+            .text_size(12)
+            .width(Length::Fixed(200.0)),
+        );
+        saved_row = saved_row
+            .push(icon_button(
+                crate::ui::icons::SAVE,
+                t!("Save"),
+                Some(msg(FilterMsg::Save)),
+            ))
+            .push(icon_button(
+                crate::ui::icons::COPY,
+                t!("Save As"),
+                Some(msg(FilterMsg::SaveAs(Some(String::new())))),
+            ))
+            .push(icon_button(
+                crate::ui::icons::TRASH,
+                t!("Delete"),
+                state
+                    .saved_name
+                    .is_some()
+                    .then_some(msg(FilterMsg::DeleteSaved)),
+            ));
+        if let Some(typed) = &state.save_as {
+            saved_row = saved_row
+                .push(
+                    text_input(&t!("Name"), typed)
+                        .on_input(|v| msg(FilterMsg::SaveAs(Some(v))))
+                        .on_submit(msg(FilterMsg::SaveAsCommit))
+                        .size(12)
+                        .width(Length::Fixed(180.0)),
+                )
+                .push(dialog_button(t!("OK"), msg(FilterMsg::SaveAsCommit), true))
+                .push(dialog_button(
+                    t!("Cancel"),
+                    msg(FilterMsg::SaveAs(None)),
+                    false,
+                ));
+        }
+        // Where they are kept, said quietly (#2611: no popup).
+        let saved_row = saved_row
+            .push(Space::new().width(Fill))
+            .push(muted(t!("Saved in this drawing")));
+
         // ── Rows ──────────────────────────────────────────────────────────
         let mut rows = column![row![
             text(t!("Select objects that match")).size(12),
@@ -966,6 +1186,7 @@ mod view {
         .align_y(iced::Alignment::Center);
 
         let body = column![
+            saved_row,
             scope_row,
             row![editor, live].spacing(12),
             match problem {

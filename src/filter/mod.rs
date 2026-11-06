@@ -8,12 +8,14 @@
 //! [`PropertySource`], so the same filter runs over drawing objects or over
 //! layers.
 
+use serde::{Deserialize, Serialize};
+
 pub mod compare;
 pub mod describe;
 pub mod qselect;
 
 /// How a root or a group combines its items.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Match {
     #[default]
     All,
@@ -21,7 +23,7 @@ pub enum Match {
 }
 
 /// Operator between an object's property value and the condition's value.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Op {
     /// Any value: only the type test applies.
     Any,
@@ -35,7 +37,7 @@ pub enum Op {
 }
 
 /// One test: "an object of `type_filter` whose `property` `op` `value`".
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Condition {
     /// The test's result is turned around.
     pub negate: bool,
@@ -48,20 +50,20 @@ pub struct Condition {
 }
 
 /// Conditions combined by their own all / any. Groups don't nest.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Group {
     pub mode: Match,
     pub conditions: Vec<Condition>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Item {
     Condition(Condition),
     Group(Group),
 }
 
 /// A whole filter. An empty one matches everything.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Filter {
     pub root: Match,
     pub items: Vec<Item>,

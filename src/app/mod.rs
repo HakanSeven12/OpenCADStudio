@@ -87,6 +87,7 @@ mod quick_calc;
 mod qselect_tests;
 mod recent;
 mod record_api;
+mod saved_filters;
 pub(crate) mod settings;
 pub(crate) mod tool_windows;
 mod shortcuts;

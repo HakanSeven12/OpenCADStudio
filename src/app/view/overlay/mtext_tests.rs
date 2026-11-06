@@ -232,7 +232,7 @@ fn every_popup_opens_under_its_own_trigger_inside_the_window() {
                 EditorMenu::Paragraph => label!("bullets"),
                 EditorMenu::Columns => label!("no-columns"),
                 EditorMenu::Justify => t!("Top Left").into_owned(),
-                EditorMenu::Symbols => label!("diameter"),
+                EditorMenu::Symbols => label!("degree"),
                 EditorMenu::Find => label!("find-what"),
                 EditorMenu::Fraction => unreachable!("opened from More"),
                 EditorMenu::Style | EditorMenu::NewStyle => unreachable!("beside the Style list"),

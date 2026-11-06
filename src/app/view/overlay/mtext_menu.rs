@@ -564,29 +564,54 @@ fn justify_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 
 pub(super) fn symbols() -> Vec<(&'static str, String)> {
     vec![
-        ("⌀", label!("diameter")),
         ("°", label!("degree")),
         ("±", label!("plus-minus")),
+        ("⌀", label!("diameter")),
+        ("≈", label!("approximately")),
+        ("∠", label!("angle")),
+        ("℄", label!("centerline")),
+        ("Δ", label!("delta")),
+        ("ɸ", label!("electrical-phase")),
+        ("≡", label!("identity")),
+        ("≠", label!("not-equal")),
+        ("Ω", label!("ohm")),
+        ("Ω", label!("omega")),
+        ("⅊", label!("property-line")),
+        ("₂", label!("subscript-2")),
         ("²", label!("squared")),
         ("³", label!("cubed")),
         ("×", label!("multiply")),
         ("÷", label!("divide")),
         ("≤", label!("less-equal")),
         ("≥", label!("greater-equal")),
-        ("≈", label!("approximately")),
+        // Shown as a gap in the list; it keeps two words on one line.
+        ("\u{a0}", label!("non-breaking-space")),
     ]
 }
 
+/// Two columns, so the whole list opens under its button.
 fn symbols_panel() -> Element<'static, Message> {
-    symbols()
+    let mut cells: Vec<Element<'static, Message>> = symbols()
         .into_iter()
-        .fold(
-            Panel::new(title(EditorMenu::Symbols), 220.0),
-            |panel, (symbol, name)| {
-                panel.push(item(symbol, name, Message::MTextInsert(symbol.into())))
-            },
-        )
-        .build()
+        .map(|(symbol, name)| item(symbol, name, Message::MTextInsert(symbol.into())))
+        .collect();
+    let mut panel = Panel::new(title(EditorMenu::Symbols), 440.0);
+    while !cells.is_empty() {
+        let left = cells.remove(0);
+        let right: Element<'static, Message> = if cells.is_empty() {
+            Space::new().width(Fill).into()
+        } else {
+            cells.remove(0)
+        };
+        panel = panel.push(
+            row![
+                container(left).width(Fill),
+                container(right).width(Fill)
+            ]
+            .into(),
+        );
+    }
+    panel.build()
 }
 
 fn find_panel(ed: &MTextEditorState) -> Element<'static, Message> {

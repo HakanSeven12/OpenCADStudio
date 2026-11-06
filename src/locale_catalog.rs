@@ -3,6 +3,8 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "The viewport's display is locked; unlock it to change its scale." => Some(("command", "viewport-scale-locked")),
+        "Select a viewport or double-click into one to set its scale." => Some(("command", "viewport-scale-needs-viewport")),
         "When the list is nonempty, only listed conditions are applied." => Some(("ui", "qselect-list-note")),
         "Conditions (all of an object's type must match)" => Some(("ui", "qselect-conditions-heading")),
         "No conditions added." => Some(("ui", "qselect-no-conditions")),

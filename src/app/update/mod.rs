@@ -6464,6 +6464,27 @@ impl OpenCADStudio {
             Message::SetViewportScale(scale) => {
                 self.scale_popup_open = false;
                 let auto_scale = self.annotation_auto_scale;
+                // Say why nothing changed instead of leaving the list silent
+                // (#2626).
+                if let Some(tab) = self.tabs.get(self.active_tab) {
+                    match tab.scene.scale_target_viewport() {
+                        None => {
+                            self.command_line.push_error(
+                                crate::t!("Select a viewport or double-click into one to set its scale.")
+                                    .as_ref(),
+                            );
+                            return Task::none();
+                        }
+                        Some(viewport) if tab.scene.viewport_display_locked(viewport) => {
+                            self.command_line.push_error(
+                                crate::t!("The viewport's display is locked; unlock it to change its scale.")
+                                    .as_ref(),
+                            );
+                            return Task::none();
+                        }
+                        Some(_) => {}
+                    }
+                }
                 if let Some(tab) = self.tabs.get_mut(self.active_tab) {
                     let previous = tab.scene.displayed_annotation_scale_handle();
                     if let Some(handle) = tab.scene.set_viewport_scale_named(&scale) {

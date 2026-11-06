@@ -7896,8 +7896,29 @@ impl Scene {
     }
 
     pub fn set_viewport_scale_named(&mut self, name: &str) -> Option<Handle> {
-        let viewport = self.explicit_viewport_handle()?;
+        let viewport = self.scale_target_viewport()?;
         self.set_viewport_scale_named_for(viewport, name)
+    }
+
+    /// The viewport a scale picked from the list applies to: the active or a
+    /// selected one, else the layout's only viewport. With several and none
+    /// picked there is none, so no viewport changes behind the user's back.
+    pub fn scale_target_viewport(&self) -> Option<Handle> {
+        self.explicit_viewport_handle().or_else(|| {
+            let (_, _, content) = self.paper_viewport_handles();
+            match content.as_slice() {
+                [only] => Some(*only),
+                _ => None,
+            }
+        })
+    }
+
+    /// Whether `viewport`'s display is locked against zoom and scale changes.
+    pub fn viewport_display_locked(&self, viewport: Handle) -> bool {
+        matches!(
+            self.document.get_entity(viewport),
+            Some(EntityType::Viewport(vp)) if vp.status.locked
+        )
     }
 
     pub fn set_viewport_scale_named_for(&mut self, viewport: Handle, name: &str) -> Option<Handle> {
@@ -18316,6 +18337,37 @@ mod layout_cache_tests {
         assert!(fresh.ensure_real_scale_list());
         let (paper, drawing) = fresh.scale_paper_drawing("1:100").unwrap();
         assert!((paper / drawing - 10.0).abs() < 1e-9, "{paper} = {drawing}");
+    }
+
+    /// #2626: with nothing selected, a layout's only viewport takes the scale
+    /// picked from the list; with two, neither changes until one is picked.
+    #[test]
+    fn a_picked_scale_reaches_the_layouts_only_viewport() {
+        let mut scene = Scene::new();
+        scene.add_layout("P1").unwrap();
+        scene.current_layout = "P1".to_string();
+        assert!(scene.add_scale("1:50", 1.0, 50.0));
+        let viewport = |scene: &mut Scene| {
+            let mut vp = codec::entities::Viewport::new();
+            vp.width = 100.0;
+            vp.height = 100.0;
+            scene
+                .document
+                .add_entity_to_layout(codec::EntityType::Viewport(Box::new(vp)), "P1")
+                .unwrap()
+        };
+        let only = viewport(&mut scene);
+        scene.bump_geometry();
+        assert_eq!(scene.scale_target_viewport(), Some(only));
+        assert!(scene.set_viewport_scale_named("1:50").is_some());
+        let Some(codec::EntityType::Viewport(vp)) = scene.document.get_entity(only) else {
+            panic!("viewport");
+        };
+        assert!((vp.custom_scale - 0.02).abs() < 1e-9);
+
+        viewport(&mut scene);
+        scene.bump_geometry();
+        assert_eq!(scene.scale_target_viewport(), None);
     }
 
     #[test]

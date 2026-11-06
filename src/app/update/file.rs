@@ -112,9 +112,16 @@ fn plot_dialog_scale_factor(d: &crate::ui::window::plot::PlotDialogState) -> f64
 }
 
 fn scale_name_for_factor(scales: &[(String, f64)], factor: f64) -> Option<String> {
-    scales
-        .iter()
-        .find(|(_, candidate)| (*candidate - factor).abs() <= 1e-6 * factor.abs().max(1.0))
+    // Several names can share a ratio ("1:1" and 1'-0" = 1'-0"); the plain
+    // ratio name reads best.
+    let matching = || {
+        scales
+            .iter()
+            .filter(|(_, candidate)| (*candidate - factor).abs() <= 1e-6 * factor.abs().max(1.0))
+    };
+    matching()
+        .find(|(name, _)| !name.contains('='))
+        .or_else(|| matching().next())
         .map(|(name, _)| name.clone())
 }
 

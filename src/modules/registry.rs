@@ -858,6 +858,8 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "MIRRTEXT",
     "MLEADERLAYER",
     "MSLTSCALE",
+    "LOGFILEMODE",
+    "LOGFILEPATH",
     "MSOLESCALE",
     "OLEFRAME",
     "OLEHIDE",

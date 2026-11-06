@@ -29,6 +29,11 @@ mod draw;
 mod field;
 mod group_display;
 mod fileops;
+mod log_file;
+pub(crate) use log_file::write_line as write_log_line;
+pub(crate) use log_file::{
+    log_file_folder_setting, log_file_mode, set_log_file_folder, set_log_file_mode,
+};
 mod hyperlink;
 pub(crate) use group_display::{group_display_mode, set_group_display_mode};
 pub(crate) use hyperlink::{hyperlink_options, set_hyperlink_options};
@@ -1166,6 +1171,10 @@ inventory::submit!(crate::command::CommandRegistration {
         "PLINEGEN",
         "PSLTSCALE",
         "MSLTSCALE",
+        "LOGFILEMODE",
+        "LOGFILEON",
+        "LOGFILEOFF",
+        "LOGFILEPATH",
         // Plot preferences and the current-layout variables (commands/plotvars.rs).
         "PLOTOFFSET",
         "PAPERUPDATE",

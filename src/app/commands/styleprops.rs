@@ -946,6 +946,10 @@ impl OpenCADStudio {
                     | "PLINEGEN"
                     | "PSLTSCALE"
                     | "MSLTSCALE"
+                    | "LOGFILEMODE"
+                    | "LOGFILEON"
+                    | "LOGFILEOFF"
+                    | "LOGFILEPATH"
                     | "DISPSILH"
                     | "WORLDVIEW"
                     | "LIMCHECK"
@@ -1129,6 +1133,14 @@ impl OpenCADStudio {
                     }
                     if name == "GROUPDISPLAYMODE" {
                         self.group_display_setvar(value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if matches!(name.as_str(), "LOGFILEMODE" | "LOGFILEON" | "LOGFILEOFF") {
+                        self.log_file_setvar(&name, value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "LOGFILEPATH" {
+                        self.log_file_path_setvar(value.as_deref());
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name == "OFFSETGAPTYPE" {

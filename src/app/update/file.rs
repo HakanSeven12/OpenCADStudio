@@ -862,6 +862,8 @@ impl OpenCADStudio {
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
             group_display_mode: crate::app::commands::group_display_mode(),
+            log_file_mode: crate::app::commands::log_file_mode(),
+            log_file_path: crate::app::commands::log_file_folder_setting(),
             offset_gap_type: crate::modules::draw::modify::offset::gap_type(),
             trim_extend_quick: crate::modules::draw::modify::trim::quick_mode(),
             match_mode: crate::entities::match_props::match_mode(),
@@ -1059,6 +1061,8 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::app::commands::set_group_display_mode(s.group_display_mode);
+        crate::app::commands::set_log_file_folder(&s.log_file_path);
+        crate::app::commands::set_log_file_mode(s.log_file_mode);
         crate::modules::draw::modify::offset::set_gap_type(s.offset_gap_type);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
         crate::entities::match_props::set_match_mode(s.match_mode);

@@ -539,6 +539,7 @@ impl CommandLine {
             // A quiet machine replay (API v13) leaves no echo; errors pass.
             return;
         }
+        crate::app::commands::write_log_line(&text);
         self.history.push(HistoryEntry {
             kind,
             text,

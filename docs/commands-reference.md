@@ -396,6 +396,8 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `LAYTRANS` | — | Translates layer names and standards in the current drawing to match another company or AIA layer standard file. *Tip:* Save translation mappings to a .dws or .dwg standard file for recurrin project conversion. |
 | `LAYUNISO` | — | Restores all layers that were turned off, frozen, or locked by the most recent LAYISO command. *Tip:* Quickly returns your workspace to its full visible state after isolated editing. |
 | `LAYWALK` | — | Opens an interactive layer inspector dialog to quickly walk through and view objects on individual layers. *Tip:* The ultimate tool for CAD quality assurance and checking what rogue entities sit on unexpected layers. |
+| `LOGFILEOFF` | — | Stops writing the command line to the log file and shows where the file is. |
+| `LOGFILEON` | — | Writes everything the command line shows to a log file in LOGFILEPATH, one file per session. |
 | `LINETYPE` | `LT` | Menu: Linetype.... |
 | `MATCHPROP` | `MA` | Applies the properties (layer, color, linetype, text style, dimension style) of a selected source object to other target objects. *Tip:* Type S (Settings) after selecting source to toggle exactly which properties to copy (e.g. only layer without changing hatch scale). |
 | `PROPERTIES` | `CH`, `MO`, `PR`, `PROPS` | Opens the Properties palette (Ctrl+1) to inspect and modify all geometric and styling parameters of selected objects. *Tip:* Aliases CH, MO also open this palette. Use the Quick Select (funnel icon) button at top-right for precision filtering. |
@@ -909,6 +911,8 @@ Type a name to read it and be prompted for a new value (`OSMODE <4133>`). A dash
 | `ISOLINES` | 4 | Integer Read/Write | Specifies number of wireframe contour lines displayed on curved surfaces of 3D solids (0 to 2047). Tip: Increase to 16 or 32 for higher visual surface fidelity on curved solids. |
 | `LAYOUTCREATEVIEWPORT` | — | — | — |
 | `LIMCHECK` | — | — | — |
+| `LOGFILEMODE` | 0 (Off) | Boolean Read/Write | Writes the command line to a log file (LOGFILEON / LOGFILEOFF). |
+| `LOGFILEPATH` | (settings folder)/logs | String Read/Write | Folder the log files go to; `.` restores the default. |
 | `LOGINNAME` | (Windows User) | String Read-Only | Stores the Windows or Autodesk account user login name. Tip: Used in title blocks and plot stamps to track "Drawn By" and approval records automatically. |
 | `LTSCALE` | 1.0 | Real Read/Write | Sets global linetype scale factor for all dotted, dashed, and patterned lines across the entire drawing. Tip: In Model Space, set LTSCALE to match your intended plot scale factor (e.g. 48 for 1/4"=1'-0", 100 for 1:100). |
 | `LUNITS` | 2 (Decimal) | Integer Read/Write | Sets linear coordinate display unit format: 1=Scientific, 2=Decimal, 3=Engineering (feet & decimal inches), 4=Architectural (feet & fractional inches), 5=Fractional. Tip: Architects and interior designers use 4; civil and mechanical engineers use 2. |

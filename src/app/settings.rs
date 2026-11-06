@@ -926,6 +926,10 @@ pub struct UserSettings {
     /// GROUPDISPLAYMODE: a picked group shows member grips (0), a centre
     /// grip (1) or a centre grip and a box (2).
     pub group_display_mode: i16,
+    /// LOGFILEMODE: the command line is also written to a log file.
+    pub log_file_mode: bool,
+    /// LOGFILEPATH: the folder log files go to; empty for the default.
+    pub log_file_path: String,
     /// OFFSETGAPTYPE: how a polyline offset outward closes its corners
     /// (0 extend, 1 fillet, 2 chamfer).
     pub offset_gap_type: u8,
@@ -1483,6 +1487,8 @@ impl Default for UserSettings {
             ole_hide: 0,
             ole_quality: 3,
             group_display_mode: 2,
+            log_file_mode: false,
+            log_file_path: String::new(),
             offset_gap_type: 0,
             trim_extend_quick: true,
             match_mode: crate::entities::match_props::MatchOpts::DEFAULT_MODE,

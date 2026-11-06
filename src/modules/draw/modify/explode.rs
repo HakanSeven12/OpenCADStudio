@@ -2463,7 +2463,8 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut Document) -> Vec<Han
     pending
 }
 
-/// Remove `*D` pictures no dimension or insert names any more: a rotated
+/// Remove `*D` pictures no dimension, insert or scale representation refers to
+/// any more: a rotated
 /// or mirrored dimension detaches its old one (kept in the open drawing so an
 /// undo can point back to it), which a saved file should not carry.
 fn drop_detached_dimension_blocks(doc: &mut Document) {
@@ -2481,14 +2482,29 @@ fn drop_detached_dimension_blocks(doc: &mut Document) {
             _ => None,
         })
         .collect();
+    // An annotative dimension draws each scale representation from a block of
+    // its own, which only the representation refers to.
+    let represented: std::collections::HashSet<Handle> = doc
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            document::objects::ObjectType::ObjectContextData(leaf) => match &leaf.kind {
+                document::objects::ObjectContextKind::Dim(context) => Some(context.block),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
     let detached: Vec<String> = doc
         .block_records
         .iter()
-        .map(|record| record.name.clone())
-        .filter(|name| {
-            let upper = name.to_ascii_uppercase();
-            upper.starts_with("*D") && !named.contains(&upper)
+        .filter(|record| {
+            let upper = record.name.to_ascii_uppercase();
+            upper.starts_with("*D")
+                && !named.contains(&upper)
+                && !represented.contains(&record.handle)
         })
+        .map(|record| record.name.clone())
         .collect();
     for name in detached {
         if let Some(record) = doc.block_records.remove(&name) {
@@ -2859,6 +2875,81 @@ mod tests {
             before,
             "a dimension that already owns a block must not be re-baked"
         );
+    }
+
+    /// A dimension with a scale representation drawn by a block nothing else
+    /// names, as a second annotation scale of a saved drawing has.
+    fn dimension_with_represented_block(doc: &mut Document) -> Handle {
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .unwrap();
+        bake_dimension_blocks(doc);
+
+        let block = doc.allocate_handle();
+        let mut record = document::tables::BlockRecord::new("*D2");
+        record.handle = block;
+        doc.block_records.add(record).unwrap();
+
+        let scale = doc.allocate_handle();
+        let mut scale_object = document::objects::Scale::new("1:100", 1.0, 100.0);
+        scale_object.handle = scale;
+        doc.objects
+            .insert(scale, document::objects::ObjectType::Scale(scale_object));
+        assert!(crate::scene::annotative::create_annotation_context(
+            doc, handle, scale
+        ));
+        for object in doc.objects.values_mut() {
+            if let document::objects::ObjectType::ObjectContextData(leaf) = object {
+                if let document::objects::ObjectContextKind::Dim(context) = &mut leaf.kind {
+                    if leaf.scale == scale {
+                        context.block = block;
+                    }
+                }
+            }
+        }
+        handle
+    }
+
+    #[test]
+    fn baking_keeps_the_block_of_a_scale_representation() {
+        let mut doc = Document::new();
+        dimension_with_represented_block(&mut doc);
+        bake_dimension_blocks(&mut doc);
+        assert!(doc.block_records.get("*D2").is_some());
+    }
+
+    #[test]
+    fn a_saved_scale_representation_names_its_block() {
+        let mut doc = Document::new();
+        dimension_with_represented_block(&mut doc);
+        let bytes = crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let names: Vec<&str> = (1..lines.len())
+            .filter(|&at| lines[at].ends_with("OBJECTCONTEXTDATA_CLASS") && lines[at - 1] == "0")
+            .filter_map(|start| {
+                (start + 1..lines.len() - 1)
+                    .step_by(2)
+                    .take_while(|&code| lines[code] != "0")
+                    .find(|&code| lines[code] == "2")
+                    .map(|code| lines[code + 1])
+            })
+            .collect();
+        assert!(names.contains(&"*D2"), "{names:?}");
+    }
+
+    #[test]
+    fn baking_still_drops_a_dimension_block_nothing_refers_to() {
+        let mut doc = Document::new();
+        dimension_with_represented_block(&mut doc);
+        let mut record = document::tables::BlockRecord::new("*D3");
+        record.handle = doc.allocate_handle();
+        doc.block_records.add(record).unwrap();
+        bake_dimension_blocks(&mut doc);
+        assert!(doc.block_records.get("*D3").is_none());
     }
 
     #[test]

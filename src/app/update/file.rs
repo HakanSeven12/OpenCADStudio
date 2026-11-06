@@ -2390,11 +2390,12 @@ impl OpenCADStudio {
         // parse/purge/cache spans plus the UI-thread xref resolve.
         self.command_line.push_info(
             crate::tf!(
-                "  parse {}ms · purge {}ms · caches {}ms · xref {}ms · total {}ms",
+                "  parse {}ms · purge {}ms · caches {}ms · xref {}ms · geometry {}ms · total {}ms",
                 timings.parse_ms,
                 timings.purge_ms,
                 timings.caches_ms,
                 timings.xref_ms,
+                timings.finalize_ms,
                 total_ms
             )
             .as_ref(),

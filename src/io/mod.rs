@@ -528,9 +528,6 @@ async fn open_path_with_phase_attempt(
                     doc = prepared_doc;
                     caches.prepared_geometry = Some(prepared_geometry);
                     progress2.set(crate::app::OPEN_PHASE_FINALIZING, 9950, 1, 1);
-                    // The localized command-line summary predates `finalize_ms` and
-                    // is keyed on its format string, so the full breakdown goes out
-                    // here instead of changing that key across every locale.
                     crate::perf_record!(
                     "[perf] open-phases parse={}ms purge={}ms xref={}ms caches={}ms finalize={}ms",
                     caches.timings.parse_ms,

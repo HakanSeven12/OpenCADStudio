@@ -670,7 +670,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "  VP #{id}: {w:.1}×{h:.1} @ ({:.1},{:.1})  scale={scale:.4}  [{state}]" => Some(("view", "vp-id-w-1-h-1-1-1-scale-scale-4-state")),
         "  Version GUID:      {}" => Some(("view", "version-guid")),
         "  [{tag}] = {val}" => Some(("draw", "tag-val")),
-        "  parse {}ms · purge {}ms · caches {}ms · xref {}ms · total {}ms" => Some(("file", "parse-ms-purge-ms-caches-ms-xref-ms-total-ms")),
+        "  parse {}ms · purge {}ms · caches {}ms · xref {}ms · geometry {}ms · total {}ms" => Some(("file", "parse-ms-purge-ms-caches-ms-xref-ms-geometry-ms-total-ms")),
         "  {:x} [{}]: {} value(s)" => Some(("view", "x-value-s")),
         "  {:x}: no xdata." => Some(("view", "x-no-xdata")),
         "  {k}: {n}" => Some(("inquiry", "k-n")),

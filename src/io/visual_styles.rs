@@ -4,8 +4,8 @@
 //! index, `R` true color, `CL`/`CB`/`CN` by layer / by block / none, `T` text;
 //! a trailing `!` marks a property that is not enabled.
 
-use codec::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
-use codec::types::Color;
+use document::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
+use document::types::Color;
 
 /// (name, type, face lighting model, face lighting quality, face color
 /// mode, face modifier, edge model, edge style, internal only, extended
@@ -102,7 +102,7 @@ fn property(token: &str) -> Option<VisualStyleProperty> {
 
 /// Adds the reference's visual styles to the drawing's ACAD_VISUALSTYLE
 /// dictionary, keeping a style of the same name that is there already.
-pub fn populate_document(document: &mut codec::Document) {
+pub fn populate_document(document: &mut document::Document) {
     let dictionary = document.header.acad_visualstyle_dict_handle;
     if dictionary.is_null() {
         return;
@@ -145,7 +145,7 @@ pub fn populate_document(document: &mut codec::Document) {
 
 /// The visual styles offered by name (not the internal ones), as the
 /// reference lists them: the 2D wireframe style shows as "2D Wireframe".
-pub fn offered(document: &codec::Document) -> Vec<(String, codec::types::Handle)> {
+pub fn offered(document: &document::Document) -> Vec<(String, document::types::Handle)> {
     let Some(ObjectType::Dictionary(entries)) = document
         .objects
         .get(&document.header.acad_visualstyle_dict_handle)

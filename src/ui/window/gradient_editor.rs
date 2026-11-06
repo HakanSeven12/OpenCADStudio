@@ -3,7 +3,7 @@
 use crate::app::Message;
 use crate::scene::model::hatch_model::GradientKind;
 use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
-use codec::types::Color as AcadColor;
+use document::types::Color as AcadColor;
 use iced::widget::{
     button, checkbox, column, container, image, mouse_area, row, slider, text, text_input, tooltip,
     Space,
@@ -18,7 +18,7 @@ pub enum GradientColorMode {
 
 #[derive(Debug, Clone)]
 pub struct GradientEditorState {
-    pub handles: Vec<codec::Handle>,
+    pub handles: Vec<document::Handle>,
     pub color_mode: GradientColorMode,
     pub color_1: AcadColor,
     pub color_2: AcadColor,
@@ -63,7 +63,7 @@ fn msg(message: GradientMsg) -> Message {
 }
 
 impl GradientEditorState {
-    pub fn from_hatch(handles: Vec<codec::Handle>, hatch: &codec::entities::Hatch) -> Self {
+    pub fn from_hatch(handles: Vec<document::Handle>, hatch: &document::entities::Hatch) -> Self {
         let color = |index: usize| {
             hatch
                 .gradient_color
@@ -130,7 +130,7 @@ impl GradientEditorState {
 fn rgb(color: &AcadColor) -> Color {
     let (r, g, b) = match color {
         AcadColor::Rgb { r, g, b } => (*r, *g, *b),
-        AcadColor::Index(i) => codec::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128)),
+        AcadColor::Index(i) => document::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128)),
         _ => (255, 255, 255),
     };
     Color::from_rgb8(r, g, b)
@@ -220,7 +220,7 @@ fn preview(state: &GradientEditorState) -> Element<'static, Message> {
 }
 
 pub(crate) fn compact_preview(
-    hatch: &codec::entities::Hatch,
+    hatch: &document::entities::Hatch,
 ) -> Option<iced::widget::image::Handle> {
     preview_sized(&GradientEditorState::from_hatch(Vec::new(), hatch), 256, 26)
 }

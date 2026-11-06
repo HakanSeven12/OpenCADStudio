@@ -1,4 +1,4 @@
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -273,7 +273,7 @@ impl CadCommand for SymmetricConstraintCommand {
                 CmdResult::NeedPoint
             }
             Step::FirstPoint | Step::SecondPoint(_) => {
-                let world = codec::types::Vector3::new(point.x, point.y, point.z);
+                let world = document::types::Vector3::new(point.x, point.y, point.z);
                 if !is_parametric_point_near(&entity, world) {
                     return Self::invalid_point();
                 }

@@ -155,7 +155,7 @@ impl OpenCADStudio {
                     .paper_space_linetype_scaling,
             ) | (i16::from(self.tabs[i].scene.document.header.paper_space_limit_check) << 1);
         for obj in self.tabs[i].scene.document.objects.values_mut() {
-            if let codec::objects::ObjectType::Layout(layout) = obj {
+            if let document::objects::ObjectType::Layout(layout) = obj {
                 if layout.name == name {
                     layout.flags = layout_flags;
                     crate::scene::apply_default_page_setup(layout, &plot_style);
@@ -191,7 +191,7 @@ impl OpenCADStudio {
         let mut ps = self.tabs[i]
             .scene
             .plot_settings_for(&layout)
-            .unwrap_or_else(|| codec::objects::PlotSettings::new(String::new()));
+            .unwrap_or_else(|| document::objects::PlotSettings::new(String::new()));
         if let Some(paper) = req["paper"].as_str().filter(|p| !p.is_empty()) {
             let resolved = crate::io::paper_catalog::resolve(paper)
                 .ok_or_else(|| failure("invalid_paper", format!("Unknown paper '{paper}'")))?;
@@ -203,9 +203,9 @@ impl OpenCADStudio {
                 .as_str()
                 .is_some_and(|o| o.eq_ignore_ascii_case("portrait"))
             {
-                codec::objects::PlotRotation::None
+                document::objects::PlotRotation::None
             } else {
-                codec::objects::PlotRotation::Degrees90
+                document::objects::PlotRotation::Degrees90
             };
         }
         if let Some(fit) = req["fit"].as_bool() {
@@ -243,7 +243,7 @@ impl OpenCADStudio {
         if let Some(window) = req["window"].as_array().filter(|v| v.len() == 4) {
             let coord = |k: usize| window[k].as_f64().unwrap_or(0.0);
             ps.set_plot_window(coord(0), coord(1), coord(2), coord(3));
-            ps.plot_type = codec::objects::PlotType::Window;
+            ps.plot_type = document::objects::PlotType::Window;
         }
         self.push_undo_snapshot(i, "PAGESETUP");
         if !self.tabs[i].scene.set_layout_plot_settings(&layout, &ps) {
@@ -512,22 +512,22 @@ impl OpenCADStudio {
                     &mut self.tabs[i].scene.document,
                     handle,
                     FILE_IDENTITY_APP,
-                    Some(vec![codec::xdata::XDataValue::String(identity.clone())]),
+                    Some(vec![document::xdata::XDataValue::String(identity.clone())]),
                 );
             }
             None => {
-                let mut text = codec::entities::Text::with_value(
+                let mut text = document::entities::Text::with_value(
                     FILE_IDENTITY_APP,
-                    codec::types::Vector3::ZERO,
+                    document::types::Vector3::ZERO,
                 )
                 .with_height(0.0001);
                 text.common.invisible = true;
-                let handle = self.tabs[i].scene.add_entity(codec::EntityType::Text(text));
+                let handle = self.tabs[i].scene.add_entity(document::EntityType::Text(text));
                 crate::scene::view::dispatch::set_entity_xdata(
                     &mut self.tabs[i].scene.document,
                     handle,
                     FILE_IDENTITY_APP,
-                    Some(vec![codec::xdata::XDataValue::String(identity.clone())]),
+                    Some(vec![document::xdata::XDataValue::String(identity.clone())]),
                 );
             }
         }
@@ -542,7 +542,7 @@ impl OpenCADStudio {
 const FILE_IDENTITY_APP: &str = "SPMDOCUNIQUE";
 
 /// The handle of the entity carrying the file identity, if present.
-fn find_file_identity_marker(document: &codec::Document) -> Option<codec::Handle> {
+fn find_file_identity_marker(document: &document::Document) -> Option<document::Handle> {
     document
         .entities()
         .find(|entity| {
@@ -556,14 +556,14 @@ fn find_file_identity_marker(document: &codec::Document) -> Option<codec::Handle
 }
 
 /// The identity GUID from the marker entity's XData.
-fn marker_identity(document: &codec::Document, handle: codec::Handle) -> Option<String> {
+fn marker_identity(document: &document::Document, handle: document::Handle) -> Option<String> {
     let record = document
         .get_entity(handle)?
         .common()
         .extended_data
         .get_record(FILE_IDENTITY_APP)?;
     match record.values.first() {
-        Some(codec::xdata::XDataValue::String(text)) => Some(text.clone()),
+        Some(document::xdata::XDataValue::String(text)) => Some(text.clone()),
         _ => None,
     }
 }
@@ -658,7 +658,7 @@ fn read_sysvar(scene: &crate::scene::Scene, name: &str) -> Option<Value> {
     Some(value)
 }
 
-fn validate_sysvar(document: &codec::Document, name: &str, value: &Value) -> Result<(), Value> {
+fn validate_sysvar(document: &document::Document, name: &str, value: &Value) -> Result<(), Value> {
     let failure = |message: &str| crate::app::control::failure("invalid_sysvar_value", message);
     match name.to_ascii_lowercase().as_str() {
         "ltscale" => {
@@ -729,12 +729,12 @@ fn validate_sysvar(document: &codec::Document, name: &str, value: &Value) -> Res
     Ok(())
 }
 
-fn set_sysvar(document: &mut codec::Document, name: &str, value: &Value) -> Result<(), Value> {
+fn set_sysvar(document: &mut document::Document, name: &str, value: &Value) -> Result<(), Value> {
     validate_sysvar(document, name, value)?;
     let failure = |message: &str| crate::app::control::failure("invalid_sysvar_value", message);
     // The header and the tables are separate fields of the acadrust document;
     // borrow them through it, not through the whole Document.
-    let document: &mut codec::CadDocument = document;
+    let document: &mut document::CadDocument = document;
     let header = &mut document.header;
     match name.to_ascii_lowercase().as_str() {
         "ltscale" => {

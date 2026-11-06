@@ -4,8 +4,8 @@ use crate::modules::draw::modify::{
     copy::CopyCommand, mirror::MirrorCommand, rotate::RotateCommand, scale::ScaleCommand,
     translate::MoveCommand,
 };
-use codec::entities::{Insert, Line};
-use codec::types::Vector3;
+use document::entities::{Insert, Line};
+use document::types::Vector3;
 use glam::DVec3;
 
 fn repeated_blocks(nested: bool) -> (Scene, Vec<Handle>) {

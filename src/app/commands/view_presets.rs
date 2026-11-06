@@ -5,8 +5,8 @@
 use super::super::{Message, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::modules::view::view_cmd::{self, DashViewCommand, ViewInfo, ViewNames};
-use codec::objects::ObjectType;
-use codec::types::{Handle, Vector3};
+use document::objects::ObjectType;
+use document::types::{Handle, Vector3};
 use iced::Task;
 
 /// The xrecord in a view's extension dictionary holding its category and
@@ -26,8 +26,8 @@ impl OpenCADStudio {
         let live_sections: Vec<(String, Handle)> = document
             .entities()
             .filter_map(|entity| match entity {
-                codec::EntityType::Extended(extended) => match &extended.data {
-                    codec::entities::ExtendedEntityData::SectionObject(section) => {
+                document::EntityType::Extended(extended) => match &extended.data {
+                    document::entities::ExtendedEntityData::SectionObject(section) => {
                         Some((section.name.clone(), extended.common.handle))
                     }
                     _ => None,
@@ -67,7 +67,7 @@ impl OpenCADStudio {
                     .layout_content_viewports()
                     .iter()
                     .filter_map(|handle| match document.get_entity(*handle) {
-                        Some(codec::EntityType::Viewport(value)) => Some((
+                        Some(document::EntityType::Viewport(value)) => Some((
                             handle.value(),
                             [
                                 value.center.x - value.width / 2.0,
@@ -132,7 +132,7 @@ impl OpenCADStudio {
             if let Some((name, x, y, ortho)) = view_cmd::orthographic_ucs(preset) {
                 // The top view's UCS is the world one.
                 self.tabs[i].active_ucs = (ortho != 1).then(|| {
-                    let mut ucs = codec::tables::Ucs::new(name);
+                    let mut ucs = document::tables::Ucs::new(name);
                     ucs.origin = Vector3::ZERO;
                     ucs.x_axis = Vector3::new(x[0], x[1], x[2]);
                     ucs.y_axis = Vector3::new(y[0], y[1], y[2]);
@@ -227,7 +227,7 @@ impl OpenCADStudio {
                             .filter_map(|preset| view_cmd::orthographic_ucs(preset))
                             .find(|(_, _, _, ortho)| *ortho == view.ucs_ortho_type)
                             .map_or("*ACTIVE*", |(name, ..)| name);
-                        let mut ucs = codec::tables::Ucs::new(name);
+                        let mut ucs = document::tables::Ucs::new(name);
                         ucs.origin = view.ucs_origin;
                         ucs.x_axis = view.ucs_x_axis;
                         ucs.y_axis = view.ucs_y_axis;
@@ -317,7 +317,7 @@ impl OpenCADStudio {
     }
 
     /// Keep the current UCS with a view being saved (UCSVIEW).
-    fn store_ucs_in_view(&self, i: usize, view: &mut codec::tables::View) {
+    fn store_ucs_in_view(&self, i: usize, view: &mut document::tables::View) {
         view.ucs_associated = true;
         match &self.tabs[i].active_ucs {
             Some(ucs) => {
@@ -340,7 +340,7 @@ impl OpenCADStudio {
 
     /// A model-space view restored in the entered paper-space viewport, with
     /// its background and visual style.
-    fn restore_view_in_active_viewport(&mut self, i: usize, view: &codec::tables::View) {
+    fn restore_view_in_active_viewport(&mut self, i: usize, view: &document::tables::View) {
         let Some(viewport) = self.tabs[i].scene.active_viewport else {
             return;
         };
@@ -365,7 +365,7 @@ impl OpenCADStudio {
 
     /// Add or replace a named view, keeping the record (and so its settings)
     /// of a view saved again under the same name.
-    fn save_named_view(&mut self, i: usize, mut view: codec::tables::View) {
+    fn save_named_view(&mut self, i: usize, mut view: document::tables::View) {
         self.push_undo_snapshot(i, "-VIEW");
         let background = self.tabs[i].scene.active_background();
         let document = &mut self.tabs[i].scene.document;
@@ -424,8 +424,8 @@ impl OpenCADStudio {
                 let sections: Vec<(String, Handle)> = document
                     .entities()
                     .filter_map(|entity| match entity {
-                        codec::EntityType::Extended(extended) => match &extended.data {
-                            codec::entities::ExtendedEntityData::SectionObject(section) => {
+                        document::EntityType::Extended(extended) => match &extended.data {
+                            document::entities::ExtendedEntityData::SectionObject(section) => {
                                 Some((section.name.clone(), extended.common.handle))
                             }
                             _ => None,
@@ -450,7 +450,7 @@ impl OpenCADStudio {
                 };
                 let record = document.ensure_xrecord(view.handle, VIEW_INFO);
                 if let Some(ObjectType::XRecord(record)) = document.objects.get_mut(&record) {
-                    let text = |record: &codec::objects::XRecord, code: i32| {
+                    let text = |record: &document::objects::XRecord, code: i32| {
                         record.get_string(code).unwrap_or_default().to_string()
                     };
                     let category = if setting == "CATEGORIZE" {
@@ -467,8 +467,8 @@ impl OpenCADStudio {
                         .collect();
                     if rest.is_empty() {
                         rest = vec![
-                            codec::objects::XRecordEntry::bool(293, false),
-                            codec::objects::XRecordEntry::bool(294, false),
+                            document::objects::XRecordEntry::bool(293, false),
+                            document::objects::XRecordEntry::bool(294, false),
                         ];
                     }
                     record.entries.clear();
@@ -490,7 +490,7 @@ impl OpenCADStudio {
     /// prompt and filled from the view's background where it has one.
     fn open_view_background(&mut self, i: usize, view: &str, kind: &str) {
         use crate::ui::window::pdf_dialogs::{BgKind, BgPosition, ViewBackgroundState};
-        use codec::objects::ClassObjectData as D;
+        use document::objects::ClassObjectData as D;
         let unpack = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
         let canvas = self.tabs[i].scene.bg_color;
         let mut state = ViewBackgroundState {
@@ -567,7 +567,7 @@ impl OpenCADStudio {
         message: crate::ui::window::pdf_dialogs::PdfDialogMsg,
     ) -> Task<Message> {
         use crate::ui::window::pdf_dialogs::{BgKind, BgPosition, PdfDialogMsg as M};
-        use codec::objects::{
+        use document::objects::{
             ClassObjectData as D, GradientBackground, ImageBackground, SolidBackground,
         };
         let i = self.active_tab;
@@ -639,7 +639,7 @@ impl OpenCADStudio {
                 };
                 return Task::done(Message::OpenColorWindow(
                     crate::app::ColorPickTarget::ViewBackground(slot),
-                    codec::types::Color::Rgb { r, g, b },
+                    document::types::Color::Rgb { r, g, b },
                 ));
             }
             M::BgBrowse => {
@@ -732,11 +732,11 @@ impl OpenCADStudio {
                             fit_to_screen: state.position == BgPosition::Stretch,
                             maintain_aspect_ratio: state.aspect,
                             use_tiling: state.position == BgPosition::Tile,
-                            offset: codec::types::Vector2::new(
+                            offset: document::types::Vector2::new(
                                 ox.clamp(-BG_OFFSET_LIMIT, BG_OFFSET_LIMIT),
                                 oy.clamp(-BG_OFFSET_LIMIT, BG_OFFSET_LIMIT),
                             ),
-                            scale: codec::types::Vector2::new(
+                            scale: document::types::Vector2::new(
                                 scale(sx, state.scale_base[0]),
                                 scale(sy, state.scale_base[1]),
                             ),
@@ -769,7 +769,7 @@ impl OpenCADStudio {
 impl OpenCADStudio {
     /// A restored view's visual style becomes the model tab's render mode
     /// (the closest of OCS's modes); a view without one leaves it.
-    pub(crate) fn apply_view_render_mode(&mut self, i: usize, view: &codec::tables::View) {
+    pub(crate) fn apply_view_render_mode(&mut self, i: usize, view: &document::tables::View) {
         if self.tabs[i].scene.current_layout != "Model" {
             return;
         }

@@ -3,10 +3,10 @@
 // survives a DWG save/reload — i.e. an OCS-authored annotative object carries a
 // genuine per-scale representation, interoperably, not just the native flag.
 
-use codec::entities::{EntityType, MText};
-use codec::objects::{Dictionary, ObjectContextKind, ObjectType, Scale};
-use codec::types::Vector3;
-use codec::{Document, DxfVersion, Handle};
+use document::entities::{EntityType, MText};
+use document::objects::{Dictionary, ObjectContextKind, ObjectType, Scale};
+use document::types::Vector3;
+use document::{Document, DxfVersion, Handle};
 use OpenCADStudio::io;
 use OpenCADStudio::scene::annotative;
 
@@ -138,7 +138,7 @@ fn ocs_synthesized_mtext_context_survives_dwg_roundtrip() {
 
 #[test]
 fn ocs_synthesized_block_context_survives_dwg_roundtrip() {
-    use codec::entities::Insert;
+    use document::entities::Insert;
 
     let mut doc = Document::with_version(DxfVersion::AC1032);
 
@@ -238,8 +238,8 @@ fn object_scale_membership_add_remove_roundtrips() {
 /// under a style whose DIMTMOVE is 0, and draws that scale with the leader.
 #[test]
 fn dimension_context_fit_overrides_reach_the_drawn_dimension() {
-    use codec::entities::{Dimension, DimensionLinear};
-    use codec::xdata::XDataValue;
+    use document::entities::{Dimension, DimensionLinear};
+    use document::xdata::XDataValue;
     use OpenCADStudio::entities::dim_override as ov;
 
     let mut doc = Document::with_version(DxfVersion::AC1032);

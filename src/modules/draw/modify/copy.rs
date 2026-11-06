@@ -5,7 +5,7 @@
 //   Step 1: pick base point
 //   Step 2+: each click makes another copy at (click - base); Enter to finish.
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};

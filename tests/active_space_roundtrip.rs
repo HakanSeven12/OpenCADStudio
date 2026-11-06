@@ -82,7 +82,7 @@ fn ctab_is_created_when_absent_then_updated_in_place() {
 /// from paper space it reopens on the sheet (#1670).
 #[test]
 fn entered_viewport_survives_a_save_and_reload() {
-    use codec::{entities::Viewport, EntityType};
+    use document::{entities::Viewport, EntityType};
     for format in ["dxf", "dwg"] {
         let mut scene = Scene::new();
         scene.set_current_layout("Layout1".to_string());

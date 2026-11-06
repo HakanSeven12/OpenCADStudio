@@ -1,6 +1,6 @@
 // Shared value types used by the dispatch and grip systems.
 
-use codec::types::{Color as AcadColor, Handle, LineWeight};
+use document::types::{Color as AcadColor, Handle, LineWeight};
 use glam::DVec3;
 
 /// Stable identity of a native reference parameter property.

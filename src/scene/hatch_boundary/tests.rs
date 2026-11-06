@@ -1,9 +1,9 @@
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::Scene;
-use codec::entities::hatch::{
+use document::entities::hatch::{
     BoundaryEdge, BoundaryPath, BoundaryPathFlags, Hatch, LineEdge, PolylineEdge, SplineEdge,
 };
-use codec::types::{Vector2, Vector3};
+use document::types::{Vector2, Vector3};
 use kernel::geom2d::{refine_spline_boundary, Curve, NurbsCurve};
 use kernel::tessellation::DEFAULT_ANGLE;
 
@@ -17,14 +17,14 @@ fn gradient_stops_keep_entity_transparency() {
     hatch.gradient_color.enabled = true;
     hatch.gradient_color.name = "LINEAR".into();
     hatch.gradient_color.colors = vec![
-        codec::entities::hatch::GradientColorEntry {
+        document::entities::hatch::GradientColorEntry {
             value: 0.0,
-            color: codec::types::Color::Rgb { r: 255, g: 0, b: 0 },
+            color: document::types::Color::Rgb { r: 255, g: 0, b: 0 },
             ..Default::default()
         },
-        codec::entities::hatch::GradientColorEntry {
+        document::entities::hatch::GradientColorEntry {
             value: 1.0,
-            color: codec::types::Color::Rgb { r: 0, g: 0, b: 255 },
+            color: document::types::Color::Rgb { r: 0, g: 0, b: 255 },
             ..Default::default()
         },
     ];
@@ -362,15 +362,15 @@ fn loops_flagged_not_closed_are_skipped_like_autocad() {
 #[test]
 fn loops_flagged_not_closed_stay_out_of_the_extents() {
     let mut scene = Scene::new();
-    let mut line = codec::entities::Line::new();
+    let mut line = document::entities::Line::new();
     line.end = Vector3::new(10.0, 10.0, 0.0);
-    scene.add_entity(codec::EntityType::Line(line));
+    scene.add_entity(document::EntityType::Line(line));
     let mut path = rectangle([100.0, 100.0], [110.0, 110.0], [0.0; 2]);
     path.flags = BoundaryPathFlags::from_bits(1 | 32);
     let mut hatch = Hatch::new();
     hatch.is_solid = true;
     hatch.paths.push(path);
-    scene.add_entity(codec::EntityType::Hatch(Box::new(hatch)));
+    scene.add_entity(document::EntityType::Hatch(Box::new(hatch)));
 
     let (_, max) = scene.model_space_extents().unwrap();
     assert!(max.x < 10.5 && max.y < 10.5, "{max:?}");
@@ -382,7 +382,7 @@ fn loops_flagged_not_closed_stay_out_of_the_extents() {
 // (two loops: 40 and 20), each centred in the one before.
 #[test]
 fn island_style_keeps_loops_by_their_flags() {
-    use codec::entities::HatchStyleType::{Ignore, Normal, Outer};
+    use document::entities::HatchStyleType::{Ignore, Normal, Outer};
     let square = |half: f64, flags: u32| {
         let mut path = rectangle(
             [20.0 - half, 20.0 - half],
@@ -429,7 +429,7 @@ fn island_style_keeps_loops_by_their_flags() {
 // as before: Ignore the outermost, Outer the outermost and the next.
 #[test]
 fn island_style_without_flags_falls_back_to_nesting_depth() {
-    use codec::entities::HatchStyleType::{Ignore, Outer};
+    use document::entities::HatchStyleType::{Ignore, Outer};
     let square = |half: f64| {
         rectangle(
             [20.0 - half, 20.0 - half],
@@ -465,7 +465,7 @@ fn a_pattern_hatch_keeps_loops_flagged_not_closed() {
         hatch.paths = paths;
         Scene::hatch_model_from_dxf(&hatch, [1.0; 4]).map_or(0.0, |model| filled_area(&model))
     };
-    use codec::entities::HatchStyleType::{Normal, Outer};
+    use document::entities::HatchStyleType::{Normal, Outer};
     let outer = || square([0.0, 0.0], [10.0, 10.0]);
     let island = || square([3.0, 3.0], [7.0, 7.0]);
     let cases = [

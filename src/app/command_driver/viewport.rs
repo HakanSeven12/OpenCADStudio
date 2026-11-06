@@ -3,7 +3,7 @@ use super::*;
 impl OpenCADStudio {
     pub(super) fn handle_mview_create(
         &mut self,
-        viewport: codec::entities::Viewport,
+        viewport: document::entities::Viewport,
         preserve_view: bool,
     ) {
         let i = self.active_tab;
@@ -21,9 +21,9 @@ impl OpenCADStudio {
         });
         let label = self.history_label_from_active_cmd(i, "MVIEW");
         let pending = self.begin_undo(i, label, 1, true);
-        let handle = self.commit_entity_handle(codec::EntityType::Viewport(Box::new(viewport)));
+        let handle = self.commit_entity_handle(document::EntityType::Viewport(Box::new(viewport)));
         if let (Some(handle), Some(saved)) = (handle, saved_view) {
-            if let Some(codec::EntityType::Viewport(viewport)) =
+            if let Some(document::EntityType::Viewport(viewport)) =
                 self.tabs[i].scene.document.get_entity_mut(handle)
             {
                 viewport.view_target = saved.0;
@@ -55,14 +55,14 @@ impl OpenCADStudio {
     pub(super) fn handle_vpclip(
         &mut self,
         viewport: Handle,
-        boundary: Option<codec::EntityType>,
+        boundary: Option<document::EntityType>,
         boundary_handle: Handle,
     ) {
         let i = self.active_tab;
         self.tabs[i].scene.clear_preview_wire();
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
-        let Some(codec::EntityType::Viewport(vp)) =
+        let Some(document::EntityType::Viewport(vp)) =
             self.tabs[i].scene.document.get_entity(viewport).cloned()
         else {
             return;
@@ -74,11 +74,11 @@ impl OpenCADStudio {
                     .document
                     .get_entity(boundary_handle)
                     .is_some_and(|entity| match entity {
-                        codec::EntityType::Circle(_) => true,
-                        codec::EntityType::Ellipse(ellipse) => ellipse.is_full(),
-                        codec::EntityType::LwPolyline(polyline) => polyline.is_closed,
-                        codec::EntityType::Polyline(polyline) => polyline.is_closed(),
-                        codec::EntityType::Polyline2D(polyline) => polyline.is_closed(),
+                        document::EntityType::Circle(_) => true,
+                        document::EntityType::Ellipse(ellipse) => ellipse.is_full(),
+                        document::EntityType::LwPolyline(polyline) => polyline.is_closed,
+                        document::EntityType::Polyline(polyline) => polyline.is_closed(),
+                        document::EntityType::Polyline2D(polyline) => polyline.is_closed(),
                         _ => false,
                     });
             if !closed {
@@ -141,7 +141,7 @@ impl OpenCADStudio {
             }
         }
         if let Some(entity) = scene.document.get_entity_mut(viewport) {
-            *entity = codec::EntityType::Viewport(vp);
+            *entity = document::EntityType::Viewport(vp);
         }
         if !old.is_null() && old != clip {
             scene.erase_entities(&[old]);
@@ -158,7 +158,7 @@ impl OpenCADStudio {
 
     pub(super) fn handle_mview_create_clipped(
         &mut self,
-        boundary: Option<codec::EntityType>,
+        boundary: Option<document::EntityType>,
         boundary_handle: Handle,
     ) -> Option<Task<Message>> {
         let i = self.active_tab;
@@ -169,12 +169,12 @@ impl OpenCADStudio {
                     .document
                     .get_entity(boundary_handle)
                     .is_some_and(|entity| match entity {
-                        codec::EntityType::Circle(_) => true,
-                        codec::EntityType::Ellipse(ellipse) => ellipse.is_full(),
-                        codec::EntityType::LwPolyline(polyline) => polyline.is_closed,
-                        codec::EntityType::Polyline(polyline) => polyline.is_closed(),
-                        codec::EntityType::Polyline2D(polyline) => polyline.is_closed(),
-                        codec::EntityType::Polyline3D(polyline) => polyline.flags.closed,
+                        document::EntityType::Circle(_) => true,
+                        document::EntityType::Ellipse(ellipse) => ellipse.is_full(),
+                        document::EntityType::LwPolyline(polyline) => polyline.is_closed,
+                        document::EntityType::Polyline(polyline) => polyline.is_closed(),
+                        document::EntityType::Polyline2D(polyline) => polyline.is_closed(),
+                        document::EntityType::Polyline3D(polyline) => polyline.flags.closed,
                         _ => false,
                     });
             if !valid {
@@ -237,16 +237,16 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
 
-        let mut viewport = codec::entities::Viewport::new();
+        let mut viewport = document::entities::Viewport::new();
         viewport.center =
-            codec::types::Vector3::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0, 0.0);
+            document::types::Vector3::new((min_x + max_x) / 2.0, (min_y + max_y) / 2.0, 0.0);
         viewport.width = max_x - min_x;
         viewport.height = max_y - min_y;
         viewport.id = 2;
         viewport.clip_boundary_handle = clip_handle;
         viewport.status.non_rectangular_clipping = !clip_handle.is_null();
         let viewport_handle =
-            self.commit_entity_handle(codec::EntityType::Viewport(Box::new(viewport)));
+            self.commit_entity_handle(document::EntityType::Viewport(Box::new(viewport)));
         if let Some(viewport_handle) = viewport_handle {
             if !created_boundary {
                 let before = self.tabs[i]
@@ -371,7 +371,7 @@ impl OpenCADStudio {
         let mut thawed_count = 0usize;
 
         // Collect target viewport handles
-        let target_handles: Vec<Handle> = if vp_handle == codec::Handle::NULL {
+        let target_handles: Vec<Handle> = if vp_handle == document::Handle::NULL {
             // All viewports in current layout block
             let block_handle = self.tabs[i].scene.current_layout_block_handle_pub();
             self.tabs[i]
@@ -380,7 +380,7 @@ impl OpenCADStudio {
                 .entities()
                 .filter(|e| {
                     e.common().owner_handle == block_handle
-                        && matches!(e, codec::EntityType::Viewport(_))
+                        && matches!(e, document::EntityType::Viewport(_))
                 })
                 .map(|e| e.common().handle)
                 .collect()
@@ -389,7 +389,7 @@ impl OpenCADStudio {
         };
 
         for &target_handle in &target_handles {
-            if let Some(codec::EntityType::Viewport(vp)) =
+            if let Some(document::EntityType::Viewport(vp)) =
                 self.tabs[i].scene.document.get_entity_mut(target_handle)
             {
                 for h in &freeze_handles {
@@ -460,7 +460,7 @@ impl OpenCADStudio {
             .filter(|handle| {
                 matches!(
                     self.tabs[i].scene.document.get_entity(*handle),
-                    Some(codec::EntityType::Viewport(viewport)) if viewport.id > 1
+                    Some(document::EntityType::Viewport(viewport)) if viewport.id > 1
                 )
             })
             .collect();

@@ -12,7 +12,7 @@
 
 use std::f64::consts::TAU;
 
-use codec::objects::ObjectType;
+use document::objects::ObjectType;
 
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::Scene;
@@ -203,8 +203,8 @@ impl Scene {
             .document
             .entities()
             .filter_map(|entity| match entity {
-                codec::EntityType::Extended(extended) => match &extended.data {
-                    codec::entities::ExtendedEntityData::Camera { view_handle } => {
+                document::EntityType::Extended(extended) => match &extended.data {
+                    document::entities::ExtendedEntityData::Camera { view_handle } => {
                         Some(view_handle)
                     }
                     _ => None,

@@ -6,12 +6,12 @@
 //   Step 2: If first point picked, pick second point to define angle vector.
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, DynField};
 use crate::scene::model::wire_model::WireModel;
-use codec::EntityType;
+use document::EntityType;
 
 // ── Command implementation ─────────────────────────────────────────────────
 

@@ -28,12 +28,12 @@
 //! curves. They keep their own paths and this returns `None` for them, which
 //! is what lets a caller ask about any entity without checking first.
 
-use codec::entities::{
+use document::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, LwPolyline as LwPolylineEnt,
     Polyline2D, Spline as SplineEnt,
 };
-use codec::types::Vector3;
-use codec::EntityType;
+use document::types::Vector3;
+use document::EntityType;
 use kernel::geom2d::{
     characteristic_points, Arc, Circle, Curve, Ellipse, EllipseArc, Line, Polyline, PolylineVertex,
     Ray, SnapKind, Transform, XLine,
@@ -116,7 +116,7 @@ pub fn entity_spatial_measurement(entity: &EntityType) -> Option<kernel::space::
     let curve = match entity {
         EntityType::Polyline3D(polyline) => {
             if polyline.flags.spline_fit {
-                use codec::entities::polyline3d::SmoothSurfaceType;
+                use document::entities::polyline3d::SmoothSurfaceType;
                 let degree = match polyline.smooth_type {
                     SmoothSurfaceType::QuadraticBSpline => 2,
                     SmoothSurfaceType::CubicBSpline | SmoothSurfaceType::Bezier => 3,
@@ -576,9 +576,9 @@ fn normalized(normal: Vector3) -> Vector3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::lwpolyline::LwVertex;
-    use codec::entities::{Line as LineEnt, Ray as RayEnt, XLine as XLineEnt};
-    use codec::types::Vector2;
+    use document::entities::lwpolyline::LwVertex;
+    use document::entities::{Line as LineEnt, Ray as RayEnt, XLine as XLineEnt};
+    use document::types::Vector2;
     use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
     fn v3(x: f64, y: f64, z: f64) -> Vector3 {
@@ -772,8 +772,8 @@ mod tests {
 
     #[test]
     fn spatial_polyline_measurement_uses_unflagged_fit_controls() {
-        use codec::entities::polyline3d::SmoothSurfaceType;
-        use codec::entities::{Polyline3D, Vertex3DPolyline};
+        use document::entities::polyline3d::SmoothSurfaceType;
+        use document::entities::{Polyline3D, Vertex3DPolyline};
 
         let mut polyline = Polyline3D::new();
         polyline.flags.spline_fit = true;
@@ -923,7 +923,7 @@ mod tests {
             .expect("the kernel builds its own primitives");
         assert!(solid.validate().is_empty());
         assert_eq!(solid.euler_characteristic(), 2);
-        let document = codec::entities::acis::types::SatDocument::new();
+        let document = document::entities::acis::types::SatDocument::new();
         let (bodies, loss) = kernel::acis::lift(&document);
         assert!(
             bodies.is_empty() && loss.is_empty(),

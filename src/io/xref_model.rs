@@ -767,9 +767,9 @@ mod tests {
     // every SPIKE1 cell survived the round trip.
     #[cfg(not(target_arch = "wasm32"))]
     fn roundtrip_probe(ext: &str) {
-        use codec::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
-        use codec::tables::BlockRecord;
-        use codec::Document;
+        use document::objects::{ImageDefinition, ObjectType, UnderlayDefinition};
+        use document::tables::BlockRecord;
+        use document::Document;
 
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_probe_{}_{}",

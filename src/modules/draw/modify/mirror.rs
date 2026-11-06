@@ -9,7 +9,7 @@
 //           Yes → flip the original in place (no copy kept)
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform, WorkingPlane};

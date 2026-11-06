@@ -14,12 +14,12 @@
 // rectangle as its two corners); the clip-inside bit follows the Invert
 // choice.
 
-use codec::entities::{
+use document::entities::{
     ClipBoundary, ClipMode, ImageDisplayFlags, RasterImage, Underlay, UnderlayDisplayFlags,
     UnderlayType,
 };
-use codec::types::{Handle, Vector2};
-use codec::EntityType;
+use document::types::{Handle, Vector2};
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

@@ -1,8 +1,8 @@
 // DIVIDE and MEASURE place points or block references along a curve.
 
-use codec::entities::{Insert, Point as PointEnt};
-use codec::types::Vector3;
-use codec::{Entity, EntityType, Handle};
+use document::entities::{Insert, Point as PointEnt};
+use document::types::Vector3;
+use document::{Entity, EntityType, Handle};
 use glam::DVec3;
 use kernel::space::PlanarCurve;
 
@@ -365,7 +365,7 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{Circle, Line};
+    use document::entities::{Circle, Line};
 
     fn point(entity: &EntityType) -> DVec3 {
         let EntityType::Point(point) = entity else {

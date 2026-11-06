@@ -3,7 +3,7 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::scene::block_visibility as visibility;
-use codec::{Document, EntityType, Handle};
+use document::{Document, EntityType, Handle};
 use iced::Task;
 
 impl OpenCADStudio {
@@ -38,7 +38,7 @@ impl OpenCADStudio {
             );
             return Task::none();
         }
-        let vector = |p: glam::DVec3| codec::types::Vector3::new(p.x, p.y, p.z);
+        let vector = |p: glam::DVec3| document::types::Vector3::new(p.x, p.y, p.z);
         if let Some(error) = self.parameter_placement_error(kind.name()).or_else(|| {
             crate::scene::block_orientation_parameter::points_error(
                 kind,
@@ -166,7 +166,7 @@ impl OpenCADStudio {
             );
             return Task::none();
         }
-        let vector = |p: glam::DVec3| codec::types::Vector3::new(p.x, p.y, p.z);
+        let vector = |p: glam::DVec3| document::types::Vector3::new(p.x, p.y, p.z);
         if let Some(error) = self.parameter_placement_error(kind.name()).or_else(|| {
             crate::scene::block_distance_parameter::points_error(
                 kind,
@@ -398,8 +398,8 @@ impl OpenCADStudio {
         let parameter = crate::scene::block_point_parameter::create(
             &mut self.tabs[i].scene.document,
             definition,
-            codec::types::Vector3::new(location.x, location.y, location.z),
-            codec::types::Vector3::new(label.x, label.y, label.z),
+            document::types::Vector3::new(location.x, location.y, location.z),
+            document::types::Vector3::new(label.x, label.y, label.z),
         )
         .expect("validated Point placement");
         let option_error = {
@@ -493,7 +493,7 @@ impl OpenCADStudio {
         let parameter = visibility::create(
             document,
             definition,
-            codec::types::Vector3::new(location.x, location.y, location.z),
+            document::types::Vector3::new(location.x, location.y, location.z),
         )
         .expect("validated visibility placement");
         self.tabs[i].scene.bump_geometry();
@@ -538,7 +538,7 @@ impl OpenCADStudio {
                     _ => None,
                 },
             )
-            .unwrap_or(codec::types::Vector3::ZERO);
+            .unwrap_or(document::types::Vector3::ZERO);
         visibility::create(document, block, base)
     }
 

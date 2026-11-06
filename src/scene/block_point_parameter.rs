@@ -1,12 +1,12 @@
 //! Native Point parameter authoring. Action evaluation is a separate service.
 use super::block_authoring::{self as authoring, *};
-use codec::objects::{
+use document::objects::{
     BlockConnection, BlockElement, BlockEvalValue, BlockGrip, BlockGripExpression,
     BlockOnePointParameter, BlockParameter, BlockParameterProperty, BlockPointParameter,
     DynamicBlockData, ObjectType,
 };
-use codec::types::{Transform, Vector3};
-use codec::{Document, Handle};
+use document::types::{Transform, Vector3};
+use document::{Document, Handle};
 
 fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     match document
@@ -206,7 +206,7 @@ pub(crate) fn reframe(
 mod tests {
     use super::*;
     use crate::scene::{block_visibility, Scene};
-    use codec::{entities::Line, EntityType};
+    use document::{entities::Line, EntityType};
 
     #[test]
     #[ignore = "requires OCS_DYNAMIC_BLOCK_FIXTURES with local DWG fixtures"]
@@ -346,7 +346,7 @@ mod tests {
     fn graph_data(
         document: &Document,
         definition: Handle,
-    ) -> &codec::objects::BlockEvaluationGraph {
+    ) -> &document::objects::BlockEvaluationGraph {
         let ObjectType::DynamicBlock(object) =
             &document.objects[&graph_handle(document, definition).unwrap()]
         else {

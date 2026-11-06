@@ -1,7 +1,7 @@
 // DIMJOGLINE — add or remove a jog on a linear/aligned dimension.
 
-use codec::entities::Dimension;
-use codec::{EntityType, Handle};
+use document::entities::Dimension;
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

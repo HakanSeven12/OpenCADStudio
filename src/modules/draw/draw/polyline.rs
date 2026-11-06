@@ -14,9 +14,9 @@
 // Widths are stored per segment as (start, end).
 
 use crate::t;
-use codec::entities::LwVertex;
-use codec::types::Vector2;
-use codec::{EntityType, Handle, LwPolyline};
+use document::entities::LwVertex;
+use document::types::Vector2;
+use document::{EntityType, Handle, LwPolyline};
 use glam::{DVec2, DVec3, Vec2, Vec3};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

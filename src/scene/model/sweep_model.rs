@@ -1,12 +1,12 @@
 // Exact profile sweeps stored as kernel B-reps and ACIS.
 
-use codec::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
-use codec::objects::{
+use document::entities::{EmbeddedEntity, LwPolyline, LwVertex, Spline};
+use document::objects::{
     SolidHistoryLoft, SolidHistoryNodeBase, SolidHistoryOperation, SolidHistoryRevolve,
     SolidHistorySweep,
 };
-use codec::types::{Vector2, Vector3};
-use codec::EntityType;
+use document::types::{Vector2, Vector3};
+use document::EntityType;
 use kernel::brep::{self, Body};
 use kernel::geom2d::{Arc, Curve, EllipseArc, Line};
 use kernel::space::{PlanarCurve, Plane, Vec3};
@@ -690,7 +690,7 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
     let identity = glam::DMat4::IDENTITY.to_cols_array();
     match boundary.as_slice() {
         [Curve::Circle(circle)] => {
-            let mut value = codec::entities::Circle::new();
+            let mut value = document::entities::Circle::new();
             value.center = world(plane.point_at(circle.centre));
             value.radius = circle.radius;
             value.normal = normal;
@@ -703,7 +703,7 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
                 && (boundary.iter().map(|piece| match piece { Curve::Arc(arc) => arc.sweep(), _ => 0.0 }).sum::<f64>()
                     - std::f64::consts::TAU).abs() <= 1e-9 =>
         {
-            let mut value = codec::entities::Circle::new();
+            let mut value = document::entities::Circle::new();
             value.center = world(plane.point_at(first.centre));
             value.radius = first.radius;
             value.normal = normal;
@@ -716,7 +716,7 @@ pub fn region_boundary_entity(entity: &EntityType) -> Option<(EmbeddedEntity, [f
                 ellipse.centre[0] + ellipse.major_axis[0] * ellipse.major_radius,
                 ellipse.centre[1] + ellipse.major_axis[1] * ellipse.major_radius,
             ]));
-            let mut value = codec::entities::Ellipse::new();
+            let mut value = document::entities::Ellipse::new();
             value.center = world(centre.to_array());
             value.major_axis = world((tip - centre).to_array());
             value.minor_axis_ratio = ellipse.minor_radius / ellipse.major_radius;
@@ -1075,8 +1075,8 @@ fn circular_loft(profiles: &[EntityType]) -> Option<Body> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{Circle, LwPolyline, LwVertex};
-    use codec::types::{Vector2, Vector3};
+    use document::entities::{Circle, LwPolyline, LwVertex};
+    use document::types::{Vector2, Vector3};
 
     fn square(size: f64) -> EntityType {
         let mut polyline = LwPolyline::new();

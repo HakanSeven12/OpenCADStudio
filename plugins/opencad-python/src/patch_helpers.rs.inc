@@ -3,10 +3,10 @@
 /// Apply `patch` (a dict of context fields) onto `existing`, so a script can
 /// change one context field without resetting the rest. Unknown keys error.
 fn merge_multileader_context(
-    existing: &codec::entities::MultiLeaderAnnotContext,
+    existing: &document::entities::MultiLeaderAnnotContext,
     patch: PyObjectRef,
     vm: &VirtualMachine,
-) -> PyResult<codec::entities::MultiLeaderAnnotContext> {
+) -> PyResult<document::entities::MultiLeaderAnnotContext> {
     let patch = patch.try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;
     let merged = multi_leader_annot_context_to_dict(vm, existing)?
         .try_into_value::<rustpython_vm::builtins::PyDictRef>(vm)?;

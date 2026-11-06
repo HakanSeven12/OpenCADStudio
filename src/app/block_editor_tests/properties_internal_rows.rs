@@ -1,8 +1,8 @@
 use super::*;
 use crate::scene::model::object::PropValue;
-use codec::entities::{Insert, Line};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{Insert, Line};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 
 /// The fixture reference is given its own evaluated `*U` copy, the way a
 /// visibility state change isolates an instance, and the definition carries a
@@ -169,13 +169,13 @@ fn block_reference_name_typing_renames_the_authored_definition() {
     let doc = doc.clone();
     use std::io::Cursor;
     for saved in [
-        codec::DxfReader::from_reader(Cursor::new(
-            codec::DxfWriter::new(&doc).write_to_vec().unwrap(),
+        document::DxfReader::from_reader(Cursor::new(
+            document::DxfWriter::new(&doc).write_to_vec().unwrap(),
         ))
         .unwrap()
         .read()
         .unwrap(),
-        codec::DwgReader::from_stream(Cursor::new(codec::DwgWriter::write_to_vec(&doc).unwrap()))
+        document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(&doc).unwrap()))
             .read()
             .unwrap(),
     ] {
@@ -257,8 +257,8 @@ fn block_reference_name_choice_drops_the_evaluated_link() {
 /// Data the panel never touches must survive a re-point: an unrelated XDATA
 /// record and an unrelated extension-dictionary entry.
 fn add_unrelated_data(app: &mut OpenCADStudio, reference: Handle) -> Handle {
-    use codec::objects::{Dictionary, ObjectType};
-    use codec::xdata::{ExtendedDataRecord, XDataValue};
+    use document::objects::{Dictionary, ObjectType};
+    use document::xdata::{ExtendedDataRecord, XDataValue};
     let doc = &mut app.tabs[app.active_tab].scene.document;
     if let Some(EntityType::Insert(insert)) = doc.get_entity_mut(reference) {
         let mut record = ExtendedDataRecord::new("OCS_KEEP");
@@ -327,7 +327,7 @@ fn block_reference_name_typing_an_existing_block_repoints_the_reference() {
     let holder = doc
         .extension_dictionary_handle(reference)
         .expect("the reference dictionary");
-    let Some(codec::objects::ObjectType::Dictionary(holder)) = doc.objects.get(&holder) else {
+    let Some(document::objects::ObjectType::Dictionary(holder)) = doc.objects.get(&holder) else {
         panic!("the reference dictionary vanished");
     };
     assert!(
@@ -380,13 +380,13 @@ fn block_reference_name_pick_survives_a_save_and_reopen() {
     );
     let doc = app.tabs[i].scene.document.clone();
     for saved in [
-        codec::DxfReader::from_reader(Cursor::new(
-            codec::DxfWriter::new(&doc).write_to_vec().unwrap(),
+        document::DxfReader::from_reader(Cursor::new(
+            document::DxfWriter::new(&doc).write_to_vec().unwrap(),
         ))
         .unwrap()
         .read()
         .unwrap(),
-        codec::DwgReader::from_stream(Cursor::new(codec::DwgWriter::write_to_vec(&doc).unwrap()))
+        document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(&doc).unwrap()))
             .read()
             .unwrap(),
     ] {

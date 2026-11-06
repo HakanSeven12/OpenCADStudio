@@ -126,10 +126,10 @@ mod tests {
         let i = app.active_tab;
         let first = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Viewport(Box::new(codec::entities::Viewport::new())));
+            .add_entity(document::EntityType::Viewport(Box::new(document::entities::Viewport::new())));
         let second = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Viewport(Box::new(codec::entities::Viewport::new())));
+            .add_entity(document::EntityType::Viewport(Box::new(document::entities::Viewport::new())));
         app.tabs[i].scene.active_viewport = Some(first);
         let _ = app.run_command_line("UCSFOLLOW 1");
         assert!(app.tabs[i].scene.ucs_follow());

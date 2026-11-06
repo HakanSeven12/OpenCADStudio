@@ -1,9 +1,9 @@
 use super::*;
-use codec::entities::{
+use document::entities::{
     Arc, AttributeEntity, Circle, Ellipse, Line as NativeLine, LwPolyline, LwVertex, Ray, Spline,
     XLine,
 };
-use codec::types::{Vector2, Vector3};
+use document::types::{Vector2, Vector3};
 use std::f64::consts::{FRAC_PI_2, PI};
 
 fn fixture() -> (Scene, Handle, Handle) {
@@ -105,7 +105,7 @@ fn block_alignment_reference_pose_preserves_native_frames_and_attributes() {
                     + destination
                     - alignment.anchor;
                 let attribute = &reference.attributes[0];
-                let attribute_world = codec::types::Matrix3::arbitrary_axis(attribute.normal)
+                let attribute_world = document::types::Matrix3::arbitrary_axis(attribute.normal)
                     * attribute.insertion_point;
                 assert!(actions::v(attribute_world).distance(expected_attribute) < 1e-8);
                 *scene.document.get_entity_mut(insert).unwrap() = changed;

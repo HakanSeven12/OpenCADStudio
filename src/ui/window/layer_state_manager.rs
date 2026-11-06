@@ -4,14 +4,14 @@ use crate::app::{LayerStateLayerFlag, LayerStateProperty, Message};
 use crate::t;
 use crate::ui::properties::{lw_options, LwItem};
 use crate::ui::style::form::{hdivider, LABEL_WIDTH};
-use codec::{LayerState, LayerStateMask};
+use document::{LayerState, LayerStateMask};
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Border, Element, Fill, Length, Theme};
 use std::borrow::Cow;
 use std::fmt;
 
 #[derive(Clone, PartialEq, Debug)]
-struct TransparencyItem(Option<codec::types::Transparency>);
+struct TransparencyItem(Option<document::types::Transparency>);
 
 impl fmt::Display for TransparencyItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -22,11 +22,11 @@ impl fmt::Display for TransparencyItem {
     }
 }
 
-fn transparency_options(current: Option<codec::types::Transparency>) -> Vec<TransparencyItem> {
+fn transparency_options(current: Option<document::types::Transparency>) -> Vec<TransparencyItem> {
     let mut options = vec![TransparencyItem(None)];
     for percent in (0..=90).step_by(10) {
         options.push(TransparencyItem(Some(
-            codec::types::Transparency::from_percent(percent as f64 / 100.0),
+            document::types::Transparency::from_percent(percent as f64 / 100.0),
         )));
     }
     let current = TransparencyItem(current);
@@ -409,7 +409,7 @@ fn editor_header<'a>() -> Element<'a, Message> {
 
 fn editor_layer_row<'a>(
     index: usize,
-    layer: &'a codec::LayerStateLayer,
+    layer: &'a document::LayerStateLayer,
     color_open: bool,
     linetypes: std::sync::Arc<[String]>,
 ) -> Element<'a, Message> {
@@ -636,10 +636,10 @@ mod borrowed_linetypes_tests {
 
     #[test]
     fn view_editor_accepts_shared_linetypes() {
-        let state = codec::LayerState {
+        let state = document::LayerState {
             name: String::new(),
             description: String::new(),
-            mask: codec::LayerStateMask::default(),
+            mask: document::LayerStateMask::default(),
             hidden: false,
             current_layer: String::new(),
             layers: Vec::new(),

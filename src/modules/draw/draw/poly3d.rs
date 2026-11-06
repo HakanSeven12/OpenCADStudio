@@ -1,9 +1,9 @@
 // 3DPOLY creates open or closed non-planar paths.
 
 use crate::t;
-use codec::entities::Polyline3D;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::Polyline3D;
+use document::types::Vector3;
+use document::EntityType;
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};

@@ -32,7 +32,7 @@ impl crate::command::CadCommand for AttmanPickCommand {
 
     fn on_entity_pick(
         &mut self,
-        handle: codec::Handle,
+        handle: document::Handle,
         _pt: glam::DVec3,
     ) -> crate::command::CmdResult {
         if handle.is_null() {

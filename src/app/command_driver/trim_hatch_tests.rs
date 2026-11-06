@@ -3,11 +3,11 @@
 use super::super::OpenCADStudio;
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::draw::modify::trim::TrimCommand;
-use codec::entities::hatch::{BoundaryEdge, BoundaryPath, PolylineEdge};
-use codec::entities::{Hatch, Line, LwPolyline, LwVertex};
-use codec::tables::layer::Layer;
-use codec::types::{Color, Transparency, Vector2, Vector3};
-use codec::{EntityType, Handle};
+use document::entities::hatch::{BoundaryEdge, BoundaryPath, PolylineEdge};
+use document::entities::{Hatch, Line, LwPolyline, LwVertex};
+use document::tables::layer::Layer;
+use document::types::{Color, Transparency, Vector2, Vector3};
+use document::{EntityType, Handle};
 use serde_json::{json, Value};
 
 const FILL_LAYER: &str = "TRIM_HATCH_FILL";

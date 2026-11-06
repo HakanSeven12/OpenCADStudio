@@ -35,7 +35,7 @@ impl OpenCADStudio {
                 };
                 let handle = u64::from_str_radix(handle_text, 16)
                     .ok()
-                    .map(codec::Handle::new);
+                    .map(document::Handle::new);
                 let Some(handle) = handle else {
                     self.command_line
                         .push_error(crate::t!("-FIELD: expected a hex object handle.").as_ref());
@@ -43,7 +43,7 @@ impl OpenCADStudio {
                 };
                 if !matches!(
                     self.tabs[i].scene.document.get_entity(handle),
-                    Some(codec::EntityType::Text(_) | codec::EntityType::MText(_))
+                    Some(document::EntityType::Text(_) | document::EntityType::MText(_))
                 ) {
                     self.command_line.push_error(
                         crate::t!("-FIELD: the handle must name a Text or MText object.")
@@ -149,7 +149,7 @@ impl OpenCADStudio {
                     .split_whitespace()
                     .nth(1)
                     .and_then(|h| u64::from_str_radix(h, 16).ok())
-                    .map(codec::Handle::new);
+                    .map(document::Handle::new);
                 if let Some(state) = self.field_dialog.as_mut() {
                     if let Some(entity) =
                         handle.and_then(|h| self.tabs[i].scene.document.get_entity(h))
@@ -197,15 +197,15 @@ impl OpenCADStudio {
     /// `Table(%<\_ObjId H>%).B4` or `Table(%<\_ObjId H>%).Evaluate(Sum(A3:B5))`.
     fn table_cell_expression(&self, i: usize, parts: &[&str]) -> Option<String> {
         let function = *parts.first()?;
-        let cell = |at: &[&str]| -> Option<(codec::Handle, usize, usize)> {
-            let handle = codec::Handle::new(u64::from_str_radix(at.first()?, 16).ok()?);
+        let cell = |at: &[&str]| -> Option<(document::Handle, usize, usize)> {
+            let handle = document::Handle::new(u64::from_str_radix(at.first()?, 16).ok()?);
             let point = glam::DVec3::new(
                 at.get(1)?.parse().ok()?,
                 at.get(2)?.parse().ok()?,
                 at.get(3)?.parse().ok()?,
             );
             let document = &self.tabs[i].scene.document;
-            let codec::EntityType::Table(table) = document.get_entity(handle)? else {
+            let document::EntityType::Table(table) = document.get_entity(handle)? else {
                 return None;
             };
             let hit = crate::modules::annotate::table_cmd::table_cell_at(table, None, point)?;
@@ -245,7 +245,7 @@ impl OpenCADStudio {
             .map(|f| self.field_value(&format!("\\AcVar Date \\f \"{f}\""), &[]))
             .collect();
         if let Some(db) = self.sheet_set.db() {
-            let custom = codec::sheet_set::custom_properties(db.sheet_set());
+            let custom = document::sheet_set::custom_properties(db.sheet_set());
             let names = |flag: i32| {
                 custom
                     .iter()
@@ -253,8 +253,8 @@ impl OpenCADStudio {
                     .map(|(n, _, _)| n.clone())
                     .collect()
             };
-            state.ss_sheet_custom = names(codec::sheet_set::CUSTOM_SHEET_PROP);
-            state.ss_set_custom = names(codec::sheet_set::CUSTOM_SHEET_SET_PROP);
+            state.ss_sheet_custom = names(document::sheet_set::CUSTOM_SHEET_PROP);
+            state.ss_set_custom = names(document::sheet_set::CUSTOM_SHEET_SET_PROP);
             state.ss_set_name = db.name().to_string();
         }
         state.custom_properties = self.tabs[self.active_tab]
@@ -275,7 +275,7 @@ impl OpenCADStudio {
 
     /// Open the Field dialog on the field text `host` is made of, so OK
     /// changes that field in place. False when `host` is not such a text.
-    pub(in crate::app) fn open_field_edit(&mut self, host: codec::Handle) -> bool {
+    pub(in crate::app) fn open_field_edit(&mut self, host: document::Handle) -> bool {
         let i = self.active_tab;
         let Some((code, objects)) =
             crate::entities::field::whole_text_field(&self.tabs[i].scene.document, host)
@@ -306,7 +306,7 @@ impl OpenCADStudio {
         true
     }
 
-    fn field_value(&self, code: &str, objects: &[codec::Handle]) -> String {
+    fn field_value(&self, code: &str, objects: &[document::Handle]) -> String {
         crate::entities::field::evaluate(
             &self.tabs[self.active_tab].scene.document,
             code,
@@ -325,7 +325,7 @@ impl OpenCADStudio {
             if state.name == "BlockPlaceholder" {
                 // A placeholder shows its property name until a block reference resolves it.
                 let (label, _, _) =
-                    codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
+                    document::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
                 text_case(label, state.text_case)
             } else {
                 self.field_value(&code, &objects)
@@ -344,7 +344,7 @@ impl OpenCADStudio {
             return;
         };
         let document = &self.tabs[self.active_tab].scene.document;
-        let mut names: Vec<(String, codec::Handle)> = match NAMED_TYPES[state.named_type] {
+        let mut names: Vec<(String, document::Handle)> = match NAMED_TYPES[state.named_type] {
             "Block" => document
                 .block_records
                 .iter()
@@ -451,11 +451,11 @@ impl OpenCADStudio {
             FieldDialogMsg::SsPicked(None) => {}
             FieldDialogMsg::SsPicked(Some(path)) => match crate::app::commands::sheet_set::read_set(&path.to_string_lossy()) {
                 Ok(db) => {
-                    let key = codec::sheet_set::path_key(&path.to_string_lossy());
+                    let key = document::sheet_set::path_key(&path.to_string_lossy());
                     let open = state
                         .ss_sets
                         .iter()
-                        .position(|d| d.path.as_deref().is_some_and(|p| codec::sheet_set::path_key(p) == key));
+                        .position(|d| d.path.as_deref().is_some_and(|p| document::sheet_set::path_key(p) == key));
                     state.ss_set = match open {
                         Some(k) => k,
                         None => {
@@ -617,11 +617,11 @@ impl OpenCADStudio {
                 self.close_active_modal();
                 self.push_undo_snapshot(i, "TABLE CELL FIELD");
                 let (code, objects) = field.expect("set above");
-                let mut child = codec::fields::NewField::new(code, &value);
+                let mut child = document::fields::NewField::new(code, &value);
                 child.objects = objects;
                 let document = &mut self.tabs[i].scene.document;
                 document.set_table_cell_field(table, row, column, "%<\\_FldIdx 0>%", vec![child]);
-                if let Some(codec::EntityType::Table(target)) = document.get_entity_mut(table) {
+                if let Some(document::EntityType::Table(target)) = document.get_entity_mut(table) {
                     target.block_record_handle = None;
                 }
                 self.tabs[i]
@@ -730,7 +730,7 @@ fn text_case(value: &str, case: usize) -> String {
 mod tests {
     use crate::app::OpenCADStudio;
     use crate::ui::window::field_dialog::{FieldDialogMsg, FieldDialogState, FieldTarget};
-    use codec::entities::{EntityType, LwPolyline, MText};
+    use document::entities::{EntityType, LwPolyline, MText};
 
     fn app_with_custom_properties() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
@@ -809,7 +809,7 @@ mod tests {
         let i = app.active_tab;
         let mut square = LwPolyline::new();
         for (x, y) in [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)] {
-            square.add_point(codec::types::Vector2::new(x, y));
+            square.add_point(document::types::Vector2::new(x, y));
         }
         square.is_closed = true;
         let document = &mut app.tabs[i].scene.document;
@@ -845,8 +845,8 @@ mod tests {
 
     #[test]
     fn ok_on_an_unchanged_level_mark_keeps_its_format() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -882,7 +882,7 @@ mod tests {
     }
 
     /// A text showing `code` for `object`, opened in the Field dialog.
-    fn editing(code: &str, object: EntityType) -> (OpenCADStudio, codec::Handle, codec::Handle) {
+    fn editing(code: &str, object: EntityType) -> (OpenCADStudio, document::Handle, document::Handle) {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -902,7 +902,7 @@ mod tests {
         (app, text, object)
     }
 
-    fn written(app: &OpenCADStudio, text: codec::Handle) -> (String, String) {
+    fn written(app: &OpenCADStudio, text: document::Handle) -> (String, String) {
         let document = &app.tabs[app.active_tab].scene.document;
         let (code, _) = crate::entities::field::whole_text_field(document, text).unwrap();
         let Some(EntityType::MText(shown)) = document.get_entity(text) else {
@@ -915,7 +915,7 @@ mod tests {
     fn an_area_in_square_centimetres_shows_in_square_metres_with_a_comma() {
         let mut room = LwPolyline::new();
         for (x, y) in [(0.0, 0.0), (500.0, 0.0), (500.0, 300.0), (0.0, 300.0)] {
-            room.add_point(codec::types::Vector2::new(x, y));
+            room.add_point(document::types::Vector2::new(x, y));
         }
         room.is_closed = true;
         let code = "\\AcObjProp Object(%<\\_ObjIdx 0>%).Area \\f \"%lu2%pr2\"";
@@ -937,8 +937,8 @@ mod tests {
 
     #[test]
     fn a_level_mark_shows_the_height_with_a_plus_sign() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 3.5, 0.0));
         let code = "\\AcObjProp.16.2 Object(%<\\_ObjIdx 0>%).EndPoint \\f \"%lu2%pr2\"";
         let (mut app, text, _) = editing(code, EntityType::Line(line));
@@ -958,8 +958,8 @@ mod tests {
 
     #[test]
     fn a_block_insertion_point_field_reopens_unchanged() {
-        use codec::entities::Insert;
-        use codec::types::Vector3;
+        use document::entities::Insert;
+        use document::types::Vector3;
         let door = Insert::new("DOOR", Vector3::new(4.0, 7.5, 0.0));
         // The height of a block's insertion point, in the WCS.
         let code = "\\AcObjProp Object(%<\\_ObjIdx 0>%).InsertionPoint \\f \"%lu2%pt2%pr2\"";
@@ -989,13 +989,13 @@ mod tests {
     fn rectangle(width: f64, height: f64) -> EntityType {
         let mut room = LwPolyline::new();
         for (x, y) in [(0.0, 0.0), (width, 0.0), (width, height), (0.0, height)] {
-            room.add_point(codec::types::Vector2::new(x, y));
+            room.add_point(document::types::Vector2::new(x, y));
         }
         room.is_closed = true;
         EntityType::LwPolyline(room)
     }
 
-    fn area_operand(handle: codec::Handle) -> String {
+    fn area_operand(handle: document::Handle) -> String {
         format!("%<\\AcObjProp Object(%<\\_ObjId {:X}>%).Area>%", handle.value())
     }
 
@@ -1076,8 +1076,8 @@ mod tests {
 
     #[test]
     fn a_reopened_wcs_point_field_stays_in_the_wcs() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let line = Line::from_points(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 3.5, 0.0));
         let code = "\\AcObjProp Object(%<\\_ObjIdx 0>%).EndPoint \\f \"%lu2%pt2%pr2\"";
         let (mut app, text, _) = editing(code, EntityType::Line(line));

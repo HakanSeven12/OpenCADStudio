@@ -18,8 +18,8 @@
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::Arc;
 
-use codec::types::{Color as AcadColor, LineWeight, Transform, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::types::{Color as AcadColor, LineWeight, Transform, Vector3};
+use document::{Document, EntityType, Handle};
 use kernel::space::{Plane as KernelPlane, Vec3 as KernelVec3};
 
 use crate::scene::convert::tessellate;
@@ -739,7 +739,7 @@ fn inline_wire_point_cost(wire: &LocalWire) -> Option<usize> {
 }
 
 fn build_nested_ref(
-    nested_ins: &codec::entities::Insert,
+    nested_ins: &document::entities::Insert,
     scale_policy: crate::scene::BlockScalePolicy,
     doc: &Document,
     anno_scale: f32,
@@ -1094,7 +1094,7 @@ pub fn aabb_disjoint_xy(a: [f32; 4], b: [f32; 4]) -> bool {
 pub fn expand_insert(
     doc: &Document,
     cache: &BlockCache,
-    ins: &codec::entities::Insert,
+    ins: &document::entities::Insert,
     ins_handle: Handle,
     ins_resolved_color: [f32; 4],
     ins_aci: u8,
@@ -1370,7 +1370,7 @@ fn transform_translation(transform: &Transform) -> [f64; 3] {
 
 #[allow(clippy::too_many_arguments)]
 fn expansion_prototype_key(
-    ins: &codec::entities::Insert,
+    ins: &document::entities::Insert,
     transform: &Transform,
     ins_color: [f32; 4],
     ins_pat_len: f32,
@@ -3477,13 +3477,13 @@ mod bg_resolution_tests {
             [1.0, 1.0, 1.0, 1.0]
         );
         assert_eq!(adapt_to_bg(NEAR_WHITE, LIGHT), NEAR_WHITE);
-        let mask = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Rgb {
+        let mask = crate::scene::convert::tess_util::aci_to_rgba(&document::types::Color::Rgb {
             r: 255,
             g: 255,
             b: 255,
         });
         assert_eq!(adapt_to_bg(mask, LIGHT), mask);
-        let seven = crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::Index(7));
+        let seven = crate::scene::convert::tess_util::aci_to_rgba(&document::types::Color::Index(7));
         assert_eq!(adapt_to_bg(seven, LIGHT), [0.0, 0.0, 0.0, 1.0]);
     }
 }
@@ -3492,8 +3492,8 @@ mod bg_resolution_tests {
 mod compact_nested_tests {
     use super::*;
     use crate::scene::view::render::InheritStyle;
-    use codec::entities::{Insert, Line};
-    use codec::tables::BlockRecord;
+    use document::entities::{Insert, Line};
+    use document::tables::BlockRecord;
 
     fn add_block(document: &mut Document, name: &str) -> Handle {
         let mut block = BlockRecord::new(name);
@@ -3600,8 +3600,8 @@ mod compact_nested_tests {
     /// rectangle. A constant wide polyline batched alongside keeps its band.
     #[test]
     fn tapered_polyline_keeps_its_taper_inside_an_insert() {
-        use codec::entities::{LwPolyline, LwVertex};
-        use codec::types::Vector2;
+        use document::entities::{LwPolyline, LwVertex};
+        use document::types::Vector2;
 
         let mut document = Document::new();
         let arrow = add_block(&mut document, "FLE");
@@ -3759,8 +3759,8 @@ mod compact_nested_tests {
 #[cfg(test)]
 mod metrics_depth_tests {
     use super::*;
-    use codec::entities::{Insert, Line};
-    use codec::tables::BlockRecord;
+    use document::entities::{Insert, Line};
+    use document::tables::BlockRecord;
 
     fn add_block(document: &mut Document, name: &str) -> Handle {
         let mut block = BlockRecord::new(name);

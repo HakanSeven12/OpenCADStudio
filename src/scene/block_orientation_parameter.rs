@@ -1,14 +1,14 @@
 //! Native Rotation, Alignment and Flip parameter placement.
 use super::block_authoring::{self as authoring, *};
 use super::block_distance_parameter::Graphic;
-use codec::objects::{
+use document::objects::{
     BlockAlignmentParameter, BlockConnection, BlockElement, BlockEvalValue, BlockFlipGrip,
     BlockFlipParameter, BlockGrip, BlockGripExpression, BlockOrientedGrip, BlockParameter,
     BlockParameterProperty, BlockParameterValueSet, BlockRotationParameter, BlockTwoPointParameter,
     DynamicBlockData, ObjectType,
 };
-use codec::types::{Transform, Vector3};
-use codec::{Document, Handle};
+use document::types::{Transform, Vector3};
+use document::{Document, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {

@@ -1,5 +1,5 @@
-use super::document::DocumentTab;
-use super::document::DynComponent;
+use super::tab_document::DocumentTab;
+use super::tab_document::DynComponent;
 use super::history::history_dropdown_labels;
 use super::{ArrowKey, Message, OpenCADStudio};
 use crate::scene::pick::grip::{grips_to_screen, grips_to_screen_paper, grips_to_screen_rte};
@@ -713,7 +713,7 @@ fn shortcut_key_name(key: &keyboard::Key, modifiers: keyboard::Modifiers) -> Opt
 /// `ViewportRenderMode` enum carries the raw DXF integers, not a label,
 /// so wrap it locally with a friendly name renderer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct RenderModeChoice(pub codec::entities::ViewportRenderMode);
+pub(super) struct RenderModeChoice(pub document::entities::ViewportRenderMode);
 
 impl std::fmt::Display for RenderModeChoice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -724,10 +724,10 @@ impl std::fmt::Display for RenderModeChoice {
 /// A named style (Realistic, …) the active viewport draws as, by name.
 fn named_visual_style(
     scene: &crate::scene::Scene,
-    mode: codec::entities::ViewportRenderMode,
+    mode: document::entities::ViewportRenderMode,
 ) -> Option<String> {
     match scene.document.objects.get(&scene.active_visual_style()) {
-        Some(codec::objects::ObjectType::VisualStyle(style)) => {
+        Some(document::objects::ObjectType::VisualStyle(style)) => {
             match crate::modules::view::visual_style::mode_for_style_name(&style.description) {
                 Some((named_mode, true)) if named_mode == mode => {
                     Some(crate::t!(style.description.as_str()).into_owned())
@@ -1100,7 +1100,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     .is_some_and(|cmd| cmd.name() == "STRETCH");
 
             // Screen grips with the object they belong to, for the frames.
-            let mut owned_grips: Vec<(codec::Handle, iced::Point, crate::scene::model::object::GripShape)> =
+            let mut owned_grips: Vec<(document::Handle, iced::Point, crate::scene::model::object::GripShape)> =
                 Vec::new();
             let mut grip_rubber: Option<(iced::Point, iced::Point)> = None;
             let (grips, group_boxes): (Vec<crate::ui::overlay::GripMarker>, Vec<Vec<iced::Point>>) =
@@ -1127,12 +1127,12 @@ bg={bg_ms:.1}ms n={view_count}"
                     .flatten()
                     .and_then(|h| {
                         let indexed = match tab.scene.document.get_entity(h) {
-                            Some(codec::EntityType::LwPolyline(_))
-                            | Some(codec::EntityType::Polyline2D(_))
-                            | Some(codec::EntityType::Polyline3D(_))
-                            | Some(codec::EntityType::Spline(_))
-                            | Some(codec::EntityType::Face3D(_))
-                            | Some(codec::EntityType::PolygonMesh(_)) => true,
+                            Some(document::EntityType::LwPolyline(_))
+                            | Some(document::EntityType::Polyline2D(_))
+                            | Some(document::EntityType::Polyline3D(_))
+                            | Some(document::EntityType::Spline(_))
+                            | Some(document::EntityType::Face3D(_))
+                            | Some(document::EntityType::PolygonMesh(_)) => true,
                             _ => false,
                         };
                         indexed.then_some(tab.properties.prop_vertex)
@@ -1177,7 +1177,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         };
                         // A circle's quadrant stretches from its centre.
                         let base = match tab.scene.document.get_entity(edit.handle) {
-                            Some(codec::EntityType::Circle(circle)) => {
+                            Some(document::EntityType::Circle(circle)) => {
                                 let centre = circle.center_wcs();
                                 glam::DVec3::new(centre.x, centre.y, centre.z)
                             }
@@ -1293,7 +1293,7 @@ bg={bg_ms:.1}ms n={view_count}"
             };
             // The frame of every selected CV spline and spline-fit 2D or 3D
             // polyline: its frame-vertex grips joined in order.
-            let mut framed: Vec<codec::Handle> = Vec::new();
+            let mut framed: Vec<document::Handle> = Vec::new();
             for (owner, _, _) in &owned_grips {
                 if !framed.contains(owner) {
                     framed.push(*owner);
@@ -1303,7 +1303,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 .into_iter()
                 .filter_map(|handle| {
                     let (closed, dotted, grip_shape) = match tab.scene.document.get_entity(handle) {
-                        Some(codec::EntityType::Spline(spline))
+                        Some(document::EntityType::Spline(spline))
                             if crate::entities::spline::shows_control_vertices(spline) =>
                         {
                             (
@@ -1312,7 +1312,7 @@ bg={bg_ms:.1}ms n={view_count}"
                                 crate::scene::model::object::GripShape::Circle,
                             )
                         }
-                        Some(codec::EntityType::Polyline2D(polyline))
+                        Some(document::EntityType::Polyline2D(polyline))
                             if polyline.flags.bits() & 4 != 0 =>
                         {
                             (
@@ -1321,9 +1321,9 @@ bg={bg_ms:.1}ms n={view_count}"
                                 crate::scene::model::object::GripShape::Square,
                             )
                         }
-                        Some(codec::EntityType::Polyline3D(polyline))
+                        Some(document::EntityType::Polyline3D(polyline))
                             if polyline.smooth_type
-                                != codec::entities::polyline3d::SmoothSurfaceType::None =>
+                                != document::entities::polyline3d::SmoothSurfaceType::None =>
                         {
                             (
                                 polyline.is_closed(),
@@ -1682,7 +1682,7 @@ bg={bg_ms:.1}ms n={view_count}"
                         )
                         .into_iter()
                         .filter_map(|(handle, parameter)| {
-                            let project = |point: codec::types::Vector3| {
+                            let project = |point: document::types::Vector3| {
                                 let point = tab.scene.camera.borrow().project(
                                     glam::DVec3::new(point.x, point.y, point.z),
                                     vp_bounds,
@@ -1794,7 +1794,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     )
                     .chain(crate::scene::block_authoring::edit::items(&tab.scene.document, session.br_handle).into_iter().filter_map(|item| {
                         let native = tab.scene.document.objects.get(&item.handle)?;
-                        if matches!(native, codec::objects::ObjectType::DynamicBlock(object) if matches!(object.data, codec::objects::DynamicBlockData::PropertiesTable(_))) {
+                        if matches!(native, document::objects::ObjectType::DynamicBlock(object) if matches!(object.data, document::objects::DynamicBlockData::PropertiesTable(_))) {
                             Some((item.handle, item.graphic, item.grips.first()?.1))
                         } else { None }
                     }))
@@ -1828,7 +1828,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     )
                     .filter_map(|(handle, mut graphic, marker_tail)| {
                         let native_grips = crate::scene::block_grips::config::apply_graphic(&tab.scene.document, session.br_handle, handle, &mut graphic);
-                        let project = |p: codec::types::Vector3| {
+                        let project = |p: document::types::Vector3| {
                             let p = tab
                                 .scene
                                 .camera
@@ -2412,7 +2412,7 @@ bg={bg_ms:.1}ms n={view_count}"
             // clicks (the shader viewport sits below it). Positioned with
             // leading Spaces sized to the viewport's screen rectangle.
             mark("active_vp_rect");
-            let active_vp_rect: Option<(codec::Handle, iced::Rectangle)> =
+            let active_vp_rect: Option<(document::Handle, iced::Rectangle)> =
                 if is_paper && !tab.is_start {
                     tab.scene.active_viewport.and_then(|h| {
                         let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
@@ -2461,7 +2461,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 let vp_mode = tab
                     .scene
                     .active_viewport_render_mode()
-                    .unwrap_or(codec::entities::ViewportRenderMode::Wireframe2D);
+                    .unwrap_or(document::entities::ViewportRenderMode::Wireframe2D);
                 // Adaptive (same as model): the picker measures its real width into
                 // `render_bar_w` and swaps to an empty spacer only when the viewport
                 // can't hold it; the ViewCube reads that width to decide overlap.
@@ -5457,7 +5457,7 @@ mod tests {
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         app.visibility_popup = Some(crate::app::visibility::VisibilityPopup {
-            insert_handle: codec::Handle::new(1),
+            insert_handle: document::Handle::new(1),
             anchor: iced::Point::new(400.0, 300.0),
             items: vec!["VisibilityState0".into(), "WindowHidden".into()],
             current: Some(1),
@@ -5553,7 +5553,7 @@ mod tests {
 
     #[test]
     fn test_crosshair_background_paper_space() {
-        let tab = crate::app::document::DocumentTab::new_drawing(1);
+        let tab = crate::app::tab_document::DocumentTab::new_drawing(1);
         let bg = crosshair_background(&tab, true);
         assert_eq!(bg, tab.scene.paper_bg_color);
         assert!(crate::ui::style::common::canvas_is_light(bg));

@@ -17,14 +17,14 @@ pub(super) async fn parse_document(
     bytes: &[u8],
     recovery_mode: bool,
     initial_error: &str,
-) -> Result<(codec::ReadOutcome, Option<String>), super::OpenLoadError> {
+) -> Result<(document::ReadOutcome, Option<String>), super::OpenLoadError> {
     let options = WorkerOptions::new();
     options.set_type(WorkerType::Module);
     let worker = Worker::new_with_options(WORKER_URL, &options)
         .map_err(|error| super::OpenLoadError::from(js_error(error)))?;
 
     let (sender, receiver) = iced::futures::channel::oneshot::channel::<
-        Result<(codec::ReadOutcome, Option<String>), super::OpenLoadError>,
+        Result<(document::ReadOutcome, Option<String>), super::OpenLoadError>,
     >();
     let sender = Rc::new(RefCell::new(Some(sender)));
     let message_sender = sender.clone();
@@ -41,7 +41,7 @@ pub(super) async fn parse_document(
                     let bytes = Uint8Array::new(&value).to_vec();
                     let payload: (
                         u16,
-                        Result<codec::ReadOutcome, (String, Option<codec::ReadStats>)>,
+                        Result<document::ReadOutcome, (String, Option<document::ReadStats>)>,
                         Option<String>,
                         bool,
                         Vec<ocs_save::EntityRuntimeFields>,

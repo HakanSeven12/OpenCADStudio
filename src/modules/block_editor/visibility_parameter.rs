@@ -1,7 +1,7 @@
 //! Interactive placement of the supported Visibility action parameter.
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 pub struct VisibilityParameterCommand {

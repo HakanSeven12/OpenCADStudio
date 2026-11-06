@@ -3,10 +3,10 @@
 
 use super::{Message, OpenCADStudio};
 use crate::scene::table_content::table_content_handle;
-use codec::entities::Table;
-use codec::objects::{Dictionary, ObjectType, XRecord, XRecordEntry};
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::entities::Table;
+use document::objects::{Dictionary, ObjectType, XRecord, XRecordEntry};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 
 fn table(doc: &Document, handle: Handle) -> &Table {
     let Some(EntityType::Table(table)) = doc.get_entity(handle) else {
@@ -136,9 +136,9 @@ fn table_content_follows_table_edit() {
 fn table_content_edit_survives_dwg() {
     let (mut app, handle) = fixture();
     edit(&mut app, handle);
-    let bytes = codec::DwgWriter::write_to_vec(&app.tabs[app.active_tab].scene.document)
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[app.active_tab].scene.document)
         .expect("DWG write");
-    let reopened = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let reopened = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .expect("DWG read");
     assert_eq!(

@@ -1,5 +1,5 @@
 use crate::command::{CadCommand, CmdResult, InputKind};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

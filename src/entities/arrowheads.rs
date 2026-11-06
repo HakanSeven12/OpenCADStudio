@@ -6,9 +6,9 @@
 //! standard names itself; the block still needs its geometry so other
 //! programs draw the same arrow. It is created the first time it is picked.
 
-use codec::entities::{Circle, Line, LwPolyline, LwVertex, Solid};
-use codec::types::{Color, LineWeight, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::entities::{Circle, Line, LwPolyline, LwVertex, Solid};
+use document::types::{Color, LineWeight, Vector3};
+use document::{Document, EntityType, Handle};
 
 /// Name shown, block name (empty: closed filled, the null handle).
 pub(crate) const STANDARD: &[(&str, &str)] = &[

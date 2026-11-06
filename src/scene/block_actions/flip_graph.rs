@@ -1,7 +1,7 @@
 //! Ordered reference evaluation for coupled Flip selections.
 use super::instance::ParameterFrame;
 use super::*;
-use codec::xdata::XDataValue as X;
+use document::xdata::XDataValue as X;
 use std::collections::{BTreeMap, BTreeSet};
 mod recovery;
 pub(super) const INPUTS: &str = "OCS_BLOCK_INPUT_FRAMES";

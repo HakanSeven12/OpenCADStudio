@@ -223,10 +223,10 @@ pub(crate) fn compute_grounding(
     let img_h = image_height as f32;
 
     struct Candidate {
-        handle: codec::Handle,
+        handle: document::Handle,
         entity_type: &'static str,
         layer: String,
-        owner: codec::Handle,
+        owner: document::Handle,
         space: Option<String>,
         screen_pixel: [i32; 2],
         screen_bounds: [i32; 4],
@@ -235,9 +235,9 @@ pub(crate) fn compute_grounding(
         area: f32,
     }
 
-    let selected_set: std::collections::HashSet<codec::Handle> =
+    let selected_set: std::collections::HashSet<document::Handle> =
         tab.scene.selected_handles_in_order().into_iter().collect();
-    let space_names: rustc_hash::FxHashMap<codec::Handle, String> = tab
+    let space_names: rustc_hash::FxHashMap<document::Handle, String> = tab
         .scene
         .document
         .block_records
@@ -743,8 +743,8 @@ mod tests {
     /// described as sitting where nothing of it paints.
     #[test]
     fn the_capture_annotation_covers_where_a_reference_draws() {
-        use codec::entities::{EntityType, Insert, Line};
-        use codec::types::Vector3;
+        use document::entities::{EntityType, Insert, Line};
+        use document::types::Vector3;
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);

@@ -2,10 +2,10 @@
 // copied objects as a block, or the system clipboard's text as multi-line text.
 
 use crate::t;
-use codec::entities::mtext::AttachmentPoint;
-use codec::entities::MText;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::mtext::AttachmentPoint;
+use document::entities::MText;
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

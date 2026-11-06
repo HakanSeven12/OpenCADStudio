@@ -1,6 +1,6 @@
 use super::{Message, OpenCADStudio};
 use crate::scene::block_action_bars::{self as bars, EntryKind, Group};
-use codec::Handle;
+use document::Handle;
 use iced::{Point, Rectangle, Task, Vector};
 use std::collections::{HashMap, HashSet};
 

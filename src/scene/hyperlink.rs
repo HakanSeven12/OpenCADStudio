@@ -4,8 +4,8 @@
 //! follows it. The inner group's integer is 1 while DWG links are converted
 //! to DWF.
 
-use codec::xdata::XDataValue;
-use codec::{Document, EntityType, Handle};
+use document::xdata::XDataValue;
+use document::{Document, EntityType, Handle};
 
 pub(crate) const APP: &str = "PE_URL";
 /// Flag of the inner group: links to drawings point at their DWF.

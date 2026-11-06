@@ -10,7 +10,7 @@
 //   the applied rotation is new-angle - reference-angle.
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use kernel::geom2d::{self, Curve as KernelCurve};
 

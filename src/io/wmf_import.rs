@@ -9,9 +9,9 @@
 //! top-left corner at the block's origin and y running down the screen as
 //! a metafile's does.
 
-use codec::entities::{Polyline2D, Text, Vertex2D};
-use codec::types::{Color, Vector3};
-use codec::EntityType;
+use document::entities::{Polyline2D, Text, Vertex2D};
+use document::types::{Color, Vector3};
+use document::EntityType;
 
 /// A font face as the text uses it: its name, and whether bold and italic.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -226,7 +226,7 @@ fn color(rgb: [u8; 3]) -> Color {
     if rgb == [0, 0, 0] || rgb == [255, 255, 255] {
         return Color::Index(7);
     }
-    Color::Index(codec::types::nearest_aci(rgb[0], rgb[1], rgb[2]))
+    Color::Index(document::types::nearest_aci(rgb[0], rgb[1], rgb[2]))
 }
 
 fn colorref(lo: u16, hi: u16) -> [u8; 3] {

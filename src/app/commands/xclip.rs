@@ -8,9 +8,9 @@ impl OpenCADStudio {
     /// A block reference's extents in WCS: its block's objects through the
     /// insert transform — the base-point-aware one, because that is where the
     /// renderer puts the contents the user drew the boundary around.
-    fn insert_extents(&self, i: usize, insert: codec::Handle) -> ([f64; 2], [f64; 2]) {
+    fn insert_extents(&self, i: usize, insert: document::Handle) -> ([f64; 2], [f64; 2]) {
         let document = &self.tabs[i].scene.document;
-        let Some(codec::EntityType::Insert(ins)) = document.get_entity(insert) else {
+        let Some(document::EntityType::Insert(ins)) = document.get_entity(insert) else {
             return ([0.0; 2], [0.0; 2]);
         };
         let xform = crate::scene::render_graph::insert_transform(document, ins);
@@ -19,14 +19,14 @@ impl OpenCADStudio {
             let (a, b) = crate::scene::convert::tess::entity_bounds_in(document, e);
             for x in [a[0], b[0]] {
                 for y in [a[1], b[1]] {
-                    let w = xform.apply(codec::types::Vector3::new(x, y, a[2]));
+                    let w = xform.apply(document::types::Vector3::new(x, y, a[2]));
                     lo = [lo[0].min(w.x), lo[1].min(w.y)];
                     hi = [hi[0].max(w.x), hi[1].max(w.y)];
                 }
             }
         }
         if lo[0] > hi[0] {
-            let p = xform.apply(codec::types::Vector3::new(0.0, 0.0, 0.0));
+            let p = xform.apply(document::types::Vector3::new(0.0, 0.0, 0.0));
             return ([p.x, p.y], [p.x, p.y]);
         }
         (lo, hi)
@@ -35,7 +35,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn apply_xclip(
         &mut self,
         i: usize,
-        inserts: Vec<codec::Handle>,
+        inserts: Vec<document::Handle>,
         action: XclipAction,
     ) {
         if let XclipAction::Depth { rejected: true, .. } = action {
@@ -72,8 +72,8 @@ impl OpenCADStudio {
                         continue;
                     };
                     let (
-                        Some(codec::objects::ObjectType::SpatialFilter(filter)),
-                        Some(codec::EntityType::Insert(ins)),
+                        Some(document::objects::ObjectType::SpatialFilter(filter)),
+                        Some(document::EntityType::Insert(ins)),
                     ) = (doc.objects.get(&spatial), doc.get_entity(*insert))
                     else {
                         continue;
@@ -86,17 +86,17 @@ impl OpenCADStudio {
                         filter,
                         &crate::scene::render_graph::insert_transform(doc, ins),
                     );
-                    let mut pl = codec::entities::LwPolyline::from_points(
+                    let mut pl = document::entities::LwPolyline::from_points(
                         outline
                             .iter()
-                            .map(|p| codec::types::Vector2::new(p[0], p[1]))
+                            .map(|p| document::types::Vector2::new(p[0], p[1]))
                             .collect(),
                     );
                     pl.is_closed = true;
                     if !current_layer.is_empty() {
                         pl.common.layer = current_layer.clone();
                     }
-                    polylines.push(codec::EntityType::LwPolyline(pl));
+                    polylines.push(document::EntityType::LwPolyline(pl));
                 }
             }
             scene.reseed_derived_caches(*insert);

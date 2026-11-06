@@ -5,7 +5,7 @@
 //! only per distinct colour, never per object.
 
 use super::math;
-use codec::types::{Color as AcadColor, Handle};
+use document::types::{Color as AcadColor, Handle};
 use rustc_hash::FxHashMap;
 
 /// One distinct colour: a concrete colour plus, for a colour-book colour,
@@ -91,7 +91,7 @@ fn key(color: AcadColor) -> Option<u32> {
 
 /// A layer's colour-book identity, `BOOK$NAME`. Layers keep the book and
 /// the colour name apart; objects store them joined like this.
-pub fn layer_identity(layer: &codec::tables::Layer) -> Option<String> {
+pub fn layer_identity(layer: &document::tables::Layer) -> Option<String> {
     match (&layer.book_name, &layer.color_name) {
         (Some(book), Some(name)) => Some(format!("{book}${name}")),
         (None, Some(name)) => Some(name.clone()),
@@ -101,7 +101,7 @@ pub fn layer_identity(layer: &codec::tables::Layer) -> Option<String> {
 
 /// Every concrete colour in the drawing. ByLayer, ByBlock and None are
 /// states rather than colours and are skipped.
-pub fn collect(document: &codec::Document) -> Vec<DocColor> {
+pub fn collect(document: &document::Document) -> Vec<DocColor> {
     let layer_names: Vec<Option<String>> = document.layers.iter().map(layer_identity).collect();
     let objects = document.entities().map(|entity| {
         let common = entity.common();

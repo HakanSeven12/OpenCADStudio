@@ -263,7 +263,7 @@ impl OpenCADStudio {
                 // A viewport has no key vertices: its corners are what stretches.
                 let viewport_hit = matches!(
                     self.tabs[i].scene.document.get_entity(handle),
-                    Some(codec::EntityType::Viewport(vp))
+                    Some(document::EntityType::Viewport(vp))
                         if crate::entities::viewport::stretch_corners(vp)
                             .into_iter()
                             .any(&active_point)
@@ -366,7 +366,7 @@ impl OpenCADStudio {
         let structural = handles.iter().any(|handle| {
             matches!(
                 self.tabs[i].scene.document.get_entity(*handle),
-                Some(codec::EntityType::Dimension(_))
+                Some(document::EntityType::Dimension(_))
             )
         });
         let pending = self.begin_undo(i, "STRETCH", handles.len(), !structural);
@@ -376,7 +376,7 @@ impl OpenCADStudio {
 
         // Dimensions whose points moved — their baked *D block is
         // stale afterwards and must be dropped (see #398 / #372).
-        let mut stretched_dims: Vec<codec::Handle> = Vec::new();
+        let mut stretched_dims: Vec<document::Handle> = Vec::new();
         for handle in &handles {
             // Subtract only this entity's explicitly removed vertices. The same
             // predicate gates preview, geometry mutation and inferred constraints.
@@ -393,7 +393,7 @@ impl OpenCADStudio {
             if let Some(entity) = before.as_deref() {
                 use crate::scene::parametric_constraints::ParametricRef;
                 match entity {
-                    codec::EntityType::Line(line) => {
+                    document::EntityType::Line(line) => {
                         if in_win(line.start.x, line.start.y) {
                             driven_refs.push(ParametricRef::point(*handle, 0));
                         }
@@ -401,7 +401,7 @@ impl OpenCADStudio {
                             driven_refs.push(ParametricRef::point(*handle, 1));
                         }
                     }
-                    codec::EntityType::LwPolyline(polyline) => {
+                    document::EntityType::LwPolyline(polyline) => {
                         if let Some(world) = crate::entities::curve::lwpolyline_world_xy(polyline) {
                             for (index, vertex) in world.vertices.iter().enumerate() {
                                 if in_win(vertex.location.x, vertex.location.y) {
@@ -410,19 +410,19 @@ impl OpenCADStudio {
                             }
                         }
                     }
-                    codec::EntityType::Polyline2D(polyline) => {
+                    document::EntityType::Polyline2D(polyline) => {
                         for (index, vertex) in polyline.vertices.iter().enumerate() {
                             if in_win(vertex.location.x, vertex.location.y) {
                                 driven_refs.push(ParametricRef::point(*handle, index as i32));
                             }
                         }
                     }
-                    codec::EntityType::Circle(circle)
+                    document::EntityType::Circle(circle)
                         if in_win(circle.center.x, circle.center.y) =>
                     {
                         driven_refs.push(ParametricRef::center(*handle));
                     }
-                    codec::EntityType::Arc(arc) if in_win(arc.center.x, arc.center.y) => {
+                    document::EntityType::Arc(arc) if in_win(arc.center.x, arc.center.y) => {
                         driven_refs.push(ParametricRef::center(*handle));
                     }
                     _ => {}
@@ -438,7 +438,7 @@ impl OpenCADStudio {
                 &excluded_points,
                 delta,
             );
-            if stretched && matches!(entity, codec::EntityType::Dimension(_)) {
+            if stretched && matches!(entity, document::EntityType::Dimension(_)) {
                 stretched_dims.push(*handle);
             }
             if stretched {
@@ -492,7 +492,7 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod stretch_window_feedback_tests {
     use crate::app::OpenCADStudio;
-    use codec::{EntityType, Handle};
+    use document::{EntityType, Handle};
     use glam::DVec3;
 
     /// A 20x10 viewport centred on (10, 5).
@@ -500,8 +500,8 @@ mod stretch_window_feedback_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut viewport = codec::entities::Viewport::default();
-        viewport.center = codec::types::Vector3::new(10.0, 5.0, 0.0);
+        let mut viewport = document::entities::Viewport::default();
+        viewport.center = document::types::Vector3::new(10.0, 5.0, 0.0);
         viewport.width = 20.0;
         viewport.height = 10.0;
         let handle = app.tabs[i]

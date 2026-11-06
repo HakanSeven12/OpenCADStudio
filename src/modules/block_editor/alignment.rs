@@ -1,6 +1,6 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, PointPickContext};
 use crate::scene::block_alignment::{Alignment, Targets};
-use codec::{Document, EntityType, Handle};
+use document::{Document, EntityType, Handle};
 use glam::DVec3;
 
 pub struct AlignmentCommand {

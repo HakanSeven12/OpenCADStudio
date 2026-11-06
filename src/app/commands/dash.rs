@@ -106,7 +106,7 @@ fn layer_flow(current: String) -> PromptFlow {
                 )?;
                 if !matches!(
                     crate::ui::window::attman_dialog::parse_color(&color),
-                    Some(codec::types::Color::Index(_))
+                    Some(document::types::Color::Index(_))
                 ) {
                     return Err(PromptStep::Retry("Invalid input."));
                 }
@@ -843,7 +843,7 @@ impl OpenCADStudio {
         i: usize,
         label: &str,
         names: &[String],
-        edit: impl Fn(&mut codec::tables::Layer),
+        edit: impl Fn(&mut document::tables::Layer),
     ) {
         if names.is_empty() {
             return;
@@ -875,7 +875,7 @@ impl OpenCADStudio {
         }
         let undo = self.begin_layer_undo(i, "LAYER NEW", &new);
         for name in &new {
-            let mut layer = codec::tables::Layer::new(name);
+            let mut layer = document::tables::Layer::new(name);
             // A layer needs a real handle or a DWG save drops it (#67).
             layer.handle = self.tabs[i].scene.document.allocate_handle();
             let _ = self.tabs[i].scene.document.layers.add(layer);
@@ -985,7 +985,7 @@ impl OpenCADStudio {
                         .push_error(crate::t!("LAYER: transparency must be 0-100.").as_ref());
                     return Task::none();
                 }
-                let transparency = codec::types::Transparency::from_percent(percent / 100.0);
+                let transparency = document::types::Transparency::from_percent(percent / 100.0);
                 let names = self.listed_layers(i, &arg(2));
                 self.edit_layers(i, "LAYER TRANSPARENCY", &names, move |layer| {
                     layer.transparency = transparency
@@ -1001,11 +1001,11 @@ impl OpenCADStudio {
             "MATERIAL" => {
                 let name = arg(1);
                 let material = if name.is_empty() || name.eq_ignore_ascii_case("BYLAYER") {
-                    codec::Handle::NULL
+                    document::Handle::NULL
                 } else {
                     let found = self.tabs[i].scene.document.objects.iter().find_map(
                         |(handle, object)| match object {
-                            codec::objects::ObjectType::Material(m)
+                            document::objects::ObjectType::Material(m)
                                 if m.name.eq_ignore_ascii_case(&name) =>
                             {
                                 Some(*handle)
@@ -1054,13 +1054,13 @@ impl OpenCADStudio {
                     );
                     names.retain(|name| name != &current);
                 }
-                let edit: fn(&mut codec::tables::Layer) = match option {
-                    "ON" => codec::tables::Layer::turn_on,
-                    "OFF" => codec::tables::Layer::turn_off,
-                    "FREEZE" => codec::tables::Layer::freeze,
-                    "THAW" => codec::tables::Layer::thaw,
-                    "LOCK" => codec::tables::Layer::lock,
-                    _ => codec::tables::Layer::unlock,
+                let edit: fn(&mut document::tables::Layer) = match option {
+                    "ON" => document::tables::Layer::turn_on,
+                    "OFF" => document::tables::Layer::turn_off,
+                    "FREEZE" => document::tables::Layer::freeze,
+                    "THAW" => document::tables::Layer::thaw,
+                    "LOCK" => document::tables::Layer::lock,
+                    _ => document::tables::Layer::unlock,
                 };
                 let label = format!("LAYER {option}");
                 self.edit_layers(i, &label, &names, edit);
@@ -1075,7 +1075,7 @@ impl OpenCADStudio {
         let undo = self.begin_text_style_undo(i, "STYLE", std::slice::from_ref(&name));
         let doc = &mut self.tabs[i].scene.document;
         if doc.text_styles.get(&name).is_none() {
-            let mut style = codec::tables::TextStyle::new(&name);
+            let mut style = document::tables::TextStyle::new(&name);
             style.handle = doc.allocate_handle();
             let _ = doc.text_styles.add(style);
         }
@@ -1147,11 +1147,11 @@ impl OpenCADStudio {
             }
             "APPLY_PICKED" => {
                 let scene = &self.tabs[i].scene;
-                let handles: Vec<codec::Handle> = scene
+                let handles: Vec<document::Handle> = scene
                     .selected_entities()
                     .into_iter()
                     .filter(|(handle, entity)| {
-                        matches!(entity, codec::EntityType::Dimension(_))
+                        matches!(entity, document::EntityType::Dimension(_))
                             && !scene.is_layer_locked(*handle)
                     })
                     .map(|(handle, _)| handle)
@@ -1163,7 +1163,7 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "DIMSTYLE APPLY");
                 for &handle in &handles {
                     let doc = &mut self.tabs[i].scene.document;
-                    if let Some(codec::EntityType::Dimension(dimension)) =
+                    if let Some(document::EntityType::Dimension(dimension)) =
                         doc.get_entity_mut(handle)
                     {
                         dimension.base_mut().style_name = current.clone();
@@ -1192,7 +1192,7 @@ impl OpenCADStudio {
                     .selected_entities()
                     .into_iter()
                     .find_map(|(_, entity)| match entity {
-                        codec::EntityType::Dimension(dimension) => {
+                        document::EntityType::Dimension(dimension) => {
                             Some(dimension.base().style_name.clone())
                         }
                         _ => None,
@@ -1378,7 +1378,7 @@ mod tests {
         }
         let doc = &app.tabs[app.active_tab].scene.document;
         let layer = doc.layers.get("SCANTEST").expect("-LAYER Make");
-        assert_eq!(layer.color, codec::types::Color::Index(1));
+        assert_eq!(layer.color, document::types::Color::Index(1));
         assert_eq!(doc.header.current_layer_name, "SCANTEST");
         assert!(doc.layers.get("KEEP").is_some_and(|l| l.flags.off));
         assert!(doc.layers.get("TMP2").is_none(), "-PURGE by name");

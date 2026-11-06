@@ -4,7 +4,7 @@ use crate::app::{Message, OpenCADStudio};
 fn app(normal: Vector3) -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     let mut mt = MText::with_value(r"\pxqc,t4;Á{\Lé}", Vector3::new(0., 0., 0.));
     mt.normal = normal;
@@ -85,8 +85,8 @@ fn rotation_dwg_dxf_2018_and_2013_roundtrip_matches_codec_control() {
     t.rotation = std::f64::consts::FRAC_PI_2;
     t.dwg_x_direction = None;
     for ext in ["dwg", "dxf"] {
-        for version in [codec::DxfVersion::AC1032, codec::DxfVersion::AC1027] {
-            let reload = |doc: &codec::Document| {
+        for version in [document::DxfVersion::AC1032, document::DxfVersion::AC1027] {
+            let reload = |doc: &document::Document| {
                 let bytes = crate::io::save_to_bytes(doc, ext, version).unwrap();
                 crate::io::load_bytes(&format!("rotation.{ext}"), bytes).unwrap()
             };
@@ -181,7 +181,7 @@ fn tilted_plane_text_keeps_its_in_plane_x_direction_through_dwg() {
         panic!()
     };
     t.dwg_x_direction = Some(x);
-    for version in [codec::DxfVersion::AC1018, codec::DxfVersion::AC1032] {
+    for version in [document::DxfVersion::AC1018, document::DxfVersion::AC1032] {
         let bytes = crate::io::save_to_bytes(&doc, "dwg", version).unwrap();
         let saved = crate::io::load_bytes("tilted.dwg", bytes).unwrap();
         let Some(EntityType::MText(back)) = saved.get_entity(h) else {

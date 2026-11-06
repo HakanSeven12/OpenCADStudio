@@ -1,5 +1,5 @@
 use crate::command::{CadCommand, CmdOption, CmdResult};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {

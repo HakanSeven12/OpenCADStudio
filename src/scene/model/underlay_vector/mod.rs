@@ -18,7 +18,7 @@ pub(crate) use wires::display_wires;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use codec::entities::UnderlayType;
+use document::entities::UnderlayType;
 
 pub use model::{
     scaled_elements, By, DgnColor, DgnDimLook, DgnDimStyle, DgnElement, DgnGeom, DgnImport,

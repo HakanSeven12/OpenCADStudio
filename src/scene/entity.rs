@@ -5,8 +5,8 @@ pub struct CreateBlockOptions {
     pub name: String,
     pub handles: Vec<Handle>,
     pub base_point: glam::DVec3,
-    pub world_to_block: codec::types::Transform,
-    pub block_to_world: codec::types::Transform,
+    pub world_to_block: document::types::Transform,
+    pub block_to_world: document::types::Transform,
     pub mode: crate::ui::window::block_definition::BlockObjectMode,
     pub annotative: bool,
     pub match_orientation: bool,
@@ -86,7 +86,7 @@ pub(super) fn chain_path_edges_with_directions(
 }
 
 fn family_from_stored_line(
-    ln: &codec::entities::hatch::HatchPatternLine,
+    ln: &document::entities::hatch::HatchPatternLine,
 ) -> crate::scene::model::hatch_model::PatFamily {
     let (ca, sa) = (ln.angle.cos(), ln.angle.sin());
     let dx = ln.offset.x * ca + ln.offset.y * sa;
@@ -148,7 +148,7 @@ impl Scene {
         if name.trim().is_empty() || self.document.layers.contains(name) {
             return;
         }
-        let mut layer = codec::tables::Layer::new(name);
+        let mut layer = document::tables::Layer::new(name);
         layer.handle = self.document.allocate_handle();
         let _ = self.document.layers.add(layer);
         self.invalidate_layer_dependencies(&[name.to_string()]);
@@ -159,14 +159,14 @@ impl Scene {
         if name.trim().is_empty() || self.document.app_ids.contains(name) {
             return;
         }
-        let mut app_id = codec::tables::AppId::new(name);
+        let mut app_id = document::tables::AppId::new(name);
         app_id.handle = self.document.allocate_handle();
         let _ = self.document.app_ids.add(app_id);
     }
 
     fn prepare_section_objects(&mut self, entity: &mut EntityType) -> bool {
-        use codec::entities::ExtendedEntityData;
-        use codec::objects::{
+        use document::entities::ExtendedEntityData;
+        use document::objects::{
             ClassObject, ClassObjectData, SectionManager, SectionSettings, SectionTypeSettings,
         };
 
@@ -302,7 +302,7 @@ impl Scene {
     /// list and keep it; an array copy or a scripted add commits the bare
     /// reference, so the declaration is filled in here rather than by every
     /// builder that could place one.
-    fn instantiate_attributes(document: &mut codec::Document, insert_handle: Handle) {
+    fn instantiate_attributes(document: &mut document::Document, insert_handle: Handle) {
         let Some(EntityType::Insert(insert)) = document.get_entity(insert_handle) else {
             return;
         };
@@ -325,10 +325,10 @@ impl Scene {
     /// the reference. `value` answers each definition; `None` keeps its
     /// default value.
     pub(crate) fn attributes_from_definitions(
-        document: &codec::Document,
-        insert: &codec::entities::Insert,
-        mut value: impl FnMut(&codec::entities::AttributeDefinition) -> Option<String>,
-    ) -> Vec<codec::entities::AttributeEntity> {
+        document: &document::Document,
+        insert: &document::entities::Insert,
+        mut value: impl FnMut(&document::entities::AttributeDefinition) -> Option<String>,
+    ) -> Vec<document::entities::AttributeEntity> {
         let name = &insert.block_name;
         let base = crate::scene::render_graph::block_base_point(document, name);
         let place = crate::scene::render_graph::insert_transform_with_base(insert, base);
@@ -336,11 +336,11 @@ impl Scene {
             .entities_in_block(name)
             .filter_map(|entity| match entity {
                 EntityType::AttributeDefinition(definition) => {
-                    let mut attribute = codec::entities::AttributeEntity::from_definition(
+                    let mut attribute = document::entities::AttributeEntity::from_definition(
                         definition,
                         value(definition),
                     );
-                    codec::Entity::apply_transform(&mut attribute, &place);
+                    document::Entity::apply_transform(&mut attribute, &place);
                     Some(attribute)
                 }
                 _ => None,
@@ -353,7 +353,7 @@ impl Scene {
     /// adopted here: one already carrying a handle keeps it, one without gets a
     /// fresh handle, the reference always becomes their owner, and the set is
     /// terminated once there is something to terminate.
-    pub(crate) fn adopt_attributes(document: &mut codec::Document, insert_handle: Handle) {
+    pub(crate) fn adopt_attributes(document: &mut document::Document, insert_handle: Handle) {
         Self::instantiate_attributes(document, insert_handle);
         let Some(EntityType::Insert(insert)) = document.get_entity(insert_handle) else {
             return;
@@ -422,7 +422,7 @@ impl Scene {
     /// actually holds: read back from the body every time a body is written —
     /// by the block editor, by a definition replace, by a pasted definition's
     /// twin — rather than left to whichever command set it first.
-    pub(crate) fn sync_attribute_flag(document: &mut codec::Document, name: &str) {
+    pub(crate) fn sync_attribute_flag(document: &mut document::Document, name: &str) {
         let holds_definitions = document
             .entities_in_block(name)
             .any(|entity| matches!(entity, EntityType::AttributeDefinition(_)));
@@ -660,9 +660,9 @@ impl Scene {
             .cloned()
         {
             if let Some(name) = authored.values.iter_mut().find(|value| {
-                matches!(value, codec::xdata::XDataValue::String(text) if !text.trim().is_empty())
+                matches!(value, document::xdata::XDataValue::String(text) if !text.trim().is_empty())
             }) {
-                *name = codec::xdata::XDataValue::String(new.to_string());
+                *name = document::xdata::XDataValue::String(new.to_string());
             }
             self.document.set_object_xdata_record(record, authored);
         }
@@ -1056,7 +1056,7 @@ impl Scene {
             .objects
             .values()
             .filter_map(|o| match o {
-                codec::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
+                document::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
                     Some(l.block_record)
                 }
                 _ => None,
@@ -1128,7 +1128,7 @@ impl Scene {
         let layer_entry = self.document.layers.get(layer);
         let color = layer_entry
             .map(|l| &l.color)
-            .unwrap_or(&codec::types::Color::WHITE);
+            .unwrap_or(&document::types::Color::WHITE);
         let [r, g, b, _] = crate::scene::convert::tess_util::aci_to_rgba(color);
         let alpha = layer_entry
             .map(|layer| 1.0 - layer.transparency.as_percent() as f32)
@@ -1152,8 +1152,8 @@ impl Scene {
         &mut self,
         handles: &[Handle],
         name: &str,
-        world_to_block: &codec::types::Transform,
-        block_to_world: &codec::types::Transform,
+        world_to_block: &document::types::Transform,
+        block_to_world: &document::types::Transform,
     ) -> Result<Handle, String> {
         self.create_block_with_options(CreateBlockOptions {
             name: name.to_string(),
@@ -1233,7 +1233,7 @@ impl Scene {
                     // the contract above), so the definition's base point has to
                     // go back to ZERO. Leaving an imported definition's non-zero
                     // base point here would subtract the picked base twice.
-                    b.base_point = codec::types::Vector3::ZERO;
+                    b.base_point = document::types::Vector3::ZERO;
                 }
                 let stale_end = self
                     .document
@@ -1247,7 +1247,7 @@ impl Scene {
                 let br_handle = Handle::new(next);
                 let block_handle = Handle::new(next + 1);
 
-                let mut block_record = codec::tables::BlockRecord::new(name);
+                let mut block_record = document::tables::BlockRecord::new(name);
                 block_record.handle = br_handle;
                 block_record.block_entity_handle = block_handle;
                 block_record.units = options.unit;
@@ -1259,7 +1259,7 @@ impl Scene {
                     .add(block_record)
                     .map_err(|e| e.to_string())?;
 
-                let mut block = Block::new(name, codec::types::Vector3::ZERO);
+                let mut block = Block::new(name, document::types::Vector3::ZERO);
                 block.common.handle = block_handle;
                 block.common.owner_handle = br_handle;
                 block.description = options.description.clone();
@@ -1313,8 +1313,8 @@ impl Scene {
         // The record advertises an attributed block whenever its body holds
         // attribute definitions, and those definitions are what the reference
         // below is built from.
-        let definitions: Vec<codec::entities::AttributeDefinition> = {
-            let cloned: Vec<codec::entities::AttributeDefinition> = self
+        let definitions: Vec<document::entities::AttributeDefinition> = {
+            let cloned: Vec<document::entities::AttributeDefinition> = self
                 .document
                 .entities_in_block(name)
                 .filter_map(|entity| match entity {
@@ -1331,8 +1331,8 @@ impl Scene {
         if options.mode == crate::ui::window::block_definition::BlockObjectMode::Convert
             && !options.handles.is_empty()
         {
-            let mut insert = DxfInsert::new(name, codec::types::Vector3::ZERO);
-            codec::Entity::apply_transform(&mut insert, &options.block_to_world);
+            let mut insert = DxfInsert::new(name, document::types::Vector3::ZERO);
+            document::Entity::apply_transform(&mut insert, &options.block_to_world);
             // Each definition contributes a reference of its own, seeded from
             // its default and placed where the definition draws it, so the
             // converted objects read as the attributed block they became.
@@ -1340,8 +1340,8 @@ impl Scene {
             let place = crate::scene::render_graph::insert_transform_with_base(&insert, base);
             for definition in &definitions {
                 let mut attribute =
-                    codec::entities::AttributeEntity::from_definition(definition, None);
-                codec::Entity::apply_transform(&mut attribute, &place);
+                    document::entities::AttributeEntity::from_definition(definition, None);
+                document::Entity::apply_transform(&mut attribute, &place);
                 insert.attributes.push(attribute);
             }
             insert_handle = self.add_entity(EntityType::Insert(insert));
@@ -1518,7 +1518,7 @@ impl Scene {
         block_handle: Handle,
         options: &CreateBlockOptions,
     ) {
-        use codec::xdata::{ExtendedDataRecord, XDataValue as V};
+        use document::xdata::{ExtendedDataRecord, XDataValue as V};
         for app in ["AcadAnnotative", "AcadAnnoPO", "PE_URL"] {
             view::dispatch::set_entity_xdata(&mut self.document, block_handle, app, None);
             self.document.remove_object_xdata_record(br_handle, app);
@@ -1559,7 +1559,7 @@ impl Scene {
         }
         for record in records {
             if !self.document.app_ids.contains(&record.application_name) {
-                let mut app = codec::tables::AppId::new(&record.application_name);
+                let mut app = document::tables::AppId::new(&record.application_name);
                 app.handle = self.document.allocate_handle();
                 let _ = self.document.app_ids.add(app);
             }
@@ -1578,7 +1578,7 @@ impl Scene {
         let EntityType::RasterImage(img) = entity else {
             return;
         };
-        use codec::objects::{Dictionary, ImageDefinition, ImageDefinitionReactor, ObjectType};
+        use document::objects::{Dictionary, ImageDefinition, ImageDefinitionReactor, ObjectType};
         let existing = img
             .definition_handle
             .filter(|h| {
@@ -1759,7 +1759,7 @@ impl Scene {
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
 
-        let mut block_record = codec::tables::BlockRecord::new(name);
+        let mut block_record = document::tables::BlockRecord::new(name);
         block_record.handle = br_handle;
         block_record.block_entity_handle = block_handle;
         self.document
@@ -1767,7 +1767,7 @@ impl Scene {
             .add(block_record)
             .map_err(|e| e.to_string())?;
 
-        let mut block = Block::new(name, codec::types::Vector3::ZERO);
+        let mut block = Block::new(name, document::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = br_handle;
         self.document
@@ -1818,7 +1818,7 @@ impl Scene {
     pub fn define_block_raw(
         &mut self,
         name: &str,
-        base_point: codec::types::Vector3,
+        base_point: document::types::Vector3,
         entities: Vec<EntityType>,
     ) {
         if name.is_empty() || self.document.block_records.get(name).is_some() {
@@ -1828,7 +1828,7 @@ impl Scene {
         let br_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
 
-        let mut block_record = codec::tables::BlockRecord::new(name);
+        let mut block_record = document::tables::BlockRecord::new(name);
         block_record.flags.anonymous = name.starts_with('*')
             && !(block_record.is_model_space() || block_record.is_paper_space());
         block_record.handle = br_handle;
@@ -1869,7 +1869,7 @@ impl Scene {
     pub fn redefine_block_raw(
         &mut self,
         name: &str,
-        base_point: codec::types::Vector3,
+        base_point: document::types::Vector3,
         entities: Vec<EntityType>,
     ) -> Result<(), String> {
         for entity in &entities {
@@ -1996,11 +1996,11 @@ impl Scene {
         // ByLayer / ByBlock backgrounds resolve through the normal style chain
         // instead of the raw ACI table (#415).
         let (bg_color, bg_aci) = match bg {
-            codec::types::Color::ByLayer => {
+            document::types::Color::ByLayer => {
                 let layer = self.document.layers.get(&dxf.common.layer);
                 let aci = layer
                     .and_then(|layer| match &layer.color {
-                        codec::types::Color::Index(index) => Some(*index),
+                        document::types::Color::Index(index) => Some(*index),
                         _ => None,
                     })
                     .unwrap_or(0);
@@ -2014,9 +2014,9 @@ impl Scene {
                     aci,
                 )
             }
-            codec::types::Color::ByBlock => style,
-            codec::types::Color::Index(index) => {
-                let color = codec::types::Color::Index(index);
+            document::types::Color::ByBlock => style,
+            document::types::Color::Index(index) => {
+                let color = document::types::Color::Index(index);
                 (crate::scene::convert::tess_util::aci_to_rgba(&color), index)
             }
             other => (crate::scene::convert::tess_util::aci_to_rgba(&other), 0),
@@ -2542,7 +2542,7 @@ impl Scene {
                 }
                 let style = context.style_for(document, entity);
                 let preserve_white_mask = source_hatch.is_solid
-                    && matches!(source_hatch.common.color, codec::types::Color::Index(7));
+                    && matches!(source_hatch.common.color, document::types::Color::Index(7));
                 let color = if preserve_white_mask {
                     style.0
                 } else {
@@ -2816,7 +2816,7 @@ impl Scene {
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: codec::entities::HatchStyleType::Normal,
+                    style: document::entities::HatchStyleType::Normal,
                     pattern: model::hatch_model::HatchPattern::Solid,
                     name: "WIPEOUT_FILL".into(),
                     color,
@@ -2835,7 +2835,7 @@ impl Scene {
     /// Compute the 2D (XY) boundary polygon for a Wipeout entity.
     /// Wipeout fill boundary as small f32 offsets from the returned world_origin
     /// (the insertion point, kept in f64).
-    pub(super) fn wipeout_boundary_2d(wo: &codec::entities::Wipeout) -> ([f64; 2], Vec<[f32; 2]>) {
+    pub(super) fn wipeout_boundary_2d(wo: &document::entities::Wipeout) -> ([f64; 2], Vec<[f32; 2]>) {
         let origin = [wo.insertion_point.x, wo.insertion_point.y];
         let plane = kernel::space::Plane::from_axes(
             [
@@ -2860,8 +2860,8 @@ impl Scene {
         (origin, boundary)
     }
 
-    fn wipeout_local_boundary(wo: &codec::entities::Wipeout) -> Vec<[f64; 2]> {
-        use codec::entities::{WipeoutClipMode, WipeoutClipType};
+    fn wipeout_local_boundary(wo: &document::entities::Wipeout) -> Vec<[f64; 2]> {
+        use document::entities::{WipeoutClipMode, WipeoutClipType};
         let mut outer = vec![
             [0.0, 0.0],
             [wo.size.x, 0.0],
@@ -2893,7 +2893,7 @@ impl Scene {
     }
 
     fn wipeout_fill_plane(
-        wipeout: &codec::entities::Wipeout,
+        wipeout: &document::entities::Wipeout,
     ) -> Option<(model::hatch_model::FillPlane, Vec<[f32; 2]>)> {
         let origin = [
             wipeout.insertion_point.x,
@@ -3012,15 +3012,15 @@ impl Scene {
         // those flagged external. A counter stored as an external loop is a
         // hole even with Ignore. When no loop carries the flag the style
         // needs, nesting depth picks them instead.
-        let style_keeps = |path: &codec::entities::BoundaryPath| {
-            use codec::entities::hatch::BoundaryPathFlags;
+        let style_keeps = |path: &document::entities::BoundaryPath| {
+            use document::entities::hatch::BoundaryPathFlags;
             let external = BoundaryPathFlags::EXTERNAL.bits();
             let outermost = BoundaryPathFlags::OUTERMOST.bits();
             let bits = path.flags.bits();
             match dxf.style {
-                codec::entities::HatchStyleType::Normal => true,
-                codec::entities::HatchStyleType::Outer => bits & (external | outermost) != 0,
-                codec::entities::HatchStyleType::Ignore => bits & external != 0,
+                document::entities::HatchStyleType::Normal => true,
+                document::entities::HatchStyleType::Outer => bits & (external | outermost) != 0,
+                document::entities::HatchStyleType::Ignore => bits & external != 0,
             }
         };
         let by_flags = local_rings.iter().any(|(_, path)| style_keeps(path));
@@ -3039,9 +3039,9 @@ impl Scene {
                 style_keeps(path)
             } else {
                 match dxf.style {
-                    codec::entities::HatchStyleType::Normal => true,
-                    codec::entities::HatchStyleType::Outer => depth <= 1,
-                    codec::entities::HatchStyleType::Ignore => depth == 0,
+                    document::entities::HatchStyleType::Normal => true,
+                    document::entities::HatchStyleType::Outer => depth <= 1,
+                    document::entities::HatchStyleType::Ignore => depth == 0,
                 }
             };
             if !keep {
@@ -3057,7 +3057,7 @@ impl Scene {
             if path
                 .edges
                 .iter()
-                .any(|edge| matches!(edge, codec::entities::BoundaryEdge::Spline(_)))
+                .any(|edge| matches!(edge, document::entities::BoundaryEdge::Spline(_)))
             {
                 spline_paths.push((path, local_ring, range));
             }
@@ -3149,7 +3149,7 @@ impl Scene {
                 entry.gpu.clone()
             } else if matches!(
                 dxf.pattern_type,
-                codec::entities::hatch::HatchPatternType::UserDefined
+                document::entities::hatch::HatchPatternType::UserDefined
             ) {
                 // User-defined hatch: parallel lines at `pattern_angle`, spaced
                 // `pattern_scale` apart, plus a perpendicular set when
@@ -3360,7 +3360,7 @@ impl Scene {
     /// author's machine and was unresolvable at open time — rebuild the image
     /// models so the entity finally renders. Returns whether a rebuild ran.
     pub fn resolve_registered_image_names(&mut self, names: &[String]) -> bool {
-        let matches_name = |img: &codec::entities::RasterImage| {
+        let matches_name = |img: &document::entities::RasterImage| {
             names
                 .iter()
                 .any(|name| crate::scene::model::image_model::same_file_name(&img.file_path, name))
@@ -3379,7 +3379,7 @@ impl Scene {
 
     fn populate_images_from_document_unbumped(&mut self) {
         self.images.clear();
-        let entries: Vec<(Handle, codec::entities::EntityType)> = self
+        let entries: Vec<(Handle, document::entities::EntityType)> = self
             .document
             .entities()
             .filter(|e| {
@@ -3475,13 +3475,13 @@ impl Scene {
     /// ImageModel for an image-bearing entity. `None` when it cannot decode.
     pub(super) fn image_seed_for(
         &self,
-        entity: &codec::entities::EntityType,
+        entity: &document::entities::EntityType,
     ) -> Option<ImageModel> {
         match entity {
             EntityType::RasterImage(img) => ImageModel::from_raster_image(img),
             EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole),
             EntityType::Underlay(u) => match self.document.objects.get(&u.definition_handle) {
-                Some(codec::objects::ObjectType::UnderlayDefinition(def)) => {
+                Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
                     // A paper-space underlay adjusts to the sheet, not the canvas.
                     let owner = u.common.owner_handle;
                     let background = if owner.is_null() || owner == self.model_space_block_handle()
@@ -3533,7 +3533,7 @@ impl Scene {
             .objects
             .values()
             .filter_map(|o| match o {
-                codec::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
+                document::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
                     Some(l.block_record)
                 }
                 _ => None,
@@ -3692,7 +3692,7 @@ impl Scene {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: codec::entities::HatchStyleType::Normal,
+            style: document::entities::HatchStyleType::Normal,
             pattern: model::hatch_model::HatchPattern::Solid,
             name: "SOLID".into(),
             color,
@@ -3709,7 +3709,7 @@ impl Scene {
         &mut self,
         model: HatchModel,
         layer: Option<&str>,
-        entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
+        entity_style: Option<(document::types::Color, document::types::Transparency)>,
     ) -> Handle {
         let mut dxf = DxfHatch::new();
         dxf.style = model.style;
@@ -3717,7 +3717,7 @@ impl Scene {
             let x = glam::DVec3::from_array(plane.x_axis);
             let y = glam::DVec3::from_array(plane.y_axis);
             let normal = x.cross(y).normalize_or(glam::DVec3::Z);
-            dxf.normal = codec::types::Vector3::new(normal.x, normal.y, normal.z);
+            dxf.normal = document::types::Vector3::new(normal.x, normal.y, normal.z);
             dxf.elevation = glam::DVec3::from_array(plane.origin).dot(normal);
         }
         dxf.is_solid = matches!(
@@ -3767,11 +3767,11 @@ impl Scene {
                         .collect();
                     let mut bits = 0;
                     if is_outer {
-                        bits |= codec::entities::hatch::BoundaryPathFlags::OUTERMOST.bits();
-                        bits |= codec::entities::hatch::BoundaryPathFlags::EXTERNAL.bits();
+                        bits |= document::entities::hatch::BoundaryPathFlags::OUTERMOST.bits();
+                        bits |= document::entities::hatch::BoundaryPathFlags::EXTERNAL.bits();
                     }
                     let mut path = BoundaryPath::with_flags(
-                        codec::entities::hatch::BoundaryPathFlags::from_bits(bits),
+                        document::entities::hatch::BoundaryPathFlags::from_bits(bits),
                     );
                     path.add_edge(BoundaryEdge::Polyline(edge));
                     for handle in handles {
@@ -3825,7 +3825,7 @@ impl Scene {
             .map(|point| [point[0] as f64, point[1] as f64])
             .unwrap_or(model.world_origin);
         if let crate::scene::model::hatch_model::HatchPattern::Pattern(families) = &model.pattern {
-            let mut pattern = codec::entities::HatchPattern::new(&model.name);
+            let mut pattern = document::entities::HatchPattern::new(&model.name);
             let rotation = model.angle_offset as f64;
             let (rotation_sin, rotation_cos) = rotation.sin_cos();
             for family in families {
@@ -3836,7 +3836,7 @@ impl Scene {
                 let local_offset_y = family.dx as f64 * family_sin + family.dy as f64 * family_cos;
                 let base_x = family.x0 as f64 * pattern_scale;
                 let base_y = family.y0 as f64 * pattern_scale;
-                pattern.lines.push(codec::entities::HatchPatternLine {
+                pattern.lines.push(document::entities::HatchPatternLine {
                     angle,
                     base_point: Vector2::new(
                         pattern_origin[0] + base_x * rotation_cos - base_y * rotation_sin,
@@ -3871,7 +3871,7 @@ impl Scene {
             shift,
         } = &model.pattern
         {
-            let to_color = |c: [f32; 4]| codec::types::Color::Rgb {
+            let to_color = |c: [f32; 4]| document::types::Color::Rgb {
                 r: (c[0] * 255.0).round().clamp(0.0, 255.0) as u8,
                 g: (c[1] * 255.0).round().clamp(0.0, 255.0) as u8,
                 b: (c[2] * 255.0).round().clamp(0.0, 255.0) as u8,
@@ -3894,12 +3894,12 @@ impl Scene {
                 (model.color, *color2)
             };
             dxf.gradient_color.colors = vec![
-                codec::entities::hatch::GradientColorEntry {
+                document::entities::hatch::GradientColorEntry {
                     value: 0.0,
                     color: to_color(c0),
                     ..Default::default()
                 },
-                codec::entities::hatch::GradientColorEntry {
+                document::entities::hatch::GradientColorEntry {
                     value: 1.0,
                     color: to_color(c1),
                     ..Default::default()
@@ -3990,7 +3990,7 @@ impl Scene {
         self.sync_annotation_scale_from_header();
         for obj in self.document.objects.values_mut() {
             match obj {
-                codec::objects::ObjectType::Layout(l) if l.name != "Model" => {
+                document::objects::ObjectType::Layout(l) if l.name != "Model" => {
                     crate::scene::apply_default_page_setup(l, "");
                     self.unopened_layouts.insert(l.name.clone());
                 }
@@ -3998,7 +3998,7 @@ impl Scene {
                 // the metric template's is in millimetres. Left as-is, a new
                 // leader's arrow and landing were a fraction of a millimetre,
                 // invisible on a sheet. (#2027)
-                codec::objects::ObjectType::MultiLeaderStyle(s)
+                document::objects::ObjectType::MultiLeaderStyle(s)
                     if s.name.eq_ignore_ascii_case("Standard") =>
                 {
                     s.text_height = 4.0;
@@ -4009,7 +4009,7 @@ impl Scene {
                 }
                 // Likewise the Standard table style: the metric template's
                 // cells are 4.5 high (title 6) with 1.5 margins, not 0.18.
-                codec::objects::ObjectType::TableStyle(s)
+                document::objects::ObjectType::TableStyle(s)
                     if s.name.eq_ignore_ascii_case("Standard") =>
                 {
                     s.set_margins(1.5);
@@ -4028,7 +4028,7 @@ impl Scene {
 /// reference, a rebuilt representation — can leave the ENDBLK below them;
 /// records already terminated after their body are not touched. Model and
 /// paper space are laid out by the document layer and stay as they are.
-pub(crate) fn normalize_block_terminators(document: &mut codec::Document) {
+pub(crate) fn normalize_block_terminators(document: &mut document::Document) {
     let model_space = document.header.model_space_block_handle;
     let paper_space = document.header.paper_space_block_handle;
     let names: Vec<String> = document
@@ -4087,13 +4087,13 @@ pub(crate) fn normalize_block_terminators(document: &mut codec::Document) {
 #[cfg(test)]
 mod image_definition_graph_tests {
     use super::*;
-    use codec::entities::RasterImage;
-    use codec::objects::ObjectType;
+    use document::entities::RasterImage;
+    use document::objects::ObjectType;
 
     fn image(path: &str) -> EntityType {
         EntityType::RasterImage(RasterImage::with_size(
             path,
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             4.0,
             4.0,
             40.0,
@@ -4330,9 +4330,9 @@ mod image_definition_graph_tests {
 #[cfg(test)]
 mod attribute_instantiation_tests {
     use super::*;
-    use codec::entities::{AttributeDefinition, AttributeEntity, Insert};
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert};
 
-    fn definition(tag: &str, value: &str, at: codec::types::Vector3) -> AttributeDefinition {
+    fn definition(tag: &str, value: &str, at: document::types::Vector3) -> AttributeDefinition {
         let mut definition =
             AttributeDefinition::new(tag.to_string(), format!("{tag}:"), value.to_string());
         definition.insertion_point = at;
@@ -4355,17 +4355,17 @@ mod attribute_instantiation_tests {
         let mut scene = Scene::new();
         scene.define_block_raw(
             "ATTRIB_PLAIN",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             vec![EntityType::AttributeDefinition(definition(
                 "WIDTH",
                 "100",
-                codec::types::Vector3::new(2.0, 3.0, 0.0),
+                document::types::Vector3::new(2.0, 3.0, 0.0),
             ))],
         );
 
         let handle = scene.add_entity(EntityType::Insert(Insert::new(
             "ATTRIB_PLAIN".to_string(),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         )));
         let insert = insert(&scene, handle);
         assert_eq!(
@@ -4378,7 +4378,7 @@ mod attribute_instantiation_tests {
         assert_eq!(attribute.value, "100");
         assert_eq!(
             attribute.insertion_point,
-            codec::types::Vector3::new(12.0, 3.0, 0.0),
+            document::types::Vector3::new(12.0, 3.0, 0.0),
             "the definition's place travels with the reference"
         );
         assert!(!attribute.common.handle.is_null());
@@ -4404,16 +4404,16 @@ mod attribute_instantiation_tests {
     #[test]
     fn the_fill_carries_every_declared_attribute_in_definition_order() {
         let mut scene = Scene::new();
-        let mut constant = definition("CONST", "fixed", codec::types::Vector3::new(0.0, 5.0, 0.0));
+        let mut constant = definition("CONST", "fixed", document::types::Vector3::new(0.0, 5.0, 0.0));
         constant.flags.constant = true;
         scene.define_block_raw(
             "ATTRIB_MIXED",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             vec![
                 EntityType::AttributeDefinition(definition(
                     "WIDTH",
                     "100",
-                    codec::types::Vector3::new(2.0, 3.0, 0.0),
+                    document::types::Vector3::new(2.0, 3.0, 0.0),
                 )),
                 EntityType::AttributeDefinition(constant),
             ],
@@ -4421,7 +4421,7 @@ mod attribute_instantiation_tests {
 
         let handle = scene.add_entity(EntityType::Insert(Insert::new(
             "ATTRIB_MIXED".to_string(),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         )));
         let tags: Vec<String> = insert(&scene, handle)
             .attributes
@@ -4450,22 +4450,22 @@ mod attribute_instantiation_tests {
         let mut scene = Scene::new();
         scene.define_block_raw(
             "ATTRIB_ASKED",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             vec![EntityType::AttributeDefinition(definition(
                 "WIDTH",
                 "100",
-                codec::types::Vector3::new(2.0, 3.0, 0.0),
+                document::types::Vector3::new(2.0, 3.0, 0.0),
             ))],
         );
         let mut answer = AttributeEntity::from_definition(
-            &definition("WIDTH", "100", codec::types::Vector3::new(2.0, 3.0, 0.0)),
+            &definition("WIDTH", "100", document::types::Vector3::new(2.0, 3.0, 0.0)),
             Some("250".to_string()),
         );
         answer.common.handle = Handle::new(0x1234);
-        answer.insertion_point = codec::types::Vector3::new(12.0, 3.0, 0.0);
+        answer.insertion_point = document::types::Vector3::new(12.0, 3.0, 0.0);
         let mut bare = Insert::new(
             "ATTRIB_ASKED".to_string(),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         );
         bare.attributes = vec![answer];
 
@@ -4487,15 +4487,15 @@ mod attribute_instantiation_tests {
         let mut scene = Scene::new();
         scene.define_block_raw(
             "PLAIN_ONLY",
-            codec::types::Vector3::ZERO,
-            vec![EntityType::Line(codec::entities::Line::from_points(
-                codec::types::Vector3::ZERO,
-                codec::types::Vector3::new(4.0, 0.0, 0.0),
+            document::types::Vector3::ZERO,
+            vec![EntityType::Line(document::entities::Line::from_points(
+                document::types::Vector3::ZERO,
+                document::types::Vector3::new(4.0, 0.0, 0.0),
             ))],
         );
         let handle = scene.add_entity(EntityType::Insert(Insert::new(
             "PLAIN_ONLY".to_string(),
-            codec::types::Vector3::new(20.0, 0.0, 0.0),
+            document::types::Vector3::new(20.0, 0.0, 0.0),
         )));
         let insert = insert(&scene, handle);
         assert!(insert.attributes.is_empty());
@@ -4511,11 +4511,11 @@ mod attribute_instantiation_tests {
         let mut scene = Scene::new();
         scene.define_block_raw(
             "WRITTEN",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             vec![EntityType::AttributeDefinition(definition(
                 "TAG",
                 "value",
-                codec::types::Vector3::ZERO,
+                document::types::Vector3::ZERO,
             ))],
         );
         assert_eq!(
@@ -4530,10 +4530,10 @@ mod attribute_instantiation_tests {
         scene
             .redefine_block_raw(
                 "WRITTEN",
-                codec::types::Vector3::ZERO,
-                vec![EntityType::Line(codec::entities::Line::from_points(
-                    codec::types::Vector3::ZERO,
-                    codec::types::Vector3::new(4.0, 0.0, 0.0),
+                document::types::Vector3::ZERO,
+                vec![EntityType::Line(document::entities::Line::from_points(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::new(4.0, 0.0, 0.0),
                 ))],
             )
             .unwrap();
@@ -4552,22 +4552,22 @@ mod attribute_instantiation_tests {
 #[cfg(test)]
 mod attribute_identity_tests {
     use super::*;
-    use codec::entities::{AttributeDefinition, AttributeEntity, Insert, MText};
+    use document::entities::{AttributeDefinition, AttributeEntity, Insert, MText};
 
     fn attributed_scene() -> (Scene, Handle) {
         let mut scene = Scene::new();
         let mut definition =
             AttributeDefinition::new("WIDTH".to_string(), "Width:".to_string(), "100".to_string());
-        definition.insertion_point = codec::types::Vector3::new(2.0, 3.0, 0.0);
+        definition.insertion_point = document::types::Vector3::new(2.0, 3.0, 0.0);
         definition.height = 1.0;
         scene.define_block_raw(
             "ATTRIB_ID",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             vec![EntityType::AttributeDefinition(definition)],
         );
         let source = scene.add_entity(EntityType::Insert(Insert::new(
             "ATTRIB_ID".to_string(),
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
         )));
         (scene, source)
     }

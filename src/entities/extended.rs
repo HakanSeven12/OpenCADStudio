@@ -1,10 +1,10 @@
 use crate::t;
-use codec::entities::{
+use document::entities::{
     ArcAlignedTextData, ExtendedEntity, ExtendedEntityData, GeoPositionMarkerData, PointCloudData,
     PointCloudExData, RemoteTextData, SectionObjectData,
 };
-use codec::types::{Handle, Transform, Vector3};
-use codec::xdata::{ExtendedDataRecord, XDataValue};
+use document::types::{Handle, Transform, Vector3};
+use document::xdata::{ExtendedDataRecord, XDataValue};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -552,7 +552,7 @@ fn point_cloud_clip_lines(data: &PointCloudData) -> Vec<[f64; 3]> {
 /// The cloud's extents box, placed in the drawing. Its points are drawn from
 /// the scan file; the box only picks the cloud, unless the file cannot be
 /// found: then the box shows, with the saved path written across it.
-fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::Document) -> Vec<[f64; 3]> {
+fn point_cloud_ex_lines(data: &PointCloudExData, document: &document::Document) -> Vec<[f64; 3]> {
     let mut points = point_cloud_ex_box(data);
     if crate::scene::model::point_cloud::resolve_source(document, data).is_none() {
         let saved = crate::scene::model::point_cloud::definition(document, data)
@@ -564,7 +564,7 @@ fn point_cloud_ex_lines(data: &PointCloudExData, document: &codec::Document) -> 
 }
 
 fn point_cloud_ex_box(data: &PointCloudExData) -> Vec<[f64; 3]> {
-    let corners = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
+    let corners = document::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
     let mut points = Vec::new();
     for a in 0..8 {
         for bit in [1, 2, 4] {
@@ -624,7 +624,7 @@ fn append_missing_cloud_label(points: &mut Vec<[f64; 3]>, data: &PointCloudExDat
                     center[1] + (y as f64 - mid[1]) * scale,
                     min.z,
                 );
-                let p = codec::entities::point_cloud_ex_to_world(data, local);
+                let p = document::entities::point_cloud_ex_to_world(data, local);
                 [p.x, p.y, p.z]
             }),
         );
@@ -641,7 +641,7 @@ fn point_cloud_ex_clip_lines(data: &PointCloudExData) -> Vec<[f64; 3]> {
             // Crop points are kept in the cloud's own coordinates; the crop
             // runs along the normal of the plane its two directions span.
             let place = |p: Vector3| {
-                let w = codec::entities::point_cloud_ex_to_world(data, p);
+                let w = document::entities::point_cloud_ex_to_world(data, p);
                 [w.x, w.y, w.z]
             };
             // A circle is stored as its centre and a point on it.
@@ -675,7 +675,7 @@ pub(crate) fn point_cloud_frame_lines(entity: &ExtendedEntity) -> Option<Vec<[f6
     }
 }
 
-fn camera_lines(document: &codec::Document, view_handle: Handle) -> Vec<[f64; 3]> {
+fn camera_lines(document: &document::Document, view_handle: Handle) -> Vec<[f64; 3]> {
     // CAMERADISPLAY 0 hides every camera glyph.
     if !document.header.camera_display {
         return Vec::new();
@@ -717,7 +717,7 @@ fn camera_lines(document: &codec::Document, view_handle: Handle) -> Vec<[f64; 3]
     points
 }
 
-fn to_render(entity: &ExtendedEntity, document: &codec::Document) -> Option<RenderEntity> {
+fn to_render(entity: &ExtendedEntity, document: &document::Document) -> Option<RenderEntity> {
     if let ExtendedEntityData::ArcAlignedText(data) = &entity.data {
         return Some(arc_aligned_text_render(data));
     }
@@ -1604,7 +1604,7 @@ pub(crate) fn validate_point_cloud_property(field: &str, value: &str) -> Result<
     Ok(())
 }
 
-fn semantic_properties(properties: &[codec::objects::SemanticProperty]) -> String {
+fn semantic_properties(properties: &[document::objects::SemanticProperty]) -> String {
     properties
         .iter()
         .map(|property| {
@@ -1617,7 +1617,7 @@ fn semantic_properties(properties: &[codec::objects::SemanticProperty]) -> Strin
         .join("\n")
 }
 
-fn reference_properties(references: &[codec::objects::ProxyObjectReference]) -> String {
+fn reference_properties(references: &[document::objects::ProxyObjectReference]) -> String {
     references
         .iter()
         .map(|reference| format!("{:X}: {:?}", reference.handle.value(), reference.kind))
@@ -2454,11 +2454,11 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
             data.radius *= scale;
             data.landing_gap *= scale;
             if let Some(text) = data.embedded_mtext.as_mut() {
-                codec::Entity::apply_transform(text, &transform);
+                document::Entity::apply_transform(text, &transform);
             }
         }
         ExtendedEntityData::CoordinationModel(data) => {
-            let mut matrix = codec::types::Matrix4::zero();
+            let mut matrix = document::types::Matrix4::zero();
             for row in 0..4 {
                 for column in 0..4 {
                     matrix.m[row][column] = data.transform[row * 4 + column];
@@ -2531,7 +2531,7 @@ fn apply_transform(entity: &mut ExtendedEntity, requested: &EntityTransform) {
 }
 
 impl RenderConvertible for ExtendedEntity {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         to_render(self, document)
     }
 }
@@ -2631,8 +2631,8 @@ impl Transformable for ExtendedEntity {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::EntityCommon;
-    use codec::types::Color;
+    use document::entities::EntityCommon;
+    use document::types::Color;
 
     #[test]
     fn reselecting_slice_keeps_its_depth() {

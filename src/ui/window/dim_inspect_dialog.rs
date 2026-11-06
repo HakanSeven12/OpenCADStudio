@@ -31,7 +31,7 @@ fn msg(m: DimInspectMsg) -> Message {
 }
 
 pub struct DimInspectState {
-    pub handles: Vec<codec::Handle>,
+    pub handles: Vec<document::Handle>,
     /// Some of the dimensions show an inspection.
     pub any_inspected: bool,
     pub shape: Shape,

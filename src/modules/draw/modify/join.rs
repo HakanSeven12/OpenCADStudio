@@ -9,8 +9,8 @@
 //
 // Workflow: select objects then press Enter to join.
 
-use codec::types::{Vector2, Vector3};
-use codec::{EntityType, Handle};
+use document::types::{Vector2, Vector3};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -94,7 +94,7 @@ impl CadCommand for JoinCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         if matches!(text.trim().to_ascii_uppercase().as_str(), "L" | "CLOSE") {
             if let Some((handle, EntityType::Arc(arc))) = &self.source {
-                let mut circle = codec::entities::Circle::new();
+                let mut circle = document::entities::Circle::new();
                 circle.common = arc.common.clone();
                 circle.common.handle = Handle::NULL;
                 circle.center = arc.center.clone();
@@ -222,7 +222,7 @@ pub fn join_to_source(
                     })
                 }
                 (EntityType::Arc(a), EntityType::Arc(b)) => {
-                    let data = |a: &codec::entities::Arc| {
+                    let data = |a: &document::entities::Arc| {
                         (
                             [a.center.x, a.center.y, a.center.z],
                             [a.normal.x, a.normal.y, a.normal.z],
@@ -233,7 +233,7 @@ pub fn join_to_source(
                     kernel::space::source_join::join_cocircular_arcs(data(a), data(b), JOIN_EPS)
                         .map(|span| {
                             if span[1] - span[0] >= std::f64::consts::TAU {
-                                let mut circle = codec::entities::Circle::new();
+                                let mut circle = document::entities::Circle::new();
                                 circle.common = a.common.clone();
                                 circle.center = a.center.clone();
                                 circle.normal = a.normal.clone();
@@ -249,7 +249,7 @@ pub fn join_to_source(
                         })
                 }
                 (EntityType::Spline(source), candidate) => {
-                    let curve = |s: &codec::entities::Spline| {
+                    let curve = |s: &document::entities::Spline| {
                         if s.flags.closed || s.flags.periodic {
                             return None;
                         }
@@ -657,7 +657,7 @@ fn join_chain(
         )
         && is_collinear(&verts)
     {
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common = common;
         line.common.handle = Handle::NULL;
         line.start = v3(verts.first().unwrap().0);
@@ -672,11 +672,11 @@ fn join_chain(
             return None;
         }
         let flipped = thickness != 0.0 && normal.z < 0.0;
-        let lw_verts: Vec<codec::entities::LwVertex> = verts
+        let lw_verts: Vec<document::entities::LwVertex> = verts
             .iter()
             .enumerate()
             .map(|(index, (p, bulge))| {
-                let mut v = codec::entities::LwVertex::new(Vector2::new(
+                let mut v = document::entities::LwVertex::new(Vector2::new(
                     if flipped { -p.x } else { p.x },
                     p.y,
                 ));
@@ -696,7 +696,7 @@ fn join_chain(
                 v
             })
             .collect();
-        let mut pl = codec::entities::LwPolyline::new();
+        let mut pl = document::entities::LwPolyline::new();
         pl.common = common;
         pl.common.handle = Handle::NULL;
         pl.vertices = lw_verts;
@@ -716,7 +716,7 @@ fn join_chain(
                 .map(|vertex| {
                     let point =
                         output.project(input.point_at([vertex.location.x, vertex.location.y]))?;
-                    let mut result = codec::entities::polyline::Vertex2D::new(Vector3::new(
+                    let mut result = document::entities::polyline::Vertex2D::new(Vector3::new(
                         point[0],
                         point[1],
                         source.elevation,
@@ -761,12 +761,12 @@ fn join_chain(
     if thickness != 0.0 {
         return None;
     }
-    let mut pl = codec::entities::Polyline3D::new();
+    let mut pl = document::entities::Polyline3D::new();
     pl.common = common;
     pl.common.handle = Handle::NULL;
     pl.vertices = verts
         .iter()
-        .map(|(p, _)| codec::entities::Vertex3DPolyline::new(v3(*p)))
+        .map(|(p, _)| document::entities::Vertex3DPolyline::new(v3(*p)))
         .collect();
     if closed {
         pl.close();
@@ -824,8 +824,8 @@ fn stitch(mut segs: Vec<Seg>) -> Option<(Vec<Seg>, bool)> {
 #[cfg(test)]
 mod join_tests {
     use super::*;
-    use codec::entities::{Line as LineEnt, LwVertex};
-    use codec::Handle;
+    use document::entities::{Line as LineEnt, LwVertex};
+    use document::Handle;
 
     fn line(x0: f64, y0: f64, x1: f64, y1: f64, thickness: f64) -> EntityType {
         let mut l = LineEnt::new();
@@ -836,7 +836,7 @@ mod join_tests {
     }
 
     fn lw_2pts(p0: (f64, f64), p1: (f64, f64), thickness: f64) -> EntityType {
-        let mut pl = codec::entities::LwPolyline::new();
+        let mut pl = document::entities::LwPolyline::new();
         pl.vertices = vec![
             LwVertex::new(Vector2::new(p0.0, p0.1)),
             LwVertex::new(Vector2::new(p1.0, p1.1)),
@@ -964,7 +964,7 @@ mod join_tests {
     fn source_join_elevates_splines_and_clears_fit_representation() {
         let source_handle = Handle::new(21);
         let candidate_handle = Handle::new(22);
-        let mut source = codec::entities::Spline::new();
+        let mut source = document::entities::Spline::new();
         source.common.handle = source_handle;
         source.degree = 1;
         source.control_points = vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0)];
@@ -972,7 +972,7 @@ mod join_tests {
         source.fit_points = vec![Vector3::new(0.0, 0.0, 0.0)];
         source.dwg_flags1 = 1;
         source.dxf_flags = 32 | 1024;
-        let mut candidate = codec::entities::Spline::new();
+        let mut candidate = document::entities::Spline::new();
         candidate.degree = 3;
         candidate.control_points = vec![
             Vector3::new(1.0, 0.0, 0.0),
@@ -1002,7 +1002,7 @@ mod join_tests {
     #[test]
     fn arc_source_accepts_the_typed_close_option() {
         let handle = Handle::new(31);
-        let mut arc = codec::entities::Arc::new();
+        let mut arc = document::entities::Arc::new();
         arc.common.handle = handle;
         arc.center = Vector3::new(2.0, 3.0, 4.0);
         arc.radius = 5.0;

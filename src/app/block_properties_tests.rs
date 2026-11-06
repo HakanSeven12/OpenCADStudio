@@ -1,8 +1,8 @@
 use super::{Message, OpenCADStudio};
 use crate::scene::model::object::{PropValue, Property};
-use codec::entities::{Insert, Line};
-use codec::types::Vector3;
-use codec::{Document, EntityType};
+use document::entities::{Insert, Line};
+use document::types::Vector3;
+use document::{Document, EntityType};
 use std::io::Cursor;
 
 fn fixture() -> OpenCADStudio {
@@ -351,8 +351,8 @@ fn block_properties_annotation_gates_orientation_and_preserves_unrelated_xdata()
         .get("PROPERTIES")
         .unwrap()
         .handle;
-    let mut data = codec::xdata::ExtendedDataRecord::new("EXTRA_TAG");
-    data.values = vec![codec::xdata::XDataValue::String("retained".into())];
+    let mut data = document::xdata::ExtendedDataRecord::new("EXTRA_TAG");
+    data.values = vec![document::xdata::XDataValue::String("retained".into())];
     app.tabs[i]
         .scene
         .document
@@ -544,8 +544,8 @@ fn block_properties_metadata_survives_dwg_and_dxf_save_and_reopen() {
     let _ = app.dispatch_command("BSAVE");
     let _ = app.dispatch_command("BCLOSE");
     let doc = &app.tabs[app.active_tab].scene.document;
-    let bytes = codec::DwgWriter::write_to_vec(doc).unwrap();
-    let read = codec::DwgReader::from_stream(Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(doc).unwrap();
+    let read = document::DwgReader::from_stream(Cursor::new(bytes))
         .read()
         .unwrap();
     check_round_trip(&read);
@@ -558,8 +558,8 @@ fn block_properties_metadata_survives_dwg_and_dxf_save_and_reopen() {
         "https://example.com/replaced",
         "Replaced",
     );
-    let reopened = codec::DwgReader::from_stream(Cursor::new(
-        codec::DwgWriter::write_to_vec(&changed).unwrap(),
+    let reopened = document::DwgReader::from_stream(Cursor::new(
+        document::DwgWriter::write_to_vec(&changed).unwrap(),
     ))
     .read()
     .unwrap();
@@ -571,8 +571,8 @@ fn block_properties_metadata_survives_dwg_and_dxf_save_and_reopen() {
         crate::scene::block_metadata::hyperlink(&reopened, "PROPERTIES"),
         ("https://example.com/replaced".into(), "Replaced".into())
     );
-    let bytes = codec::DxfWriter::new(doc).write_to_vec().unwrap();
-    let read = codec::DxfReader::from_reader(Cursor::new(bytes))
+    let bytes = document::DxfWriter::new(doc).write_to_vec().unwrap();
+    let read = document::DxfReader::from_reader(Cursor::new(bytes))
         .unwrap()
         .read()
         .unwrap();
@@ -590,8 +590,8 @@ fn block_properties_creation_options_persist_orientation_on_the_definition() {
         name: "CREATED".into(),
         handles: vec![line],
         base_point: glam::DVec3::ZERO,
-        world_to_block: codec::types::Transform::identity(),
-        block_to_world: codec::types::Transform::identity(),
+        world_to_block: document::types::Transform::identity(),
+        block_to_world: document::types::Transform::identity(),
         mode: crate::ui::window::block_definition::BlockObjectMode::Retain,
         annotative: true,
         match_orientation: true,
@@ -608,8 +608,8 @@ fn block_properties_creation_options_persist_orientation_on_the_definition() {
         crate::scene::block_metadata::annotation_flags(&scene.document, "CREATED"),
         (true, true)
     );
-    let bytes = codec::DwgWriter::write_to_vec(&scene.document).unwrap();
-    let read = codec::DwgReader::from_stream(Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&scene.document).unwrap();
+    let read = document::DwgReader::from_stream(Cursor::new(bytes))
         .read()
         .unwrap();
     assert_eq!(
@@ -655,7 +655,7 @@ fn block_properties_hyperlink_cancel_and_stale_context_do_not_modify_a_definitio
     let _ = app.update(Message::HyperlinkUrlChanged(
         "https://example.com/stale".into(),
     ));
-    app.hyperlink_editor_block = Some((app.tabs[i].id + 1, codec::Handle::new(1)));
+    app.hyperlink_editor_block = Some((app.tabs[i].id + 1, document::Handle::new(1)));
     let _ = app.update(Message::HyperlinkApply);
     assert_eq!(app.tabs[i].scene.document, before);
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
@@ -713,7 +713,7 @@ fn block_properties_staged_values_do_not_follow_a_different_definition() {
     );
 }
 
-fn select_editor_line(app: &mut OpenCADStudio) -> codec::types::Handle {
+fn select_editor_line(app: &mut OpenCADStudio) -> document::types::Handle {
     let i = app.active_tab;
     let handle = app.tabs[i]
         .scene
@@ -730,7 +730,7 @@ fn select_editor_line(app: &mut OpenCADStudio) -> codec::types::Handle {
 
 /// Select one line of the edited definition by position, replacing whatever
 /// was selected so each call starts from a known selection.
-fn select_editor_line_at(app: &mut OpenCADStudio, index: usize) -> codec::types::Handle {
+fn select_editor_line_at(app: &mut OpenCADStudio, index: usize) -> document::types::Handle {
     let i = app.active_tab;
     let handle = app.tabs[i]
         .scene
@@ -751,10 +751,10 @@ fn block_parameter_key() -> crate::scene::model::object::BlockParameterKey {
     use crate::scene::model::object::{BlockParameterComponent, BlockParameterKey};
     BlockParameterKey {
         document: 0,
-        definition: codec::Handle::new(1),
-        insert: codec::Handle::new(2),
+        definition: document::Handle::new(1),
+        insert: document::Handle::new(2),
         batch_generation: None,
-        parameter: codec::Handle::new(3),
+        parameter: document::Handle::new(3),
         component: BlockParameterComponent::Distance,
     }
 }

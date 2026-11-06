@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{Curve, Polyline};
 use kernel::space::PlanarCurve;
@@ -157,8 +157,8 @@ impl Scene {
             let mut moved_to = Vec::with_capacity(vertices.len());
             for index in vertices {
                 let world = curve.plane.point_at(polyline.vertices[index].position);
-                let mut marker = EntityType::Point(codec::entities::Point::at(
-                    codec::types::Vector3::new(world[0], world[1], world[2]),
+                let mut marker = EntityType::Point(document::entities::Point::at(
+                    document::types::Vector3::new(world[0], world[1], world[2]),
                 ));
                 super::view::dispatch::apply_transform(&mut marker, transform);
                 let EntityType::Point(marker) = marker else {

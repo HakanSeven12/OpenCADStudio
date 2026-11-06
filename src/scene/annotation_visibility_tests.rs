@@ -3,10 +3,10 @@
 //! a paper layout filters them unless that layout says otherwise, and an object
 //! drawn directly on a sheet is never filtered.
 
-use codec::entities::Text;
-use codec::objects::{ObjectType, Scale};
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::entities::Text;
+use document::objects::{ObjectType, Scale};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 
 use crate::scene::annotative::{
     annotative_offscale_for, create_annotation_context, ensure_scale_object,
@@ -55,7 +55,7 @@ fn a_paper_layout_filters_annotative_objects_unless_it_says_otherwise() {
 
 #[test]
 fn a_paper_layout_reads_its_value_from_its_xdata() {
-    use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+    use document::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
 
     let mut scene = scene_on(None);
     let name = scene.current_layout.clone();
@@ -84,7 +84,7 @@ fn setting_the_value_on_a_layout_survives_a_dxf_save() {
     assert!(scene.annotation_all_visible());
 
     let bytes =
-        crate::io::save_to_bytes(&scene.document, "dxf", codec::DxfVersion::AC1027).expect("save");
+        crate::io::save_to_bytes(&scene.document, "dxf", document::DxfVersion::AC1027).expect("save");
     let reopened = crate::io::load_bytes("drawing.dxf", bytes).expect("open");
     let layout = reopened
         .objects

@@ -13,7 +13,7 @@ fn pe_url_strings(entity: &EntityType) -> impl Iterator<Item = &str> {
         .into_iter()
         .flat_map(|record| record.values.iter())
         .filter_map(|value| match value {
-            codec::xdata::XDataValue::String(text) => Some(text.trim()),
+            document::xdata::XDataValue::String(text) => Some(text.trim()),
             _ => None,
         })
 }
@@ -386,7 +386,7 @@ impl Scene {
         if self.selected.is_empty() {
             return 0;
         }
-        let key = |e: &codec::EntityType| -> Vec<Option<String>> {
+        let key = |e: &document::EntityType| -> Vec<Option<String>> {
             SIMILAR_FIELDS
                 .iter()
                 .filter(|(bit, _)| mode & bit != 0)
@@ -1001,7 +1001,7 @@ impl Scene {
     /// `"ByLayer"` / `"7"` / `"0.30mm"` are stable; everything else
     /// goes through `geometry_properties()` and pulls the matching
     /// row's value out.
-    pub fn entity_property_value(&self, entity: &codec::EntityType, field: &str) -> Option<String> {
+    pub fn entity_property_value(&self, entity: &document::EntityType, field: &str) -> Option<String> {
         use crate::entities::traits::EntityTypeOps;
         use crate::scene::model::object::PropValue;
         match field {
@@ -1032,9 +1032,9 @@ impl Scene {
             ),
             "lineweight" => Some(Self::format_lineweight(entity.common().line_weight)),
             "transparency" => Some(match entity.common().transparency {
-                codec::types::Transparency::ByLayer => "ByLayer".to_string(),
-                codec::types::Transparency::ByBlock => "ByBlock".to_string(),
-                codec::types::Transparency::Explicit(alpha) => {
+                document::types::Transparency::ByLayer => "ByLayer".to_string(),
+                document::types::Transparency::ByBlock => "ByBlock".to_string(),
+                document::types::Transparency::Explicit(alpha) => {
                     ((alpha as f64 / 255.0 * 100.0).round() as u32).to_string()
                 }
             }),
@@ -1099,8 +1099,8 @@ impl Scene {
         }
     }
 
-    fn format_color(c: codec::types::Color) -> String {
-        use codec::types::Color;
+    fn format_color(c: document::types::Color) -> String {
+        use document::types::Color;
         match c {
             Color::ByLayer => "ByLayer".to_string(),
             Color::None => "None".to_string(),
@@ -1110,8 +1110,8 @@ impl Scene {
         }
     }
 
-    fn format_lineweight(lw: codec::types::LineWeight) -> String {
-        use codec::types::LineWeight;
+    fn format_lineweight(lw: document::types::LineWeight) -> String {
+        use document::types::LineWeight;
         match lw {
             LineWeight::ByLayer => "ByLayer".to_string(),
             LineWeight::ByBlock => "ByBlock".to_string(),
@@ -1174,7 +1174,7 @@ impl Scene {
         let mut managers_by_section: HashMap<Handle, Vec<Handle>> = HashMap::default();
         for (handle, object) in self.document.objects.iter() {
             if let ObjectType::ClassObject(object) = object {
-                if let codec::objects::ClassObjectData::SectionManager(manager) = &object.data {
+                if let document::objects::ClassObjectData::SectionManager(manager) = &object.data {
                     for &section in &manager.sections {
                         managers_by_section
                             .entry(section)
@@ -1202,7 +1202,7 @@ impl Scene {
             }
             let settings_handle = self.document.get_entity(h).and_then(|entity| match entity {
                 EntityType::Extended(extended) => match &extended.data {
-                    codec::entities::ExtendedEntityData::SectionObject(data)
+                    document::entities::ExtendedEntityData::SectionObject(data)
                         if !data.settings_handle.is_null() =>
                     {
                         Some(data.settings_handle)
@@ -1241,7 +1241,7 @@ impl Scene {
                 if let Some(ObjectType::ClassObject(object)) =
                     self.document.objects.get_mut(&manager_handle)
                 {
-                    if let codec::objects::ClassObjectData::SectionManager(manager) =
+                    if let document::objects::ClassObjectData::SectionManager(manager) =
                         &mut object.data
                     {
                         manager.sections.retain(|section| *section != h);
@@ -1411,8 +1411,8 @@ mod tests {
     #[test]
     fn qselect_sample_matches_identical_entities_without_unique_handles() {
         use crate::app::{QSelectMode, QSelectScope};
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let mut scene = Scene::new();
         let line = || {
             EntityType::Line(Line::from_points(
@@ -1457,8 +1457,8 @@ mod tests {
     #[test]
     fn qselect_samples_of_two_types_and_numbers_compare_as_numbers() {
         use crate::app::{QSelectMode, QSelectScope};
-        use codec::entities::{Circle, Line};
-        use codec::types::Vector3;
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
         let mut scene = Scene::new();
         let line = scene.add_entity(EntityType::Line(Line::from_points(
             Vector3::ZERO,
@@ -1484,8 +1484,8 @@ mod tests {
 
     #[test]
     fn pe_url_of_reads_standard_hyperlink_xdata() {
-        use codec::entities::Point;
-        use codec::xdata::{ExtendedDataRecord, XDataValue};
+        use document::entities::Point;
+        use document::xdata::{ExtendedDataRecord, XDataValue};
 
         let mut doc = Document::new();
 
@@ -1524,8 +1524,8 @@ mod tests {
 
     #[test]
     fn bulk_selection_matches_selecting_one_at_a_time() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         let build = || {
             let mut scene = Scene::new();
@@ -1579,12 +1579,12 @@ mod tests {
 
     #[test]
     fn the_leader_index_matches_a_document_walk() {
-        use codec::entities::Leader;
-        use codec::types::Vector3;
+        use document::entities::Leader;
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let line = |x: f64| {
-            EntityType::Line(codec::entities::Line::from_points(
+            EntityType::Line(document::entities::Line::from_points(
                 Vector3::new(x, 0.0, 0.0),
                 Vector3::new(x + 1.0, 0.0, 0.0),
             ))
@@ -1648,8 +1648,8 @@ mod tests {
 
     #[test]
     fn adding_a_type_already_present_reuses_the_list() {
-        use codec::entities::{Circle, EntityType, Line};
-        use codec::types::Vector3;
+        use document::entities::{Circle, EntityType, Line};
+        use document::types::Vector3;
         use std::sync::Arc;
 
         let line = || {
@@ -1688,8 +1688,8 @@ mod tests {
 
     #[test]
     fn changing_an_entity_type_rebuilds_the_type_names() {
-        use codec::entities::{Circle, EntityType, Line};
-        use codec::types::Vector3;
+        use document::entities::{Circle, EntityType, Line};
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let handle = scene.add_entity(EntityType::Line(Line::from_points(
@@ -1706,8 +1706,8 @@ mod tests {
 
     #[test]
     fn layout_type_cache_reuses_and_invalidates_on_edits_undo_and_layout() {
-        use codec::entities::{Circle, EntityType, Line};
-        use codec::types::Vector3;
+        use document::entities::{Circle, EntityType, Line};
+        use document::types::Vector3;
         use std::sync::Arc;
 
         let mut scene = Scene::new();
@@ -1820,7 +1820,7 @@ impl Scene {
                 return None;
             }
             let style = table.table_style_handle.and_then(|h| match self.document.objects.get(&h)? {
-                codec::objects::ObjectType::TableStyle(style) => Some(style),
+                document::objects::ObjectType::TableStyle(style) => Some(style),
                 _ => None,
             });
             crate::modules::annotate::table_cmd::table_cell_inside(table, style, point, margin)

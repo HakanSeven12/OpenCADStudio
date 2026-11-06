@@ -2,8 +2,8 @@ use super::*;
 
 // Sort tables belong to the block's extension dictionary. Reserve real handles
 // and reconnect older unattached tables without losing their existing entries.
-fn ensure_draw_order_table(doc: &mut codec::Document, block: codec::Handle) -> codec::Handle {
-    use codec::objects::{Dictionary, ObjectType, SortEntitiesTable};
+fn ensure_draw_order_table(doc: &mut document::Document, block: document::Handle) -> document::Handle {
+    use document::objects::{Dictionary, ObjectType, SortEntitiesTable};
 
     // Older commands inserted objects using the unreserved next-handle value.
     // Repair the allocator floor before creating anything beside those objects.
@@ -568,7 +568,7 @@ impl OpenCADStudio {
             //    Inside a viewport the selection goes to the sheet; on the
             //    sheet it goes into the model through the viewport under it.
             "CHSPACE" => {
-                let handles: Vec<codec::Handle> = self.tabs[i]
+                let handles: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
@@ -683,7 +683,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 };
-                let Some(codec::EntityType::Viewport(vp)) =
+                let Some(document::EntityType::Viewport(vp)) =
                     scene.document.get_entity(handle)
                 else {
                     self.command_line
@@ -710,10 +710,10 @@ impl OpenCADStudio {
                     .unwrap_or(((0.0, 0.0), (297.0, 210.0)));
                 let (uw, uh) = ((x1 - x0).max(1.0), (y1 - y0).max(1.0));
                 let (cx, cz) = (x0 + uw / 2.0, y0 + uh / 2.0);
-                if let Some(codec::EntityType::Viewport(vp)) =
+                if let Some(document::EntityType::Viewport(vp)) =
                     self.tabs[i].scene.document.get_entity_mut(handle)
                 {
-                    vp.center = codec::types::Vector3::new(cx, 0.0, cz);
+                    vp.center = document::types::Vector3::new(cx, 0.0, cz);
                     vp.width = uw;
                     vp.height = uh;
                     // Keep the paper-per-model scale: height / view_height.
@@ -749,7 +749,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                let Some(codec::EntityType::Viewport(vp)) =
+                let Some(document::EntityType::Viewport(vp)) =
                     self.tabs[i].scene.document.get_entity_mut(saved.handle)
                 else {
                     self.vpmax_state = None;
@@ -813,7 +813,7 @@ impl OpenCADStudio {
                             .document
                             .entities()
                             .filter_map(|e| match e {
-                                codec::EntityType::Viewport(vp)
+                                document::EntityType::Viewport(vp)
                                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                                 {
                                     Some((vp.center.x, vp.center.z, vp.width, vp.height))
@@ -994,7 +994,7 @@ impl OpenCADStudio {
                         .document
                         .entities()
                         .filter_map(|e| {
-                            if let codec::EntityType::Viewport(vp) = e {
+                            if let document::EntityType::Viewport(vp) = e {
                                 if vp.id > 1 && vp.common.owner_handle == layout_block {
                                     Some((
                                         vp.id,
@@ -1115,7 +1115,7 @@ impl OpenCADStudio {
                     let vp_handle = scene.active_viewport.unwrap();
                     // Collect current frozen layer names for display.
                     let frozen_names: Vec<String> = {
-                        if let Some(codec::EntityType::Viewport(vp)) =
+                        if let Some(document::EntityType::Viewport(vp)) =
                             scene.document.get_entity(vp_handle)
                         {
                             vp.frozen_layers
@@ -1155,7 +1155,7 @@ impl OpenCADStudio {
             "TEXTTOFRONT" | "TEXTTOBACK" => {
                 let to_front = cmd.ends_with("FRONT");
                 let block_handle = self.tabs[i].scene.interaction_block_handle();
-                let handles: rustc_hash::FxHashSet<codec::Handle> = self.tabs[i]
+                let handles: rustc_hash::FxHashSet<document::Handle> = self.tabs[i]
                     .scene
                     .document
                     .entities()
@@ -1164,9 +1164,9 @@ impl OpenCADStudio {
                         (c.owner_handle == block_handle || c.owner_handle.is_null())
                             && matches!(
                                 e,
-                                codec::EntityType::Text(_)
-                                    | codec::EntityType::MText(_)
-                                    | codec::EntityType::Dimension(_)
+                                document::EntityType::Text(_)
+                                    | document::EntityType::MText(_)
+                                    | document::EntityType::Dimension(_)
                             )
                     })
                     .map(|e| e.common().handle)
@@ -1189,7 +1189,7 @@ impl OpenCADStudio {
 
             // HATCHTOBACK ÔÇö move every hatch object in the active space to the back of the draw order.
             "HATCHTOBACK" => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let block_handle = self.tabs[i].scene.interaction_block_handle();
                 let doc_ref = &self.tabs[i].scene.document;
 
@@ -1220,7 +1220,7 @@ impl OpenCADStudio {
                 let has_locked_layers = !locked_layers.is_empty();
 
                 // 3. Single pass over entities in the active space.
-                let mut hatches_to_move: Vec<codec::Handle> = Vec::new();
+                let mut hatches_to_move: Vec<document::Handle> = Vec::new();
                 let mut min_eff = u64::MAX;
 
                 for e in doc_ref.entities() {
@@ -1229,7 +1229,7 @@ impl OpenCADStudio {
                         continue;
                     }
                     let hv = c.handle.value();
-                    if matches!(e, codec::EntityType::Hatch(_)) {
+                    if matches!(e, document::EntityType::Hatch(_)) {
                         if !has_locked_layers || !locked_layers.contains(c.layer.as_str()) {
                             hatches_to_move.push(c.handle);
                         }
@@ -1272,7 +1272,7 @@ impl OpenCADStudio {
                     self.tabs[i].scene.document.objects.get_mut(&th)
                 {
                     for (h, sort) in &assigns {
-                        table.add_entry(*h, codec::Handle::new(*sort));
+                        table.add_entry(*h, document::Handle::new(*sort));
                     }
                 }
 
@@ -1281,7 +1281,7 @@ impl OpenCADStudio {
                 }
 
                 // 6. Invalidate ONLY draw-depth cache without dropping whole-drawing tessellations or spatial indexes.
-                let changes: Vec<(codec::Handle, crate::scene::ChangeKind)> = hatches_to_move
+                let changes: Vec<(document::Handle, crate::scene::ChangeKind)> = hatches_to_move
                     .iter()
                     .map(|h| (*h, crate::scene::ChangeKind::Modified))
                     .collect();
@@ -1301,7 +1301,7 @@ impl OpenCADStudio {
             }
 
             "DRAWORDER_FRONT" | "DRAWORDER_BACK" | "DRAWORDER_ABOVE" | "DRAWORDER_UNDER" => {
-                let selected: Vec<codec::Handle> = self.tabs[i]
+                let selected: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1330,7 +1330,7 @@ impl OpenCADStudio {
                 }
             }
             "DRAWORDER" => {
-                let selected: Vec<codec::Handle> = self.tabs[i]
+                let selected: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1341,11 +1341,11 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("DRAWORDER ") => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 let option = parts.get(1).unwrap_or(&"").to_uppercase();
                 let i = self.active_tab;
-                let selected: Vec<codec::Handle> = self.tabs[i]
+                let selected: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1370,7 +1370,7 @@ impl OpenCADStudio {
                                 16,
                             )
                             .ok()
-                            .map(codec::Handle::new)
+                            .map(document::Handle::new)
                         })
                         .filter(|handle| !selected.contains(handle))
                         .collect();
@@ -1398,7 +1398,7 @@ impl OpenCADStudio {
                         // entities land strictly above/below every sibling —
                         // including ones not yet in the table, which sort by
                         // their own handle. (min_eff, max_eff) over siblings.
-                        let mut back_assigns: Option<Vec<(codec::Handle, u64)>> = None;
+                        let mut back_assigns: Option<Vec<(document::Handle, u64)>> = None;
                         let fb_baseline: Option<(u64, u64)> = if to_front_opt.is_some() {
                             let selected_set: rustc_hash::FxHashSet<u64> =
                                 selected.iter().map(|h| h.value()).collect();
@@ -1471,7 +1471,7 @@ impl OpenCADStudio {
                         {
                             if let Some(assignments) = &relative_assignments {
                                 for (handle, sort) in assignments {
-                                    table.add_entry(*handle, codec::Handle::new(*sort));
+                                    table.add_entry(*handle, document::Handle::new(*sort));
                                 }
                                 self.command_line.push_info(crate::t!("DRAWORDER: selection reordered relative to reference objects.").as_ref());
                             } else if let Some(to_front) = to_front_opt {
@@ -1479,11 +1479,11 @@ impl OpenCADStudio {
                                     let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
                                     for (k, h) in selected.iter().enumerate() {
                                         let sort = max_eff.saturating_add(1 + k as u64);
-                                        table.add_entry(*h, codec::Handle::new(sort));
+                                        table.add_entry(*h, document::Handle::new(sort));
                                     }
                                 } else if let Some(assigns) = &back_assigns {
                                     for (h, sort) in assigns {
-                                        table.add_entry(*h, codec::Handle::new(*sort));
+                                        table.add_entry(*h, document::Handle::new(*sort));
                                     }
                                 }
                                 let dir = if to_front { "front" } else { "back" };
@@ -1516,11 +1516,11 @@ impl OpenCADStudio {
             // SYNCPVIEWPORTS — copy the first selected viewport's display settings
             // (view direction/target, scale, snap/grid, frozen layers) to the rest.
             "SYNCPVIEWPORTS" | "VPSYNC" => {
-                let vps: Vec<codec::Handle> = self.tabs[i]
+                let vps: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
-                    .filter(|(_, e)| matches!(e, codec::EntityType::Viewport(_)))
+                    .filter(|(_, e)| matches!(e, document::EntityType::Viewport(_)))
                     .map(|(h, _)| *h)
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
@@ -1531,7 +1531,7 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 let src = match self.tabs[i].scene.document.get_entity(vps[0]) {
-                    Some(codec::EntityType::Viewport(vp)) => vp.clone(),
+                    Some(document::EntityType::Viewport(vp)) => vp.clone(),
                     _ => {
                         self.command_line.push_error(
                             crate::t!("SYNCPVIEWPORTS: master is not a viewport.").as_ref(),
@@ -1542,7 +1542,7 @@ impl OpenCADStudio {
                 self.push_undo_snapshot(i, "SYNCPVIEWPORTS");
                 let mut n = 0usize;
                 for h in &vps[1..] {
-                    if let Some(codec::EntityType::Viewport(vp)) =
+                    if let Some(document::EntityType::Viewport(vp)) =
                         self.tabs[i].scene.document.get_entity_mut(*h)
                     {
                         vp.view_direction = src.view_direction;
@@ -1566,7 +1566,7 @@ impl OpenCADStudio {
             // HIDE — hidden-line view of the active viewport.
             "HIDE" => {
                 return Some(Task::done(Message::SetRenderMode(
-                    codec::entities::ViewportRenderMode::HiddenLine,
+                    document::entities::ViewportRenderMode::HiddenLine,
                 )));
             }
 
@@ -1600,12 +1600,12 @@ impl OpenCADStudio {
     ) -> usize {
         let layout_name = self.tabs[i].scene.current_layout.clone();
         let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
-        let to_erase: Vec<codec::Handle> = self.tabs[i]
+        let to_erase: Vec<document::Handle> = self.tabs[i]
             .scene
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(vp)
+                document::EntityType::Viewport(vp)
                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                 {
                     Some(vp.common.handle)
@@ -1626,13 +1626,13 @@ impl OpenCADStudio {
         self.tabs[i].scene.erase_entities(&to_erase);
         let mut created = 0usize;
         for (cx, cz, w, h) in rects {
-            let mut vp = codec::entities::Viewport::new();
-            vp.center = codec::types::Vector3::new(*cx, 0.0, *cz);
+            let mut vp = document::entities::Viewport::new();
+            vp.center = document::types::Vector3::new(*cx, 0.0, *cz);
             vp.width = *w;
             vp.height = *h;
             vp.id = 2; // re-numbered below
             match self.tabs[i].scene.document.add_entity_to_layout(
-                codec::EntityType::Viewport(Box::new(vp)),
+                document::EntityType::Viewport(Box::new(vp)),
                 &layout_name,
             ) {
                 Ok(handle) => {
@@ -1647,12 +1647,12 @@ impl OpenCADStudio {
         }
         let layout_block = self.tabs[i].scene.current_layout_block_handle_pub();
         let mut id_counter = 2_i16;
-        let handles: Vec<codec::Handle> = self.tabs[i]
+        let handles: Vec<document::Handle> = self.tabs[i]
             .scene
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(vp)
+                document::EntityType::Viewport(vp)
                     if vp.id >= 2 && vp.common.owner_handle == layout_block =>
                 {
                     Some(vp.common.handle)
@@ -1661,7 +1661,7 @@ impl OpenCADStudio {
             })
             .collect();
         for h in handles {
-            if let Some(codec::EntityType::Viewport(vp)) =
+            if let Some(document::EntityType::Viewport(vp)) =
                 self.tabs[i].scene.document.get_entity_mut(h)
             {
                 vp.id = id_counter;
@@ -1681,7 +1681,7 @@ fn vports_config_key(name: &str) -> String {
     format!("VPORTSCONFIG:{}", name.trim().to_uppercase())
 }
 
-fn vports_config_names(doc: &codec::Document) -> Vec<String> {
+fn vports_config_names(doc: &document::Document) -> Vec<String> {
     crate::io::drawing_variable(doc, VPORTSCONFIG_INDEX)
         .map(|value| {
             value
@@ -1694,7 +1694,7 @@ fn vports_config_names(doc: &codec::Document) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn vports_config_remember(doc: &mut codec::Document, name: &str) {
+fn vports_config_remember(doc: &mut document::Document, name: &str) {
     let mut names = vports_config_names(doc);
     if names.iter().any(|n| n.eq_ignore_ascii_case(name.trim())) {
         return;
@@ -1703,7 +1703,7 @@ fn vports_config_remember(doc: &mut codec::Document, name: &str) {
     crate::io::set_drawing_variable(doc, VPORTSCONFIG_INDEX, &names.join("\n"));
 }
 
-fn vports_config_forget(doc: &mut codec::Document, name: &str) {
+fn vports_config_forget(doc: &mut document::Document, name: &str) {
     let names: Vec<String> = vports_config_names(doc)
         .into_iter()
         .filter(|n| !n.eq_ignore_ascii_case(name.trim()))
@@ -1757,13 +1757,13 @@ enum DrawOrderStep {
 /// 3. Gather reference objects, excluding the moved selection; Enter applies.
 ///    Typed hexadecimal handles may also be accumulated before confirming.
 pub(crate) struct DrawOrderCommand {
-    selected: Vec<codec::Handle>,
+    selected: Vec<document::Handle>,
     step: DrawOrderStep,
-    references: Vec<codec::Handle>,
+    references: Vec<document::Handle>,
 }
 
 impl DrawOrderCommand {
-    pub(crate) fn new(selected: Vec<codec::Handle>) -> Self {
+    pub(crate) fn new(selected: Vec<document::Handle>) -> Self {
         let step = if selected.is_empty() {
             DrawOrderStep::SelectObjects
         } else {
@@ -1776,7 +1776,7 @@ impl DrawOrderCommand {
         }
     }
 
-    pub(crate) fn for_reference_pick(selected: Vec<codec::Handle>, above: bool) -> Self {
+    pub(crate) fn for_reference_pick(selected: Vec<document::Handle>, above: bool) -> Self {
         Self {
             selected,
             step: DrawOrderStep::PickReference { above },
@@ -1837,7 +1837,7 @@ impl CadCommand for DrawOrderCommand {
         )
     }
 
-    fn on_selection_complete(&mut self, handles: Vec<codec::Handle>) -> crate::command::CmdResult {
+    fn on_selection_complete(&mut self, handles: Vec<document::Handle>) -> crate::command::CmdResult {
         if matches!(self.step, DrawOrderStep::PickReference { .. }) {
             self.references = handles
                 .into_iter()
@@ -1922,7 +1922,7 @@ impl CadCommand for DrawOrderCommand {
                 for text in t.split_whitespace() {
                     let hex = text.trim_start_matches("0x").trim_start_matches("0X");
                     if let Ok(value) = u64::from_str_radix(hex, 16) {
-                        let handle = codec::Handle::new(value);
+                        let handle = document::Handle::new(value);
                         if !handle.is_null()
                             && !self.selected.contains(&handle)
                             && !self.references.contains(&handle)
@@ -1938,7 +1938,7 @@ impl CadCommand for DrawOrderCommand {
 
     fn on_entity_pick(
         &mut self,
-        handle: codec::Handle,
+        handle: document::Handle,
         _pt: glam::DVec3,
     ) -> crate::command::CmdResult {
         if matches!(self.step, DrawOrderStep::PickReference { .. })
@@ -1958,13 +1958,13 @@ impl CadCommand for DrawOrderCommand {
 /// Insert the selected block next to the extremal reference in effective draw
 /// order. Renumber the ordered siblings to avoid ties or saturated sort keys.
 fn assign_relative_group_keys(
-    document: &codec::Document,
-    block: codec::Handle,
-    selected: &[codec::Handle],
-    references: &[codec::Handle],
+    document: &document::Document,
+    block: document::Handle,
+    selected: &[document::Handle],
+    references: &[document::Handle],
     above: bool,
-) -> Option<Vec<(codec::Handle, u64)>> {
-    use codec::objects::ObjectType;
+) -> Option<Vec<(document::Handle, u64)>> {
+    use document::objects::ObjectType;
     let overrides: std::collections::HashMap<_, _> = document
         .objects
         .values()
@@ -2039,15 +2039,15 @@ fn assign_relative_group_keys(
 /// shifted by `n` so lifted siblings keep their relative order. Locked-layer
 /// entities are never moved or lifted.
 fn assign_back_group_keys(
-    doc: &codec::Document,
-    block_handle: codec::Handle,
-    group: &[codec::Handle],
+    doc: &document::Document,
+    block_handle: document::Handle,
+    group: &[document::Handle],
     floor: u64,
     overrides: Option<&rustc_hash::FxHashMap<u64, u64>>,
     locked_layers: &rustc_hash::FxHashSet<&str>,
-) -> Vec<(codec::Handle, u64)> {
+) -> Vec<(document::Handle, u64)> {
     let n = group.len() as u64;
-    let mut out: Vec<(codec::Handle, u64)> = Vec::with_capacity(group.len());
+    let mut out: Vec<(document::Handle, u64)> = Vec::with_capacity(group.len());
     if n == 0 {
         return out;
     }
@@ -2062,7 +2062,7 @@ fn assign_back_group_keys(
     }
     let moved: rustc_hash::FxHashSet<u64> = group.iter().map(|h| h.value()).collect();
     let has_locked = !locked_layers.is_empty();
-    let mut lifts: Vec<(codec::Handle, u64)> = Vec::new();
+    let mut lifts: Vec<(document::Handle, u64)> = Vec::new();
     for e in doc.entities() {
         let c = e.common();
         if c.owner_handle != block_handle && !c.owner_handle.is_null() {
@@ -2088,8 +2088,8 @@ fn assign_back_group_keys(
 mod tests {
     use super::*;
     use crate::app::OpenCADStudio;
-    use codec::objects::ObjectType;
-    use codec::EntityType;
+    use document::objects::ObjectType;
+    use document::EntityType;
 
     fn fresh_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
@@ -2239,7 +2239,7 @@ mod tests {
     fn hatchtoback_ignores_hatches_in_other_spaces() {
         let mut app = fresh_app();
         let i = app.active_tab;
-        let other_block = codec::Handle::new(0x9999);
+        let other_block = document::Handle::new(0x9999);
         let h_foreign = app.tabs[i]
             .scene
             .add_entity_clone(EntityType::Hatch(Default::default()));
@@ -2401,7 +2401,7 @@ mod tests {
             layer.flags.locked = true;
         }
 
-        let mut locked_hatch = codec::entities::Hatch::default();
+        let mut locked_hatch = document::entities::Hatch::default();
         locked_hatch.common.layer = "LOCKED_LAYER".into();
         let h_locked_hatch = app.tabs[i]
             .scene
@@ -2545,12 +2545,12 @@ mod tests {
         // Pin the line to sort key 2: only ONE slot below the floor exists,
         // but three hatches need to fit behind it.
         {
-            use codec::objects::{ObjectType, SortEntitiesTable};
+            use document::objects::{ObjectType, SortEntitiesTable};
             let doc = &mut app.tabs[i].scene.document;
-            let nh = codec::Handle::new(doc.next_handle());
+            let nh = document::Handle::new(doc.next_handle());
             let mut table = SortEntitiesTable::for_block(block_handle);
             table.handle = nh;
-            table.add_entry(h_line, codec::Handle::new(2));
+            table.add_entry(h_line, document::Handle::new(2));
             doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
         }
 
@@ -2670,7 +2670,7 @@ mod tests {
         let model = app.tabs[i].scene.model_space_block_handle();
         app.tabs[i].scene.document.add_layout("Sheet").unwrap();
         app.tabs[i].scene.set_current_layout("Sheet".into());
-        let mut viewport = codec::entities::Viewport::new();
+        let mut viewport = document::entities::Viewport::new();
         viewport.id = 2;
         viewport.turn_on();
         let viewport = app.tabs[i]
@@ -2697,7 +2697,7 @@ mod tests {
                 _ => None,
             })
             .unwrap_or_default();
-        let key = |h: codec::Handle| order.get(&h.value()).copied().unwrap_or(h.value());
+        let key = |h: document::Handle| order.get(&h.value()).copied().unwrap_or(h.value());
         assert!(
             key(h_moved) < key(h_under),
             "the moved line must sort behind the other model line: {order:?}"
@@ -2772,12 +2772,12 @@ mod tests {
             .add_entity_clone(EntityType::Line(Default::default()));
 
         {
-            use codec::objects::{ObjectType, SortEntitiesTable};
+            use document::objects::{ObjectType, SortEntitiesTable};
             let doc = &mut app.tabs[i].scene.document;
-            let nh = codec::Handle::new(doc.next_handle());
+            let nh = document::Handle::new(doc.next_handle());
             let mut table = SortEntitiesTable::for_block(block_handle);
             table.handle = nh;
-            table.add_entry(h_pinned, codec::Handle::new(2));
+            table.add_entry(h_pinned, document::Handle::new(2));
             doc.objects.insert(nh, ObjectType::SortEntitiesTable(table));
         }
 
@@ -2998,7 +2998,7 @@ mod tests {
 
     #[test]
     fn draw_order_table_reattaches_orphan_and_advances_object_handles() {
-        use codec::objects::SortEntitiesTable;
+        use document::objects::SortEntitiesTable;
 
         let mut app = fresh_app();
         let i = app.active_tab;
@@ -3006,10 +3006,10 @@ mod tests {
         let entity = app.tabs[i]
             .scene
             .add_entity_clone(EntityType::Line(Default::default()));
-        let orphan_handle = codec::Handle::new(0x10_0000);
+        let orphan_handle = document::Handle::new(0x10_0000);
         let mut orphan = SortEntitiesTable::for_block(block);
         orphan.handle = orphan_handle;
-        orphan.add_entry(entity, codec::Handle::new(7));
+        orphan.add_entry(entity, document::Handle::new(7));
         app.tabs[i]
             .scene
             .document
@@ -3471,7 +3471,7 @@ impl OpenCADStudio {
     fn chspace_through(
         &mut self,
         i: usize,
-        handles: Vec<codec::Handle>,
+        handles: Vec<document::Handle>,
         to_paper: bool,
         frame: crate::scene::viewport_ref::ViewportFrame,
     ) {
@@ -3508,7 +3508,7 @@ impl OpenCADStudio {
         };
         self.push_undo_snapshot(i, "CHSPACE");
         let scene = &mut self.tabs[i].scene;
-        let entities: Vec<codec::EntityType> = handles
+        let entities: Vec<document::EntityType> = handles
             .iter()
             .filter_map(|h| scene.document.get_entity(*h).cloned())
             .collect();
@@ -3518,7 +3518,7 @@ impl OpenCADStudio {
         // viewport, the model with one.
         let active = scene.active_viewport;
         scene.active_viewport = if to_paper { None } else { Some(frame.viewport) };
-        let moved: Vec<codec::Handle> = entities
+        let moved: Vec<document::Handle> = entities
             .into_iter()
             .map(|e| scene.add_entity_clone(e))
             .collect();

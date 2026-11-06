@@ -54,7 +54,7 @@ fn batch_visibility_properties_isolate_copies_and_reject_stale_states() {
             })
             .unwrap()
     };
-    let read = |doc: &codec::Document, insert| {
+    let read = |doc: &document::Document, insert| {
         let row = OpenCADStudio::visibility_property(doc, insert)
             .unwrap_or_else(|| panic!("missing Visibility property for {insert}"));
         let PropValue::ChoiceWithTooltip { selected, .. } = row.value else {

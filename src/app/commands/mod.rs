@@ -1530,7 +1530,7 @@ mod marquee_cancel_tests {
     use crate::app::{GripPendingValue, Message, OpenCADStudio};
     use crate::scene::model::object::GripMenuAction;
     use crate::scene::pick::grip::GripEdit;
-    use codec::Handle;
+    use document::Handle;
     use iced::time::Instant;
 
     fn fresh() -> OpenCADStudio {
@@ -1955,8 +1955,8 @@ mod ribbon_highlight_tests {
 #[cfg(test)]
 mod stretch_preselection_tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
     use glam::DVec3;
 
     fn fresh() -> OpenCADStudio {
@@ -1969,7 +1969,7 @@ mod stretch_preselection_tests {
     fn preselected_crossing_window_stretches_only_contained_endpoints() {
         let mut app = fresh();
         let i = app.active_tab;
-        let line = codec::EntityType::Line(Line::from_points(
+        let line = document::EntityType::Line(Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         ));
@@ -1993,7 +1993,7 @@ mod stretch_preselection_tests {
 
         // Check line: start (0,0,0) didn't move; end (10,0,0) moved to (15,0,0)
         let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
-        let codec::EntityType::Line(l) = ent else { panic!("expected line"); };
+        let document::EntityType::Line(l) = ent else { panic!("expected line"); };
         assert_eq!(l.start, Vector3::new(0.0, 0.0, 0.0));
         assert_eq!(l.end, Vector3::new(15.0, 0.0, 0.0));
     }
@@ -2002,7 +2002,7 @@ mod stretch_preselection_tests {
     fn preselected_without_crossing_window_moves_rigidly() {
         let mut app = fresh();
         let i = app.active_tab;
-        let line = codec::EntityType::Line(Line::from_points(
+        let line = document::EntityType::Line(Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         ));
@@ -2026,7 +2026,7 @@ mod stretch_preselection_tests {
 
         // Check line: start moved to (5,3,0); end moved to (15,3,0)
         let ent = app.tabs[i].scene.document.get_entity(handle).unwrap();
-        let codec::EntityType::Line(l) = ent else { panic!("expected line"); };
+        let document::EntityType::Line(l) = ent else { panic!("expected line"); };
         assert_eq!(l.start, Vector3::new(5.0, 3.0, 0.0));
         assert_eq!(l.end, Vector3::new(15.0, 3.0, 0.0));
     }

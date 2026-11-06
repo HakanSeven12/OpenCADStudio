@@ -12,9 +12,9 @@
 //! option list `[Basepoint/Scale/X/Y/Z/Rotate]`.
 
 use crate::t;
-use codec::entities::{AttributeDefinition, AttributeEntity, Entity, Insert};
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::{AttributeDefinition, AttributeEntity, Entity, Insert};
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::app::settings::BlockInsertOptions;
@@ -931,7 +931,7 @@ impl CadCommand for InsertBlockCommand {
     fn attreq_set_attdefs(
         &mut self,
         attdefs: Vec<AttributeDefinition>,
-    ) -> Option<codec::EntityType> {
+    ) -> Option<document::EntityType> {
         self.step = Step::FillAttr {
             attdefs,
             idx: 0,
@@ -940,7 +940,7 @@ impl CadCommand for InsertBlockCommand {
         self.advance_automatic_attributes()
     }
 
-    fn attreq_take_insert(&mut self) -> Option<codec::EntityType> {
+    fn attreq_take_insert(&mut self) -> Option<document::EntityType> {
         self.pending_insert.take().map(EntityType::Insert)
     }
 

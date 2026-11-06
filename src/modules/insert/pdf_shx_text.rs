@@ -18,7 +18,7 @@
 // a style named after the font, a group's lines top down; the geometry of its
 // recognised characters is erased.
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -1057,8 +1057,8 @@ pub fn recognize(
 }
 
 /// The curves of `entity` as world-XY strokes (text and other objects: none).
-pub fn entity_strokes(entity: &codec::EntityType) -> Vec<Vec<P>> {
-    use codec::EntityType as E;
+pub fn entity_strokes(entity: &document::EntityType) -> Vec<Vec<P>> {
+    use document::EntityType as E;
     match entity {
         E::Line(_)
         | E::Arc(_)

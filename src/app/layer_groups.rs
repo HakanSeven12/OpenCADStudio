@@ -4,10 +4,10 @@
 //! layer) under anonymous `*A<n>` keys in the `ACLYDICTIONARY` of the layer
 //! table's extension dictionary, beside the property filters stored there.
 
-use codec::objects::{
+use document::objects::{
     Dictionary, DictionaryCloningFlags, ObjectType, XRecord, XRecordEntry, XRecordValue,
 };
-use codec::{Document, Handle};
+use document::{Document, Handle};
 
 const DICTIONARY: &str = "ACLYDICTIONARY";
 const GROUP: &str = "AcLyLayerGroup";
@@ -205,10 +205,10 @@ mod tests {
         let mut document = Document::new();
         let zero = document.layers.get("0").unwrap().handle;
         store_layer_group(&mut document, "Walls", &[zero]);
-        let dwg = codec::DwgWriter::write_to_vec(&document).unwrap();
-        let from_dwg = codec::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
-        let dxf = codec::DxfWriter::new(&document).write_to_vec().unwrap();
-        let from_dxf = codec::DxfReader::from_reader(std::io::Cursor::new(dxf))
+        let dwg = document::DwgWriter::write_to_vec(&document).unwrap();
+        let from_dwg = document::DwgReader::from_stream(std::io::Cursor::new(dwg)).read().unwrap();
+        let dxf = document::DxfWriter::new(&document).write_to_vec().unwrap();
+        let from_dxf = document::DxfReader::from_reader(std::io::Cursor::new(dxf))
             .unwrap()
             .read()
             .unwrap();

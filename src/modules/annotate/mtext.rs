@@ -1,7 +1,7 @@
-use codec::entities::mtext::AttachmentPoint;
-use codec::entities::LineSpacingStyle;
-use codec::types::Vector3;
-use codec::MText;
+use document::entities::mtext::AttachmentPoint;
+use document::entities::LineSpacingStyle;
+use document::types::Vector3;
+use document::MText;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, DynField, InputKind, WorkingPlane};

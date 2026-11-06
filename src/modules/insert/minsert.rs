@@ -7,9 +7,9 @@
 //! replicates over `row_count × column_count` using the row/column spacing.
 
 use crate::t;
-use codec::entities::Insert;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::Insert;
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};

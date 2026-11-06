@@ -246,7 +246,7 @@ fn a_manager_edit_runs_the_actions_attached_to_the_parameter() {
     begin(&mut app, reference);
     let copy = |app: &OpenCADStudio| {
         let doc = &app.tabs[tab].scene.document;
-        let codec::EntityType::Insert(native) = doc.get_entity(reference).unwrap() else {
+        let document::EntityType::Insert(native) = doc.get_entity(reference).unwrap() else {
             panic!("the reference is no longer an insert");
         };
         doc.block_records
@@ -255,14 +255,14 @@ fn a_manager_edit_runs_the_actions_attached_to_the_parameter() {
             .entity_handles
             .iter()
             .find_map(|handle| match doc.get_entity(*handle) {
-                Some(codec::EntityType::Line(line)) => Some(line.start),
+                Some(document::EntityType::Line(line)) => Some(line.start),
                 _ => None,
             })
             .unwrap_or_else(|| panic!("the reference has no line to move"))
     };
     let before = copy(&app);
     let authored = match app.tabs[tab].scene.document.get_entity(target) {
-        Some(codec::EntityType::Line(line)) => line.start,
+        Some(document::EntityType::Line(line)) => line.start,
         other => panic!("the definition member is not a plain line: {other:?}"),
     };
     assert!(
@@ -282,7 +282,7 @@ fn a_manager_edit_runs_the_actions_attached_to_the_parameter() {
         "the manager edit rebuilt the reference along the parameter's axis, got {shift:?}"
     );
     match app.tabs[tab].scene.document.get_entity(target) {
-        Some(codec::EntityType::Line(line)) => assert_eq!(
+        Some(document::EntityType::Line(line)) => assert_eq!(
             line.start, authored,
             "and the definition's own member stays where it was authored"
         ),
@@ -299,7 +299,7 @@ fn an_edit_left_open_by_a_closed_session_writes_nothing() {
     // from whichever one is active. A field left open from another session must
     // not write onto a same-named parameter of this one.
     app.tabs[tab].parameters_panel.editing = Some(crate::ui::window::parameters_manager::Edit {
-        definition: codec::Handle::NULL,
+        definition: document::Handle::NULL,
         parameter: crate::scene::block_actions::all_parameters(
             &app.tabs[tab].scene.document,
             definition,
@@ -724,7 +724,7 @@ fn a_cell_left_open_when_the_session_ends_writes_nothing() {
     // A field that outlives its session by any route is refused the same way.
     app.tabs[tab].parameters_panel.editing = Some(crate::ui::window::parameters_manager::Edit {
         definition,
-        parameter: codec::Handle::new(1),
+        parameter: document::Handle::new(1),
         component: Component::Distance,
         name: "Distance1".to_owned(),
         cell: Cell::Value,
@@ -956,7 +956,7 @@ fn a_cell_the_pane_does_not_own_closes_without_a_refusal() {
     // refusal for it and writes nothing. (Which real route leaves such a cell
     // behind is not measured; the guard is the pane's own promise.)
     app.tabs[tab].parameters_panel.editing = Some(crate::ui::window::parameters_manager::Edit {
-        definition: codec::Handle::NULL,
+        definition: document::Handle::NULL,
         parameter: crate::scene::block_actions::all_parameters(
             &app.tabs[tab].scene.document,
             definition,
@@ -1153,16 +1153,16 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
             point::create(doc, definition, Vector3::ZERO, Vector3::UNIT_Y).unwrap()
         };
         for handle in [parent, child] {
-            let codec::objects::ObjectType::DynamicBlock(object) =
+            let document::objects::ObjectType::DynamicBlock(object) =
                 doc.objects.get_mut(&handle).unwrap()
             else {
                 panic!()
             };
             match &mut object.data {
-                codec::objects::DynamicBlockData::LinearParameter(p) => {
+                document::objects::DynamicBlockData::LinearParameter(p) => {
                     p.parameter.parameter.chain_actions = true
                 }
-                codec::objects::DynamicBlockData::PointParameter(p) => {
+                document::objects::DynamicBlockData::PointParameter(p) => {
                     p.parameter.parameter.chain_actions = true
                 }
                 _ => panic!(),
@@ -1173,11 +1173,11 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
         let scaled =
             actions::create(doc, definition, Kind::Scale, parent, &[member], DVec3::ZERO).unwrap();
         actions::create(doc, definition, Kind::Move, child, &[member], DVec3::ZERO).unwrap();
-        let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
+        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+        let document::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
             panic!()
         };
         action.action.dependencies = vec![member, child];
@@ -1211,7 +1211,7 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
         .unwrap();
         app.apply_action_document(tab, changed);
         begin(&mut app, insert);
-        let line = |doc: &codec::Document, handle: Handle| {
+        let line = |doc: &document::Document, handle: Handle| {
             let EntityType::Insert(reference) = doc.get_entity(handle).unwrap() else {
                 panic!()
             };
@@ -1280,14 +1280,14 @@ fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo()
 }
 
 /// The definition's evaluation graph — the fixture's definition holds one.
-fn evaluation_graph(document: &codec::Document) -> codec::Handle {
+fn evaluation_graph(document: &document::Document) -> document::Handle {
     document
         .objects
         .values()
         .find_map(|object| match object {
-            codec::objects::ObjectType::DynamicBlock(object) => matches!(
+            document::objects::ObjectType::DynamicBlock(object) => matches!(
                 object.data,
-                codec::objects::DynamicBlockData::EvaluationGraph(_)
+                document::objects::DynamicBlockData::EvaluationGraph(_)
             )
             .then_some(object.handle),
             _ => None,
@@ -1297,13 +1297,13 @@ fn evaluation_graph(document: &codec::Document) -> codec::Handle {
 
 /// Leave the graph naming one node twice: every parameter it held is still
 /// named, and no authoring read will edit it.
-fn duplicate_a_node(document: &mut codec::Document, graph: codec::Handle) -> bool {
-    let Some(codec::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&graph)
+fn duplicate_a_node(document: &mut document::Document, graph: document::Handle) -> bool {
+    let Some(document::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&graph)
     else {
         return false;
     };
     match &mut object.data {
-        codec::objects::DynamicBlockData::EvaluationGraph(graph) => {
+        document::objects::DynamicBlockData::EvaluationGraph(graph) => {
             match graph.nodes.first().cloned() {
                 Some(node) => {
                     graph.nodes.push(node);

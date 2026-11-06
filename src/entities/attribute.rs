@@ -1,8 +1,8 @@
-use codec::entities::attribute_definition::{
+use document::entities::attribute_definition::{
     HorizontalAlignment as AHA, MTextFlag, VerticalAlignment as AVA,
 };
-use codec::entities::{AttributeDefinition, AttributeEntity};
-use codec::types::Vector3;
+use document::entities::{AttributeDefinition, AttributeEntity};
+use document::types::Vector3;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -108,7 +108,7 @@ fn mtext_flag_str(f: MTextFlag) -> &'static str {
 /// glyph boxes, the point they are relative to and the layout rotation.
 pub(crate) type AttrCells = (Vec<crate::entities::text_support::GlyphBox>, [f64; 2], f32);
 
-fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::Document) -> RenderEntity {
+fn build_attr_render(input: AttrTextInputs<'_>, document: &document::Document) -> RenderEntity {
     build_attr_layout(input, document, None)
 }
 
@@ -116,7 +116,7 @@ fn build_attr_render(input: AttrTextInputs<'_>, document: &codec::Document) -> R
 /// character cells in `cells` (left `None` for a single-line one).
 fn build_attr_layout(
     mut input: AttrTextInputs<'_>,
-    document: &codec::Document,
+    document: &document::Document,
     mut cells: Option<&mut Option<AttrCells>>,
 ) -> RenderEntity {
     let normal = (input.normal.x, input.normal.y, input.normal.z);
@@ -354,7 +354,7 @@ fn build_attr_layout(
             anchor_f64[0] - (anchor_local_x as f64 * cos_r - local_y_for_line as f64 * sin_r),
             anchor_f64[1] - (anchor_local_x as f64 * sin_r + local_y_for_line as f64 * cos_r),
         ];
-        // Parse `%%` codes through opencadcodec (same as TEXT), re-encoded for the
+        // Parse `%%` codes through document (same as TEXT), re-encoded for the
         // stroke tessellator, so attribute text shares the one parser.
         let encoded = crate::entities::text::acad_text_encode(line);
         let (strokes, fill_tris) = lff::tessellate_text_ex(
@@ -409,7 +409,7 @@ fn build_attr_layout(
 // ── AttributeDefinition ───────────────────────────────────────────────────────
 
 impl RenderConvertible for AttributeDefinition {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         // A definition shows its tag; the value appears only on the block
         // references (block content renders a constant one's value itself).
         Some(build_attr_render(
@@ -660,7 +660,7 @@ fn set_multiline(a: &mut AttributeDefinition, on: bool) {
         a.vertical_alignment = AVA::Top;
         a.alignment_point = a.insertion_point;
         a.line_count = a.default_value.split("\\P").count().max(1) as i16;
-        let mut mtext = codec::entities::MText::new();
+        let mut mtext = document::entities::MText::new();
         mtext.value = a.default_value.clone();
         mtext.insertion_point = a.insertion_point;
         mtext.height = a.height;
@@ -968,7 +968,7 @@ impl Transformable for AttributeDefinition {
 /// single-line attribute.
 pub(crate) fn attribute_cells(
     a: &AttributeEntity,
-    document: &codec::Document,
+    document: &document::Document,
 ) -> Option<AttrCells> {
     let mut out = None;
     build_attr_layout(attr_inputs(a), document, Some(&mut out));
@@ -997,7 +997,7 @@ fn attr_inputs(a: &AttributeEntity) -> AttrTextInputs<'_> {
 }
 
 impl RenderConvertible for AttributeEntity {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         Some(build_attr_render(
             AttrTextInputs {
                 value: &self.value,
@@ -1284,7 +1284,7 @@ impl Transformable for AttributeEntity {
     }
 }
 
-impl crate::entities::traits::TextContent for codec::entities::AttributeDefinition {
+impl crate::entities::traits::TextContent for document::entities::AttributeDefinition {
     fn text_content(&self) -> Option<String> {
         Some(self.default_value.clone())
     }
@@ -1296,7 +1296,7 @@ impl crate::entities::traits::TextContent for codec::entities::AttributeDefiniti
     }
 }
 
-impl crate::entities::traits::TextContent for codec::entities::AttributeEntity {
+impl crate::entities::traits::TextContent for document::entities::AttributeEntity {
     fn text_content(&self) -> Option<String> {
         Some(self.get_value().to_string())
     }
@@ -1315,11 +1315,11 @@ mod wrapping_tests {
 
     #[test]
     fn multiline_attribute_uses_embedded_boundary_width() {
-        let document = codec::Document::new();
+        let document = document::Document::new();
         let mut attribute = AttributeEntity::new("TITLE".into(), "Alpha Beta Gamma Delta".into());
         attribute.mtext_flag = MTextFlag::MultiLine;
         attribute.is_multiline = true;
-        let mut mtext = codec::entities::MText::new();
+        let mut mtext = document::entities::MText::new();
         mtext.rectangle_width = 15.0;
         attribute.embedded_mtext = Some(Box::new(mtext));
         let rendered = attribute.to_render(&document).expect("attribute render");

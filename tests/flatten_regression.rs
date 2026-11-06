@@ -1,9 +1,9 @@
 //! FLATTEN regression: golden projections, collection filters, plan/apply
 //! invariants, and a legacy-vs-batch differential.
 
-use codec::entities::{Line, Polyline2D, Polyline3D, Solid, Vertex2D, Vertex3DPolyline};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{Line, Polyline2D, Polyline3D, Solid, Vertex2D, Vertex3DPolyline};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 
 use OpenCADStudio::modules::draw::modify::flatten::{
     apply_flatten_updates, collect_flatten_handles, flatten_entity_z, plan_flatten,
@@ -33,7 +33,7 @@ fn golden_line_projects_and_resets_thickness_normal() {
 
 #[test]
 fn golden_tilted_circle_becomes_ellipse() {
-    let mut c = codec::entities::Circle::from_center_radius(Vector3::new(1.0, 2.0, 4.0), 5.0);
+    let mut c = document::entities::Circle::from_center_radius(Vector3::new(1.0, 2.0, 4.0), 5.0);
     c.normal = Vector3::new(0.0, 0.6, 0.8);
     let flat = flatten_entity_z(&EntityType::Circle(c)).expect("moves");
     assert!(
@@ -74,7 +74,7 @@ fn golden_polyline2d_elevation_zeroed() {
 
 #[test]
 fn golden_text_insertion_and_normal_zeroed() {
-    let mut t = codec::entities::Text::new();
+    let mut t = document::entities::Text::new();
     t.insertion_point = Vector3::new(1.0, 2.0, 3.0);
     t.thickness = 1.0;
     let flat = flatten_entity_z(&EntityType::Text(t)).expect("moves");
@@ -115,7 +115,7 @@ fn already_flat_and_unsupported_return_none() {
     flat_line.start = Vector3::new(0.0, 0.0, 0.0);
     flat_line.end = Vector3::new(3.0, 4.0, 0.0);
     assert!(flatten_entity_z(&EntityType::Line(flat_line)).is_none());
-    let ray = codec::entities::Ray::new(Vector3::new(0.0, 0.0, 5.0), Vector3::new(0.0, 0.0, 1.0));
+    let ray = document::entities::Ray::new(Vector3::new(0.0, 0.0, 5.0), Vector3::new(0.0, 0.0, 1.0));
     assert!(flatten_entity_z(&EntityType::Ray(ray)).is_none());
 }
 
@@ -131,7 +131,7 @@ fn scene_with_three_lines() -> (Scene, [Handle; 3]) {
 fn collect_excludes_locked_layer_and_respects_selection() {
     let (mut scene, [a, b, c]) = scene_with_three_lines();
     // Lock b's layer.
-    let mut layer = codec::tables::Layer::new("LOCKED");
+    let mut layer = document::tables::Layer::new("LOCKED");
     layer.flags.locked = true;
     scene.document.layers.add(layer).unwrap();
     scene.document.get_entity_mut(b).unwrap().common_mut().layer = "LOCKED".into();
@@ -186,7 +186,7 @@ fn plan_moves_only_movable_candidates() {
     let (mut scene, [a, b, c]) = scene_with_three_lines();
     let ray = scene
         .document
-        .add_entity(EntityType::Ray(codec::entities::Ray::new(
+        .add_entity(EntityType::Ray(document::entities::Ray::new(
             Vector3::new(0.0, 0.0, 5.0),
             Vector3::new(0.0, 0.0, 1.0),
         )))
@@ -225,7 +225,7 @@ fn differential_legacy_loop_vs_apply_flatten_updates() {
                 h.push(
                     scene
                         .document
-                        .add_entity(EntityType::Ray(codec::entities::Ray::new(
+                        .add_entity(EntityType::Ray(document::entities::Ray::new(
                             Vector3::new(0.0, 0.0, 5.0),
                             Vector3::new(0.0, 0.0, 1.0),
                         )))

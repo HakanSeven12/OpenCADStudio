@@ -37,7 +37,7 @@ pub enum DwgPropsMsg {
 pub(crate) struct State {
     pub tab: Tab,
     /// The summary being edited; the document keeps its own until OK.
-    pub summary: codec::document::SummaryInfo,
+    pub summary: document::document::SummaryInfo,
     /// Read-only General tab: label, value.
     pub general: Vec<(String, String)>,
     /// Why OK was refused, shown under the table.

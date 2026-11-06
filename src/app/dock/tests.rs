@@ -1454,7 +1454,7 @@ fn orientation_parameter_batch_starts_from_actual_palette_rows() {
 }
 
 fn authoring_app() -> OpenCADStudio {
-    use codec::{
+    use document::{
         entities::{Insert, Line},
         types::Vector3,
         EntityType,
@@ -1605,14 +1605,14 @@ fn block_actions_palette_controls_require_compatible_parameters_and_start_comman
             .document
             .entities_in_block("AUTHOR")
             .find_map(|e| {
-                if let codec::EntityType::Line(l) = e {
+                if let document::EntityType::Line(l) = e {
                     Some(l)
                 } else {
                     None
                 }
             })
             .unwrap();
-        assert_eq!(line.end, codec::types::Vector3::new(2., 0., 0.));
+        assert_eq!(line.end, document::types::Vector3::new(2., 0., 0.));
     });
 }
 

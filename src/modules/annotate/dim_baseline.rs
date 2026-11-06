@@ -1,11 +1,11 @@
 use std::f64::consts::PI;
 
-use codec::entities::{
+use document::entities::{
     Dimension, DimensionAligned, DimensionAngular2Ln, DimensionAngular3Pt, DimensionBase,
     DimensionLinear, DimensionOrdinate,
 };
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{
     arc_span, intersect, nearest_of, Arc, Curve, Line, Tolerance, Transform, Vec2, XLine,
@@ -87,7 +87,7 @@ pub(super) struct SourceStyle {
     text_rotation: f64,
     pub(super) horizontal_direction: f64,
     /// The base dimension's dimension variable overrides.
-    overrides: Vec<(i16, codec::xdata::XDataValue)>,
+    overrides: Vec<(i16, document::xdata::XDataValue)>,
 }
 
 impl SourceStyle {

@@ -18,15 +18,15 @@
 //! style added without a handle (dropped on DWG save, issue #67).
 
 use super::OpenCADStudio;
-use codec::objects::{Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle};
-use codec::tables::{DimStyle, TextStyle};
-use codec::types::Handle;
+use document::objects::{Dictionary, MLineStyle, MultiLeaderStyle, ObjectType, TableStyle};
+use document::tables::{DimStyle, TextStyle};
+use document::types::Handle;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 const MLEADERSTYLE_DICT_NAME: &str = "ACAD_MLEADERSTYLE";
 
-fn mleaderstyle_dict_handle(doc: &codec::Document) -> Option<Handle> {
+fn mleaderstyle_dict_handle(doc: &document::Document) -> Option<Handle> {
     let root_h = doc.header.named_objects_dict_handle;
 
     let root = match doc.objects.get(&root_h) {
@@ -41,7 +41,7 @@ fn mleaderstyle_dict_handle(doc: &codec::Document) -> Option<Handle> {
         .filter(|handle| matches!(doc.objects.get(handle), Some(ObjectType::Dictionary(_))))
 }
 
-fn import_mleaderstyle_names_from_dictionary(doc: &mut codec::Document) {
+fn import_mleaderstyle_names_from_dictionary(doc: &mut document::Document) {
     let Some(dict_h) = mleaderstyle_dict_handle(doc) else {
         return;
     };
@@ -59,7 +59,7 @@ fn import_mleaderstyle_names_from_dictionary(doc: &mut codec::Document) {
     }
 }
 
-pub(crate) fn sync_mleaderstyle_dictionary(doc: &mut codec::Document) {
+pub(crate) fn sync_mleaderstyle_dictionary(doc: &mut document::Document) {
     let root_h = crate::scene::annotative::root_named_dict_handle(doc);
 
     let existing = match doc.objects.get(&root_h) {
@@ -133,7 +133,7 @@ pub(crate) fn sync_mleaderstyle_dictionary(doc: &mut codec::Document) {
 /// broken with no way to recover, and new text/dimensions have nothing to
 /// reference (#366). Missing entries are re-seeded with the app defaults.
 /// Called on every file open; a no-op for healthy documents.
-pub(crate) fn ensure_standard_styles(doc: &mut codec::Document) {
+pub(crate) fn ensure_standard_styles(doc: &mut document::Document) {
     import_mleaderstyle_names_from_dictionary(doc);
     if !doc
         .text_styles
@@ -153,7 +153,7 @@ pub(crate) fn ensure_standard_styles(doc: &mut codec::Document) {
         s.handle = doc.allocate_handle();
         let _ = doc.dim_styles.add(s);
     }
-    let has = |doc: &codec::Document, pred: fn(&ObjectType) -> Option<&str>| {
+    let has = |doc: &document::Document, pred: fn(&ObjectType) -> Option<&str>| {
         doc.objects
             .values()
             .filter_map(pred)
@@ -382,7 +382,7 @@ impl OpenCADStudio {
                         Some(ObjectType::TableTemplate(table)) => Some(table.clone()),
                         _ => None,
                     });
-                    s.modern_cell_style_handle = codec::Handle::NULL;
+                    s.modern_cell_style_handle = document::Handle::NULL;
                     if let Some(mut table) = template {
                         let copy = doc.allocate_handle();
                         table.common.handle = copy;
@@ -445,7 +445,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn style_in_use(&self, kind: StyleKind, name: &str) -> bool {
-        use codec::entities::EntityType;
+        use document::entities::EntityType;
 
         let i = self.active_tab;
         let doc = &self.tabs[i].scene.document;
@@ -602,15 +602,15 @@ impl OpenCADStudio {
                         stage.entities.entry(handle).or_insert(before);
                     }
                     match doc.get_entity_mut(handle) {
-                        Some(codec::entities::EntityType::Text(t)) => t.style = new.to_string(),
-                        Some(codec::entities::EntityType::MText(t)) => t.style = new.to_string(),
-                        Some(codec::entities::EntityType::AttributeEntity(a)) => {
+                        Some(document::entities::EntityType::Text(t)) => t.style = new.to_string(),
+                        Some(document::entities::EntityType::MText(t)) => t.style = new.to_string(),
+                        Some(document::entities::EntityType::AttributeEntity(a)) => {
                             a.text_style = new.to_string()
                         }
-                        Some(codec::entities::EntityType::AttributeDefinition(a)) => {
+                        Some(document::entities::EntityType::AttributeDefinition(a)) => {
                             a.text_style = new.to_string()
                         }
-                        Some(codec::entities::EntityType::Insert(insert)) => {
+                        Some(document::entities::EntityType::Insert(insert)) => {
                             for attribute in &mut insert.attributes {
                                 if attribute.text_style.eq_ignore_ascii_case(old) {
                                     attribute.text_style = new.to_string();
@@ -657,17 +657,17 @@ impl OpenCADStudio {
                 }
                 for e in doc.entities_mut() {
                     match e {
-                        codec::entities::EntityType::Dimension(d)
+                        document::entities::EntityType::Dimension(d)
                             if d.base().style_name.eq_ignore_ascii_case(old) =>
                         {
                             d.base_mut().style_name = new.to_string();
                         }
-                        codec::entities::EntityType::Leader(l)
+                        document::entities::EntityType::Leader(l)
                             if l.dimension_style.eq_ignore_ascii_case(old) =>
                         {
                             l.dimension_style = new.to_string();
                         }
-                        codec::entities::EntityType::Tolerance(t)
+                        document::entities::EntityType::Tolerance(t)
                             if t.dimension_style_name.eq_ignore_ascii_case(old) =>
                         {
                             t.dimension_style_name = new.to_string();
@@ -728,7 +728,7 @@ impl OpenCADStudio {
                     doc.header.multiline_style = new.to_string();
                 }
                 for entity in doc.entities_mut() {
-                    if let codec::entities::EntityType::MLine(line) = entity {
+                    if let document::entities::EntityType::MLine(line) = entity {
                         if line.style_name.eq_ignore_ascii_case(old) {
                             line.style_name = new.to_string();
                         }
@@ -1062,11 +1062,11 @@ impl OpenCADStudio {
         if changed {
             self.tabs[i].dirty = true;
             let (text_names, dim_names, object_handles) = edited.changed_keys(&stage.baseline);
-            let changed_mleader_styles: Vec<codec::objects::MultiLeaderStyle> = object_handles
+            let changed_mleader_styles: Vec<document::objects::MultiLeaderStyle> = object_handles
                 .iter()
                 .filter_map(
                     |handle| match self.tabs[i].scene.document.objects.get(handle) {
-                        Some(codec::objects::ObjectType::MultiLeaderStyle(style)) => {
+                        Some(document::objects::ObjectType::MultiLeaderStyle(style)) => {
                             Some(style.clone())
                         }
                         _ => None,
@@ -1077,12 +1077,12 @@ impl OpenCADStudio {
             let mut changed_mleaders = Vec::new();
 
             for style in changed_mleader_styles {
-                let entity_handles: Vec<codec::Handle> = {
+                let entity_handles: Vec<document::Handle> = {
                     let doc = &self.tabs[i].scene.document;
 
                     doc.entities()
                         .filter_map(|entity| match entity {
-                            codec::EntityType::MultiLeader(ml)
+                            document::EntityType::MultiLeader(ml)
                                 if ml.style_handle == Some(style.handle) =>
                             {
                                 Some(ml.common.handle)
@@ -1171,8 +1171,8 @@ impl OpenCADStudio {
 /// Snapshot of every document field a style manager can touch.
 #[derive(Clone, PartialEq)]
 pub(super) struct StyleStateSnapshot {
-    text_styles: codec::tables::Table<TextStyle>,
-    dim_styles: codec::tables::Table<DimStyle>,
+    text_styles: document::tables::Table<TextStyle>,
+    dim_styles: document::tables::Table<DimStyle>,
     style_objects: Vec<(Handle, ObjectType)>,
     current_text: String,
     current_dim: String,
@@ -1248,12 +1248,12 @@ pub(super) struct StyleStage {
     baseline: StyleStateSnapshot,
     /// Entities the transaction changed (a rename rewrites their style name,
     /// Apply their by-style values), as they were when the manager opened.
-    entities: FxHashMap<Handle, Arc<codec::EntityType>>,
+    entities: FxHashMap<Handle, Arc<document::EntityType>>,
 }
 
 /// True when the entity, or one of an insert's attributes, names the text style.
-fn names_text_style(entity: &codec::EntityType, name: &str) -> bool {
-    use codec::EntityType;
+fn names_text_style(entity: &document::EntityType, name: &str) -> bool {
+    use document::EntityType;
     match entity {
         EntityType::Text(text) => text.style.eq_ignore_ascii_case(name),
         EntityType::MText(text) => text.style.eq_ignore_ascii_case(name),
@@ -1274,7 +1274,7 @@ fn names_text_style(entity: &codec::EntityType, name: &str) -> bool {
 /// Find the object-backed style named `name` and return a clone. `pick` maps a
 /// matching variant to `(its name, a clone of the inner style)`.
 fn find_object_style<T>(
-    doc: &codec::Document,
+    doc: &document::Document,
     name: &str,
     pick: impl Fn(&ObjectType) -> Option<(&str, T)>,
 ) -> Option<T> {
@@ -1284,7 +1284,7 @@ fn find_object_style<T>(
     })
 }
 
-fn object_handle(doc: &codec::Document, name: &str, kind: StyleKind) -> Option<Handle> {
+fn object_handle(doc: &document::Document, name: &str, kind: StyleKind) -> Option<Handle> {
     doc.objects.iter().find_map(|(&h, o)| {
         let matches = match (kind, o) {
             (StyleKind::Table, ObjectType::TableStyle(s)) => s.name.eq_ignore_ascii_case(name),
@@ -1463,7 +1463,7 @@ impl OpenCADStudio {
 mod rename_follow_tests {
     // #42: renaming a text style must follow into dimstyle dimtxsty.
     use super::{OpenCADStudio, StyleKind};
-    use codec::tables::{DimStyle, TextStyle};
+    use document::tables::{DimStyle, TextStyle};
 
     #[test]
     fn text_rename_follows_dimtxsty() {

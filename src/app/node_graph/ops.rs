@@ -9,7 +9,7 @@
 
 use super::AppHost;
 use crate::command::EntityTransform;
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use graph::ops::{b, l, n, s, v};
 use graph::value::{list, num, number, point, point_value, text};
@@ -287,12 +287,12 @@ fn vec3(value: &Value) -> Option<DVec3> {
 
 /// A closed plan polyline through `vertices` at height `z`.
 fn closed_polyline(vertices: &[[f64; 2]], z: f64) -> EntityType {
-    let mut polyline = codec::entities::LwPolyline::new();
+    let mut polyline = document::entities::LwPolyline::new();
     polyline.is_closed = true;
     polyline.elevation = z;
     polyline.vertices = vertices
         .iter()
-        .map(|p| codec::entities::LwVertex::new(codec::types::Vector2::new(p[0], p[1])))
+        .map(|p| document::entities::LwVertex::new(document::types::Vector2::new(p[0], p[1])))
         .collect();
     EntityType::LwPolyline(polyline)
 }
@@ -396,16 +396,16 @@ impl AppHost<'_> {
                 one(self.build(json!({ "type": "SPLINE", "fit_points": points })))
             }
             "3D Polyline By Points" => {
-                let points: Vec<codec::types::Vector3> = list(&a[0])
+                let points: Vec<document::types::Vector3> = list(&a[0])
                     .iter()
                     .filter_map(point)
-                    .map(|p| codec::types::Vector3::new(p[0], p[1], p[2]))
+                    .map(|p| document::types::Vector3::new(p[0], p[1], p[2]))
                     .collect();
                 if points.len() < 2 {
                     return one(Value::Null);
                 }
                 one(self.create(EntityType::Polyline3D(
-                    codec::entities::Polyline3D::from_points(points),
+                    document::entities::Polyline3D::from_points(points),
                 )))
             }
             "Rectangle" => one(match vec3(&a[0]) {
@@ -528,7 +528,7 @@ impl AppHost<'_> {
                 let entity = match (self.entity(&a[0]), vec3(&a[1])) {
                     (Some(entity), Some(location)) => crate::scene::dimension_assoc::radial_source_at(
                         entity,
-                        codec::types::Vector3::new(location.x, location.y, location.z),
+                        document::types::Vector3::new(location.x, location.y, location.z),
                     )
                     .map(|source| {
                         if spec.name == "Radius Dimension" {
@@ -606,9 +606,9 @@ impl AppHost<'_> {
                 });
                 one(match body {
                     Some((origin, body)) => {
-                        let mut region = codec::entities::Region::new();
+                        let mut region = document::entities::Region::new();
                         region.point_of_reference =
-                            codec::types::Vector3::new(origin[0], origin[1], origin[2]);
+                            document::types::Vector3::new(origin[0], origin[1], origin[2]);
                         let handle = self.app.add_region_model(region, body);
                         self.created(handle)
                     }
@@ -678,7 +678,7 @@ impl AppHost<'_> {
                 let Some(point) = vec3(&a[2]).filter(|_| scale > 0.0 && !path.is_empty()) else {
                     return one(Value::Null);
                 };
-                let kind = codec::entities::UnderlayType::Pdf;
+                let kind = document::entities::UnderlayType::Pdf;
                 let pages = crate::modules::insert::pdf_attach::underlays_for_pages(
                     kind,
                     &[page],
@@ -1187,7 +1187,7 @@ impl AppHost<'_> {
             .collect();
         // Solids keep a construction history beside them; their records go
         // back with them.
-        let records: Vec<(Handle, Vec<(Handle, codec::objects::ObjectType)>)> = before
+        let records: Vec<(Handle, Vec<(Handle, document::objects::ObjectType)>)> = before
             .iter()
             .filter(|(_, entity)| {
                 matches!(
@@ -1266,11 +1266,11 @@ impl AppHost<'_> {
     }
 
     /// A solid from `body` with `history`, as the solid commands commit one.
-    fn solid(&mut self, body: kernel::brep::Body, history: codec::objects::SolidHistoryOperation) -> Value {
+    fn solid(&mut self, body: kernel::brep::Body, history: document::objects::SolidHistoryOperation) -> Value {
         let Some(sat) = crate::scene::convert::acis_export::solid_to_sat(&body) else {
             return Value::Null;
         };
-        let mut solid = codec::entities::Solid3D::new();
+        let mut solid = document::entities::Solid3D::new();
         solid.set_sat_document(&sat);
         solid.wires = crate::scene::model::solid_model::edge_wires(&body);
         let handle = self.app.add_solid_model(EntityType::Solid3D(solid), body, history);
@@ -1278,7 +1278,7 @@ impl AppHost<'_> {
     }
 
     /// A primitive solid whose history keeps its sizes editable.
-    fn primitive(&mut self, history: codec::objects::SolidHistoryOperation) -> Value {
+    fn primitive(&mut self, history: document::objects::SolidHistoryOperation) -> Value {
         match kernel::acis::rebuild_body(&history) {
             Ok(body) => self.solid(body, history),
             Err(_) => Value::Null,

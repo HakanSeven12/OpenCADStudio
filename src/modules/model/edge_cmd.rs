@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use kernel::brep::{Body, EdgeKey, FaceKey};
 

@@ -9,7 +9,7 @@
 
 use std::sync::Mutex;
 
-use codec::types::Handle;
+use document::types::Handle;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 
@@ -112,7 +112,7 @@ inventory::submit!(crate::command::CommandRegistration {
 // A picked cloud opens the dialog for it; None (or Enter) for the
 // drawing's default schemes.
 pub struct PointCloudColorMapCommand {
-    picked: Option<codec::EntityType>,
+    picked: Option<document::EntityType>,
 }
 
 impl PointCloudColorMapCommand {
@@ -150,7 +150,7 @@ impl CadCommand for PointCloudColorMapCommand {
         true
     }
 
-    fn inject_picked_entity(&mut self, entity: codec::EntityType) {
+    fn inject_picked_entity(&mut self, entity: document::EntityType) {
         self.picked = Some(entity);
     }
 

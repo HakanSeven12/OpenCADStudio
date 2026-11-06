@@ -49,7 +49,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn copy_svg_to_system_clipboard(
         &self,
         i: usize,
-        handles: &[codec::Handle],
+        handles: &[document::Handle],
     ) -> Task<Message> {
         let Some(svg) = crate::io::svg_clipboard::selection_svg(&self.tabs[i].scene, handles) else {
             return Task::none();
@@ -68,7 +68,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn copy_entities_to_clipboard(
         &mut self,
         i: usize,
-        handles: &[codec::Handle],
+        handles: &[document::Handle],
         base: glam::DVec3,
     ) -> usize {
         // Clone + dep-capture live in the shared kernel; storage stays here.
@@ -182,7 +182,7 @@ impl OpenCADStudio {
                 match scene.document.get_entity(*handle) {
                     // A reference is drawn from its definition, placed by the
                     // reference's transform.
-                    Some(codec::EntityType::Insert(insert)) => {
+                    Some(document::EntityType::Insert(insert)) => {
                         let base = crate::scene::render_graph::block_base_point(
                             &scene.document,
                             &insert.block_name,
@@ -192,7 +192,7 @@ impl OpenCADStudio {
                         for mut wire in scene.block_preview_wires(&insert.block_name) {
                             for p in &mut wire.points {
                                 if p.iter().all(|v| v.is_finite()) {
-                                    let q = xform.apply(codec::types::Vector3::new(
+                                    let q = xform.apply(document::types::Vector3::new(
                                         f64::from(p[0]),
                                         f64::from(p[1]),
                                         f64::from(p[2]),
@@ -233,7 +233,7 @@ impl OpenCADStudio {
                         .collect();
                     if nums.len() >= 2 {
                         let z = nums.get(2).copied().unwrap_or(0.0);
-                        let pt = codec::types::Vector3::new(nums[0], nums[1], z);
+                        let pt = document::types::Vector3::new(nums[0], nums[1], z);
                         let is_paper = self.tabs[i].scene.current_layout != "Model";
                         self.push_undo_snapshot(i, "BASE");
                         if is_paper {
@@ -415,7 +415,7 @@ impl OpenCADStudio {
             // Block Editor; every item follows when it is saved.
             cmd if cmd.starts_with("ARRAYEDIT_SOURCE:") => {
                 let handle =
-                    codec::Handle::new(cmd["ARRAYEDIT_SOURCE:".len()..].parse().unwrap_or(0));
+                    document::Handle::new(cmd["ARRAYEDIT_SOURCE:".len()..].parse().unwrap_or(0));
                 let document = &self.tabs[i].scene.document;
                 let source = crate::scene::assoc_array::array_of_insert(document, handle).and_then(
                     |array| {
@@ -443,7 +443,7 @@ impl OpenCADStudio {
             cmd if cmd.starts_with("ARRAYEDIT_ITEM:") => {
                 use crate::scene::assoc_array::{self, ItemEdit};
                 let mut parts = cmd["ARRAYEDIT_ITEM:".len()..].split(':');
-                let handle = codec::Handle::new(parts.next()?.parse().unwrap_or(0));
+                let handle = document::Handle::new(parts.next()?.parse().unwrap_or(0));
                 let op = parts.next().unwrap_or("");
                 let points: Vec<glam::DVec3> = parts
                     .filter_map(|p| {
@@ -887,9 +887,9 @@ impl OpenCADStudio {
             "PDFCLIP" | "DWFCLIP" | "DGNCLIP" => {
                 use crate::command::CadCommand;
                 let kind = match cmd {
-                    "DWFCLIP" => codec::entities::UnderlayType::Dwf,
-                    "DGNCLIP" => codec::entities::UnderlayType::Dgn,
-                    _ => codec::entities::UnderlayType::Pdf,
+                    "DWFCLIP" => document::entities::UnderlayType::Dwf,
+                    "DGNCLIP" => document::entities::UnderlayType::Dgn,
+                    _ => document::entities::UnderlayType::Pdf,
                 };
                 let command = crate::modules::insert::pdf_clip::PdfClipCommand::for_kind(kind);
                 self.command_line.push_info(&command.prompt());
@@ -929,11 +929,11 @@ impl OpenCADStudio {
             "XCLIP" => {
                 use crate::command::CadCommand;
                 use crate::modules::insert::xclip::XclipCommand;
-                let inserts: Vec<codec::Handle> = self.tabs[i]
+                let inserts: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
-                    .filter(|(_, e)| matches!(e, codec::EntityType::Insert(_)))
+                    .filter(|(_, e)| matches!(e, document::EntityType::Insert(_)))
                     .map(|(h, _)| *h)
                     .collect();
                 let command = if inserts.is_empty() {
@@ -1398,7 +1398,7 @@ impl OpenCADStudio {
                                 self.tabs[i].xref_unloaded.remove(key);
                                 self.tabs[i].xref_stat_cache.remove(key);
                             }
-                            let handles: rustc_hash::FxHashSet<codec::types::Handle> = self.tabs[i]
+                            let handles: rustc_hash::FxHashSet<document::types::Handle> = self.tabs[i]
                                 .scene
                                 .document
                                 .block_records
@@ -2004,7 +2004,7 @@ impl OpenCADStudio {
                     .selected_entities()
                     .iter()
                     .filter_map(|(_, e)| match e {
-                        codec::EntityType::Insert(ins) => Some(ins.block_name.clone()),
+                        document::EntityType::Insert(ins) => Some(ins.block_name.clone()),
                         _ => None,
                     })
                     .collect();
@@ -2089,10 +2089,10 @@ mod tests {
         app.tabs[i].scene.document.header.linear_unit_precision = 2;
         app.tabs[i].scene.define_block_raw(
             "PRE_BASE",
-            codec::Vector3::new(10.0, 5.0, 0.0),
-            vec![codec::EntityType::Line(codec::entities::Line::from_points(
-                codec::Vector3::new(10.0, 5.0, 0.0),
-                codec::Vector3::new(30.0, 5.0, 0.0),
+            document::Vector3::new(10.0, 5.0, 0.0),
+            vec![document::EntityType::Line(document::entities::Line::from_points(
+                document::Vector3::new(10.0, 5.0, 0.0),
+                document::Vector3::new(30.0, 5.0, 0.0),
             ))],
         );
         let _ = app.run_command_line("BLOCK");
@@ -2146,13 +2146,13 @@ mod tests {
     }
 
     fn define_line_block(app: &mut OpenCADStudio, tab: usize, name: &str) {
-        let mut line = codec::entities::Line::new();
-        line.start = codec::types::Vector3::ZERO;
-        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.start = document::types::Vector3::ZERO;
+        line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[tab]
             .scene
             .define_block_from_owned_entities(
-                vec![codec::EntityType::Line(line)],
+                vec![document::EntityType::Line(line)],
                 name,
                 glam::DVec3::ZERO,
             )
@@ -2173,7 +2173,7 @@ mod tests {
         define_line_block(&mut app, first, "ALPHA");
         app.record_block_insert("ALPHA");
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(2));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(2));
         app.active_tab = 1;
         define_line_block(&mut app, 1, "BETA");
         app.record_block_insert("BETA");
@@ -2266,13 +2266,13 @@ mod tests {
         let mut app = fresh_app();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = codec::entities::Line::new();
-        line.start = codec::types::Vector3::ZERO;
-        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.start = document::types::Vector3::ZERO;
+        line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![codec::EntityType::Line(line)],
+                vec![document::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -2291,13 +2291,13 @@ mod tests {
         app.refresh_block_palette();
         assert!(app.block_palette.blocks.is_empty());
         let i = app.active_tab;
-        let mut line = codec::entities::Line::new();
-        line.start = codec::types::Vector3::ZERO;
-        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.start = document::types::Vector3::ZERO;
+        line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![codec::EntityType::Line(line)],
+                vec![document::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -2311,12 +2311,12 @@ mod tests {
         let mut app = fresh_app();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = codec::entities::Line::new();
-        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![codec::EntityType::Line(line)],
+                vec![document::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -2342,21 +2342,21 @@ mod tests {
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         let line = |x: f64| {
-            let mut line = codec::entities::Line::new();
-            line.end = codec::types::Vector3::new(x, 0.0, 0.0);
-            codec::EntityType::Line(line)
+            let mut line = document::entities::Line::new();
+            line.end = document::types::Vector3::new(x, 0.0, 0.0);
+            document::EntityType::Line(line)
         };
         let insert = |name: &str| {
-            codec::EntityType::Insert(codec::entities::Insert::new(
+            document::EntityType::Insert(document::entities::Insert::new(
                 name.to_string(),
-                codec::types::Vector3::ZERO,
+                document::types::Vector3::ZERO,
             ))
         };
         let scene = &mut app.tabs[i].scene;
-        scene.define_block_raw("Part", codec::types::Vector3::ZERO, vec![line(1.0)]);
-        scene.define_block_raw("Holder", codec::types::Vector3::ZERO, vec![insert("Part")]);
-        scene.define_block_raw("Outer", codec::types::Vector3::ZERO, vec![insert("Holder")]);
-        scene.define_block_raw("Other", codec::types::Vector3::ZERO, vec![line(2.0)]);
+        scene.define_block_raw("Part", document::types::Vector3::ZERO, vec![line(1.0)]);
+        scene.define_block_raw("Holder", document::types::Vector3::ZERO, vec![insert("Part")]);
+        scene.define_block_raw("Outer", document::types::Vector3::ZERO, vec![insert("Holder")]);
+        scene.define_block_raw("Other", document::types::Vector3::ZERO, vec![line(2.0)]);
         app.refresh_block_palette();
         let preview = |app: &crate::app::OpenCADStudio, name: &str| {
             Rc::clone(&app.block_palette.current_entry(name).unwrap().preview)
@@ -2385,7 +2385,7 @@ mod tests {
         let fresh = !app.block_palette_stale();
         app.tabs[i]
             .scene
-            .redefine_block_raw("Part", codec::types::Vector3::ZERO, vec![line(5.0)])
+            .redefine_block_raw("Part", document::types::Vector3::ZERO, vec![line(5.0)])
             .unwrap();
         app.note_block_changes(fresh, ["Part"]);
         app.refresh_block_palette();
@@ -2425,12 +2425,12 @@ mod tests {
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         for k in 0..300 {
-            let mut line = codec::entities::Line::new();
-            line.end = codec::types::Vector3::new(1.0 + k as f64, 0.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.end = document::types::Vector3::new(1.0 + k as f64, 0.0, 0.0);
             app.tabs[i].scene.define_block_raw(
                 &format!("B{k:03}"),
-                codec::types::Vector3::ZERO,
-                vec![codec::EntityType::Line(line)],
+                document::types::Vector3::ZERO,
+                vec![document::EntityType::Line(line)],
             );
         }
         app.show_block_palette = true;
@@ -2486,8 +2486,8 @@ mod tests {
         let define = |app: &mut crate::app::OpenCADStudio, name: &str| {
             app.tabs[i].scene.define_block_raw(
                 name,
-                codec::types::Vector3::ZERO,
-                vec![codec::EntityType::Line(codec::entities::Line::new())],
+                document::types::Vector3::ZERO,
+                vec![document::EntityType::Line(document::entities::Line::new())],
             );
         };
         for k in 0..300 {
@@ -2624,7 +2624,7 @@ mod tests {
 
     fn add_dwg_xref(app: &mut OpenCADStudio, name: &str, saved: &str) {
         let i = app.active_tab;
-        let mut br = codec::tables::BlockRecord::new(name);
+        let mut br = document::tables::BlockRecord::new(name);
         br.flags.is_xref = true;
         br.xref_path = saved.to_string();
         br.handle = app.tabs[i].scene.document.allocate_handle();
@@ -2662,7 +2662,7 @@ mod tests {
 
     #[test]
     fn xref_overlay_on_image_errors() {
-        use codec::objects::{ImageDefinition, ObjectType};
+        use document::objects::{ImageDefinition, ObjectType};
         let mut app = fresh_app();
         let i = app.active_tab;
         let h = app.tabs[i].scene.document.allocate_handle();
@@ -2675,12 +2675,12 @@ mod tests {
             .insert(h, ObjectType::ImageDefinition(def));
         // Reference it so collect_entries lists it.
         let mut img =
-            codec::entities::RasterImage::new("img.png", codec::types::Vector3::ZERO, 8.0, 8.0);
+            document::entities::RasterImage::new("img.png", document::types::Vector3::ZERO, 8.0, 8.0);
         img.definition_handle = Some(h);
         app.tabs[i]
             .scene
             .document
-            .add_entity(codec::EntityType::RasterImage(img))
+            .add_entity(document::EntityType::RasterImage(img))
             .unwrap();
         let out = run_capture(&mut app, "XREF Overlay img.png");
         assert!(
@@ -2694,7 +2694,7 @@ mod tests {
         // CLI mirror of the palette F7 guard: reloading an image row reports
         // the drawing-only error, leaves its unloaded flag untouched, and
         // does not follow with a spurious no-match error.
-        use codec::objects::{ImageDefinition, ObjectType};
+        use document::objects::{ImageDefinition, ObjectType};
         let mut app = fresh_app();
         let i = app.active_tab;
         let h = app.tabs[i].scene.document.allocate_handle();
@@ -2706,12 +2706,12 @@ mod tests {
             .objects
             .insert(h, ObjectType::ImageDefinition(def));
         let mut img =
-            codec::entities::RasterImage::new("img.png", codec::types::Vector3::ZERO, 8.0, 8.0);
+            document::entities::RasterImage::new("img.png", document::types::Vector3::ZERO, 8.0, 8.0);
         img.definition_handle = Some(h);
         app.tabs[i]
             .scene
             .document
-            .add_entity(codec::EntityType::RasterImage(img))
+            .add_entity(document::EntityType::RasterImage(img))
             .unwrap();
         app.tabs[i].current_path = Some(std::path::PathBuf::from("C:/Drawings/host.dwg"));
         app.tabs[i].xref_unloaded.add(h.value());
@@ -2759,7 +2759,7 @@ mod tests {
 
     #[test]
     fn xref_detach_nested_guard_errors() {
-        use codec::tables::BlockRecord;
+        use document::tables::BlockRecord;
         // Host file on disk containing its own xref "INNER".
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_nested_{}_{}",
@@ -2770,7 +2770,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut host_doc = codec::Document::new();
+        let mut host_doc = document::Document::new();
         let mut inner = BlockRecord::new("INNER");
         inner.flags.is_xref = true;
         inner.xref_path = "inner.dwg".to_string();
@@ -2800,14 +2800,14 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut xref_doc = codec::Document::new();
+        let mut xref_doc = document::Document::new();
         xref_doc
             .layers
-            .add(codec::tables::Layer::new("WALLS"))
+            .add(document::tables::Layer::new("WALLS"))
             .unwrap();
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.layer = "WALLS".to_string();
-        xref_doc.add_entity(codec::EntityType::Line(line)).unwrap();
+        xref_doc.add_entity(document::EntityType::Line(line)).unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
         std::fs::write(&xref_path, &bytes).unwrap();
@@ -2836,11 +2836,11 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut xref_doc = codec::Document::new();
-        let mut line = codec::entities::Line::new();
+        let mut xref_doc = document::Document::new();
+        let mut line = document::entities::Line::new();
         line.common.plotstyle_flags = 0b11;
         line.common.plotstyle_handle = Some(xref_doc.allocate_handle());
-        xref_doc.add_entity(codec::EntityType::Line(line)).unwrap();
+        xref_doc.add_entity(document::EntityType::Line(line)).unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
         std::fs::write(&xref_path, &bytes).unwrap();
@@ -2859,7 +2859,7 @@ mod tests {
 
     #[test]
     fn xref_bind_pdf_errors() {
-        use codec::objects::{ObjectType, UnderlayDefinition};
+        use document::objects::{ObjectType, UnderlayDefinition};
         let mut app = fresh_app();
         let i = app.active_tab;
         let h = app.tabs[i].scene.document.allocate_handle();
@@ -2880,7 +2880,7 @@ mod tests {
 
     #[test]
     fn xref_bind_nested_guard_errors() {
-        use codec::tables::BlockRecord;
+        use document::tables::BlockRecord;
         let dir = std::env::temp_dir().join(format!(
             "ocs_xref_bind_nested_{}_{}",
             std::process::id(),
@@ -2890,7 +2890,7 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut host_doc = codec::Document::new();
+        let mut host_doc = document::Document::new();
         let mut inner = BlockRecord::new("INNER");
         inner.flags.is_xref = true;
         inner.xref_path = "inner.dwg".to_string();
@@ -3074,14 +3074,14 @@ mod tests {
                 .as_nanos()
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut xref_doc = codec::Document::new();
+        let mut xref_doc = document::Document::new();
         xref_doc
             .layers
-            .add(codec::tables::Layer::new("WALLS"))
+            .add(document::tables::Layer::new("WALLS"))
             .unwrap();
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.layer = "WALLS".to_string();
-        xref_doc.add_entity(codec::EntityType::Line(line)).unwrap();
+        xref_doc.add_entity(document::EntityType::Line(line)).unwrap();
         let bytes = crate::io::save_to_bytes(&xref_doc, "dwg", xref_doc.version).unwrap();
         let xref_path = dir.join("plan.dwg");
         std::fs::write(&xref_path, &bytes).unwrap();
@@ -3130,12 +3130,12 @@ mod tests {
         let mut app = fresh_app();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = codec::entities::Line::new();
-        line.end = codec::types::Vector3::new(10.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.end = document::types::Vector3::new(10.0, 0.0, 0.0);
         app.tabs[i]
             .scene
             .define_block_from_owned_entities(
-                vec![codec::EntityType::Line(line)],
+                vec![document::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )
@@ -3145,14 +3145,14 @@ mod tests {
         let first_tab_id = app.tabs[i].id;
 
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(99));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(99));
         let other = app.tabs.len() - 1;
-        let mut line = codec::entities::Line::new();
-        line.end = codec::types::Vector3::new(50.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.end = document::types::Vector3::new(50.0, 0.0, 0.0);
         app.tabs[other]
             .scene
             .define_block_from_owned_entities(
-                vec![codec::EntityType::Line(line)],
+                vec![document::EntityType::Line(line)],
                 "Widget",
                 glam::DVec3::ZERO,
             )

@@ -7,10 +7,10 @@
 //! an override over the style default, so editing one of these rows writes here
 //! and the change round-trips to file.
 
-use codec::entities::EntityCommon;
-use codec::types::Color;
-use codec::xdata::{ExtendedData, XDataValue};
-use codec::{Document, EntityType, Handle};
+use document::entities::EntityCommon;
+use document::types::Color;
+use document::xdata::{ExtendedData, XDataValue};
+use document::{Document, EntityType, Handle};
 
 // DXF group codes of the dimension variables surfaced on the leader panel.
 pub const DIMSCALE: i16 = 40; // overall scale       (real)
@@ -292,7 +292,7 @@ pub fn set_on_common(common: &mut EntityCommon, code: i16, value: Option<XDataVa
 
     // The new record takes the old one's place among the entity's records.
     let mut record = values.map(|vals| {
-        let mut record = codec::xdata::ExtendedDataRecord::new(app);
+        let mut record = document::xdata::ExtendedDataRecord::new(app);
         for v in vals {
             record.add_value(v);
         }
@@ -409,7 +409,7 @@ const NAMED_VARS: &[(&str, i16, VarKind)] = named_vars! {
 
 /// How DIMOVERRIDE shows a variable's current value (`<2.5000>`): reals to
 /// four places, colours by name for ByBlock and ByLayer.
-pub fn style_value_text(style: &codec::tables::DimStyle, code: i16) -> Option<String> {
+pub fn style_value_text(style: &document::tables::DimStyle, code: i16) -> Option<String> {
     fn color_name(index: i16) -> String {
         match index {
             0 => "BYBLOCK".to_string(),

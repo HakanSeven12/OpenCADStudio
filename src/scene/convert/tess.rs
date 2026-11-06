@@ -5,7 +5,7 @@ use super::super::*;
 /// layer is locked, so locked objects read as non-editable (they stay visible
 /// and snappable). No-op for unlocked layers.
 fn fade_if_locked(
-    document: &codec::Document,
+    document: &document::Document,
     e: &EntityType,
     color: [f32; 4],
     bg: [f32; 4],
@@ -21,7 +21,7 @@ fn fade_if_locked(
 /// break wherever its linetype restarts (every vertex when PLINEGEN is off) —
 /// the path `tessellate` splits into one wire per arc segment plus one wire of
 /// the straight segments. `None` for any other entity or render form.
-fn polyline_lt_path(document: &codec::Document, e: &EntityType) -> Option<Vec<[f64; 3]>> {
+fn polyline_lt_path(document: &document::Document, e: &EntityType) -> Option<Vec<[f64; 3]>> {
     use convert::acad_to_render::RenderObject;
     if !matches!(e, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
         return None;
@@ -58,8 +58,8 @@ pub(crate) struct BlockObjectOptions {
 }
 
 fn block_object_style(
-    document: &codec::Document,
-    insert: &codec::entities::Insert,
+    document: &document::Document,
+    insert: &document::entities::Insert,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
 ) -> BlockObjectStyle {
@@ -78,7 +78,7 @@ fn block_object_style(
         .layers
         .get(&insert.common.layer)
         .and_then(|layer| match &layer.color {
-            codec::types::Color::Index(index) => Some(*index),
+            document::types::Color::Index(index) => Some(*index),
             _ => None,
         })
         .unwrap_or(0);
@@ -103,8 +103,8 @@ fn block_object_style(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn expand_block_object(
-    document: &codec::Document,
-    insert: &codec::entities::Insert,
+    document: &document::Document,
+    insert: &document::entities::Insert,
     owner: Handle,
     selected: bool,
     active_viewport: Option<Handle>,
@@ -224,10 +224,10 @@ pub(crate) fn expand_block_object(
 /// `None` when any link is missing (DXF files, older DWGs) — the caller then
 /// falls back to a geometric heuristic.
 fn section_arrow_dir_from_views(
-    document: &codec::Document,
-    s: &codec::entities::SectionSymbol,
+    document: &document::Document,
+    s: &document::entities::SectionSymbol,
 ) -> Option<[f64; 2]> {
-    use codec::types::Handle as AHandle;
+    use document::types::Handle as AHandle;
     if s.view_rep_handle.is_null() {
         return None;
     }
@@ -305,9 +305,9 @@ fn section_arrow_dir_from_views(
 ///   ([`section_arrow_dir_from_views`]); only when that chain is unavailable
 ///   does it fall back to the 90°-CCW rotation of END-A→END-B.
 fn section_symbol_wires(
-    document: &codec::Document,
-    s: &codec::entities::SectionSymbol,
-    style: Option<&codec::entities::SectionViewStyle>,
+    document: &document::Document,
+    s: &document::entities::SectionSymbol,
+    style: Option<&document::entities::SectionViewStyle>,
     h: Handle,
     color: [f32; 4],
     sel: bool,
@@ -358,7 +358,7 @@ fn section_symbol_wires(
     let arrow_kind = match style {
         Some(st) if st.arrow_start_handle != 0 => arrow_from_block(
             document,
-            codec::types::Handle::from(st.arrow_start_handle),
+            document::types::Handle::from(st.arrow_start_handle),
             arrow_size as f32,
         ),
         _ => ArrowKind::Triangle {
@@ -498,7 +498,7 @@ struct ProxyInherit {
 /// resolve against its sub-entity layer (ByLayer) or the proxy entity itself
 /// (ByBlock); primitives sharing a style share one wire.
 fn proxy_preview_wires(
-    document: &codec::Document,
+    document: &document::Document,
     e: &EntityType,
     dec: &convert::proxy_graphics::Decoded,
     own: ProxyInherit,
@@ -530,13 +530,13 @@ fn proxy_preview_wires(
             ProxyColor::ByBlock => (own.color, own.aci),
             ProxyColor::ByLayer => {
                 let aci = match document.layers.get(layer_name).map(|l| &l.color) {
-                    Some(codec::types::Color::Index(i)) => *i,
+                    Some(document::types::Color::Index(i)) => *i,
                     _ => 0,
                 };
                 (show(layer.color), aci)
             }
             ProxyColor::Aci(a) => (
-                show(convert::tess_util::aci_to_rgba(&codec::types::Color::Index(a))),
+                show(convert::tess_util::aci_to_rgba(&document::types::Color::Index(a))),
                 a,
             ),
             ProxyColor::Rgb(r, g, b) => {
@@ -569,7 +569,7 @@ fn proxy_preview_wires(
         };
         let lw_px = match style.lineweight {
             w if w >= 0 => {
-                view::render::lineweight_to_px(&codec::types::LineWeight::Value(w))
+                view::render::lineweight_to_px(&document::types::LineWeight::Value(w))
             }
             -1 if style.layer.is_some() => layer.lw_px,
             _ => own.line_weight_px,
@@ -653,7 +653,7 @@ fn proxy_preview_wires(
 /// (so DIMCLRT / DIMSTYLE colours win over the synthetic Text's defaults).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tessellate_entity_dim_text(
-    document: &codec::Document,
+    document: &document::Document,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
@@ -691,7 +691,7 @@ pub(crate) fn tessellate_entity_dim_text(
 }
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn tessellate_entity(
-    document: &codec::Document,
+    document: &document::Document,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
@@ -751,7 +751,7 @@ pub(crate) fn tessellate_entity(
 }
 #[allow(clippy::too_many_arguments)]
 fn tessellate_entity_inner(
-    document: &codec::Document,
+    document: &document::Document,
     selected: &HashSet<Handle>,
     active_viewport: Option<Handle>,
     bg_color: [f32; 4],
@@ -970,7 +970,7 @@ fn tessellate_entity_inner(
             .as_deref()
             .map(std::borrow::Cow::Borrowed),
         EntityType::Extended(entity) => match &entity.data {
-            codec::entities::ExtendedEntityData::Proxy(proxy) => {
+            document::entities::ExtendedEntityData::Proxy(proxy) => {
                 Some(std::borrow::Cow::Owned(proxy.graphics.data()))
             }
             _ => None,
@@ -1284,7 +1284,7 @@ fn tessellate_entity_inner(
 
     if let EntityType::Insert(ins) = e {
         // `insert_point` is in the OCS of `normal`.
-        let w = codec::types::Matrix3::arbitrary_axis(ins.normal) * ins.insert_point;
+        let w = document::types::Matrix3::arbitrary_axis(ins.normal) * ins.insert_point;
         let ip = glam::DVec3::new(w.x, w.y, w.z);
         let marker = WireModel {
             bg_adapt: None,
@@ -1887,7 +1887,7 @@ pub(crate) fn wire_points_aabb(w: &WireModel) -> [f32; 4] {
 /// Assign `entity_box` as `w`'s cullable box, widened to cover the wire's
 /// actual tessellated geometry and pick-only geometry.
 ///
-/// `entity_aabb`'s box comes from opencadcodec's `bounding_box()`, which for a
+/// `entity_aabb`'s box comes from document's `bounding_box()`, which for a
 /// polyline is often the box of its stored vertices — it may know nothing about
 /// bulge arcs between them, the band a width paints around them, or the wall a
 /// thickness extrudes. Hit-testing rejects on this box before it looks at the
@@ -1941,8 +1941,8 @@ pub(crate) fn set_wire_aabb(w: &mut WireModel, entity_box: [f32; 4]) {
     w.aabb = out;
 }
 
-pub(crate) fn entity_bounds(e: &codec::EntityType) -> ([f64; 3], [f64; 3]) {
-    if let codec::EntityType::Region(region) = e {
+pub(crate) fn entity_bounds(e: &document::EntityType) -> ([f64; 3], [f64; 3]) {
+    if let document::EntityType::Region(region) = e {
         if region.wires.is_empty() {
             if let Some(bounds) = super::solid3d_tess::kernel_region_body(region)
                 .and_then(|body| kernel::brep::body_bounds(&body))
@@ -1951,19 +1951,19 @@ pub(crate) fn entity_bounds(e: &codec::EntityType) -> ([f64; 3], [f64; 3]) {
             }
         }
     }
-    if let codec::EntityType::Line(line) = e {
+    if let document::EntityType::Line(line) = e {
         if let Some(association) =
-            codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
+            document::entities::CenterMarkAssociation::read(&line.common.extended_data)
         {
             return crate::scene::centermark::mark_bounds(&association);
         }
     }
-    if let codec::EntityType::Solid(solid) = e {
+    if let document::EntityType::Solid(solid) = e {
         if let Some(bounds) = crate::entities::solid::wcs_bounds(solid) {
             return (bounds.min, bounds.max);
         }
     }
-    if let codec::EntityType::Spline(spline) = e {
+    if let document::EntityType::Spline(spline) = e {
         if let Some(bounds) = crate::entities::spline::fit_geometry_bounds(spline) {
             return (bounds.min, bounds.max);
         }
@@ -1980,15 +1980,15 @@ pub(crate) fn entity_bounds(e: &codec::EntityType) -> ([f64; 3], [f64; 3]) {
 /// reference spans what its definition draws once the reference transform is
 /// applied to it.
 pub(crate) fn entity_bounds_in(
-    document: &codec::Document,
-    e: &codec::EntityType,
+    document: &document::Document,
+    e: &document::EntityType,
 ) -> ([f64; 3], [f64; 3]) {
-    if let codec::EntityType::Underlay(underlay) = e {
+    if let document::EntityType::Underlay(underlay) = e {
         if let Some(bounds) = crate::entities::underlay::world_bounds(underlay, document) {
             return bounds;
         }
     }
-    if let codec::EntityType::Insert(insert) = e {
+    if let document::EntityType::Insert(insert) = e {
         if let Some(bounds) = crate::app::helpers::insert_world_bounds(document, insert) {
             return (
                 [bounds.min.x, bounds.min.y, bounds.min.z],
@@ -2000,8 +2000,8 @@ pub(crate) fn entity_bounds_in(
 }
 
 /// [`entity_aabb`] with the document (see [`entity_bounds_in`]).
-pub(crate) fn entity_aabb_in(document: &codec::Document, e: &codec::EntityType) -> [f32; 4] {
-    if let codec::EntityType::Underlay(underlay) = e {
+pub(crate) fn entity_aabb_in(document: &document::Document, e: &document::EntityType) -> [f32; 4] {
+    if let document::EntityType::Underlay(underlay) = e {
         if let Some((min, max)) = crate::entities::underlay::world_bounds(underlay, document) {
             return [min[0] as f32, min[1] as f32, max[0] as f32, max[1] as f32];
         }
@@ -2009,7 +2009,7 @@ pub(crate) fn entity_aabb_in(document: &codec::Document, e: &codec::EntityType) 
     entity_aabb(e)
 }
 
-pub(crate) fn entity_aabb(e: &codec::EntityType) -> [f32; 4] {
+pub(crate) fn entity_aabb(e: &document::EntityType) -> [f32; 4] {
     let (min, max) = entity_bounds(e);
     let min_x = min[0] as f32;
     let min_y = min[1] as f32;
@@ -2031,7 +2031,7 @@ pub(crate) fn entity_aabb(e: &codec::EntityType) -> [f32; 4] {
 /// (which `entity_aabb` collapses to `UNBOUNDED_AABB`). Quadtree
 /// indexing uses this so changing `world_offset` doesn't invalidate
 /// the index.
-pub(crate) fn entity_world_aabb_f64(e: &codec::EntityType) -> Option<[f64; 4]> {
+pub(crate) fn entity_world_aabb_f64(e: &document::EntityType) -> Option<[f64; 4]> {
     let (min, max) = entity_bounds(e);
     let (xmin, ymin, xmax, ymax) = (min[0], min[1], max[0], max[1]);
     if xmin == xmax && ymin == ymax {
@@ -2047,8 +2047,8 @@ pub(crate) fn entity_world_aabb_f64(e: &codec::EntityType) -> Option<[f64; 4]> {
 /// `Viewport` are sized only after extra transformation; tessellation
 /// already handles them via dedicated code paths. `Block`/`BlockEnd`
 /// are block-defn sentinels with no geometry.
-pub(crate) fn is_unindexable_entity(e: &codec::EntityType) -> bool {
-    use codec::EntityType as E;
+pub(crate) fn is_unindexable_entity(e: &document::EntityType) -> bool {
+    use document::EntityType as E;
     matches!(
         e,
         E::Insert(_) | E::Viewport(_) | E::Block(_) | E::BlockEnd(_)
@@ -2061,8 +2061,8 @@ mod viewport_colour_tests {
 
     #[test]
     fn inactive_viewport_frame_uses_entity_and_layer_colour() {
-        use codec::types::Color;
-        let mut document = codec::Document::new();
+        use document::types::Color;
+        let mut document = document::Document::new();
         document.layers.get_mut("0").unwrap().color = Color::Rgb {
             r: 51,
             g: 102,
@@ -2080,7 +2080,7 @@ mod viewport_colour_tests {
                     [0.6, 0.2, 0.4, 1.0],
                 ),
             ] {
-                let mut viewport = codec::entities::Viewport::new();
+                let mut viewport = document::entities::Viewport::new();
                 viewport.id = 2;
                 viewport.common.handle = document.allocate_handle();
                 viewport.common.color = color;

@@ -15,7 +15,7 @@
 // block record in place, so there is no copy-back and no transform — the space
 // render filter (`current_layout_block_handle`) already draws only the block.
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -69,11 +69,11 @@ pub struct BlockEditSession {
     pub editor_camera: crate::scene::view::camera::Camera,
     /// Transient UCS being manipulated in this block tab. On commit its full
     /// frame is baked into the definition and this returns to `None`.
-    pub editor_ucs: Option<codec::tables::Ucs>,
+    pub editor_ucs: Option<document::tables::Ucs>,
     /// Snapshot of the document prior to creating an empty new block for editing.
     /// If the session is closed without saving, this snapshot is restored so
     /// no block record remains in the block table.
-    pub unpersisted_pre_document: Option<codec::Document>,
+    pub unpersisted_pre_document: Option<document::Document>,
 }
 
 // ── BEDIT pick command ─────────────────────────────────────────────────────

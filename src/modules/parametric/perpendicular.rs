@@ -1,4 +1,4 @@
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -32,7 +32,7 @@ impl PerpendicularConstraintCommand {
         )
     }
 
-    fn distance_to_axis(point: DVec3, endpoints: [codec::types::Vector3; 2]) -> f64 {
+    fn distance_to_axis(point: DVec3, endpoints: [document::types::Vector3; 2]) -> f64 {
         kernel::space::Vec3::from(point.to_array())
             .distance_to_line(
                 kernel::space::Vec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z),
@@ -213,8 +213,8 @@ impl CadCommand for PerpendicularConstraintCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     #[test]
     fn command_preserves_pick_order_for_the_solver() {
@@ -252,11 +252,11 @@ mod tests {
     #[test]
     fn preselection_uses_the_first_straight_polyline_segment() {
         let handle = Handle::new(11);
-        let mut polyline = codec::entities::LwPolyline::new();
+        let mut polyline = document::entities::LwPolyline::new();
         polyline.vertices = vec![
-            codec::entities::LwVertex::with_bulge(codec::types::Vector2::new(0.0, 0.0), 1.0),
-            codec::entities::LwVertex::from_coords(4.0, 0.0),
-            codec::entities::LwVertex::from_coords(8.0, 0.0),
+            document::entities::LwVertex::with_bulge(document::types::Vector2::new(0.0, 0.0), 1.0),
+            document::entities::LwVertex::from_coords(4.0, 0.0),
+            document::entities::LwVertex::from_coords(8.0, 0.0),
         ];
 
         let pick = PerpendicularConstraintCommand::preselected_reference(

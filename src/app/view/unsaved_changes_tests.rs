@@ -18,18 +18,18 @@ fn dirty_definition_edit() -> OpenCADStudio {
     let i = app.active_tab;
     app.tabs[i].scene.define_block_raw(
         "EDIT_ME",
-        codec::types::Vector3::ZERO,
-        vec![codec::EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::UNIT_X,
+        document::types::Vector3::ZERO,
+        vec![document::EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::UNIT_X,
         ))],
     );
     let reference = app.tabs[i]
         .scene
         .document
-        .add_entity(codec::EntityType::Insert(codec::entities::Insert::new(
+        .add_entity(document::EntityType::Insert(document::entities::Insert::new(
             "EDIT_ME",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
         )))
         .unwrap();
     let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));

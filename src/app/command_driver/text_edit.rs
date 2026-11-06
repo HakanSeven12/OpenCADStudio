@@ -61,7 +61,7 @@ impl OpenCADStudio {
     pub(super) fn handle_suspend_for_text_input(
         &mut self,
         pos: glam::DVec3,
-        entity: codec::entities::Text,
+        entity: document::entities::Text,
     ) {
         let i = self.active_tab;
         self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
@@ -132,7 +132,7 @@ impl OpenCADStudio {
             !self.tabs[i].scene.is_layer_locked(*handle)
                 && matches!(
                     self.tabs[i].scene.document.get_entity(*handle),
-                    Some(codec::EntityType::Dimension(_))
+                    Some(document::EntityType::Dimension(_))
                 )
         });
         if handles.is_empty() {
@@ -141,15 +141,15 @@ impl OpenCADStudio {
         } else {
             self.push_undo_snapshot(i, "DIMEDIT");
             for handle in &handles {
-                if let Some(codec::EntityType::Dimension(dimension)) =
+                if let Some(document::EntityType::Dimension(dimension)) =
                     self.tabs[i].scene.document.get_entity_mut(*handle)
                 {
                     use crate::command::DimensionEditOperation as Operation;
                     match &operation {
                         Operation::Home => {
                             let base = dimension.base_mut();
-                            base.text_middle_point = codec::types::Vector3::ZERO;
-                            base.insertion_point = codec::types::Vector3::ZERO;
+                            base.text_middle_point = document::types::Vector3::ZERO;
+                            base.insertion_point = document::types::Vector3::ZERO;
                             base.text_user_positioned = false;
                             base.text_rotation = 0.0;
                         }
@@ -162,10 +162,10 @@ impl OpenCADStudio {
                             dimension.base_mut().text_rotation = degrees.to_radians();
                         }
                         Operation::Oblique(degrees) => match &mut **dimension {
-                            codec::entities::Dimension::Linear(value) => {
+                            document::entities::Dimension::Linear(value) => {
                                 value.ext_line_rotation = degrees.to_radians();
                             }
-                            codec::entities::Dimension::Aligned(value) => {
+                            document::entities::Dimension::Aligned(value) => {
                                 value.ext_line_rotation = degrees.to_radians();
                             }
                             _ => {}
@@ -206,23 +206,23 @@ impl OpenCADStudio {
         let mut is_dim = false;
         if let Some(entity) = self.tabs[i].scene.document.get_entity_mut(handle) {
             match entity {
-                codec::EntityType::Text(t) => {
+                document::EntityType::Text(t) => {
                     t.value = new_text;
                     updated = true;
                 }
-                codec::EntityType::MText(t) => {
+                document::EntityType::MText(t) => {
                     t.value = new_text;
                     updated = true;
                 }
-                codec::EntityType::AttributeDefinition(a) => {
+                document::EntityType::AttributeDefinition(a) => {
                     a.default_value = new_text;
                     updated = true;
                 }
-                codec::EntityType::AttributeEntity(a) => {
+                document::EntityType::AttributeEntity(a) => {
                     a.set_value(new_text);
                     updated = true;
                 }
-                codec::EntityType::Dimension(d) => {
+                document::EntityType::Dimension(d) => {
                     // Empty string resets to auto-measured value; otherwise set override.
                     crate::entities::dimension::set_dimension_text_override(
                         d.base_mut(),

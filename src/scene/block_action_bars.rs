@@ -1,6 +1,6 @@
 //! Read-only groups of native actions for parameter action bars.
 use super::block_actions::{self as actions, Kind};
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use glam::DVec3;
 
 #[derive(Clone, Copy, Debug)]
@@ -92,7 +92,7 @@ pub(crate) fn groups(doc: &Document, definition: Handle) -> Vec<Group> {
 }
 
 pub(crate) fn is_action(doc: &Document, handle: Handle) -> bool {
-    use codec::objects::{DynamicBlockData as D, ObjectType};
+    use document::objects::{DynamicBlockData as D, ObjectType};
     matches!(doc.objects.get(&handle),Some(ObjectType::DynamicBlock(object)) if matches!(object.data,
         D::MoveAction(_)|D::StretchAction(_)|D::PolarStretchAction(_)|D::RotateAction(_)|D::ScaleAction(_)|D::FlipAction(_)|D::ArrayAction(_)))
 }

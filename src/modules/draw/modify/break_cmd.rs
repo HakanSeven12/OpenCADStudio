@@ -9,11 +9,11 @@
 
 use crate::modules::draw::modify::spline_ops::{spline_cut, spline_nearest_t, spline_range};
 use crate::t;
-use codec::entities::{
+use document::entities::{
     Arc as ArcEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline, Spline as SplineEnt,
 };
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -118,7 +118,7 @@ fn break_arc(arc: &ArcEnt, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
         .collect()
 }
 
-fn break_circle(circle: &codec::entities::Circle, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
+fn break_circle(circle: &document::entities::Circle, p1: DVec3, p2: DVec3) -> Vec<EntityType> {
     let curve = crate::entities::curve::circle_curve(circle);
     let Some(spans) = picked_spans(&curve, p1, p2) else {
         return vec![EntityType::Circle(circle.clone())];
@@ -427,8 +427,8 @@ inventory::submit!(crate::command::CommandRegistration { names: &["BREAK"] }); /
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::LwVertex;
-    use codec::types::Vector2;
+    use document::entities::LwVertex;
+    use document::types::Vector2;
 
     #[test]
     fn first_option_replaces_the_selection_point_and_at_reuses_it() {

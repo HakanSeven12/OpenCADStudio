@@ -54,10 +54,10 @@ use std::collections::{HashMap, HashSet};
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::entities::{EntityType, Line};
-use codec::objects::ObjectType;
-use codec::tables::BlockRecord;
-use codec::types::{Handle, Vector3};
+use document::entities::{EntityType, Line};
+use document::objects::ObjectType;
+use document::tables::BlockRecord;
+use document::types::{Handle, Vector3};
 use OpenCADStudio::scene::named_parameters::DrivingValue;
 use OpenCADStudio::scene::parametric_constraints::{
     ConstraintKind, ParametricRef, ParametricScope,

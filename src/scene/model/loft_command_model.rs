@@ -2,9 +2,9 @@
 
 use super::sweep_model::embedded_path;
 use crate::command::{ExtrudeMode, LoftOptions, LoftSectionSelection};
-use codec::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
-use codec::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
-use codec::{EntityType, Handle};
+use document::entities::{EmbeddedEntity, Point, Surface, SurfaceData, SurfaceKind};
+use document::objects::{SolidHistoryLoft, SolidHistoryLoftParameters, SolidHistoryNodeBase};
+use document::{EntityType, Handle};
 use kernel::brep::Body;
 
 pub(crate) fn embedded_section(entity: &EntityType) -> Option<EmbeddedEntity> {

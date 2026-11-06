@@ -1,8 +1,8 @@
-use codec::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
-use codec::objects::{ClassObjectData, ObjectType};
-use codec::types::{Color, Handle, Vector3};
-use codec::xdata::{ExtendedDataRecord, XDataValue};
-use codec::EntityType;
+use document::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+use document::objects::{ClassObjectData, ObjectType};
+use document::types::{Color, Handle, Vector3};
+use document::xdata::{ExtendedDataRecord, XDataValue};
+use document::EntityType;
 use OpenCADStudio::scene::Scene;
 
 fn add_slice(scene: &mut Scene) -> Handle {
@@ -32,7 +32,7 @@ fn add_slice(scene: &mut Scene) -> Handle {
     })))
 }
 
-fn assert_section_graph(document: &codec::Document, extension: &str) {
+fn assert_section_graph(document: &document::Document, extension: &str) {
     let (handle, section) = document
         .entities()
         .find_map(|entity| match entity {

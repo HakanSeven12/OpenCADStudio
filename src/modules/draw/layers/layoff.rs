@@ -51,11 +51,11 @@ impl CadCommand for LayerOffCommand {
         true
     }
 
-    fn inject_picked_entity(&mut self, entity: codec::EntityType) {
+    fn inject_picked_entity(&mut self, entity: document::EntityType) {
         self.picked = Some(entity.common().layer.clone());
     }
 
-    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: document::Handle, _pt: DVec3) -> CmdResult {
         let Some(layer) = self.picked.take().filter(|_| !handle.is_null()) else {
             return CmdResult::NeedPoint;
         };

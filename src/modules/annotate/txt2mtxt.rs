@@ -9,11 +9,11 @@
 //! starts a paragraph; unless line spacing is forced uniform, each paragraph
 //! keeps its own pitch (`\pxsm` / `\psm`). A height change starts `\H<h>;`.
 
-use codec::entities::{
+use document::entities::{
     AttachmentPoint, DrawingDirection, LineSpacingStyle, MText, TextHorizontalAlignment as HA,
 };
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 
 use crate::app::settings::Txt2MtxtSettings;
 use crate::entities::text_support::{resolve_dxf_special_chars, text_local_bounds};
@@ -231,7 +231,7 @@ fn separate(p: &Piece, doc: &Document) -> Vec<EntityType> {
             // The drawn words, grouped into lines by their baseline.
             // ponytail: a line keeps only its words, not inline formatting.
             let words = crate::entities::mtext::explode_mtext(m, doc);
-            let mut lines: Vec<(f64, Vec<(f64, &codec::entities::Text)>)> = Vec::new();
+            let mut lines: Vec<(f64, Vec<(f64, &document::entities::Text)>)> = Vec::new();
             for word in &words {
                 let EntityType::Text(t) = word else { continue };
                 let at = [t.insertion_point.x, t.insertion_point.y];

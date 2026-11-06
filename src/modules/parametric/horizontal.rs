@@ -1,4 +1,4 @@
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -79,12 +79,12 @@ impl HorizontalConstraintCommand {
         }
     }
 
-    fn direction(&self) -> codec::types::Vector3 {
+    fn direction(&self) -> document::types::Vector3 {
         let direction = match self.kind {
             ConstraintKind::Vertical => self.plane.y.normalize_or(DVec3::Y),
             _ => self.plane.x.normalize_or(DVec3::X),
         };
-        codec::types::Vector3::new(direction.x, direction.y, direction.z)
+        document::types::Vector3::new(direction.x, direction.y, direction.z)
     }
 
     fn invalid_object(&self) -> CmdResult {
@@ -112,7 +112,7 @@ impl HorizontalConstraintCommand {
         }
     }
 
-    fn distance_to_axis(point: DVec3, endpoints: [codec::types::Vector3; 2]) -> f64 {
+    fn distance_to_axis(point: DVec3, endpoints: [document::types::Vector3; 2]) -> f64 {
         kernel::space::Vec3::from(point.to_array())
             .distance_to_line(
                 kernel::space::Vec3::new(endpoints[0].x, endpoints[0].y, endpoints[0].z),
@@ -305,7 +305,7 @@ impl CadCommand for HorizontalConstraintCommand {
                 }
             }
             Step::FirstPoint | Step::SecondPoint(_) => {
-                let world = codec::types::Vector3::new(point.x, point.y, point.z);
+                let world = document::types::Vector3::new(point.x, point.y, point.z);
                 if !is_parametric_point_near(&entity, world) {
                     return Self::invalid_point();
                 }
@@ -352,8 +352,8 @@ impl CadCommand for HorizontalConstraintCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     #[test]
     fn object_pick_captures_the_working_x_direction() {

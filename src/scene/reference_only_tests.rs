@@ -4,7 +4,7 @@
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::pick::hit_test;
 use crate::scene::Scene;
-use codec::Handle;
+use document::Handle;
 use glam::{DVec3, Mat4};
 use iced::{Point, Rectangle, Size};
 

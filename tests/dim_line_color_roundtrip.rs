@@ -4,11 +4,11 @@
 // is silently lost, which is exactly why the row was kept read-only before.
 // This is the regression guard for that persistence.
 
-use codec::entities::{Dimension, DimensionLinear, Leader, Line};
-use codec::tables::BlockRecord;
-use codec::types::{Color, Vector3};
-use codec::xdata::XDataValue;
-use codec::{Document, EntityType, Handle};
+use document::entities::{Dimension, DimensionLinear, Leader, Line};
+use document::tables::BlockRecord;
+use document::types::{Color, Vector3};
+use document::xdata::XDataValue;
+use document::{Document, EntityType, Handle};
 use OpenCADStudio::entities::dim_override as dov;
 use OpenCADStudio::scene::Scene;
 

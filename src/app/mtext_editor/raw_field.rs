@@ -7,8 +7,8 @@
 //! tree from the codes of its fields.
 use super::raw_adapter::EditError;
 use super::*;
-use codec::fields::NewField;
-use codec::objects::ObjectType;
+use document::fields::NewField;
+use document::objects::ObjectType;
 use std::ops::Range;
 
 /// A FIELD host's field texts in the edited value, and their placeholders.
@@ -26,7 +26,7 @@ pub struct FieldHost {
 }
 
 /// The host's `_text` container: xdictionary → ACAD_FIELD → TEXT.
-fn container(doc: &codec::Document, host: Handle) -> Option<Handle> {
+fn container(doc: &document::Document, host: Handle) -> Option<Handle> {
     let xdict = doc.get_entity(host)?.common().xdictionary_handle?;
     let ObjectType::Dictionary(x) = doc.objects.get(&xdict)? else {
         return None;
@@ -53,13 +53,13 @@ fn placeholders(template: &str) -> Option<Vec<String>> {
 impl FieldHost {
     /// The host's fields located in `value`, when the template and the
     /// cached field values reproduce it exactly.
-    pub(super) fn locate(doc: &codec::Document, host: Handle, value: &str) -> Option<Self> {
+    pub(super) fn locate(doc: &document::Document, host: Handle, value: &str) -> Option<Self> {
         let container = container(doc, host)?;
         let Some(ObjectType::Field(field)) = doc.objects.get(&container) else {
             return None;
         };
         let placeholders = placeholders(&field.code)?;
-        let spans = codec::fields::field_spans(doc, host, value)?;
+        let spans = document::fields::field_spans(doc, host, value)?;
         (spans.len() == placeholders.len()).then(|| Self {
             container: Some(container),
             inserted: vec![None; spans.len()],
@@ -168,7 +168,7 @@ impl FieldHost {
     /// Write the template and display checksum for `value` into the
     /// container, in both of the document's FIELD stores. Nothing else in
     /// any FIELD object changes.
-    pub(super) fn save(&self, doc: &mut codec::Document, host: Handle, value: &str) {
+    pub(super) fn save(&self, doc: &mut document::Document, host: Handle, value: &str) {
         let Some(container) = self
             .container
             .filter(|_| !self.removed && self.inserted.iter().all(Option::is_none))
@@ -183,7 +183,7 @@ impl FieldHost {
             field.code = template;
             for child in &mut field.child_values {
                 if child.key == "ACFD_FIELDTEXT_CHECKSUM" {
-                    let mut checksum = codec::entities::CellValue::number(checksum(value));
+                    let mut checksum = document::entities::CellValue::number(checksum(value));
                     checksum.flags = child.value.flags;
                     checksum.formatted_value.clear();
                     child.value = checksum;
@@ -207,7 +207,7 @@ impl FieldHost {
 
     /// Replace the host's field tree by one with a FIELD for every span: the
     /// existing fields from their codes, the inserted ones as made.
-    fn rebuild(&self, doc: &mut codec::Document, host: Handle, value: &str) {
+    fn rebuild(&self, doc: &mut document::Document, host: Handle, value: &str) {
         let mut old: Vec<Handle> = self
             .container
             .map(|c| doc.fields.iter().filter(|(_, f)| f.owner == c).map(|(h, _)| *h).collect())
@@ -217,7 +217,7 @@ impl FieldHost {
         for ((span, placeholder), inserted) in self.spans.iter().zip(&self.placeholders).zip(&self.inserted) {
             let field = inserted.clone().or_else(|| {
                 let n = placeholder.strip_prefix("%<\\_FldIdx ")?.strip_suffix(">%")?.trim();
-                let (code, objects) = codec::fields::inline_code(doc, *old.get(n.parse::<usize>().ok()?)?)?;
+                let (code, objects) = document::fields::inline_code(doc, *old.get(n.parse::<usize>().ok()?)?)?;
                 let mut field = NewField::new(code, &value[span.clone()]);
                 field.objects = objects;
                 Some(field)

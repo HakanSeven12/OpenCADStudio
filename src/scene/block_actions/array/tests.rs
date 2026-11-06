@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::block_distance_parameter as distance;
-use codec::entities::Insert;
+use document::entities::Insert;
 
 fn setup(
     kind: distance::Kind,

@@ -39,9 +39,9 @@ use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Instant;
 
-use codec::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
-use codec::types::{Vector2, Vector3};
-use codec::{Document, DxfReader, DxfWriter, EntityType};
+use document::entities::{Arc as AcadArc, Circle, Ellipse, Line, LwPolyline, LwVertex};
+use document::types::{Vector2, Vector3};
+use document::{Document, DxfReader, DxfWriter, EntityType};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Color, Point, Rectangle};
 
@@ -797,7 +797,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "0".to_string(),
                 color: Color::TRANSPARENT,
-                stored_color: codec::types::Color::Index(7),
+                stored_color: document::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -806,7 +806,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "DRAWING".to_string(),
                 color: Color::TRANSPARENT,
-                stored_color: codec::types::Color::Index(7),
+                stored_color: document::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -815,7 +815,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "DIMENSIONS".to_string(),
                 color: Color::TRANSPARENT,
-                stored_color: codec::types::Color::Index(7),
+                stored_color: document::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -824,7 +824,7 @@ fn bench_ui_ribbon_view_construction(runner: &mut BenchmarkRunner) {
             LayerInfo {
                 name: "ANNOTATIONS".to_string(),
                 color: Color::TRANSPARENT,
-                stored_color: codec::types::Color::Index(7),
+                stored_color: document::types::Color::Index(7),
                 visible: true,
                 frozen: false,
                 locked: false,
@@ -1167,9 +1167,9 @@ fn bench_ui_plotstyle_layer_usage(runner: &mut BenchmarkRunner) {
 
     let mut doc = Document::new();
     for i in 0..200 {
-        let mut layer = codec::tables::Layer::new(&format!("LAYER_{i:03}"));
+        let mut layer = document::tables::Layer::new(&format!("LAYER_{i:03}"));
         layer.handle = doc.allocate_handle();
-        layer.color = codec::types::Color::Index((i % 8 + 1) as u8);
+        layer.color = document::types::Color::Index((i % 8 + 1) as u8);
         let _ = doc.layers.add(layer);
     }
 
@@ -1323,8 +1323,8 @@ fn bench_ui_grip_budget(runner: &mut BenchmarkRunner) {
             axis: None,
         });
     }
-    let all_handles: Vec<codec::Handle> = (0..all_grips.len() as u64)
-        .map(|k| codec::Handle::new(k + 1))
+    let all_handles: Vec<document::Handle> = (0..all_grips.len() as u64)
+        .map(|k| document::Handle::new(k + 1))
         .collect();
     let n_fixture_grips = all_grips.len();
 
@@ -2037,10 +2037,10 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
 
     // Populate scene with non-graphical document objects
     for i in 0..obj_count {
-        let handle = codec::Handle::new(0x2000 + i as u64);
+        let handle = document::Handle::new(0x2000 + i as u64);
         scene.document.objects.insert(
             handle,
-            codec::objects::ObjectType::Dictionary(codec::objects::Dictionary::default()),
+            document::objects::ObjectType::Dictionary(document::objects::Dictionary::default()),
         );
     }
     // Add lines to model space
@@ -2068,7 +2068,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let t0 = Instant::now();
         let primitive = scene.build_viewports(
             bounds,
-            codec::entities::ViewportRenderMode::Wireframe2D,
+            document::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,
@@ -2092,7 +2092,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
     // 2. Cached / After: Memoized document render environment + O(1) fast paths
     let _ = scene.build_viewports(
         bounds,
-        codec::entities::ViewportRenderMode::Wireframe2D,
+        document::entities::ViewportRenderMode::Wireframe2D,
         None,
         false,
         false,
@@ -2104,7 +2104,7 @@ fn bench_view_render_viewport_construction(runner: &mut BenchmarkRunner) {
         let t0 = Instant::now();
         let primitive = scene.build_viewports(
             bounds,
-            codec::entities::ViewportRenderMode::Wireframe2D,
+            document::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,
@@ -2159,7 +2159,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
     // Warm up viewports
     let _ = scene.build_viewports(
         bounds,
-        codec::entities::ViewportRenderMode::Wireframe2D,
+        document::entities::ViewportRenderMode::Wireframe2D,
         None,
         false,
         false,
@@ -2179,7 +2179,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
             cam.pan_screen(dx, dy, bounds.height);
             let primitive = scene.build_viewports(
                 bounds,
-                codec::entities::ViewportRenderMode::Wireframe2D,
+                document::entities::ViewportRenderMode::Wireframe2D,
                 None,
                 false,
                 false,
@@ -2241,7 +2241,7 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
             scene.camera_generation += 1;
             let prim = scene.build_viewports(
                 bounds,
-                codec::entities::ViewportRenderMode::Wireframe2D,
+                document::entities::ViewportRenderMode::Wireframe2D,
                 None,
                 true,
                 true,
@@ -2264,14 +2264,14 @@ fn bench_navigation_latency_and_coalescing(runner: &mut BenchmarkRunner) {
 
     // 4. QuadTree Spatial Index Build
     let n_tree_items = if runner.quick_mode { 2_000 } else { 100_000 };
-    let tree_items: Vec<(codec::Handle, [f64; 4])> = (0..n_tree_items)
+    let tree_items: Vec<(document::Handle, [f64; 4])> = (0..n_tree_items)
         .map(|i| {
             // Clustered distribution: 80% of entities share tight bounding clusters
             let cluster = (i % 10) as f64 * 50.0;
             let offset = (i as f64 * 0.05) % 10.0;
             let x = cluster + offset;
             let y = cluster + offset;
-            (codec::Handle::from(i as u64), [x, y, x + 5.0, y + 5.0])
+            (document::Handle::from(i as u64), [x, y, x + 5.0, y + 5.0])
         })
         .collect();
     let tree_bounds = [0.0, 0.0, 1000.0, 1000.0];

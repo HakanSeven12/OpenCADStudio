@@ -1,4 +1,4 @@
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::space::polygon;
 
@@ -504,7 +504,7 @@ mod measurement_tests {
         command.on_text_input("OBJECTS");
         let circle = |radius| SelectionEntity {
             handle: Handle::new(1),
-            entity: EntityType::Circle(codec::Circle::from_coords(0.0, 0.0, 0.0, radius)),
+            entity: EntityType::Circle(document::Circle::from_coords(0.0, 0.0, 0.0, radius)),
             surface_area: None,
         };
         command.inject_selection_entities(vec![circle(2.0)]);

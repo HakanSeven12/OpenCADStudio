@@ -66,73 +66,73 @@ fn generate_type_registry(out_dir: &Path) {
     // entity/object variants and their enums are added to the same registry.
     type TraceFn = fn(&mut Tracer, &Samples);
     let types: Vec<(&str, TraceFn)> = vec![
-        ("EntityType", trace::<codec::EntityType>),
-        ("ObjectType", trace::<codec::objects::ObjectType>),
-        ("HeaderVariables", trace::<codec::document::HeaderVariables>),
-        ("SummaryInfo", trace::<codec::document::SummaryInfo>),
-        ("LineType", trace::<codec::LineType>),
-        ("TextStyle", trace::<codec::TextStyle>),
-        ("BlockRecord", trace::<codec::BlockRecord>),
-        ("DimStyle", trace::<codec::DimStyle>),
-        ("AppId", trace::<codec::AppId>),
-        ("View", trace::<codec::View>),
-        ("VPort", trace::<codec::VPort>),
-        ("Ucs", trace::<codec::Ucs>),
-        ("VxTableRecord", trace::<codec::VxTableRecord>),
-        ("DxfClass", trace::<codec::classes::DxfClass>),
+        ("EntityType", trace::<document::EntityType>),
+        ("ObjectType", trace::<document::objects::ObjectType>),
+        ("HeaderVariables", trace::<document::document::HeaderVariables>),
+        ("SummaryInfo", trace::<document::document::SummaryInfo>),
+        ("LineType", trace::<document::LineType>),
+        ("TextStyle", trace::<document::TextStyle>),
+        ("BlockRecord", trace::<document::BlockRecord>),
+        ("DimStyle", trace::<document::DimStyle>),
+        ("AppId", trace::<document::AppId>),
+        ("View", trace::<document::View>),
+        ("VPort", trace::<document::VPort>),
+        ("Ucs", trace::<document::Ucs>),
+        ("VxTableRecord", trace::<document::VxTableRecord>),
+        ("DxfClass", trace::<document::classes::DxfClass>),
         (
             "BlockVisibilityParameter",
-            trace::<codec::objects::BlockVisibilityParameter>,
+            trace::<document::objects::BlockVisibilityParameter>,
         ),
-        ("FieldDef", trace::<codec::document::FieldDef>),
-        ("DgnLsDefinition", trace::<codec::objects::DgnLsDefinition>),
-        ("DgnLsComponent", trace::<codec::objects::DgnLsComponent>),
+        ("FieldDef", trace::<document::document::FieldDef>),
+        ("DgnLsDefinition", trace::<document::objects::DgnLsDefinition>),
+        ("DgnLsComponent", trace::<document::objects::DgnLsComponent>),
         (
             "NotificationCollection",
-            trace::<codec::notification::NotificationCollection>,
+            trace::<document::notification::NotificationCollection>,
         ),
-        ("Preview", trace::<codec::document::Preview>),
-        ("Point", trace::<codec::Point>),
-        ("Line", trace::<codec::Line>),
-        ("Circle", trace::<codec::Circle>),
-        ("Arc", trace::<codec::Arc>),
-        ("Ellipse", trace::<codec::Ellipse>),
-        ("Polyline", trace::<codec::Polyline>),
-        ("Polyline2D", trace::<codec::entities::Polyline2D>),
-        ("Polyline3D", trace::<codec::entities::Polyline3D>),
-        ("LwPolyline", trace::<codec::LwPolyline>),
-        ("MText", trace::<codec::entities::MText>),
-        ("Spline", trace::<codec::Spline>),
-        ("EntityCommon", trace::<codec::entities::EntityCommon>),
-        ("Handle", trace::<codec::Handle>),
-        ("Vector2", trace::<codec::Vector2>),
-        ("Vector3", trace::<codec::Vector3>),
-        ("Color", trace::<codec::Color>),
-        ("Layer", trace::<codec::Layer>),
-        ("XDataValue", trace::<codec::xdata::XDataValue>),
-        ("XRecord", trace::<codec::objects::XRecord>),
-        ("XRecordEntry", trace::<codec::objects::XRecordEntry>),
-        ("XRecordValue", trace::<codec::objects::XRecordValue>),
+        ("Preview", trace::<document::document::Preview>),
+        ("Point", trace::<document::Point>),
+        ("Line", trace::<document::Line>),
+        ("Circle", trace::<document::Circle>),
+        ("Arc", trace::<document::Arc>),
+        ("Ellipse", trace::<document::Ellipse>),
+        ("Polyline", trace::<document::Polyline>),
+        ("Polyline2D", trace::<document::entities::Polyline2D>),
+        ("Polyline3D", trace::<document::entities::Polyline3D>),
+        ("LwPolyline", trace::<document::LwPolyline>),
+        ("MText", trace::<document::entities::MText>),
+        ("Spline", trace::<document::Spline>),
+        ("EntityCommon", trace::<document::entities::EntityCommon>),
+        ("Handle", trace::<document::Handle>),
+        ("Vector2", trace::<document::Vector2>),
+        ("Vector3", trace::<document::Vector3>),
+        ("Color", trace::<document::Color>),
+        ("Layer", trace::<document::Layer>),
+        ("XDataValue", trace::<document::xdata::XDataValue>),
+        ("XRecord", trace::<document::objects::XRecord>),
+        ("XRecordEntry", trace::<document::objects::XRecordEntry>),
+        ("XRecordValue", trace::<document::objects::XRecordValue>),
         (
             "XRecordValueType",
-            trace::<codec::objects::XRecordValueType>,
+            trace::<document::objects::XRecordValueType>,
         ),
-        ("XRecordSection", trace::<codec::objects::XRecordSection>),
+        ("XRecordSection", trace::<document::objects::XRecordSection>),
         (
             "DictionaryCloningFlags",
-            trace::<codec::objects::DictionaryCloningFlags>,
+            trace::<document::objects::DictionaryCloningFlags>,
         ),
         (
             "KnownXRecordKind",
-            trace::<codec::objects::KnownXRecordKind>,
+            trace::<document::objects::KnownXRecordKind>,
         ),
         (
             "ProxyObjectReference",
-            trace::<codec::objects::ProxyObjectReference>,
+            trace::<document::objects::ProxyObjectReference>,
         ),
         (
             "ProxyReferenceKind",
-            trace::<codec::objects::ProxyReferenceKind>,
+            trace::<document::objects::ProxyReferenceKind>,
         ),
     ];
 
@@ -150,338 +150,338 @@ fn generate_type_registry(out_dir: &Path) {
     let enums: Vec<(&str, TraceSimpleFn)> = vec![
         (
             "AssocAnnotationKind",
-            trace_simple::<codec::objects::AssocAnnotationKind>,
+            trace_simple::<document::objects::AssocAnnotationKind>,
         ),
         (
             "AssocConstraintNodeData",
-            trace_simple::<codec::objects::AssocConstraintNodeData>,
+            trace_simple::<document::objects::AssocConstraintNodeData>,
         ),
         (
             "AssocCurveValue",
-            trace_simple::<codec::objects::AssocCurveValue>,
+            trace_simple::<document::objects::AssocCurveValue>,
         ),
         (
             "AssocEvalValue",
-            trace_simple::<codec::objects::AssocEvalValue>,
+            trace_simple::<document::objects::AssocEvalValue>,
         ),
         (
             "AssocSubcurveKind",
-            trace_simple::<codec::objects::AssocSubcurveKind>,
+            trace_simple::<document::objects::AssocSubcurveKind>,
         ),
         (
             "AssocSurfaceActionKind",
-            trace_simple::<codec::objects::AssocSurfaceActionKind>,
+            trace_simple::<document::objects::AssocSurfaceActionKind>,
         ),
         (
             "AssocViewObjectActionParamKind",
-            trace_simple::<codec::objects::AssocViewObjectActionParamKind>,
+            trace_simple::<document::objects::AssocViewObjectActionParamKind>,
         ),
-        ("AcisVersion", trace_simple::<codec::entities::AcisVersion>),
+        ("AcisVersion", trace_simple::<document::entities::AcisVersion>),
         (
             "AssociativeData",
-            trace_simple::<codec::objects::AssociativeData>,
+            trace_simple::<document::objects::AssociativeData>,
         ),
         (
             "AttachmentPointType",
-            trace_simple::<codec::entities::AttachmentPointType>,
+            trace_simple::<document::entities::AttachmentPointType>,
         ),
         (
             "BlockContentConnectionType",
-            trace_simple::<codec::entities::BlockContentConnectionType>,
+            trace_simple::<document::entities::BlockContentConnectionType>,
         ),
         (
             "BlockEvalValue",
-            trace_simple::<codec::objects::BlockEvalValue>,
+            trace_simple::<document::objects::BlockEvalValue>,
         ),
         (
             "BlockPropertiesTableValue",
-            trace_simple::<codec::objects::BlockPropertiesTableValue>,
+            trace_simple::<document::objects::BlockPropertiesTableValue>,
         ),
-        ("BorderType", trace_simple::<codec::entities::BorderType>),
+        ("BorderType", trace_simple::<document::entities::BorderType>),
         (
             "BoundaryEdge",
-            trace_simple::<codec::entities::BoundaryEdge>,
+            trace_simple::<document::entities::BoundaryEdge>,
         ),
         (
             "BreakFlowDirection",
-            trace_simple::<codec::entities::BreakFlowDirection>,
+            trace_simple::<document::entities::BreakFlowDirection>,
         ),
         (
             "CellAlignment",
-            trace_simple::<codec::objects::CellAlignment>,
+            trace_simple::<document::objects::CellAlignment>,
         ),
         (
             "CellStyleType",
-            trace_simple::<codec::entities::CellStyleType>,
+            trace_simple::<document::entities::CellStyleType>,
         ),
-        ("CellType", trace_simple::<codec::entities::CellType>),
+        ("CellType", trace_simple::<document::entities::CellType>),
         (
             "CellValueType",
-            trace_simple::<codec::entities::CellValueType>,
+            trace_simple::<document::entities::CellValueType>,
         ),
         (
             "ClassObjectData",
-            trace_simple::<codec::objects::ClassObjectData>,
+            trace_simple::<document::objects::ClassObjectData>,
         ),
-        ("ClipMode", trace_simple::<codec::entities::ClipMode>),
-        ("ClipType", trace_simple::<codec::entities::ClipType>),
+        ("ClipMode", trace_simple::<document::entities::ClipMode>),
+        ("ClipType", trace_simple::<document::entities::ClipType>),
         (
             "CompoundEntry",
-            trace_simple::<codec::compound_file::CompoundEntry>,
+            trace_simple::<document::compound_file::CompoundEntry>,
         ),
         (
             "CompoundPropertyValue",
-            trace_simple::<codec::compound_file::CompoundPropertyValue>,
+            trace_simple::<document::compound_file::CompoundPropertyValue>,
         ),
         (
             "CompoundStreamContent",
-            trace_simple::<codec::compound_file::CompoundStreamContent>,
+            trace_simple::<document::compound_file::CompoundStreamContent>,
         ),
         (
             "DataObjectData",
-            trace_simple::<codec::objects::DataObjectData>,
+            trace_simple::<document::objects::DataObjectData>,
         ),
         (
             "DgnLineStyleData",
-            trace_simple::<codec::objects::DgnLineStyleData>,
+            trace_simple::<document::objects::DgnLineStyleData>,
         ),
         (
             "DgnLsComponentData",
-            trace_simple::<codec::objects::DgnLsComponentData>,
+            trace_simple::<document::objects::DgnLsComponentData>,
         ),
         (
             "DgnLsComponentType",
-            trace_simple::<codec::objects::DgnLsComponentType>,
+            trace_simple::<document::objects::DgnLsComponentType>,
         ),
         (
             "DgnLsPhaseMode",
-            trace_simple::<codec::objects::DgnLsPhaseMode>,
+            trace_simple::<document::objects::DgnLsPhaseMode>,
         ),
-        ("DimSubtype", trace_simple::<codec::objects::DimSubtype>),
-        ("Dimension", trace_simple::<codec::entities::Dimension>),
+        ("DimSubtype", trace_simple::<document::objects::DimSubtype>),
+        ("Dimension", trace_simple::<document::entities::Dimension>),
         (
             "DimensionType",
-            trace_simple::<codec::entities::DimensionType>,
+            trace_simple::<document::entities::DimensionType>,
         ),
-        ("DxfVersion", trace_simple::<codec::DxfVersion>),
+        ("DxfVersion", trace_simple::<document::DxfVersion>),
         (
             "DynamicBlockData",
-            trace_simple::<codec::objects::DynamicBlockData>,
+            trace_simple::<document::objects::DynamicBlockData>,
         ),
         (
             "EmbeddedEntity",
-            trace_simple::<codec::entities::EmbeddedEntity>,
+            trace_simple::<document::entities::EmbeddedEntity>,
         ),
         (
             "ExtendedEntityData",
-            trace_simple::<codec::entities::ExtendedEntityData>,
+            trace_simple::<document::entities::ExtendedEntityData>,
         ),
         (
             "FlowDirectionType",
-            trace_simple::<codec::entities::FlowDirectionType>,
+            trace_simple::<document::entities::FlowDirectionType>,
         ),
         (
             "HatchPatternType",
-            trace_simple::<codec::entities::HatchPatternType>,
+            trace_simple::<document::entities::HatchPatternType>,
         ),
         (
             "HatchStyleType",
-            trace_simple::<codec::entities::HatchStyleType>,
+            trace_simple::<document::entities::HatchStyleType>,
         ),
         (
             "HelixConstraint",
-            trace_simple::<codec::entities::HelixConstraint>,
+            trace_simple::<document::entities::HelixConstraint>,
         ),
         (
             "HooklineDirection",
-            trace_simple::<codec::entities::HooklineDirection>,
+            trace_simple::<document::entities::HooklineDirection>,
         ),
         (
             "HorizontalAlignment",
-            trace_simple::<codec::entities::HorizontalAlignment>,
+            trace_simple::<document::entities::HorizontalAlignment>,
         ),
         (
             "LeaderContentType",
-            trace_simple::<codec::entities::LeaderContentType>,
+            trace_simple::<document::entities::LeaderContentType>,
         ),
         (
             "LeaderCreationType",
-            trace_simple::<codec::entities::LeaderCreationType>,
+            trace_simple::<document::entities::LeaderCreationType>,
         ),
         (
             "LeaderDrawOrderType",
-            trace_simple::<codec::objects::LeaderDrawOrderType>,
+            trace_simple::<document::objects::LeaderDrawOrderType>,
         ),
         (
             "LeaderPathType",
-            trace_simple::<codec::entities::LeaderPathType>,
+            trace_simple::<document::entities::LeaderPathType>,
         ),
         (
             "LineTypeComplexContent",
-            trace_simple::<codec::tables::LineTypeComplexContent>,
+            trace_simple::<document::tables::LineTypeComplexContent>,
         ),
         (
             "LegacyEntityData",
-            trace_simple::<codec::entities::LegacyEntityData>,
+            trace_simple::<document::entities::LegacyEntityData>,
         ),
         (
             "MLineJustification",
-            trace_simple::<codec::entities::MLineJustification>,
+            trace_simple::<document::entities::MLineJustification>,
         ),
-        ("MTextFlag", trace_simple::<codec::entities::MTextFlag>),
+        ("MTextFlag", trace_simple::<document::entities::MTextFlag>),
         (
             "MaterialProceduralValue",
-            trace_simple::<codec::objects::MaterialProceduralValue>,
+            trace_simple::<document::objects::MaterialProceduralValue>,
         ),
         (
             "MultiLeaderDrawOrderType",
-            trace_simple::<codec::objects::MultiLeaderDrawOrderType>,
+            trace_simple::<document::objects::MultiLeaderDrawOrderType>,
         ),
         (
             "MultiLeaderPathType",
-            trace_simple::<codec::entities::MultiLeaderPathType>,
+            trace_simple::<document::entities::MultiLeaderPathType>,
         ),
         (
             "ObjectContextKind",
-            trace_simple::<codec::objects::ObjectContextKind>,
+            trace_simple::<document::objects::ObjectContextKind>,
         ),
         (
             "NotificationType",
-            trace_simple::<codec::notification::NotificationType>,
+            trace_simple::<document::notification::NotificationType>,
         ),
         (
             "OleFrameEnvelope",
-            trace_simple::<codec::entities::OleFrameEnvelope>,
+            trace_simple::<document::entities::OleFrameEnvelope>,
         ),
         (
             "OleObjectType",
-            trace_simple::<codec::entities::OleObjectType>,
+            trace_simple::<document::entities::OleObjectType>,
         ),
         (
             "PlotPaperUnits",
-            trace_simple::<codec::objects::PlotPaperUnits>,
+            trace_simple::<document::objects::PlotPaperUnits>,
         ),
-        ("PlotRotation", trace_simple::<codec::objects::PlotRotation>),
-        ("PlotType", trace_simple::<codec::objects::PlotType>),
+        ("PlotRotation", trace_simple::<document::objects::PlotRotation>),
+        ("PlotType", trace_simple::<document::objects::PlotType>),
         (
             "PreviewFormat",
-            trace_simple::<codec::document::PreviewFormat>,
+            trace_simple::<document::document::PreviewFormat>,
         ),
         (
             "PolyfaceSmoothType",
-            trace_simple::<codec::entities::PolyfaceSmoothType>,
+            trace_simple::<document::entities::PolyfaceSmoothType>,
         ),
         (
             "ProxyPayloadEncoding",
-            trace_simple::<codec::objects::ProxyPayloadEncoding>,
+            trace_simple::<document::objects::ProxyPayloadEncoding>,
         ),
         (
             "ResolutionUnit",
-            trace_simple::<codec::objects::ResolutionUnit>,
+            trace_simple::<document::objects::ResolutionUnit>,
         ),
-        ("ScaledType", trace_simple::<codec::objects::ScaledType>),
+        ("ScaledType", trace_simple::<document::objects::ScaledType>),
         (
             "SemanticPropertyValue",
-            trace_simple::<codec::objects::SemanticPropertyValue>,
+            trace_simple::<document::objects::SemanticPropertyValue>,
         ),
         (
             "ShadePlotMode",
-            trace_simple::<codec::objects::ShadePlotMode>,
+            trace_simple::<document::objects::ShadePlotMode>,
         ),
         (
             "ShadePlotResolutionLevel",
-            trace_simple::<codec::objects::ShadePlotResolutionLevel>,
+            trace_simple::<document::objects::ShadePlotResolutionLevel>,
         ),
         (
             "SolidHistoryOperation",
-            trace_simple::<codec::objects::SolidHistoryOperation>,
+            trace_simple::<document::objects::SolidHistoryOperation>,
         ),
-        ("SurfaceData", trace_simple::<codec::entities::SurfaceData>),
-        ("SurfaceKind", trace_simple::<codec::entities::SurfaceKind>),
+        ("SurfaceData", trace_simple::<document::entities::SurfaceData>),
+        ("SurfaceKind", trace_simple::<document::entities::SurfaceKind>),
         (
             "SurfaceSmoothType",
-            trace_simple::<codec::entities::SurfaceSmoothType>,
+            trace_simple::<document::entities::SurfaceSmoothType>,
         ),
         (
             "TableBorderType",
-            trace_simple::<codec::objects::TableBorderType>,
+            trace_simple::<document::objects::TableBorderType>,
         ),
         (
             "TableCellContentType",
-            trace_simple::<codec::entities::TableCellContentType>,
+            trace_simple::<document::entities::TableCellContentType>,
         ),
         (
             "TableFlowDirection",
-            trace_simple::<codec::objects::TableFlowDirection>,
+            trace_simple::<document::objects::TableFlowDirection>,
         ),
         (
             "TextAlignmentType",
-            trace_simple::<codec::entities::TextAlignmentType>,
+            trace_simple::<document::entities::TextAlignmentType>,
         ),
         (
             "TextAngleType",
-            trace_simple::<codec::entities::TextAngleType>,
+            trace_simple::<document::entities::TextAngleType>,
         ),
         (
             "TextAttachmentDirectionType",
-            trace_simple::<codec::entities::TextAttachmentDirectionType>,
+            trace_simple::<document::entities::TextAttachmentDirectionType>,
         ),
         (
             "TextAttachmentPointType",
-            trace_simple::<codec::entities::TextAttachmentPointType>,
+            trace_simple::<document::entities::TextAttachmentPointType>,
         ),
         (
             "TextAttachmentType",
-            trace_simple::<codec::entities::TextAttachmentType>,
+            trace_simple::<document::entities::TextAttachmentType>,
         ),
         (
             "TextHorizontalAlignment",
-            trace_simple::<codec::entities::TextHorizontalAlignment>,
+            trace_simple::<document::entities::TextHorizontalAlignment>,
         ),
         (
             "TextVerticalAlignment",
-            trace_simple::<codec::entities::TextVerticalAlignment>,
+            trace_simple::<document::entities::TextVerticalAlignment>,
         ),
         (
             "UnderlayType",
-            trace_simple::<codec::entities::UnderlayType>,
+            trace_simple::<document::entities::UnderlayType>,
         ),
         (
             "ValueUnitType",
-            trace_simple::<codec::entities::ValueUnitType>,
+            trace_simple::<document::entities::ValueUnitType>,
         ),
         (
             "VbaDirectoryValue",
-            trace_simple::<codec::vba::VbaDirectoryValue>,
+            trace_simple::<document::vba::VbaDirectoryValue>,
         ),
         (
             "VerticalAlignment",
-            trace_simple::<codec::entities::VerticalAlignment>,
+            trace_simple::<document::entities::VerticalAlignment>,
         ),
         (
             "ViewportRenderMode",
-            trace_simple::<codec::entities::ViewportRenderMode>,
+            trace_simple::<document::entities::ViewportRenderMode>,
         ),
         (
             "VisualStylePropertyValue",
-            trace_simple::<codec::objects::VisualStylePropertyValue>,
+            trace_simple::<document::objects::VisualStylePropertyValue>,
         ),
         (
             "ViewRepSketchGeometry",
-            trace_simple::<codec::objects::ViewRepSketchGeometry>,
+            trace_simple::<document::objects::ViewRepSketchGeometry>,
         ),
         (
             "WipeoutClipMode",
-            trace_simple::<codec::entities::WipeoutClipMode>,
+            trace_simple::<document::entities::WipeoutClipMode>,
         ),
         (
             "WipeoutClipType",
-            trace_simple::<codec::entities::WipeoutClipType>,
+            trace_simple::<document::entities::WipeoutClipType>,
         ),
-        ("WireType", trace_simple::<codec::entities::WireType>),
-        ("ArchKind", trace_simple::<codec::classes::arch::ArchKind>),
-        ("NumberRole", trace_simple::<codec::classes::arch::NumberRole>),
-        ("PreviewRecord", trace_simple::<codec::classes::arch::PreviewRecord>),
+        ("WireType", trace_simple::<document::entities::WireType>),
+        ("ArchKind", trace_simple::<document::classes::arch::ArchKind>),
+        ("NumberRole", trace_simple::<document::classes::arch::NumberRole>),
+        ("PreviewRecord", trace_simple::<document::classes::arch::PreviewRecord>),
     ];
     for (name, trace) in enums {
         trace(&mut tracer);
@@ -494,7 +494,7 @@ fn generate_type_registry(out_dir: &Path) {
     let mut registry = map_to_custom_schema(&traced);
     let mut section_style_tracer = Tracer::new(TracerConfig::default());
     section_style_tracer
-        .trace_simple_type::<codec::entities::SectionViewStyle>()
+        .trace_simple_type::<document::entities::SectionViewStyle>()
         .expect("section view style tracing failed");
     let section_style_registry = section_style_tracer
         .registry()
@@ -895,107 +895,107 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
     // serde-reflection needs at least one sample value per enum variant in
     // order to reconstruct the full schema. Provide samples for the enums that
     // need concrete serialized values.
-    let _ = tracer.trace_value(samples, &codec::LineWeight::ByLayer);
-    let _ = tracer.trace_value(samples, &codec::LineWeight::ByBlock);
-    let _ = tracer.trace_value(samples, &codec::LineWeight::Default);
-    let _ = tracer.trace_value(samples, &codec::LineWeight::Value(0));
+    let _ = tracer.trace_value(samples, &document::LineWeight::ByLayer);
+    let _ = tracer.trace_value(samples, &document::LineWeight::ByBlock);
+    let _ = tracer.trace_value(samples, &document::LineWeight::Default);
+    let _ = tracer.trace_value(samples, &document::LineWeight::Value(0));
 
-    let _ = tracer.trace_value(samples, &codec::Transparency::BY_LAYER);
-    let _ = tracer.trace_value(samples, &codec::Transparency::BY_BLOCK);
-    let _ = tracer.trace_value(samples, &codec::Transparency::OPAQUE);
+    let _ = tracer.trace_value(samples, &document::Transparency::BY_LAYER);
+    let _ = tracer.trace_value(samples, &document::Transparency::BY_BLOCK);
+    let _ = tracer.trace_value(samples, &document::Transparency::OPAQUE);
 
-    let _ = tracer.trace_value(samples, &codec::entities::SmoothSurfaceType::None);
+    let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::None);
     let _ = tracer.trace_value(
         samples,
-        &codec::entities::SmoothSurfaceType::QuadraticBSpline,
+        &document::entities::SmoothSurfaceType::QuadraticBSpline,
     );
-    let _ = tracer.trace_value(samples, &codec::entities::SmoothSurfaceType::CubicBSpline);
-    let _ = tracer.trace_value(samples, &codec::entities::SmoothSurfaceType::Bezier);
+    let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::CubicBSpline);
+    let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::Bezier);
 
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::TopLeft);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::TopCenter);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::TopRight);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::MiddleLeft);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::MiddleCenter);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::MiddleRight);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::BottomLeft);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::BottomCenter);
-    let _ = tracer.trace_value(samples, &codec::entities::AttachmentPoint::BottomRight);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::TopLeft);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::TopCenter);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::TopRight);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::MiddleLeft);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::MiddleCenter);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::MiddleRight);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::BottomLeft);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::BottomCenter);
+    let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::BottomRight);
 
-    let _ = tracer.trace_value(samples, &codec::entities::DrawingDirection::LeftToRight);
-    let _ = tracer.trace_value(samples, &codec::entities::DrawingDirection::TopToBottom);
-    let _ = tracer.trace_value(samples, &codec::entities::DrawingDirection::ByStyle);
+    let _ = tracer.trace_value(samples, &document::entities::DrawingDirection::LeftToRight);
+    let _ = tracer.trace_value(samples, &document::entities::DrawingDirection::TopToBottom);
+    let _ = tracer.trace_value(samples, &document::entities::DrawingDirection::ByStyle);
 
-    let _ = tracer.trace_value(samples, &codec::entities::LineSpacingStyle::AtLeast);
-    let _ = tracer.trace_value(samples, &codec::entities::LineSpacingStyle::Exactly);
+    let _ = tracer.trace_value(samples, &document::entities::LineSpacingStyle::AtLeast);
+    let _ = tracer.trace_value(samples, &document::entities::LineSpacingStyle::Exactly);
 
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::String(String::new()));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::String(String::new()));
     let _ = tracer.trace_value(
         samples,
-        &codec::xdata::XDataValue::ControlString(String::new()),
+        &document::xdata::XDataValue::ControlString(String::new()),
     );
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::LayerName(String::new()));
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::BinaryData(Vec::new()));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::LayerName(String::new()));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::BinaryData(Vec::new()));
     let _ = tracer.trace_value(
         samples,
-        &codec::xdata::XDataValue::Handle(codec::Handle::default()),
-    );
-    let _ = tracer.trace_value(
-        samples,
-        &codec::xdata::XDataValue::Point3D(codec::Vector3::default()),
+        &document::xdata::XDataValue::Handle(document::Handle::default()),
     );
     let _ = tracer.trace_value(
         samples,
-        &codec::xdata::XDataValue::Position3D(codec::Vector3::default()),
+        &document::xdata::XDataValue::Point3D(document::Vector3::default()),
     );
     let _ = tracer.trace_value(
         samples,
-        &codec::xdata::XDataValue::Displacement3D(codec::Vector3::default()),
+        &document::xdata::XDataValue::Position3D(document::Vector3::default()),
     );
     let _ = tracer.trace_value(
         samples,
-        &codec::xdata::XDataValue::Direction3D(codec::Vector3::default()),
+        &document::xdata::XDataValue::Displacement3D(document::Vector3::default()),
     );
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::Real(0.0));
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::Distance(0.0));
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::ScaleFactor(0.0));
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::Integer16(0));
-    let _ = tracer.trace_value(samples, &codec::xdata::XDataValue::Integer32(0));
+    let _ = tracer.trace_value(
+        samples,
+        &document::xdata::XDataValue::Direction3D(document::Vector3::default()),
+    );
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::Real(0.0));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::Distance(0.0));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::ScaleFactor(0.0));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::Integer16(0));
+    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::Integer32(0));
 
     // XRecord value variants
     let _ = tracer.trace_value(
         samples,
-        &codec::objects::XRecordValue::String(String::new()),
+        &document::objects::XRecordValue::String(String::new()),
     );
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Double(0.0));
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Int16(0));
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Int32(0));
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Int64(0));
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Byte(0));
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Bool(false));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Double(0.0));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Int16(0));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Int32(0));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Int64(0));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Byte(0));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Bool(false));
     let _ = tracer.trace_value(
         samples,
-        &codec::objects::XRecordValue::Handle(codec::Handle::default()),
+        &document::objects::XRecordValue::Handle(document::Handle::default()),
     );
     let _ = tracer.trace_value(
         samples,
-        &codec::objects::XRecordValue::Point3D(0.0, 0.0, 0.0),
+        &document::objects::XRecordValue::Point3D(0.0, 0.0, 0.0),
     );
-    let _ = tracer.trace_value(samples, &codec::objects::XRecordValue::Chunk(Vec::new()));
+    let _ = tracer.trace_value(samples, &document::objects::XRecordValue::Chunk(Vec::new()));
 
     // Proxy reference kinds pulled in by XRecord.object_references
-    let _ = tracer.trace_value(samples, &codec::objects::ProxyReferenceKind::Undefined);
-    let _ = tracer.trace_value(samples, &codec::objects::ProxyReferenceKind::SoftOwnership);
-    let _ = tracer.trace_value(samples, &codec::objects::ProxyReferenceKind::HardOwnership);
-    let _ = tracer.trace_value(samples, &codec::objects::ProxyReferenceKind::SoftPointer);
-    let _ = tracer.trace_value(samples, &codec::objects::ProxyReferenceKind::HardPointer);
+    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::Undefined);
+    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::SoftOwnership);
+    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::HardOwnership);
+    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::SoftPointer);
+    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::HardPointer);
 
     // KnownXRecordKind variants
     let _ = tracer.trace_value(
         samples,
-        &codec::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+        &document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
     );
-    let _ = tracer.trace_value(samples, &codec::objects::KnownXRecordKind::Unknown);
+    let _ = tracer.trace_value(samples, &document::objects::KnownXRecordKind::Unknown);
 }
 
 fn map_to_custom_schema(traced: &Registry) -> TypeRegistry {
@@ -1245,7 +1245,7 @@ fn generate_version_info(out_dir: &Path) {
         .iter()
         .find(|p| p.name.as_str() == "OpenCADStudio")
         .expect("OpenCADStudio package in Cargo.lock");
-    let opencadcodec = lockfile
+    let document = lockfile
         .packages
         .iter()
         .find(|p| p.name.as_str() == "acadrust")
@@ -1269,8 +1269,8 @@ fn generate_version_info(out_dir: &Path) {
         "ocs_version": ocs.version.to_string(),
         "ocs_plugin_api_version": env!("CARGO_PKG_VERSION"),
         "api_version": 15,
-        "acadrust_version": opencadcodec.version.to_string(),
-        "acadrust_source": opencadcodec.source.as_ref().map(|s| s.to_string()),
+        "acadrust_version": document.version.to_string(),
+        "acadrust_source": document.source.as_ref().map(|s| s.to_string()),
         "rustc_version": rustc_version,
         "api_version_min_supported": 3,
         "build_timestamp": build_timestamp,

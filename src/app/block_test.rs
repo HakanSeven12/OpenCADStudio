@@ -1,13 +1,13 @@
-use super::{document::DocumentTab, Message, OpenCADStudio};
-use codec::entities::{AttributeEntity, Entity, Insert};
-use codec::EntityType;
+use super::{tab_document::DocumentTab, Message, OpenCADStudio};
+use document::entities::{AttributeEntity, Entity, Insert};
+use document::EntityType;
 use iced::Task;
 
 pub(super) struct BlockTestSession {
     pub source_id: u64,
-    pub definition: codec::Handle,
-    pub insert: codec::Handle,
-    pub baseline: std::sync::Arc<codec::Document>,
+    pub definition: document::Handle,
+    pub insert: document::Handle,
+    pub baseline: std::sync::Arc<document::Document>,
 }
 
 impl OpenCADStudio {
@@ -71,7 +71,7 @@ impl OpenCADStudio {
         document.header.show_model_space = true;
         crate::scene::block_visibility::finish_editing(&mut document, definition);
         let base = crate::scene::render_graph::block_base_point(&document, &name);
-        let mut insert = Insert::new(&name, codec::types::Vector3::ZERO);
+        let mut insert = Insert::new(&name, document::types::Vector3::ZERO);
         insert.common.layer = self.tabs[i].active_layer.clone();
         insert.common.handle = document.allocate_handle();
         insert.common.owner_handle = document.header.model_space_block_handle;
@@ -149,7 +149,7 @@ impl OpenCADStudio {
                     crate::scene::block_actions::all_parameters(&tab.scene.document, definition)
                         .into_iter()
                         .filter(|parameter| {
-                            parameter.grip != codec::Handle::NULL && actions
+                            parameter.grip != document::Handle::NULL && actions
                                 .iter()
                                 .any(|(_, _, _, parameter_id)| *parameter_id == parameter.id)
                         })

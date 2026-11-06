@@ -6,9 +6,9 @@
 //! draw order, and clip boundaries. Leaf entities remain responsible for
 //! producing their normal wire, hatch, image, wipeout, or mesh model.
 
-use codec::entities::Insert;
-use codec::types::{Color, Matrix3, Matrix4, Transform, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::entities::Insert;
+use document::types::{Color, Matrix3, Matrix4, Transform, Vector3};
+use document::{Document, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::scene::view::render::{
@@ -99,10 +99,10 @@ impl InsertStyleSpec {
             transparency_bylayer: common.transparency.is_by_layer(),
             linetype_byblock: linetype.eq_ignore_ascii_case("byblock"),
             linetype_bylayer: linetype.is_empty() || linetype.eq_ignore_ascii_case("bylayer"),
-            lineweight_byblock: matches!(common.line_weight, codec::types::LineWeight::ByBlock),
+            lineweight_byblock: matches!(common.line_weight, document::types::LineWeight::ByBlock),
             lineweight_bylayer: matches!(
                 common.line_weight,
-                codec::types::LineWeight::ByLayer | codec::types::LineWeight::Default
+                document::types::LineWeight::ByLayer | document::types::LineWeight::Default
             ),
             layer0: is_effective_layer_zero(&common.layer),
         }
@@ -707,7 +707,7 @@ fn single_scale_picture(document: &Document, handle: Handle, block: &str) -> boo
 /// world coordinates, so only the point goes through the OCS. A zero scale
 /// component (an unread field) counts as 1 rather than collapsing the picture.
 pub(crate) fn dimension_picture_insert(
-    base: &codec::entities::dimension::DimensionBase,
+    base: &document::entities::dimension::DimensionBase,
     block_name: String,
 ) -> Insert {
     let scale = |s: f64| if s.abs() < 1e-12 { 1.0 } else { s };
@@ -724,7 +724,7 @@ pub(crate) fn dimension_picture_insert(
 /// World transform of a dimension's picture placement, or None when it is
 /// the identity (the usual case: OCS bakes its pictures in place).
 pub(crate) fn dimension_picture_placement(
-    base: &codec::entities::dimension::DimensionBase,
+    base: &document::entities::dimension::DimensionBase,
 ) -> Option<Transform> {
     let insert = dimension_picture_insert(base, String::new());
     let p = insert.insert_point;
@@ -848,7 +848,7 @@ pub struct BlockUse {
 pub(crate) fn block_record_by_name<'a>(
     document: &'a Document,
     name: &str,
-) -> Option<&'a codec::tables::BlockRecord> {
+) -> Option<&'a document::tables::BlockRecord> {
     document.block_records.get(name).or_else(|| {
         document
             .block_records
@@ -1259,7 +1259,7 @@ fn block_contains_kind(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::xdata::ExtendedDataRecord;
+    use document::xdata::ExtendedDataRecord;
 
     #[test]
     fn applied_block_scale_skips_annotative_rescaling() {
@@ -1284,8 +1284,8 @@ mod tests {
 
     #[test]
     fn layer_zero_block_members_follow_the_reference_until_frozen() {
-        use codec::entities::Line;
-        use codec::tables::BlockRecord;
+        use document::entities::Line;
+        use document::tables::BlockRecord;
         let mut document = Document::new();
         let mut record = BlockRecord::new("ARROW");
         record.handle = document.allocate_handle();

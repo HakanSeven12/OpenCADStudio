@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::{block_distance_parameter as distance, Scene};
-use codec::{
+use document::{
     entities::{Insert, Line},
     DwgReader, DwgWriter, DxfReader, DxfWriter,
 };

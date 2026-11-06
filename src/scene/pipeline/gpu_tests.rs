@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::model::{mesh_model::MeshLodSet, mesh_model::MeshModel, wire_model::WireModel};
-use codec::{types::Transform, Handle};
+use document::{types::Transform, Handle};
 use iced::futures::executor::block_on;
 
 #[test]
@@ -506,7 +506,7 @@ fn test_selected_circle_arc_ellipse_highlight_overlay() {
             radius: 10.0,
         });
 
-    let handle = codec::Handle::new(100);
+    let handle = document::Handle::new(100);
     let mut selected_handles = rustc_hash::FxHashSet::default();
     selected_handles.insert(handle);
     let hover_handles = rustc_hash::FxHashSet::default();
@@ -856,7 +856,7 @@ fn test_selected_ellipse_overlay() {
         },
     );
 
-    let handle = codec::Handle::new(200);
+    let handle = document::Handle::new(200);
     let mut selected_handles = rustc_hash::FxHashSet::default();
     selected_handles.insert(handle);
     let hover_handles = rustc_hash::FxHashSet::default();
@@ -975,7 +975,7 @@ fn test_pline_arc_switch_preview_and_render() {
     let mut cmd = crate::modules::draw::draw::polyline::PlineCommand::new();
     cmd.on_point(glam::DVec3::new(0.0, 0.0, 0.0));
     let _res = cmd.on_point(glam::DVec3::new(10.0, 0.0, 0.0));
-    cmd.set_live_handle(codec::Handle::new(1));
+    cmd.set_live_handle(document::Handle::new(1));
     cmd.on_text_input("A");
 
     let test_points = [

@@ -1,9 +1,9 @@
 //! Handle remapping for decoded associative constraint graphs.
-use codec::objects::{
+use document::objects::{
     AssocAction, AssocConstraintNodeData as Node, AssocDependency, AssocEvalValue,
     AssocEvalVariant, AssociativeData as Data, AssociativeObject,
 };
-use codec::Handle;
+use document::Handle;
 use rustc_hash::FxHashMap;
 
 pub(super) fn cloneable(object: &AssociativeObject) -> bool {

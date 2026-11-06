@@ -47,7 +47,7 @@ impl OpenCADStudio {
             .unwrap_or(if document.header.measurement == 1 { 3.75 } else { 0.38 })
     }
 
-    fn recent_dimension(&self, i: usize) -> Option<codec::EntityType> {
+    fn recent_dimension(&self, i: usize) -> Option<document::EntityType> {
         let scene = &self.tabs[i].scene;
         scene
             .last_created_dimension
@@ -111,7 +111,7 @@ impl OpenCADStudio {
             extent = extent
                 .max((bounds.max.x - bounds.min.x).abs())
                 .max((bounds.max.y - bounds.min.y).abs());
-            if matches!(entity, codec::EntityType::Dimension(_)) {
+            if matches!(entity, document::EntityType::Dimension(_)) {
                 dimensions.push(entity.clone());
             }
         }

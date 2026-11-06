@@ -3,8 +3,8 @@ use super::block_actions::{self as actions, instance, Parameter, Value};
 use super::model::object::{
     BlockParameterComponent as Component, BlockParameterKey as Key, PropValue, Property,
 };
-use codec::objects::{DynamicBlockData as Data, ObjectType};
-use codec::{Document, EntityType, Handle};
+use document::objects::{DynamicBlockData as Data, ObjectType};
+use document::{Document, EntityType, Handle};
 use glam::DVec3;
 
 mod table;

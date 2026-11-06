@@ -15,10 +15,10 @@
 
 use std::sync::Mutex;
 
-use codec::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
-use codec::objects::{Dictionary, ObjectType, UnderlayDefinition};
-use codec::types::{Handle, Vector3};
-use codec::{Document, EntityType};
+use document::entities::{Underlay, UnderlayDisplayFlags, UnderlayType};
+use document::objects::{Dictionary, ObjectType, UnderlayDefinition};
+use document::types::{Handle, Vector3};
+use document::{Document, EntityType};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};

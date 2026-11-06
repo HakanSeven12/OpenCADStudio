@@ -558,7 +558,7 @@ impl OpenCADStudio {
     fn apply_plugin_grip_live_geometry(
         &mut self,
         tab: usize,
-        live_entities: &[(codec::Handle, codec::EntityType)],
+        live_entities: &[(document::Handle, document::EntityType)],
     ) {
         if live_entities.is_empty() {
             return;
@@ -960,7 +960,7 @@ impl OpenCADStudio {
                     // along — and patch ONLY the geometry from the re-derived
                     // carriers. The count-staged set stays the drag's handles.
                     let document = &self.tabs[tab].scene.document;
-                    let mut pairs: Vec<(codec::Handle, codec::EntityType)> =
+                    let mut pairs: Vec<(document::Handle, document::EntityType)> =
                         Vec::with_capacity(handles.len());
                     let mut refused: Option<String> = None;
                     for (slot, fresh_entity) in handles.iter().zip(fresh.iter()) {
@@ -1021,8 +1021,8 @@ impl OpenCADStudio {
         app: &OpenCADStudio,
         tab: usize,
         binding: &crate::app::plugin_host::PluginClassInstanceBinding,
-    ) -> Vec<codec::Handle> {
-        use codec::xdata::XDataValue;
+    ) -> Vec<document::Handle> {
+        use document::xdata::XDataValue;
         let mut out = Vec::new();
         for entity in app.tabs[tab].scene.document.entities() {
             let handle = entity.common().handle;
@@ -1074,15 +1074,15 @@ impl OpenCADStudio {
 /// entity, keyed by kind (the seat test's honest arms). The identity stamp,
 /// the reference-only designation and the layer ride on the clone untouched.
 pub(in crate::app) fn patch_carrier_geometry(
-    patched: &mut codec::EntityType,
-    fresh: &codec::EntityType,
+    patched: &mut document::EntityType,
+    fresh: &document::EntityType,
 ) -> Result<(), String> {
     match (&mut *patched, &*fresh) {
-        (codec::EntityType::Line(old), codec::EntityType::Line(newer)) => {
+        (document::EntityType::Line(old), document::EntityType::Line(newer)) => {
             old.start = newer.start;
             old.end = newer.end;
         }
-        (codec::EntityType::Spline(old), codec::EntityType::Spline(newer)) => {
+        (document::EntityType::Spline(old), document::EntityType::Spline(newer)) => {
             old.degree = newer.degree;
             old.control_points = newer.control_points.clone();
             old.knots = newer.knots.clone();
@@ -1090,13 +1090,13 @@ pub(in crate::app) fn patch_carrier_geometry(
             old.begin_tangent = newer.begin_tangent;
             old.end_tangent = newer.end_tangent;
         }
-        (codec::EntityType::Arc(old), codec::EntityType::Arc(newer)) => {
+        (document::EntityType::Arc(old), document::EntityType::Arc(newer)) => {
             old.center = newer.center;
             old.radius = newer.radius;
             old.start_angle = newer.start_angle;
             old.end_angle = newer.end_angle;
         }
-        (codec::EntityType::Circle(old), codec::EntityType::Circle(newer)) => {
+        (document::EntityType::Circle(old), document::EntityType::Circle(newer)) => {
             old.center = newer.center;
             old.radius = newer.radius;
         }
@@ -1112,12 +1112,12 @@ pub(in crate::app) fn patch_carrier_geometry(
 }
 
 /// A stable diagnostic label for the carrier-shape refusal.
-fn entity_kind_label(entity: &codec::EntityType) -> &'static str {
+fn entity_kind_label(entity: &document::EntityType) -> &'static str {
     match entity {
-        codec::EntityType::Line(_) => "line",
-        codec::EntityType::Spline(_) => "spline",
-        codec::EntityType::Arc(_) => "arc",
-        codec::EntityType::Circle(_) => "circle",
+        document::EntityType::Line(_) => "line",
+        document::EntityType::Spline(_) => "spline",
+        document::EntityType::Arc(_) => "arc",
+        document::EntityType::Circle(_) => "circle",
         _ => "other",
     }
 }

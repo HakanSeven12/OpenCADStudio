@@ -1,13 +1,13 @@
 //! Native Linear, Polar and XY parameter authoring with one end grip.
 use super::block_authoring::{self as authoring, *};
-use codec::objects::{
+use document::objects::{
     BlockConnection, BlockElement, BlockEvalValue, BlockGrip, BlockGripExpression,
     BlockLinearParameter, BlockOrientedGrip, BlockParameter, BlockParameterProperty,
     BlockParameterValueSet, BlockPolarParameter, BlockTwoPointParameter, BlockXYParameter,
     DynamicBlockData, ObjectType,
 };
-use codec::types::{Transform, Vector3};
-use codec::{Document, Handle};
+use document::types::{Transform, Vector3};
+use document::{Document, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -682,7 +682,7 @@ pub(crate) fn reframe(
 mod tests {
     use super::*;
     use crate::scene::{block_point_parameter, block_visibility, Scene};
-    use codec::{entities::Line, EntityType};
+    use document::{entities::Line, EntityType};
 
     pub(super) fn fixture() -> (Scene, Handle) {
         let mut scene = Scene::new();

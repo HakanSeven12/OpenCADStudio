@@ -1,8 +1,8 @@
 // Freehand sketch tool.
 
-use codec::entities::{Line, LwPolyline, LwVertex, Spline};
-use codec::types::{Vector2, Vector3};
-use codec::EntityType;
+use document::entities::{Line, LwPolyline, LwVertex, Spline};
+use document::types::{Vector2, Vector3};
+use document::EntityType;
 use glam::DVec3;
 use kernel::geom2d::NurbsCurve;
 

@@ -4,7 +4,7 @@ use super::*;
 impl Scene {
     // ── Group helpers ──────────────────────────────────────────────────────
 
-    pub fn groups(&self) -> impl Iterator<Item = &codec::objects::Group> {
+    pub fn groups(&self) -> impl Iterator<Item = &document::objects::Group> {
         self.document.objects.values().filter_map(|obj| match obj {
             ObjectType::Group(g) => Some(g),
             _ => None,
@@ -22,7 +22,7 @@ impl Scene {
     /// Creates a named group from the given handles and registers it in the group dictionary.
     pub fn create_group(&mut self, name: String, handles: Vec<Handle>) -> Handle {
         let group_dict_handle = self.document.header.acad_group_dict_handle;
-        let mut group = codec::objects::Group::new(&name);
+        let mut group = document::objects::Group::new(&name);
         group.handle = self.document.allocate_handle();
         group.owner = group_dict_handle;
         group.add_entities(handles);
@@ -114,7 +114,7 @@ impl Scene {
     /// the copy lands in the same drawing or a different file.
     pub fn recreate_groups(
         &mut self,
-        sources: Vec<codec::objects::Group>,
+        sources: Vec<document::objects::Group>,
         handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
     ) -> usize {
         let group_dict_handle = self.document.header.acad_group_dict_handle;
@@ -325,8 +325,8 @@ impl Scene {
 #[cfg(test)]
 mod group_reactor_tests {
     use super::*;
-    use codec::entities::{EntityType, Line};
-    use codec::types::Vector3;
+    use document::entities::{EntityType, Line};
+    use document::types::Vector3;
 
     fn two_lines() -> (Scene, [Handle; 2]) {
         let mut scene = Scene::new();
@@ -462,8 +462,8 @@ mod group_expansion_tests {
 
     #[test]
     fn group_expansion_pulls_in_siblings_and_nothing_else() {
-        use codec::entities::{EntityType, Line};
-        use codec::types::Vector3;
+        use document::entities::{EntityType, Line};
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let mut line = |x: f64| {
@@ -506,8 +506,8 @@ mod group_expansion_tests {
     /// each other.
     #[test]
     fn selected_object_units_keep_a_complete_group_together() {
-        use codec::entities::{EntityType, Line};
-        use codec::types::Vector3;
+        use document::entities::{EntityType, Line};
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let mut line = |x: f64| {

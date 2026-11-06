@@ -1,7 +1,7 @@
 use super::*;
 use crate::scene::block_distance_parameter as distance;
 use crate::scene::block_point_parameter as point;
-use codec::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
+use document::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
 use std::io::Cursor;
 
 fn set_targets(doc: &mut Document, action: Handle, targets: Vec<Handle>) {
@@ -974,7 +974,7 @@ fn block_move_creation_validates_point_ownership_and_cycles_atomically() {
     scene.define_block_raw(
         "FOREIGN",
         Vector3::ZERO,
-        vec![EntityType::Line(codec::entities::Line::from_points(
+        vec![EntityType::Line(document::entities::Line::from_points(
             Vector3::ZERO,
             Vector3::UNIT_X,
         ))],

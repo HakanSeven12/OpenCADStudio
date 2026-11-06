@@ -83,9 +83,9 @@ impl OpenCADStudio {
         // This application record is the hatch background colour.
         // Keep the outer Option to distinguish "source is not a
         // hatch" from "source hatch has no background".
-        let hatch_background_xdata: Option<Option<Vec<codec::xdata::XDataValue>>> =
+        let hatch_background_xdata: Option<Option<Vec<document::xdata::XDataValue>>> =
             match src_clone.as_ref() {
-                Some(codec::EntityType::Hatch(h)) => Some(
+                Some(document::EntityType::Hatch(h)) => Some(
                     h.common
                         .extended_data
                         .get_record("HATCHBACKGROUNDCOLOR")
@@ -96,12 +96,12 @@ impl OpenCADStudio {
         // Dimension-style overrides ride the ACAD record, identified
         // by a leading DSTYLE string. Matching replicates that payload
         // (or clears the destination when the source has none).
-        let dstyle_xdata: Option<Vec<(i16, codec::xdata::XDataValue)>> = src_clone
+        let dstyle_xdata: Option<Vec<(i16, document::xdata::XDataValue)>> = src_clone
             .as_ref()
             .filter(|e| {
                 matches!(
                     e,
-                    codec::EntityType::Dimension(_) | codec::EntityType::Leader(_)
+                    document::EntityType::Dimension(_) | document::EntityType::Leader(_)
                 )
             })
             .map(|e| crate::entities::dim_override::pairs(&e.common().extended_data));
@@ -119,8 +119,8 @@ impl OpenCADStudio {
                 let mut is_hatch = false;
                 if let Some(se) = &src_clone {
                     if let Some(e) = app.tabs[i].scene.document.get_entity_mut(handle) {
-                        is_dim = matches!(e, codec::EntityType::Dimension(_));
-                        is_hatch = matches!(e, codec::EntityType::Hatch(_));
+                        is_dim = matches!(e, document::EntityType::Dimension(_));
+                        is_hatch = matches!(e, document::EntityType::Hatch(_));
                         crate::entities::match_props::match_properties_kernel(se, e, &match_opts);
                     }
                 }
@@ -143,11 +143,11 @@ impl OpenCADStudio {
                 if match_opts.has(MatchOpts::DIM)
                     && matches!(
                         app.tabs[i].scene.document.get_entity(handle),
-                        Some(codec::EntityType::Dimension(_) | codec::EntityType::Leader(_))
+                        Some(document::EntityType::Dimension(_) | document::EntityType::Leader(_))
                     )
                     && matches!(
                         src_clone,
-                        Some(codec::EntityType::Dimension(_) | codec::EntityType::Leader(_))
+                        Some(document::EntityType::Dimension(_) | document::EntityType::Leader(_))
                     )
                 {
                     crate::entities::dim_override::replace(

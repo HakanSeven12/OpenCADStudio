@@ -4,8 +4,8 @@
 //   POINT commits one entity and exits. MULTIPOINT stays active.
 
 use crate::t;
-use codec::types::Vector3;
-use codec::{EntityType, Point as CadPoint};
+use document::types::Vector3;
+use document::{EntityType, Point as CadPoint};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};

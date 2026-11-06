@@ -1,9 +1,9 @@
 //! The MTEXT save-loss table against the DWG/DXF writer itself: a warning is
 //! given for exactly what a target really drops, and for nothing else.
 use super::{load_bytes, mtext_losses_on_save, save_to_bytes, MTextTargetLoss};
-use codec::entities::{LineSpacingStyle, MText};
-use codec::types::{Color, Vector3};
-use codec::{Document, DxfVersion, EntityType, Handle};
+use document::entities::{LineSpacingStyle, MText};
+use document::types::{Color, Vector3};
+use document::{Document, DxfVersion, EntityType, Handle};
 
 const TARGETS: [DxfVersion; 7] = [
     DxfVersion::AC1014,

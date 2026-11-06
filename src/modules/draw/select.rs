@@ -9,7 +9,7 @@
 // completed selection action fires straight away, no Enter required.
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
@@ -43,7 +43,7 @@ pub struct SelectObjectsCommand {
     associative_dimensions_only: bool,
     /// The kinds of object the command takes; the host drops the rest of
     /// each completed selection silently, and Enter on nothing ends quietly.
-    keep: Option<fn(&codec::EntityType) -> bool>,
+    keep: Option<fn(&document::EntityType) -> bool>,
     /// A SEttings keyword at the prompt, and what it does.
     settings: Option<fn() -> CmdResult>,
     /// A command's own keyword at the prompt (its label, the keyword and
@@ -156,7 +156,7 @@ impl SelectObjectsCommand {
         prompt_cmd: &str,
         pending_cmd: &str,
         prompt_text: &'static str,
-        keep: fn(&codec::EntityType) -> bool,
+        keep: fn(&document::EntityType) -> bool,
     ) -> Self {
         let mut command = Self::with_prompt(prompt_cmd, pending_cmd, prompt_text);
         command.keep = Some(keep);
@@ -265,7 +265,7 @@ impl CadCommand for SelectObjectsCommand {
         self.associative_dimensions_only
     }
 
-    fn selection_entity_filter(&self) -> Option<fn(&codec::EntityType) -> bool> {
+    fn selection_entity_filter(&self) -> Option<fn(&document::EntityType) -> bool> {
         self.keep
     }
 

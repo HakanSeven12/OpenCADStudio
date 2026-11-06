@@ -3,7 +3,7 @@ mod multiple_outputs;
 mod expressions;
 mod rename;
 use crate::scene::{block_basepoint, block_distance_parameter as distance, render_graph, Scene};
-use codec::{
+use document::{
     entities::{Insert, Line},
     EntityType,
 };
@@ -47,7 +47,7 @@ fn draft(document: &Document, definition: Handle, parameter: Handle) -> BlockLoo
     table.expressions = vec!["2".into(), "Small".into(), "4".into(), "Large".into()];
     table
 }
-fn graph_data(document: &Document, definition: Handle) -> codec::objects::BlockEvaluationGraph {
+fn graph_data(document: &Document, definition: Handle) -> document::objects::BlockEvaluationGraph {
     let ObjectType::DynamicBlock(o) =
         &document.objects[&graph_handle(document, definition).unwrap()]
     else {
@@ -532,7 +532,7 @@ fn lookup_basepoint_anchor_transform_and_reframe() {
 
 #[test]
 fn lookup_basepoint_existing_attributes_follow_anchor_and_editor_frame() {
-    use codec::entities::{AttributeDefinition, AttributeEntity};
+    use document::entities::{AttributeDefinition, AttributeEntity};
     let (document, definition) = fixture();
     let mut scene = Scene::new();
     scene.document = document;

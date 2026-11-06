@@ -23,9 +23,9 @@ pub enum FieldTarget {
     /// The Default of the Edit Attribute Definition dialog.
     AttdefEdit,
     /// The field a text already shows, edited in place.
-    EditText(codec::Handle),
+    EditText(document::Handle),
     /// A picked table cell (table, row, column).
-    TableCell(codec::Handle, usize, usize),
+    TableCell(document::Handle, usize, usize),
     /// An operand of the formula of the Field dialog beneath this one.
     FormulaOperand,
     /// The caret of the open text editor.
@@ -135,10 +135,10 @@ fn sheet_set_code(name: &str, custom: &str) -> String {
 /// The navigation tree of a SheetSet (set, subsets, sheets) or SheetView
 /// (set, view categories) field: depth, component id, label, is a sheet.
 pub fn nav_nodes(
-    db: &codec::sheet_set::SheetSetDatabase,
+    db: &document::sheet_set::SheetSetDatabase,
     views: bool,
 ) -> Vec<(u16, String, String, bool)> {
-    use codec::sheet_set::{number_and_title, ComponentKind, Element as SsElement};
+    use document::sheet_set::{number_and_title, ComponentKind, Element as SsElement};
     let set = db.sheet_set();
     let mut out = vec![(0, set.id().to_string(), db.name().to_string(), false)];
     if views {
@@ -151,7 +151,7 @@ pub fn nav_nodes(
             .collect();
         let named: Vec<&SsElement> = db.view_categories();
         let in_named = |v: &SsElement| {
-            codec::sheet_set::SheetSetDatabase::view_category_of(v)
+            document::sheet_set::SheetSetDatabase::view_category_of(v)
                 .is_some_and(|c| named.iter().any(|n| n.id() == c))
         };
         for v in all.iter().filter(|v| !in_named(v)) {
@@ -166,7 +166,7 @@ pub fn nav_nodes(
             ));
             for v in all
                 .iter()
-                .filter(|v| codec::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id()))
+                .filter(|v| document::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id()))
             {
                 out.push((2, v.id().to_string(), number_and_title(v), true));
             }
@@ -198,10 +198,10 @@ pub fn nav_nodes(
 
 /// The properties a navigation node offers: list label, code property, version.
 pub fn nav_props(
-    db: &codec::sheet_set::SheetSetDatabase,
+    db: &document::sheet_set::SheetSetDatabase,
     id: &str,
 ) -> Vec<(String, String, &'static str)> {
-    use codec::sheet_set::{
+    use document::sheet_set::{
         custom_properties, ComponentKind, CUSTOM_SHEET_PROP, CUSTOM_SHEET_SET_PROP,
     };
     let Some(el) = db.find(id) else {
@@ -259,7 +259,7 @@ pub fn nav_props(
 
 /// The sheet drawing, named view and layout a sheet or sheet view node links to.
 pub fn nav_link(
-    db: &codec::sheet_set::SheetSetDatabase,
+    db: &document::sheet_set::SheetSetDatabase,
     id: &str,
 ) -> Option<(String, String, String)> {
     let el = db.find(id)?;
@@ -273,8 +273,8 @@ pub fn nav_link(
                 .unwrap_or("")
                 .to_string(),
         )
-    } else if codec::sheet_set::ComponentKind::of(el)
-        == Some(codec::sheet_set::ComponentKind::Sheet)
+    } else if document::sheet_set::ComponentKind::of(el)
+        == Some(document::sheet_set::ComponentKind::Sheet)
     {
         (id.to_string(), String::new())
     } else {
@@ -298,11 +298,11 @@ impl FieldDialogState {
             return "\\AcSm".into();
         };
         let set = db.sheet_set().id().to_string();
-        let path = codec::sheet_set::native_path(db.path.as_deref().unwrap_or(""));
+        let path = document::sheet_set::native_path(db.path.as_deref().unwrap_or(""));
         // ViewportScale takes a scale format (and its version), not a text case.
         let scale = prop == "ViewportScale";
         let version = if scale {
-            codec::fields::PLOT_SCALE_FORMATS
+            document::fields::PLOT_SCALE_FORMATS
                 .get(self.ss_scale_format)
                 .map_or("", |(_, c)| {
                     if c.starts_with("\\AcVar.16.2") {
@@ -360,7 +360,7 @@ pub const PLACEHOLDER_TYPES: &[(&str, &str, &str)] = &[
 
 /// ViewportScale placeholder formats: the PlotScale pictures.
 pub fn viewport_scale_picture(k: usize) -> String {
-    codec::fields::PLOT_SCALE_FORMATS
+    document::fields::PLOT_SCALE_FORMATS
         .get(k)
         .and_then(|(_, code)| code.find("\\f ").map(|p| code[p..].to_string()))
         .unwrap_or_default()
@@ -555,10 +555,10 @@ pub struct FieldDialogState {
     pub sysvar: String,
     pub diesel: String,
     pub named_type: usize,
-    pub named_names: Vec<(String, codec::Handle)>,
+    pub named_names: Vec<(String, document::Handle)>,
     pub named: Option<usize>,
     /// The object picked for an Object field, its type and properties.
-    pub object: Option<(codec::Handle, String)>,
+    pub object: Option<(document::Handle, String)>,
     pub object_props: Vec<&'static str>,
     pub object_prop: Option<&'static str>,
     /// Whether the object field opened from the drawing used the versioned
@@ -606,7 +606,7 @@ pub struct FieldDialogState {
     pub ss_set_name: String,
     /// SheetSet / SheetView: the sets offered (open ones and any picked with
     /// "..."), the one shown, the node and property picked, associate hyperlink.
-    pub ss_sets: Vec<codec::sheet_set::SheetSetDatabase>,
+    pub ss_sets: Vec<document::sheet_set::SheetSetDatabase>,
     pub ss_set: usize,
     pub ss_node: String,
     pub ss_prop: String,
@@ -688,7 +688,7 @@ impl FieldDialogState {
     }
 
     /// The field code (without the `%<…>%` wrapper) and the objects it refers to.
-    pub fn code(&self) -> (String, Vec<codec::Handle>) {
+    pub fn code(&self) -> (String, Vec<document::Handle>) {
         let case = |base: String| match self.text_case {
             0 => base,
             n => format!("{base} \\f \"%tc{n}\""),
@@ -744,7 +744,7 @@ impl FieldDialogState {
                 vec![],
             ),
             FieldKind::PlotScale => (
-                codec::fields::PLOT_SCALE_FORMATS
+                document::fields::PLOT_SCALE_FORMATS
                     .get(self.plot_scale)
                     .map_or_else(|| "\\AcVar PlotScale".to_string(), |f| f.1.to_string()),
                 vec![],
@@ -774,7 +774,7 @@ impl FieldDialogState {
                 };
                 if label == "ViewportScale" {
                     // The version follows the format, as for PlotScale.
-                    let version = codec::fields::PLOT_SCALE_FORMATS
+                    let version = document::fields::PLOT_SCALE_FORMATS
                         .get(self.ss_scale_format)
                         .map_or("", |(_, code)| {
                             if code.starts_with("\\AcVar.16.2") {
@@ -794,7 +794,7 @@ impl FieldDialogState {
             }
             FieldKind::BlockPlaceholder => {
                 let (_, property, format) =
-                    codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[self.placeholder_property];
+                    document::fields::BLOCK_PLACEHOLDER_PROPERTIES[self.placeholder_property];
                 // Text properties take the chosen case; the others keep their own format.
                 let format = match (format, self.text_case) {
                     ("%tc4", 0) => String::new(),
@@ -845,14 +845,14 @@ impl FieldDialogState {
     /// Open on the field `code` a text already shows: its name and the
     /// settings its code spells. An Object field returns the property it
     /// reads, for the caller to match against the object's own list.
-    pub fn seed_from_code(&mut self, code: &str, objects: &[codec::Handle]) -> Option<String> {
+    pub fn seed_from_code(&mut self, code: &str, objects: &[document::Handle]) -> Option<String> {
         let code = code.trim();
         let (body, picture) = match code.find(" \\f \"") {
             Some(at) => (code[..at].trim(), code[at + 4..].trim().trim_matches('"')),
             None => (code, ""),
         };
         self.category = 0;
-        self.formula_format = codec::fields::FORMULA_FORMATS
+        self.formula_format = document::fields::FORMULA_FORMATS
             .iter()
             .position(|(_, format)| !format.is_empty() && picture.contains(format))
             .unwrap_or(0);
@@ -943,7 +943,7 @@ impl FieldDialogState {
     /// formula or an object property (`%lu2%pr3%ds44%ct8[0.0001]%ps[,m²]`),
     /// empty for the drawing's own units.
     fn number_picture(&self) -> String {
-        let mut picture = codec::fields::FORMULA_FORMATS
+        let mut picture = document::fields::FORMULA_FORMATS
             .get(self.formula_format)
             .map_or("", |f| f.1)
             .to_string();
@@ -1010,7 +1010,7 @@ impl FieldDialogState {
 /// code numbers them (`%<\_ObjIdx n>%`) and lists the objects.
 /// The stored, numbered object references of a formula (`%<\_ObjIdx 0>%`)
 /// back as the typed ones the dialog edits (`%<\_ObjId 2A>%`).
-pub fn typed_object_ids(formula: &str, objects: &[codec::Handle]) -> String {
+pub fn typed_object_ids(formula: &str, objects: &[document::Handle]) -> String {
     let mut out = String::new();
     let mut rest = formula;
     while let Some(start) = rest.find("%<\\_ObjIdx ") {
@@ -1032,9 +1032,9 @@ pub fn typed_object_ids(formula: &str, objects: &[codec::Handle]) -> String {
     out
 }
 
-fn indexed_object_ids(formula: &str) -> (String, Vec<codec::Handle>) {
+fn indexed_object_ids(formula: &str) -> (String, Vec<document::Handle>) {
     let mut out = String::new();
-    let mut objects: Vec<codec::Handle> = Vec::new();
+    let mut objects: Vec<document::Handle> = Vec::new();
     let mut rest = formula;
     while let Some(start) = rest.find("%<\\_ObjId ") {
         let after = &rest[start + "%<\\_ObjId ".len()..];
@@ -1042,7 +1042,7 @@ fn indexed_object_ids(formula: &str) -> (String, Vec<codec::Handle>) {
         let Ok(value) = u64::from_str_radix(after[..end].trim(), 16) else {
             break;
         };
-        let handle = codec::Handle::new(value);
+        let handle = document::Handle::new(value);
         let index = objects
             .iter()
             .position(|h| *h == handle)
@@ -1060,8 +1060,8 @@ fn indexed_object_ids(formula: &str) -> (String, Vec<codec::Handle>) {
 
 /// The geometric properties a field can show for an object of this type.
 /// Its own properties first, then the ones every object has.
-pub fn object_properties(entity: &codec::EntityType) -> Vec<&'static str> {
-    use codec::EntityType as E;
+pub fn object_properties(entity: &document::EntityType) -> Vec<&'static str> {
+    use document::EntityType as E;
     let own: &[&'static str] = match entity {
         E::Line(_) => &["Center", "EndPoint", "Length", "StartPoint"],
         E::Circle(_) => &["Area", "Center", "Circumference", "Diameter", "Radius"],
@@ -1416,7 +1416,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
             .into(),
             Some(block) => {
                 let (_, _, format) =
-                    codec::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
+                    document::fields::BLOCK_PLACEHOLDER_PROPERTIES[state.placeholder_property];
                 let mut panel = column![
                     row![
                         text(t!("Block name")).size(12).width(Length::Fixed(110.0)),
@@ -1428,7 +1428,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
                     .align_y(iced::Center),
                     text(t!("Block reference property")).size(12),
                     list(
-                        codec::fields::BLOCK_PLACEHOLDER_PROPERTIES
+                        document::fields::BLOCK_PLACEHOLDER_PROPERTIES
                             .iter()
                             .enumerate()
                             .map(|(i, (label, _, _))| {
@@ -1454,7 +1454,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         FieldKind::PlotScale => column![
             text(t!("Format")).size(12),
             list(
-                codec::fields::PLOT_SCALE_FORMATS
+                document::fields::PLOT_SCALE_FORMATS
                     .iter()
                     .enumerate()
                     .map(|(i, (n, _))| (
@@ -1513,7 +1513,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
             );
             let format: Element<'a, Message> = if kind == "ViewportScale" {
                 list(
-                    codec::fields::PLOT_SCALE_FORMATS
+                    document::fields::PLOT_SCALE_FORMATS
                         .iter()
                         .enumerate()
                         .map(|(i, (n, _))| {
@@ -1613,7 +1613,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
             }
             let format: Element<'a, Message> = if state.ss_prop == "ViewportScale" {
                 list(
-                    codec::fields::PLOT_SCALE_FORMATS
+                    document::fields::PLOT_SCALE_FORMATS
                         .iter()
                         .enumerate()
                         .map(|(i, (n, _))| {
@@ -1699,7 +1699,7 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
 /// with its additional format and, for a point, the coordinates it shows.
 fn number_format_rows(state: &FieldDialogState) -> Element<'_, Message> {
     const LABEL: f32 = 120.0;
-    let formats: Vec<Pick> = codec::fields::FORMULA_FORMATS
+    let formats: Vec<Pick> = document::fields::FORMULA_FORMATS
         .iter()
         .enumerate()
         .map(|(i, (n, _))| Pick(i, t!(*n).into_owned()))
@@ -1984,7 +1984,7 @@ mod tests {
 
     /// Open `code` in the dialog as the edit of an existing field would, and
     /// give back the code the dialog writes when nothing is changed.
-    fn reopened(code: &str, objects: &[codec::Handle], props: &[&'static str]) -> String {
+    fn reopened(code: &str, objects: &[document::Handle], props: &[&'static str]) -> String {
         let mut state = FieldDialogState::new(FieldTarget::NewText);
         if let Some(property) = state.seed_from_code(code, objects) {
             state.object = Some((objects[0], "Line".into()));
@@ -2000,7 +2000,7 @@ mod tests {
     fn a_level_mark_keeps_its_ucs_coordinate_and_prefix() {
         // A level mark: the end point's Y in the current UCS, after "+".
         let code = "\\AcObjProp.16.2 Object(%<\\_ObjIdx 0>%).EndPoint \\f \"%lu6%pt2%ps[+,]\"";
-        let line = codec::Handle::new(0x2A);
+        let line = document::Handle::new(0x2A);
         let props = ["Center", "EndPoint", "Length", "StartPoint"];
         assert_eq!(reopened(code, &[line], &props), code);
     }
@@ -2021,7 +2021,7 @@ mod tests {
     fn the_additional_format_goes_into_the_picture() {
         let mut state = FieldDialogState::new(FieldTarget::NewText);
         state.name = "Object";
-        state.object = Some((codec::Handle::new(0x2A), "Polyline".into()));
+        state.object = Some((document::Handle::new(0x2A), "Polyline".into()));
         state.object_props = vec!["Area", "Length"];
         state.object_prop = Some("Area");
         state.formula_format = 2;
@@ -2060,7 +2060,7 @@ mod tests {
     fn a_new_point_field_reads_the_current_ucs() {
         let mut state = FieldDialogState::new(FieldTarget::NewText);
         state.name = "Object";
-        state.object = Some((codec::Handle::new(0x2A), "Block reference".into()));
+        state.object = Some((document::Handle::new(0x2A), "Block reference".into()));
         state.object_prop = Some("InsertionPoint");
         assert!(state.code().0.starts_with("\\AcObjProp.16.2 "));
         state.object_prop = Some("XScaleFactor");
@@ -2069,9 +2069,9 @@ mod tests {
 
     #[test]
     fn a_block_reference_offers_its_own_and_the_general_properties() {
-        use codec::entities::Insert;
-        use codec::types::Vector3;
-        let door = codec::EntityType::Insert(Insert::new("DOOR", Vector3::ZERO));
+        use document::entities::Insert;
+        use document::types::Vector3;
+        let door = document::EntityType::Insert(Insert::new("DOOR", Vector3::ZERO));
         assert_eq!(
             super::object_properties(&door),
             [

@@ -1,7 +1,7 @@
-use codec::entities::{Block, BlockEnd, EntityCommon};
-use codec::objects::ObjectType;
-use codec::tables::BlockRecord;
-use codec::{Document, EntityType, Handle};
+use document::entities::{Block, BlockEnd, EntityCommon};
+use document::objects::ObjectType;
+use document::tables::BlockRecord;
+use document::{Document, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 
@@ -25,10 +25,10 @@ fn remap_common(common: &mut EntityCommon, handles: &FxHashMap<Handle, Handle>) 
         .iter()
         .filter_map(|h| handles.get(h).copied())
         .collect();
-    let mut data = codec::xdata::ExtendedData::new();
+    let mut data = document::xdata::ExtendedData::new();
     for mut record in common.extended_data.records().iter().cloned() {
         for value in &mut record.values {
-            if let codec::xdata::XDataValue::Handle(handle) = value {
+            if let document::xdata::XDataValue::Handle(handle) = value {
                 *handle = map(*handle);
             }
         }
@@ -43,7 +43,7 @@ fn cloneable_object(object: &ObjectType) -> bool {
         return constraints::cloneable(object);
     }
     if let ObjectType::DynamicBlock(object) = object {
-        return !matches!(object.data, codec::objects::DynamicBlockData::Unknown);
+        return !matches!(object.data, document::objects::DynamicBlockData::Unknown);
     }
     matches!(
         object,
@@ -58,7 +58,7 @@ fn cloneable_object(object: &ObjectType) -> bool {
             | ObjectType::PlaceHolder(_)
             | ObjectType::ImageDefinitionReactor(_)
             | ObjectType::BlockVisibilityParameter(_)
-            | ObjectType::XRecord(codec::objects::XRecord {
+            | ObjectType::XRecord(document::objects::XRecord {
                 entries_complete: true,
                 ..
             })
@@ -403,7 +403,7 @@ pub(super) fn copy_definition(
                         *handle = *new;
                     }
                 });
-                if let codec::objects::DynamicBlockData::VisibilityParameter(parameter) =
+                if let document::objects::DynamicBlockData::VisibilityParameter(parameter) =
                     &object.data
                 {
                     target
@@ -417,7 +417,7 @@ pub(super) fn copy_definition(
                     .get(&parameter.owner)
                     .copied()
                     .unwrap_or(parameter.owner);
-                if let codec::objects::BlockEvalValue::Handle(handle) = &mut parameter.eval_value {
+                if let document::objects::BlockEvalValue::Handle(handle) = &mut parameter.eval_value {
                     *handle = handles.get(handle).copied().unwrap_or(*handle);
                 }
                 for handle in
@@ -547,7 +547,7 @@ pub(super) fn copy_definition(
         if let Some(data) = source.object_xdata(*old) {
             for mut record in data.records().iter().cloned() {
                 for value in &mut record.values {
-                    if let codec::xdata::XDataValue::Handle(handle) = value {
+                    if let document::xdata::XDataValue::Handle(handle) = value {
                         *handle = handles.get(handle).copied().unwrap_or(*handle);
                     }
                 }

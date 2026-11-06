@@ -10,7 +10,7 @@ use crate::ui::dock::PanelId;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
 use crate::ui::window::pdf_dialogs::{accent_text, card_style};
-use codec::sheet_set::{self as ss, ComponentKind, Element as SsElement, SheetSetDatabase};
+use document::sheet_set::{self as ss, ComponentKind, Element as SsElement, SheetSetDatabase};
 use iced::widget::{
     button, checkbox, column, container, mouse_area, pick_list, row, scrollable, text, text_input,
     Space,
@@ -103,7 +103,7 @@ pub struct SheetSetManager {
 pub struct DrawingCache(
     pub  std::collections::HashMap<
         String,
-        (std::time::SystemTime, std::sync::Arc<codec::Document>),
+        (std::time::SystemTime, std::sync::Arc<document::Document>),
     >,
 );
 
@@ -115,7 +115,7 @@ impl std::fmt::Debug for DrawingCache {
 
 impl DrawingCache {
     /// The drawing at `path` when it was read and is unchanged since.
-    pub fn get(&self, path: &str) -> Option<std::sync::Arc<codec::Document>> {
+    pub fn get(&self, path: &str) -> Option<std::sync::Arc<document::Document>> {
         let modified = std::fs::metadata(path).and_then(|m| m.modified()).ok()?;
         let (t, doc) = self.0.get(&ss::path_key(path))?;
         (*t == modified).then(|| doc.clone())
@@ -125,7 +125,7 @@ impl DrawingCache {
         &mut self,
         path: &str,
         modified: std::time::SystemTime,
-        doc: std::sync::Arc<codec::Document>,
+        doc: std::sync::Arc<document::Document>,
     ) {
         self.0.insert(ss::path_key(path), (modified, doc));
     }
@@ -135,7 +135,7 @@ impl DrawingCache {
     pub fn take(
         &mut self,
         path: &str,
-    ) -> Option<(std::time::SystemTime, std::sync::Arc<codec::Document>)> {
+    ) -> Option<(std::time::SystemTime, std::sync::Arc<document::Document>)> {
         self.0.remove(&ss::path_key(path))
     }
 }
@@ -143,7 +143,7 @@ impl DrawingCache {
 /// A drawing read for the cache (its modification time and document).
 #[derive(Clone)]
 pub struct ReadDrawing(
-    pub Result<(std::time::SystemTime, std::sync::Arc<codec::Document>), String>,
+    pub Result<(std::time::SystemTime, std::sync::Arc<document::Document>), String>,
 );
 
 impl std::fmt::Debug for ReadDrawing {
@@ -172,7 +172,7 @@ pub fn read_drawing(path: &str) -> ReadDrawing {
 pub type ImportRead = Result<
     (
         Vec<(String, String)>,
-        Option<codec::sheet_set::SheetSetData>,
+        Option<document::sheet_set::SheetSetData>,
     ),
     String,
 >;

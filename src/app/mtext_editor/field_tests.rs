@@ -2,22 +2,22 @@
 //! is edited and formatted, and the save matches what the codec would write.
 use super::*;
 use crate::app::{Message, OpenCADStudio};
-use codec::fields::NewField;
-use codec::objects::ObjectType;
-use codec::DxfVersion;
+use document::fields::NewField;
+use document::objects::ObjectType;
+use document::DxfVersion;
 
 /// An MTEXT whose value is `template` with each `%<\_FldIdx n>%` shown as
 /// `values[n]`, opened in the editor.
 fn host(template: &str, values: &[&str]) -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     let doc = &mut app.tabs[1].scene.document;
     let h = doc
         .add_entity(EntityType::MText(Box::new(MText::with_value(
             "",
-            codec::types::Vector3::new(0., 0., 0.),
+            document::types::Vector3::new(0., 0., 0.),
         ))))
         .unwrap();
     doc.set_text_field(h, template, children(values)).unwrap();
@@ -241,7 +241,7 @@ fn formatting_beside_a_field_is_saved_and_over_it_is_refused() {
     assert!(app.mtext_commit());
     assert_eq!(container(&app, h).1, r"\fSimplex;{\La} %<\_FldIdx 0>% b");
     assert_eq!(
-        codec::fields::field_spans(&app.tabs[1].scene.document, h, &value(&app, h)),
+        document::fields::field_spans(&app.tabs[1].scene.document, h, &value(&app, h)),
         Some(vec![16..18]),
         "the field is found again in the formatted text"
     );
@@ -261,14 +261,14 @@ fn an_edited_field_host_reopens_editable_after_dwg_and_dxf() {
         };
         assert_eq!(t.value, "xa 12 b", "{ext}");
         assert_eq!(
-            codec::fields::field_spans(&doc, h, &t.value),
+            document::fields::field_spans(&doc, h, &t.value),
             Some(vec![3..5]),
             "{ext}: the field is found again"
         );
         let mut reopened = OpenCADStudio::new_for_test();
         reopened
             .tabs
-            .push(crate::app::document::DocumentTab::new_drawing(1));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(1));
         reopened.active_tab = 1;
         reopened.tabs[1].scene.document = doc.clone();
         reopened.open_mtext_editor(DVec3::ZERO, Some(h), &t.value, 2.5, None);
@@ -341,7 +341,7 @@ fn a_field_inserted_at_the_caret_is_saved_between_the_texts() {
     assert_eq!(value(&app, h), "a42-7b");
     assert_eq!(container(&app, h).1, r"a%<\_FldIdx 0>%b");
     assert_eq!(
-        codec::fields::field_spans(&app.tabs[1].scene.document, h, "a42-7b"),
+        document::fields::field_spans(&app.tabs[1].scene.document, h, "a42-7b"),
         Some(vec![1..5])
     );
 }
@@ -358,7 +358,7 @@ fn an_inserted_field_keeps_the_existing_ones_and_leaves_no_orphan() {
     let doc = &app.tabs[1].scene.document;
     assert_eq!(container(&app, h).1, r"a %<\_FldIdx 0>% b%<\_FldIdx 1>%");
     assert_eq!(
-        codec::fields::field_spans(doc, h, &value(&app, h)),
+        document::fields::field_spans(doc, h, &value(&app, h)),
         Some(vec![2..4, 6..10])
     );
     let fields = doc

@@ -2,9 +2,9 @@
 // and entity render-style helpers for the Scene.
 
 use crate::io::plot_style::PlotStyleTableExt as _;
-use codec::tables::LineType;
-use codec::types::{Color as AcadColor, LineWeight};
-use codec::{Document, EntityType, Handle};
+use document::tables::LineType;
+use document::types::{Color as AcadColor, LineWeight};
+use document::{Document, EntityType, Handle};
 use glam::Mat4;
 use iced::mouse;
 use iced::widget::shader::{self, Viewport};
@@ -242,9 +242,9 @@ pub struct ViewportData {
     /// so `prepare` can patch just those entities' slabs. `None` ⇒ full build.
     pub(in crate::scene) wire_patch: Option<(u64, Arc<crate::scene::WireGpuPatch>)>,
     /// Selected handles only (no hover) — solid meshes tint these blue.
-    pub(in crate::scene) selected_handles: Arc<rustc_hash::FxHashSet<codec::Handle>>,
+    pub(in crate::scene) selected_handles: Arc<rustc_hash::FxHashSet<document::Handle>>,
     /// Currently hovered selectable unit — solid meshes tint it orange.
-    pub(in crate::scene) hover_handles: Arc<rustc_hash::FxHashSet<codec::Handle>>,
+    pub(in crate::scene) hover_handles: Arc<rustc_hash::FxHashSet<document::Handle>>,
     /// Bumped on selection / hover change. Paired with `wire_content_id` to
     /// decide when the xray overlay batch needs rebuilding.
     pub(in crate::scene) selection_generation: u64,
@@ -279,7 +279,7 @@ pub struct Primitive {
 }
 
 /// Flags the render pipeline consumes, derived from
-/// [`codec::entities::ViewportRenderMode`]. Each shaded variant fills
+/// [`document::entities::ViewportRenderMode`]. Each shaded variant fills
 /// 3D faces and meshes; the pure wireframes drop the fill and keep only
 /// edges. The optimized 2-D wireframe retains planar SOLID interiors and
 /// entity draw order; the 3-D wireframe uses true depth and outlines them.
@@ -301,8 +301,8 @@ pub struct RenderModeFlags {
     pub flat_shade: bool,
 }
 
-pub fn render_mode_flags(mode: codec::entities::ViewportRenderMode) -> RenderModeFlags {
-    use codec::entities::ViewportRenderMode as M;
+pub fn render_mode_flags(mode: document::entities::ViewportRenderMode) -> RenderModeFlags {
+    use document::entities::ViewportRenderMode as M;
     match mode {
         M::Wireframe2D => RenderModeFlags {
             face3d_fill: false,
@@ -778,11 +778,11 @@ impl shader::Primitive for Primitive {
                     // scanned/parses all resident wires repeatedly here even
                     // though WireArena emits just one changed entity.
                     let mut regular_changed: rustc_hash::FxHashMap<
-                        codec::Handle,
+                        document::Handle,
                         Vec<&crate::scene::WireModel>,
                     > = rustc_hash::FxHashMap::default();
                     let mut mesh_changed: rustc_hash::FxHashMap<
-                        codec::Handle,
+                        document::Handle,
                         Vec<&crate::scene::WireModel>,
                     > = rustc_hash::FxHashMap::default();
                     if let Some(patch) = patch {
@@ -869,7 +869,7 @@ impl shader::Primitive for Primitive {
                                 inner.wire_arena_fallback_handles = regular
                                     .iter()
                                     .filter_map(|wire| {
-                                        wire.name.parse::<u64>().ok().map(codec::Handle::new)
+                                        wire.name.parse::<u64>().ok().map(document::Handle::new)
                                     })
                                     .collect();
                             } else if inner.wire_arena_fallback_kind == Some(false) {
@@ -902,7 +902,7 @@ impl shader::Primitive for Primitive {
                                 inner.wire_arena_fallback_handles = mesh
                                     .iter()
                                     .filter_map(|wire| {
-                                        wire.name.parse::<u64>().ok().map(codec::Handle::new)
+                                        wire.name.parse::<u64>().ok().map(document::Handle::new)
                                     })
                                     .collect();
                             } else if inner.wire_arena_fallback_kind == Some(true) {
@@ -2335,7 +2335,7 @@ fn normalized_direction(value: [f64; 3], fallback: [f32; 3]) -> [f32; 3] {
     }
 }
 
-fn solar_direction(sun: &codec::objects::Sun, geo: &codec::objects::GeoData) -> Option<[f32; 3]> {
+fn solar_direction(sun: &document::objects::Sun, geo: &document::objects::GeoData) -> Option<[f32; 3]> {
     if sun.julian_day < 1_000_000 {
         return None;
     }
@@ -2438,7 +2438,7 @@ impl Scene {
             .map(|value| value.handle)
     }
 
-    fn model_tile_vport(&self, index: usize) -> Option<&codec::tables::VPort> {
+    fn model_tile_vport(&self, index: usize) -> Option<&document::tables::VPort> {
         let rect = self.model_tiles.borrow().get(index)?.rect;
         let lower_left = [rect.x as f64, (1.0 - rect.y - rect.height) as f64];
         let upper_right = [(rect.x + rect.width) as f64, (1.0 - rect.y) as f64];
@@ -2483,8 +2483,8 @@ impl Scene {
         })
     }
 
-    fn geolocation(&self) -> Option<&codec::objects::GeoData> {
-        use codec::objects::ObjectType;
+    fn geolocation(&self) -> Option<&document::objects::GeoData> {
+        use document::objects::ObjectType;
 
         crate::entities::object_data::geo_objects(&self.object_data_cache)
             .iter()
@@ -2507,9 +2507,9 @@ impl Scene {
         target_block: Handle,
         frozen: &rustc_hash::FxHashSet<Handle>,
     ) -> Vec<SceneLight> {
-        use codec::objects::{ClassObjectData, ObjectType};
+        use document::objects::{ClassObjectData, ObjectType};
 
-        fn converted(scene: &Scene, light: &codec::entities::Light) -> Option<SceneLight> {
+        fn converted(scene: &Scene, light: &document::entities::Light) -> Option<SceneLight> {
             if !light.status {
                 return None;
             }
@@ -2748,8 +2748,8 @@ impl Scene {
                 None => self.document.objects.get(&light.handle).is_some_and(|object| {
                     matches!(
                         object,
-                        codec::objects::ObjectType::ClassObject(value)
-                            if matches!(&value.data, codec::objects::ClassObjectData::Sun(_))
+                        document::objects::ObjectType::ClassObject(value)
+                            if matches!(&value.data, document::objects::ClassObjectData::Sun(_))
                     ) && (!settings.sun_handle.is_valid()
                         || settings.sun_handle == light.handle)
                 }),
@@ -2884,13 +2884,13 @@ impl Scene {
                 [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
             })
         };
-        let from_entity = |value: &codec::entities::Viewport| ViewportLightingSettings {
+        let from_entity = |value: &document::entities::Viewport| ViewportLightingSettings {
             force_default: value.default_lighting,
             default_type: value.default_lighting_type,
             ambient: ambient(&value.ambient_color),
             sun_handle: value.sun_handle,
         };
-        let from_table = |value: &codec::tables::VPort| ViewportLightingSettings {
+        let from_table = |value: &document::tables::VPort| ViewportLightingSettings {
             force_default: value.use_default_lights,
             default_type: value.default_lighting_type,
             ambient: ambient(&value.ambient_color),
@@ -2962,7 +2962,7 @@ impl Scene {
             }
         } else if viewport.handle.is_valid() {
             if let Some(EntityType::Viewport(value)) = self.document.get_entity(viewport.handle) {
-                let flat = value.render_mode == codec::entities::ViewportRenderMode::Wireframe2D;
+                let flat = value.render_mode == document::entities::ViewportRenderMode::Wireframe2D;
                 return build(
                     value.visual_style_handle,
                     value.brightness,
@@ -2979,7 +2979,7 @@ impl Scene {
             if let Some(value) = self.model_tile_vport(index) {
                 // A 2D wireframe view shows no background, as in the reference.
                 let flat = self.model_tiles.borrow().get(index).is_some_and(|tile| {
-                    tile.render_mode == codec::entities::ViewportRenderMode::Wireframe2D
+                    tile.render_mode == document::entities::ViewportRenderMode::Wireframe2D
                 });
                 return build(
                     value.visual_style_handle,
@@ -3178,7 +3178,7 @@ impl Scene {
     }
 
     fn resolve_document_render_environment(&self) -> CachedDocumentRenderEnvironment {
-        use codec::objects::{ClassObjectData, ObjectType};
+        use document::objects::{ClassObjectData, ObjectType};
 
         let mut result = CachedDocumentRenderEnvironment::default();
 
@@ -3221,9 +3221,9 @@ impl Scene {
 
                 (env, pre)
             } else {
-                let mut best_env: Option<(codec::Handle, &codec::objects::RenderEnvironment)> =
+                let mut best_env: Option<(document::Handle, &document::objects::RenderEnvironment)> =
                     None;
-                let mut best_preset: Option<(codec::Handle, &codec::objects::RenderSettings)> =
+                let mut best_preset: Option<(document::Handle, &document::objects::RenderSettings)> =
                     None;
 
                 for (handle, object) in &self.document.objects {
@@ -3366,7 +3366,7 @@ impl Scene {
         canvas: [f32; 4],
         depth: usize,
     ) -> ViewportBackgroundSettings {
-        use codec::objects::{ClassObjectData, ObjectType};
+        use document::objects::{ClassObjectData, ObjectType};
 
         if depth > 4 || !handle.is_valid() {
             return ViewportBackgroundSettings::canvas(canvas);
@@ -3753,7 +3753,7 @@ impl Scene {
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: codec::entities::HatchStyleType::Normal,
+                    style: document::entities::HatchStyleType::Normal,
                     pattern: pattern.clone(),
                     name: "PLOTSTYLE".to_string(),
                     color,
@@ -3803,7 +3803,7 @@ pub(in crate::scene) fn linetype_name_for<'a>(
 
 pub(crate) fn linetype_name_for_common_viewport<'a>(
     document: &'a Document,
-    common: &'a codec::entities::EntityCommon,
+    common: &'a document::entities::EntityCommon,
     viewport: Option<Handle>,
 ) -> &'a str {
     let elt = &common.linetype;
@@ -3813,7 +3813,7 @@ pub(crate) fn linetype_name_for_common_viewport<'a>(
                 document,
                 &common.layer,
                 viewport,
-                codec::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+                document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
             )
             .and_then(|value| value.as_handle())
             {
@@ -3883,8 +3883,8 @@ fn viewport_override(
     document: &Document,
     layer_name: &str,
     viewport: Option<Handle>,
-    kind: codec::objects::KnownXRecordKind,
-) -> Option<codec::objects::XRecordValue> {
+    kind: document::objects::KnownXRecordKind,
+) -> Option<document::objects::XRecordValue> {
     let viewport = viewport.filter(|handle| handle.is_valid())?;
     let layer = document.layers.get(layer_name)?;
     document
@@ -3895,7 +3895,7 @@ fn viewport_override(
 
 pub(crate) fn render_style_for_common_viewport(
     document: &Document,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
     viewport: Option<Handle>,
 ) -> ([f32; 4], f32, [f32; 8], f32, u8) {
     if crate::scene::block_construction::is_construction(common) {
@@ -3908,7 +3908,7 @@ pub(crate) fn render_style_for_common_viewport(
             .filter(|handle| handle.is_valid())
             .and_then(|handle| document.objects.get(&handle))
             .and_then(|object| match object {
-                codec::objects::ObjectType::BookColor(book) => Some(&book.color),
+                document::objects::ObjectType::BookColor(book) => Some(&book.color),
                 _ => None,
             });
         let ec = book_color.unwrap_or(&common.color);
@@ -3919,7 +3919,7 @@ pub(crate) fn render_style_for_common_viewport(
                         document,
                         layer_name,
                         viewport,
-                        codec::objects::KnownXRecordKind::LayerViewportColorOverride,
+                        document::objects::KnownXRecordKind::LayerViewportColorOverride,
                     )
                     .and_then(|value| value.as_i32())
                     .map(layer_override_color)
@@ -3947,10 +3947,10 @@ pub(crate) fn render_style_for_common_viewport(
                     document,
                     layer_name,
                     viewport,
-                    codec::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+                    document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
                 )
                 .and_then(|value| value.as_i32())
-                .map(|value| codec::types::Transparency::from_alpha_value(value as u32))
+                .map(|value| document::types::Transparency::from_alpha_value(value as u32))
             } else {
                 None
             };
@@ -3983,7 +3983,7 @@ pub(crate) fn render_style_for_common_viewport(
                 document,
                 layer_name,
                 viewport,
-                codec::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+                document::objects::KnownXRecordKind::LayerViewportLineweightOverride,
             )
             .and_then(|value| value.as_i32())
             .map(|value| LineWeight::from_value(value as i16))
@@ -4012,13 +4012,13 @@ pub(crate) fn render_style_for_viewport(
 
 pub(crate) fn has_resolved_book_color_common(
     document: &Document,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
 ) -> bool {
     common
         .color_book_handle
         .filter(|handle| handle.is_valid())
         .and_then(|handle| document.objects.get(&handle))
-        .is_some_and(|object| matches!(object, codec::objects::ObjectType::BookColor(_)))
+        .is_some_and(|object| matches!(object, document::objects::ObjectType::BookColor(_)))
 }
 
 pub(crate) fn has_resolved_book_color(document: &Document, e: &EntityType) -> bool {
@@ -4040,7 +4040,7 @@ pub struct InheritStyle {
 /// An INSERT's dash pattern as its ByBlock children inherit it: the linetype is
 /// the INSERT's, but the linetype scale that applies is the child's own.
 pub(crate) fn insert_pattern_for_children(
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
     pat_len: f32,
     pat: [f32; 8],
 ) -> (f32, [f32; 8]) {
@@ -4082,7 +4082,7 @@ pub(crate) fn layer_render_style_viewport(
             document,
             layer_name,
             viewport,
-            codec::objects::KnownXRecordKind::LayerViewportColorOverride,
+            document::objects::KnownXRecordKind::LayerViewportColorOverride,
         )
         .and_then(|value| value.as_i32())
         .map(layer_override_color)
@@ -4099,10 +4099,10 @@ pub(crate) fn layer_render_style_viewport(
             document,
             layer_name,
             viewport,
-            codec::objects::KnownXRecordKind::LayerViewportAlphaOverride,
+            document::objects::KnownXRecordKind::LayerViewportAlphaOverride,
         )
         .and_then(|value| value.as_i32())
-        .map(|value| codec::types::Transparency::from_alpha_value(value as u32))
+        .map(|value| document::types::Transparency::from_alpha_value(value as u32))
         .or_else(|| layer.map(|layer| layer.transparency))
         .map(|transparency| 1.0 - transparency.as_percent() as f32)
         .unwrap_or(1.0)
@@ -4117,7 +4117,7 @@ pub(crate) fn layer_render_style_viewport(
             document,
             layer_name,
             viewport,
-            codec::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
         )
         .and_then(|value| value.as_handle())
         .and_then(|handle| {
@@ -4141,7 +4141,7 @@ pub(crate) fn layer_render_style_viewport(
             document,
             layer_name,
             viewport,
-            codec::objects::KnownXRecordKind::LayerViewportLineweightOverride,
+            document::objects::KnownXRecordKind::LayerViewportLineweightOverride,
         )
         .and_then(|value| value.as_i32())
         .map(|value| LineWeight::from_value(value as i16))
@@ -4547,7 +4547,7 @@ impl Scene {
                     for index in [pair_start, pair_start + 1] {
                         let high = edges[index];
                         let low = edges_low.get(index).copied().unwrap_or([0.0; 3]);
-                        let local = codec::types::Vector3::new(
+                        let local = document::types::Vector3::new(
                             high[0] as f64 + low[0] as f64,
                             high[1] as f64 + low[1] as f64,
                             high[2] as f64 + low[2] as f64,
@@ -4623,7 +4623,7 @@ impl Scene {
                     continue;
                 }
                 let context_scale = match self.document.objects.get(&scale) {
-                    Some(codec::objects::ObjectType::Scale(value)) => value.inverse_factor() as f32,
+                    Some(document::objects::ObjectType::Scale(value)) => value.inverse_factor() as f32,
                     _ => annotation_scale,
                 };
                 let block_cache = self.block_cache_arc_for(Some(scale), true, self.active_viewport);
@@ -4668,7 +4668,7 @@ impl Scene {
     pub fn build_viewports(
         &self,
         bounds: Rectangle,
-        model_render_mode: codec::entities::ViewportRenderMode,
+        model_render_mode: document::entities::ViewportRenderMode,
         _hover_region: Option<usize>,
         show_viewcube: bool,
         show_interaction: bool,
@@ -4734,7 +4734,7 @@ impl Scene {
         &self,
         bounds: Rectangle,
         tile_idx: usize,
-        model_render_mode: codec::entities::ViewportRenderMode,
+        model_render_mode: document::entities::ViewportRenderMode,
         show_viewcube: bool,
         show_interaction: bool,
         viewcube_text_color: [f32; 4],
@@ -4885,7 +4885,7 @@ impl Scene {
             // borders — NOT the projected viewport content (the GPU content
             // viewports draw that themselves).
             self.paper_sheet_wires_arc()
-        } else if inst.handle == codec::Handle::NULL {
+        } else if inst.handle == document::Handle::NULL {
             self.entity_wires_arc()
         } else {
             self.model_wires_for_viewport_arc(inst.handle, full.height)
@@ -4996,7 +4996,7 @@ impl Scene {
         // incremental patch's base id receives the same tag, preserving the
         // arena fast path after the first mode switch.
         let wire_mode_tag =
-            u64::from(inst.render_mode == codec::entities::ViewportRenderMode::Wireframe3D);
+            u64::from(inst.render_mode == document::entities::ViewportRenderMode::Wireframe3D);
         let wire_content_id = base_wire_content_id
             .wrapping_mul(2)
             .wrapping_add(wire_mode_tag);
@@ -5023,7 +5023,7 @@ impl Scene {
         vp_mark("annotation-highlight");
         // 2D wireframe draws no cloud points; the clouds show their extents
         // and a message there instead (drawn with the live overlays).
-        let wireframe_2d = inst.render_mode == codec::entities::ViewportRenderMode::Wireframe2D;
+        let wireframe_2d = inst.render_mode == document::entities::ViewportRenderMode::Wireframe2D;
         let cloud_2d_wires = if wireframe_2d && show_live_overlay && !inst.paper_sheet {
             self.point_cloud_2d_wires()
         } else {
@@ -5077,7 +5077,7 @@ impl Scene {
         // viewports hide special fills, media, meshes and lights on VP-frozen
         // layers too, matching the already-filtered resident wire set.
         let vp_frozen: rustc_hash::FxHashSet<Handle> =
-            if !inst.paper_sheet && inst.tile_idx.is_none() && inst.handle != codec::Handle::NULL {
+            if !inst.paper_sheet && inst.tile_idx.is_none() && inst.handle != document::Handle::NULL {
                 self.viewport_hidden_handles(inst.handle)
             } else {
                 rustc_hash::FxHashSet::default()
@@ -5288,12 +5288,12 @@ impl Scene {
             0x1000_0000_0000_0000
         } else if inst.paper_sheet {
             0x2000_0000_0000_0000 | self.current_layout_block_handle().value()
-        } else if inst.handle == codec::Handle::NULL {
+        } else if inst.handle == document::Handle::NULL {
             0x4000_0000_0000_0000 | self.current_layout_block_handle().value()
         } else {
             0x3000_0000_0000_0000 | inst.handle.value()
         };
-        let draw_depths = if inst.render_mode == codec::entities::ViewportRenderMode::Wireframe3D {
+        let draw_depths = if inst.render_mode == document::entities::ViewportRenderMode::Wireframe3D {
             Arc::clone(&self.no_draw_depths)
         } else {
             self.draw_depth_map()
@@ -5338,7 +5338,7 @@ impl Scene {
         // rectangle and need no stencil boundary.
         let clip_boundary_ndc = if !inst.paper_sheet
             && inst.tile_idx.is_none()
-            && inst.handle != codec::Handle::NULL
+            && inst.handle != document::Handle::NULL
             && self.current_layout != "Model"
         {
             Arc::new(self.viewport_clip_boundary_ndc(inst.handle, uo, vo, us, vs))
@@ -5519,7 +5519,7 @@ impl Scene {
 // ── Linetype pattern helper ───────────────────────────────────────────────
 
 pub(crate) fn resolve_pattern(
-    table: &codec::tables::Table<LineType>,
+    table: &document::tables::Table<LineType>,
     name: &str,
     scale: f32,
 ) -> (f32, [f32; 8]) {
@@ -5565,7 +5565,7 @@ pub(crate) fn resolve_pattern(
 /// Whether a wire belongs to a Face3D entity, by document handle lookup —
 /// so no changes to WireModel are needed.
 #[allow(dead_code)]
-fn is_face3d_wire(w: &WireModel, document: &codec::Document) -> bool {
+fn is_face3d_wire(w: &WireModel, document: &document::Document) -> bool {
     w.name
         .parse::<u64>()
         .ok()
@@ -5580,7 +5580,7 @@ fn is_face3d_wire(w: &WireModel, document: &codec::Document) -> bool {
 #[allow(dead_code)]
 fn split_face3d_wires(
     wires: &[WireModel],
-    document: &codec::Document,
+    document: &document::Document,
 ) -> (Vec<WireModel>, Vec<WireModel>) {
     let face3d_handles: rustc_hash::FxHashSet<u64> = document
         .entities()
@@ -5624,9 +5624,9 @@ fn split_face3d_wires_with_handles(
 #[cfg(test)]
 mod layer0_inherit_tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::tables::Layer;
-    use codec::types::{Color, Transparency};
+    use document::entities::Line;
+    use document::tables::Layer;
+    use document::types::{Color, Transparency};
 
     // ACI: 1 = red, 3 = green, 7 = white. Distinct, so the assertions below
     // can tell "inherited the insert layer" from "kept layer 0".
@@ -5820,9 +5820,9 @@ mod layer0_inherit_tests {
         let mut scene = Scene::new();
         assert!(!scene.has_face3d());
 
-        scene.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 10.0, 0.0),
+        scene.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 10.0, 0.0),
         )));
         assert!(!scene.has_face3d());
 
@@ -5839,17 +5839,17 @@ mod layer0_inherit_tests {
         assert_eq!(bg.fog_params, bg2.fog_params);
 
         // Test multiple Face3D additions and removals
-        let face1 = codec::entities::Face3D::new(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 10.0, 0.0),
-            codec::types::Vector3::new(0.0, 10.0, 0.0),
+        let face1 = document::entities::Face3D::new(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 10.0, 0.0),
+            document::types::Vector3::new(0.0, 10.0, 0.0),
         );
-        let face2 = codec::entities::Face3D::new(
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
-            codec::types::Vector3::new(20.0, 0.0, 0.0),
-            codec::types::Vector3::new(20.0, 10.0, 0.0),
-            codec::types::Vector3::new(10.0, 10.0, 0.0),
+        let face2 = document::entities::Face3D::new(
+            document::types::Vector3::new(10.0, 0.0, 0.0),
+            document::types::Vector3::new(20.0, 0.0, 0.0),
+            document::types::Vector3::new(20.0, 10.0, 0.0),
+            document::types::Vector3::new(10.0, 10.0, 0.0),
         );
         let fh1 = scene.add_entity(EntityType::Face3D(face1));
         assert!(scene.has_face3d());
@@ -5873,11 +5873,11 @@ mod layer0_inherit_tests {
         );
 
         // bump_geometry_no_blocks must also invalidate has_face3d
-        let fh3 = scene.add_entity(EntityType::Face3D(codec::entities::Face3D::new(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(1.0, 1.0, 1.0),
-            codec::types::Vector3::new(2.0, 2.0, 2.0),
-            codec::types::Vector3::new(3.0, 3.0, 3.0),
+        let fh3 = scene.add_entity(EntityType::Face3D(document::entities::Face3D::new(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(1.0, 1.0, 1.0),
+            document::types::Vector3::new(2.0, 2.0, 2.0),
+            document::types::Vector3::new(3.0, 3.0, 3.0),
         )));
         assert!(scene.has_face3d());
         scene.document.remove_entity(fh3);
@@ -5890,18 +5890,18 @@ mod layer0_inherit_tests {
 
     #[test]
     fn split_face3d_wires_correctness_and_parity() {
-        let mut doc = codec::Document::new();
-        let face = codec::entities::Face3D::new(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 10.0, 0.0),
-            codec::types::Vector3::new(0.0, 10.0, 0.0),
+        let mut doc = document::Document::new();
+        let face = document::entities::Face3D::new(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 10.0, 0.0),
+            document::types::Vector3::new(0.0, 10.0, 0.0),
         );
         let face_h = doc.add_entity(EntityType::Face3D(face)).unwrap();
 
-        let line = codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(5.0, 5.0, 0.0),
+        let line = document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(5.0, 5.0, 0.0),
         );
         let line_h = doc.add_entity(EntityType::Line(line)).unwrap();
 
@@ -5978,7 +5978,7 @@ mod layer0_inherit_tests {
     fn render_environment_objects_cache_and_apply() {
         let mut scene = Scene::new();
 
-        let mut renv = codec::objects::RenderEnvironment::default();
+        let mut renv = document::objects::RenderEnvironment::default();
         renv.fog_enabled = true;
         renv.fog_color = [100, 150, 200];
         renv.fog_background_enabled = true;
@@ -5990,8 +5990,8 @@ mod layer0_inherit_tests {
         let handle = Handle::new(42);
         scene.document.objects.insert(
             handle,
-            codec::objects::ObjectType::ClassObject(codec::objects::ClassObject::new(
-                codec::objects::ClassObjectData::RenderEnvironment(renv),
+            document::objects::ObjectType::ClassObject(document::objects::ClassObject::new(
+                document::objects::ClassObjectData::RenderEnvironment(renv),
             )),
         );
         scene.object_data_cache = crate::entities::object_data::build_cache(&scene.document);

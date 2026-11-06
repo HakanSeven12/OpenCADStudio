@@ -130,7 +130,7 @@ fn every_former_toolbar_command_is_in_a_menu() {
         (EditorMenu::Justify, t!("Middle Center").into_owned(), |m| {
             matches!(
                 m,
-                Message::MTextJustify(codec::entities::mtext::AttachmentPoint::MiddleCenter)
+                Message::MTextJustify(document::entities::mtext::AttachmentPoint::MiddleCenter)
             )
         }),
         (
@@ -318,7 +318,7 @@ fn the_editor_keeps_its_minimum_size_inside_the_window() {
 fn escape_closes_an_open_menu_before_the_editor() {
     let mut app = crate::app::OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     app.open_mtext_editor(glam::DVec3::ZERO, None, "ab", 2.5, None);
     let _ = app.update(Message::MTextMenu(Some(EditorMenu::Columns)));
@@ -338,7 +338,7 @@ fn escape_closes_an_open_menu_before_the_editor() {
 fn a_menu_action_closes_the_menu_and_acts() {
     let mut app = crate::app::OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     app.open_mtext_editor(glam::DVec3::ZERO, None, "ab", 2.5, None);
     let _ = app.update(Message::MTextMenu(Some(EditorMenu::Symbols)));
@@ -363,7 +363,7 @@ fn a_menu_action_closes_the_menu_and_acts() {
 fn app_with(raw: &str) -> crate::app::OpenCADStudio {
     let mut app = crate::app::OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     app.open_mtext_editor(glam::DVec3::ZERO, None, raw, 2.5, None);
     app

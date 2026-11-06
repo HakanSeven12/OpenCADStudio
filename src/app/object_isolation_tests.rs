@@ -4,9 +4,9 @@
 #[cfg(test)]
 mod tests {
     use crate::app::{Message, OpenCADStudio};
-    use codec::entities::Line;
-    use codec::types::Vector3;
-    use codec::{EntityType, Handle};
+    use document::entities::Line;
+    use document::types::Vector3;
+    use document::{EntityType, Handle};
 
     fn fresh_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();

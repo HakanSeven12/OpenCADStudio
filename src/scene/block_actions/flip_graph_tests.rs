@@ -92,7 +92,7 @@ fn authored_flip_link_reflects_an_unbound_flip_axis() {
     .unwrap();
     create(&mut doc, def, Kind::Flip, source, &[target], DVec3::ZERO).unwrap();
     let insert = doc
-        .add_entity(EntityType::Insert(codec::entities::Insert::new(
+        .add_entity(EntityType::Insert(document::entities::Insert::new(
             "ACTIONS",
             Vector3::ZERO,
         )))
@@ -162,13 +162,13 @@ fn coupled_flips_preserve_geometry_inputs_and_reload() {
             flip_actions.push(action);
         }
         let first = doc
-            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            .add_entity(EntityType::Insert(document::entities::Insert::new(
                 "ACTIONS",
                 Vector3::ZERO,
             )))
             .unwrap();
         let second = doc
-            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            .add_entity(EntityType::Insert(document::entities::Insert::new(
                 "ACTIONS",
                 Vector3::UNIT_X * 30.,
             )))
@@ -692,7 +692,7 @@ fn coupled_refresh_migrates_polar_and_rotation_values() {
     let mut inserts = Vec::new();
     for origin in [Vector3::ZERO, Vector3::UNIT_Y * 30.] {
         let insert = doc
-            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            .add_entity(EntityType::Insert(document::entities::Insert::new(
                 "ACTIONS", origin,
             )))
             .unwrap();

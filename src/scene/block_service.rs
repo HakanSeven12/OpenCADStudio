@@ -13,10 +13,10 @@
 //! callers own the app-level concerns (undo snapshots, command-line output,
 //! panel refreshes).
 
-use codec::objects::ObjectType;
-use codec::tables::BlockRecord;
-use codec::types::Handle;
-use codec::{Document, EntityType, TableEntry};
+use document::objects::ObjectType;
+use document::tables::BlockRecord;
+use document::types::Handle;
+use document::{Document, EntityType, TableEntry};
 use std::collections::HashSet;
 use std::fmt;
 
@@ -361,7 +361,7 @@ fn collect_dictionary_tree(document: &Document, handle: Handle, out: &mut HashSe
 fn extension_dictionary(
     document: &Document,
     owner: Handle,
-) -> Option<&codec::objects::Dictionary> {
+) -> Option<&document::objects::Dictionary> {
     match document
         .extension_dictionary_handle(owner)
         .and_then(|handle| document.objects.get(&handle))?
@@ -705,15 +705,15 @@ pub fn circular_dependency_error(container_block: &str, inserted_block: &str) ->
 
 mod tests {
     use super::*;
-    use codec::entities::{
+    use document::entities::{
         Block as BlockEntity, BlockEnd, Dimension, DimensionAligned, Insert, Line, MultiLeader,
         Table,
     };
-    use codec::objects::{
+    use document::objects::{
         DgnLsComponent, DgnLsComponentType, DgnLsDefinition, Dictionary, MultiLeaderStyle,
     };
-    use codec::tables::{DimStyle, LineType};
-    use codec::types::Vector3;
+    use document::tables::{DimStyle, LineType};
+    use document::types::Vector3;
 
     fn scene() -> Scene {
         Scene::new()
@@ -796,7 +796,7 @@ mod tests {
         table.block_record_handle = Some(target);
         let cell = table.cell_mut(0, 0).unwrap();
         cell.contents
-            .push(codec::entities::table::CellContent::block(target));
+            .push(document::entities::table::CellContent::block(target));
         scene
             .document
             .add_entity(EntityType::Table(Box::new(table)))
@@ -804,7 +804,7 @@ mod tests {
 
         // A multi-leader's block content and arrowhead, by handle.
         let mut leader = MultiLeader::new();
-        leader.content_type = codec::entities::LeaderContentType::Block;
+        leader.content_type = document::entities::LeaderContentType::Block;
         leader.context.has_block_contents = true;
         leader.block_content_handle = Some(target);
         leader.arrowhead_handle = Some(target);

@@ -4,7 +4,7 @@
 //! conversion, hex formatting and parsing, nearest-index lookup and the
 //! short names the panel shows.
 
-use codec::types::Color as AcadColor;
+use document::types::Color as AcadColor;
 
 /// Hue in degrees (0–360), saturation and brightness in 0–1.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -79,7 +79,7 @@ pub fn cmyk_to_rgb([c, m, y, k]: [f32; 4]) -> (u8, u8, u8) {
 
 /// RGB of an ACI entry, or `None` outside 1–255.
 pub fn aci_rgb(index: u8) -> Option<(u8, u8, u8)> {
-    codec::types::aci_table::aci_to_rgb(index)
+    document::types::aci_table::aci_to_rgb(index)
 }
 
 /// The RGB a concrete colour displays as. Logical colours have none.
@@ -93,7 +93,7 @@ pub fn color_rgb(color: AcadColor) -> Option<(u8, u8, u8)> {
 
 /// The closest index colour to an RGB value.
 pub fn nearest_aci(r: u8, g: u8, b: u8) -> u8 {
-    codec::types::aci_table::nearest_aci(r, g, b)
+    document::types::aci_table::nearest_aci(r, g, b)
 }
 
 /// `#RRGGBB`, upper case — the same format the Options hex fields store.

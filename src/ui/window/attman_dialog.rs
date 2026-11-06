@@ -7,8 +7,8 @@
 //! edited in a card below (Attribute / Text / Properties) and the settings
 //! are switches in the footer.
 
-use codec::entities::AttributeDefinition;
-use codec::Handle;
+use document::entities::AttributeDefinition;
+use document::Handle;
 use iced::widget::{
     button, column, container, pick_list, row, scrollable, text, text_input, toggler, Space,
 };
@@ -353,8 +353,8 @@ pub const COLORS: [&str; 9] = [
     "ByLayer", "ByBlock", "Red", "Yellow", "Green", "Cyan", "Blue", "Magenta", "White",
 ];
 
-pub fn color_label(color: codec::types::Color) -> String {
-    use codec::types::Color as C;
+pub fn color_label(color: document::types::Color) -> String {
+    use document::types::Color as C;
     match color {
         C::ByLayer => "ByLayer".into(),
         C::ByBlock => "ByBlock".into(),
@@ -365,8 +365,8 @@ pub fn color_label(color: codec::types::Color) -> String {
     }
 }
 
-pub fn parse_color(label: &str) -> Option<codec::types::Color> {
-    use codec::types::Color as C;
+pub fn parse_color(label: &str) -> Option<document::types::Color> {
+    use document::types::Color as C;
     match COLORS.iter().position(|c| c.eq_ignore_ascii_case(label.trim())) {
         Some(0) => Some(C::ByLayer),
         Some(1) => Some(C::ByBlock),
@@ -386,8 +386,8 @@ const LINEWEIGHTS: [i16; 24] = [
     200, 211,
 ];
 
-pub fn lineweight_label(lw: codec::types::LineWeight) -> String {
-    use codec::types::LineWeight as L;
+pub fn lineweight_label(lw: document::types::LineWeight) -> String {
+    use document::types::LineWeight as L;
     match lw {
         L::ByLayer => "ByLayer".into(),
         L::ByBlock => "ByBlock".into(),
@@ -396,8 +396,8 @@ pub fn lineweight_label(lw: codec::types::LineWeight) -> String {
     }
 }
 
-pub fn parse_lineweight(label: &str) -> Option<codec::types::LineWeight> {
-    use codec::types::LineWeight as L;
+pub fn parse_lineweight(label: &str) -> Option<document::types::LineWeight> {
+    use document::types::LineWeight as L;
     let s = label.trim();
     match s.to_ascii_lowercase().as_str() {
         "bylayer" => Some(L::ByLayer),
@@ -418,7 +418,7 @@ fn lineweight_options() -> Vec<String> {
         .chain(
             LINEWEIGHTS
                 .iter()
-                .map(|v| lineweight_label(codec::types::LineWeight::Value(*v))),
+                .map(|v| lineweight_label(document::types::LineWeight::Value(*v))),
         )
         .collect()
 }

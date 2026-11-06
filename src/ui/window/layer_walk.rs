@@ -17,8 +17,8 @@ use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::field_style_with_radius;
 use crate::ui::ROW_H;
-use codec::tables::layer::Layer as DocLayer;
-use codec::tables::Table;
+use document::tables::layer::Layer as DocLayer;
+use document::tables::Table;
 use iced::widget::{
     button, checkbox, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
     tooltip,
@@ -216,8 +216,8 @@ impl LayerWalkSession {
 pub struct LayerWalkRow {
     pub name: String,
     /// The layer table record, so the walk set can be built without a lookup.
-    pub handle: codec::Handle,
-    pub color: codec::types::Color,
+    pub handle: document::Handle,
+    pub color: document::types::Color,
     pub count: usize,
     /// Removable by PURGE's rules if selected.
     pub purged: bool,
@@ -469,7 +469,7 @@ pub fn visible_counts(rows: &[LayerWalkRow], session: &LayerWalkSession) -> (usi
 pub fn visible_handles(
     rows: &[LayerWalkRow],
     session: &LayerWalkSession,
-) -> FxHashSet<codec::Handle> {
+) -> FxHashSet<document::Handle> {
     let names = visible_set(session);
     rows.iter()
         .filter(|r| names.contains(&r.name))
@@ -1482,12 +1482,12 @@ fn footer_btn<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::types::Color as AcadColor;
+    use document::types::Color as AcadColor;
 
     fn row(name: &str, count: usize) -> LayerWalkRow {
         LayerWalkRow {
             name: name.to_string(),
-            handle: codec::Handle::new(name.len() as u64 + 1),
+            handle: document::Handle::new(name.len() as u64 + 1),
             color: AcadColor::Index(7),
             count,
             purged: false,

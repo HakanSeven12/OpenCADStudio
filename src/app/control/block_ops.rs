@@ -5,9 +5,9 @@ use crate::app::control::text_ops::decode_dxf_escapes;
 use crate::app::OpenCADStudio;
 use crate::scene::block_authoring::{definition_dictionary, DictionaryOwners};
 use crate::scene::model::object::PropValue;
-use codec::objects::{DynamicBlockData, ObjectType};
-use codec::xdata::XDataValue;
-use codec::{Document, EntityType, Handle};
+use document::objects::{DynamicBlockData, ObjectType};
+use document::xdata::XDataValue;
+use document::{Document, EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde_json::{json, Map, Value};
 
@@ -163,7 +163,7 @@ pub(crate) fn build_block_members_map(doc: &Document) -> FxHashMap<Handle, Vec<H
 /// and evaluated representation `BlockRecord` handle (e.g. `*U12`).
 pub(crate) fn resolve_effective_block(
     doc: &Document,
-    insert: &codec::entities::Insert,
+    insert: &document::entities::Insert,
 ) -> (String, Option<Handle>, Option<Handle>) {
     let insert_handle = insert.common.handle;
     let raw_name = &insert.block_name;
@@ -377,7 +377,7 @@ pub(crate) fn glob_match_ci(pattern: &str, text: &str) -> bool {
 
 fn clean_text(raw: &str, is_mtext: bool) -> String {
     let base = if is_mtext {
-        codec::entities::mtext_format::parse_mtext(raw, true).to_plain_text()
+        document::entities::mtext_format::parse_mtext(raw, true).to_plain_text()
     } else {
         raw.replace("\\P", "\n").replace("\\p", "\n")
     };
@@ -547,7 +547,7 @@ fn collect_definition_texts_and_nested_attrs(
 pub(crate) fn extract_block_attributes(
     doc: &Document,
     block_members: &FxHashMap<Handle, Vec<Handle>>,
-    insert: &codec::entities::Insert,
+    insert: &document::entities::Insert,
     effective_def: Option<Handle>,
     evaluated_def: Option<Handle>,
 ) -> Map<String, Value> {
@@ -687,7 +687,7 @@ fn clean_float(v: f64) -> f64 {
 fn insert_world_xy_bounds(
     doc: &Document,
     block_members: &FxHashMap<Handle, Vec<Handle>>,
-    insert: &codec::entities::Insert,
+    insert: &document::entities::Insert,
     active_def: Option<Handle>,
 ) -> ([f64; 2], [f64; 2]) {
     let mut min_x = insert.insert_point.x;
@@ -738,7 +738,7 @@ fn insert_world_xy_bounds(
             (emax[0], emin[1]),
             (emax[0], emax[1]),
         ] {
-            let wp = transform.apply(codec::types::Vector3::new(px, py, 0.0));
+            let wp = transform.apply(document::types::Vector3::new(px, py, 0.0));
             if wp.x.is_finite() && wp.y.is_finite() {
                 any_member = true;
                 b_min_x = b_min_x.min(wp.x);
@@ -1140,8 +1140,8 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{AttributeDefinition, AttributeEntity, Circle, Insert, Line, Text};
-    use codec::types::Vector3;
+    use document::entities::{AttributeDefinition, AttributeEntity, Circle, Insert, Line, Text};
+    use document::types::Vector3;
 
     #[test]
     fn extracts_schedule_tags_attributes_dynamic_properties_and_filters_anonymous_blocks() {

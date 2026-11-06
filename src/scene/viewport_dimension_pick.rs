@@ -5,7 +5,7 @@ use super::*;
 
 use crate::command::EntityTransform;
 use crate::scene::viewport_ref::ViewportFrame;
-use codec::types::{Matrix4, Transform};
+use document::types::{Matrix4, Transform};
 #[cfg(test)]
 use glam::DVec2;
 use glam::DVec3;
@@ -177,7 +177,7 @@ impl Scene {
     /// Returns the entity already transformed into WCS plus the INSERT path.
     fn descend_block_instance(
         &self,
-        insert: &codec::entities::Insert,
+        insert: &document::entities::Insert,
         outer: Transform,
         model_point: DVec3,
         depth: usize,
@@ -341,7 +341,7 @@ pub fn planar_pick_distance(entity: &EntityType, point: DVec3) -> Option<f64> {
     // A centre mark is picked by every line it draws, not only the stored
     // carrier line (its horizontal cross arm).
     if let EntityType::Line(line) = entity {
-        if let Some(mark) = codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        if let Some(mark) = document::entities::CenterMarkAssociation::read(&line.common.extended_data)
         {
             return crate::scene::centermark::render_segments(&mark)
                 .into_iter()
@@ -393,7 +393,7 @@ mod tests {
             DVec3::new(940.5, 2113.25, 0.0),
         ] {
             let expected = f.model_to_paper(model);
-            let actual = t.apply(codec::types::Vector3::new(model.x, model.y, model.z));
+            let actual = t.apply(document::types::Vector3::new(model.x, model.y, model.z));
             assert!(
                 (actual.x - expected.x).abs() < 1e-9 && (actual.y - expected.y).abs() < 1e-9,
                 "{actual:?} != {expected:?}"
@@ -410,7 +410,7 @@ pub(crate) fn feature_pick_distance(
     kind: Option<crate::snap::SnapType>,
 ) -> Option<f64> {
     use crate::snap::SnapType as S;
-    let points: Vec<codec::types::Vector3> = match kind {
+    let points: Vec<document::types::Vector3> = match kind {
         Some(S::Center) => match entity {
             EntityType::Circle(c) => vec![c.center_wcs()],
             EntityType::Arc(a) => vec![a.center_wcs()],
@@ -432,7 +432,7 @@ pub(crate) fn feature_pick_distance(
                 })
                 .map(|p| {
                     let p = planar.plane.point_at(p.point);
-                    codec::types::Vector3::new(p[0], p[1], p[2])
+                    document::types::Vector3::new(p[0], p[1], p[2])
                 })
                 .collect()
         }

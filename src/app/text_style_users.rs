@@ -12,10 +12,10 @@
 //! Before Apply the manager lists every changed style this way, from the
 //! same old/new pairs Apply writes.
 
-use codec::entities::EntityType;
-use codec::tables::TextStyle;
-use codec::types::Handle;
-use codec::Document;
+use document::entities::EntityType;
+use document::tables::TextStyle;
+use document::types::Handle;
+use document::Document;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 

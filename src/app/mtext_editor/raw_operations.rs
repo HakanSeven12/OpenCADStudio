@@ -362,7 +362,7 @@ struct ParagraphEdit {
     settings: Vec<String>,
     dropped: Vec<Range<usize>>,
     produced: usize,
-    expected: Vec<codec::entities::mtext_format::ParagraphProperties>,
+    expected: Vec<document::entities::mtext_format::ParagraphProperties>,
 }
 
 impl ParagraphEdit {
@@ -489,7 +489,7 @@ fn encode_plain(plain: &str) -> Result<(String, usize), EditError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::mtext_format::parse_mtext;
+    use document::entities::mtext_format::parse_mtext;
     #[test]
     fn newline_cannot_move_late_paragraph_settings_off_untouched_prefix_text() {
         let raw = r"\pxqc,t4;ab\pqr;cd";
@@ -507,7 +507,7 @@ mod tests {
             let doc = parse_mtext(&edit.raw, true);
             assert_eq!(
                 doc.paragraphs[0].properties.alignment,
-                Some(codec::entities::mtext_format::MTextParagraphAlignment::Right)
+                Some(document::entities::mtext_format::MTextParagraphAlignment::Right)
             );
             assert_eq!(doc.paragraphs[0].properties.tab_stops.len(), 1);
             assert!(edit.raw.starts_with(r"\pxqc,t4;ab\pqr;\P"));
@@ -573,7 +573,7 @@ mod tests {
     }
     #[test]
     fn paragraph_merge_keeps_the_first_paragraph_settings() {
-        fn props(raw: &str) -> Vec<codec::entities::mtext_format::ParagraphProperties> {
+        fn props(raw: &str) -> Vec<document::entities::mtext_format::ParagraphProperties> {
             super::super::raw_edit::editor_document(raw)
                 .paragraphs
                 .into_iter()

@@ -1,9 +1,9 @@
 //! Region-based HATCH trimming. Pattern strokes are display geometry, not
 //! independently trimmable lines: partition the stored fill boundary instead.
 
-use codec::entities::{Hatch, HatchStyleType};
-use codec::types::Vector2;
-use codec::{EntityType, Handle};
+use document::entities::{Hatch, HatchStyleType};
+use document::types::Vector2;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{
     bounded_faces, contains, distance_to, ring_nesting_depths, signed_area, triangulate, Curve,

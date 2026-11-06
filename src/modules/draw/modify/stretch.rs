@@ -18,7 +18,7 @@
 //     All others  : left as they are.
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -33,7 +33,7 @@ use crate::scene::model::wire_model::WireModel;
 /// Returns whether anything moved. The command's preview and its commit
 /// both go through here.
 pub fn stretch_entity(
-    entity: &mut codec::EntityType,
+    entity: &mut document::EntityType,
     windows: &[(DVec3, DVec3)],
     delta: DVec3,
 ) -> bool {
@@ -53,7 +53,7 @@ pub(crate) fn is_excluded(excluded: &[(Handle, DVec3)], handle: Handle, point: D
 /// `excluded` in place. Exclusions affect the moved vertices, not the
 /// crossing selection itself.
 pub(crate) fn stretch_entity_except(
-    entity: &mut codec::EntityType,
+    entity: &mut document::EntityType,
     handle: Handle,
     windows: &[(DVec3, DVec3)],
     excluded: &[(Handle, DVec3)],
@@ -67,7 +67,7 @@ pub(crate) fn stretch_entity_except(
     let (dx, dy, dz) = (delta.x, delta.y, delta.z);
     let mut stretched = false;
     match entity {
-        codec::EntityType::Line(l) => {
+        document::EntityType::Line(l) => {
             let s_in = in_win(l.start.x, l.start.y);
             let e_in = in_win(l.end.x, l.end.y);
             if s_in {
@@ -83,7 +83,7 @@ pub(crate) fn stretch_entity_except(
                 stretched = true;
             }
         }
-        codec::EntityType::LwPolyline(p) => {
+        document::EntityType::LwPolyline(p) => {
             let Some(mut world) = crate::entities::curve::lwpolyline_world_xy(p) else {
                 return false;
             };
@@ -106,7 +106,7 @@ pub(crate) fn stretch_entity_except(
                 *p = world;
             }
         }
-        codec::EntityType::Polyline2D(p) => {
+        document::EntityType::Polyline2D(p) => {
             let before: Vec<[f64; 2]> =
                 p.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
             for v in &mut p.vertices {
@@ -125,7 +125,7 @@ pub(crate) fn stretch_entity_except(
                 }
             }
         }
-        codec::EntityType::Polyline(p) => {
+        document::EntityType::Polyline(p) => {
             for v in &mut p.vertices {
                 if in_win(v.location.x, v.location.y) {
                     v.location.x += dx;
@@ -134,8 +134,8 @@ pub(crate) fn stretch_entity_except(
                 }
             }
         }
-        codec::EntityType::Arc(a) => stretched = stretch_arc(a, &in_win, delta),
-        codec::EntityType::Circle(c) => {
+        document::EntityType::Arc(a) => stretched = stretch_arc(a, &in_win, delta),
+        document::EntityType::Circle(c) => {
             if in_win(c.center.x, c.center.y) {
                 c.center.x += dx;
                 c.center.y += dy;
@@ -143,7 +143,7 @@ pub(crate) fn stretch_entity_except(
                 stretched = true;
             }
         }
-        codec::EntityType::Ellipse(e) => {
+        document::EntityType::Ellipse(e) => {
             if in_win(e.center.x, e.center.y) {
                 e.center.x += dx;
                 e.center.y += dy;
@@ -151,7 +151,7 @@ pub(crate) fn stretch_entity_except(
                 stretched = true;
             }
         }
-        codec::EntityType::Insert(ins) => {
+        document::EntityType::Insert(ins) => {
             if in_win(ins.insert_point.x, ins.insert_point.y) {
                 ins.insert_point.x += dx;
                 ins.insert_point.y += dy;
@@ -159,9 +159,9 @@ pub(crate) fn stretch_entity_except(
                 stretched = true;
             }
         }
-        codec::EntityType::Text(t) => {
-            use codec::entities::{TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
-            let shift = |p: &mut codec::types::Vector3| {
+        document::EntityType::Text(t) => {
+            use document::entities::{TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+            let shift = |p: &mut document::types::Vector3| {
                 p.x += dx;
                 p.y += dy;
                 p.z += dz;
@@ -198,7 +198,7 @@ pub(crate) fn stretch_entity_except(
                 }
             }
         }
-        codec::EntityType::MText(t) => {
+        document::EntityType::MText(t) => {
             if in_win(t.insertion_point.x, t.insertion_point.y) {
                 t.insertion_point.x += dx;
                 t.insertion_point.y += dy;
@@ -206,19 +206,19 @@ pub(crate) fn stretch_entity_except(
                 stretched = true;
             }
         }
-        codec::EntityType::Viewport(vp) => {
+        document::EntityType::Viewport(vp) => {
             let corner_excluded = |corner: DVec3| is_excluded(excluded, handle, corner);
             stretched = windows.iter().any(|(win_min, win_max)| {
                 crate::entities::viewport::stretch(vp, *win_min, *win_max, &corner_excluded, delta)
             });
         }
-        codec::EntityType::Dimension(dim) => {
-            use codec::entities::Dimension;
+        document::EntityType::Dimension(dim) => {
+            use document::entities::Dimension;
             // Move every definition point that falls inside the
             // window — the same points the grips expose — then
             // refresh the stored measurement so the value tracks
             // the stretched geometry.
-            let mv = |p: &mut codec::types::Vector3| {
+            let mv = |p: &mut document::types::Vector3| {
                 if in_win(p.x, p.y) {
                     p.x += dx;
                     p.y += dy;
@@ -295,7 +295,7 @@ pub(crate) fn stretch_entity_except(
                 dim.base_mut().actual_measurement = dim.stored_measurement();
             }
         }
-        codec::EntityType::Polyline3D(p) => {
+        document::EntityType::Polyline3D(p) => {
             for v in &mut p.vertices {
                 if in_win(v.position.x, v.position.y) {
                     v.position.x += dx;
@@ -306,7 +306,7 @@ pub(crate) fn stretch_entity_except(
             }
         }
         // The control and fit points in the window move; the rest stay.
-        codec::EntityType::Spline(s) => {
+        document::EntityType::Spline(s) => {
             for p in s.control_points.iter_mut().chain(s.fit_points.iter_mut()) {
                 if in_win(p.x, p.y) {
                     p.x += dx;
@@ -316,7 +316,7 @@ pub(crate) fn stretch_entity_except(
                 }
             }
         }
-        codec::EntityType::Point(p) => {
+        document::EntityType::Point(p) => {
             if in_win(p.location.x, p.location.y) {
                 p.location.x += dx;
                 p.location.y += dy;
@@ -356,16 +356,16 @@ pub(crate) fn held_bulge(
 
 /// Stretch an arc by its ends: both in the window move it whole; one moves
 /// that end while the arc keeps its height over the new chord.
-fn stretch_arc(arc: &mut codec::entities::Arc, in_win: &dyn Fn(f64, f64) -> bool, delta: DVec3) -> bool {
+fn stretch_arc(arc: &mut document::entities::Arc, in_win: &dyn Fn(f64, f64) -> bool, delta: DVec3) -> bool {
     let (start, finish) = (arc.start_point_wcs(), arc.end_point_wcs());
     stretch_arc_endpoints(arc, in_win(start.x, start.y), in_win(finish.x, finish.y), delta)
 }
 
 /// Apply fixed endpoint membership, shared by ordinary and dynamic Stretch.
 pub(crate) fn stretch_arc_endpoints(
-    arc: &mut codec::entities::Arc, start_in: bool, finish_in: bool, delta: DVec3,
+    arc: &mut document::entities::Arc, start_in: bool, finish_in: bool, delta: DVec3,
 ) -> bool {
-    use codec::types::{Matrix3, Vector3};
+    use document::types::{Matrix3, Vector3};
     let ocs = Matrix3::arbitrary_axis(arc.normal);
     let end = |angle: f64| {
         Vector3::new(
@@ -753,7 +753,7 @@ impl CadCommand for StretchCommand {
         }
     }
 
-    fn preview_entities(&mut self, document: &codec::Document, pt: DVec3) -> Vec<codec::EntityType> {
+    fn preview_entities(&mut self, document: &document::Document, pt: DVec3) -> Vec<document::EntityType> {
         // The base-point step already has the final windows: resolve what
         // moves there, so the drag starts with only those objects hidden.
         if matches!(self.step, Step::Base | Step::Target { .. }) && self.moving.is_none() {
@@ -847,8 +847,8 @@ impl CadCommand for StretchCommand {
 #[cfg(test)]
 mod shift_stretch_tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     #[test]
     fn shift_window_subtracts_selected_vertices_without_adding_a_crossing_window() {
@@ -895,7 +895,7 @@ mod shift_stretch_tests {
 
     #[test]
     fn excluded_endpoint_stays_fixed_while_other_endpoint_stretches() {
-        let mut entity = codec::EntityType::Line(Line::from_points(
+        let mut entity = document::EntityType::Line(Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         ));
@@ -909,7 +909,7 @@ mod shift_stretch_tests {
             &excluded,
             DVec3::new(5.0, 0.0, 0.0),
         ));
-        let codec::EntityType::Line(line) = entity else { panic!("line expected") };
+        let document::EntityType::Line(line) = entity else { panic!("line expected") };
         assert_eq!(line.start, Vector3::new(0.0, 0.0, 0.0));
         assert_eq!(line.end, Vector3::new(15.0, 0.0, 0.0));
     }
@@ -947,7 +947,7 @@ mod shift_stretch_tests {
     #[test]
     fn shift_removed_viewport_corners_stay_in_place() {
         let handle = Handle::new(7);
-        let mut viewport = codec::entities::Viewport::default();
+        let mut viewport = document::entities::Viewport::default();
         viewport.center = Vector3::new(10.0, 10.0, 0.0);
         viewport.width = 20.0;
         viewport.height = 20.0;
@@ -955,7 +955,7 @@ mod shift_stretch_tests {
         let window = (DVec3::new(15.0, -1.0, -1.0), DVec3::new(25.0, 25.0, 1.0));
 
         // Both right corners excluded: nothing is left to stretch.
-        let mut entity = codec::EntityType::Viewport(Box::new(viewport.clone()));
+        let mut entity = document::EntityType::Viewport(Box::new(viewport.clone()));
         let excluded = vec![
             (handle, DVec3::new(20.0, 0.0, 0.0)),
             (handle, DVec3::new(20.0, 20.0, 0.0)),
@@ -967,13 +967,13 @@ mod shift_stretch_tests {
             &excluded,
             DVec3::new(5.0, 0.0, 0.0),
         ));
-        let codec::EntityType::Viewport(unchanged) = &entity else {
+        let document::EntityType::Viewport(unchanged) = &entity else {
             panic!("viewport")
         };
         assert_eq!(unchanged.width, 20.0);
 
         // Without exclusions the same window widens it.
-        let mut entity = codec::EntityType::Viewport(Box::new(viewport));
+        let mut entity = document::EntityType::Viewport(Box::new(viewport));
         assert!(stretch_entity_except(
             &mut entity,
             handle,
@@ -981,7 +981,7 @@ mod shift_stretch_tests {
             &[],
             DVec3::new(5.0, 0.0, 0.0),
         ));
-        let codec::EntityType::Viewport(widened) = &entity else {
+        let document::EntityType::Viewport(widened) = &entity else {
             panic!("viewport")
         };
         assert_eq!(widened.width, 25.0);
@@ -1007,9 +1007,9 @@ mod shift_stretch_tests {
 
     #[test]
     fn only_objects_the_drag_moves_are_hidden() {
-        let mut document = codec::Document::new();
+        let mut document = document::Document::new();
         let mut add = |a: Vector3, b: Vector3| {
-            let line = codec::EntityType::Line(Line::from_points(a, b));
+            let line = document::EntityType::Line(Line::from_points(a, b));
             document.add_entity(line).unwrap()
         };
         // One end inside the window, and a line merely passing through it.

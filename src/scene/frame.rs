@@ -1,5 +1,5 @@
-use codec::objects::{ObjectType, RasterVariables, WipeoutVariables};
-use codec::{Document, EntityType, Handle};
+use document::objects::{ObjectType, RasterVariables, WipeoutVariables};
+use document::{Document, EntityType, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum FrameKind {
@@ -235,11 +235,11 @@ pub(crate) fn entity_kind(entity: &EntityType) -> Option<FrameKind> {
     }
 }
 
-fn underlay_kind(underlay: &codec::entities::Underlay) -> FrameKind {
+fn underlay_kind(underlay: &document::entities::Underlay) -> FrameKind {
     match underlay.underlay_type {
-        codec::entities::UnderlayType::Pdf => FrameKind::Pdf,
-        codec::entities::UnderlayType::Dwf => FrameKind::Dwf,
-        codec::entities::UnderlayType::Dgn => FrameKind::Dgn,
+        document::entities::UnderlayType::Pdf => FrameKind::Pdf,
+        document::entities::UnderlayType::Dwf => FrameKind::Dwf,
+        document::entities::UnderlayType::Dgn => FrameKind::Dgn,
     }
 }
 
@@ -257,8 +257,8 @@ pub(crate) fn affected(entity: &EntityType, kind: FrameKind) -> bool {
             EntityType::Extended(extended)
                 if matches!(
                     &extended.data,
-                    codec::entities::ExtendedEntityData::PointCloud(_)
-                        | codec::entities::ExtendedEntityData::PointCloudEx(_)
+                    document::entities::ExtendedEntityData::PointCloud(_)
+                        | document::entities::ExtendedEntityData::PointCloudEx(_)
                 )
         ),
     }

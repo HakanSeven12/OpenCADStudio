@@ -39,7 +39,7 @@ pub fn copy_to_layer_tool() -> ToolDef {
 
 // ── CadCommand implementation ─────────────────────────────────────────────
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};

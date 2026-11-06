@@ -14,13 +14,13 @@
 // been removed, or whose process has died contributes nothing — its entities
 // display as their bare native type. No snapshot of declarations is cached.
 
-use codec::EntityType;
+use document::EntityType;
 use rustc_hash::FxHashSet;
 
 // The wire declaration type and the resolution core exist only where the
 // out-of-process plugin runtime does; the web build has no plugins at all.
 #[cfg(not(target_arch = "wasm32"))]
-use codec::xdata::ExtendedData;
+use document::xdata::ExtendedData;
 #[cfg(not(target_arch = "wasm32"))]
 use ocs_plugin_api::ribbon::owned::OwnedEntityClasses;
 
@@ -66,7 +66,7 @@ pub(crate) fn resolve_class_label(
     declarations: &[(String, OwnedEntityClasses)],
     xdata: &ExtendedData,
 ) -> Option<String> {
-    use codec::xdata::XDataValue;
+    use document::xdata::XDataValue;
 
     for record in xdata.records() {
         let Some(declaration) = declaration_for(declarations, &record.application_name) else {
@@ -132,8 +132,8 @@ pub(crate) fn display_type_title(custom_label: Option<String>, native_title: Str
 
 #[cfg(test)]
 mod tests {
-    use codec::entities::{Line, Point};
-    use codec::xdata::{ExtendedDataRecord, XDataValue};
+    use document::entities::{Line, Point};
+    use document::xdata::{ExtendedDataRecord, XDataValue};
 
     use super::*;
 

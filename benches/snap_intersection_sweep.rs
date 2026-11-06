@@ -19,9 +19,9 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Instant;
 
-use codec::entities::Line;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::Line;
+use document::types::Vector3;
+use document::EntityType;
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Point, Rectangle};
 

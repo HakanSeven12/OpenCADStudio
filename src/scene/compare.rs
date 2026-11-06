@@ -5,7 +5,7 @@
 //! the other — unless both drawings still give it the same handle (a
 //! revision of one file), when it shows as modified with both states.
 
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 

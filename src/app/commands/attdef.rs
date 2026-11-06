@@ -153,9 +153,9 @@ impl OpenCADStudio {
     }
 
     /// The Edit Attribute Definition dialog for `handle`.
-    pub(in crate::app) fn open_attdef_edit(&mut self, handle: codec::Handle) {
+    pub(in crate::app) fn open_attdef_edit(&mut self, handle: document::Handle) {
         let i = self.active_tab;
-        let Some(codec::EntityType::AttributeDefinition(a)) =
+        let Some(document::EntityType::AttributeDefinition(a)) =
             self.tabs[i].scene.document.get_entity(handle)
         else {
             return;
@@ -374,12 +374,12 @@ impl OpenCADStudio {
         self.close_active_modal();
         let changed = matches!(
             self.tabs[i].scene.document.get_entity(state.handle),
-            Some(codec::EntityType::AttributeDefinition(a))
+            Some(document::EntityType::AttributeDefinition(a))
                 if a.tag != attdef::normalize_tag(&state.tag) || a.prompt != state.prompt || a.default_value != state.default
         ) || state.field_changed;
         if changed && !self.reject_locked_edit(i, state.handle) {
             self.push_undo_snapshot(i, "DDEDIT");
-            if let Some(codec::EntityType::AttributeDefinition(a)) =
+            if let Some(document::EntityType::AttributeDefinition(a)) =
                 self.tabs[i].scene.document.get_entity_mut(state.handle)
             {
                 a.tag = attdef::normalize_tag(&state.tag);

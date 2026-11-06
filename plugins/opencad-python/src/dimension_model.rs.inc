@@ -22,8 +22,8 @@ const DIM_BASE_KEYS: &[&str] = &[
 ];
 const DIM_READ_ONLY_KEYS: &[&str] = &["subtype", "actual_measurement"];
 
-fn dimension_subtype_name(dim: &codec::entities::Dimension) -> &'static str {
-    use codec::entities::Dimension as D;
+fn dimension_subtype_name(dim: &document::entities::Dimension) -> &'static str {
+    use document::entities::Dimension as D;
     match dim {
         D::Aligned(_) => "Aligned",
         D::Linear(_) => "Linear",
@@ -38,8 +38,8 @@ fn dimension_subtype_name(dim: &codec::entities::Dimension) -> &'static str {
 }
 
 /// Subtype-specific fields in stable order.
-fn dimension_fields(dim: &mut codec::entities::Dimension) -> Vec<(&'static str, DimField<'_>)> {
-    use codec::entities::Dimension as D;
+fn dimension_fields(dim: &mut document::entities::Dimension) -> Vec<(&'static str, DimField<'_>)> {
+    use document::entities::Dimension as D;
     use DimField::{B, F, V};
     match dim {
         D::Aligned(d) => vec![
@@ -120,12 +120,12 @@ fn dimension_required(subtype: &str) -> &'static [&'static str] {
     }
 }
 
-fn dimension_base_mut(dim: &mut codec::entities::Dimension) -> &mut codec::entities::DimensionBase {
+fn dimension_base_mut(dim: &mut document::entities::Dimension) -> &mut document::entities::DimensionBase {
     dim.base_mut()
 }
 
-fn dim_attachment_point_name(value: codec::entities::AttachmentPointType) -> &'static str {
-    use codec::entities::AttachmentPointType as A;
+fn dim_attachment_point_name(value: document::entities::AttachmentPointType) -> &'static str {
+    use document::entities::AttachmentPointType as A;
     match value {
         A::TopLeft => "TopLeft",
         A::TopCenter => "TopCenter",
@@ -142,8 +142,8 @@ fn dim_attachment_point_name(value: codec::entities::AttachmentPointType) -> &'s
 fn parse_dim_attachment_point(
     value: &str,
     vm: &VirtualMachine,
-) -> PyResult<codec::entities::AttachmentPointType> {
-    use codec::entities::AttachmentPointType as A;
+) -> PyResult<document::entities::AttachmentPointType> {
+    use document::entities::AttachmentPointType as A;
     Ok(match value {
         "TopLeft" => A::TopLeft,
         "TopCenter" => A::TopCenter,
@@ -162,7 +162,7 @@ fn parse_dim_attachment_point(
 
 fn dimension_to_dict(
     vm: &VirtualMachine,
-    dimension: &codec::entities::Dimension,
+    dimension: &document::entities::Dimension,
 ) -> PyResult<PyObjectRef> {
     let mut dim = dimension.clone();
     let dict = vm.ctx.new_dict();
@@ -197,7 +197,7 @@ fn dimension_to_dict(
 /// Merge `dict` onto `dim`. With `creating`, geometry the subtype needs must
 /// be present so a script cannot silently default a point to the origin.
 fn dimension_merge(
-    dim: &mut codec::entities::Dimension,
+    dim: &mut document::entities::Dimension,
     dict: &rustpython_vm::builtins::PyDictRef,
     creating: bool,
     vm: &VirtualMachine,
@@ -271,8 +271,8 @@ fn dimension_merge(
 fn dimension_from_dict(
     dict: &rustpython_vm::builtins::PyDictRef,
     vm: &VirtualMachine,
-) -> PyResult<codec::entities::Dimension> {
-    use codec::entities::*;
+) -> PyResult<document::entities::Dimension> {
+    use document::entities::*;
     let subtype = match dict.get_item_opt("subtype", vm)? {
         Some(v) => v.try_into_value::<String>(vm)?,
         None => {
@@ -299,17 +299,17 @@ fn dimension_from_dict(
     };
     dimension_merge(&mut dim, dict, true, vm)?;
     let base = dimension_base_mut(&mut dim);
-    base.common.handle = codec::Handle::new(get_opt_u64(dict, "handle", vm)?);
+    base.common.handle = document::Handle::new(get_opt_u64(dict, "handle", vm)?);
     base.common.layer = get_opt_string(dict, "layer", "0", vm)?;
-    base.common.owner_handle = codec::Handle::new(get_opt_u64(dict, "owner_handle", vm)?);
+    base.common.owner_handle = document::Handle::new(get_opt_u64(dict, "owner_handle", vm)?);
     Ok(dim)
 }
 
 fn dimension_apply(
-    existing: &codec::entities::Dimension,
+    existing: &document::entities::Dimension,
     dict: &rustpython_vm::builtins::PyDictRef,
     vm: &VirtualMachine,
-) -> PyResult<codec::entities::Dimension> {
+) -> PyResult<document::entities::Dimension> {
     let mut dim = existing.clone();
     dimension_merge(&mut dim, dict, false, vm)?;
     let base = dimension_base_mut(&mut dim);

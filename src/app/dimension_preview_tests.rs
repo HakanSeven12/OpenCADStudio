@@ -6,9 +6,9 @@
 use super::viewport_dimension_tests::preview_text as text;
 use super::OpenCADStudio;
 use crate::command::StepInput;
-use codec::entities::{Arc, Circle, Line};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::{Arc, Circle, Line};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 use glam::DVec3;
 
 fn app() -> (OpenCADStudio, usize) {
@@ -151,7 +151,7 @@ fn continue_and_baseline_previews_follow_style_inheritance() {
         .header
         .current_dimstyle_name
         .clone();
-    let mut style = codec::tables::DimStyle::new("Inherit");
+    let mut style = document::tables::DimStyle::new("Inherit");
     style.dimlfac = 2.0;
     app.tabs[i].scene.document.dim_styles.add(style).unwrap();
     app.tabs[i].scene.document.header.current_dimstyle_name = "Inherit".into();
@@ -462,10 +462,10 @@ fn region_dimension_association_refreshes_after_same_topology_change() {
 
     // Verify refreshed dimension values
     let refreshed_dims = committed(&app);
-    let refreshed_rad = refreshed_dims.iter().find(|d| matches!(d, EntityType::Dimension(dim) if matches!(**dim, codec::entities::Dimension::Radius(_)))).unwrap();
+    let refreshed_rad = refreshed_dims.iter().find(|d| matches!(d, EntityType::Dimension(dim) if matches!(**dim, document::entities::Dimension::Radius(_)))).unwrap();
     assert_eq!(text(&app, refreshed_rad), "R4");
 
-    let refreshed_arc = refreshed_dims.iter().find(|d| matches!(d, EntityType::Dimension(dim) if matches!(**dim, codec::entities::Dimension::Arc(_)))).unwrap();
+    let refreshed_arc = refreshed_dims.iter().find(|d| matches!(d, EntityType::Dimension(dim) if matches!(**dim, document::entities::Dimension::Arc(_)))).unwrap();
     let new_arc_text = text(&app, refreshed_arc);
     assert!(
         new_arc_text.contains("47,1"),

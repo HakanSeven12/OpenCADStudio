@@ -20,12 +20,12 @@ use super::geom::{
 
 use crate::modules::draw::fence::{crossing_box_preview, FencePick};
 
-use codec::entities::{
+use document::entities::{
     Arc as ArcEnt, Circle as CircleEnt, Ellipse as EllipseEnt, Line as LineEnt, LwPolyline,
     LwVertex, Ray as RayEnt, Spline as SplineEnt, XLine as XLineEnt,
 };
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::nurbs::clamped_uniform_knots;
 use kernel::geom2d::{
@@ -1051,11 +1051,11 @@ fn extend_spline(spl: &SplineEnt, t_click: f64, geos: &[Geo]) -> Option<EntityTy
     if extend_end {
         new_spl
             .control_points
-            .push(codec::types::Vector3::new(hit_x, hit_y, z));
+            .push(document::types::Vector3::new(hit_x, hit_y, z));
     } else {
         new_spl
             .control_points
-            .insert(0, codec::types::Vector3::new(hit_x, hit_y, z));
+            .insert(0, document::types::Vector3::new(hit_x, hit_y, z));
     }
     // Rebuild knots (uniform) for the extended control polygon.
     let degree = new_spl.degree as usize;
@@ -2447,11 +2447,11 @@ fn crossing_trim_lwpolyline(
 /// Unlike a rectangular fill with a hole, it can be removed with a single
 /// click without selecting another cutting edge. Do not delete arbitrary
 /// multi-loop / polygonal hatches when a trim solver finds no intersection.
-fn hatch_is_standalone_circle(hatch: &codec::entities::Hatch) -> bool {
+fn hatch_is_standalone_circle(hatch: &document::entities::Hatch) -> bool {
     if hatch.paths.len() != 1 { return false; }
     let edges = &hatch.paths[0].edges;
     if edges.len() != 1 { return false; }
-    let codec::entities::BoundaryEdge::CircularArc(arc) = &edges[0] else {
+    let document::entities::BoundaryEdge::CircularArc(arc) = &edges[0] else {
         return false;
     };
     arc.radius.is_finite()
@@ -2464,14 +2464,14 @@ fn hatch_is_standalone_circle(hatch: &codec::entities::Hatch) -> bool {
 /// Do not approximate the final arc with chords (DWG must retain a true arc).
 /// Return None for complex topology that would require a region boolean.
 fn trim_hatch_circle(
-    hatch: &codec::entities::Hatch,
+    hatch: &document::entities::Hatch,
     rings: &[Vec<[f64; 2]>],
     outer_index: usize,
     circle: &Geo,
     pick: [f64; 2],
-) -> Option<codec::entities::Hatch> {
-    use codec::entities::{BoundaryEdge, BoundaryPath, BoundaryPathFlags, CircularArcEdge, LineEdge};
-    use codec::types::Vector2;
+) -> Option<document::entities::Hatch> {
+    use document::entities::{BoundaryEdge, BoundaryPath, BoundaryPathFlags, CircularArcEdge, LineEdge};
+    use document::types::Vector2;
     use std::f64::consts::TAU;
     let Geo::Circle { handle, cx, cy, r } = *circle else {
         return None;
@@ -2676,13 +2676,13 @@ fn trim_hatch_circle(
 /// on the opposite side of the click and close it along the cutter. A new
 /// CircularArcEdge is emitted for the surviving portion of any split arc.
 fn trim_hatch_curved_outer(
-    path: &codec::entities::BoundaryPath,
+    path: &document::entities::BoundaryPath,
     p1: [f64; 2],
     p2: [f64; 2],
     keep_sign: f64,
-) -> Option<codec::entities::BoundaryPath> {
-    use codec::entities::{BoundaryEdge, BoundaryPath, BoundaryPathFlags, CircularArcEdge, LineEdge};
-    use codec::types::Vector2;
+) -> Option<document::entities::BoundaryPath> {
+    use document::entities::{BoundaryEdge, BoundaryPath, BoundaryPathFlags, CircularArcEdge, LineEdge};
+    use document::types::Vector2;
     const EPS: f64 = 1.0e-8;
     const TAU: f64 = std::f64::consts::TAU;
     #[derive(Clone, Copy)]
@@ -2876,13 +2876,13 @@ fn trim_hatch_curved_outer(
 /// hatch is detached from its original associative source handles: these
 /// source curves have not changed to match the new boundary.
 fn trim_hatch_at(
-    hatch: &codec::entities::Hatch,
+    hatch: &document::entities::Hatch,
     geos: &[Geo],
     px: f64,
     py: f64,
-) -> Option<codec::entities::Hatch> {
-    use codec::entities::{BoundaryEdge, BoundaryPath, BoundaryPathFlags, PolylineEdge};
-    use codec::types::Vector2;
+) -> Option<document::entities::Hatch> {
+    use document::entities::{BoundaryEdge, BoundaryPath, BoundaryPathFlags, PolylineEdge};
+    use document::types::Vector2;
     // The working plane of TRIM is XY. Do not quietly clip a tilted OCS
     // boundary using an unrelated XY cutting edge.
     if hatch.normal.x.abs() > 1.0e-9
@@ -2942,7 +2942,7 @@ fn trim_hatch_at(
     if !old_area.is_finite() || old_area <= EPS {
         return None;
     }
-    let mut best: Option<(f64, codec::entities::Hatch)> = None;
+    let mut best: Option<(f64, document::entities::Hatch)> = None;
     // A click inside a circle should cut that disk out of the hatch. Do
     // not let an unrelated nearby straight edge win this pick.
     for circle in geos.iter().filter(|geo| matches!(geo, Geo::Circle { .. })) {
@@ -4670,11 +4670,11 @@ impl CadCommand for TrimCommand {
         }
     }
 
-    fn on_entity_replaced(&mut self, old: Handle, new_handles: &[codec::Handle]) {
+    fn on_entity_replaced(&mut self, old: Handle, new_handles: &[document::Handle]) {
         self.on_entities_replaced(&[(old, new_handles.to_vec())]);
     }
 
-    fn on_entities_replaced(&mut self, replacements: &[(Handle, Vec<codec::Handle>)]) {
+    fn on_entities_replaced(&mut self, replacements: &[(Handle, Vec<document::Handle>)]) {
         if !replacements.is_empty() {
             self.hover_cut_cache.clear();
             self.hover_cut_order.clear();
@@ -5529,11 +5529,11 @@ impl CadCommand for ExtendCommand {
         }
     }
 
-    fn on_entity_replaced(&mut self, old: Handle, new_handles: &[codec::Handle]) {
+    fn on_entity_replaced(&mut self, old: Handle, new_handles: &[document::Handle]) {
         self.on_entities_replaced(&[(old, new_handles.to_vec())]);
     }
 
-    fn on_entities_replaced(&mut self, replacements: &[(Handle, Vec<codec::Handle>)]) {
+    fn on_entities_replaced(&mut self, replacements: &[(Handle, Vec<document::Handle>)]) {
         let mut rebuild = false;
         for (old, new_handles) in replacements {
             let snapshot = Snapshot {
@@ -5932,10 +5932,10 @@ mod tests {
     use super::*;
     use std::f64::consts::PI;
 
-    fn rect_hatch(handle: u64, associative: bool) -> codec::entities::Hatch {
-        use codec::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
-        use codec::types::Vector2;
-        let mut hatch = codec::entities::Hatch::new();
+    fn rect_hatch(handle: u64, associative: bool) -> document::entities::Hatch {
+        use document::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
+        use document::types::Vector2;
+        let mut hatch = document::entities::Hatch::new();
         hatch.common.handle = Handle::new(handle);
         hatch.is_associative = associative;
         hatch.is_solid = true;
@@ -5955,9 +5955,9 @@ mod tests {
         hatch
     }
 
-    fn add_rect_hole(hatch: &mut codec::entities::Hatch, xmin: f64, ymin: f64, xmax: f64, ymax: f64) {
-        use codec::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
-        use codec::types::Vector2;
+    fn add_rect_hole(hatch: &mut document::entities::Hatch, xmin: f64, ymin: f64, xmax: f64, ymax: f64) {
+        use document::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
+        use document::types::Vector2;
         let points = [[xmin, ymin], [xmax, ymin], [xmax, ymax], [xmin, ymax]];
         let mut hole = BoundaryPath::new();
         hole.add_edge(BoundaryEdge::Polyline(PolylineEdge::new(
@@ -6214,7 +6214,7 @@ mod tests {
         assert!(!result.is_associative);
         assert!(result.paths.iter().all(|path| path.boundary_handles.is_empty()));
         assert!(matches!(result.paths[1].edges.first(),
-            Some(codec::entities::BoundaryEdge::CircularArc(arc))
+            Some(document::entities::BoundaryEdge::CircularArc(arc))
                 if arc.counter_clockwise && (arc.end_angle - arc.start_angle - std::f64::consts::TAU).abs() < 1e-9));
         assert!((crate::entities::hatch::boundary_area(&result) - (100.0 - PI * 9.0)).abs() < 1e-5);
         let render = crate::scene::Scene::hatch_model_from_dxf(&result, [1.0; 4])
@@ -6232,7 +6232,7 @@ mod tests {
             .expect("circle crossing one side must cut a curved notch");
         assert_eq!(result.paths.len(), 1);
         let arcs: Vec<_> = result.paths[0].edges.iter().filter_map(|edge| {
-            let codec::entities::BoundaryEdge::CircularArc(arc) = edge else { return None; };
+            let document::entities::BoundaryEdge::CircularArc(arc) = edge else { return None; };
             Some(arc)
         }).collect();
         assert_eq!(arcs.len(), 1);
@@ -6284,7 +6284,7 @@ mod tests {
             .expect("next trim by line must retain round hole");
         assert_eq!(cut_line.paths.len(), 2);
         assert!(matches!(cut_line.paths[1].edges.first(),
-            Some(codec::entities::BoundaryEdge::CircularArc(_))));
+            Some(document::entities::BoundaryEdge::CircularArc(_))));
         assert!((crate::entities::hatch::boundary_area(&cut_line)
             - (50.0 - PI)).abs() < 1.0e-5);
     }
@@ -6305,7 +6305,7 @@ mod tests {
             .expect("subsequent line must trim the already notched hatch");
         assert_eq!(trimmed.paths.len(), 1);
         assert!(trimmed.paths[0].edges.iter().any(|edge| matches!(
-            edge, codec::entities::BoundaryEdge::CircularArc(arc)
+            edge, document::entities::BoundaryEdge::CircularArc(arc)
                 if (arc.center.x - 10.5).abs() < 1.0e-9
                     && (arc.radius - 3.0).abs() < 1.0e-9
         )));
@@ -6316,9 +6316,9 @@ mod tests {
 
     #[test]
     fn trim_click_erases_standalone_circular_hatch_not_plain_rectangle() {
-        use codec::entities::{BoundaryEdge, BoundaryPath, CircularArcEdge};
-        use codec::types::Vector2;
-        let mut round = codec::entities::Hatch::new();
+        use document::entities::{BoundaryEdge, BoundaryPath, CircularArcEdge};
+        use document::types::Vector2;
+        let mut round = document::entities::Hatch::new();
         round.common.handle = Handle::new(90);
         round.is_solid = true;
         let mut path = BoundaryPath::new();
@@ -6586,7 +6586,7 @@ mod tests {
 
     #[test]
     fn selected_legacy_polyline_boundary_has_visible_glow() {
-        use codec::entities::{Polyline2D, Vertex2D};
+        use document::entities::{Polyline2D, Vertex2D};
 
         let mut boundary = Polyline2D::new();
         boundary.vertices = vec![
@@ -6608,7 +6608,7 @@ mod tests {
 
     #[test]
     fn trim_can_select_a_polyline2d_as_cutting_edge() {
-        use codec::entities::{Polyline2D, Vertex2D};
+        use document::entities::{Polyline2D, Vertex2D};
 
         let target = xline_at(0.0, 0.0, 4.0, 0.0, 1);
         let mut boundary = Polyline2D::new();
@@ -6999,7 +6999,7 @@ mod tests {
 
     #[test]
     fn polyline2d_bulge_segment_is_used_as_a_curved_trim_boundary() {
-        use codec::entities::{Polyline2D, Vertex2D};
+        use document::entities::{Polyline2D, Vertex2D};
 
         let target = xline_at(-2.0, 0.0, 4.0, 0.0, 1);
         let mut boundary = Polyline2D::new();
@@ -7023,7 +7023,7 @@ mod tests {
 
     #[test]
     fn extend_line_reaches_polyline2d_boundary() {
-        use codec::entities::{Polyline2D, Vertex2D};
+        use document::entities::{Polyline2D, Vertex2D};
 
         let target = xline_at(0.0, 0.0, 1.0, 0.0, 1);
         let mut boundary = Polyline2D::new();
@@ -7646,7 +7646,7 @@ mod tests {
     /// two empty ends as equal and sliced the empty sample from index 1.
     #[test]
     fn sampling_skips_segments_with_no_plan_shape() {
-        use codec::entities::{Polyline3D, Vertex3DPolyline};
+        use document::entities::{Polyline3D, Vertex3DPolyline};
 
         let mut pl = Polyline3D::new();
         pl.vertices = vec![
@@ -7672,7 +7672,7 @@ mod tests {
     /// must keep dropping the duplicated seam vertex between two of them.
     #[test]
     fn sampling_still_joins_segments_at_their_seam() {
-        use codec::entities::{Polyline3D, Vertex3DPolyline};
+        use document::entities::{Polyline3D, Vertex3DPolyline};
 
         let mut pl = Polyline3D::new();
         pl.vertices = vec![
@@ -7692,7 +7692,7 @@ mod tests {
 
     #[test]
     fn preview_sampling_skips_edge_on_polyline2d_arc_segments() {
-        use codec::entities::{Polyline2D, Vertex2D};
+        use document::entities::{Polyline2D, Vertex2D};
 
         let mut pl = Polyline2D::new();
         let mut start = Vertex2D::new(Vector3::new(0.0, 0.0, 0.0));
@@ -7709,7 +7709,7 @@ mod tests {
 
     #[test]
     fn trim_circle_with_tangent_arcs_touching_at_endpoints() {
-        use codec::entities::{Arc as ArcEnt, Circle as CircleEnt};
+        use document::entities::{Arc as ArcEnt, Circle as CircleEnt};
         let mut c = CircleEnt::new();
         c.common.handle = Handle::new(1);
         c.center = Vector3::new(0.0, 0.0, 0.0);
@@ -7769,7 +7769,7 @@ mod tests {
 
     #[test]
     fn test_trim_circle_between_two_tangent_lines() {
-        use codec::entities::{Circle as CircleEnt, Line as LineEnt};
+        use document::entities::{Circle as CircleEnt, Line as LineEnt};
         let mut c = CircleEnt::new();
         c.common.handle = Handle::new(1);
         c.center = Vector3::new(0.0, 0.0, 0.0);
@@ -7929,7 +7929,7 @@ mod tests {
 
     #[test]
     fn trim_ellipse_with_tangent_arcs_touching_at_endpoints() {
-        use codec::entities::{Arc as ArcEnt, Ellipse as EllipseEnt};
+        use document::entities::{Arc as ArcEnt, Ellipse as EllipseEnt};
         let mut e = EllipseEnt::new();
         e.common.handle = Handle::new(10);
         e.center = Vector3::new(0.0, 0.0, 0.0);
@@ -7978,7 +7978,7 @@ mod tests {
 
     #[test]
     fn trim_ellipse_selection_tracking_near_breakpoint() {
-        use codec::entities::{Ellipse as EllipseEnt, Line as LineEnt};
+        use document::entities::{Ellipse as EllipseEnt, Line as LineEnt};
         use std::f64::consts::TAU;
 
         let mut e = EllipseEnt::new();
@@ -8086,7 +8086,7 @@ mod tests {
 
     #[test]
     fn trim_arc_selection_tracking_near_start_endpoint() {
-        use codec::entities::{Arc as ArcEnt, Line as LineEnt};
+        use document::entities::{Arc as ArcEnt, Line as LineEnt};
         // Arc from 0.5 to 2.0 rad (~28.6° to 114.6°), radius 10.0
         let mut a = ArcEnt::new();
         a.common.handle = Handle::new(20);
@@ -8129,7 +8129,7 @@ mod tests {
 
     #[test]
     fn test_tangent_circles_or_arcs_trim() {
-        use codec::entities::{Arc as ArcEnt, Circle as CircleEnt};
+        use document::entities::{Arc as ArcEnt, Circle as CircleEnt};
         let mut c1 = CircleEnt::new();
         c1.common.handle = Handle::new(1);
         c1.center = Vector3::new(0.0, 0.0, 0.0);
@@ -8340,7 +8340,7 @@ mod tests {
 
     #[test]
     fn test_skinny_ellipse_crossing_arc() {
-        use codec::entities::{Arc as ArcEnt, Ellipse as EllipseEnt};
+        use document::entities::{Arc as ArcEnt, Ellipse as EllipseEnt};
         let mut e = EllipseEnt::new();
         e.common.handle = Handle::new(100);
         e.center = Vector3::new(0.0, 0.0, 0.0);
@@ -8403,7 +8403,7 @@ mod tests {
 
     #[test]
     fn test_trim_line_tangent_to_arc() {
-        use codec::entities::{Arc as ArcEnt, Line as LineEnt};
+        use document::entities::{Arc as ArcEnt, Line as LineEnt};
         let mut l1 = LineEnt::new();
         l1.common.handle = Handle::new(1);
         l1.start = Vector3::new(-10.0, 0.0, 0.0);
@@ -8435,7 +8435,7 @@ mod tests {
     fn test_trim_arc_tangent_to_two_lines() {
         use crate::command::{TangentObject, WorkingPlane};
         use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
-        use codec::entities::{Arc as CadArc, Line as LineEnt};
+        use document::entities::{Arc as CadArc, Line as LineEnt};
 
         let mut l1 = LineEnt::new();
         l1.common.handle = Handle::new(1);
@@ -8520,7 +8520,7 @@ mod tests {
     fn test_trim_arc_tangent_angled_lines() {
         use crate::command::{TangentObject, WorkingPlane};
         use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
-        use codec::entities::{Arc as CadArc, Line as LineEnt};
+        use document::entities::{Arc as CadArc, Line as LineEnt};
 
         // Two lines meeting at (0, 0): one along (cos(20 deg), sin(20 deg)), other along (cos(80 deg), sin(80 deg))
         let a1 = 20.0_f64.to_radians();
@@ -8710,7 +8710,7 @@ mod tests {
     fn test_arc_tangent_line_precision_sweep() {
         use crate::command::{TangentObject, WorkingPlane};
         use crate::modules::draw::draw::arc::{solve_arc_3_inputs, ArcPick};
-        use codec::entities::{Arc as CadArc, Line as LineEnt};
+        use document::entities::{Arc as CadArc, Line as LineEnt};
 
         let mut max_dist = 0.0_f64;
         let mut failed_cuts = 0;

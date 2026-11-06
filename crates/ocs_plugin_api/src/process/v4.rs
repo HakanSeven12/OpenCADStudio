@@ -596,7 +596,7 @@ mod tests {
     use crate::ipc::protocol::{HostResponse, PluginRequest, PluginResponse};
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
-    use codec::{Document, Handle};
+    use document::{Document, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, ToNsName,
@@ -644,7 +644,7 @@ mod tests {
 
     struct DummyHost {
         push_info_messages: StdMutex<Vec<String>>,
-        transactions: StdMutex<Vec<(String, Vec<codec::EntityType>)>>,
+        transactions: StdMutex<Vec<(String, Vec<document::EntityType>)>>,
     }
     impl DummyHost {
         fn new() -> Self {
@@ -656,7 +656,7 @@ mod tests {
         fn take_push_info(&self) -> Vec<String> {
             std::mem::take(&mut *self.push_info_messages.lock().unwrap())
         }
-        fn take_transactions(&self) -> Vec<(String, Vec<codec::EntityType>)> {
+        fn take_transactions(&self) -> Vec<(String, Vec<document::EntityType>)> {
             std::mem::take(&mut *self.transactions.lock().unwrap())
         }
     }
@@ -673,7 +673,7 @@ mod tests {
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
             Box::new(EmptyReader)
         }
-        fn add_entity(&mut self, _entity: codec::EntityType) -> Handle {
+        fn add_entity(&mut self, _entity: document::EntityType) -> Handle {
             panic!("not used")
         }
         fn bump_geometry(&mut self) {}
@@ -681,13 +681,13 @@ mod tests {
             &self,
             _handle: Handle,
             _app_name: &str,
-        ) -> Option<&codec::xdata::ExtendedDataRecord> {
+        ) -> Option<&document::xdata::ExtendedDataRecord> {
             None
         }
         fn write_record(
             &mut self,
             _handle: Handle,
-            _record: codec::xdata::ExtendedDataRecord,
+            _record: document::xdata::ExtendedDataRecord,
         ) -> bool {
             false
         }
@@ -698,7 +698,7 @@ mod tests {
         fn update_entities_transaction(
             &mut self,
             label: &str,
-            entities: Vec<codec::EntityType>,
+            entities: Vec<document::EntityType>,
         ) -> Result<(), String> {
             self.transactions
                 .lock()
@@ -909,10 +909,10 @@ mod tests {
         let handler: Arc<dyn Fn(Option<u64>, PluginNotification) + Send + Sync> =
             Arc::new(|_, _| {});
         let conn = V4Connection::new(host_stream, handler).unwrap();
-        let mut point = codec::entities::Point::new();
+        let mut point = document::entities::Point::new();
         point.common.handle = Handle::new(42);
         point.location.x = 7.0;
-        let expected = codec::EntityType::Point(point);
+        let expected = document::EntityType::Point(point);
         let sent = expected.clone();
 
         let runner = thread::spawn(move || {
@@ -1193,7 +1193,7 @@ mod tests {
         fn document_reader(&self) -> Box<dyn DocumentReader + '_> {
             Box::new(EmptyReader)
         }
-        fn add_entity(&mut self, _entity: codec::EntityType) -> Handle {
+        fn add_entity(&mut self, _entity: document::EntityType) -> Handle {
             self.calls.lock().unwrap().push("add_entity");
             Handle::from(1u64)
         }
@@ -1202,13 +1202,13 @@ mod tests {
             &self,
             _handle: Handle,
             _app_name: &str,
-        ) -> Option<&codec::xdata::ExtendedDataRecord> {
+        ) -> Option<&document::xdata::ExtendedDataRecord> {
             None
         }
         fn write_record(
             &mut self,
             _handle: Handle,
-            _record: codec::xdata::ExtendedDataRecord,
+            _record: document::xdata::ExtendedDataRecord,
         ) -> bool {
             false
         }
@@ -1268,10 +1268,10 @@ mod tests {
                 PluginRequest::PushUndo {
                     label: "CVI: PI radius".to_string(),
                 },
-                PluginRequest::AddEntity(codec::EntityType::Line(
-                    codec::entities::Line::from_points(
-                        codec::types::Vector3::new(0.0, 0.0, 0.0),
-                        codec::types::Vector3::new(3.0, 0.0, 0.0),
+                PluginRequest::AddEntity(document::EntityType::Line(
+                    document::entities::Line::from_points(
+                        document::types::Vector3::new(0.0, 0.0, 0.0),
+                        document::types::Vector3::new(3.0, 0.0, 0.0),
                     ),
                 )),
             ] {

@@ -1,4 +1,4 @@
-use codec::entities::{Ole2Frame, OleObjectType};
+use document::entities::{Ole2Frame, OleObjectType};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
@@ -122,7 +122,7 @@ pub(crate) fn hidden(ole: &Ole2Frame) -> bool {
 
 /// OLEFRAME of the drawing: 0 no frame, 1 frame shown and plotted, 2 frame
 /// shown but not plotted (the default).
-pub(crate) fn frame_mode(document: &codec::Document) -> i16 {
+pub(crate) fn frame_mode(document: &document::Document) -> i16 {
     crate::io::drawing_variable(document, "OLEFRAME")
         .and_then(|value| value.trim().parse::<i16>().ok())
         .filter(|value| (0..=2).contains(value))
@@ -299,14 +299,14 @@ fn apply_transform(ole: &mut Ole2Frame, t: &EntityTransform) {
             ole.lower_right_corner.y = scale(ole.lower_right_corner.y, center.y as f64);
         }
         EntityTransform::Affine(transform) => {
-            codec::Entity::apply_transform(ole, transform);
+            document::Entity::apply_transform(ole, transform);
         }
         _ => {}
     }
 }
 
 impl RenderConvertible for Ole2Frame {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         if hidden(self) {
             return None;
         }

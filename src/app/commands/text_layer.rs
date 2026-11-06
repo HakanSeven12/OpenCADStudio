@@ -2,7 +2,7 @@
 //! variable dictionary; empty means the current layer.
 
 use crate::app::{Message, OpenCADStudio};
-use codec::Handle;
+use document::Handle;
 use iced::Task;
 
 const NAME: &str = "TEXTLAYER";
@@ -64,7 +64,7 @@ impl OpenCADStudio {
 
     /// Commit a TEXT or MTEXT the TEXT / MTEXT commands made: on TEXTLAYER
     /// (created when it does not exist yet) when one is set.
-    pub(crate) fn commit_new_text(&mut self, mut entity: codec::EntityType) -> Option<Handle> {
+    pub(crate) fn commit_new_text(&mut self, mut entity: document::EntityType) -> Option<Handle> {
         let i = self.active_tab;
         match self.text_layer(i) {
             Some(layer) => {

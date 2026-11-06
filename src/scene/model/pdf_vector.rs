@@ -1415,19 +1415,19 @@ static UNDERLAY_OSNAP: [AtomicBool; 3] = [
     AtomicBool::new(true),
 ];
 
-fn osnap_slot(kind: codec::entities::UnderlayType) -> &'static AtomicBool {
+fn osnap_slot(kind: document::entities::UnderlayType) -> &'static AtomicBool {
     match kind {
-        codec::entities::UnderlayType::Pdf => &UNDERLAY_OSNAP[0],
-        codec::entities::UnderlayType::Dwf => &UNDERLAY_OSNAP[1],
-        codec::entities::UnderlayType::Dgn => &UNDERLAY_OSNAP[2],
+        document::entities::UnderlayType::Pdf => &UNDERLAY_OSNAP[0],
+        document::entities::UnderlayType::Dwf => &UNDERLAY_OSNAP[1],
+        document::entities::UnderlayType::Dgn => &UNDERLAY_OSNAP[2],
     }
 }
 
-pub fn underlay_osnap(kind: codec::entities::UnderlayType) -> bool {
+pub fn underlay_osnap(kind: document::entities::UnderlayType) -> bool {
     osnap_slot(kind).load(Ordering::Relaxed)
 }
 
-pub fn set_underlay_osnap(kind: codec::entities::UnderlayType, on: bool) {
+pub fn set_underlay_osnap(kind: document::entities::UnderlayType, on: bool) {
     osnap_slot(kind).store(on, Ordering::Relaxed);
 }
 
@@ -1459,12 +1459,12 @@ const MAX_SNAP_POINTS: usize = 20_000;
 /// Endpoint and midpoint snaps of the underlay's PDF geometry, in world
 /// space, when PDFOSNAP is on and the page is shown.
 pub fn underlay_snap_points(
-    u: &codec::entities::Underlay,
-    document: &codec::Document,
+    u: &document::entities::Underlay,
+    document: &document::Document,
 ) -> Vec<(glam::DVec3, crate::scene::model::wire_model::SnapHint)> {
     use crate::scene::model::wire_model::SnapHint;
     if !underlay_osnap(u.underlay_type)
-        || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON)
+        || !u.flags.contains(document::entities::UnderlayDisplayFlags::ON)
     {
         return Vec::new();
     }
@@ -1509,12 +1509,12 @@ pub fn underlay_snap_points(
 /// The page's vectors in page units: PDF through its layer overrides, DWF
 /// and DGN from their sheet.
 fn underlay_vectors(
-    u: &codec::entities::Underlay,
-    def: &codec::entities::UnderlayDefinition,
+    u: &document::entities::Underlay,
+    def: &document::entities::UnderlayDefinition,
 ) -> Option<Arc<PageVectors>> {
     let page = crate::entities::underlay::page_of(def);
     match def.underlay_type {
-        codec::entities::UnderlayType::Pdf => {
+        document::entities::UnderlayType::Pdf => {
             page_vectors(&super::pdf_layers::underlay_source(u, &def.file_path), page)
         }
         kind => super::underlay_vector::page_vectors(
@@ -1542,11 +1542,11 @@ pub struct SnapPiece {
 /// piece, so pieces cross each other as separate objects do. Empty when
 /// PDFOSNAP is off or the page is not shown.
 pub fn underlay_snap_geometry(
-    u: &codec::entities::Underlay,
-    document: &codec::Document,
+    u: &document::entities::Underlay,
+    document: &document::Document,
 ) -> Vec<SnapPiece> {
     if !underlay_osnap(u.underlay_type)
-        || !u.flags.contains(codec::entities::UnderlayDisplayFlags::ON)
+        || !u.flags.contains(document::entities::UnderlayDisplayFlags::ON)
     {
         return Vec::new();
     }

@@ -1,5 +1,5 @@
-use codec::entities::EntityType;
-use codec::types::{Handle, Vector3};
+use document::entities::EntityType;
+use document::types::{Handle, Vector3};
 use OpenCADStudio::scene::named_parameters::DrivingValue;
 use OpenCADStudio::scene::parametric_constraints::{
     ConstraintKind, ParametricRef, ParametricScope,
@@ -7,7 +7,7 @@ use OpenCADStudio::scene::parametric_constraints::{
 use OpenCADStudio::scene::{ChangeKind, Scene};
 
 fn add_line(scene: &mut Scene, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
-    scene.add_entity(EntityType::Line(codec::entities::Line::from_points(
+    scene.add_entity(EntityType::Line(document::entities::Line::from_points(
         Vector3::new(x1, y1, 0.0),
         Vector3::new(x2, y2, 0.0),
     )))
@@ -28,7 +28,7 @@ fn set_line_end(scene: &mut Scene, handle: Handle, end: Vector3) {
 
 fn add_circle(scene: &mut Scene, cx: f64, cy: f64, radius: f64) -> Handle {
     scene.add_entity(EntityType::Circle(
-        codec::entities::Circle::from_center_radius(Vector3::new(cx, cy, 0.0), radius),
+        document::entities::Circle::from_center_radius(Vector3::new(cx, cy, 0.0), radius),
     ))
 }
 
@@ -108,7 +108,7 @@ fn add_arc(
     end_angle: f64,
 ) -> Handle {
     scene.add_entity(EntityType::Arc(
-        codec::entities::Arc::from_center_radius_angles(
+        document::entities::Arc::from_center_radius_angles(
             Vector3::new(cx, cy, 0.0),
             radius,
             start_angle,
@@ -126,7 +126,7 @@ fn arc_geom(scene: &Scene, handle: Handle) -> (Vector3, f64) {
 
 fn add_ellipse(scene: &mut Scene, cx: f64, cy: f64, major_axis: (f64, f64), ratio: f64) -> Handle {
     scene.add_entity(EntityType::Ellipse(
-        codec::entities::Ellipse::from_center_axes(
+        document::entities::Ellipse::from_center_axes(
             Vector3::new(cx, cy, 0.0),
             Vector3::new(major_axis.0, major_axis.1, 0.0),
             ratio,
@@ -186,10 +186,10 @@ fn horizontal_constraint_levels_the_line_when_an_endpoint_moves() {
 fn horizontal_constraint_levels_a_polyline_segment() {
     let mut scene = Scene::new();
     let polyline = scene.add_entity(EntityType::LwPolyline(
-        codec::entities::LwPolyline::from_points(vec![
-            codec::types::Vector2::new(0.0, 0.0),
-            codec::types::Vector2::new(5.0, 2.0),
-            codec::types::Vector2::new(10.0, 7.0),
+        document::entities::LwPolyline::from_points(vec![
+            document::types::Vector2::new(0.0, 0.0),
+            document::types::Vector2::new(5.0, 2.0),
+            document::types::Vector2::new(10.0, 7.0),
         ]),
     ));
     scene
@@ -212,9 +212,9 @@ fn horizontal_constraint_levels_a_polyline_segment() {
 
 #[test]
 fn horizontal_constraint_does_not_flatten_a_polyline_arc_segment() {
-    let mut source = codec::entities::LwPolyline::new();
-    source.add_point_with_bulge(codec::types::Vector2::new(0.0, 0.0), 0.5);
-    source.add_point(codec::types::Vector2::new(5.0, 2.0));
+    let mut source = document::entities::LwPolyline::new();
+    source.add_point_with_bulge(document::types::Vector2::new(0.0, 0.0), 0.5);
+    source.add_point(document::types::Vector2::new(5.0, 2.0));
     let mut scene = Scene::new();
     let polyline = scene.add_entity(EntityType::LwPolyline(source));
     scene
@@ -797,7 +797,7 @@ fn midpoint_constraint_pulls_a_point_onto_a_lines_midpoint() {
 fn midpoint_constraint_supports_a_point_entity() {
     let mut scene = Scene::new();
     let base = add_line(&mut scene, 0.0, 0.0, 10.0, 6.0);
-    let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(Vector3::new(
+    let point = scene.add_entity(EntityType::Point(document::entities::Point::at(Vector3::new(
         20.0, 20.0, 0.0,
     ))));
     scene
@@ -821,7 +821,7 @@ fn midpoint_constraint_supports_a_point_entity() {
 fn coincident_constraint_supports_a_block_insertion_point() {
     let mut scene = Scene::new();
     let line = add_line(&mut scene, 0.0, 0.0, 10.0, 4.0);
-    let insert = scene.add_entity(EntityType::Insert(codec::entities::Insert::new(
+    let insert = scene.add_entity(EntityType::Insert(document::entities::Insert::new(
         "fixture",
         Vector3::new(30.0, 20.0, 0.0),
     )));
@@ -1294,9 +1294,9 @@ fn point_on_curve_constraint_keeps_a_point_within_an_arcs_sweep() {
 
 #[test]
 fn point_on_curve_constraint_keeps_a_point_within_a_polyline_arc_segment() {
-    let mut source = codec::entities::LwPolyline::new();
-    source.add_point_with_bulge(codec::types::Vector2::new(0.0, 0.0), 1.0);
-    source.add_point(codec::types::Vector2::new(10.0, 0.0));
+    let mut source = document::entities::LwPolyline::new();
+    source.add_point_with_bulge(document::types::Vector2::new(0.0, 0.0), 1.0);
+    source.add_point(document::types::Vector2::new(10.0, 0.0));
     let mut scene = Scene::new();
     let polyline = scene.add_entity(EntityType::LwPolyline(source));
     let marker = add_line(&mut scene, 5.0, 20.0, 6.0, 20.0);
@@ -1464,7 +1464,7 @@ fn normal_constraint_pulls_the_line_through_the_circles_center() {
 }
 
 // Phase 5 of the same plan: an `Ellipse` registers center/focus1/minor-
-// radius (converted from opencadcodec's center + major-axis-vector + ratio
+// radius (converted from document's center + major-axis-vector + ratio
 // parametrization). Only center-based whole-entity constraints are wired
 // up so far — Concentric, CenterPoint, Fixed — mirroring how Arc started
 // at "center/radius only" in Phase 1. Axis-length constraints and
@@ -1535,7 +1535,7 @@ fn center_point_constraint_pulls_a_lines_endpoint_onto_an_ellipses_center() {
 
 #[test]
 fn a_tilted_ellipse_round_trips_through_the_solver_without_drifting() {
-    // The riskiest part of Ellipse support: converting opencadcodec's center +
+    // The riskiest part of Ellipse support: converting document's center +
     // major-axis-*vector* + minor/major ratio into `opencadkernel_constraints`'s center +
     // focus + minor-radius, then back, for a major axis that ISN'T
     // axis-aligned (an axis-aligned one wouldn't exercise the direction

@@ -9,9 +9,9 @@
 // piece of a NURBS circle into a piece of a parabola — a change that looks
 // fine until it is measured.
 
-use codec::entities::Spline;
-use codec::types::Vector3;
-use codec::Handle;
+use document::entities::Spline;
+use document::types::Vector3;
+use document::Handle;
 use kernel::geom2d::{NurbsCurve, Parameterization};
 use kernel::space::Plane;
 
@@ -30,7 +30,7 @@ fn elevation(spl: &Spline) -> f64 {
 
 // ── Conversion ─────────────────────────────────────────────────────────────
 
-/// Convert an opencadcodec `Spline` to a kernel `NurbsCurve`, weights included.
+/// Convert a document `Spline` to a kernel `NurbsCurve`, weights included.
 ///
 /// A SPLINE is stored one of two ways and both turn up: a control polygon the
 /// curve approaches, or fit points it must pass through with optional end
@@ -107,7 +107,7 @@ fn spline_to_nurbs_with(
     NurbsCurve::interpolate(&fit, start_tangent, end_tangent, parameterization)
 }
 
-/// Rebuild an opencadcodec `Spline` from a kernel curve.
+/// Rebuild a document `Spline` from a kernel curve.
 ///
 /// The `template` supplies entity common data and the Z elevation; splines
 /// here are planar, so the kernel's 2D points are lifted back onto it.

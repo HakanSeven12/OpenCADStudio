@@ -480,7 +480,7 @@ impl ModelSpaceThemeConfig {
 
     /// Resolve active selection highlight overlay color as [f32; 4].
     pub fn resolve_selection_color(&self) -> [f32; 4] {
-        let mut color = codec::types::aci_table::aci_to_rgb(self.selection_highlight_color)
+        let mut color = document::types::aci_table::aci_to_rgb(self.selection_highlight_color)
             .filter(|_| self.selection_highlight_color != 0)
             .map_or(crate::scene::model::wire_model::WireModel::SELECTED, |(r, g, b)| {
                 [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0]

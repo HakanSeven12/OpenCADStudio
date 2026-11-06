@@ -1,7 +1,7 @@
 //! Two-point authoring gesture: parameter position followed by label position.
 use crate::command::{CadCommand, CmdResult, InputKind};
 use crate::scene::WireModel;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 /// Values answered at the placement prompt before the parameter exists.

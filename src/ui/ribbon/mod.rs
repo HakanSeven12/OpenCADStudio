@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use rustc_hash::FxHashMap as HashMap;
 
-use codec::types::{Color as AcadColor, LineWeight};
+use document::types::{Color as AcadColor, LineWeight};
 use iced::widget::{button, column, container, mouse_area, row, text, Space};
 use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 
@@ -2683,7 +2683,7 @@ mod tests {
     #[test]
     fn ribbon_layer_color_list_swatch_targets_its_row_without_selecting_it() {
         use crate::app::{ColorPickTarget, Message};
-        use codec::types::Color as AcadColor;
+        use document::types::Color as AcadColor;
         use iced_test::simulator::Simulator;
 
         for (id, vp_frozen) in [

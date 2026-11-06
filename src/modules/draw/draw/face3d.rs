@@ -1,6 +1,6 @@
-use codec::entities::{face3d::InvisibleEdgeFlags, Face3D};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{face3d::InvisibleEdgeFlags, Face3D};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::Tolerance;
 use kernel::space::{curve::segments_overlap_collinearly, Vec3 as KernelVec3};

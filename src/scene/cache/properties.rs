@@ -1,5 +1,5 @@
 use crate::t;
-use codec::{EntityType, Handle, Transparency};
+use document::{EntityType, Handle, Transparency};
 
 use crate::scene::model::object::{PropSection, PropValue, Property};
 
@@ -118,7 +118,7 @@ pub fn visualization_section(entity: &EntityType) -> Option<PropSection> {
     ) || matches!(
         entity,
         EntityType::Extended(extended)
-            if matches!(extended.data, codec::entities::ExtendedEntityData::PointCloudEx(_))
+            if matches!(extended.data, document::entities::ExtendedEntityData::PointCloudEx(_))
     ) {
         return None;
     }

@@ -7,7 +7,7 @@
 //      and when closed, resumes the command loop.
 //   4. In Single mode, editing an object exits the command immediately.
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};

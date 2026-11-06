@@ -2,7 +2,7 @@ use super::{Message, OpenCADStudio};
 use crate::scene::block_parameter_properties::{self as native, Input};
 use crate::scene::model::object::{BlockParameterComponent, BlockParameterKey, PropSection, PropValue};
 use crate::ui::properties::FieldKey;
-use codec::Handle;
+use document::Handle;
 use iced::Task;
 
 /// Read a value the palette printed, or an expression the user typed.
@@ -202,7 +202,7 @@ impl OpenCADStudio {
                 if let Some(staged) = staged {
                     self.push_undo_snapshot(
                         i,
-                        super::document::HistoryLabel::Message("Block reference parameter"),
+                        super::tab_document::HistoryLabel::Message("Block reference parameter"),
                     );
                     self.apply_action_document(i, staged);
                     self.tabs[i].scene.bump_geometry();

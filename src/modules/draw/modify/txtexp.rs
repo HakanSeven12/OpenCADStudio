@@ -4,9 +4,9 @@
 // layer and with its properties: a lightweight polyline when the text lies
 // flat, a 3D polyline when it is tilted.
 
-use codec::entities::{LwPolyline, LwVertex, Polyline3D, Vertex3DPolyline};
-use codec::types::Vector2;
-use codec::{Document, EntityType, Handle};
+use document::entities::{LwPolyline, LwVertex, Polyline3D, Vertex3DPolyline};
+use document::types::Vector2;
+use document::{Document, EntityType, Handle};
 
 use crate::scene::convert::acad_to_render::{convert, RenderObject};
 

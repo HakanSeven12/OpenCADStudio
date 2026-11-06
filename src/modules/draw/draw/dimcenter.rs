@@ -1,9 +1,9 @@
 // Legacy centre cross and associative centre mark commands.
 
 use crate::t;
-use codec::entities::{CenterMarkAssociation, CenterMarkSource};
-use codec::types::Vector3;
-use codec::{EntityType, Handle, Line};
+use document::entities::{CenterMarkAssociation, CenterMarkSource};
+use document::types::Vector3;
+use document::{EntityType, Handle, Line};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
@@ -324,7 +324,7 @@ impl CadCommand for CenterReassociateCommand {
                     Some(true)
                 }
                 EntityType::Line(line)
-                    if codec::entities::CenterLineAssociation::read(&line.common.extended_data)
+                    if document::entities::CenterLineAssociation::read(&line.common.extended_data)
                         .is_some() =>
                 {
                     Some(false)

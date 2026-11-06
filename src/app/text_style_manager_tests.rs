@@ -4,9 +4,9 @@
 
 use super::*;
 use crate::ui::font_picker::{FontChoice, FontPickerEvent};
-use codec::entities::{AttributeDefinition, AttributeEntity, EntityType, Insert, MText, Text};
-use codec::tables::{BlockRecord, TextStyle};
-use codec::types::{Handle, Vector3};
+use document::entities::{AttributeDefinition, AttributeEntity, EntityType, Insert, MText, Text};
+use document::tables::{BlockRecord, TextStyle};
+use document::types::{Handle, Vector3};
 
 fn exact_style(name: &str) -> TextStyle {
     let mut style = TextStyle::new(name);

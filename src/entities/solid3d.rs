@@ -9,12 +9,12 @@ use crate::entities::common::{
 use crate::entities::traits::{Grippable, PropertyEditable, Transformable};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::t;
-use codec::entities::{Body, Region, Solid3D, Surface};
-use codec::xdata::{ExtendedDataRecord, XDataValue};
+use document::entities::{Body, Region, Solid3D, Surface};
+use document::xdata::{ExtendedDataRecord, XDataValue};
 use kernel::space::polygon;
 
 /// Shared transform for the ACIS volume entities. Translate / rotate / scale
-/// delegate to opencadcodec (which composes the move into the solid's ACIS
+/// delegate to document (which composes the move into the solid's ACIS
 /// placement), and mirror delegates via a reflection transform. Without this
 /// the entity dispatcher treated solids as non-transformable, so a moved or
 /// pasted solid stayed at its original ACIS placement.
@@ -27,7 +27,7 @@ macro_rules! impl_acis_transformable {
                     t,
                     |e, p1, p2| {
                         let m = crate::scene::view::transform::reflection_about_xy_line(p1, p2);
-                        codec::Entity::apply_transform(e, &m);
+                        document::Entity::apply_transform(e, &m);
                     },
                 );
             }
@@ -41,12 +41,12 @@ impl_acis_transformable!(Surface);
 
 // ── shared helpers ────────────────────────────────────────────────────────────
 
-fn dvec3(v: &codec::types::Vector3) -> glam::DVec3 {
+fn dvec3(v: &document::types::Vector3) -> glam::DVec3 {
     glam::DVec3::new(v.x, v.y, v.z)
 }
 
-fn translate_acis_entity<T: codec::Entity>(entity: &mut T, d: glam::DVec3) {
-    codec::Entity::translate(entity, codec::types::Vector3::new(d.x, d.y, d.z));
+fn translate_acis_entity<T: document::Entity>(entity: &mut T, d: glam::DVec3) {
+    document::Entity::translate(entity, document::types::Vector3::new(d.x, d.y, d.z));
 }
 
 fn yes_no(value: bool) -> &'static str {
@@ -137,7 +137,7 @@ pub(crate) fn surface_isoline_counts(surface: &Surface) -> [usize; 2] {
     ]
 }
 
-fn handle_text(handle: Option<codec::Handle>) -> String {
+fn handle_text(handle: Option<document::Handle>) -> String {
     handle
         .filter(|handle| handle.is_valid())
         .map(|handle| format!("{:X}", handle.value()))
@@ -145,20 +145,20 @@ fn handle_text(handle: Option<codec::Handle>) -> String {
 }
 
 fn acis_sections(
-    acis: &codec::entities::AcisData,
-    wires: &[codec::entities::Wire],
-    silhouettes: &[codec::entities::Silhouette],
-    history: Option<codec::Handle>,
+    acis: &document::entities::AcisData,
+    wires: &[document::entities::Wire],
+    silhouettes: &[document::entities::Silhouette],
+    history: Option<document::Handle>,
 ) -> Vec<PropSection> {
     let mut wire_types = [0usize; 5];
     let mut transformed = 0usize;
     let mut points = 0usize;
     for wire in wires {
         let index = match wire.wire_type {
-            codec::entities::WireType::Silhouette => 1,
-            codec::entities::WireType::VisibleEdge => 2,
-            codec::entities::WireType::HiddenEdge => 3,
-            codec::entities::WireType::Isoline => 4,
+            document::entities::WireType::Silhouette => 1,
+            document::entities::WireType::VisibleEdge => 2,
+            document::entities::WireType::HiddenEdge => 3,
+            document::entities::WireType::Isoline => 4,
             _ => 0,
         };
         wire_types[index] += 1;
@@ -265,7 +265,7 @@ fn acis_sections(
     ]
 }
 
-fn position_section(prefix: &str, p: &codec::types::Vector3) -> PropSection {
+fn position_section(prefix: &str, p: &document::types::Vector3) -> PropSection {
     let fields = match prefix {
         "rgn" => ["rgn_px", "rgn_py", "rgn_pz"],
         "bdy" => ["bdy_px", "bdy_py", "bdy_pz"],
@@ -368,13 +368,13 @@ impl PropertyEditable for Solid3D {
             return;
         };
         let delta = match field {
-            "s3d_px" => codec::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
-            "s3d_py" => codec::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
-            "s3d_pz" => codec::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
+            "s3d_px" => document::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
+            "s3d_py" => document::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
+            "s3d_pz" => document::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
             _ => return,
         };
-        if delta != codec::types::Vector3::ZERO {
-            codec::Entity::translate(self, delta);
+        if delta != document::types::Vector3::ZERO {
+            document::Entity::translate(self, delta);
         }
     }
 }
@@ -452,37 +452,37 @@ impl PropertyEditable for Body {
             return;
         };
         let delta = match field {
-            "bdy_px" => codec::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
-            "bdy_py" => codec::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
-            "bdy_pz" => codec::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
+            "bdy_px" => document::types::Vector3::new(v - self.point_of_reference.x, 0.0, 0.0),
+            "bdy_py" => document::types::Vector3::new(0.0, v - self.point_of_reference.y, 0.0),
+            "bdy_pz" => document::types::Vector3::new(0.0, 0.0, v - self.point_of_reference.z),
             _ => return,
         };
-        if delta != codec::types::Vector3::ZERO {
-            codec::Entity::translate(self, delta);
+        if delta != document::types::Vector3::ZERO {
+            document::Entity::translate(self, delta);
         }
     }
 }
 
-fn embedded_name(entity: Option<&codec::entities::EmbeddedEntity>) -> &'static str {
+fn embedded_name(entity: Option<&document::entities::EmbeddedEntity>) -> &'static str {
     match entity {
-        Some(codec::entities::EmbeddedEntity::Point(_)) => "Point",
-        Some(codec::entities::EmbeddedEntity::Line(_)) => "Line",
-        Some(codec::entities::EmbeddedEntity::Arc(_)) => "Arc",
-        Some(codec::entities::EmbeddedEntity::Circle(_)) => "Circle",
-        Some(codec::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
-        Some(codec::entities::EmbeddedEntity::Spline(_)) => "Spline",
-        Some(codec::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
+        Some(document::entities::EmbeddedEntity::Point(_)) => "Point",
+        Some(document::entities::EmbeddedEntity::Line(_)) => "Line",
+        Some(document::entities::EmbeddedEntity::Arc(_)) => "Arc",
+        Some(document::entities::EmbeddedEntity::Circle(_)) => "Circle",
+        Some(document::entities::EmbeddedEntity::Ellipse(_)) => "Ellipse",
+        Some(document::entities::EmbeddedEntity::Spline(_)) => "Spline",
+        Some(document::entities::EmbeddedEntity::LwPolyline(_)) => "Polyline",
         // A 2D / 3D polyline profile the modeler keeps as a wire body.
-        Some(codec::entities::EmbeddedEntity::Body { .. }) => "Polyline",
-        Some(codec::entities::EmbeddedEntity::Region(_)) => "Region",
-        Some(codec::entities::EmbeddedEntity::Ray(_)) => "Ray",
-        Some(codec::entities::EmbeddedEntity::XLine(_)) => "XLine",
-        Some(codec::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",
+        Some(document::entities::EmbeddedEntity::Body { .. }) => "Polyline",
+        Some(document::entities::EmbeddedEntity::Region(_)) => "Region",
+        Some(document::entities::EmbeddedEntity::Ray(_)) => "Ray",
+        Some(document::entities::EmbeddedEntity::XLine(_)) => "XLine",
+        Some(document::entities::EmbeddedEntity::Unknown { .. }) => "Unknown",
         None => "None",
     }
 }
 
-fn vector_text(vector: &codec::types::Vector3) -> String {
+fn vector_text(vector: &document::types::Vector3) -> String {
     format!("{:.6}, {:.6}, {:.6}", vector.x, vector.y, vector.z)
 }
 
@@ -499,7 +499,7 @@ fn matrix_text(matrix: &[f64; 16]) -> String {
         .join(" ")
 }
 
-fn sweep_options_text(options: &codec::entities::SurfaceSweepOptions) -> String {
+fn sweep_options_text(options: &document::entities::SurfaceSweepOptions) -> String {
     format!(
         "draft {:.6} ({:.6}→{:.6}); twist {:.6}; scale {:.6}; align {:.6}; solid {}; flags {}/{}; align-start {}; bank {}; base {}; sweep-xform {}; path-xform {}; ref {}",
         options.draft_angle,
@@ -521,7 +521,7 @@ fn sweep_options_text(options: &codec::entities::SurfaceSweepOptions) -> String 
 }
 
 fn surface_construction_section(surface: &Surface) -> PropSection {
-    use codec::entities::SurfaceData;
+    use document::entities::SurfaceData;
     let mut props = vec![
         ro(
             t!("Kind").as_ref(),
@@ -828,9 +828,9 @@ fn surface_construction_section(surface: &Surface) -> PropSection {
     }
 }
 
-fn translate_surface(surface: &mut Surface, delta: codec::types::Vector3) {
+fn translate_surface(surface: &mut Surface, delta: document::types::Vector3) {
     let before = surface.point_of_reference;
-    codec::Entity::translate(surface, delta);
+    document::Entity::translate(surface, delta);
     if surface.point_of_reference == before {
         surface.point_of_reference = before + delta;
     }
@@ -846,7 +846,7 @@ impl Grippable for Surface {
             return;
         }
         if let GripApply::Translate(delta) = apply {
-            translate_surface(self, codec::types::Vector3::new(delta.x, delta.y, delta.z));
+            translate_surface(self, document::types::Vector3::new(delta.x, delta.y, delta.z));
         }
     }
 }
@@ -897,17 +897,17 @@ impl PropertyEditable for Surface {
                 };
                 let delta = match field {
                     "srf_px" => {
-                        codec::types::Vector3::new(value - self.point_of_reference.x, 0.0, 0.0)
+                        document::types::Vector3::new(value - self.point_of_reference.x, 0.0, 0.0)
                     }
                     "srf_py" => {
-                        codec::types::Vector3::new(0.0, value - self.point_of_reference.y, 0.0)
+                        document::types::Vector3::new(0.0, value - self.point_of_reference.y, 0.0)
                     }
                     "srf_pz" => {
-                        codec::types::Vector3::new(0.0, 0.0, value - self.point_of_reference.z)
+                        document::types::Vector3::new(0.0, 0.0, value - self.point_of_reference.z)
                     }
                     _ => return,
                 };
-                if delta != codec::types::Vector3::ZERO {
+                if delta != document::types::Vector3::ZERO {
                     translate_surface(self, delta);
                 }
             }
@@ -921,13 +921,13 @@ impl PropertyEditable for Surface {
 
 use crate::scene::convert::solid3d_tess;
 use crate::scene::model::mesh_model::MeshLodSet;
-use codec::{types::Vector3, EntityType};
+use document::{types::Vector3, EntityType};
 
 const DISPLAY_DEFLECTION_COEFFICIENT: f64 = 2.5e-4;
 
 /// Shared world-space chord tolerance for solid display.
 pub fn display_deflection(
-    header: &codec::document::HeaderVariables,
+    header: &document::document::HeaderVariables,
     facet_res: f64,
 ) -> Option<f64> {
     let low = header.model_space_extents_min;
@@ -1040,7 +1040,7 @@ mod tests {
     /// editor's writable range, 0..=200.
     #[test]
     fn surface_isolate_counts_stay_within_the_plugin_editor_range() {
-        use codec::entities::{Surface, SurfaceKind};
+        use document::entities::{Surface, SurfaceKind};
 
         let mut surface = Surface::new(SurfaceKind::Extruded);
         surface.u_isolines = i16::MAX;

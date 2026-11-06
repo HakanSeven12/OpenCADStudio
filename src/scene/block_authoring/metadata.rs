@@ -1,6 +1,6 @@
 //! Native parameter text and visibility metadata, validated against definition ownership.
-use codec::objects::{DynamicBlockData as Data, ObjectType};
-use codec::{Document, Handle};
+use document::objects::{DynamicBlockData as Data, ObjectType};
+use document::{Document, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Field {
@@ -306,7 +306,7 @@ fn owned_by(object: &ObjectType, graph: Handle) -> bool {
 fn graph_nodes<'a>(
     document: &'a Document,
     definition: Handle,
-) -> Result<Option<(Handle, &'a [codec::objects::BlockEvaluationNode])>, &'static str> {
+) -> Result<Option<(Handle, &'a [document::objects::BlockEvaluationNode])>, &'static str> {
     let Some(graph) = super::graph(document, definition)? else {
         return Ok(None);
     };

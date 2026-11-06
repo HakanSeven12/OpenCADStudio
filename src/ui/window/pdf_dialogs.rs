@@ -232,9 +232,9 @@ pub fn page_thumbs(path: &str) -> Vec<PageThumb> {
 }
 
 /// Thumbnails of a file's pages (PDF), sheets (DWF) or models (DGN).
-pub fn item_thumbs(kind: codec::entities::UnderlayType, path: &str) -> Vec<PageThumb> {
+pub fn item_thumbs(kind: document::entities::UnderlayType, path: &str) -> Vec<PageThumb> {
     use crate::scene::model::underlay_vector;
-    if kind == codec::entities::UnderlayType::Pdf {
+    if kind == document::entities::UnderlayType::Pdf {
         return page_thumbs(path);
     }
     underlay_vector::item_names(kind, path)
@@ -565,7 +565,7 @@ pub static ATTACH_MEMORY: std::sync::Mutex<Option<AttachMemory>> = std::sync::Mu
 
 pub struct PdfAttachState {
     /// PDF pages, DWF sheets or DGN models.
-    pub kind: codec::entities::UnderlayType,
+    pub kind: document::entities::UnderlayType,
     /// DGN: sub units chosen (the scale then turns them into master units).
     pub sub_units: bool,
     /// DGN: sub units per master unit of the chosen model.
@@ -601,7 +601,7 @@ impl PdfAttachState {
             .unwrap_or_default();
         let names = existing.iter().map(|(name, _)| name.clone()).collect();
         Self {
-            kind: codec::entities::UnderlayType::Pdf,
+            kind: document::entities::UnderlayType::Pdf,
             sub_units: false,
             sub_per_master: 1.0,
             path: String::new(),
@@ -661,7 +661,7 @@ pub fn view_attach<'a>(
     .size(12)
     .padding([5, 8])
     .width(Fill);
-    use codec::entities::UnderlayType;
+    use document::entities::UnderlayType;
     let count_text = match state.kind {
         UnderlayType::Pdf => crate::tf!("{count} pages", count = state.pages.len()),
         UnderlayType::Dwf => crate::tf!("{count} sheets", count = state.pages.len()),
@@ -1046,7 +1046,7 @@ pub fn view_point_cloud_attach<'a>(
 #[derive(Clone)]
 pub struct LayerTarget {
     pub name: String,
-    pub handle: codec::Handle,
+    pub handle: document::Handle,
     pub layers: Vec<String>,
     pub hidden: Vec<String>,
 }
@@ -1837,7 +1837,7 @@ pub struct MapSlot {
 /// a chosen cloud, its intensity and elevation colouring.
 pub struct PointCloudColorMapState {
     /// The cloud edited; `None` edits the drawing's default schemes.
-    pub cloud: Option<codec::Handle>,
+    pub cloud: Option<document::Handle>,
     /// Elevation tab (else intensity).
     pub elevation_tab: bool,
     pub ramps: Vec<MapRamp>,
@@ -3069,7 +3069,7 @@ fn adjust_card<'a>(state: &'a ViewBackgroundState) -> Element<'a, Message> {
 /// The Image Adjust dialog: brightness, contrast and fade (0–100) of the
 /// chosen raster images, with a before / after preview of the first.
 pub struct ImageAdjustState {
-    pub handles: Vec<codec::Handle>,
+    pub handles: Vec<document::Handle>,
     /// The first image's file name, shown over the preview.
     pub name: String,
     /// Brightness, contrast, fade.
@@ -3088,7 +3088,7 @@ pub struct ImageAdjustState {
 pub const IMAGE_ADJUST_DEFAULTS: [u8; 3] = [50, 50, 0];
 
 impl ImageAdjustState {
-    pub fn new(handles: Vec<codec::Handle>, path: &str, values: [u8; 3], canvas: [u8; 3]) -> Self {
+    pub fn new(handles: Vec<document::Handle>, path: &str, values: [u8; 3], canvas: [u8; 3]) -> Self {
         let name = std::path::Path::new(path.trim()).file_name().map_or_else(
             || path.trim().to_string(),
             |n| n.to_string_lossy().into_owned(),

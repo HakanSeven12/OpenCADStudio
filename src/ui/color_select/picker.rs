@@ -6,14 +6,14 @@
 //! colour editor: no tabs, no index colours.
 
 use super::book::ColorBook;
-use super::document::{self, DocColor, DocSort, DocView};
+use super::drawing_colors::{self, DocColor, DocSort, DocView};
 use super::editor::{rgb_color, ColorEditor, EditorMsg};
 use super::eyedropper::{Eyedropper, EyedropperMsg};
 use super::math;
 use crate::app::{ArrowKey, ColorPickTarget, Message};
 use crate::t;
 use crate::ui::properties::acad_color_display;
-use codec::types::Color as AcadColor;
+use document::types::Color as AcadColor;
 use iced::widget::{
     button, column, container, mouse_area, pick_list, row, scrollable, svg, text, text_input, Space,
 };
@@ -159,7 +159,7 @@ impl ColorPicker {
         by_layer: Option<AcadColor>,
     ) -> Self {
         self.by_layer = by_layer;
-        document::sort(&mut doc, self.doc_sort, recent);
+        drawing_colors::sort(&mut doc, self.doc_sort, recent);
         self.doc = doc;
         self.recent = recent.to_vec();
         self.books = books;
@@ -346,7 +346,7 @@ impl ColorPicker {
             ColorPickerMsg::DocQuery(query) => self.doc_query = query,
             ColorPickerMsg::DocSort(by) => {
                 self.doc_sort = by;
-                document::sort(&mut self.doc, by, &self.recent);
+                drawing_colors::sort(&mut self.doc, by, &self.recent);
             }
             ColorPickerMsg::Book(i) => {
                 if i < self.books.len() {
@@ -1515,7 +1515,7 @@ mod tests {
     #[test]
     fn document_colours_pick_and_walk() {
         // A new drawing's layer 0 is white.
-        let doc = document::collect(&codec::Document::new());
+        let doc = drawing_colors::collect(&document::Document::new());
         assert!(doc.iter().any(|c| c.color == AcadColor::Index(7)));
         let mut p = picker(AcadColor::Index(30)).with_drawing(doc, &[], Arc::default(), None, None);
         p.update(ColorPickerMsg::Tab(ColorPickerTab::Document));
@@ -1724,7 +1724,7 @@ mod tests {
                     ral()
                 };
                 let mut p = ColorPicker::new(target, color, varies).with_drawing(
-                    document::collect(&codec::Document::new()),
+                    drawing_colors::collect(&document::Document::new()),
                     &[],
                     books,
                     None,

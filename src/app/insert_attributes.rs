@@ -2,7 +2,7 @@
 //! at once, and the answers go back through the parked insert command.
 use super::{Message, ModalKind, OpenCADStudio};
 use crate::ui::window::insert_attr_dialog::{InsertAttrMsg, InsertAttrRow, InsertAttrState};
-use codec::entities::AttributeDefinition;
+use document::entities::AttributeDefinition;
 use iced::Task;
 
 impl OpenCADStudio {

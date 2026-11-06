@@ -3,8 +3,8 @@ use super::block_actions::{self as actions, instance::ParameterFrame};
 use super::block_authoring::{self as authoring, graph};
 use super::block_parameter_properties::{self as properties};
 use super::model::object::BlockParameterComponent as Component;
-use codec::objects::{DynamicBlockData as Data, ObjectType};
-use codec::{Document, EntityType, Handle};
+use document::objects::{DynamicBlockData as Data, ObjectType};
+use document::{Document, EntityType, Handle};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Group {
@@ -338,7 +338,7 @@ pub fn write_number(
         definition,
         parameter,
         Part::End,
-        codec::types::Vector3::new(at.x, at.y, at.z),
+        document::types::Vector3::new(at.x, at.y, at.z),
     )
 }
 

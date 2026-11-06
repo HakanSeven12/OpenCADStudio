@@ -1,6 +1,6 @@
-use codec::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
-use codec::types::{Color, Handle, Vector3};
-use codec::EntityType;
+use document::entities::{EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData};
+use document::types::{Color, Handle, Vector3};
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

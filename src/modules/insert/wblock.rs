@@ -5,7 +5,7 @@
 //   *           → copies currently selected model-space entities
 
 use crate::t;
-use codec::{Document, EntityType};
+use document::{Document, EntityType};
 
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 
@@ -82,7 +82,7 @@ fn inherit_source_header(src: &Document, out: &mut Document) {
 
 /// Handles of the entities placed in model space; entities that belong to a
 /// block definition travel through the references that use them.
-fn model_space_handles(out: &Document) -> Vec<codec::Handle> {
+fn model_space_handles(out: &Document) -> Vec<document::Handle> {
     let model_space = out.header.model_space_block_handle;
     out.entities()
         .filter(|entity| {
@@ -107,7 +107,7 @@ fn recompute_model_space_extents(out: &mut Document) {
 /// (the "selected entities" mode, `*`).
 pub fn extract_entities_to_doc(
     src: &Document,
-    handles: &[codec::Handle],
+    handles: &[document::Handle],
 ) -> Result<Document, String> {
     let mut out = Document::new();
     extract_entities_into(src, handles, &mut out)?;
@@ -117,7 +117,7 @@ pub fn extract_entities_to_doc(
 /// Extract the listed entities into `out` (fresh document or template base).
 pub fn extract_entities_into(
     src: &Document,
-    handles: &[codec::Handle],
+    handles: &[document::Handle],
     out: &mut Document,
 ) -> Result<(), String> {
     if handles.is_empty() {
@@ -141,11 +141,11 @@ pub fn extract_entities_into(
 /// the file opens empty or needs recovery. (#1111)
 fn copy_with_dependencies(
     src: &Document,
-    handles: &[codec::Handle],
+    handles: &[document::Handle],
     out: &mut Document,
     translate: Option<&crate::command::EntityTransform>,
 ) {
-    let handles: Vec<codec::Handle> = handles
+    let handles: Vec<document::Handle> = handles
         .iter()
         .copied()
         .filter(|&handle| {
@@ -180,8 +180,8 @@ pub fn normalize_to_origin(out: &mut Document) {
     if !(min.x.is_finite() && min.y.is_finite() && min.z.is_finite()) {
         return;
     }
-    let shift = crate::command::EntityTransform::Affine(codec::types::Transform::from_translation(
-        codec::types::Vector3::new(-min.x, -min.y, -min.z),
+    let shift = crate::command::EntityTransform::Affine(document::types::Transform::from_translation(
+        document::types::Vector3::new(-min.x, -min.y, -min.z),
     ));
     // Only what sits in model space moves; a definition's own entities keep
     // their coordinates and the reference carries them.
@@ -227,7 +227,7 @@ impl crate::command::CadCommand for WblockPickBasePointCommand {
 /// applying `base_point` translation and `unit` insertion units.
 pub fn extract_entities_to_doc_with_base(
     src: &Document,
-    handles: &[codec::Handle],
+    handles: &[document::Handle],
     base_point: glam::DVec3,
     unit: i16,
 ) -> Result<Document, String> {
@@ -240,7 +240,7 @@ pub fn extract_entities_to_doc_with_base(
     // drawing's insertion base (INSBASE).
     copy_with_dependencies(src, handles, &mut out, None);
     out.header.model_space_insertion_base =
-        codec::types::Vector3::new(base_point.x, base_point.y, base_point.z);
+        document::types::Vector3::new(base_point.x, base_point.y, base_point.z);
     if out.entities().count() == 0 {
         return Err(t!("None of the selected entities could be exported.").into_owned());
     }
@@ -251,8 +251,8 @@ pub fn extract_entities_to_doc_with_base(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     #[test]
     fn test_extract_entities_with_base_point_and_units() {
@@ -295,7 +295,7 @@ mod tests {
         line.end = Vector3::new(3.0, 4.0, 0.0);
         let h = doc.add_entity(EntityType::Line(line)).unwrap();
 
-        let mut block_record = codec::tables::BlockRecord::new("MY_BLOCK".to_string());
+        let mut block_record = document::tables::BlockRecord::new("MY_BLOCK".to_string());
         block_record.entity_handles.push(h);
         let _ = doc.block_records.add(block_record);
 
@@ -312,13 +312,13 @@ mod tests {
         line.start = Vector3::new(10.0, 20.0, 0.0);
         line.end = Vector3::new(30.0, 40.0, 0.0);
         let inner_line = doc.add_entity(EntityType::Line(line)).unwrap();
-        let mut inner = codec::tables::BlockRecord::new("INNER");
+        let mut inner = document::tables::BlockRecord::new("INNER");
         inner.entity_handles.push(inner_line);
         doc.block_records.add(inner).unwrap();
 
-        let insert = codec::entities::Insert::new("INNER", Vector3::new(100.0, 200.0, 0.0));
+        let insert = document::entities::Insert::new("INNER", Vector3::new(100.0, 200.0, 0.0));
         let insert_handle = doc.add_entity(EntityType::Insert(insert)).unwrap();
-        let mut outer = codec::tables::BlockRecord::new("OUTER");
+        let mut outer = document::tables::BlockRecord::new("OUTER");
         outer.entity_handles.push(insert_handle);
         doc.block_records.add(outer).unwrap();
 
@@ -341,11 +341,11 @@ mod tests {
         line.start = Vector3::new(5.0, 5.0, 0.0);
         line.end = Vector3::new(15.0, 15.0, 0.0);
         let inner_line = doc.add_entity(EntityType::Line(line)).unwrap();
-        let mut part = codec::tables::BlockRecord::new("PART");
+        let mut part = document::tables::BlockRecord::new("PART");
         part.entity_handles.push(inner_line);
         doc.block_records.add(part).unwrap();
 
-        let insert = codec::entities::Insert::new("PART", Vector3::new(100.0, 100.0, 0.0));
+        let insert = document::entities::Insert::new("PART", Vector3::new(100.0, 100.0, 0.0));
         let insert_handle = doc.add_entity(EntityType::Insert(insert)).unwrap();
 
         let mut out = extract_entities_to_doc(&doc, &[insert_handle]).expect("selection extract");
@@ -377,7 +377,7 @@ mod tests {
         line.start = Vector3::new(0.0, 0.0, 0.0);
         line.end = Vector3::new(1.0, 1.0, 0.0);
         let h = doc.add_entity(EntityType::Line(line)).unwrap();
-        let mut record = codec::tables::BlockRecord::new("PART");
+        let mut record = document::tables::BlockRecord::new("PART");
         record.entity_handles.push(h);
         doc.block_records.add(record).unwrap();
 
@@ -396,7 +396,7 @@ mod tests {
         line.start = Vector3::new(0.0, 0.0, 0.0);
         line.end = Vector3::new(1.0, 1.0, 0.0);
         let h = doc.add_entity(EntityType::Line(line)).unwrap();
-        let mut record = codec::tables::BlockRecord::new("PART");
+        let mut record = document::tables::BlockRecord::new("PART");
         record.entity_handles.push(h);
         doc.block_records.add(record).unwrap();
 
@@ -422,7 +422,7 @@ mod tests {
         line.start = Vector3::new(20.0, 0.0, 0.0);
         line.end = Vector3::new(212.0, 206.0, 0.0);
         let h = doc.add_entity(EntityType::Line(line)).unwrap();
-        let mut record = codec::tables::BlockRecord::new("PART");
+        let mut record = document::tables::BlockRecord::new("PART");
         record.entity_handles.push(h);
         doc.block_records.add(record).unwrap();
 

@@ -4,11 +4,11 @@ use crate::app::{Message, OpenCADStudio};
 use crate::entities::dim_inspect::{self as inspect, Inspection, Shape};
 use crate::modules::annotate::dim_inspect::{DimInspectCommand, SEP};
 use crate::ui::window::dim_inspect_dialog::{DimInspectMsg, DimInspectState};
-use codec::Handle;
+use document::Handle;
 use iced::Task;
 
-fn is_dimension(entity: &codec::EntityType) -> bool {
-    matches!(entity, codec::EntityType::Dimension(_))
+fn is_dimension(entity: &document::EntityType) -> bool {
+    matches!(entity, document::EntityType::Dimension(_))
 }
 
 impl OpenCADStudio {

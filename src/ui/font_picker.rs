@@ -7,7 +7,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::{muted_style, readable_accent};
-use codec::Document;
+use document::Document;
 use iced::widget::{button, container, row, text, text_input, Space};
 use iced::{Background, Border, Color, Element, Font, Length, Theme};
 use std::borrow::Cow;
@@ -184,7 +184,7 @@ pub fn catalogue(doc: &Document, style_default: bool) -> Vec<FontEntry> {
 
 /// The font `style` draws with, as the picker names it; `None` when the
 /// style names none.
-pub fn style_font(style: &codec::tables::TextStyle) -> Option<FontChoice> {
+pub fn style_font(style: &document::tables::TextStyle) -> Option<FontChoice> {
     let family = style.true_type_font.trim();
     if !family.is_empty() {
         return Some(FontChoice::TrueType(family.to_string()));

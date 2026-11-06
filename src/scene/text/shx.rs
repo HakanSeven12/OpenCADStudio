@@ -237,7 +237,7 @@ pub fn bigfont_glyph(path: &str, ch: char) -> Option<Arc<crate::scene::text::lff
     if file.kind != ShxKind::Bigfont {
         return None;
     }
-    let enc = codec::io::dxf::code_page::encoding_from_code_page(bigfont_code_page(path, &file))?;
+    let enc = document::io::dxf::code_page::encoding_from_code_page(bigfont_code_page(path, &file))?;
     let mut buf = [0u8; 4];
     let (bytes, _, unmappable) = enc.encode(ch.encode_utf8(&mut buf));
     if unmappable || bytes.len() != 2 {

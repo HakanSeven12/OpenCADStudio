@@ -15,8 +15,8 @@
 
 use crate::app::Message;
 use crate::t;
-use codec::entities::{HorizontalAlignment, VerticalAlignment};
-use codec::types::{Color as AcadColor, LineWeight};
+use document::entities::{HorizontalAlignment, VerticalAlignment};
+use document::types::{Color as AcadColor, LineWeight};
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, text_input, Space};
 use iced::{Background, Border, Element, Length, Theme};
 use std::borrow::Cow;

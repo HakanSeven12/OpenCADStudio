@@ -117,7 +117,7 @@ pub(super) struct State {
     selection_revision: u64,
     pub(super) routing: bool,
     /// Session-scoped named handle sets for selection_set_save/load.
-    selection_sets: std::collections::BTreeMap<String, Vec<codec::Handle>>,
+    selection_sets: std::collections::BTreeMap<String, Vec<document::Handle>>,
     /// Live `user_select` request — the client asked the person at the screen
     /// to pick entities; Some until that person answers with Enter/Escape.
     pub(super) user_select: Option<UserSelectSession>,
@@ -141,7 +141,7 @@ pub(super) struct State {
     /// document-level snapshot. Such a step bumps geometry as a whole, so the
     /// journal cannot name what moved; the step's own delta can, and the
     /// response of the request that ran it reports these instead of `null`.
-    history_changes: Option<Vec<(codec::Handle, crate::scene::ChangeKind)>>,
+    history_changes: Option<Vec<(document::Handle, crate::scene::ChangeKind)>>,
 }
 
 /// The pending half of an interactive `user_select` operation (`interactive`
@@ -181,7 +181,7 @@ impl State {
     /// (or while an interactive request is parked) records nothing.
     pub(super) fn note_history_changes(
         &mut self,
-        changes: Vec<(codec::Handle, crate::scene::ChangeKind)>,
+        changes: Vec<(document::Handle, crate::scene::ChangeKind)>,
     ) {
         if self.routing {
             self.history_changes = Some(changes);
@@ -190,7 +190,7 @@ impl State {
 
     pub(super) fn take_history_changes(
         &mut self,
-    ) -> Option<Vec<(codec::Handle, crate::scene::ChangeKind)>> {
+    ) -> Option<Vec<(document::Handle, crate::scene::ChangeKind)>> {
         self.history_changes.take()
     }
 
@@ -290,9 +290,9 @@ fn string<'a>(req: &'a Value, key: &str) -> Result<&'a str, Value> {
         .filter(|v| !v.is_empty())
         .ok_or_else(|| failure("invalid_request", format!("Missing {key}")))
 }
-fn handle(req: &Value) -> Result<codec::Handle, Value> {
+fn handle(req: &Value) -> Result<document::Handle, Value> {
     u64::from_str_radix(string(req, "handle")?.trim_start_matches("0x"), 16)
-        .map(codec::Handle::new)
+        .map(document::Handle::new)
         .map_err(|_| failure("invalid_handle", "Expected hexadecimal handle"))
 }
 #[cfg(not(target_arch = "wasm32"))]
@@ -578,7 +578,7 @@ impl OpenCADStudio {
     /// plugin host already publishes the V4 selection event; automation clients
     /// need the same signal instead of polling `state`.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(super) fn control_record_selection_event(&mut self, handles: &[codec::Handle]) {
+    pub(super) fn control_record_selection_event(&mut self, handles: &[document::Handle]) {
         let (document_id, revision) = {
             let tab = &self.tabs[self.active_tab];
             (tab.id, tab.edit_revision)
@@ -1327,7 +1327,7 @@ impl OpenCADStudio {
                                         v.as_str().unwrap_or("").trim_start_matches("0x"),
                                         16,
                                     )
-                                    .map(codec::Handle::new)
+                                    .map(document::Handle::new)
                                     .map_err(|_| {
                                         failure("invalid_handle", "Expected hexadecimal handle")
                                     })?;
@@ -1359,7 +1359,7 @@ impl OpenCADStudio {
                             v.as_str().unwrap_or("").trim_start_matches("0x"),
                             16,
                         )
-                        .map(codec::Handle::new)
+                        .map(document::Handle::new)
                         .map_err(|_| failure("invalid_handle", "Expected hexadecimal handle"))?;
                         if self.tabs[i].scene.document.get_entity(h).is_none() {
                             return Err(failure(
@@ -1554,11 +1554,11 @@ impl OpenCADStudio {
 
                 // Optional framing / selection adjustments prior to snapshot:
                 if let Some(handles) = req.get("highlight_handles").and_then(Value::as_array) {
-                    let hex_handles: Vec<codec::Handle> = handles
+                    let hex_handles: Vec<document::Handle> = handles
                         .iter()
                         .filter_map(|v| v.as_str())
                         .filter_map(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
-                        .map(codec::Handle::new)
+                        .map(document::Handle::new)
                         .collect();
                     if !hex_handles.is_empty() {
                         let scene = &mut self.tabs[self.active_tab].scene;
@@ -1569,11 +1569,11 @@ impl OpenCADStudio {
                     }
                 }
                 if let Some(focus) = req.get("focus_handles").and_then(Value::as_array) {
-                    let hex_handles: Vec<codec::Handle> = focus
+                    let hex_handles: Vec<document::Handle> = focus
                         .iter()
                         .filter_map(|v| v.as_str())
                         .filter_map(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
-                        .map(codec::Handle::new)
+                        .map(document::Handle::new)
                         .collect();
                     if !hex_handles.is_empty() {
                         self.tabs[self.active_tab]
@@ -1804,13 +1804,13 @@ impl OpenCADStudio {
     }
     pub(super) fn control_measure(&self, req: &Value) -> Value {
         let tab = &self.tabs[self.active_tab];
-        let requested: Vec<codec::Handle> = req["handles"]
+        let requested: Vec<document::Handle> = req["handles"]
             .as_array()
             .map(|a| {
                 a.iter()
                     .filter_map(|v| v.as_str())
                     .filter_map(|v| u64::from_str_radix(v.trim_start_matches("0x"), 16).ok())
-                    .map(codec::Handle::new)
+                    .map(document::Handle::new)
                     .collect()
             })
             .unwrap_or_else(|| tab.scene.selected_handles_in_order());
@@ -1840,7 +1840,7 @@ impl OpenCADStudio {
                     min[axis].is_finite() && max[axis].is_finite() && min[axis] <= max[axis]
                 })
             };
-            let solid_bounds = if let codec::EntityType::Solid3D(solid) = entity {
+            let solid_bounds = if let document::EntityType::Solid3D(solid) = entity {
                 crate::scene::convert::solid3d_tess::kernel_body(solid)
                     .and_then(|body| kernel::brep::body_bounds(&body))
                     .map(|bounds| (bounds.min, bounds.max))
@@ -2377,9 +2377,9 @@ mod tests {
         app.tabs[i]
             .scene
             .document
-            .add_entity(codec::entities::EntityType::Ray(codec::entities::Ray::new(
-                codec::types::Vector3::ZERO,
-                codec::types::Vector3::UNIT_X,
+            .add_entity(document::entities::EntityType::Ray(document::entities::Ray::new(
+                document::types::Vector3::ZERO,
+                document::types::Vector3::UNIT_X,
             )))
             .unwrap();
         let path = std::env::temp_dir().join(format!(
@@ -2522,9 +2522,9 @@ mod tests {
     fn control_property_reads_dynamic_rows_as_scalars_and_sets_them_by_id() {
         use crate::scene::block_actions as actions;
         use crate::scene::block_distance_parameter as distance;
-        use codec::entities::{Insert, Line};
-        use codec::types::Vector3;
-        use codec::EntityType;
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+        use document::EntityType;
 
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
@@ -2665,9 +2665,9 @@ mod tests {
     #[test]
     fn control_property_sets_dynamic_visibility_with_tooltip() {
         use crate::scene::block_visibility;
-        use codec::entities::{Insert, Line};
-        use codec::types::Vector3;
-        use codec::EntityType;
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+        use document::EntityType;
 
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
@@ -2861,15 +2861,15 @@ mod tests {
         assert_eq!(applied["ok"], true, "{applied}");
 
         let document = &app.tabs[app.active_tab].scene.document;
-        let codec::EntityType::Line(line) = document
-            .get_entity(codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap()))
+        let document::EntityType::Line(line) = document
+            .get_entity(document::Handle::new(u64::from_str_radix(&handle, 16).unwrap()))
             .unwrap()
         else {
             panic!("expected the line");
         };
         assert_eq!(
             line.start,
-            codec::types::Vector3::new(5.0, 5.0, 0.0),
+            document::types::Vector3::new(5.0, 5.0, 0.0),
             "the alignment translated the named handle, not the scene selection"
         );
     }
@@ -3086,10 +3086,10 @@ mod tests {
                 .map_or(0, |set| set.constraints.len())
         };
         let line_length = |app: &OpenCADStudio, handle: &str| {
-            let codec::EntityType::Line(line) = app.tabs[app.active_tab]
+            let document::EntityType::Line(line) = app.tabs[app.active_tab]
                 .scene
                 .document
-                .get_entity(codec::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+                .get_entity(document::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
                 .unwrap()
             else {
                 panic!("expected a line");
@@ -3281,19 +3281,19 @@ mod tests {
         let i = app.active_tab;
         app.tabs[i].scene.define_block_raw(
             "HIDE_ME",
-            codec::types::Vector3::ZERO,
-            vec![codec::EntityType::Line(codec::entities::Line::from_points(
-                codec::types::Vector3::ZERO,
-                codec::types::Vector3::UNIT_X,
+            document::types::Vector3::ZERO,
+            vec![document::EntityType::Line(document::entities::Line::from_points(
+                document::types::Vector3::ZERO,
+                document::types::Vector3::UNIT_X,
             ))],
         );
         let definition = app.tabs[i].scene.document.block_records.get("HIDE_ME").unwrap().handle;
         let reference = app.tabs[i]
             .scene
             .document
-            .add_entity(codec::EntityType::Insert(codec::entities::Insert::new(
+            .add_entity(document::EntityType::Insert(document::entities::Insert::new(
                 "HIDE_ME",
-                codec::types::Vector3::ZERO,
+                document::types::Vector3::ZERO,
             )))
             .unwrap();
         let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
@@ -3587,7 +3587,7 @@ mod tests {
             .iter()
             .map(|entity| entity["handle"].as_str().unwrap().to_string())
             .collect();
-        let line = codec::Handle::new(u64::from_str_radix(&lines[0], 16).unwrap());
+        let line = document::Handle::new(u64::from_str_radix(&lines[0], 16).unwrap());
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
             kind: ConstraintKind::DistanceX,
             first: ParametricRef::point(line, 0),
@@ -3725,7 +3725,7 @@ mod tests {
             .as_array()
             .unwrap()
             .clone();
-        let line = codec::Handle::new(
+        let line = document::Handle::new(
             u64::from_str_radix(lines[0]["handle"].as_str().unwrap(), 16).unwrap(),
         );
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
@@ -3745,7 +3745,7 @@ mod tests {
         app.drive_headless_task(task).unwrap();
 
         let document = &app.tabs[app.active_tab].scene.document;
-        let codec::EntityType::Line(line_entity) = document.get_entity(line).unwrap() else {
+        let document::EntityType::Line(line_entity) = document.get_entity(line).unwrap() else {
             panic!("the picked entity is the line");
         };
         assert!(
@@ -3770,7 +3770,7 @@ mod tests {
             .parametric_constraint_set(ParametricScope::ModelSpace)
             .and_then(|set| set.dimensions.values().next().copied())
             .expect("the constraint drives a dimension");
-        let codec::EntityType::Dimension(printed) = app.tabs[app.active_tab]
+        let document::EntityType::Dimension(printed) = app.tabs[app.active_tab]
             .scene
             .document
             .get_entity(dimension)
@@ -3802,7 +3802,7 @@ mod tests {
             .as_array()
             .unwrap()
             .clone();
-        let line = codec::Handle::new(
+        let line = document::Handle::new(
             u64::from_str_radix(drawn[0]["handle"].as_str().unwrap(), 16).unwrap(),
         );
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
@@ -3826,8 +3826,8 @@ mod tests {
             .parametric_constraint_set(ParametricScope::ModelSpace)
             .and_then(|set| set.dimensions.values().next().copied())
             .expect("the constraint drives a dimension");
-        let placement = |document: &codec::Document| {
-            let codec::EntityType::Dimension(printed) =
+        let placement = |document: &document::Document| {
+            let document::EntityType::Dimension(printed) =
                 document.get_entity(dimension).expect("the dimension is in the document")
             else {
                 panic!("the constraint's dimension is a dimension");
@@ -3844,13 +3844,13 @@ mod tests {
             "the dimension line keeps the side the label was given on: {definition:?}"
         );
         assert!(
-            text == codec::types::Vector3::ZERO && !positioned,
+            text == document::types::Vector3::ZERO && !positioned,
             "a dynamic label is placed automatically, not pinned: {text:?}"
         );
-        let bytes = codec::DxfWriter::new(&app.tabs[app.active_tab].scene.document)
+        let bytes = document::DxfWriter::new(&app.tabs[app.active_tab].scene.document)
             .write_to_vec()
             .unwrap();
-        let reopened = codec::DxfReader::from_reader(std::io::Cursor::new(bytes))
+        let reopened = document::DxfReader::from_reader(std::io::Cursor::new(bytes))
             .unwrap()
             .read()
             .unwrap();
@@ -3879,7 +3879,7 @@ mod tests {
             .as_array()
             .unwrap()
             .clone();
-        let line = codec::Handle::new(
+        let line = document::Handle::new(
             u64::from_str_radix(drawn[0]["handle"].as_str().unwrap(), 16).unwrap(),
         );
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
@@ -3899,7 +3899,7 @@ mod tests {
         app.drive_headless_task(task).unwrap();
         let end_x = |app: &OpenCADStudio| {
             let document = &app.tabs[app.active_tab].scene.document;
-            let codec::EntityType::Line(line_entity) = document.get_entity(line).unwrap() else {
+            let document::EntityType::Line(line_entity) = document.get_entity(line).unwrap() else {
                 panic!("the picked entity is the line");
             };
             line_entity.end.x
@@ -4172,15 +4172,15 @@ mod tests {
             let handle = queried["entities"][0]["handle"].clone();
             if center[0] != 0.0 {
                 let key =
-                    codec::Handle::new(u64::from_str_radix(handle.as_str().unwrap(), 16).unwrap());
+                    document::Handle::new(u64::from_str_radix(handle.as_str().unwrap(), 16).unwrap());
                 let scene = &mut app.tabs[app.active_tab].scene;
                 assert!(scene.meshes.contains_key(&key));
                 // Keep the real mesh but force bounds to use its double-single vertices.
-                let Some(codec::EntityType::Solid3D(solid)) = scene.document.get_entity_mut(key)
+                let Some(document::EntityType::Solid3D(solid)) = scene.document.get_entity_mut(key)
                 else {
                     panic!("expected a torus solid");
                 };
-                solid.acis_data = codec::entities::AcisData::from_sat("");
+                solid.acis_data = document::entities::AcisData::from_sat("");
             }
             let measured = request(&mut app, json!({"op":"measure","handles":[handle]}));
             let bounds = &measured["measurements"][0]["bounds"];
@@ -4294,7 +4294,7 @@ mod tests {
         let scene = &mut app.tabs[app.active_tab].scene;
         let handle = scene
             .document
-            .add_entity(codec::EntityType::Solid3D(codec::entities::Solid3D::new()))
+            .add_entity(document::EntityType::Solid3D(document::entities::Solid3D::new()))
             .unwrap();
         let entity = scene.document.get_entity(handle).unwrap();
         let (min, max) = crate::scene::convert::tess::entity_bounds_in(&scene.document, entity);
@@ -4337,7 +4337,7 @@ mod tests {
             .document
             .entities()
             .find_map(|entity| {
-                matches!(entity, codec::EntityType::Solid3D(_)).then(|| entity.common().handle)
+                matches!(entity, document::EntityType::Solid3D(_)).then(|| entity.common().handle)
             })
             .unwrap();
         let handle_text = format!("{:X}", handle.value());
@@ -4363,7 +4363,7 @@ mod tests {
                 .scene
                 .document
                 .solid_history_operation(handle),
-            Some(codec::objects::SolidHistoryOperation::Brep(_))
+            Some(document::objects::SolidHistoryOperation::Brep(_))
         ));
 
         assert_eq!(request(&mut app, json!({"op":"undo"}))["ok"], true);
@@ -4676,9 +4676,9 @@ mod tests {
 
     #[test]
     fn open_with_missing_xrefs_succeeds_and_lists_every_reference() {
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         for name in ["Grid Plan", "Wall Base"] {
-            let mut record = codec::tables::BlockRecord::new(name);
+            let mut record = document::tables::BlockRecord::new(name);
             record.flags.is_xref = true;
             record.xref_path = format!("missing-dir/{name}.dwg");
             doc.block_records.add(record).unwrap();
@@ -4811,7 +4811,7 @@ mod tests {
             .document
             .entities()
             .find_map(|e| match e {
-                codec::EntityType::Circle(c) => Some(c.center.y),
+                document::EntityType::Circle(c) => Some(c.center.y),
                 _ => None,
             });
         assert_eq!(circle, Some(-10.0));
@@ -4837,7 +4837,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, codec::EntityType::Ole2Frame(_)))
+                .filter(|e| matches!(e, document::EntityType::Ole2Frame(_)))
                 .count()
         };
         assert_eq!(ole_count(&app), 1);
@@ -4895,7 +4895,7 @@ mod tests {
         let value = u64::from_str_radix(&handle, 16).unwrap();
         app.tabs[app.active_tab]
             .scene
-            .select_entity(codec::Handle::new(value), false);
+            .select_entity(document::Handle::new(value), false);
         handle
     }
 
@@ -4956,7 +4956,7 @@ mod tests {
             .add(
                 crate::scene::parametric_constraints::ConstraintKind::Fixed,
                 vec![crate::scene::parametric_constraints::ParametricRef::whole(
-                    codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap()),
+                    document::Handle::new(u64::from_str_radix(&handle, 16).unwrap()),
                 )],
                 None,
             );
@@ -5235,7 +5235,7 @@ mod tests {
         let value = u64::from_str_radix(&handle, 16).unwrap();
         app.tabs[i]
             .scene
-            .select_entity(codec::Handle::new(value), false);
+            .select_entity(document::Handle::new(value), false);
         let _ = app.update(Message::CommandFinalize);
         let done = user_select_result(&mut app, "us-snap");
         assert_eq!(done["status"], "completed", "{done}");
@@ -5292,7 +5292,7 @@ mod tests {
             .add(
                 crate::scene::parametric_constraints::ConstraintKind::Fixed,
                 vec![crate::scene::parametric_constraints::ParametricRef::whole(
-                    codec::Handle::new(u64::from_str_radix(&circle_handle, 16).unwrap()),
+                    document::Handle::new(u64::from_str_radix(&circle_handle, 16).unwrap()),
                 )],
                 None,
             );
@@ -5312,19 +5312,19 @@ mod tests {
             let scene = &mut app.tabs[app.active_tab].scene;
             // Two layers set to different pen weights; entities fully ByLayer.
             for (name, weight) in [
-                ("THIN", codec::types::LineWeight::Value(13)),
-                ("THICK", codec::types::LineWeight::Value(50)),
+                ("THIN", document::types::LineWeight::Value(13)),
+                ("THICK", document::types::LineWeight::Value(50)),
             ] {
-                let mut layer = codec::tables::Layer::new(name);
+                let mut layer = document::tables::Layer::new(name);
                 layer.line_weight = weight;
                 let _ = scene.document.layers.add(layer);
             }
             for (name, origin) in [("THIN", 0.0), ("THICK", 3000.0)] {
-                let mut line = codec::entities::Line::new();
+                let mut line = document::entities::Line::new();
                 line.common.layer = name.to_string();
-                line.start = codec::types::Vector3::new(origin, origin, 0.0);
-                line.end = codec::types::Vector3::new(origin + 3000.0, origin + 2000.0, 0.0);
-                scene.add_entity(codec::EntityType::Line(line));
+                line.start = document::types::Vector3::new(origin, origin, 0.0);
+                line.end = document::types::Vector3::new(origin + 3000.0, origin + 2000.0, 0.0);
+                scene.add_entity(document::EntityType::Line(line));
             }
         }
 
@@ -5373,28 +5373,28 @@ mod tests {
         {
             let scene = &mut app.tabs[app.active_tab].scene;
             // Frame layer carries the classic cyan ACI 4; its entity is ByLayer.
-            let mut frame = codec::tables::Layer::new("FRAME-CYAN");
-            frame.color = codec::types::Color::Index(4);
+            let mut frame = document::tables::Layer::new("FRAME-CYAN");
+            frame.color = document::types::Color::Index(4);
             let _ = scene.document.layers.add(frame);
-            let mut frame_line = codec::entities::Line::new();
+            let mut frame_line = document::entities::Line::new();
             frame_line.common.layer = "FRAME-CYAN".to_string();
-            frame_line.start = codec::types::Vector3::new(0.0, 0.0, 0.0);
-            frame_line.end = codec::types::Vector3::new(3000.0, 0.0, 0.0);
-            scene.add_entity(codec::EntityType::Line(frame_line));
+            frame_line.start = document::types::Vector3::new(0.0, 0.0, 0.0);
+            frame_line.end = document::types::Vector3::new(3000.0, 0.0, 0.0);
+            scene.add_entity(document::EntityType::Line(frame_line));
 
             // An explicit red ACI 1 and a true-color green: index must map
             // through the CTB, the true color must stay RGB (aci 0).
-            let mut red = codec::entities::Line::new();
-            red.common.color = codec::types::Color::Index(1);
-            red.start = codec::types::Vector3::new(0.0, 1000.0, 0.0);
-            red.end = codec::types::Vector3::new(3000.0, 1000.0, 0.0);
-            scene.add_entity(codec::EntityType::Line(red));
+            let mut red = document::entities::Line::new();
+            red.common.color = document::types::Color::Index(1);
+            red.start = document::types::Vector3::new(0.0, 1000.0, 0.0);
+            red.end = document::types::Vector3::new(3000.0, 1000.0, 0.0);
+            scene.add_entity(document::EntityType::Line(red));
 
-            let mut true_color = codec::entities::Line::new();
-            true_color.common.color = codec::types::Color::from_true_color_value(0x0000FF00);
-            true_color.start = codec::types::Vector3::new(0.0, 2000.0, 0.0);
-            true_color.end = codec::types::Vector3::new(3000.0, 2000.0, 0.0);
-            scene.add_entity(codec::EntityType::Line(true_color));
+            let mut true_color = document::entities::Line::new();
+            true_color.common.color = document::types::Color::from_true_color_value(0x0000FF00);
+            true_color.start = document::types::Vector3::new(0.0, 2000.0, 0.0);
+            true_color.end = document::types::Vector3::new(3000.0, 2000.0, 0.0);
+            scene.add_entity(document::EntityType::Line(true_color));
         }
 
         let pdf = std::env::temp_dir().join(format!("ocs-plot-aci-{}.pdf", std::process::id()));
@@ -5692,7 +5692,7 @@ mod tests {
     #[test]
     fn a_history_step_records_nothing_when_no_request_is_routing() {
         let mut app = OpenCADStudio::new_for_test();
-        let changes = || vec![(codec::Handle::new(1), crate::scene::ChangeKind::Modified)];
+        let changes = || vec![(document::Handle::new(1), crate::scene::ChangeKind::Modified)];
         app.control.note_history_changes(changes());
         assert!(
             app.control.take_history_changes().is_none(),

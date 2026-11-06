@@ -5,13 +5,13 @@
 // the real entity is re-tessellated into the scene's preview wires on every
 // change so the user sees the actual drawing result while typing.
 
-use codec::entities::mtext::AttachmentPoint;
-use codec::entities::mtext_format::{
+use document::entities::mtext::AttachmentPoint;
+use document::entities::mtext_format::{
     parse_mtext, MTextDocument, MTextFont, MTextParagraph, MTextSpan, ParagraphProperties,
     SpanProperties, StackingData, StackingType,
 };
-use codec::types::Vector3;
-use codec::{EntityType, Handle, MText};
+use document::types::Vector3;
+use document::{EntityType, Handle, MText};
 use glam::DVec3;
 use iced::widget::text_editor;
 
@@ -130,7 +130,7 @@ pub struct MTextEditorState {
     pub pos: DVec3,
     /// The editable text buffer (raw value with inline codes).
     pub content: text_editor::Content,
-    /// Structured mirror of `content`, parsed via opencadcodec `parse_mtext` — the
+    /// Structured mirror of `content`, parsed via document `parse_mtext` — the
     /// target authority for the editor. Phase 1: passive mirror kept in sync on
     /// every rebuild, cross-checked against the rendered glyph boxes; later
     /// phases make it the source of truth and delete the raw-string path.
@@ -156,7 +156,7 @@ pub struct MTextEditorState {
     /// What the current text style supplies where the source sets nothing.
     pub object_style: raw_style::ObjectStyle,
     /// The object colour set in the editor; `None` keeps the entity's own.
-    pub object_color: Option<codec::types::Color>,
+    pub object_color: Option<document::types::Color>,
     /// Tessellated strokes of the current text, drawn in the editor's own
     /// preview area (NOT on the drawing canvas).
     pub preview_wires: Vec<WireModel>,
@@ -166,7 +166,7 @@ pub struct MTextEditorState {
     pub line_spacing: f64,
     /// Whether the spacing is at least the factor or exactly it (entity
     /// field of an MTEXT and of a multileader's text).
-    pub line_spacing_style: codec::entities::LineSpacingStyle,
+    pub line_spacing_style: document::entities::LineSpacingStyle,
     /// The spacing factor as typed while it is not a valid factor yet.
     pub line_spacing_draft: Option<String>,
     /// Object rotation in degrees, kept as typed so partial input is allowed.
@@ -219,7 +219,7 @@ pub struct MTextEditorState {
     /// The Background menu's mask while it differs from the stored one.
     pub mask_draft: Option<entity_options::MaskDraft>,
     /// The Position menu's direction while it differs from the stored one.
-    pub direction: Option<codec::entities::DrawingDirection>,
+    pub direction: Option<document::entities::DrawingDirection>,
     /// The native FIELDs of the edited MTEXT, located in its value: the
     /// text around them is edited, their own text is not.
     pub(super) field_host: Option<raw_field::FieldHost>,
@@ -1196,8 +1196,8 @@ impl super::OpenCADStudio {
     /// Apply a colour from the shared Properties-style picker: to the selection
     /// (per-run) when there is one, else the whole text via the global colour.
     /// Closes the picker popup.
-    pub(super) fn mtext_apply_color(&mut self, color: codec::types::Color) {
-        use codec::types::Color as C;
+    pub(super) fn mtext_apply_color(&mut self, color: document::types::Color) {
+        use document::types::Color as C;
         let has_sel = self
             .mtext_editor
             .as_ref()
@@ -1291,7 +1291,7 @@ mod stack_tests;
 #[cfg(test)]
 mod cell_tests {
     use super::*;
-    use codec::entities::mtext_format::MTextParagraphAlignment;
+    use document::entities::mtext_format::MTextParagraphAlignment;
 
     fn rt(s: &str) -> String {
         let doc = parse_mtext(s, true);
@@ -1395,7 +1395,7 @@ mod cell_tests {
     // round-trip so the renderer actually sees them.
     #[test]
     fn per_run_color_and_font_persist() {
-        use codec::entities::mtext_format::{MTextColor, MTextFont};
+        use document::entities::mtext_format::{MTextColor, MTextFont};
         let mut p = SpanProperties::default();
         p.color = Some(MTextColor::Index(1)); // red
         p.font = Some(MTextFont::with_flags("Arial".to_string(), true, false)); // bold Arial

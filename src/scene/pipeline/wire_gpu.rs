@@ -1205,7 +1205,7 @@ pub struct BlockGeometryRecords {
 /// Where the placements of one upload landed: each reference's slots, and the
 /// instance buffer of every arena they index.
 pub struct BlockTracking {
-    pub slots: Vec<(codec::Handle, BlockSlot)>,
+    pub slots: Vec<(document::Handle, BlockSlot)>,
     pub buffers: Vec<wgpu::Buffer>,
     /// The block-local geometry of each group, indexed by `BlockSlot::group`.
     pub shapes: Vec<Vec<[f32; 3]>>,
@@ -1407,7 +1407,7 @@ impl BlockWireGpu {
                 .collect()
         };
         block_mark("placed");
-        let mut tracked: Option<Vec<(codec::Handle, BlockSlot)>> = track.then(Vec::new);
+        let mut tracked: Option<Vec<(document::Handle, BlockSlot)>> = track.then(Vec::new);
         let mut shapes: Vec<Vec<[f32; 3]>> = Vec::new();
         for ((mesh_edge, group, base, geometry), instances) in prepared.iter().zip(placed.iter()) {
             if instances.is_empty() {

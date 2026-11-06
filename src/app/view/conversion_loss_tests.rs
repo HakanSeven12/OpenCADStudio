@@ -207,7 +207,7 @@ mod drawing_properties_loss {
     fn save_as(
         app: &mut OpenCADStudio,
         path: &std::path::Path,
-        version: codec::DxfVersion,
+        version: document::DxfVersion,
     ) -> Task<Message> {
         app.queue_native_save(
             0,
@@ -227,7 +227,7 @@ mod drawing_properties_loss {
         let path = scratch.0.join("old.dwg");
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].scene.document.summary_info.last_saved_by = "someone".into();
-        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1015));
+        let _ = run(save_as(&mut app, &path, document::DxfVersion::AC1015));
         assert_ne!(app.active_modal, Some(ModalKind::ConversionLoss));
         assert!(path.exists(), "the save went ahead");
     }
@@ -238,7 +238,7 @@ mod drawing_properties_loss {
         let scratch = Scratch::new("ask");
         let path = scratch.0.join("old.dwg");
         let mut app = app_with_properties();
-        let task = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        let task = save_as(&mut app, &path, document::DxfVersion::AC1015);
         assert!(run(task).is_empty(), "nothing is saved before the answer");
         assert_eq!(app.active_modal, Some(ModalKind::ConversionLoss));
         assert!(!path.exists(), "nothing is written before the answer");
@@ -259,7 +259,7 @@ mod drawing_properties_loss {
         let scratch = Scratch::new("ask-dxf");
         let path = scratch.0.join("old.dxf");
         let mut app = app_with_properties();
-        let _ = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        let _ = save_as(&mut app, &path, document::DxfVersion::AC1015);
         assert_eq!(app.active_modal, Some(ModalKind::ConversionLoss));
         assert!(!path.exists());
         assert_eq!(
@@ -280,7 +280,7 @@ mod drawing_properties_loss {
         let path = scratch.0.join("old.dwg");
         let mut app = app_with_properties();
         let before = app.tabs[0].scene.document.summary_info.clone();
-        let _ = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        let _ = save_as(&mut app, &path, document::DxfVersion::AC1015);
         let _ = run(app.update(Message::ConversionLossProceed));
         assert_eq!(app.active_modal, None);
         assert!(path.exists(), "the held-back save is replayed");
@@ -293,7 +293,7 @@ mod drawing_properties_loss {
         let scratch = Scratch::new("back");
         let path = scratch.0.join("old.dwg");
         let mut app = app_with_properties();
-        let _ = save_as(&mut app, &path, codec::DxfVersion::AC1015);
+        let _ = save_as(&mut app, &path, document::DxfVersion::AC1015);
         let _ = app.update(Message::ConversionLossBack);
         assert_eq!(app.active_modal, None);
         assert!(!path.exists());
@@ -306,7 +306,7 @@ mod drawing_properties_loss {
         let scratch = Scratch::new("empty");
         let path = scratch.0.join("old.dwg");
         let mut app = OpenCADStudio::new_for_test();
-        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1015));
+        let _ = run(save_as(&mut app, &path, document::DxfVersion::AC1015));
         assert_eq!(app.active_modal, None);
         assert!(path.exists());
     }
@@ -318,7 +318,7 @@ mod drawing_properties_loss {
         let path = scratch.0.join("new.dwg");
         let mut app = app_with_properties();
         let expected = app.tabs[0].scene.document.summary_info.custom_properties.clone();
-        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1032));
+        let _ = run(save_as(&mut app, &path, document::DxfVersion::AC1032));
         assert_eq!(app.active_modal, None);
         assert!(path.exists());
         let reopened = crate::io::load_file(&path).expect("reopen saved drawing");
@@ -332,7 +332,7 @@ mod drawing_properties_loss {
         let path = scratch.0.join("new.dxf");
         let mut app = app_with_properties();
         let expected = app.tabs[0].scene.document.summary_info.custom_properties.clone();
-        let _ = run(save_as(&mut app, &path, codec::DxfVersion::AC1032));
+        let _ = run(save_as(&mut app, &path, document::DxfVersion::AC1032));
         assert_eq!(app.active_modal, None);
         let reopened = crate::io::load_file(&path).expect("reopen saved drawing");
         assert_eq!(reopened.summary_info.custom_properties, expected);
@@ -347,7 +347,7 @@ mod drawing_properties_loss {
         let _ = app.queue_native_save(
             0,
             path.clone(),
-            codec::DxfVersion::AC1015,
+            document::DxfVersion::AC1015,
             SavePurpose::Manual,
             SaveContinuation::None,
             false,
@@ -366,7 +366,7 @@ mod drawing_properties_loss {
         let task = app.queue_native_save(
             0,
             path.clone(),
-            codec::DxfVersion::AC1015,
+            document::DxfVersion::AC1015,
             SavePurpose::Autosave,
             SaveContinuation::None,
             false,

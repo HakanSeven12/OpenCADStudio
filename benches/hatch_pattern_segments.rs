@@ -47,7 +47,7 @@ fn model(boundary: Vec<[f32; 2]>, families: Vec<PatFamily>) -> HatchModel {
         boundary_exterior: None,
         boundary_sources: None,
         boundary_paths: None,
-        style: codec::entities::HatchStyleType::Normal,
+        style: document::entities::HatchStyleType::Normal,
         pattern: HatchPattern::Pattern(families),
         name: String::new(),
         color: [0.75, 0.75, 0.75, 0.85],

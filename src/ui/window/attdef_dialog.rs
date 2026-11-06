@@ -80,19 +80,19 @@ pub struct AttdefDialogState {
     /// Validation message shown above the buttons.
     pub error: Option<String>,
     /// The field the Default value shows, when one was inserted.
-    pub field: Option<(String, Vec<codec::Handle>)>,
+    pub field: Option<(String, Vec<document::Handle>)>,
 }
 
 /// The Edit Attribute Definition dialog's fields.
 #[derive(Debug, Clone)]
 pub struct AttdefEditState {
-    pub handle: codec::Handle,
+    pub handle: document::Handle,
     pub tag: String,
     pub prompt: String,
     pub default: String,
     pub constant: bool,
     pub error: Option<String>,
-    pub field: Option<(String, Vec<codec::Handle>)>,
+    pub field: Option<(String, Vec<document::Handle>)>,
     /// The Default was retyped or a field inserted: the stored field is
     /// replaced on Apply.
     pub field_changed: bool,

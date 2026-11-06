@@ -7,10 +7,10 @@ use crate::ui::style::common::muted_style;
 use crate::ui::style::form::field_style_with_radius;
 use crate::ui::style::row_button::{cell_button_style, header_button_style};
 use crate::ui::ROW_H;
-use codec::tables::layer::Layer as DocLayer;
-use codec::tables::Table;
-use codec::types::{Color as AcadColor, LineWeight};
-use codec::Handle;
+use document::tables::layer::Layer as DocLayer;
+use document::tables::Table;
+use document::types::{Color as AcadColor, LineWeight};
+use document::Handle;
 use iced::widget::{
     button, checkbox, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
     tooltip,

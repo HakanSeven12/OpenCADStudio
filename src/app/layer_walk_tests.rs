@@ -6,8 +6,8 @@ mod tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::ui::dock::PanelId;
     use crate::ui::window::layer_walk::{LayerWalkMenuItem, LayerWalkMsg};
-    use codec::entities::Line;
-    use codec::EntityType;
+    use document::entities::Line;
+    use document::EntityType;
 
     fn fresh_app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
@@ -18,7 +18,7 @@ mod tests {
     /// The walk keys its set on layer handles, so a test layer needs a real
     /// one — exactly what the LAYER command does when it creates a table row.
     fn add_layer(app: &mut OpenCADStudio, tab: usize, name: &str) {
-        let mut layer = codec::tables::Layer::new(name);
+        let mut layer = document::tables::Layer::new(name);
         layer.handle = app.tabs[tab].scene.document.allocate_handle();
         let _ = app.tabs[tab].scene.document.layers.add(layer);
     }
@@ -346,7 +346,7 @@ mod tests {
             },
         );
         assert!(app.tabs[i].scene.layer_walk_active());
-        let other = codec::Document::new();
+        let other = document::Document::new();
         app.tabs[i].scene.document = other;
         app.reset_layer_walk_for(i);
         assert!(!app.tabs[i].scene.layer_walk_active());
@@ -782,7 +782,7 @@ mod tests {
         assert!(app.tabs[i].layer_walk_picking);
         // The pallet is hidden only while the prompt is live.
         assert!(!app.dock_panel_visible(PanelId::Laywalk));
-        let handles: Vec<codec::Handle> = app.tabs[i]
+        let handles: Vec<document::Handle> = app.tabs[i]
             .scene
             .document
             .entities()
@@ -969,7 +969,7 @@ mod tests {
         let i = app.active_tab;
         let model = app.tabs[i].scene.interaction_space_key_pub();
         let _ = app.update(Message::LayoutSwitch("Layout1".into()));
-        let mut vp = codec::entities::Viewport::default();
+        let mut vp = document::entities::Viewport::default();
         vp.width = 200.;
         vp.height = 100.;
         vp.view_height = 50.;

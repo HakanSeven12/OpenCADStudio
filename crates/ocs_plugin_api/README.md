@@ -359,8 +359,8 @@ struct SnapshotWorker {
 
 impl SnapshotWorker {
     fn add_point(&self, x: f64, y: f64, z: f64) -> anyhow::Result<u64> {
-        use opencadcodec::entities::Point;
-        use opencadcodec::EntityType;
+        use ocs_plugin_api::host::document::entities::Point;
+        use ocs_plugin_api::host::document::EntityType;
 
         let mut p = Point::from_coords(x, y, z);
         p.common.layer = "0".to_string();

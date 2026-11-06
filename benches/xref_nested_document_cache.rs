@@ -30,10 +30,10 @@ use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Instant;
 
-use codec::entities::{Circle, Line, LwPolyline, LwVertex};
-use codec::tables::BlockRecord;
-use codec::types::{Vector2, Vector3};
-use codec::{Document, EntityType};
+use document::entities::{Circle, Line, LwPolyline, LwVertex};
+use document::tables::BlockRecord;
+use document::types::{Vector2, Vector3};
+use document::{Document, EntityType};
 
 const DOC_ENTITIES: usize = 4_000;
 const BLOCK_RECORDS: usize = 24;

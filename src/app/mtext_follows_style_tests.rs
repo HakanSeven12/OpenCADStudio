@@ -5,7 +5,7 @@
 
 use super::mtext_editor::{MTextEditorState, ValueOrigin};
 use super::*;
-use codec::tables::TextStyle;
+use document::tables::TextStyle;
 use glam::DVec3;
 
 /// A drawing whose current style "Notes" has a fixed height of 2.5, width
@@ -14,7 +14,7 @@ use glam::DVec3;
 fn editing(raw: &str, height: f64) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     let doc = &mut app.tabs[1].scene.document;
     let mut notes = TextStyle::new("Notes");

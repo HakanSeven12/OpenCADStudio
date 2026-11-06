@@ -1,11 +1,11 @@
 //! An annotative dimension with a single scale representation is drawn from
 //! its picture block, as AutoCAD draws it; with several it is rebuilt.
 
-use codec::entities::{Dimension, DimensionLinear, EntityType, Line};
-use codec::objects::{ObjectType, Scale};
-use codec::tables::BlockRecord;
-use codec::types::Vector3;
-use codec::Handle;
+use document::entities::{Dimension, DimensionLinear, EntityType, Line};
+use document::objects::{ObjectType, Scale};
+use document::tables::BlockRecord;
+use document::types::Vector3;
+use document::Handle;
 use OpenCADStudio::scene::{annotative, Scene};
 
 /// A dimension whose picture holds only a line no dimension would draw, so

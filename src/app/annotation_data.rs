@@ -3,10 +3,10 @@ use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use codec::entities::{table::CellRange, TableBuilder};
-use codec::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
-use codec::types::{Handle, Vector3};
-use codec::{Document, EntityType};
+use document::entities::{table::CellRange, TableBuilder};
+use document::objects::{ClassObject, ClassObjectData, DataLink, DataLinkCustomData, ObjectType};
+use document::types::{Handle, Vector3};
+use document::{Document, EntityType};
 use iced::Task;
 
 use super::{Message, ModalKind, OpenCADStudio};
@@ -265,7 +265,7 @@ fn put_data_link_entry(doc: &mut Document, handle: Handle, name: &str) {
             return None;
         }
         let dictionary_handle = doc.allocate_handle();
-        let mut dictionary = codec::objects::Dictionary::new();
+        let mut dictionary = document::objects::Dictionary::new();
         dictionary.handle = dictionary_handle;
         dictionary.owner = root;
         dictionary.hard_owner = true;
@@ -750,7 +750,7 @@ fn table_style_choices(doc: &Document) -> Vec<crate::modules::annotate::table_cm
                 style_copy.ensure_cell_styles(|row| {
                     row.text_style_handle
                         .or_else(|| doc.text_styles.get(&row.text_style_name).map(|s| s.handle))
-                        .unwrap_or(codec::Handle::NULL)
+                        .unwrap_or(document::Handle::NULL)
                 });
                 Some(crate::modules::annotate::table_cmd::StyleChoice {
                     name: style.name.clone(),
@@ -784,7 +784,7 @@ fn build_table(
     rows: &[Vec<String>],
     style: Option<Handle>,
     title: Option<&str>,
-) -> codec::entities::Table {
+) -> document::entities::Table {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(1).max(1);
     let title_rows = usize::from(title.is_some_and(|value| !value.trim().is_empty()));
     let mut table = TableBuilder::new(rows.len().max(1) + title_rows, columns)
@@ -1957,7 +1957,7 @@ impl OpenCADStudio {
             choice
                 .style
                 .cell_styles()
-                .filter(|cell| !codec::objects::is_row_cell_style(&cell.name))
+                .filter(|cell| !document::objects::is_row_cell_style(&cell.name))
                 .map(|cell| cell.name.clone())
                 .collect()
         });
@@ -2455,9 +2455,9 @@ impl OpenCADStudio {
                             cell.data_link_rows = 0;
                             cell.data_link_columns = 0;
                             cell.state.remove(
-                                codec::entities::table::CellStateFlags::LINKED
-                                    | codec::entities::table::CellStateFlags::CONTENT_LOCKED
-                                    | codec::entities::table::CellStateFlags::FORMAT_LOCKED,
+                                document::entities::table::CellStateFlags::LINKED
+                                    | document::entities::table::CellStateFlags::CONTENT_LOCKED
+                                    | document::entities::table::CellStateFlags::FORMAT_LOCKED,
                             );
                         }
                     }
@@ -3067,7 +3067,7 @@ impl OpenCADStudio {
     /// The extraction table: a title row (empty when no title was given),
     /// the column headers, then the data, in the chosen table and cell
     /// styles, each column as wide as its longest entry.
-    fn extraction_table(&self, rows: &[Vec<String>]) -> codec::entities::Table {
+    fn extraction_table(&self, rows: &[Vec<String>]) -> document::entities::Table {
         let state = &self.data_extraction;
         let doc = &self.tabs[self.active_tab].scene.document;
         let style = doc.objects.iter().find_map(|(handle, object)| match object {

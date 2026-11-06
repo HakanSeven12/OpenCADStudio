@@ -7,7 +7,7 @@
 //! routes picks back through `QuadMsg`; the app layer classifies the target
 //! and records launches into [`QuadMru`].
 
-use codec::Handle;
+use document::Handle;
 use iced::Point;
 use rustc_hash::FxHashMap;
 

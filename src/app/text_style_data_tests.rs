@@ -6,10 +6,10 @@ use super::text_style_manager_tests::pick;
 use super::*;
 use crate::entities::text_support::{TTF_FLAG_BOLD, TTF_FLAG_ITALIC};
 use crate::ui::font_picker::FontChoice;
-use codec::entities::{AttributeDefinition, EntityType};
-use codec::tables::TextStyle;
-use codec::types::Handle;
-use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+use document::entities::{AttributeDefinition, EntityType};
+use document::tables::TextStyle;
+use document::types::Handle;
+use document::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
 
 /// Character set and pitch bits a TrueType style carries besides bold/italic.
 const CHARSET_PITCH: i32 = 34;
@@ -36,17 +36,17 @@ fn true_type_style() -> TextStyle {
     style
 }
 
-fn notes(doc: &codec::Document) -> TextStyle {
+fn notes(doc: &document::Document) -> TextStyle {
     doc.text_styles.get("Notes").unwrap().clone()
 }
 
 /// Save through the app's save preparation and load the bytes back.
-fn round_trip(doc: &codec::Document, ext: &str) -> codec::Document {
+fn round_trip(doc: &document::Document, ext: &str) -> document::Document {
     let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
     crate::io::load_bytes(&format!("drawing.{ext}"), bytes).unwrap()
 }
 
-fn record_names(doc: &codec::Document, handle: Handle) -> Vec<String> {
+fn record_names(doc: &document::Document, handle: Handle) -> Vec<String> {
     doc.object_xdata
         .get(&handle)
         .map_or_else(Vec::new, |xdata| {
@@ -151,7 +151,7 @@ fn unknown_xdata_and_character_set_bits_survive_save_and_load() {
     let mut xdata = ExtendedData::new();
     xdata.add_record(record);
     doc.object_xdata.insert(handle, xdata);
-    let _ = doc.app_ids.add(codec::tables::AppId::new("OCS_KEEP"));
+    let _ = doc.app_ids.add(document::tables::AppId::new("OCS_KEEP"));
 
     for ext in ["dxf", "dwg"] {
         let back = round_trip(&app.tabs[i].scene.document, ext);

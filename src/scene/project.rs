@@ -13,7 +13,7 @@ impl Scene {
         exclude_vp: Option<Handle>,
         plot: bool,
     ) -> Vec<WireModel> {
-        use codec::entities::Viewport;
+        use document::entities::Viewport;
 
         let (_, _, viewport_handles) = self.paper_viewport_handles();
         let viewports: Vec<&Viewport> = viewport_handles
@@ -478,7 +478,7 @@ impl Scene {
         Vec<HatchModel>,
         Vec<crate::io::pdf_export::PlotImage>,
     ) {
-        use codec::entities::Viewport;
+        use document::entities::Viewport;
         use model::hatch_model::HatchPattern;
 
         if self.current_layout == "Model" {
@@ -722,7 +722,7 @@ impl Scene {
         us: f32,
         vs: f32,
     ) -> Vec<[f32; 2]> {
-        use codec::entities::Viewport;
+        use document::entities::Viewport;
         let Some(EntityType::Viewport(vp)) = self.document.get_entity(vp_handle) else {
             return vec![];
         };
@@ -788,7 +788,7 @@ impl Scene {
         view: [f64; 3],
         viewport: Option<Handle>,
     ) -> Vec<WireModel> {
-        use codec::types::Vector3;
+        use document::types::Vector3;
         let mut wires = Vec::new();
         for set in meshes {
             let Some(handle) = set.entity_handle() else {

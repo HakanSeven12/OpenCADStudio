@@ -23,9 +23,9 @@
 // to f32 loses several hundredths of a unit at survey-scale coordinates).
 
 use crate::t;
-use codec::entities::{LwPolyline, LwVertex};
-use codec::types::Vector2;
-use codec::{EntityType, Handle};
+use document::entities::{LwPolyline, LwVertex};
+use document::types::Vector2;
+use document::{EntityType, Handle};
 use glam::{DVec2, DVec3, Vec2};
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -938,7 +938,7 @@ impl MeasureGeomCommand {
             EntityType::Region(_) => {
                 let source = crate::scene::dimension_assoc::radial_source_at(
                     entity,
-                    codec::types::Vector3::new(point.x, point.y, point.z),
+                    document::types::Vector3::new(point.x, point.y, point.z),
                 )?;
                 (source.radius.is_finite()
                     && source.radius > 0.0
@@ -1070,7 +1070,7 @@ impl MeasureGeomCommand {
     /// or an arc's or circle's radius, as a line from the centre. The edge
     /// comes back too, for the distance between two parallel ones.
     fn quick_object(entity: &EntityType, hit: DVec3) -> Option<(Vec<DVec3>, String, Option<[DVec3; 2]>)> {
-        let v = |p: codec::Vector3| DVec3::new(p.x, p.y, p.z);
+        let v = |p: document::Vector3| DVec3::new(p.x, p.y, p.z);
         let length = |a: DVec3, b: DVec3| {
             let value = crate::entities::common::format_length(a.distance(b));
             (vec![a, b], crate::tr!("measurement", "quick-length", value = value), Some([a, b]))
@@ -1671,7 +1671,7 @@ inventory::submit!(crate::command::CommandRegistration {
 mod measurement_tests {
     use super::*;
     use crate::entities::common::{set_unit_context, unit_context};
-    use codec::{
+    use document::{
         entities::{Arc, Circle, Line},
         types::Vector3,
     };

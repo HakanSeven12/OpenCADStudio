@@ -1,4 +1,4 @@
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -35,11 +35,11 @@ impl SmoothConstraintCommand {
         }
     }
 
-    fn point(point: codec::types::Vector3) -> DVec3 {
+    fn point(point: document::types::Vector3) -> DVec3 {
         DVec3::new(point.x, point.y, point.z)
     }
 
-    fn nearest_marker(points: &[codec::types::Vector3], point: DVec3) -> Option<i32> {
+    fn nearest_marker(points: &[document::types::Vector3], point: DVec3) -> Option<i32> {
         points
             .iter()
             .enumerate()
@@ -126,7 +126,7 @@ impl SmoothConstraintCommand {
         let source_ends = [*source_points.first()?, *source_points.last()?];
         let source_point = source_ends.iter().copied().min_by(|left, right| {
             let target_points = crate::scene::dimension_assoc::source_points(second.0);
-            let distance = |source: codec::types::Vector3| {
+            let distance = |source: document::types::Vector3| {
                 target_points
                     .iter()
                     .map(|target| (source - *target).length_squared())
@@ -246,11 +246,11 @@ mod tests {
     #[test]
     fn polyline_target_keeps_the_picked_arc_segment_and_endpoint() {
         let handle = Handle::new(7);
-        let mut polyline = codec::entities::LwPolyline::new();
+        let mut polyline = document::entities::LwPolyline::new();
         polyline.vertices = vec![
-            codec::entities::LwVertex::from_coords(0.0, 0.0),
-            codec::entities::LwVertex::with_bulge(codec::types::Vector2::new(5.0, 0.0), 1.0),
-            codec::entities::LwVertex::from_coords(10.0, 0.0),
+            document::entities::LwVertex::from_coords(0.0, 0.0),
+            document::entities::LwVertex::with_bulge(document::types::Vector2::new(5.0, 0.0), 1.0),
+            document::entities::LwVertex::from_coords(10.0, 0.0),
         ];
 
         let target = SmoothConstraintCommand::target_reference(

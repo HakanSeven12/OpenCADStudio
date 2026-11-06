@@ -1,6 +1,6 @@
 //! Plot style tables in Open CAD Studio: the plot styles folder, the tables
 //! registered this session, and the shipped ones. The table model and its
-//! CTB/STB codec live in `codec::plot_style`.
+//! CTB/STB codec live in `document::plot_style`.
 
 use rustc_hash::FxHashMap as HashMap;
 use std::path::{Component, Path};
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
-pub use codec::plot_style::{decode_plot_style_text, PlotStyleEntry, PlotStyleTable, LW_TABLE};
+pub use document::plot_style::{decode_plot_style_text, PlotStyleEntry, PlotStyleTable, LW_TABLE};
 
 pub const DEFAULT_PLOT_STYLE: &str = "ocad.ctb";
 pub const MONOCHROME_PLOT_STYLE: &str = "monochrome.ctb";
@@ -212,7 +212,7 @@ impl PlotStyleTableExt for PlotStyleTable {
             "grayscale.ctb" => {
                 let mut table = Self::identity(GRAYSCALE_PLOT_STYLE);
                 for aci in 1..=255u8 {
-                    if let Some((r, g, b)) = codec::types::aci_to_rgb(aci) {
+                    if let Some((r, g, b)) = document::types::aci_to_rgb(aci) {
                         let gray = if aci == 7 {
                             0
                         } else {

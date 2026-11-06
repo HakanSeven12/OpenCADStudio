@@ -12,7 +12,7 @@ fn mgr() -> std::sync::MutexGuard<'static, HostV4SnapshotManager> {
 }
 
 /// Open (or refresh) the V4 shared document view for `tab_id`.
-pub fn open_document_view_v4(tab_id: u64, doc: &codec::Document) -> Option<DocumentViewInfo> {
+pub fn open_document_view_v4(tab_id: u64, doc: &document::Document) -> Option<DocumentViewInfo> {
     mgr().open(tab_id, doc)
 }
 
@@ -23,7 +23,7 @@ pub fn close_document_view_v4(tab_id: u64) {
 
 /// Publish the latest document to the V4 shared view for `tab_id` and broadcast
 /// a change notification when successful.
-pub fn publish_document_view_v4(tab_id: u64, doc: &codec::Document) {
+pub fn publish_document_view_v4(tab_id: u64, doc: &document::Document) {
     let info = mgr().publish(tab_id, doc);
     if let Some(info) = info {
         broadcast(HostNotification::DocumentChangedV4 {
@@ -44,7 +44,7 @@ pub fn on_tab_closed(tab_id: u64) {
 /// `HostNotification::SelectionChangedV4` carries the active tab id and the
 /// current selection set. The caller is responsible for only calling this when
 /// the selection actually changed; see `OpenCADStudio::notify_plugins_selection_changed`.
-pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<codec::Handle>) {
+pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<document::Handle>) {
     broadcast(HostNotification::SelectionChangedV4 { tab_id, handles });
 }
 
@@ -52,7 +52,7 @@ pub fn publish_selection_changed_v4(tab_id: u64, handles: Vec<codec::Handle>) {
 /// loaded native plugin (API v9): the plain-handle variant of the selection
 /// event, dispatched at the same fingerprint-guarded message boundary as the
 /// tab-scoped one above (`OpenCADStudio::notify_plugins_selection_changed`).
-pub fn publish_selection_changed(handles: Vec<codec::Handle>) {
+pub fn publish_selection_changed(handles: Vec<document::Handle>) {
     broadcast(HostNotification::SelectionChanged { handles });
 }
 
@@ -74,8 +74,8 @@ pub fn publish_document_changed(version: u64) {
 pub fn publish_document_changed_regions(
     tab_id: u64,
     version: u64,
-    entities: Vec<codec::Handle>,
-    records: Vec<(codec::Handle, String)>,
+    entities: Vec<document::Handle>,
+    records: Vec<(document::Handle, String)>,
 ) {
     broadcast(HostNotification::DocumentChangedRegions {
         tab_id,
@@ -139,7 +139,7 @@ pub fn publish_quad_action(
     plugin_id: &str,
     panel_id: &str,
     control_id: &str,
-    handles: Vec<codec::Handle>,
+    handles: Vec<document::Handle>,
     type_keys: Vec<String>,
     pick_point: [f64; 3],
 ) {

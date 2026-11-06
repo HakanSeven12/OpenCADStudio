@@ -5,7 +5,7 @@
 
 use iced::Point;
 
-use codec::types::Handle;
+use document::types::Handle;
 
 use crate::app::OpenCADStudio;
 use crate::scene::viewport_ref::{AcceptedSnap, ViewportFrame};
@@ -192,12 +192,12 @@ impl OpenCADStudio {
                     .scene
                     .document
                     .get_entity(source.source.handle),
-                Some(codec::EntityType::Insert(_))
+                Some(document::EntityType::Insert(_))
             ) {
                 return true;
             }
             if source.snap_type == SnapType::Insertion {
-                let Some(codec::EntityType::Insert(insert)) = self.tabs[tab]
+                let Some(document::EntityType::Insert(insert)) = self.tabs[tab]
                     .scene
                     .document
                     .get_entity(source.source.handle)

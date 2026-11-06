@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::{block_grips, block_orientation_parameter as orientation, Scene};
-use codec::entities::Line;
+use document::entities::Line;
 
 fn fixture(
     perpendicular: bool,

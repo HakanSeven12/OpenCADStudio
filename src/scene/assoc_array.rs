@@ -4,12 +4,12 @@
 //! anonymous block holding the source objects (read). The action's value
 //! parameters (Items, ItemSpacing, Rows, …) define where the items go.
 
-use codec::EntityType;
-use codec::objects::{
+use document::EntityType;
+use document::objects::{
     AssocAction, AssocArrayActionBody, AssocDependency, AssocEvalValue, AssocValueParam,
     AssociativeData, ObjectType,
 };
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use glam::{DMat4, DVec3};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -194,7 +194,7 @@ pub fn column_axis(document: &Document, array: &AssocArray) -> DVec3 {
                 return None;
             }
             match edge.curve.get(1)? {
-                codec::objects::AssocCurveValue::Point(direction) => {
+                document::objects::AssocCurveValue::Point(direction) => {
                     DVec3::new(direction.x, direction.y, direction.z).try_normalize()
                 }
                 _ => None,
@@ -262,7 +262,7 @@ pub fn rectangular_items(
 }
 
 /// An array item's placement in array-local coordinates, as stored.
-pub fn stored_item_transform(item: &codec::objects::AssocArrayItem) -> DMat4 {
+pub fn stored_item_transform(item: &document::objects::AssocArrayItem) -> DMat4 {
     if item.uses_default_transform {
         let offset = item.x_direction;
         DMat4::from_translation(DVec3::new(offset.x, offset.y, offset.z))
@@ -378,7 +378,7 @@ fn array_block_from_world(document: &Document, insert: Handle) -> DMat4 {
     };
     let transform = crate::scene::render_graph::insert_transform(document, reference);
     let at = |x: f64, y: f64, z: f64| {
-        let p = transform.apply(codec::types::Vector3::new(x, y, z));
+        let p = transform.apply(document::types::Vector3::new(x, y, z));
         DVec3::new(p.x, p.y, p.z)
     };
     let origin = at(0.0, 0.0, 0.0);
@@ -585,7 +585,7 @@ pub fn update(
     array: &AssocArray,
     changes: &[(&str, f64)],
 ) -> Result<(), String> {
-    use codec::objects::AssocArrayItem;
+    use document::objects::AssocArrayItem;
     let document = &scene.document;
     let (params, placements, path) = plan(document, array, changes)?;
     let template = item_template(document, array)?;
@@ -627,9 +627,9 @@ pub fn update(
                 flags: if turned { 12 } else { 8 } | edit_flags,
                 uses_default_transform: !turned,
                 x_direction: if turned {
-                    codec::types::Vector3::ZERO
+                    document::types::Vector3::ZERO
                 } else {
-                    codec::types::Vector3::new(position.x, position.y, position.z)
+                    document::types::Vector3::new(position.x, position.y, position.z)
                 },
                 transform: if turned { placement.transpose().to_cols_array() } else { [0.0; 16] },
                 relative_transform: relative,
@@ -654,9 +654,9 @@ pub fn update(
             relative_transform: relative,
             uses_default_transform: !turned,
             x_direction: if turned {
-                codec::types::Vector3::ZERO
+                document::types::Vector3::ZERO
             } else {
-                codec::types::Vector3::new(position.x, position.y, position.z)
+                document::types::Vector3::new(position.x, position.y, position.z)
             },
             transform: if turned {
                 placement.transpose().to_cols_array()
@@ -831,7 +831,7 @@ fn set_item_state(
 fn item_template(
     document: &Document,
     array: &AssocArray,
-) -> Result<codec::entities::Insert, String> {
+) -> Result<document::entities::Insert, String> {
     body(document, array.body)
         .ok_or("array body missing")?
         .items
@@ -846,17 +846,17 @@ fn item_template(
 
 /// An item reference in the array block at `placement`.
 fn placed_item(
-    template: &codec::entities::Insert,
+    template: &document::entities::Insert,
     owner: Handle,
     placement: DMat4,
-) -> codec::entities::Insert {
+) -> document::entities::Insert {
     let mut insert = template.clone();
     insert.common.handle = Handle::NULL;
     insert.common.owner_handle = owner;
     insert.common.reactors.clear();
     insert.common.xdictionary_handle = None;
     let position = placement.w_axis.truncate();
-    insert.insert_point = codec::types::Vector3::new(position.x, position.y, position.z);
+    insert.insert_point = document::types::Vector3::new(position.x, position.y, position.z);
     insert.rotation = placement.x_axis.y.atan2(placement.x_axis.x);
     insert
 }
@@ -894,7 +894,7 @@ pub fn preview_items(
         .map(|(_, placement)| {
             let mut item = placed_item(&template, Handle::NULL, placement);
             let at = to_world.transform_point3(placement.w_axis.truncate());
-            item.insert_point = codec::types::Vector3::new(at.x, at.y, at.z);
+            item.insert_point = document::types::Vector3::new(at.x, at.y, at.z);
             item.rotation += reference.rotation;
             item.set_x_scale(item.x_scale() * reference.x_scale());
             item.set_y_scale(item.y_scale() * reference.y_scale());
@@ -1028,11 +1028,11 @@ fn register_array_classes(document: &mut Document) {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
         }
-        document.classes.add_or_update(codec::classes::DxfClass {
+        document.classes.add_or_update(document::classes::DxfClass {
             dxf_name: dxf_name.to_string(),
             cpp_class_name: cpp_class_name.to_string(),
             application_name: "ObjectDBX Classes".to_string(),
-            proxy_flags: codec::classes::ProxyFlags(1025),
+            proxy_flags: document::classes::ProxyFlags(1025),
             instance_count: 0,
             was_zombie: false,
             is_an_entity: false,
@@ -1063,7 +1063,7 @@ pub(crate) fn associative(
     cpp_class_name: &str,
     data: AssociativeData,
 ) -> ObjectType {
-    let mut object = codec::objects::AssociativeObject::new(dxf_name, cpp_class_name);
+    let mut object = document::objects::AssociativeObject::new(dxf_name, cpp_class_name);
     object.handle = handle;
     object.owner = owner;
     object.data = data;
@@ -1088,7 +1088,7 @@ fn child_dictionary(document: &mut Document, parent: Handle, key: &str) -> Handl
         return handle;
     }
     let handle = document.allocate_handle();
-    let mut dictionary = codec::objects::Dictionary::new();
+    let mut dictionary = document::objects::Dictionary::new();
     dictionary.handle = handle;
     dictionary.owner = parent;
     dictionary.reactors.push(parent);
@@ -1135,7 +1135,7 @@ pub(crate) fn block_network(document: &mut Document, owner: Handle) -> Handle {
         }
         _ => {
             let root = document.allocate_handle();
-            let network = codec::objects::AssocNetwork {
+            let network = document::objects::AssocNetwork {
                 action: AssocAction {
                     class_version: 2,
                     ..Default::default()
@@ -1165,7 +1165,7 @@ pub(crate) fn block_network(document: &mut Document, owner: Handle) -> Handle {
         holder,
         "ACDBASSOCNETWORK",
         "AcDbAssocNetwork",
-        AssociativeData::Network(codec::objects::AssocNetwork {
+        AssociativeData::Network(document::objects::AssocNetwork {
             action: AssocAction {
                 class_version: 2,
                 owning_network: root,
@@ -1184,7 +1184,7 @@ pub(crate) fn block_network(document: &mut Document, owner: Handle) -> Handle {
     if let Some(ObjectType::Associative(object)) = document.objects.get_mut(&root) {
         if let AssociativeData::Network(root) = &mut object.data {
             root.network_action_index += 1;
-            root.actions.push(codec::objects::AssocActionDependency {
+            root.actions.push(document::objects::AssocActionDependency {
                 is_owned: false,
                 dependency: network,
             });
@@ -1195,12 +1195,12 @@ pub(crate) fn block_network(document: &mut Document, owner: Handle) -> Handle {
 
 fn value_param(name: &str, unit_type: i32, value: f64, whole: bool) -> AssocValueParam {
     let variant = if whole {
-        codec::objects::AssocEvalVariant {
+        document::objects::AssocEvalVariant {
             code: 90,
             value: AssocEvalValue::Long(value.round() as i32),
         }
     } else {
-        codec::objects::AssocEvalVariant {
+        document::objects::AssocEvalVariant {
             code: 40,
             value: AssocEvalValue::Real(value),
         }
@@ -1208,7 +1208,7 @@ fn value_param(name: &str, unit_type: i32, value: f64, whole: bool) -> AssocValu
     AssocValueParam {
         name: name.to_string(),
         unit_type,
-        variables: vec![codec::objects::AssocValueParamVariable {
+        variables: vec![document::objects::AssocValueParamVariable {
             value: variant,
             handle: Handle::NULL,
         }],
@@ -1385,7 +1385,7 @@ pub fn create(
     params: Vec<AssocValueParam>,
     path: Option<Handle>,
 ) -> Result<Handle, String> {
-    use codec::objects::{
+    use document::objects::{
         AssocActionBody, AssocActionDependency, AssocActionParam, AssocArrayItem,
         AssocSingleDependencyActionParam, AssocVertexActionParam,
     };
@@ -1445,7 +1445,7 @@ pub fn create(
         .filter(|handle| scene.document.get_entity(*handle).is_some())
         .collect();
     let source_name = next_anonymous_name(&scene.document);
-    scene.define_block_raw(&source_name, codec::types::Vector3::ZERO, entities);
+    scene.define_block_raw(&source_name, document::types::Vector3::ZERO, entities);
     // The copies must not keep the sources' extension dictionaries.
     if let Some(record) = scene.document.block_records.get(&source_name) {
         let copies = record.entity_handles.clone();
@@ -1454,22 +1454,22 @@ pub fn create(
 
     let item = |offset: DMat4| {
         let position = offset.w_axis.truncate();
-        let mut insert = codec::entities::Insert::new(
+        let mut insert = document::entities::Insert::new(
             source_name.clone(),
-            codec::types::Vector3::new(position.x, position.y, position.z),
+            document::types::Vector3::new(position.x, position.y, position.z),
         );
         insert.rotation = offset.x_axis.y.atan2(offset.x_axis.x);
         insert.common.layer = "0".to_string();
-        insert.common.color = codec::types::Color::ByBlock;
+        insert.common.color = document::types::Color::ByBlock;
         insert.common.linetype = "ByBlock".to_string();
-        insert.common.line_weight = codec::types::LineWeight::ByBlock;
-        insert.common.transparency = codec::types::Transparency::ByBlock;
+        insert.common.line_weight = document::types::LineWeight::ByBlock;
+        insert.common.transparency = document::types::Transparency::ByBlock;
         EntityType::Insert(insert)
     };
     let array_name = next_anonymous_name(&scene.document);
     scene.define_block_raw(
         &array_name,
-        codec::types::Vector3::ZERO,
+        document::types::Vector3::ZERO,
         placements
             .iter()
             .map(|(_, placement)| item(*placement))
@@ -1494,9 +1494,9 @@ pub fn create(
         record.insert_handles = item_handles.clone();
     }
 
-    let mut array_insert = codec::entities::Insert::new(
+    let mut array_insert = document::entities::Insert::new(
         array_name.clone(),
-        codec::types::Vector3::new(base.x, base.y, base.z),
+        document::types::Vector3::new(base.x, base.y, base.z),
     );
     array_insert.common.layer = layer;
     let insert = scene.add_entity(EntityType::Insert(array_insert));
@@ -1531,7 +1531,7 @@ pub fn create(
                         },
                         ..Default::default()
                     },
-                    point: codec::types::Vector3::new(point.x, point.y, point.z),
+                    point: document::types::Vector3::new(point.x, point.y, point.z),
                 }),
             ),
         );
@@ -1557,7 +1557,7 @@ pub fn create(
                     action,
                     "ACDBASSOCEDGEACTIONPARAM",
                     "AcDbAssocEdgeActionParam",
-                    AssociativeData::EdgeActionParam(codec::objects::AssocEdgeActionParam {
+                    AssociativeData::EdgeActionParam(document::objects::AssocEdgeActionParam {
                         single_dependency: AssocSingleDependencyActionParam {
                             action_param: AssocActionParam {
                                 is_r2013: 1,
@@ -1621,9 +1621,9 @@ pub fn create(
                 flags: if turned { 12 } else { 8 },
                 uses_default_transform: !turned,
                 x_direction: if turned {
-                    codec::types::Vector3::ZERO
+                    document::types::Vector3::ZERO
                 } else {
-                    codec::types::Vector3::new(position.x, position.y, position.z)
+                    document::types::Vector3::new(position.x, position.y, position.z)
                 },
                 transform: if turned {
                     placement.transpose().to_cols_array()
@@ -1859,11 +1859,11 @@ pub(crate) fn clone_array_for_copy(
     else {
         return false;
     };
-    let base = |record: &codec::tables::BlockRecord| match document
+    let base = |record: &document::tables::BlockRecord| match document
         .get_entity(record.block_entity_handle)
     {
         Some(EntityType::Block(block)) => block.base_point,
-        _ => codec::types::Vector3::ZERO,
+        _ => document::types::Vector3::ZERO,
     };
     let (source_base, array_base) = (base(&source_record), base(&array_record));
     let members: Vec<(Handle, EntityType)> = source_record
@@ -2088,7 +2088,7 @@ pub(crate) fn clone_array_for_copy(
         Some(ObjectType::Associative(object)) => match &mut object.data {
             AssociativeData::Network(network) => {
                 network.network_action_index += 1;
-                network.actions.push(codec::objects::AssocActionDependency {
+                network.actions.push(document::objects::AssocActionDependency {
                     is_owned: true,
                     dependency: new_action,
                 });
@@ -2114,13 +2114,13 @@ pub(crate) fn clone_array_for_copy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::objects::{AssociativeData, ObjectType};
+    use document::objects::{AssociativeData, ObjectType};
 
     #[test]
     fn saved_array_networks_keep_the_dxf_name_autocad_reads() {
         let mut scene = crate::scene::Scene::new();
-        let circle = scene.add_entity(codec::EntityType::Circle(
-            codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 5.0),
+        let circle = scene.add_entity(document::EntityType::Circle(
+            document::entities::Circle::from_coords(0.0, 0.0, 0.0, 5.0),
         ));
         let spec = AssocArraySpec::Rectangular {
             columns: 3,
@@ -2147,7 +2147,7 @@ mod tests {
             .collect();
         assert_eq!(names, ["ACDBASSOCNETWORK", "ACDBASSOCNETWORK"]);
 
-        let dxf = codec::DxfWriter::new(&scene.document)
+        let dxf = document::DxfWriter::new(&scene.document)
             .write_to_vec()
             .unwrap();
         let text = String::from_utf8_lossy(&dxf).replace("\r\n", "\n");
@@ -2190,8 +2190,8 @@ mod tests {
     #[test]
     fn rectangular_array_block_records_carry_their_dependency_reactors() {
         let mut scene = crate::scene::Scene::new();
-        let source = scene.add_entity(codec::EntityType::Circle(
-            codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
+        let source = scene.add_entity(document::EntityType::Circle(
+            document::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
         ));
         let spec = AssocArraySpec::Rectangular {
             columns: 2,
@@ -2207,11 +2207,11 @@ mod tests {
     fn path_array_block_records_carry_their_dependency_reactors() {
         for divide in [true, false] {
             let mut scene = crate::scene::Scene::new();
-            let source = scene.add_entity(codec::EntityType::Circle(
-                codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
+            let source = scene.add_entity(document::EntityType::Circle(
+                document::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
             ));
-            let path = scene.add_entity(codec::EntityType::Line(
-                codec::entities::Line::from_coords(0.0, 0.0, 0.0, 60.0, 0.0, 0.0),
+            let path = scene.add_entity(document::EntityType::Line(
+                document::entities::Line::from_coords(0.0, 0.0, 0.0, 60.0, 0.0, 0.0),
             ));
             let spec = AssocArraySpec::Path {
                 path,
@@ -2228,10 +2228,10 @@ mod tests {
     #[test]
     fn path_array_moved_with_its_path_stays_on_the_path() {
         let mut scene = crate::scene::Scene::new();
-        let source = scene.add_entity(codec::EntityType::Circle(
-            codec::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
+        let source = scene.add_entity(document::EntityType::Circle(
+            document::entities::Circle::from_coords(0.0, 0.0, 0.0, 2.0),
         ));
-        let path = scene.add_entity(codec::EntityType::Line(codec::entities::Line::from_coords(
+        let path = scene.add_entity(document::EntityType::Line(document::entities::Line::from_coords(
             0.0, 0.0, 0.0, 100.0, 0.0, 0.0,
         )));
         let spec = AssocArraySpec::Path {
@@ -2284,10 +2284,10 @@ mod tests {
 mod xdict_tests {
     use super::*;
     use crate::scene::Scene;
-    use codec::entities::{AttributeEntity, Insert, Line};
-    use codec::objects::{XRecord, XRecordValue};
-    use codec::types::Vector3;
-    use codec::EntityType;
+    use document::entities::{AttributeEntity, Insert, Line};
+    use document::objects::{XRecord, XRecordValue};
+    use document::types::Vector3;
+    use document::EntityType;
 
     fn attach_test_record(scene: &mut Scene, owner: Handle, peer: Handle) -> (Handle, Handle) {
         let root = scene.document.ensure_extension_dictionary(owner);
@@ -2570,7 +2570,7 @@ mod xdict_tests {
 mod copy_tests {
     use super::*;
     use crate::command::EntityTransform;
-    use codec::entities::{Circle, Line};
+    use document::entities::{Circle, Line};
 
     fn circle(scene: &mut crate::scene::Scene) -> Handle {
         scene.add_entity(EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0)))
@@ -2708,9 +2708,9 @@ mod copy_tests {
         assert_eq!(edited.len(), 5);
         assert!(!edited.contains(&(0, 0)) && edited.contains(&(20_000, 5_000)));
         // The edits are stored with the array, so they come back from DWG.
-        let bytes = codec::DwgWriter::write_to_vec(&scene.document).unwrap();
+        let bytes = document::DwgWriter::write_to_vec(&scene.document).unwrap();
         let mut reopened = crate::scene::Scene::new();
-        reopened.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes)).read().unwrap();
+        reopened.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes)).read().unwrap();
         let again = array_of_insert(&reopened.document, insert).unwrap();
         update(&mut reopened, &again, &[]).unwrap();
         assert_eq!(world_items(&reopened.document, insert), edited);
@@ -2868,7 +2868,7 @@ mod copy_tests {
             .curve
             .iter()
             .filter_map(|value| match value {
-                codec::objects::AssocCurveValue::Point(p) => {
+                document::objects::AssocCurveValue::Point(p) => {
                     Some(((p.x * 1000.0).round() as i64, (p.y * 1000.0).round() as i64))
                 }
                 _ => None,

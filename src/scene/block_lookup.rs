@@ -1,12 +1,12 @@
 //! Native Lookup parameter and property-table authoring.
 use super::block_authoring::graph;
 use super::block_authoring::{self as authoring, *};
-use codec::objects::{
+use document::objects::{
     BlockAction, BlockElement, BlockEvalValue, BlockGrip, BlockGripExpression, BlockLookupAction,
     BlockLookupColumn, BlockLookupParameter, BlockOnePointParameter, BlockParameter,
     DynamicBlockData, ObjectType,
 };
-use codec::{
+use document::{
     types::{Transform, Vector3},
     Document, Handle,
 };
@@ -373,10 +373,10 @@ fn evaluate_row_context(
         return Err("The selected Lookup row is unavailable.");
     }
     if baseline.is_some() {
-        let Some(codec::EntityType::Insert(reference)) = document.get_entity(insert) else {
+        let Some(document::EntityType::Insert(reference)) = document.get_entity(insert) else {
             return Err("Select a test reference.");
         };
-        if document.entities().any(|e| matches!(e, codec::EntityType::Insert(other) if other.common.handle != insert
+        if document.entities().any(|e| matches!(e, document::EntityType::Insert(other) if other.common.handle != insert
             && (other.block_name == reference.block_name || document.dynamic_definition_for_insert(other.common.handle) == Some(definition)))) {
             return Err("Test actions with one reference in Test Block. Remove the extra references or reopen Test Block.");
         }

@@ -2,14 +2,14 @@
 //! and a differential test proving `apply_explode_replacements` matches the
 //! legacy per-entity erase/apply loop (including leader-annotation coupling).
 
-use codec::entities::{
+use document::entities::{
     CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind, Dimension, DimensionLinear,
     Insert, Leader, Line, LwPolyline, LwVertex, MLine, Polyline, Polyline2D, Polyline3D, Vertex2D,
     Vertex3D,
 };
-use codec::tables::BlockRecord;
-use codec::types::{Vector2, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::tables::BlockRecord;
+use document::types::{Vector2, Vector3};
+use document::{Document, EntityType, Handle};
 use OpenCADStudio::modules::draw::modify::explode::{
     apply_explode_replacements, explode_batch, explode_entity, plan_explode,
 };
@@ -68,15 +68,15 @@ fn explode_polyline_family_golden_all_lines() {
 
     let mut p3 = Polyline3D::new();
     p3.vertices = vec![
-        codec::entities::Vertex3DPolyline {
+        document::entities::Vertex3DPolyline {
             position: Vector3::new(0.0, 0.0, 0.0),
             ..Default::default()
         },
-        codec::entities::Vertex3DPolyline {
+        document::entities::Vertex3DPolyline {
             position: Vector3::new(5.0, 0.0, 0.0),
             ..Default::default()
         },
-        codec::entities::Vertex3DPolyline {
+        document::entities::Vertex3DPolyline {
             position: Vector3::new(5.0, 5.0, 0.0),
             ..Default::default()
         },
@@ -497,8 +497,8 @@ fn apply_explode_replacements_matches_legacy_loop() {
 
 #[test]
 fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
-    use codec::entities::acis::{SabWriter, SatDocument};
-    use codec::entities::{AcisData, Region};
+    use document::entities::acis::{SabWriter, SatDocument};
+    use document::entities::{AcisData, Region};
     use kernel::brep;
     use kernel::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
     use kernel::space::Plane;
@@ -557,7 +557,7 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
         let mut region = Region::new();
         region.acis_data = acis_data;
         region.common.layer = "REGIONS".to_string();
-        region.common.color = codec::types::Color::from_index(3);
+        region.common.color = document::types::Color::from_index(3);
         region.common.linetype = "DASHED".to_string();
         region.common.xdictionary_handle = Some(Handle::new(999));
 
@@ -586,7 +586,7 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
         for piece in &pieces {
             let c = piece.common();
             assert_eq!(c.layer, "REGIONS", "{label}: layer preserved");
-            assert_eq!(c.color, codec::types::Color::from_index(3), "{label}: color preserved");
+            assert_eq!(c.color, document::types::Color::from_index(3), "{label}: color preserved");
             assert_eq!(c.linetype, "DASHED", "{label}: linetype preserved");
             assert!(c.handle.is_null(), "{label}: handle cleared");
             assert!(c.owner_handle.is_null(), "{label}: owner_handle cleared");
@@ -597,8 +597,8 @@ fn explode_region_acis_sat_and_binary_sab_with_hole_and_style() {
 
 #[test]
 fn explode_region_tilted_plane_arc_and_multi_island() {
-    use codec::entities::acis::SatDocument;
-    use codec::entities::{AcisData, Region};
+    use document::entities::acis::SatDocument;
+    use document::entities::{AcisData, Region};
     use kernel::brep;
     use kernel::geom2d::{Arc as KArc, Curve as KCurve, Line as KLine};
     use kernel::space::Plane;
@@ -688,7 +688,7 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
 
     // Wire-only fallback region (no ACIS data, display wires present).
     let mut wire_region = Region::new();
-    wire_region.wires = vec![codec::entities::Wire::from_points(vec![
+    wire_region.wires = vec![document::entities::Wire::from_points(vec![
         Vector3::new(0.0, 0.0, 0.0),
         Vector3::new(4.0, 0.0, 0.0),
         Vector3::new(4.0, 3.0, 0.0),
@@ -704,8 +704,8 @@ fn explode_region_tilted_plane_arc_and_multi_island() {
 
 #[test]
 fn explode_region_acis_with_body_transform() {
-    use codec::entities::acis::SatDocument;
-    use codec::entities::{AcisData, Region};
+    use document::entities::acis::SatDocument;
+    use document::entities::{AcisData, Region};
     use kernel::brep;
     use kernel::geom2d::{Curve as KCurve, Line as KLine};
     use kernel::space::Plane;
@@ -771,8 +771,8 @@ fn explode_region_acis_with_body_transform() {
 
 #[test]
 fn explode_region_elliptical_and_spline_boundaries() {
-    use codec::entities::acis::SatDocument;
-    use codec::entities::{AcisData, Region};
+    use document::entities::acis::SatDocument;
+    use document::entities::{AcisData, Region};
     use kernel::brep;
     use kernel::geom2d::{
         Curve as KCurve, Ellipse as KEllipse, EllipseArc as KEllipseArc, Line as KLine,

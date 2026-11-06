@@ -1,4 +1,4 @@
-use codec::types::{Transform, Vector3};
+use document::types::{Transform, Vector3};
 use glam::DVec3;
 
 use crate::command::EntityTransform;
@@ -10,7 +10,7 @@ fn to_v3(v: DVec3) -> Vector3 {
 
 pub fn apply_standard_transform<T>(entity: &mut T, center: DVec3, axis: DVec3, angle_rad: f64)
 where
-    T: codec::Entity,
+    T: document::Entity,
 {
     let t = Transform::from_translation(to_v3(-center))
         .then(&Transform::from_rotation(
@@ -23,7 +23,7 @@ where
 
 pub fn apply_standard_scale<T>(entity: &mut T, center: DVec3, factor: f64)
 where
-    T: codec::Entity,
+    T: document::Entity,
 {
     let s = factor;
     let t = Transform::from_scaling_with_origin(Vector3::new(s, s, s), to_v3(center));
@@ -32,7 +32,7 @@ where
 
 pub fn apply_standard_entity_transform<T, F>(entity: &mut T, t: &EntityTransform, mirror: F)
 where
-    T: codec::Entity,
+    T: document::Entity,
     F: FnOnce(&mut T, DVec3, DVec3),
 {
     match t {
@@ -61,7 +61,7 @@ where
     }
 }
 
-/// `t` as one opencadcodec `Transform`, for data that has no entity-specific
+/// `t` as one document `Transform`, for data that has no entity-specific
 /// rules (XDATA world points, distances and scale factors).
 pub fn codec_transform(t: &EntityTransform) -> Transform {
     match t {
@@ -89,11 +89,11 @@ pub fn codec_transform(t: &EntityTransform) -> Transform {
     }
 }
 
-/// Reflection across the world-XY line through `p1`→`p2` as an opencadcodec
-/// `Transform`, for delegating MIRROR to opencadcodec's entity-aware
+/// Reflection across the world-XY line through `p1`→`p2` as a document
+/// `Transform`, for delegating MIRROR to document's entity-aware
 /// `apply_transform` paths (which handle direction flags, stored-angle
 /// conventions and bulges themselves). Degenerate line → identity.
-pub fn reflection_about_xy_line(p1: DVec3, p2: DVec3) -> codec::types::Transform {
+pub fn reflection_about_xy_line(p1: DVec3, p2: DVec3) -> document::types::Transform {
     reflection_about_working_line(p1, p2, DVec3::Z)
 }
 
@@ -103,8 +103,8 @@ pub fn reflection_about_working_line(
     p1: DVec3,
     p2: DVec3,
     working_normal: DVec3,
-) -> codec::types::Transform {
-    use codec::types::{Matrix4, Transform};
+) -> document::types::Transform {
+    use document::types::{Matrix4, Transform};
     let line = p2 - p1;
     let plane_normal = line
         .cross(working_normal.normalize_or(DVec3::Z))
@@ -183,11 +183,11 @@ pub fn transform_ellipse_geometry(
     end_param: f64,
     transform: &Transform,
 ) -> Option<(Vector3, Vector3, Vector3, f64, f64, f64)> {
-    use codec::Entity;
+    use document::Entity;
     if normal.length() <= 1e-12 || major_axis.length() <= 1e-12 {
         return None;
     }
-    let mut ellipse = codec::entities::Ellipse {
+    let mut ellipse = document::entities::Ellipse {
         center,
         major_axis,
         normal,
@@ -285,11 +285,11 @@ mod mirror_delegation_tests {
     use super::*;
     use crate::command::EntityTransform;
     use crate::entities::traits::Transformable;
-    use codec::entities::hatch::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
-    use codec::entities::Hatch;
-    use codec::types::Vector2;
+    use document::entities::hatch::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
+    use document::entities::Hatch;
+    use document::types::Vector2;
 
-    // MIRROR on a hatch goes through reflection_about_xy_line + opencadcodec's
+    // MIRROR on a hatch goes through reflection_about_xy_line + document's
     // transform_hatch. Mirror a Line→Arc→Line path across a vertical line and
     // assert the arc stays endpoint-continuous, flips its direction flag, and
     // keeps its sweep magnitude (the stored-angle conventions the old

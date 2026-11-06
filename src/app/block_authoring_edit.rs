@@ -1,7 +1,7 @@
 use super::{Message, OpenCADStudio};
 use crate::command::{CadCommand, CmdResult};
 use crate::scene::block_authoring::edit::{self, Part};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use iced::{Point, Rectangle, Task};
 
@@ -17,7 +17,7 @@ struct EditCommand {
     definition: Handle,
     handle: Handle,
     part: Part,
-    document_snapshot: codec::Document,
+    document_snapshot: document::Document,
 }
 impl CadCommand for EditCommand {
     fn name(&self) -> &'static str {
@@ -38,7 +38,7 @@ impl CadCommand for EditCommand {
     }
     fn on_preview_wires(&mut self, position: DVec3) -> Vec<crate::scene::WireModel> {
         let mut staged = self.document_snapshot.clone();
-        let at = codec::types::Vector3::new(position.x, position.y, 0.0);
+        let at = document::types::Vector3::new(position.x, position.y, 0.0);
         if edit::move_part(&mut staged, self.definition, self.handle, self.part, at).is_err() {
             return Vec::new();
         }
@@ -87,7 +87,7 @@ impl OpenCADStudio {
         match crate::scene::block_orientation_parameter::set_alignment_type(&mut staged, definition, parameter, perpendicular) {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Alignment type"));
+                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Alignment type"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;
@@ -138,7 +138,7 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                 };
-                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block action override"));
+                self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Edit block action override"));
                 self.apply_action_document(i, staged);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
@@ -170,7 +170,7 @@ impl OpenCADStudio {
                         return Task::none();
                     }
                 };
-                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block action chain"));
+                self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Edit block action chain"));
                 self.apply_action_document(i, staged);
                 self.tabs[i].dirty = true;
                 self.tabs[i].scene.bump_geometry();
@@ -219,7 +219,7 @@ impl OpenCADStudio {
         match result {
             Ok(true) => match instance::refresh(&staged, definition) {
                 Ok(staged) => {
-                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block action base point"));
+                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Edit block action base point"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
@@ -303,10 +303,10 @@ impl OpenCADStudio {
         Vec<(
             &'static str,
             &'static str,
-            &codec::objects::BlockParameterValueSet,
+            &document::objects::BlockParameterValueSet,
         )>,
     )> {
-        let Some(codec::objects::ObjectType::DynamicBlock(object)) = self.tabs[self.active_tab]
+        let Some(document::objects::ObjectType::DynamicBlock(object)) = self.tabs[self.active_tab]
             .scene
             .document
             .objects
@@ -315,38 +315,38 @@ impl OpenCADStudio {
             return None;
         };
         let (chain_actions, value_sets) = match &object.data {
-            codec::objects::DynamicBlockData::LinearParameter(parameter) => (
+            document::objects::DynamicBlockData::LinearParameter(parameter) => (
                 Some(parameter.parameter.parameter.chain_actions),
                 vec![("linear_distance", "Distance", &parameter.value_set)],
             ),
-            codec::objects::DynamicBlockData::PolarParameter(parameter) => (
+            document::objects::DynamicBlockData::PolarParameter(parameter) => (
                 Some(parameter.parameter.parameter.chain_actions),
                 vec![
                     ("polar_distance", "Distance", &parameter.distance_value_set),
                     ("polar_angle", "Angle", &parameter.angle_value_set),
                 ],
             ),
-            codec::objects::DynamicBlockData::XYParameter(parameter) => (
+            document::objects::DynamicBlockData::XYParameter(parameter) => (
                 Some(parameter.parameter.parameter.chain_actions),
                 vec![
                     ("xy_x", "X Distance", &parameter.x_value_set),
                     ("xy_y", "Y Distance", &parameter.y_value_set),
                 ],
             ),
-            codec::objects::DynamicBlockData::RotationParameter(parameter) => (
+            document::objects::DynamicBlockData::RotationParameter(parameter) => (
                 Some(parameter.parameter.parameter.chain_actions),
                 vec![("rotation_angle", "Angle", &parameter.value_set)],
             ),
-            codec::objects::DynamicBlockData::PointParameter(parameter) => {
+            document::objects::DynamicBlockData::PointParameter(parameter) => {
                 (Some(parameter.parameter.parameter.chain_actions), vec![])
             }
-            codec::objects::DynamicBlockData::FlipParameter(parameter) => {
+            document::objects::DynamicBlockData::FlipParameter(parameter) => {
                 (Some(parameter.parameter.parameter.chain_actions), vec![])
             }
-            codec::objects::DynamicBlockData::AlignmentParameter(_)
-            | codec::objects::DynamicBlockData::BasePointParameter(_)
-            | codec::objects::DynamicBlockData::LookupParameter(_)
-            | codec::objects::DynamicBlockData::UserParameter(_) => (None, vec![]),
+            document::objects::DynamicBlockData::AlignmentParameter(_)
+            | document::objects::DynamicBlockData::BasePointParameter(_)
+            | document::objects::DynamicBlockData::LookupParameter(_)
+            | document::objects::DynamicBlockData::UserParameter(_) => (None, vec![]),
             _ => return None,
         };
         Some((chain_actions, value_sets))
@@ -355,8 +355,8 @@ impl OpenCADStudio {
     /// Flip the bit that says a parameter's actions run one after the other,
     /// each acting on the member as the previous action left it. Only a parameter
     /// whose actions the evaluator runs has such an order to declare.
-    fn set_chain_actions(document: &mut codec::Document, handle: Handle, value: bool) -> bool {
-        use codec::objects::{DynamicBlockData, ObjectType};
+    fn set_chain_actions(document: &mut document::Document, handle: Handle, value: bool) -> bool {
+        use document::objects::{DynamicBlockData, ObjectType};
         let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) else {
             return false;
         };
@@ -389,8 +389,8 @@ impl OpenCADStudio {
             return Task::none();
         }
         if matches!(document.objects.get(&handle),
-            Some(codec::objects::ObjectType::DynamicBlock(object))
-                if matches!(&object.data, codec::objects::DynamicBlockData::PointParameter(_)))
+            Some(document::objects::ObjectType::DynamicBlock(object))
+                if matches!(&object.data, document::objects::DynamicBlockData::PointParameter(_)))
         {
             let Some(definition) = self.tabs[i]
                 .active_block_edit_session()
@@ -410,7 +410,7 @@ impl OpenCADStudio {
                 }
             };
         }
-        self.push_undo_snapshot(i, super::document::HistoryLabel::Message("BEDIT Chain parameter actions"));
+        self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("BEDIT Chain parameter actions"));
         self.apply_action_document(i, document);
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;
@@ -426,7 +426,7 @@ impl OpenCADStudio {
         let mut document = self.tabs[i].scene.document.clone();
         match toggle_authoring_value_set_flag(&mut document, handle, field) {
             Ok(true) => {
-                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("BEDIT Parameter value set"));
+                self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("BEDIT Parameter value set"));
                 self.tabs[i].scene.document = document;
                 self.tabs[i].scene.bump_geometry();
                 self.tabs[i].dirty = true;
@@ -450,7 +450,7 @@ impl OpenCADStudio {
         let mut document = self.tabs[i].scene.document.clone();
         match set_authoring_value_set_field(&mut document, handle, field, &input) {
             Ok(true) => {
-                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("BEDIT Parameter value set"));
+                self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("BEDIT Parameter value set"));
                 self.tabs[i].scene.document = document;
                 self.tabs[i].scene.bump_geometry();
                 self.tabs[i].dirty = true;
@@ -472,8 +472,8 @@ impl OpenCADStudio {
     /// A manager edit changes the definition's own parameter objects, and the
     /// references of that definition are rebuilt from the new values, so the
     /// staged document goes back into the live one the way an action commit does.
-    fn apply_parameters_manager_edit(&mut self, i: usize, staged: codec::Document) {
-        self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Parameters Manager edit"));
+    fn apply_parameters_manager_edit(&mut self, i: usize, staged: document::Document) {
+        self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Parameters Manager edit"));
         self.apply_action_document(i, staged);
         self.tabs[i].dirty = true;
         self.tabs[i].scene.bump_geometry();
@@ -638,7 +638,7 @@ impl OpenCADStudio {
         match result {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Edit block parameter metadata"));
+                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Edit block parameter metadata"));
                     self.tabs[i].scene.document = staged;
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
@@ -832,18 +832,18 @@ impl OpenCADStudio {
             .objects
             .get(&handle)
         {
-            Some(codec::objects::ObjectType::BlockVisibilityParameter(_)) => true,
-            Some(codec::objects::ObjectType::DynamicBlock(object)) => matches!(
+            Some(document::objects::ObjectType::BlockVisibilityParameter(_)) => true,
+            Some(document::objects::ObjectType::DynamicBlock(object)) => matches!(
                 object.data,
-                codec::objects::DynamicBlockData::PointParameter(_)
-                    | codec::objects::DynamicBlockData::LinearParameter(_)
-                    | codec::objects::DynamicBlockData::PolarParameter(_)
-                    | codec::objects::DynamicBlockData::XYParameter(_)
-                    | codec::objects::DynamicBlockData::RotationParameter(_)
-                    | codec::objects::DynamicBlockData::AlignmentParameter(_)
-                    | codec::objects::DynamicBlockData::FlipParameter(_)
-                    | codec::objects::DynamicBlockData::BasePointParameter(_)
-                    | codec::objects::DynamicBlockData::LookupParameter(_)
+                document::objects::DynamicBlockData::PointParameter(_)
+                    | document::objects::DynamicBlockData::LinearParameter(_)
+                    | document::objects::DynamicBlockData::PolarParameter(_)
+                    | document::objects::DynamicBlockData::XYParameter(_)
+                    | document::objects::DynamicBlockData::RotationParameter(_)
+                    | document::objects::DynamicBlockData::AlignmentParameter(_)
+                    | document::objects::DynamicBlockData::FlipParameter(_)
+                    | document::objects::DynamicBlockData::BasePointParameter(_)
+                    | document::objects::DynamicBlockData::LookupParameter(_)
             ),
             _ => false,
         }
@@ -860,7 +860,7 @@ impl OpenCADStudio {
         };
         let items = edit::items(&tab.scene.document, session.br_handle);
         let camera = tab.scene.camera.borrow();
-        let project = |v: codec::types::Vector3| {
+        let project = |v: document::types::Vector3| {
             camera
                 .project(DVec3::new(v.x, v.y, v.z), bounds)
                 .map(|v| Point::new(v.x, v.y))
@@ -1033,11 +1033,11 @@ impl OpenCADStudio {
             definition,
             handle,
             part,
-            codec::types::Vector3::new(position.x, position.y, position.z),
+            document::types::Vector3::new(position.x, position.y, position.z),
         ) {
             Ok(changed) => {
                 if changed {
-                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Block authoring grip"));
+                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Block authoring grip"));
                     // Keep the live entity-change recorder attached. Basepoint edits
                     // can also relocate INSERT attributes outside the edited block.
                     let doc = &mut self.tabs[i].scene.document;
@@ -1072,10 +1072,10 @@ impl OpenCADStudio {
 }
 
 fn authoring_value_set_mut<'a>(
-    data: &'a mut codec::objects::DynamicBlockData,
+    data: &'a mut document::objects::DynamicBlockData,
     key: &str,
-) -> Option<&'a mut codec::objects::BlockParameterValueSet> {
-    use codec::objects::DynamicBlockData as Data;
+) -> Option<&'a mut document::objects::BlockParameterValueSet> {
+    use document::objects::DynamicBlockData as Data;
     match (data, key) {
         (Data::LinearParameter(parameter), "linear_distance") => Some(&mut parameter.value_set),
         (Data::PolarParameter(parameter), "polar_distance") => {
@@ -1090,7 +1090,7 @@ fn authoring_value_set_mut<'a>(
 }
 
 fn set_authoring_value_set_field(
-    document: &mut codec::Document,
+    document: &mut document::Document,
     handle: Handle,
     field: &str,
     input: &str,
@@ -1101,7 +1101,7 @@ fn set_authoring_value_set_field(
     let (set_key, member) = rest
         .rsplit_once('_')
         .ok_or("Unknown parameter value-set field.")?;
-    let Some(codec::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle)
+    let Some(document::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle)
     else {
         return Err("Select an authoring parameter.");
     };
@@ -1182,7 +1182,7 @@ fn set_authoring_value_set_field(
 }
 
 fn toggle_authoring_value_set_flag(
-    document: &mut codec::Document,
+    document: &mut document::Document,
     handle: Handle,
     field: &str,
 ) -> Result<bool, &'static str> {
@@ -1200,7 +1200,7 @@ fn toggle_authoring_value_set_flag(
         "values" => 8,
         _ => return Err("Unknown parameter value-set option."),
     };
-    let Some(codec::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle)
+    let Some(document::objects::ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle)
     else {
         return Err("Select an authoring parameter.");
     };
@@ -1239,10 +1239,10 @@ mod tests {
         let mut scene = crate::scene::Scene::new();
         scene.define_block_raw(
             "PREVIEW_BASEPOINT",
-            codec::types::Vector3::new(2.0, 3.0, 0.0),
-            vec![codec::EntityType::Line(codec::entities::Line::from_points(
-                codec::types::Vector3::ZERO,
-                codec::types::Vector3::new(1.0, 0.0, 0.0),
+            document::types::Vector3::new(2.0, 3.0, 0.0),
+            vec![document::EntityType::Line(document::entities::Line::from_points(
+                document::types::Vector3::ZERO,
+                document::types::Vector3::new(1.0, 0.0, 0.0),
             ))],
         );
         let definition = scene

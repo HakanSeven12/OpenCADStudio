@@ -1,4 +1,4 @@
-use codec::entities::{Viewport, ViewportRenderMode};
+use document::entities::{Viewport, ViewportRenderMode};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
@@ -186,7 +186,7 @@ fn properties(vp: &Viewport) -> Vec<PropSection> {
 }
 
 fn apply_geom_prop(vp: &mut Viewport, field: &str, value: &str) {
-    use codec::types::Vector3;
+    use document::types::Vector3;
 
     // Boolean / toggle fields handled first (value = "toggle" or "true"/"false").
     match field {

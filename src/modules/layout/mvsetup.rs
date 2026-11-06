@@ -21,9 +21,9 @@
 //   Enter the number of model space units <1>:
 
 use crate::t;
-use codec::entities::{LwPolyline, LwVertex, Viewport};
-use codec::types::{Vector2, Vector3};
-use codec::{EntityType, Handle};
+use document::entities::{LwPolyline, LwVertex, Viewport};
+use document::types::{Vector2, Vector3};
+use document::{EntityType, Handle};
 use glam::{DVec2, DVec3};
 
 use crate::command::{CadCommand, CmdOption, CmdResult};

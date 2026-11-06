@@ -10,10 +10,10 @@
 //! case. The clip is performed in 2D (XY) after the INSERT transform has been
 //! applied, matching the space the block wires are already emitted in.
 
-use codec::entities::Insert;
-use codec::objects::{ObjectType, SpatialFilter};
-use codec::types::{Handle, Transform, Vector3};
-use codec::Document;
+use document::entities::Insert;
+use document::objects::{ObjectType, SpatialFilter};
+use document::types::{Handle, Transform, Vector3};
+use document::Document;
 use kernel::geom2d::{contains, Curve, Line, Tolerance};
 
 use crate::scene::model::wire_model::{
@@ -86,7 +86,7 @@ pub fn insert_spatial_filter<'a>(doc: &'a Document, ins: &Insert) -> Option<&'a 
 
 /// The filter's handle, when the insert has one (enabled or not).
 pub fn filter_handle(doc: &Document, insert: Handle) -> Option<Handle> {
-    let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
+    let Some(document::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return None;
     };
     let xdict = linked_extension_dictionary(doc, ins)?;
@@ -111,10 +111,10 @@ pub fn inverted_boundary(doc: &Document, filter: &SpatialFilter) -> Option<Vec<[
     let mut inside = false;
     for entry in &x.entries {
         match &entry.value {
-            codec::objects::XRecordValue::String(s) if entry.code == 102 => {
+            document::objects::XRecordValue::String(s) if entry.code == 102 => {
                 inside = s == INVERTED;
             }
-            codec::objects::XRecordValue::Point3D(px, py, _) if inside && entry.code == 10 => {
+            document::objects::XRecordValue::Point3D(px, py, _) if inside && entry.code == 10 => {
                 points.push([*px, *py]);
             }
             _ => {}
@@ -136,7 +136,7 @@ pub fn clip_outline_world(
             let mut outline = filter.clone();
             outline.boundary_points = points
                 .iter()
-                .map(|p| codec::types::Vector2::new(p[0], p[1]))
+                .map(|p| document::types::Vector2::new(p[0], p[1]))
                 .collect();
             world_clip_polygon_for_transform(&outline, xform)
         }
@@ -250,9 +250,9 @@ pub fn set_insert_clip(
     inverted: bool,
     extents: ([f64; 2], [f64; 2]),
 ) -> bool {
-    use codec::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
-    use codec::types::{Matrix4, Vector2};
-    let Some(codec::EntityType::Insert(ins)) = doc.get_entity(insert) else {
+    use document::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
+    use document::types::{Matrix4, Vector2};
+    let Some(document::EntityType::Insert(ins)) = doc.get_entity(insert) else {
         return false;
     };
     // The stored inverse is the inverse of the transform every consumer
@@ -353,7 +353,7 @@ pub fn set_insert_clip(
         }
         let mut x = XRecord::new();
         (x.handle, x.owner) = (record, fdict);
-        x.cloning_flags = codec::objects::DictionaryCloningFlags::KeepExisting;
+        x.cloning_flags = document::objects::DictionaryCloningFlags::KeepExisting;
         let point = |p: &[f64; 2]| XRecordEntry::new(10, XRecordValue::Point3D(p[0], p[1], 0.0));
         x.entries.push(XRecordEntry::string(102, INVERTED));
         x.entries.extend(boundary.iter().map(point));
@@ -1087,8 +1087,8 @@ mod tests {
 
     #[test]
     fn resolves_filter_and_clips_block_geometry() {
-        use codec::objects::Dictionary;
-        use codec::types::Vector2;
+        use document::objects::Dictionary;
+        use document::types::Vector2;
 
         // Handles: insert, xdict, acad_filter dict, spatial filter.
         let (h_ins, h_xdict, h_filter, h_spatial) = (
@@ -1181,7 +1181,7 @@ mod tests {
 
     #[test]
     fn world_polygon_applies_inverse_block_then_insert() {
-        use codec::types::{Matrix4, Vector2};
+        use document::types::{Matrix4, Vector2};
         // Clip stored against a normalized space: inverse_block_transform scales
         // the small boundary points up by 1000 into block space, then the insert
         // (scale 0.1 + translation) maps them to world.

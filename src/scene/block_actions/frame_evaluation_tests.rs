@@ -1,18 +1,18 @@
 use super::*;
 use crate::scene::block_distance_parameter as distance;
-use codec::{DwgReader, DwgWriter, DxfReader, DxfWriter};
+use document::{DwgReader, DwgWriter, DxfReader, DxfWriter};
 use instance::ParameterFrame;
 use std::io::Cursor;
 
 fn insert(doc: &mut Document) -> Handle {
-    doc.add_entity(EntityType::Insert(codec::entities::Insert::new(
+    doc.add_entity(EntityType::Insert(document::entities::Insert::new(
         "ACTIONS",
         Vector3::ZERO,
     )))
     .unwrap()
 }
 
-fn line(doc: &Document, insert: Handle) -> &codec::entities::Line {
+fn line(doc: &Document, insert: Handle) -> &document::entities::Line {
     let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
         panic!()
     };

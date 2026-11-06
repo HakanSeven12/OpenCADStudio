@@ -1,7 +1,7 @@
 use super::*;
 use crate::scene::named_parameters::DrivingValue;
 use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
-use codec::objects::{
+use document::objects::{
     AssocConstraintNode, AssocConstraintNodeData as Node, AssociativeData as Data,
     AssociativeObject, ObjectType,
 };
@@ -17,8 +17,8 @@ fn retained_fixture() -> (OpenCADStudio, Handle, Handle, Handle) {
         .unwrap()
         .handle;
     let line = members(&app)[0];
-    let mut dimension = EntityType::Dimension(Box::new(codec::entities::Dimension::Aligned(
-        codec::entities::DimensionAligned::new(Vector3::ZERO, Vector3::new(10., 0., 0.)),
+    let mut dimension = EntityType::Dimension(Box::new(document::entities::Dimension::Aligned(
+        document::entities::DimensionAligned::new(Vector3::ZERO, Vector3::new(10., 0., 0.)),
     )));
     dimension.common_mut().owner_handle = owner;
     let dimension = app.tabs[i].scene.document.add_entity(dimension).unwrap();
@@ -62,8 +62,8 @@ fn retained_fixture() -> (OpenCADStudio, Handle, Handle, Handle) {
     let mut object = AssociativeObject::new("ACDBASSOCVALUEDEPENDENCY", "AcDbAssocValueDependency");
     object.handle = dependency;
     object.owner = width;
-    object.data = Data::ValueDependency(codec::objects::AssocValueDependency {
-        dependency: codec::objects::AssocDependency {
+    object.data = Data::ValueDependency(document::objects::AssocValueDependency {
+        dependency: document::objects::AssocDependency {
             class_version: 2,
             is_read_dependency: true,
             is_attached_to_object: true,
@@ -71,9 +71,9 @@ fn retained_fixture() -> (OpenCADStudio, Handle, Handle, Handle) {
             ..Default::default()
         },
         name: "base".into(),
-        value: codec::objects::AssocEvalVariant {
+        value: document::objects::AssocEvalVariant {
             code: 40,
-            value: codec::objects::AssocEvalValue::Real(5.),
+            value: document::objects::AssocEvalValue::Real(5.),
         },
         ..Default::default()
     });
@@ -91,7 +91,7 @@ fn retained_fixture() -> (OpenCADStudio, Handle, Handle, Handle) {
     };
     value
         .dependencies
-        .push(codec::objects::AssocVariableDependency {
+        .push(document::objects::AssocVariableDependency {
             dependency,
             flags: 0,
         });
@@ -163,7 +163,7 @@ fn retained_fixture() -> (OpenCADStudio, Handle, Handle, Handle) {
     (app, reference, owner, group_handle)
 }
 
-fn assert_scope_graph(document: &codec::Document, owner: Handle, group: Handle) {
+fn assert_scope_graph(document: &document::Document, owner: Handle, group: Handle) {
     let ObjectType::Associative(AssociativeObject {
         owner: scope,
         data: Data::ConstraintGroup(value),
@@ -440,7 +440,7 @@ fn save_as_retained_constraints_create_a_destination_root_network() {
     let source = &app.tabs[app.active_tab].scene.document;
     let copied = crate::app::block_save_as::copy_definition(
         source,
-        codec::Document::new(),
+        document::Document::new(),
         "EDIT_ME",
         "COPY",
     )

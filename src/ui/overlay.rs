@@ -569,7 +569,7 @@ pub fn resolve_selection_base_color(
     // ACI 0 (BYBLOCK) and 256 (BYLAYER) are not explicit overrides;
     // the sysvar uses 0 as the unset sentinel; valid user picks are 1..=255.
     if custom > 0 {
-        if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(custom) {
+        if let Some((r, g, b)) = document::types::aci_table::aci_to_rgb(custom) {
             return Color::from_rgb8(r, g, b);
         }
     }
@@ -1618,7 +1618,7 @@ fn draw_grip_marker(
 
     if grip.is_hot {
         let hot_color = if visual.grip_hot > 0 {
-            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hot) {
+            if let Some((r, g, b)) = document::types::aci_table::aci_to_rgb(visual.grip_hot) {
                 Color::from_rgb8(r, g, b)
             } else {
                 palette.danger.base.color
@@ -1630,7 +1630,7 @@ fn draw_grip_marker(
     } else if grip.is_hovered {
         let pair = palette.primary.strong;
         let hover_color = if visual.grip_hover > 0 {
-            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_hover) {
+            if let Some((r, g, b)) = document::types::aci_table::aci_to_rgb(visual.grip_hover) {
                 Color::from_rgb8(r, g, b)
             } else {
                 pair.color
@@ -1651,7 +1651,7 @@ fn draw_grip_marker(
         let color = if grip.is_authoring {
             authoring.grip
         } else if grip.is_dynamic {
-            codec::types::aci_table::aci_to_rgb(visual.grip_dynamic)
+            document::types::aci_table::aci_to_rgb(visual.grip_dynamic)
                 .map(|(r,g,b)| Color::from_rgb8(r,g,b)).unwrap_or(palette.primary.base.color)
         } else if grip.is_plugin {
             // Plugin-declared custom grip (API v11): a distinct accent so
@@ -1663,7 +1663,7 @@ fn draw_grip_marker(
             // range's square grips.
             Color::from_rgb8(0, 191, 255)
         } else if visual.grip_color > 0 {
-            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
+            if let Some((r, g, b)) = document::types::aci_table::aci_to_rgb(visual.grip_color) {
                 Color::from_rgb8(r, g, b)
             } else {
                 palette.primary.base.color
@@ -6892,7 +6892,7 @@ mod grid_mask_tests {
     #[test]
     fn wipeout_hides_model_grid() {
         use crate::scene::{view::camera::Camera, Scene};
-        use codec::{entities::Wipeout, types::Vector2, EntityType};
+        use document::{entities::Wipeout, types::Vector2, EntityType};
 
         let mut scene = Scene::new();
         scene.add_entity(EntityType::Wipeout(Wipeout::polygonal(
@@ -6967,7 +6967,7 @@ mod grid_mask_tests {
     #[test]
     fn wipeout_hides_model_axes() {
         use crate::scene::{view::camera::Camera, Scene};
-        use codec::{entities::Wipeout, types::Vector2, EntityType};
+        use document::{entities::Wipeout, types::Vector2, EntityType};
 
         let mut scene = Scene::new();
         scene.add_entity(EntityType::Wipeout(Wipeout::polygonal(

@@ -17,8 +17,8 @@
 
 use crate::app::Message;
 use crate::ui::dock::PanelId;
-use codec::objects::SolidHistoryOperation;
-use codec::{Document, EntityType, Handle};
+use document::objects::SolidHistoryOperation;
+use document::{Document, EntityType, Handle};
 use iced::widget::{button, column, container, scrollable, text};
 use iced::{Background, Element, Fill, Theme};
 

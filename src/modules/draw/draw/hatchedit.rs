@@ -9,7 +9,7 @@
 //      Press Enter to apply changes.
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, HatchEditOperation};
@@ -33,20 +33,20 @@ pub struct HatcheditCommand {
     origin_plane: kernel::space::Plane,
     origin_bounds: Option<([f64; 2], [f64; 2])>,
     origin_bounds_unavailable: bool,
-    style: Option<codec::entities::HatchStyleType>,
+    style: Option<document::entities::HatchStyleType>,
     annotative: Option<bool>,
     annotative_current: bool,
-    style_current: codec::entities::HatchStyleType,
+    style_current: document::entities::HatchStyleType,
     input: Option<&'static str>,
-    source_appearance: Option<(codec::types::Color, String, codec::types::Transparency)>,
-    current_color: codec::types::Color,
-    current_transparency: codec::types::Transparency,
+    source_appearance: Option<(document::types::Color, String, document::types::Transparency)>,
+    current_color: document::types::Color,
+    current_transparency: document::types::Transparency,
     boundary_region: bool,
     association_sources: Option<(
         crate::command::WorkingPlane,
         rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>,
     )>,
-    association_paths: Vec<codec::entities::BoundaryPath>,
+    association_paths: Vec<document::entities::BoundaryPath>,
     association_missed: bool,
 }
 
@@ -68,11 +68,11 @@ impl HatcheditCommand {
             style: None,
             annotative: None,
             annotative_current: false,
-            style_current: codec::entities::HatchStyleType::Normal,
+            style_current: document::entities::HatchStyleType::Normal,
             input: None,
             source_appearance: None,
-            current_color: codec::types::Color::ByLayer,
-            current_transparency: codec::types::Transparency::ByLayer,
+            current_color: document::types::Color::ByLayer,
+            current_transparency: document::types::Transparency::ByLayer,
             boundary_region: false,
             association_sources: None,
             association_paths: Vec::new(),
@@ -108,11 +108,11 @@ impl HatcheditCommand {
             style: None,
             annotative: None,
             annotative_current: annotative,
-            style_current: codec::entities::HatchStyleType::Normal,
+            style_current: document::entities::HatchStyleType::Normal,
             input: None,
             source_appearance: None,
-            current_color: codec::types::Color::ByLayer,
-            current_transparency: codec::types::Transparency::ByLayer,
+            current_color: document::types::Color::ByLayer,
+            current_transparency: document::types::Transparency::ByLayer,
             boundary_region: false,
             association_sources: None,
             association_paths: Vec::new(),
@@ -175,11 +175,11 @@ impl HatcheditCommand {
     }
     pub fn with_appearance(
         mut self,
-        entity: Option<&codec::EntityType>,
-        current_color: codec::types::Color,
-        current_transparency: codec::types::Transparency,
+        entity: Option<&document::EntityType>,
+        current_color: document::types::Color,
+        current_transparency: document::types::Transparency,
     ) -> Self {
-        if let Some(codec::EntityType::Hatch(hatch)) = entity {
+        if let Some(document::EntityType::Hatch(hatch)) = entity {
             self.style_current = hatch.style;
             self.origin_plane = crate::entities::curve::ocs_plane(hatch.normal, hatch.elevation);
             self.origin_bounds = hatch
@@ -251,9 +251,9 @@ impl CadCommand for HatcheditCommand {
         if let Some(input) = self.input {
             if input == "style" {
                 let current = match self.style_current {
-                    codec::entities::HatchStyleType::Normal => "Normal",
-                    codec::entities::HatchStyleType::Outer => "Outer",
-                    codec::entities::HatchStyleType::Ignore => "Ignore",
+                    document::entities::HatchStyleType::Normal => "Normal",
+                    document::entities::HatchStyleType::Outer => "Outer",
+                    document::entities::HatchStyleType::Ignore => "Ignore",
                 };
                 return format!("Enter hatching style [Ignore/Outer/Normal] <{current}>:");
             }
@@ -267,8 +267,8 @@ impl CadCommand for HatcheditCommand {
                         return format!(
                             "Specify transparency (0-90) or ByLayer/ByBlock <{}>:",
                             match transparency {
-                                codec::types::Transparency::ByLayer => "ByLayer".into(),
-                                codec::types::Transparency::ByBlock => "ByBlock".into(),
+                                document::types::Transparency::ByLayer => "ByLayer".into(),
+                                document::types::Transparency::ByBlock => "ByBlock".into(),
                                 value => format!("{:.0}", value.as_percent() * 100.0),
                             }
                         )
@@ -441,7 +441,7 @@ impl CadCommand for HatcheditCommand {
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
         let keyword = text.trim().to_ascii_uppercase();
         if let Some(input) = self.input {
-            use codec::types::{Color, Transparency};
+            use document::types::{Color, Transparency};
             let appearance = |color, layer, transparency| HatchEditOperation::Appearance {
                 color,
                 layer,
@@ -503,9 +503,9 @@ impl CadCommand for HatcheditCommand {
                 }
                 "style" => {
                     self.style = match keyword.as_str() {
-                        "I" | "IGNORE" => Some(codec::entities::HatchStyleType::Ignore),
-                        "O" | "OUTER" => Some(codec::entities::HatchStyleType::Outer),
-                        "N" | "NORMAL" => Some(codec::entities::HatchStyleType::Normal),
+                        "I" | "IGNORE" => Some(document::entities::HatchStyleType::Ignore),
+                        "O" | "OUTER" => Some(document::entities::HatchStyleType::Outer),
+                        "N" | "NORMAL" => Some(document::entities::HatchStyleType::Normal),
                         _ => return Some(CmdResult::NeedPoint),
                     };
                     return self.apply_result(self.update_operation());
@@ -750,9 +750,9 @@ impl CadCommand for HatcheditCommand {
         }
         if let Some(rest) = text.strip_prefix('Y') {
             self.style = match rest.trim() {
-                "NORMAL" | "N" => Some(codec::entities::HatchStyleType::Normal),
-                "OUTER" | "O" => Some(codec::entities::HatchStyleType::Outer),
-                "IGNORE" | "I" => Some(codec::entities::HatchStyleType::Ignore),
+                "NORMAL" | "N" => Some(document::entities::HatchStyleType::Normal),
+                "OUTER" | "O" => Some(document::entities::HatchStyleType::Outer),
+                "IGNORE" | "I" => Some(document::entities::HatchStyleType::Ignore),
                 _ => self.style,
             };
             return Some(CmdResult::NeedPoint);
@@ -907,10 +907,10 @@ impl CadCommand for HatcheditCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::hatch::{BoundaryEdge, BoundaryPath, EllipticArcEdge, LineEdge};
-    use codec::entities::{Hatch, HatchStyleType};
-    use codec::types::{Color, Transparency, Vector2};
-    use codec::EntityType;
+    use document::entities::hatch::{BoundaryEdge, BoundaryPath, EllipticArcEdge, LineEdge};
+    use document::entities::{Hatch, HatchStyleType};
+    use document::types::{Color, Transparency, Vector2};
+    use document::EntityType;
 
     fn hatch_command() -> HatcheditCommand {
         let mut hatch = Hatch::new();

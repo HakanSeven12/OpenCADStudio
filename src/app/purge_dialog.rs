@@ -25,7 +25,7 @@ impl PurgeOnly {
 impl OpenCADStudio {
     fn purge_lists(&self) -> [Vec<String>; KINDS] {
         let i = self.active_tab;
-        let open_edits: Vec<codec::Handle> = self.tabs[i]
+        let open_edits: Vec<document::Handle> = self.tabs[i]
             .block_edits
             .iter()
             .map(|session| session.br_handle)

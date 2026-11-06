@@ -428,12 +428,12 @@ fn checked_manifest(toml_text: &str) -> Result<external::ExternalPlugin, String>
     if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(source) = manifest.acadrust_source.as_deref() else {
             return Err(
-                "Release has no opencadcodec source; cannot verify ABI compatibility".to_string(),
+                "Release has no codec source; cannot verify ABI compatibility".to_string(),
             );
         };
         if source.is_empty() {
             return Err(
-                "Release has no opencadcodec source; cannot verify ABI compatibility".to_string(),
+                "Release has no codec source; cannot verify ABI compatibility".to_string(),
             );
         }
         if !ocs_plugin_api::version_info::acadrust_sources_compatible(
@@ -446,7 +446,7 @@ fn checked_manifest(toml_text: &str) -> Result<external::ExternalPlugin, String>
             let host_hash =
                 ocs_plugin_api::version_info::acadrust_source_hash(host_src).unwrap_or("unknown");
             return Err(format!(
-                "Plugin built for opencadcodec @{plugin_hash}, but this host uses @{host_hash}"
+                "Plugin built for codec @{plugin_hash}, but this host uses @{host_hash}"
             ));
         }
     }

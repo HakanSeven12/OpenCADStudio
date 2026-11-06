@@ -1,6 +1,6 @@
-use codec::entities::{Dimension, DimensionRadius};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::{Dimension, DimensionRadius};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 
 use crate::command::{
     CadCommand, CmdOption, CmdResult, DimensionAssociationInput, DimensionPreview, InputKind,

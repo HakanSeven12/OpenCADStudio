@@ -312,7 +312,7 @@ impl OpenCADStudio {
                                         .map(PathBuf::from)
                                 };
                                 for e in doc.entities() {
-                                    if let codec::EntityType::RasterImage(img) = e {
+                                    if let document::EntityType::RasterImage(img) = e {
                                         let raw = img.file_path.trim();
                                         if !raw.is_empty() {
                                             note(raw, file(raw));
@@ -320,7 +320,7 @@ impl OpenCADStudio {
                                     }
                                 }
                                 for o in doc.objects.values() {
-                                    if let codec::objects::ObjectType::UnderlayDefinition(d) = o {
+                                    if let document::objects::ObjectType::UnderlayDefinition(d) = o {
                                         let raw = d.file_path.trim();
                                         if !raw.is_empty() {
                                             note(raw, file(raw));
@@ -1103,7 +1103,7 @@ impl OpenCADStudio {
         // Raster images — picked/dropped bytes registered for the reference
         // stand in for the file native would copy.
         for e in self.tabs[i].scene.document.entities() {
-            if let codec::EntityType::RasterImage(img) = e {
+            if let document::EntityType::RasterImage(img) = e {
                 if img.file_path.trim().is_empty() {
                     continue;
                 }
@@ -1120,8 +1120,8 @@ impl OpenCADStudio {
 
         // PDF underlays — bytes registered at attach time.
         for o in self.tabs[i].scene.document.objects.values() {
-            if let codec::objects::ObjectType::UnderlayDefinition(def) = o {
-                if !matches!(def.underlay_type, codec::entities::UnderlayType::Pdf)
+            if let document::objects::ObjectType::UnderlayDefinition(def) = o {
+                if !matches!(def.underlay_type, document::entities::UnderlayType::Pdf)
                     || def.file_path.trim().is_empty()
                 {
                     continue;
@@ -1146,7 +1146,7 @@ impl OpenCADStudio {
             .objects
             .values()
             .filter_map(|o| {
-                if let codec::objects::ObjectType::Layout(l) = o {
+                if let document::objects::ObjectType::Layout(l) = o {
                     Some(l.plot_style_sheet.clone())
                 } else {
                     None
@@ -1312,7 +1312,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ocs-batch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("a 1.dxf");
-        let doc = codec::Document::new();
+        let doc = document::Document::new();
         std::fs::write(&a, crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap()).unwrap();
         let out = dir.join("out file.dwg");
         let _ = std::fs::remove_file(&out);
@@ -1341,7 +1341,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ocs-batch-exit-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let a = dir.join("a.dxf");
-        let doc = codec::Document::new();
+        let doc = document::Document::new();
         std::fs::write(&a, crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap()).unwrap();
         let mut app = OpenCADStudio::new_for_test();
         let text = format!("OPEN \"{}\"\nCIRCLE 0,0 5\nEXIT\nY\nCIRCLE 1,1 2\n", a.display());

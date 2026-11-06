@@ -51,7 +51,7 @@ fn edit(app: &mut OpenCADStudio, field: &'static str, value: &str) {
     let _ = app.update(Message::PropGeomCommit(field));
 }
 
-fn labels(doc: &codec::Document, def: Handle, parameter: Handle) -> Vec<String> {
+fn labels(doc: &document::Document, def: Handle, parameter: Handle) -> Vec<String> {
     metadata::read(doc, def, parameter)
         .unwrap()
         .text
@@ -173,7 +173,7 @@ fn batch_reference_properties_edit_common_numeric_and_state_rows() {
     let last = *app.tabs[i].properties.source_handles.last().unwrap();
     let doc = &mut app.tabs[i].scene.document;
     let dictionary = doc.ensure_extension_dictionary(last);
-    let Some(codec::objects::ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&dictionary)
+    let Some(document::objects::ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&dictionary)
     else {
         panic!()
     };

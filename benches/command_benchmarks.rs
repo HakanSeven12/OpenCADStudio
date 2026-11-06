@@ -7,13 +7,13 @@ mod harness;
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::entities::{
+use document::entities::{
     Circle, Dimension, DimensionLinear, Insert, Line, LwPolyline, LwVertex, MLine, Point,
     Polyline2D, Polyline3D, Ray, Solid, Text, Vertex2D, Vertex3DPolyline,
 };
-use codec::tables::BlockRecord;
-use codec::types::{Vector2, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::tables::BlockRecord;
+use document::types::{Vector2, Vector3};
+use document::{Document, EntityType, Handle};
 
 use harness::BenchmarkRunner;
 use OpenCADStudio::modules::draw::modify::explode::{apply_explode_replacements, explode_batch};

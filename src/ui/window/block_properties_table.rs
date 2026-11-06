@@ -1,6 +1,6 @@
 use crate::app::Message;
 use crate::scene::block_properties_table::{Column, TableView};
-use codec::Handle;
+use document::Handle;
 use iced::{
     widget::{button, column, container, pick_list, row, scrollable, text, text_input, Space},
     Element, Fill,

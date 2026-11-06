@@ -4,7 +4,7 @@
 //! every other object wholly outside it is erased. Objects across its
 //! boundary that cannot be cut stay whole.
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use rustc_hash::FxHashMap;
 
@@ -67,7 +67,7 @@ impl Scene {
                 Some(EntityType::Extended(extended))
                     if matches!(
                         extended.data,
-                        codec::entities::ExtendedEntityData::SectionObject(_)
+                        document::entities::ExtendedEntityData::SectionObject(_)
                     )
             )
         };
@@ -83,7 +83,7 @@ impl Scene {
             .entities()
             .filter(|entity| match entity {
                 EntityType::Extended(extended) => match &extended.data {
-                    codec::entities::ExtendedEntityData::SectionObject(data) => {
+                    document::entities::ExtendedEntityData::SectionObject(data) => {
                         let owner = extended.common.owner_handle;
                         data.flags & 1 != 0
                             && !extended.common.invisible
@@ -103,7 +103,7 @@ impl Scene {
         let Some(EntityType::Extended(extended)) = self.document.get_entity(section) else {
             return None;
         };
-        let codec::entities::ExtendedEntityData::SectionObject(data) = &extended.data else {
+        let document::entities::ExtendedEntityData::SectionObject(data) = &extended.data else {
             return None;
         };
         let slice_depth = crate::entities::extended::section_is_slice(extended)

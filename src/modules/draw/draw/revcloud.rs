@@ -1,8 +1,8 @@
 // REVCLOUD command — lay a revision cloud along a rectangle, a polygon, a
 // freehand path or an object, or reshape part of one (Modify).
 
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{Curve, Polyline, PolylineVertex};
 use kernel::space::{PlanarCurve, Vec3};

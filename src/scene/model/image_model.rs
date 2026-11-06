@@ -58,8 +58,8 @@ fn quad_verts(corners: &[[f32; 3]; 4], corners_low: &[[f32; 3]; 4]) -> Vec<Image
 /// image rectangle when unclipped, else the clip rectangle or the triangulated
 /// clip polygon, or the image with the polygon cut out when the boundary
 /// hides its inside.
-fn clip_triangles_px(img: &codec::entities::RasterImage) -> Vec<[f64; 2]> {
-    use codec::entities::ClipMode;
+fn clip_triangles_px(img: &document::entities::RasterImage) -> Vec<[f64; 2]> {
+    use document::entities::ClipMode;
     let w = img.size.x;
     let h = img.size.y;
     let quad = || vec![[0.0, 0.0], [w, 0.0], [w, h], [0.0, 0.0], [w, h], [0.0, h]];
@@ -124,12 +124,12 @@ pub struct ImageModel {
 /// the background: contrast, monochrome, the background adjustment and (DGN)
 /// the fade.
 pub(crate) fn underlay_adjust(
-    u: &codec::entities::Underlay,
-    def: &codec::entities::UnderlayDefinition,
+    u: &document::entities::Underlay,
+    def: &document::entities::UnderlayDefinition,
     background: [f32; 4],
 ) -> super::pdf_raster::PageAdjust {
     use super::pdf_raster::PageAdjust;
-    use codec::entities::{UnderlayDisplayFlags, UnderlayType};
+    use document::entities::{UnderlayDisplayFlags, UnderlayType};
     let page = crate::entities::underlay::page_of(def);
     // Dark means an HSL lightness under one half: pure blue counts as
     // light, (0, 128, 0) as dark.
@@ -180,7 +180,7 @@ pub(crate) fn underlay_adjust(
 impl ImageModel {
     /// Build an ImageModel from a DXF RasterImage entity.
     /// Returns `None` if the image file cannot be opened or decoded.
-    pub fn from_raster_image(img: &codec::entities::RasterImage) -> Option<Self> {
+    pub fn from_raster_image(img: &document::entities::RasterImage) -> Option<Self> {
         let w = img.size.x;
         let h = img.size.y;
         // A degenerate or non-finite size/vectors (hostile entity data)
@@ -189,7 +189,7 @@ impl ImageModel {
         if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
             return None;
         }
-        let vector_ok = |v: &codec::Vector3| {
+        let vector_ok = |v: &document::Vector3| {
             let (x, y, z) = (v.x, v.y, v.z);
             x.is_finite() && y.is_finite() && z.is_finite() && (x != 0.0 || y != 0.0 || z != 0.0)
         };
@@ -268,7 +268,7 @@ impl ImageModel {
             pixelated: true,
             use_alpha: img
                 .flags
-                .contains(codec::entities::ImageDisplayFlags::TRANSPARENCY_ON),
+                .contains(document::entities::ImageDisplayFlags::TRANSPARENCY_ON),
         })
     }
 }
@@ -289,13 +289,13 @@ impl ImageModel {
     /// the size it shows on screen (full size when `None` or when larger),
     /// so thin lines stay one crisp pixel wide when zoomed out.
     pub fn from_underlay(
-        u: &codec::entities::Underlay,
-        def: &codec::entities::UnderlayDefinition,
+        u: &document::entities::Underlay,
+        def: &document::entities::UnderlayDefinition,
         background: [f32; 4],
         world_per_pixel: Option<f64>,
     ) -> Option<Self> {
         use super::pdf_raster;
-        use codec::entities::{UnderlayDisplayFlags, UnderlayType};
+        use document::entities::{UnderlayDisplayFlags, UnderlayType};
         if !u.flags.contains(UnderlayDisplayFlags::ON) {
             return None;
         }
@@ -405,9 +405,9 @@ impl ImageModel {
 /// Visible region of an underlay page as triangles in page UV (0..1, y up):
 /// the whole page, the clip polygon, or — for an inverted clip — the page
 /// with the polygon cut out.
-fn underlay_visible_uv(u: &codec::entities::Underlay, rect: [f64; 4]) -> Vec<[f64; 2]> {
+fn underlay_visible_uv(u: &document::entities::Underlay, rect: [f64; 4]) -> Vec<[f64; 2]> {
     let (page_w, page_h) = (rect[2] - rect[0], rect[3] - rect[1]);
-    use codec::entities::UnderlayDisplayFlags;
+    use document::entities::UnderlayDisplayFlags;
     let page = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let whole = || {
         vec![
@@ -444,7 +444,7 @@ impl ImageModel {
     /// metafile picture (rasterized by the `gdi` player); returns `None` when
     /// the frame is degenerate or nothing in the blob decodes, so the caller
     /// falls back to the frame placeholder.
-    pub fn from_ole2frame(ole: &codec::entities::Ole2Frame) -> Option<Self> {
+    pub fn from_ole2frame(ole: &document::entities::Ole2Frame) -> Option<Self> {
         if crate::entities::ole2frame::hidden(ole) {
             return None;
         }

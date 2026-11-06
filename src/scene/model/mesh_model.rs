@@ -21,7 +21,7 @@ pub struct MeshModel {
     /// Optional AcDbMaterial handle per triangle. Empty means the whole mesh
     /// uses `MeshLodSet::material`; otherwise each entry aligns with one
     /// `indices` triplet and overrides the entity material for that face.
-    pub triangle_material_handles: Vec<Option<codec::Handle>>,
+    pub triangle_material_handles: Vec<Option<document::Handle>>,
     /// Optional ACIS face colour per triangle, aligned with `indices` triplets.
     pub triangle_colors: Vec<Option<[f32; 4]>>,
     /// RGBA colour in [0, 1].
@@ -105,7 +105,7 @@ pub struct MeshLodSet {
     /// Face-level ACIS material overrides, resolved from each LOD's
     /// `triangle_material_handles`. Only handles actually referenced by the
     /// tessellation are retained.
-    pub face_materials: rustc_hash::FxHashMap<codec::Handle, super::material_model::MeshMaterial>,
+    pub face_materials: rustc_hash::FxHashMap<document::Handle, super::material_model::MeshMaterial>,
     /// Effective AcDbVisualStyle override resolved from the entity's full,
     /// face and edge style handles.
     pub visual_style: Option<super::visual_style_model::MeshVisualStyle>,
@@ -140,9 +140,9 @@ pub struct MeshLodSet {
     /// block entity. Top-level meshes leave this empty.
     pub instance_source: Option<std::sync::Arc<MeshInstanceSource>>,
     /// Accumulated block-local → world transform for this rendered instance.
-    pub instance_transform: Option<codec::types::Transform>,
+    pub instance_transform: Option<document::types::Transform>,
     /// Parent INSERT selected for this rendered block instance.
-    pub instance_handle: Option<codec::Handle>,
+    pub instance_handle: Option<document::Handle>,
     /// Effective colour after INSERT inheritance, without copying the mesh.
     pub instance_color: Option<[f32; 4]>,
     /// Colour of the edge and silhouette lines when it differs from the
@@ -154,7 +154,7 @@ pub struct MeshLodSet {
 
 #[derive(Clone, Debug)]
 pub struct MeshInstanceSource {
-    pub handle: codec::Handle,
+    pub handle: document::Handle,
     pub lods: Vec<MeshModel>,
     pub edge_verts: Vec<[f32; 3]>,
     pub edge_verts_low: Vec<[f32; 3]>,
@@ -273,7 +273,7 @@ impl MeshLodSet {
         self.z_aabb = z;
     }
 
-    pub fn prepare_instance_source(&mut self, handle: codec::Handle) {
+    pub fn prepare_instance_source(&mut self, handle: document::Handle) {
         self.instance_source = Some(std::sync::Arc::new(MeshInstanceSource {
             handle,
             lods: self.lods.clone(),
@@ -305,12 +305,12 @@ impl MeshLodSet {
         )
     }
 
-    pub fn entity_handle(&self) -> Option<codec::Handle> {
+    pub fn entity_handle(&self) -> Option<document::Handle> {
         self.instance_handle.or_else(|| {
             self.lods
                 .first()
                 .and_then(|mesh| mesh.name.parse::<u64>().ok())
-                .map(codec::Handle::new)
+                .map(document::Handle::new)
         })
     }
 

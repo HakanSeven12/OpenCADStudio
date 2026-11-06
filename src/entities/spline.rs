@@ -1,4 +1,4 @@
-use codec::entities::Spline;
+use document::entities::Spline;
 use kernel::geom2d::Curve as KernelCurve;
 use kernel::space::{NurbsCurve3, Parameterization};
 
@@ -49,7 +49,7 @@ pub(crate) fn fit_nurbs3(spline: &Spline) -> Option<NurbsCurve3> {
             points.push(first);
         }
     }
-    let tangent = |value: codec::types::Vector3| {
+    let tangent = |value: document::types::Vector3| {
         let value = [value.x, value.y, value.z];
         (value
             .iter()
@@ -185,9 +185,9 @@ fn clamped(
 /// fit data of a fit-method spline and one period of a periodic spline, so
 /// give each such spline in `doc` its full NURBS before a DXF write. The fit
 /// data and flags stay; only control points, knots and weights are added.
-pub(crate) fn complete_nurbs_for_dxf(doc: &mut codec::Document) {
+pub(crate) fn complete_nurbs_for_dxf(doc: &mut document::Document) {
     for entity in doc.entities_mut() {
-        let codec::EntityType::Spline(spline) = entity else {
+        let document::EntityType::Spline(spline) = entity else {
             continue;
         };
         let curve = if uses_fit_method(spline) {
@@ -195,7 +195,7 @@ pub(crate) fn complete_nurbs_for_dxf(doc: &mut codec::Document) {
         } else if let Some((points, knots, weights)) = unwrapped_periodic(spline) {
             // Readers apply their own wrap to an unclamped periodic form and
             // draw an extra tail; the clamped equivalent reads the same
-            // everywhere (opencadcodec#149).
+            // everywhere (document#149).
             let degree = spline.degree.max(0) as usize;
             clamped(degree, points, knots, weights).and_then(|(points, knots, weights)| {
                 NurbsCurve3::new_strict(degree, points, knots, weights)
@@ -211,7 +211,7 @@ pub(crate) fn complete_nurbs_for_dxf(doc: &mut codec::Document) {
         spline.control_points = curve
             .control_points()
             .iter()
-            .map(|point| codec::types::Vector3::new(point[0], point[1], point[2]))
+            .map(|point| document::types::Vector3::new(point[0], point[1], point[2]))
             .collect();
         spline.weights = curve.weights().to_vec();
     }
@@ -261,7 +261,7 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
     spline.control_points = curve
         .control_points()
         .iter()
-        .map(|point| codec::types::Vector3::new(point[0], point[1], point[2]))
+        .map(|point| document::types::Vector3::new(point[0], point[1], point[2]))
         .collect();
     spline.weights = curve.weights().to_vec();
     if !fit_points.is_empty() {
@@ -274,8 +274,8 @@ pub(crate) fn replace_with_nurbs(spline: &mut Spline, curve: &NurbsCurve3) {
         }
     }
     spline.fit_points = fit_points;
-    spline.begin_tangent = codec::types::Vector3::ZERO;
-    spline.end_tangent = codec::types::Vector3::ZERO;
+    spline.begin_tangent = document::types::Vector3::ZERO;
+    spline.end_tangent = document::types::Vector3::ZERO;
     spline.flags.rational = spline
         .weights
         .windows(2)
@@ -481,7 +481,7 @@ pub(crate) fn measurement_polyline(spl: &Spline) -> Vec<[f64; 3]> {
 /// Sample a Catmull-Rom spline through `pts` into a dense polyline. The curve
 /// passes through every input point; open ends use reflected phantom points so
 /// they don't kink, closed curves wrap around.
-fn catmull_rom_polyline(pts: &[codec::types::Vector3], closed: bool) -> Vec<[f64; 3]> {
+fn catmull_rom_polyline(pts: &[document::types::Vector3], closed: bool) -> Vec<[f64; 3]> {
     let n = pts.len();
     if n < 2 {
         return pts.iter().map(|p| [p.x, p.y, p.z]).collect();
@@ -651,7 +651,7 @@ fn fit_spline_slopes(spl: &Spline, p: &[[f64; 3]]) -> Option<(Vec<f64>, [Vec<f64
     }
     let h: Vec<f64> = (0..n - 1).map(|i| (t[i + 1] - t[i]).max(1e-9)).collect();
 
-    let nonzero = |v: &codec::types::Vector3| v.x * v.x + v.y * v.y + v.z * v.z > 1e-18;
+    let nonzero = |v: &document::types::Vector3| v.x * v.x + v.y * v.y + v.z * v.z > 1e-18;
     let begin = nonzero(&spl.begin_tangent).then(|| {
         [
             spl.begin_tangent.x,
@@ -722,7 +722,7 @@ fn thomas_solve(a: &[f64], b: &[f64], c: &[f64], d: &mut [f64]) {
 
 pub(crate) const SPLINE_MODE_GRIP_ID: usize = usize::MAX - 1;
 
-fn control_vertices(spline: &Spline) -> Vec<codec::types::Vector3> {
+fn control_vertices(spline: &Spline) -> Vec<document::types::Vector3> {
     if !uses_fit_method(spline) {
         return spline.control_points.clone();
     }
@@ -737,7 +737,7 @@ fn control_vertices(spline: &Spline) -> Vec<codec::types::Vector3> {
         .iter()
         .map(|point| {
             let point = planar.plane.point_at(*point);
-            codec::types::Vector3::new(point[0], point[1], point[2])
+            document::types::Vector3::new(point[0], point[1], point[2])
         })
         .collect()
 }
@@ -774,8 +774,8 @@ fn convert_to_control_method(spline: &mut Spline) -> bool {
         let valid = spline.control_points.len() >= 2;
         if valid {
             spline.fit_points.clear();
-            spline.begin_tangent = codec::types::Vector3::ZERO;
-            spline.end_tangent = codec::types::Vector3::ZERO;
+            spline.begin_tangent = document::types::Vector3::ZERO;
+            spline.end_tangent = document::types::Vector3::ZERO;
             spline.dwg_flags1 &= !1;
             spline.dxf_flags &= !(32 | 1024);
         }
@@ -794,7 +794,7 @@ fn convert_to_control_method(spline: &mut Spline) -> bool {
         .iter()
         .map(|point| {
             let point = planar.plane.point_at(*point);
-            codec::types::Vector3::new(point[0], point[1], point[2])
+            document::types::Vector3::new(point[0], point[1], point[2])
         })
         .collect();
     spline.weights = if curve.is_rational() {
@@ -805,8 +805,8 @@ fn convert_to_control_method(spline: &mut Spline) -> bool {
     spline.flags.rational = curve.is_rational();
     spline.flags.planar = true;
     spline.fit_points.clear();
-    spline.begin_tangent = codec::types::Vector3::ZERO;
-    spline.end_tangent = codec::types::Vector3::ZERO;
+    spline.begin_tangent = document::types::Vector3::ZERO;
+    spline.end_tangent = document::types::Vector3::ZERO;
     true
 }
 
@@ -826,7 +826,7 @@ fn convert_to_fit_method(spline: &mut Spline) -> bool {
     true
 }
 
-fn derived_fit_points(spline: &Spline) -> Vec<codec::types::Vector3> {
+fn derived_fit_points(spline: &Spline) -> Vec<document::types::Vector3> {
     if spline.flags.closed || spline.flags.periodic {
         return Vec::new();
     }
@@ -854,7 +854,7 @@ fn derived_fit_points(spline: &Spline) -> Vec<codec::types::Vector3> {
         .into_iter()
         .map(|parameter| {
             let point = curve.point_at_knot(parameter);
-            codec::types::Vector3::new(point[0], point[1], point[2])
+            document::types::Vector3::new(point[0], point[1], point[2])
         })
         .collect()
 }
@@ -1305,7 +1305,7 @@ fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
     {
         let transform =
             crate::scene::view::transform::reflection_about_working_line(*p1, *p2, *working_normal);
-        codec::Entity::apply_transform(spline, &transform);
+        document::Entity::apply_transform(spline, &transform);
         spline.flags.planar = crate::entities::curve::spline_is_planar(spline);
         return;
     }
@@ -1321,7 +1321,7 @@ fn apply_transform(spline: &mut Spline, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Spline {
-    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &document::Document) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
@@ -1418,7 +1418,7 @@ impl crate::entities::traits::Transformable for Spline {
 #[cfg(test)]
 mod tests {
     /// The clamped periodic form draws the same loop and has clamped ends,
-    /// so DXF readers need no wrap of their own (opencadcodec#149).
+    /// so DXF readers need no wrap of their own (document#149).
     #[test]
     fn a_clamped_periodic_spline_is_the_same_closed_loop() {
         let degree = 2;
@@ -1457,11 +1457,11 @@ mod tests {
         let mut spline = Spline::default();
         spline.degree = 3;
         spline.control_points = vec![
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(1.0, 2.0, 0.0),
-            codec::types::Vector3::new(3.0, 3.0, 1.0),
-            codec::types::Vector3::new(5.0, 2.0, 0.0),
-            codec::types::Vector3::new(6.0, 0.0, 1.0),
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(1.0, 2.0, 0.0),
+            document::types::Vector3::new(3.0, 3.0, 1.0),
+            document::types::Vector3::new(5.0, 2.0, 0.0),
+            document::types::Vector3::new(6.0, 0.0, 1.0),
         ];
         spline.knots = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         let pts = spline_knot_points(&spline);
@@ -1484,9 +1484,9 @@ mod tests {
         let mut spline = Spline::default();
         spline.degree = 3;
         spline.fit_points = vec![
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(4.0, 0.0, 1.0),
-            codec::types::Vector3::new(4.0, 3.0, 2.0),
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(4.0, 0.0, 1.0),
+            document::types::Vector3::new(4.0, 3.0, 2.0),
         ];
         assert!(spline_knot_points(&spline).is_empty());
     }
@@ -1496,12 +1496,12 @@ mod tests {
         let mut spline = Spline::default();
         spline.degree = 3;
         spline.flags.closed = true;
-        spline.control_points.push(codec::types::Vector3::ZERO);
+        spline.control_points.push(document::types::Vector3::ZERO);
         spline.fit_points = vec![
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(4.0, 0.0, 1.0),
-            codec::types::Vector3::new(4.0, 3.0, 2.0),
-            codec::types::Vector3::new(0.0, 3.0, 1.0),
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(4.0, 0.0, 1.0),
+            document::types::Vector3::new(4.0, 3.0, 2.0),
+            document::types::Vector3::new(0.0, 3.0, 1.0),
         ];
 
         let bounds = fit_geometry_bounds(&spline).unwrap();
@@ -1520,8 +1520,8 @@ mod tests {
     fn fit_tolerance_is_editable_and_rejects_invalid_values() {
         let mut spline = Spline::default();
         spline.fit_points = vec![
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::new(1.0, 0.0, 0.0),
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(1.0, 0.0, 0.0),
         ];
         spline.fit_tolerance = 0.25;
 
@@ -1544,8 +1544,8 @@ mod tests {
     fn tangent_properties_edit_only_the_stored_component() {
         let mut spline = Spline::default();
         spline.fit_points = vec![
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::new(1.0, 1.0, 0.0),
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(1.0, 1.0, 0.0),
         ];
 
         let start_y = properties(&spline)
@@ -1558,7 +1558,7 @@ mod tests {
         apply_geom_prop(&mut spline, "start_tan_y", "2.5");
         assert_eq!(
             spline.begin_tangent,
-            codec::types::Vector3::new(0.0, 2.5, 0.0)
+            document::types::Vector3::new(0.0, 2.5, 0.0)
         );
     }
 
@@ -1567,10 +1567,10 @@ mod tests {
         let mut spline = Spline::default();
         spline.degree = 3;
         spline.control_points = vec![
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(1.0, 3.0, 0.0),
-            codec::types::Vector3::new(4.0, 3.0, 0.0),
-            codec::types::Vector3::new(5.0, 0.0, 0.0),
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(1.0, 3.0, 0.0),
+            document::types::Vector3::new(4.0, 3.0, 0.0),
+            document::types::Vector3::new(5.0, 0.0, 0.0),
         ];
         spline.knots = kernel::space::clamped_uniform_knots(3, 4);
         let before = nurbs3(&spline).unwrap().point_at(0.37);

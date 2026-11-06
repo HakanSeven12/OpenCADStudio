@@ -1,4 +1,4 @@
-use codec::entities::Ellipse;
+use document::entities::Ellipse;
 use kernel::geom2d::{
     Curve as KernelCurve, EllipseArc as KernelEllipseArc, Tolerance, Vec2 as KernelVec2,
 };
@@ -356,7 +356,7 @@ fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
     // parameters — under rotate, scale, affine and mirror alike.
     crate::scene::view::transform::apply_standard_entity_transform(ell, t, |entity, p1, p2| {
         let normal = entity.normal;
-        codec::Entity::apply_mirror(
+        document::Entity::apply_mirror(
             entity,
             &crate::scene::view::transform::reflection_about_xy_line(p1, p2),
         );
@@ -375,14 +375,14 @@ fn apply_transform(ell: &mut Ellipse, t: &EntityTransform) {
 }
 
 impl RenderConvertible for Ellipse {
-    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &document::Document) -> Option<RenderEntity> {
         Some(to_render(self))
     }
 }
 
 crate::impl_entity_basics!(Ellipse);
 
-impl crate::entities::traits::MassPropsCalc for codec::entities::Ellipse {
+impl crate::entities::traits::MassPropsCalc for document::entities::Ellipse {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         use std::f64::consts::{PI, TAU};
         let e = self;
@@ -459,7 +459,7 @@ mod grip_tests {
         e.minor_axis_ratio = ratio;
         e
     }
-    fn xy_len(v: &codec::entities::Ellipse) -> f64 {
+    fn xy_len(v: &document::entities::Ellipse) -> f64 {
         (v.major_axis.x * v.major_axis.x + v.major_axis.y * v.major_axis.y).sqrt()
     }
 

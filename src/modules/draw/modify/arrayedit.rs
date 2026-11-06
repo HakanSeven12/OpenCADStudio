@@ -5,7 +5,7 @@
 // brings them all back to their places.
 
 use crate::command::{CadCommand, CmdOption, CmdResult};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 enum Step {

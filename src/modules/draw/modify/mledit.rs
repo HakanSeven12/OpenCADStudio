@@ -1,6 +1,6 @@
-use codec::entities::MLine;
-use codec::objects::MLineStyle;
-use codec::{EntityType, Handle};
+use document::entities::MLine;
+use document::objects::MLineStyle;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{Curve, Line};
 use kernel::space::{PlanarCurve, Plane, Vec3 as KernelVec3};
@@ -92,7 +92,7 @@ impl MlineEditCommand {
                 }
                 let insert = segment + 1;
                 let mut vertex = mline.vertices[segment].clone();
-                vertex.position = codec::types::Vector3::new(projected.x, projected.y, projected.z);
+                vertex.position = document::types::Vector3::new(projected.x, projected.y, projected.z);
                 mline.vertices.insert(insert, vertex);
                 crate::entities::mline::rebuild_mline_geometry(&mut mline);
                 crate::modules::draw::draw::mline::sync_mline_element_parameters(
@@ -689,7 +689,7 @@ fn snapshot_segment_data(
     mline: &MLine,
     segment: usize,
     normal: DVec3,
-) -> Option<Vec<(codec::entities::MLineSegment, f64)>> {
+) -> Option<Vec<(document::entities::MLineSegment, f64)>> {
     (0..mline.style_element_count)
         .map(|element| {
             let endpoints = element_segment(mline, segment, element)?;
@@ -705,7 +705,7 @@ fn restore_shifted_segment_data(
     mline: &mut MLine,
     segment: usize,
     normal: DVec3,
-    source: Vec<(codec::entities::MLineSegment, f64)>,
+    source: Vec<(document::entities::MLineSegment, f64)>,
     moved_start: bool,
 ) {
     for (element, (source, source_length)) in source.into_iter().enumerate() {
@@ -1033,7 +1033,7 @@ fn move_closest_end(mline: &mut MLine, style: &MLineStyle, index: usize, interse
         snapshot_segment_data(mline, segment, normal).map(|data| (segment, data))
     });
     mline.vertices[index].position =
-        codec::types::Vector3::new(intersection.x, intersection.y, intersection.z);
+        document::types::Vector3::new(intersection.x, intersection.y, intersection.z);
     crate::entities::mline::rebuild_mline_geometry(mline);
     crate::modules::draw::draw::mline::sync_mline_element_parameters(mline, style);
     restore_shifted_segment_data(mline, segment, normal, source, index == 0);
@@ -1112,8 +1112,8 @@ mod trim_tests {
     fn trim_cuts_every_element_between_its_edges() {
         let mut mline = MLine::new();
         mline.style_element_count = 2;
-        mline.add_vertex(codec::types::Vector3::new(0.0, 0.0, 0.0));
-        mline.add_vertex(codec::types::Vector3::new(10.0, 0.0, 0.0));
+        mline.add_vertex(document::types::Vector3::new(0.0, 0.0, 0.0));
+        mline.add_vertex(document::types::Vector3::new(10.0, 0.0, 0.0));
         for vertex in &mut mline.vertices {
             for (element, offset) in [1.0, -1.0].into_iter().enumerate() {
                 vertex.segments[element].parameters = vec![offset, 0.0];
@@ -1127,10 +1127,10 @@ mod trim_tests {
             assert_eq!(drawn_ranges(&data.parameters, 10.0), vec![(0.0, 3.0), (7.0, 10.0)]);
         }
         // The fill between the outer lines leaves the same gap.
-        let mut style = codec::objects::MLineStyle::new("FILLED");
+        let mut style = document::objects::MLineStyle::new("FILLED");
         style.elements = vec![
-            codec::objects::MLineStyleElement::new(1.0),
-            codec::objects::MLineStyleElement::new(-1.0),
+            document::objects::MLineStyleElement::new(1.0),
+            document::objects::MLineStyleElement::new(-1.0),
         ];
         style.flags.fill_on = true;
         let fill = crate::entities::mline::mline_fill_triangles_with_style(&trimmed, &style);

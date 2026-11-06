@@ -4,7 +4,7 @@
 // the other kinds. Each dimension is made by the matching dimension command
 // running inside DIM; after it DIM asks again until Enter.
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{

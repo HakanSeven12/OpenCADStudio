@@ -1,7 +1,7 @@
 //! Reuse the command host's point picking and object-set selection.
 use crate::command::{CadCommand, CmdOption, CmdResult, PointPickContext};
 use crate::scene::block_actions::{self as actions, Kind, Parameter, XyKeyPoint};
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {

@@ -81,14 +81,14 @@ fn setup(family: usize, testing: bool) -> (OpenCADStudio, Handle, Handle, Handle
     )
     .unwrap();
     // An unchanged fill must remain visible while the whole reference is hidden.
-    let mut hatch = codec::entities::Hatch::new();
+    let mut hatch = document::entities::Hatch::new();
     hatch.is_solid = true;
-    let mut path = codec::entities::BoundaryPath::new();
-    path.add_edge(codec::entities::BoundaryEdge::Polyline(
-        codec::entities::PolylineEdge::new(
+    let mut path = document::entities::BoundaryPath::new();
+    path.add_edge(document::entities::BoundaryEdge::Polyline(
+        document::entities::PolylineEdge::new(
             [[30., 30.], [32., 30.], [32., 32.], [30., 32.]]
                 .into_iter()
-                .map(|p| codec::types::Vector2::new(p[0], p[1]))
+                .map(|p| document::types::Vector2::new(p[0], p[1]))
                 .collect(),
             true,
         ),
@@ -285,12 +285,12 @@ fn block_parameter_geometry_preview_drops_stale_locked_and_disassociated_targets
                 }
                 _ => {
                     let action = actions::actions(&app.tabs[i].scene.document, def)[0].0;
-                    let codec::objects::ObjectType::DynamicBlock(object) =
+                    let document::objects::ObjectType::DynamicBlock(object) =
                         app.tabs[i].scene.document.objects.get_mut(&action).unwrap()
                     else {
                         panic!()
                     };
-                    let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data
+                    let document::objects::DynamicBlockData::MoveAction(action) = &mut object.data
                     else {
                         panic!()
                     };
@@ -456,19 +456,19 @@ fn setup_point_transport(
         .unwrap()
         .0;
     let doc = &mut app.tabs[i].scene.document;
-    let codec::objects::ObjectType::DynamicBlock(object) = &doc.objects[&root_action] else {
+    let document::objects::ObjectType::DynamicBlock(object) = &doc.objects[&root_action] else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::MoveAction(action) = &object.data else {
+    let document::objects::DynamicBlockData::MoveAction(action) = &object.data else {
         panic!()
     };
     let targets = action.action.dependencies.clone();
     let child = point::create(doc, def, Vector3::UNIT_Y * 5., Vector3::UNIT_Y * 7.).unwrap();
-    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&child).unwrap()
+    let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&child).unwrap()
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+    let document::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
         panic!()
     };
     parameter.parameter.parameter.chain_actions = chained;
@@ -484,12 +484,12 @@ fn setup_point_transport(
         None,
     )
     .unwrap();
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get_mut(&root_action).unwrap()
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+    let document::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
         panic!()
     };
     action.action.dependencies = vec![child];
@@ -578,7 +578,7 @@ fn block_move_point_chain_preview_events_commit_and_undo_effective_point_caches(
 fn block_move_point_chain_properties_refresh_existing_references_and_preserve_undo() {
     let (mut app, insert, _, root, child, action) = setup_point_transport(false, false);
     let i = app.active_tab;
-    let read_line = |doc: &codec::Document| {
+    let read_line = |doc: &document::Document| {
         let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
             panic!()
         };
@@ -693,16 +693,16 @@ fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
         };
         let second_parent = point::create(doc, def, Vector3::ZERO, Vector3::UNIT_Y * 2.).unwrap();
         for handle in [parent, child] {
-            let codec::objects::ObjectType::DynamicBlock(object) =
+            let document::objects::ObjectType::DynamicBlock(object) =
                 doc.objects.get_mut(&handle).unwrap()
             else {
                 panic!()
             };
             match &mut object.data {
-                codec::objects::DynamicBlockData::LinearParameter(p) => {
+                document::objects::DynamicBlockData::LinearParameter(p) => {
                     p.parameter.parameter.chain_actions = true
                 }
-                codec::objects::DynamicBlockData::PointParameter(p) => {
+                document::objects::DynamicBlockData::PointParameter(p) => {
                     p.parameter.parameter.chain_actions = true
                 }
                 _ => panic!(),
@@ -736,20 +736,20 @@ fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
             DVec3::ZERO,
         )
         .unwrap();
-        let codec::objects::ObjectType::DynamicBlock(object) =
+        let document::objects::ObjectType::DynamicBlock(object) =
             doc.objects.get_mut(&second_move).unwrap()
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+        let document::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
             panic!()
         };
         action.action.dependencies = vec![child];
-        let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
+        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&moved).unwrap()
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
+        let document::objects::DynamicBlockData::MoveAction(action) = &mut object.data else {
             panic!()
         };
         action.action.dependencies = vec![member, child];
@@ -781,7 +781,7 @@ fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
         assert!(app.start_test_action_grip(insert, grip));
         let before = app.tabs[i].scene.document.clone();
         let depth = app.tabs[i].history.undo_stack.len();
-        let line = |doc: &codec::Document, handle: Handle| {
+        let line = |doc: &document::Document, handle: Handle| {
             let EntityType::Insert(reference) = doc.get_entity(handle).unwrap() else {
                 panic!()
             };
@@ -1000,7 +1000,7 @@ fn block_mixed_order_and_parameter_transport_grip_undo_redo() {
 fn block_action_set_edits_point_targets_and_refreshes_reference_history() {
     let (mut app, insert, def, root, mut child, action) = setup_point_transport(false, true);
     let i = app.active_tab;
-    let read_line = |doc: &codec::Document| {
+    let read_line = |doc: &document::Document| {
         let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else {
             panic!()
         };
@@ -1034,7 +1034,7 @@ fn block_action_set_edits_point_targets_and_refreshes_reference_history() {
     assert!(read_line(&app.tabs[i].scene.document).distance(original + offset) < 1e-8);
     begin(&mut app, insert);
     child.name = "  Door \"A\"  ".to_owned();
-    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+    let document::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
         .scene
         .document
         .objects
@@ -1043,7 +1043,7 @@ fn block_action_set_edits_point_targets_and_refreshes_reference_history() {
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+    let document::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
         panic!()
     };
     parameter.position_name = child.name.clone();
@@ -1107,13 +1107,13 @@ fn block_action_set_edits_point_targets_and_refreshes_reference_history() {
     let _ = app.dispatch_command("BSAVE");
     let _ = app.dispatch_command("BCLOSE");
     for saved in [
-        codec::DwgReader::from_stream(std::io::Cursor::new(
-            codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap(),
+        document::DwgReader::from_stream(std::io::Cursor::new(
+            document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap(),
         ))
         .read()
         .unwrap(),
-        codec::DxfReader::from_reader(std::io::Cursor::new(
-            codec::DxfWriter::new(&app.tabs[i].scene.document)
+        document::DxfReader::from_reader(std::io::Cursor::new(
+            document::DxfWriter::new(&app.tabs[i].scene.document)
                 .write_to_vec()
                 .unwrap(),
         ))
@@ -1156,7 +1156,7 @@ fn block_action_set_rejects_ambiguous_points_and_transport_cycles_atomically() {
         Vector3::UNIT_Y * 10.,
     )
     .unwrap();
-    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+    let document::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
         .scene
         .document
         .objects
@@ -1165,7 +1165,7 @@ fn block_action_set_rejects_ambiguous_points_and_transport_cycles_atomically() {
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+    let document::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
         panic!()
     };
     parameter.position_name = child.name.clone();
@@ -1234,7 +1234,7 @@ fn block_action_set_rejects_stale_point_name_choices() {
     let _ = app.dispatch_command("BACTIONSET");
     feed(&mut app, "Remove");
     feed(&mut app, &format!("Parameter {}", child.name));
-    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+    let document::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
         .scene
         .document
         .objects
@@ -1243,7 +1243,7 @@ fn block_action_set_rejects_stale_point_name_choices() {
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
+    let document::objects::DynamicBlockData::PointParameter(parameter) = &mut object.data else {
         panic!()
     };
     parameter.position_name = "Changed while selecting".to_owned();
@@ -1347,7 +1347,7 @@ fn block_move_creation_rejects_stale_point_choices() {
         &format!("Parameter {}", serde_json::to_string(&child.name).unwrap()),
     );
     let _ = app.feed_command(crate::command::StepInput::Enter);
-    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
+    let document::objects::ObjectType::DynamicBlock(object) = app.tabs[i]
         .scene
         .document
         .objects
@@ -1356,7 +1356,7 @@ fn block_move_creation_rejects_stale_point_choices() {
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PointParameter(point) = &mut object.data else {
+    let document::objects::DynamicBlockData::PointParameter(point) = &mut object.data else {
         panic!()
     };
     point.position_name = "Changed".to_owned();
@@ -1956,15 +1956,15 @@ fn check_move_parameter_targets(flip: bool) {
         distance::create(doc, def, distance::Kind::Linear, base, end, label)
     }
     .unwrap();
-    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&handle).unwrap()
+    let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&handle).unwrap()
     else {
         panic!()
     };
     match &mut object.data {
-        codec::objects::DynamicBlockData::LinearParameter(p) => {
+        document::objects::DynamicBlockData::LinearParameter(p) => {
             p.distance_name = r#"Door "width""#.into();
         }
-        codec::objects::DynamicBlockData::FlipParameter(p) => {
+        document::objects::DynamicBlockData::FlipParameter(p) => {
             p.flip_label = r#"Door "handing""#.into();
         }
         _ => panic!(),
@@ -2128,12 +2128,12 @@ fn block_move_linear_target_choices_reject_ambiguity_and_stale_names() {
         )
         .unwrap();
         let rename = |app: &mut OpenCADStudio, name: &str| {
-            let codec::objects::ObjectType::DynamicBlock(object) =
+            let document::objects::ObjectType::DynamicBlock(object) =
                 app.tabs[i].scene.document.objects.get_mut(&linear).unwrap()
             else {
                 panic!()
             };
-            let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
+            let document::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
             else {
                 panic!()
             };

@@ -7,7 +7,7 @@ use crate::app::mtext_editor::{
     EditorMenu, FractionPart, JustifyChoice, ListKind, MTextEditorState, MTextFmt, ParaNumber,
     Script,
 };
-use codec::entities::mtext_format::StackingType;
+use document::entities::mtext_format::StackingType;
 use iced::widget::column;
 pub(super) mod popup;
 
@@ -408,7 +408,7 @@ fn more_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 
 fn paragraph_panel(ed: &MTextEditorState) -> Element<'static, Message> {
     let list = ed.list_kind();
-    let exact = ed.line_spacing_style == codec::entities::LineSpacingStyle::Exactly;
+    let exact = ed.line_spacing_style == document::entities::LineSpacingStyle::Exactly;
     let factor = ed
         .line_spacing_draft
         .clone()
@@ -804,7 +804,7 @@ fn background_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 
 /// Normal, vertical or by style set the MTEXT's own drawing direction.
 fn position_panel(ed: &MTextEditorState) -> Element<'static, Message> {
-    use codec::entities::DrawingDirection as D;
+    use document::entities::DrawingDirection as D;
     let panel = Panel::new(title(EditorMenu::Position), 240.0);
     let current = ed.direction_value();
     [

@@ -14,7 +14,7 @@
 //! (total spacing / fill angle). Levels are left to Properties.
 
 use super::assoc_array::{self as array, ArrayKind, AssocArray};
-use codec::{Document, EntityType};
+use document::{Document, EntityType};
 use glam::{DMat4, DVec3};
 use std::f64::consts::TAU;
 
@@ -155,7 +155,7 @@ pub enum Drag {
     },
 }
 
-fn get(params: &[codec::objects::AssocValueParam], name: &str, default: f64) -> f64 {
+fn get(params: &[document::objects::AssocValueParam], name: &str, default: f64) -> f64 {
     array::param_value(params, name).unwrap_or(default)
 }
 
@@ -207,7 +207,7 @@ pub fn drag(document: &Document, array: &AssocArray, kind: Kind) -> Option<Drag>
 /// Everything the arrows of one array are placed and dragged from.
 struct Setup {
     kind: ArrayKind,
-    params: Vec<codec::objects::AssocValueParam>,
+    params: Vec<document::objects::AssocValueParam>,
     points: Vec<([i32; 3], DVec3)>,
     normal: DVec3,
     /// Columns/items axis (rectangular) in world, and its unit length.
@@ -911,14 +911,14 @@ mod tests {
     use super::*;
     use crate::scene::assoc_array::{array_of_insert, create_from_spec, AssocArraySpec};
     use crate::scene::Scene;
-    use codec::entities::{Circle, Line};
+    use document::entities::{Circle, Line};
     use std::f64::consts::{FRAC_PI_2, PI};
 
-    fn circle(scene: &mut Scene, x: f64, y: f64) -> codec::Handle {
+    fn circle(scene: &mut Scene, x: f64, y: f64) -> document::Handle {
         scene.add_entity(EntityType::Circle(Circle::from_coords(x, y, 0.0, 2.0)))
     }
 
-    fn array(scene: &Scene, insert: codec::Handle) -> AssocArray {
+    fn array(scene: &Scene, insert: document::Handle) -> AssocArray {
         array_of_insert(&scene.document, insert).expect("array")
     }
 
@@ -933,12 +933,12 @@ mod tests {
         a.distance(b) < 1e-6
     }
 
-    fn param(scene: &Scene, insert: codec::Handle, name: &str) -> f64 {
+    fn param(scene: &Scene, insert: document::Handle, name: &str) -> f64 {
         let array = array(scene, insert);
         array::param_value(array::value_params(&scene.document, &array), name).unwrap()
     }
 
-    fn item_count(scene: &Scene, insert: codec::Handle) -> usize {
+    fn item_count(scene: &Scene, insert: document::Handle) -> usize {
         let array = array(scene, insert);
         scene
             .document
@@ -957,7 +957,7 @@ mod tests {
             .count()
     }
 
-    fn rectangular(columns: u32, rows: u32) -> (Scene, codec::Handle) {
+    fn rectangular(columns: u32, rows: u32) -> (Scene, document::Handle) {
         let mut scene = Scene::new();
         let source = circle(&mut scene, 0.0, 0.0);
         let spec = AssocArraySpec::Rectangular {
@@ -1061,7 +1061,7 @@ mod tests {
         assert!(grip_at(&grips, Kind::RowAndColumnCount).is_none());
     }
 
-    fn polar(items: u32, fill: f64) -> (Scene, codec::Handle, DVec3) {
+    fn polar(items: u32, fill: f64) -> (Scene, document::Handle, DVec3) {
         let mut scene = Scene::new();
         let source = circle(&mut scene, 50.0, 0.0);
         let spec = AssocArraySpec::Polar {
@@ -1182,7 +1182,7 @@ mod tests {
         );
     }
 
-    fn path(divide: bool) -> (Scene, codec::Handle) {
+    fn path(divide: bool) -> (Scene, document::Handle) {
         let mut scene = Scene::new();
         let source = circle(&mut scene, 0.0, 0.0);
         let path = scene.add_entity(EntityType::Line(Line::from_coords(

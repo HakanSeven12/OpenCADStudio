@@ -19,14 +19,14 @@
 //! shared outcome.
 
 use crate::app::OpenCADStudio;
-use codec::entities::{
+use document::entities::{
     Block as BlockEntity, BlockEnd, Dimension, DimensionAligned, Insert, LeaderContentType, Line,
     MultiLeader,
 };
-use codec::objects::Dictionary;
-use codec::tables::{BlockRecord, DimStyle};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::objects::Dictionary;
+use document::tables::{BlockRecord, DimStyle};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 
 fn app() -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
@@ -318,14 +318,14 @@ fn attach_dynamic_block(app: &mut OpenCADStudio, record: &str) -> (Handle, Handl
     dictionary.owner = record_handle;
     dictionary.add_entry("ACAD_ENHANCEDBLOCK", variants);
     doc.objects
-        .insert(xdict, codec::objects::ObjectType::Dictionary(dictionary));
+        .insert(xdict, document::objects::ObjectType::Dictionary(dictionary));
     let mut variants_dictionary = Dictionary::new();
     variants_dictionary.handle = variants;
     variants_dictionary.owner = xdict;
     variants_dictionary.add_entry("VisibilityState1", variant_handle);
     doc.objects.insert(
         variants,
-        codec::objects::ObjectType::Dictionary(variants_dictionary),
+        document::objects::ObjectType::Dictionary(variants_dictionary),
     );
     (record_handle, variant_handle)
 }
@@ -1418,7 +1418,7 @@ fn locked_purge_removes_an_unreferenced_block_and_undo_restores_it() {
 
 #[test]
 fn locked_purge_keeps_unresolved_xref_dependent_symbols() {
-    use codec::tables::{Layer, LineType, TextStyle};
+    use document::tables::{Layer, LineType, TextStyle};
     let mut app = app();
     let i = tab(&app);
     let doc = &mut app.tabs[i].scene.document;
@@ -1437,8 +1437,8 @@ fn locked_purge_keeps_unresolved_xref_dependent_symbols() {
 
 #[test]
 fn purge_keeps_symbols_used_only_by_an_inserted_attribute() {
-    use codec::entities::AttributeEntity;
-    use codec::tables::{Layer, LineType, TextStyle};
+    use document::entities::AttributeEntity;
+    use document::tables::{Layer, LineType, TextStyle};
     let mut app = app();
     let i = tab(&app);
     {
@@ -1464,7 +1464,7 @@ fn purge_keeps_symbols_used_only_by_an_inserted_attribute() {
 
 #[test]
 fn purge_keeps_the_current_layer_and_dimstyle_linetypes() {
-    use codec::tables::{Layer, LineType};
+    use document::tables::{Layer, LineType};
     let mut app = app();
     let i = tab(&app);
     {
@@ -1489,8 +1489,8 @@ fn purge_keeps_the_current_layer_and_dimstyle_linetypes() {
 
 #[test]
 fn purge_keeps_text_styles_used_only_by_leader_and_table_styles() {
-    use codec::objects::{MultiLeaderStyle, ObjectType, TableStyle};
-    use codec::tables::TextStyle;
+    use document::objects::{MultiLeaderStyle, ObjectType, TableStyle};
+    use document::tables::TextStyle;
     let mut app = app();
     let i = tab(&app);
     {
@@ -1621,8 +1621,8 @@ fn locked_purge_skips_a_block_with_an_open_bedit_session() {
 #[test]
 fn locked_attedit_attribute_flags_cases() {
     use crate::ui::window::attribute_editor::AttrRow;
-    use codec::entities::{AttributeDefinition, AttributeEntity};
-    use codec::tables::BlockRecord;
+    use document::entities::{AttributeDefinition, AttributeEntity};
+    use document::tables::BlockRecord;
 
     // Verify flag behavior in ATTEDIT conversion and apply:
     // 1. Normal attribute: editable, modifies value
@@ -1637,14 +1637,14 @@ fn locked_attedit_attribute_flags_cases() {
         rotation: "0".to_string(),
         width_factor: "1".to_string(),
         oblique: "0".to_string(),
-        h_align: codec::entities::HorizontalAlignment::Left,
-        v_align: codec::entities::VerticalAlignment::Baseline,
+        h_align: document::entities::HorizontalAlignment::Left,
+        v_align: document::entities::VerticalAlignment::Baseline,
         backwards: false,
         upside_down: false,
         layer: "0".to_string(),
-        color: codec::types::Color::ByLayer,
+        color: document::types::Color::ByLayer,
         linetype: "ByLayer".to_string(),
-        line_weight: codec::types::LineWeight::ByLayer,
+        line_weight: document::types::LineWeight::ByLayer,
         is_constant: false,
     };
     assert!(!normal_row.is_constant);
@@ -1677,7 +1677,7 @@ fn locked_attedit_attribute_flags_cases() {
     preset_row.is_constant = false;
 
     // Verify metadata mapping from Document
-    let mut doc = codec::Document::new();
+    let mut doc = document::Document::new();
     let next = doc.next_handle();
     let br_h = Handle::new(next);
     let mut br = BlockRecord::new("FLAG_BLOCK");

@@ -15,12 +15,12 @@
 // (other fills solid hatches), text runs MTEXT in a "PDF <font>" style and
 // raster images PNG files referenced by IMAGE objects.
 
-use codec::entities::{
+use document::entities::{
     Arc, AttachmentPoint, BoundaryEdge, BoundaryPath, Circle, Hatch, LwPolyline, MText,
     PolylineEdge, Solid, Spline, Underlay, UnderlayType,
 };
-use codec::types::{Color, Handle, LineWeight, Vector2, Vector3};
-use codec::EntityType;
+use document::types::{Color, Handle, LineWeight, Vector2, Vector3};
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -1279,7 +1279,7 @@ fn curve_of(points: &[[f64; 2]], bulges: &[f64], closed: bool, z: f64) -> Option
     if end <= start {
         end += TAU;
     }
-    let mut ellipse = codec::entities::Ellipse::from_center_axes(
+    let mut ellipse = document::entities::Ellipse::from_center_axes(
         Vector3::new(e.center[0], e.center[1], z),
         Vector3::new(e.major[0] * e.a, e.major[1] * e.a, 0.0),
         e.b / e.a,
@@ -1526,7 +1526,7 @@ pub fn convert(
         }
         color
     };
-    let fill_transparency = codec::types::Transparency::from_alpha_value(0x0200_007F);
+    let fill_transparency = document::types::Transparency::from_alpha_value(0x0200_007F);
     // A mirrored placement turns arcs the other way.
     let turn = (underlay.x_scale * underlay.y_scale).signum();
     let mut strokes: Vec<Stroke> = Vec::new();

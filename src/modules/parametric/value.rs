@@ -12,8 +12,8 @@
 //! submits) is still computed from a one-time read of current geometry —
 //! that part doesn't change.
 
-use codec::entities::EntityType;
-use codec::types::Handle;
+use document::entities::EntityType;
+use document::types::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind};
@@ -439,16 +439,16 @@ mod tests {
     }
 
     fn add_line(scene: &mut Scene) -> Handle {
-        scene.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(6.0, 8.0, 0.0),
+        scene.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(6.0, 8.0, 0.0),
         )))
     }
 
     fn add_circle(scene: &mut Scene) -> Handle {
         scene.add_entity(EntityType::Circle(
-            codec::entities::Circle::from_center_radius(
-                codec::types::Vector3::new(0.0, 0.0, 0.0),
+            document::entities::Circle::from_center_radius(
+                document::types::Vector3::new(0.0, 0.0, 0.0),
                 3.0,
             ),
         ))

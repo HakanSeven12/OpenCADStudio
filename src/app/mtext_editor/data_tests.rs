@@ -3,7 +3,7 @@
 use super::*;
 use crate::app::{Message, OpenCADStudio};
 use crate::scene::annotative as anno;
-use codec::Document;
+use document::Document;
 
 const APP: &str = "OCS_DATA09";
 const BLOCK: &str = "DATA09_BLOCK";
@@ -15,8 +15,8 @@ struct Fixture {
     block: Handle,
 }
 
-fn xdata(tag: &str) -> codec::xdata::ExtendedData {
-    use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+fn xdata(tag: &str) -> document::xdata::ExtendedData {
+    use document::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
     let mut record = ExtendedDataRecord::new(APP);
     for value in [
         XDataValue::String(format!("megőrzés {tag}")),
@@ -38,13 +38,13 @@ fn rich_mtext(tag: &str) -> MText {
     t.rectangle_width = 40.;
     t.rectangle_height = Some(12.);
     t.line_spacing_factor = 1.25;
-    t.line_spacing_style = codec::entities::LineSpacingStyle::Exactly;
+    t.line_spacing_style = document::entities::LineSpacingStyle::Exactly;
     t.attachment_point = AttachmentPoint::MiddleCenter;
     t.background_fill_flags = 1;
-    t.background_color = codec::types::Color::Index(42);
+    t.background_color = document::types::Color::Index(42);
     t.background_scale = 1.75;
     t.background_transparency = 37;
-    t.common.color = codec::types::Color::Index(5);
+    t.common.color = document::types::Color::Index(5);
     t.common.extended_data = xdata(tag);
     t
 }
@@ -55,10 +55,10 @@ fn rich_mtext(tag: &str) -> MText {
 fn fixture() -> Fixture {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     let scene = &mut app.tabs[1].scene;
-    let mut appid = codec::tables::AppId::new(APP);
+    let mut appid = document::tables::AppId::new(APP);
     appid.handle = scene.document.allocate_handle();
     scene.document.app_ids.add(appid).unwrap();
 
@@ -69,15 +69,15 @@ fn fixture() -> Fixture {
         .add_entity(EntityType::MText(Box::new(model)))
         .unwrap();
     let record = scene.document.ensure_xrecord(model, APP);
-    if let Some(codec::objects::ObjectType::XRecord(x)) = scene.document.objects.get_mut(&record) {
-        use codec::objects::{XRecordEntry, XRecordValue};
+    if let Some(document::objects::ObjectType::XRecord(x)) = scene.document.objects.get_mut(&record) {
+        use document::objects::{XRecordEntry, XRecordValue};
         x.entries = vec![
             XRecordEntry::new(1, XRecordValue::String("kapcsolat".into())),
             XRecordEntry::new(40, XRecordValue::Double(0.125)),
         ];
     }
-    let one = anno::ensure_scale_object(&mut scene.document, &codec::objects::Scale::scale_1_1());
-    let two = anno::ensure_scale_object(&mut scene.document, &codec::objects::Scale::scale_1_2());
+    let one = anno::ensure_scale_object(&mut scene.document, &document::objects::Scale::scale_1_1());
+    let two = anno::ensure_scale_object(&mut scene.document, &document::objects::Scale::scale_1_2());
     assert!(anno::create_annotation_context(
         &mut scene.document,
         model,
@@ -108,7 +108,7 @@ fn fixture() -> Fixture {
         .document
         .add_entity(EntityType::MText(Box::new(inner)))
         .unwrap();
-    let identity = codec::types::Transform::identity();
+    let identity = document::types::Transform::identity();
     scene
         .create_block_from_entities(&[inner], BLOCK, &identity, &identity)
         .unwrap();
@@ -219,7 +219,7 @@ fn owner_name(doc: &Document, owner: Handle) -> Option<String> {
 /// A group's name is its ACAD_GROUP dictionary key; the DXF reader leaves the
 /// object's own name field empty.
 fn group_name(doc: &Document, group: Handle) -> Option<String> {
-    let Some(codec::objects::ObjectType::Dictionary(d)) =
+    let Some(document::objects::ObjectType::Dictionary(d)) =
         doc.objects.get(&doc.header.acad_group_dict_handle)
     else {
         return None;
@@ -236,21 +236,21 @@ fn reactor_groups(doc: &Document, reactors: &[Handle]) -> Vec<String> {
         .filter(|h| {
             matches!(
                 doc.objects.get(h),
-                Some(codec::objects::ObjectType::Group(_))
+                Some(document::objects::ObjectType::Group(_))
             )
         })
         .filter_map(|h| group_name(doc, *h))
         .collect()
 }
 
-fn xrecord(doc: &Document, handle: Handle) -> Option<Vec<codec::objects::XRecordEntry>> {
+fn xrecord(doc: &Document, handle: Handle) -> Option<Vec<document::objects::XRecordEntry>> {
     let dictionary = doc.extension_dictionary_handle(handle)?;
-    let Some(codec::objects::ObjectType::Dictionary(d)) = doc.objects.get(&dictionary) else {
+    let Some(document::objects::ObjectType::Dictionary(d)) = doc.objects.get(&dictionary) else {
         return None;
     };
     let (_, record) = d.entries.iter().find(|(k, _)| k == APP)?;
     match doc.objects.get(record) {
-        Some(codec::objects::ObjectType::XRecord(x)) => Some(x.entries.clone()),
+        Some(document::objects::ObjectType::XRecord(x)) => Some(x.entries.clone()),
         _ => None,
     }
 }
@@ -268,7 +268,7 @@ fn group_members(doc: &Document, handle: Handle) -> Vec<String> {
     doc.objects
         .values()
         .filter_map(|o| match o {
-            codec::objects::ObjectType::Group(g) if g.entities.contains(&handle) => {
+            document::objects::ObjectType::Group(g) if g.entities.contains(&handle) => {
                 group_name(doc, g.handle)
             }
             _ => None,
@@ -307,7 +307,7 @@ fn commit_property(handle: Handle) -> OpenCADStudio {
     let _ = f.app.update(Message::MTextHeight("4.125".into()));
     let _ = f
         .app
-        .update(Message::MTextColorChanged(codec::types::Color::Index(3)));
+        .update(Message::MTextColorChanged(document::types::Color::Index(3)));
     assert!(f.app.mtext_commit());
     f.app
 }

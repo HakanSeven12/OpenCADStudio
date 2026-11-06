@@ -1,4 +1,4 @@
-use codec::tables::Ucs;
+use document::tables::Ucs;
 
 // ── Coordinate parsing ─────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ impl UcsXform {
     }
 
     pub(super) fn from_ucs(ucs: &Ucs) -> Self {
-        let v = |a: codec::types::Vector3| glam::DVec3::new(a.x, a.y, a.z);
+        let v = |a: document::types::Vector3| glam::DVec3::new(a.x, a.y, a.z);
         let x = v(ucs.x_axis).normalize_or(glam::DVec3::X);
         let raw_y = v(ucs.y_axis).normalize_or(glam::DVec3::Y);
         let fallback_z = if x.dot(glam::DVec3::Z).abs() < 0.999 {
@@ -211,8 +211,8 @@ impl UcsXform {
 
     /// Full UCS-local → WCS transform, using `origin` as local zero while
     /// retaining this UCS's orthonormal axes.
-    pub(crate) fn to_wcs_transform_at(&self, origin: glam::DVec3) -> codec::types::Transform {
-        use codec::types::{Matrix4, Transform};
+    pub(crate) fn to_wcs_transform_at(&self, origin: glam::DVec3) -> document::types::Transform {
+        use document::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
                 [self.x.x, self.y.x, self.z.x, origin.x],
@@ -224,8 +224,8 @@ impl UcsXform {
     }
 
     /// Full WCS → UCS-local transform, using `origin` as the local zero.
-    pub(crate) fn to_ucs_transform_at(&self, origin: glam::DVec3) -> codec::types::Transform {
-        use codec::types::{Matrix4, Transform};
+    pub(crate) fn to_ucs_transform_at(&self, origin: glam::DVec3) -> document::types::Transform {
+        use document::types::{Matrix4, Transform};
         Transform::from_matrix(Matrix4 {
             m: [
                 [self.x.x, self.x.y, self.x.z, -origin.dot(self.x)],
@@ -237,7 +237,7 @@ impl UcsXform {
     }
 
     /// Convert from the represented UCS into its canonical local frame.
-    pub(super) fn to_ucs_transform(&self) -> codec::types::Transform {
+    pub(super) fn to_ucs_transform(&self) -> document::types::Transform {
         self.to_ucs_transform_at(self.origin)
     }
 }
@@ -274,9 +274,9 @@ pub(super) fn ucs_from_normal(origin: glam::DVec3, normal: glam::DVec3) -> Optio
     }
     let ((xx, xy, xz), (yx, yy, yz)) = crate::scene::view::transform::ocs_axes((z.x, z.y, z.z));
     let mut ucs = Ucs::new("*ACTIVE*");
-    ucs.origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
-    ucs.x_axis = codec::types::Vector3::new(xx, xy, xz);
-    ucs.y_axis = codec::types::Vector3::new(yx, yy, yz);
+    ucs.origin = document::types::Vector3::new(origin.x, origin.y, origin.z);
+    ucs.x_axis = document::types::Vector3::new(xx, xy, xz);
+    ucs.y_axis = document::types::Vector3::new(yx, yy, yz);
     Some(ucs)
 }
 
@@ -285,9 +285,9 @@ pub(super) fn ucs_rotated_z(origin: glam::DVec3, angle_z: f32) -> Ucs {
     let cos = angle_z.cos() as f64;
     let sin = angle_z.sin() as f64;
     let mut ucs = Ucs::new("*ACTIVE*");
-    ucs.origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
-    ucs.x_axis = codec::types::Vector3::new(cos, sin, 0.0);
-    ucs.y_axis = codec::types::Vector3::new(-sin, cos, 0.0);
+    ucs.origin = document::types::Vector3::new(origin.x, origin.y, origin.z);
+    ucs.x_axis = document::types::Vector3::new(cos, sin, 0.0);
+    ucs.y_axis = document::types::Vector3::new(-sin, cos, 0.0);
     ucs
 }
 
@@ -470,8 +470,8 @@ pub(super) fn axis_lock_apply(pt: glam::DVec3, base: glam::DVec3, dir: glam::DVe
 /// inserted at their negative), so references are measured through their block
 /// definition instead.
 pub(super) fn entities_lower_left_by_bbox(
-    doc: &codec::Document,
-    handles: &[codec::Handle],
+    doc: &document::Document,
+    handles: &[document::Handle],
 ) -> glam::DVec3 {
     let mut blocks = rustc_hash::FxHashMap::default();
     let mut min = glam::DVec3::splat(f64::INFINITY);
@@ -479,7 +479,7 @@ pub(super) fn entities_lower_left_by_bbox(
     for &h in handles {
         let Some(e) = doc.get_entity(h) else { continue };
         let bb = match e {
-            codec::EntityType::Insert(insert) => insert_bounds(doc, insert, &mut blocks, 0)
+            document::EntityType::Insert(insert) => insert_bounds(doc, insert, &mut blocks, 0)
                 .unwrap_or_else(|| e.as_entity().bounding_box()),
             _ => e.as_entity().bounding_box(),
         };
@@ -496,29 +496,29 @@ pub(super) fn entities_lower_left_by_bbox(
     }
 }
 
-type BlockBounds = rustc_hash::FxHashMap<String, Option<codec::types::BoundingBox3D>>;
+type BlockBounds = rustc_hash::FxHashMap<String, Option<document::types::BoundingBox3D>>;
 
 /// Box enclosing every listed entity, measured through block definitions so a
 /// reference contributes what it draws and not just its insertion point.
 pub(crate) fn entities_bounds(
-    doc: &codec::Document,
-    handles: &[codec::Handle],
-) -> Option<codec::types::BoundingBox3D> {
+    doc: &document::Document,
+    handles: &[document::Handle],
+) -> Option<document::types::BoundingBox3D> {
     let mut blocks = rustc_hash::FxHashMap::default();
-    let mut out: Option<codec::types::BoundingBox3D> = None;
+    let mut out: Option<document::types::BoundingBox3D> = None;
     for &handle in handles {
         let Some(entity) = doc.get_entity(handle) else {
             continue;
         };
         let bb = match entity {
-            codec::EntityType::Insert(insert) => {
+            document::EntityType::Insert(insert) => {
                 insert_bounds(doc, insert, &mut blocks, 0).unwrap_or_default()
             }
             _ => {
                 let (lo, hi) = crate::scene::convert::tess::entity_bounds(entity);
-                codec::types::BoundingBox3D::new(
-                    codec::types::Vector3::new(lo[0], lo[1], lo[2]),
-                    codec::types::Vector3::new(hi[0], hi[1], hi[2]),
+                document::types::BoundingBox3D::new(
+                    document::types::Vector3::new(lo[0], lo[1], lo[2]),
+                    document::types::Vector3::new(hi[0], hi[1], hi[2]),
                 )
             }
         };
@@ -538,11 +538,11 @@ const MAX_BLOCK_NESTING: usize = 32;
 /// base point) carried through the reference's transform for every MINSERT
 /// cell, plus its attributes. `None` when nothing in it can be measured.
 fn insert_bounds(
-    doc: &codec::Document,
-    insert: &codec::entities::Insert,
+    doc: &document::Document,
+    insert: &document::entities::Insert,
     blocks: &mut BlockBounds,
     depth: usize,
-) -> Option<codec::types::BoundingBox3D> {
+) -> Option<document::types::BoundingBox3D> {
     let mut out = None;
     if let Some(local) = block_bounds(doc, &insert.block_name, blocks, depth) {
         // MINSERT cells differ only in their insertion point and the grid is
@@ -572,7 +572,7 @@ fn insert_bounds(
         }
     }
     for attribute in &insert.attributes {
-        let bb = codec::Entity::bounding_box(attribute);
+        let bb = document::Entity::bounding_box(attribute);
         if !is_default_box(&bb) {
             include(&mut out, bb.min);
             include(&mut out, bb.max);
@@ -583,28 +583,28 @@ fn insert_bounds(
 
 /// World box of one block reference, measured through its definition.
 pub(crate) fn insert_world_bounds(
-    doc: &codec::Document,
-    insert: &codec::entities::Insert,
-) -> Option<codec::types::BoundingBox3D> {
+    doc: &document::Document,
+    insert: &document::entities::Insert,
+) -> Option<document::types::BoundingBox3D> {
     insert_bounds(doc, insert, &mut BlockBounds::default(), 0)
 }
 
 /// Box of the named block definition's contents, relative to its base point.
 pub(crate) fn block_definition_bounds(
-    doc: &codec::Document,
+    doc: &document::Document,
     name: &str,
-) -> Option<codec::types::BoundingBox3D> {
+) -> Option<document::types::BoundingBox3D> {
     block_bounds(doc, name, &mut BlockBounds::default(), 0)
 }
 
 /// Box of a block definition's contents, relative to its base point. Attribute
 /// definitions are left out: a reference draws its attributes instead.
 fn block_bounds(
-    doc: &codec::Document,
+    doc: &document::Document,
     name: &str,
     blocks: &mut BlockBounds,
     depth: usize,
-) -> Option<codec::types::BoundingBox3D> {
+) -> Option<document::types::BoundingBox3D> {
     if let Some(known) = blocks.get(name) {
         return *known;
     }
@@ -621,8 +621,8 @@ fn block_bounds(
     for &h in &record.entity_handles {
         let Some(e) = doc.get_entity(h) else { continue };
         let bb = match e {
-            codec::EntityType::AttributeDefinition(_) => continue,
-            codec::EntityType::Insert(nested) => {
+            document::EntityType::AttributeDefinition(_) => continue,
+            document::EntityType::Insert(nested) => {
                 match insert_bounds(doc, nested, blocks, depth + 1) {
                     Some(bb) => bb,
                     None => continue,
@@ -642,23 +642,23 @@ fn block_bounds(
 
 /// The all-zero box is `bounding_box()`'s default for entities that do not
 /// measure themselves: it says nothing about where they are.
-fn is_default_box(bb: &codec::types::BoundingBox3D) -> bool {
-    bb.min == codec::types::Vector3::ZERO && bb.max == codec::types::Vector3::ZERO
+fn is_default_box(bb: &document::types::BoundingBox3D) -> bool {
+    bb.min == document::types::Vector3::ZERO && bb.max == document::types::Vector3::ZERO
 }
 
-fn include(out: &mut Option<codec::types::BoundingBox3D>, point: codec::types::Vector3) {
+fn include(out: &mut Option<document::types::BoundingBox3D>, point: document::types::Vector3) {
     if !(point.x.is_finite() && point.y.is_finite() && point.z.is_finite()) {
         return;
     }
     match out {
         Some(bb) => bb.expand_to_include(point),
-        None => *out = Some(codec::types::BoundingBox3D::from_point(point)),
+        None => *out = Some(document::types::BoundingBox3D::from_point(point)),
     }
 }
 
-fn box_corners(bb: &codec::types::BoundingBox3D) -> [codec::types::Vector3; 8] {
+fn box_corners(bb: &document::types::BoundingBox3D) -> [document::types::Vector3; 8] {
     let (a, b) = (bb.min, bb.max);
-    let v = codec::types::Vector3::new;
+    let v = document::types::Vector3::new;
     [
         v(a.x, a.y, a.z),
         v(b.x, a.y, a.z),
@@ -685,12 +685,12 @@ pub(super) fn next_group_auto_name(scene: &crate::scene::Scene) -> String {
 
 // ── Entity type labels ─────────────────────────────────────────────────────
 
-pub(super) fn entity_type_label(entity: &codec::EntityType) -> String {
+pub(super) fn entity_type_label(entity: &document::EntityType) -> String {
     crate::t!(crate::entities::names::ui_name_or_class(entity)).into_owned()
 }
 
-pub(super) fn entity_type_key(entity: &codec::EntityType) -> String {
-    use codec::EntityType::*;
+pub(super) fn entity_type_key(entity: &document::EntityType) -> String {
+    use document::EntityType::*;
     match entity {
         Point(_) => "point",
         Line(_) => "line",
@@ -793,7 +793,7 @@ mod ucs_from_normal_tests {
     use super::ucs_from_normal;
     use glam::DVec3;
 
-    fn axes(ucs: &codec::tables::Ucs) -> (DVec3, DVec3, DVec3) {
+    fn axes(ucs: &document::tables::Ucs) -> (DVec3, DVec3, DVec3) {
         let x = DVec3::new(ucs.x_axis.x, ucs.x_axis.y, ucs.x_axis.z);
         let y = DVec3::new(ucs.y_axis.x, ucs.y_axis.y, ucs.y_axis.z);
         (x, y, x.cross(y))
@@ -868,11 +868,11 @@ mod clipboard_base_tests {
     use super::entities_lower_left_by_bbox;
 
     /// DXF of the given BLOCKS and ENTITIES section bodies.
-    fn doc(blocks: &str, entities: &str) -> codec::Document {
+    fn doc(blocks: &str, entities: &str) -> document::Document {
         let text = format!(
             "0\nSECTION\n2\nBLOCKS\n{blocks}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n{entities}0\nENDSEC\n0\nEOF\n"
         );
-        codec::DxfReader::from_reader(std::io::Cursor::new(text.into_bytes()))
+        document::DxfReader::from_reader(std::io::Cursor::new(text.into_bytes()))
             .unwrap()
             .read()
             .unwrap()
@@ -896,7 +896,7 @@ mod clipboard_base_tests {
         )
     }
 
-    fn base_of_all(doc: &codec::Document) -> glam::DVec3 {
+    fn base_of_all(doc: &document::Document) -> glam::DVec3 {
         let handles = doc
             .block_records
             .get("*Model_Space")

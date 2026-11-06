@@ -39,7 +39,7 @@ pub mod v4_support {
         _plugin_id: &str,
         _panel_id: &str,
         _control_id: &str,
-        _handles: Vec<codec::Handle>,
+        _handles: Vec<document::Handle>,
         _type_keys: Vec<String>,
         _pick_point: [f64; 3],
     ) {

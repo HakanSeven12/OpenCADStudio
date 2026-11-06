@@ -1,15 +1,15 @@
 //! Host-side glue for dynamic text field evaluation.
 //!
 //! The field language (DIESEL + AcVar), the field structure/linkage, and all
-//! date math live in the reader library ([`codec::fields`]). OCS only
+//! date math live in the reader library ([`document::fields`]). OCS only
 //! supplies the **environment** — the current clock, OS login and environment
 //! variables — through [`FieldContext`]. A DWG library must stay deterministic
 //! and platform-neutral, so the one genuinely system-specific bit (reading the
 //! clock / OS user) lives here in the app instead.
 
-use codec::fields::FieldContext;
-use codec::types::Handle;
-use codec::Document;
+use document::fields::FieldContext;
+use document::types::Handle;
+use document::Document;
 
 /// OCS's environment provider for field evaluation. With the document at
 /// hand it also answers the system variables the engine asks the host for.
@@ -70,13 +70,13 @@ impl FieldContext for OcsFieldContext<'_> {
         None
     }
 
-    fn date_locale(&self) -> codec::fields::DateLocale {
+    fn date_locale(&self) -> document::fields::DateLocale {
         os_date_locale()
     }
 
     fn sheet_sets(
         &self,
-        f: &mut dyn FnMut(&codec::sheet_set::SheetSetDatabase) -> Option<String>,
+        f: &mut dyn FnMut(&document::sheet_set::SheetSetDatabase) -> Option<String>,
     ) -> Option<String> {
         let sets = SHEET_SETS.read().ok()?;
         sets.iter().find_map(|db| f(db))
@@ -97,10 +97,10 @@ impl FieldContext for OcsFieldContext<'_> {
 
 /// The sheet sets open in the Sheet Set Manager, for `\AcSm` fields. The
 /// manager replaces the list whenever a set opens, closes or changes.
-static SHEET_SETS: std::sync::RwLock<Vec<codec::sheet_set::SheetSetDatabase>> =
+static SHEET_SETS: std::sync::RwLock<Vec<document::sheet_set::SheetSetDatabase>> =
     std::sync::RwLock::new(Vec::new());
 
-pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
+pub fn set_sheet_sets(sets: Vec<document::sheet_set::SheetSetDatabase>) {
     if let Ok(mut guard) = SHEET_SETS.write() {
         *guard = sets;
     }
@@ -109,7 +109,7 @@ pub fn set_sheet_sets(sets: Vec<codec::sheet_set::SheetSetDatabase>) {
 /// Re-evaluate the field hosted by entity `host` (usually an MTEXT), or `None`
 /// to keep the cached text. Thin wrapper over the library engine.
 pub fn resolve(document: &Document, host: Handle) -> Option<String> {
-    codec::fields::resolve(document, host, &OcsFieldContext(Some(document)))
+    document::fields::resolve(document, host, &OcsFieldContext(Some(document)))
 }
 
 /// FIELDEVAL of the drawing (kept in its variable dictionary; default 31):
@@ -148,7 +148,7 @@ pub fn refresh_table_formulas(document: &mut Document, table: Handle) -> Vec<Han
     // Copying the drawing is only worth it for a table with a field.
     let has_field = matches!(
         document.get_entity(table),
-        Some(codec::EntityType::Table(t)) if t
+        Some(document::EntityType::Table(t)) if t
             .rows
             .iter()
             .flat_map(|row| &row.cells)
@@ -165,7 +165,7 @@ pub fn refresh_table_formulas(document: &mut Document, table: Handle) -> Vec<Han
 /// The text a table cell shows for its field: a formula is evaluated live
 /// (it reads other cells), any other field shows its stored value.
 pub fn cell_text(document: &Document, field: Handle, table: Handle) -> Option<String> {
-    codec::fields::cell_field_text(document, field, table, &OcsFieldContext(Some(document)))
+    document::fields::cell_field_text(document, field, table, &OcsFieldContext(Some(document)))
 }
 
 /// Evaluate one field code (`\AcVar Date \f "yyyy-MM-dd"`, or the `%<…>%`
@@ -176,7 +176,7 @@ pub fn evaluate(
     objects: &[Handle],
     host: Option<Handle>,
 ) -> Option<String> {
-    codec::fields::evaluate_code(
+    document::fields::evaluate_code(
         document,
         code,
         objects,
@@ -345,7 +345,7 @@ pub fn whole_text_field(document: &Document, host: Handle) -> Option<(String, Ve
             return Some(field.owner);
         }
         match document.objects.get(&handle)? {
-            codec::objects::ObjectType::Dictionary(dictionary) => Some(dictionary.owner),
+            document::objects::ObjectType::Dictionary(dictionary) => Some(dictionary.owner),
             _ => None,
         }
     };
@@ -377,7 +377,7 @@ pub fn whole_text_field(document: &Document, host: Handle) -> Option<(String, Ve
     }
     // Operands the field holds as fields of their own come back written in
     // its code.
-    codec::fields::inline_code(document, child.handle)
+    document::fields::inline_code(document, child.handle)
         .or_else(|| Some((child.code.clone(), child.objects.clone())))
 }
 
@@ -391,7 +391,7 @@ pub fn set_text_field(
 ) {
     match field {
         Some((code, objects)) => {
-            let mut child = codec::fields::NewField::new(code, value);
+            let mut child = document::fields::NewField::new(code, value);
             child.objects = objects;
             document.set_text_field(host, "%<\\_FldIdx 0>%", vec![child]);
         }
@@ -421,7 +421,7 @@ pub(crate) fn os_currency_symbol() -> String {
 
 /// Month and day names and the regional date / time pictures, as date
 /// fields show them: the operating system's regional settings.
-pub(crate) fn os_date_locale() -> codec::fields::DateLocale {
+pub(crate) fn os_date_locale() -> document::fields::DateLocale {
     #[cfg(target_os = "windows")]
     {
         use windows_sys::Win32::Globalization::GetLocaleInfoEx;
@@ -438,7 +438,7 @@ pub(crate) fn os_date_locale() -> codec::fields::DateLocale {
             };
             (len > 1).then(|| String::from_utf16_lossy(&buffer[..len as usize - 1]))
         };
-        let mut locale = codec::fields::DateLocale::default();
+        let mut locale = document::fields::DateLocale::default();
         for k in 0..12u32 {
             if let Some(v) = info(0x38 + k) {
                 locale.months[k as usize] = v; // LOCALE_SMONTHNAME1..
@@ -475,7 +475,7 @@ pub(crate) fn os_date_locale() -> codec::fields::DateLocale {
         locale
     }
     #[cfg(not(target_os = "windows"))]
-    codec::fields::DateLocale::default()
+    document::fields::DateLocale::default()
 }
 
 /// FIELDDISPLAY: whether fields show on a gray background (not plotted).
@@ -500,19 +500,19 @@ pub const BOX_ABOVE: f64 = 1.19;
 pub const BACKGROUND: [f32; 4] = [203.0 / 255.0, 203.0 / 255.0, 203.0 / 255.0, 1.0];
 
 /// Whether `entity` hosts a field: its extension dictionary has ACAD_FIELD.
-pub fn hosts_field(document: &Document, entity: &codec::entities::EntityType) -> bool {
+pub fn hosts_field(document: &Document, entity: &document::entities::EntityType) -> bool {
     common_hosts_field(document, entity.common())
 }
 
 /// [`hosts_field`] for an entity known only by its common data, such as an
 /// attribute of a block reference.
-pub fn common_hosts_field(document: &Document, common: &codec::entities::EntityCommon) -> bool {
+pub fn common_hosts_field(document: &Document, common: &document::entities::EntityCommon) -> bool {
     let Some(xdict) = common.xdictionary_handle else {
         return false;
     };
     matches!(
         document.objects.get(&xdict),
-        Some(codec::objects::ObjectType::Dictionary(d)) if d.get("ACAD_FIELD").is_some()
+        Some(document::objects::ObjectType::Dictionary(d)) if d.get("ACAD_FIELD").is_some()
     )
 }
 
@@ -613,7 +613,7 @@ pub fn refresh_sheet_set_fields(document: &mut Document) -> Vec<Handle> {
         .filter(|f| f.evaluator.starts_with("AcSm"))
         .filter(|f| {
             let host = field_host(document, f.handle).unwrap_or(Handle::NULL);
-            codec::fields::resolve_handle(document, f.handle, host, &context)
+            document::fields::resolve_handle(document, f.handle, host, &context)
                 .is_none_or(|v| v == "####")
         })
         .map(|f| (f.handle, f.evaluator.clone()))
@@ -658,8 +658,8 @@ fn field_host(document: &Document, field: Handle) -> Option<Handle> {
             return Some(f.owner);
         }
         match document.objects.get(&h)? {
-            codec::objects::ObjectType::Dictionary(d) => Some(d.owner),
-            codec::objects::ObjectType::Unknown { owner, .. } => Some(*owner),
+            document::objects::ObjectType::Dictionary(d) => Some(d.owner),
+            document::objects::ObjectType::Unknown { owner, .. } => Some(*owner),
             _ => None,
         }
     };
@@ -680,7 +680,7 @@ pub fn long_date_time_now() -> String {
     let locale = os_date_locale();
     let picture = format!("{}  HH:mm:ss", locale.long_date);
     let now = now_utc_julian() + utc_offset_days();
-    codec::fields::format_dt_in(codec::fields::julian_parts(now), &picture, &locale)
+    document::fields::format_dt_in(document::fields::julian_parts(now), &picture, &locale)
 }
 
 /// [`attach_attribute_fields`] with every field code passed through `map`.
@@ -707,7 +707,7 @@ pub fn block_has_attribute_fields(document: &Document, block: &str) -> bool {
         .iter()
         .filter_map(|h| document.get_entity(*h))
         .any(|e| {
-            matches!(e, codec::entities::EntityType::AttributeDefinition(_))
+            matches!(e, document::entities::EntityType::AttributeDefinition(_))
                 && hosts_field(document, e)
         })
 }
@@ -720,7 +720,7 @@ pub fn stamp_plot_fields(document: &mut Document) -> Vec<Handle> {
     let has_fields = document
         .objects
         .values()
-        .any(|object| matches!(object, codec::objects::ObjectType::Field(_)));
+        .any(|object| matches!(object, document::objects::ObjectType::Field(_)));
     if !has_fields || fieldeval(document) & 4 == 0 {
         return Vec::new();
     }
@@ -751,7 +751,7 @@ impl FieldContext for PlotContext<'_> {
     fn file_size(&self) -> Option<u64> {
         self.0.file_size()
     }
-    fn date_locale(&self) -> codec::fields::DateLocale {
+    fn date_locale(&self) -> document::fields::DateLocale {
         self.0.date_locale()
     }
     fn getenv(&self, name: &str) -> Option<String> {
@@ -762,7 +762,7 @@ impl FieldContext for PlotContext<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{EntityType, MText};
+    use document::entities::{EntityType, MText};
 
     fn document_with_properties() -> Document {
         let mut document = Document::new();

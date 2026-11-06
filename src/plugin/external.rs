@@ -31,7 +31,7 @@ pub struct RegistryEntry {
 pub struct ReleaseInfo {
     pub tag: String,
     pub api_version: u32,
-    /// Full `opencadcodec` git source used by the release.
+    /// Full codec (`acadrust`) git source used by the release.
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
@@ -57,7 +57,7 @@ pub struct ExternalPlugin {
     /// an older `plugin.toml` does not declare `repository`.
     pub repository: Option<String>,
     pub api_version: u32,
-    /// Full `opencadcodec` git source used by the plugin.
+    /// Full codec (`acadrust`) git source used by the plugin.
     pub acadrust_source: Option<String>,
     /// Whether `[opencad]` declares `acadrust_source`.
     pub acadrust_declared: bool,
@@ -463,7 +463,7 @@ mod loader {
                 && d.acadrust_source.is_none()
             {
                 eprintln!(
-                    "[plugin] {} declares opencadcodec metadata but has no fingerprint; cannot verify compatibility",
+                    "[plugin] {} declares codec metadata but has no fingerprint; cannot verify compatibility",
                     d.id
                 );
             }
@@ -479,7 +479,7 @@ mod loader {
                 out.push((
                     d.id.clone(),
                     Err(format!(
-                        "Plugin built for opencadcodec @{plugin_hash}, but this host uses @{host_hash}"
+                        "Plugin built for codec @{plugin_hash}, but this host uses @{host_hash}"
                     )),
                 ));
                 continue;
@@ -898,7 +898,7 @@ acadrust_source = "{other}"
         assert!(p.acadrust_declared);
         assert!(
             !p.acadrust_compatible(),
-            "mismatched opencadcodec fingerprint should be incompatible"
+            "mismatched codec fingerprint should be incompatible"
         );
         assert!(!p.loadable());
     }
@@ -922,7 +922,7 @@ acadrust_source = "{host}"
         assert!(p.acadrust_declared);
         assert!(
             p.acadrust_compatible(),
-            "matching opencadcodec fingerprint should be compatible"
+            "matching codec fingerprint should be compatible"
         );
     }
 
@@ -943,7 +943,7 @@ acadrust_source = "git+https://github.com/HakanSeven12/opencadcodec.git?rev=0908
         assert!(p.acadrust_declared);
         assert!(
             p.acadrust_compatible(),
-            "API v3 plugin should bypass opencadcodec gate"
+            "API v3 plugin should bypass the codec gate"
         );
         assert!(p.loadable());
     }

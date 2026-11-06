@@ -4,7 +4,7 @@
 //! behaves the same everywhere.
 
 pub mod book;
-pub mod document;
+pub mod drawing_colors;
 pub mod editor;
 pub mod eyedropper;
 pub mod math;
@@ -18,7 +18,7 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
 use crate::ui::ROW_H;
-use codec::types::Color as AcadColor;
+use document::types::Color as AcadColor;
 use iced::widget::{button, container, row, text};
 use iced::{Background, Border, Color, Element, Length, Theme};
 

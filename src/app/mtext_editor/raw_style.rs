@@ -92,7 +92,7 @@ fn width_code(raw: &str, range: &Range<usize>) -> Result<f64, EditError> {
         .ok_or(EditError::ObjectDefault)
 }
 
-fn text_style<'a>(doc: &'a codec::Document, name: &str) -> Option<&'a codec::tables::TextStyle> {
+fn text_style<'a>(doc: &'a document::Document, name: &str) -> Option<&'a document::tables::TextStyle> {
     doc.text_styles.iter().find(|s| {
         s.name.eq_ignore_ascii_case(name)
             || (name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))
@@ -100,7 +100,7 @@ fn text_style<'a>(doc: &'a codec::Document, name: &str) -> Option<&'a codec::tab
 }
 
 impl ObjectStyle {
-    pub(super) fn of(doc: &codec::Document, name: &str) -> Self {
+    pub(super) fn of(doc: &document::Document, name: &str) -> Self {
         use crate::entities::text_support::{TTF_FLAG_BOLD, TTF_FLAG_ITALIC};
         let style = text_style(doc, name);
         let font = crate::entities::text_support::resolve_text_style(name, doc).font_name;
@@ -342,7 +342,7 @@ pub(in crate::app) enum ValueOrigin {
 impl MTextEditorState {
     /// Fill the font and width fields and the style's defaults from the
     /// source and the current style.
-    pub(super) fn seed_object_values(&mut self, doc: &codec::Document) {
+    pub(super) fn seed_object_values(&mut self, doc: &document::Document) {
         let raw = self.content.text();
         self.object_style = ObjectStyle::of(doc, &self.style);
         self.font = text_font(&raw).map_or_else(String::new, |f| f.name);
@@ -661,10 +661,10 @@ mod tests {
     fn app(raw: &str) -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(1));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(1));
         app.active_tab = 1;
         let doc = &mut app.tabs[1].scene.document;
-        let mut wide = codec::tables::TextStyle::new("Wide");
+        let mut wide = document::tables::TextStyle::new("Wide");
         wide.handle = doc.allocate_handle();
         wide.width_factor = 2.;
         doc.text_styles.add(wide).unwrap();
@@ -862,10 +862,10 @@ mod tests {
     fn a_whole_text_colour_without_an_object_colour_is_a_leading_control() {
         let mut app = app(r"a{\C1;b}\Pc");
         app.command_mtext_input = true;
-        app.mtext_apply_color(codec::types::Color::Index(3));
+        app.mtext_apply_color(document::types::Color::Index(3));
         assert_eq!(raw(&app), r"\C3;a{\C1;b}\Pc");
         assert_eq!(ed(&app).color_aci, 3);
-        app.mtext_apply_color(codec::types::Color::ByLayer);
+        app.mtext_apply_color(document::types::Color::ByLayer);
         assert_eq!(raw(&app), r"a{\C1;b}\Pc");
         assert_eq!(ed(&app).color_aci, 256);
     }

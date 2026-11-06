@@ -493,11 +493,11 @@ fn arc_points(
 /// Decode an embedded LWPOLYLINE body into its (local) vertex run, arc
 /// segments flattened, and whether it is closed. Widths are not drawn.
 fn decode_lwpolyline(d: &[u8]) -> Option<(Vec<DVec3>, bool)> {
-    use codec::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader;
-    use codec::io::dwg::dwg_version::DwgVersion;
+    use document::io::dwg::dwg_stream_readers::bit_reader::DwgBitReader;
+    use document::io::dwg::dwg_version::DwgVersion;
     let body = d.get(4..)?.to_vec();
     let max_items = body.len() * 4;
-    let mut r = DwgBitReader::new(body, DwgVersion::AC24, codec::types::DxfVersion::AC1032);
+    let mut r = DwgBitReader::new(body, DwgVersion::AC24, document::types::DxfVersion::AC1032);
     let flags = r.read_bit_short() as u16;
     if flags & 4 != 0 {
         r.read_bit_double(); // constant width
@@ -792,9 +792,9 @@ mod tests {
     /// An embedded LWPOLYLINE: closed, one bulged (semicircle) segment.
     #[test]
     fn decodes_embedded_lwpolyline_with_bulge() {
-        use codec::io::dwg::dwg_stream_writers::bit_writer::DwgBitWriter;
-        use codec::io::dwg::dwg_version::DwgVersion;
-        let mut w = DwgBitWriter::new(DwgVersion::AC24, codec::types::DxfVersion::AC1032);
+        use document::io::dwg::dwg_stream_writers::bit_writer::DwgBitWriter;
+        use document::io::dwg::dwg_version::DwgVersion;
+        let mut w = DwgBitWriter::new(DwgVersion::AC24, document::types::DxfVersion::AC1032);
         w.write_bit_short(512 | 16 | 8); // closed, has bulges, elevation
         w.write_bit_double(2.0);
         w.write_bit_long(2);

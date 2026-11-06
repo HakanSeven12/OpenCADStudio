@@ -248,7 +248,7 @@ pub fn view<'a, 'b>(s: Scaffold<'a, 'b>) -> Element<'a, Message> {
 /// Choose source styles, then confirm each name collision individually.
 pub(crate) fn import_view<'a>(
     draft: &'a crate::app::StyleImportDraft,
-    target: &codec::Document,
+    target: &document::Document,
     sizing: crate::ui::modal::ModalSizing,
 ) -> Element<'a, Message> {
     let mut content = column![

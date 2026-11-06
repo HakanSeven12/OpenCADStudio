@@ -35,7 +35,7 @@ impl OpenCADStudio {
         };
         let (_, columns, rows) = match table::grid_table(&tab.scene.document, definition) {
             Ok(Some(value)) => value,
-            Ok(None) => (codec::Handle::NULL, vec![], vec![]),
+            Ok(None) => (document::Handle::NULL, vec![], vec![]),
             Err(error) => {
                 self.command_line.push_error(crate::t!(error).as_ref());
                 return Task::none();
@@ -140,7 +140,7 @@ impl OpenCADStudio {
             state.confirm_close = true;
             return Task::none();
         }
-        self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Block Properties Table"));
+        self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Block Properties Table"));
         self.tabs[i].scene.document = working;
         self.tabs[i].scene.bump_geometry();
         self.tabs[i].dirty = true;

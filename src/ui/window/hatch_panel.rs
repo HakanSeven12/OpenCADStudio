@@ -5,7 +5,7 @@
 use crate::app::Message;
 use crate::modules::draw::draw::hatch::HatchSettings;
 use crate::ui::style::form::{self, dialog_button, form_radio, LABEL_WIDTH};
-use codec::entities::HatchStyleType;
+use document::entities::HatchStyleType;
 use iced::widget::{checkbox, column, container, row, text, text_input};
 use iced::{Background, Border, Element, Length, Theme};
 

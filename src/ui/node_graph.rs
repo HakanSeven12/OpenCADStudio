@@ -6,7 +6,7 @@
 //! Properties panel's own rows for that entity (built and written back in
 //! `app::node_graph`); operation rows come from the node's spec.
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use graph::{Kind, NodeId, Port, Spec};
 use iced::advanced::layout::{self, Layout};
 use iced::advanced::widget::{self, Widget};
@@ -219,9 +219,9 @@ impl ObjectKind {
 
     /// The entity a new node starts from; `None` for `Object`. Styles and
     /// patterns come from `document`, as the commands take them.
-    pub fn entity(self, document: &codec::Document) -> Option<EntityType> {
-        use codec::entities as e;
-        use codec::types::{Vector2, Vector3};
+    pub fn entity(self, document: &document::Document) -> Option<EntityType> {
+        use document::entities as e;
+        use document::types::{Vector2, Vector3};
         let origin = Vector3::new(0.0, 0.0, 0.0);
         let x_axis = Vector3::new(1.0, 0.0, 0.0);
         let point = |x: f64, y: f64| Vector3::new(x, y, 0.0);
@@ -302,18 +302,18 @@ impl ObjectKind {
                     .objects
                     .iter()
                     .find_map(|(handle, object)| match object {
-                        codec::objects::ObjectType::MLineStyle(style)
+                        document::objects::ObjectType::MLineStyle(style)
                             if style.name.eq_ignore_ascii_case(&header.multiline_style) =>
                         {
                             Some((Some(*handle), style.clone()))
                         }
                         _ => None,
                     })
-                    .unwrap_or_else(|| (None, codec::objects::MLineStyle::standard()));
+                    .unwrap_or_else(|| (None, document::objects::MLineStyle::standard()));
                 crate::modules::draw::draw::mline::build_mline(
                     &[glam::DVec3::ZERO, glam::DVec3::new(10.0, 0.0, 0.0)],
                     header.multiline_scale,
-                    codec::entities::MLineJustification::from(header.multiline_justification),
+                    document::entities::MLineJustification::from(header.multiline_justification),
                     false,
                     &style,
                     handle,
@@ -323,7 +323,7 @@ impl ObjectKind {
             ObjectKind::MultiLeader => {
                 let name = &document.header.current_mleader_style_name;
                 let style = document.objects.iter().find_map(|(handle, object)| match object {
-                    codec::objects::ObjectType::MultiLeaderStyle(style)
+                    document::objects::ObjectType::MultiLeaderStyle(style)
                         if style.name.eq_ignore_ascii_case(name) =>
                     {
                         let mut style = style.clone();
@@ -354,7 +354,7 @@ impl ObjectKind {
                 let mut table = e::TableBuilder::new(4, 3).at(origin).build();
                 let name = &document.header.current_table_style_name;
                 table.table_style_handle = document.objects.iter().find_map(|(handle, object)| {
-                    matches!(object, codec::objects::ObjectType::TableStyle(style)
+                    matches!(object, document::objects::ObjectType::TableStyle(style)
                         if style.name.eq_ignore_ascii_case(name))
                     .then_some(*handle)
                 });
@@ -498,7 +498,7 @@ pub struct Graph {
     pub applied: Vec<(Handle, EntityType)>,
     /// History records (solid construction history) the last evaluation's
     /// operations changed, with their prior state; restored with `applied`.
-    pub applied_records: Vec<(Handle, codec::objects::ObjectType)>,
+    pub applied_records: Vec<(Handle, document::objects::ObjectType)>,
     /// Objects the last evaluation's operations created; the next one
     /// erases them first.
     pub created: Vec<Handle>,

@@ -97,7 +97,7 @@ pub struct PlotContent {
     pub group_splits: PlotGroupSplits,
     /// Drawing layer of each plotted entity, keyed by the handle its wire or
     /// hatch name carries; the PDF groups output into one layer per entry.
-    pub entity_layers: std::collections::HashMap<codec::Handle, String>,
+    pub entity_layers: std::collections::HashMap<document::Handle, String>,
 }
 
 /// Owned geometry and settings for one plot page.

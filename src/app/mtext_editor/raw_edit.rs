@@ -647,7 +647,7 @@ mod tests {
     fn app(raw: &str) -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(1));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(1));
         app.active_tab = 1;
         app.open_mtext_editor(DVec3::ZERO, None, raw, 2.5, None);
         app
@@ -766,7 +766,7 @@ mod tests {
     fn cells(app: &OpenCADStudio) -> Vec<super::Cell> {
         super::doc_to_cells(&app.mtext_editor.as_ref().unwrap().doc)
     }
-    fn props(app: &OpenCADStudio, n: usize) -> codec::entities::mtext_format::SpanProperties {
+    fn props(app: &OpenCADStudio, n: usize) -> document::entities::mtext_format::SpanProperties {
         match &cells(app)[n] {
             super::Cell::Char(_, p) => p.clone(),
             _ => panic!("char"),
@@ -900,7 +900,7 @@ mod tests {
             .document
             .entities()
             .find_map(|e| match e {
-                codec::EntityType::MText(t) => Some((t.common.handle, t.value.clone())),
+                document::EntityType::MText(t) => Some((t.common.handle, t.value.clone())),
                 _ => None,
             })
             .unwrap();
@@ -909,11 +909,11 @@ mod tests {
             let bytes = crate::io::save_to_bytes(
                 &app.tabs[1].scene.document,
                 ext,
-                codec::DxfVersion::AC1032,
+                document::DxfVersion::AC1032,
             )
             .unwrap();
             let doc = crate::io::load_bytes(&format!("clear.{ext}"), bytes).unwrap();
-            let Some(codec::EntityType::MText(t)) = doc.get_entity(h) else {
+            let Some(document::EntityType::MText(t)) = doc.get_entity(h) else {
                 panic!()
             };
             assert_eq!(t.value, value, "{ext}");

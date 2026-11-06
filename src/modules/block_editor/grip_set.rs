@@ -1,7 +1,7 @@
 //! Configure native grip counts using the command host's parameter picking.
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::scene::{block_authoring::edit, block_grips::config};
-use codec::{objects::ObjectType, Document, Handle};
+use document::{objects::ObjectType, Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {

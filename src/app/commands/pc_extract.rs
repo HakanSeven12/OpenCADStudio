@@ -4,14 +4,14 @@
 
 use super::*;
 use crate::ui::window::pdf_dialogs::PdfDialogMsg;
-use codec::entities::ExtendedEntityData;
+use document::entities::ExtendedEntityData;
 use glam::DVec3;
 
 use crate::modules::insert::pc_extract::{
     CenterlineCommand, Clouds, PlanesCommand, Section, SectionCommand,
 };
 
-fn dvec(v: codec::types::Vector3) -> DVec3 {
+fn dvec(v: document::types::Vector3) -> DVec3 {
     DVec3::new(v.x, v.y, v.z)
 }
 
@@ -21,7 +21,7 @@ impl OpenCADStudio {
         let document = &self.tabs[i].scene.document;
         let mut clouds = Vec::new();
         for entity in document.entities() {
-            let codec::EntityType::Extended(extended) = entity else {
+            let document::EntityType::Extended(extended) = entity else {
                 continue;
             };
             let ExtendedEntityData::PointCloudEx(data) = &extended.data else {
@@ -29,7 +29,7 @@ impl OpenCADStudio {
             };
             let common = entity.common();
             // The colour the renderer places with, so its cached points are reused.
-            let color = if matches!(common.color, codec::types::Color::ByLayer) {
+            let color = if matches!(common.color, document::types::Color::ByLayer) {
                 document
                     .layers
                     .get(&common.layer)
@@ -58,7 +58,7 @@ impl OpenCADStudio {
             .document
             .entities()
             .filter_map(|entity| {
-                let codec::EntityType::Extended(extended) = entity else {
+                let document::EntityType::Extended(extended) = entity else {
                     return None;
                 };
                 let ExtendedEntityData::SectionObject(data) = &extended.data else {

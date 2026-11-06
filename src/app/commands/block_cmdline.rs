@@ -65,7 +65,7 @@ impl OpenCADStudio {
                         .map(|a| {
                             a.iter()
                                 .filter_map(|v| v.as_u64())
-                                .map(codec::Handle::new)
+                                .map(document::Handle::new)
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -103,7 +103,7 @@ impl OpenCADStudio {
                 let references = doc
                     .entities()
                     .filter_map(|entity| match entity {
-                        codec::EntityType::Insert(insert) => {
+                        document::EntityType::Insert(insert) => {
                             Some((insert.common.handle, insert.block_name.clone()))
                         }
                         _ => None,
@@ -175,9 +175,9 @@ impl OpenCADStudio {
 
     /// [`Self::attsync_block`], opening its own undo step only when `undo`.
     pub(in crate::app) fn attsync_block_with(&mut self, i: usize, block: &str, undo: bool) {
-        use codec::Entity as _;
+        use document::Entity as _;
         let doc = &self.tabs[i].scene.document;
-        let attdefs: Vec<codec::entities::AttributeDefinition> = doc
+        let attdefs: Vec<document::entities::AttributeDefinition> = doc
             .block_records
             .get(block)
             .map(|br| {
@@ -185,7 +185,7 @@ impl OpenCADStudio {
                     .iter()
                     .filter_map(|h| doc.get_entity(*h))
                     .filter_map(|e| match e {
-                        codec::EntityType::AttributeDefinition(a) => Some(a.clone()),
+                        document::EntityType::AttributeDefinition(a) => Some(a.clone()),
                         _ => None,
                     })
                     .collect()
@@ -198,7 +198,7 @@ impl OpenCADStudio {
         let inserts: Vec<_> = doc
             .entities()
             .filter_map(|entity| match entity {
-                codec::EntityType::Insert(insert)
+                document::EntityType::Insert(insert)
                     if (insert.block_name.eq_ignore_ascii_case(block)
                         || def.is_some()
                             && doc.dynamic_definition_for_insert(insert.common.handle) == def)
@@ -218,7 +218,7 @@ impl OpenCADStudio {
         let mut changes = Vec::new();
         for handle in inserts {
             let document = &self.tabs[i].scene.document;
-            let Some(codec::EntityType::Insert(ins)) = document.get_entity(handle) else {
+            let Some(document::EntityType::Insert(ins)) = document.get_entity(handle) else {
                 continue;
             };
             let transform = crate::scene::render_graph::insert_transform_with_base(ins, base);
@@ -229,12 +229,12 @@ impl OpenCADStudio {
                     .attributes
                     .iter()
                     .find(|a| a.tag.eq_ignore_ascii_case(&def.tag));
-                let mut attribute = codec::entities::AttributeEntity::from_definition(
+                let mut attribute = document::entities::AttributeEntity::from_definition(
                     def,
                     previous.map(|a| a.value.clone()),
                 );
                 attribute.apply_transform(&transform);
-                attribute.common.handle = previous.map_or(codec::Handle::NULL, |a| a.common.handle);
+                attribute.common.handle = previous.map_or(document::Handle::NULL, |a| a.common.handle);
                 attribute.common.owner_handle = handle;
                 rebuilt.push(attribute);
             }
@@ -259,7 +259,7 @@ impl OpenCADStudio {
             } else {
                 Some(self.tabs[i].scene.document.allocate_handle())
             };
-            if let Some(codec::EntityType::Insert(ins)) =
+            if let Some(document::EntityType::Insert(ins)) =
                 self.tabs[i].scene.document.get_entity_mut(handle)
             {
                 ins.attributes = rebuilt;

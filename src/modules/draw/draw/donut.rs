@@ -1,7 +1,7 @@
 // DONUT creates a ring as a closed, constant-width LwPolyline.
 
-use codec::entities::{LwPolyline, LwVertex};
-use codec::EntityType;
+use document::entities::{LwPolyline, LwVertex};
+use document::EntityType;
 use glam::DVec3;
 use kernel::geom2d::{Circle as KernelCircle, Curve as KernelCurve, Vec2 as KernelVec2};
 
@@ -248,7 +248,7 @@ pub(crate) fn make_donut(
     inner_r: f64,
     outer_r: f64,
 ) -> EntityType {
-    use codec::types::Vector2;
+    use document::types::Vector2;
     let r_avg = (inner_r + outer_r) / 2.0;
     let width = outer_r - inner_r;
 

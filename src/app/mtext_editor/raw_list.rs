@@ -7,7 +7,7 @@ use super::raw_edit::editor_document;
 use super::raw_operations::{apply_patches, TextEdit};
 use super::*;
 use crate::app::OpenCADStudio;
-use codec::entities::mtext_format::ParagraphProperties;
+use document::entities::mtext_format::ParagraphProperties;
 use std::ops::Range;
 
 /// Hanging indent of a list item, in text heights.

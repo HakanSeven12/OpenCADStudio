@@ -12,10 +12,10 @@
 // The definition is created when the INSERT is committed (see the command
 // driver), so one undo removes both.
 
-use codec::entities::Insert;
-use codec::tables::block_record::{BlockFlags, BlockRecord};
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::Insert;
+use document::tables::block_record::{BlockFlags, BlockRecord};
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, WorkingPlane};
@@ -703,7 +703,7 @@ pub fn prepare_named_xref_definition(
     }
     .or(file_dir);
     if let Some(base_dir) = base_dir {
-        let keys: rustc_hash::FxHashSet<codec::types::Handle> = [key].into_iter().collect();
+        let keys: rustc_hash::FxHashSet<document::types::Handle> = [key].into_iter().collect();
         let _ = crate::io::xref::resolve_xrefs_for_keys(&mut scene.document, &base_dir, &keys);
     }
 
@@ -732,7 +732,7 @@ mod tests {
         XAttachCommand,
     };
     use crate::command::{CadCommand, CmdResult};
-    use codec::EntityType;
+    use document::EntityType;
     use glam::DVec3;
 
     #[test]
@@ -792,7 +792,7 @@ mod tests {
         assert!(cmd.prompt().contains("Specify insertion point"));
     }
 
-    fn committed(result: Option<CmdResult>) -> codec::entities::Insert {
+    fn committed(result: Option<CmdResult>) -> document::entities::Insert {
         match result {
             Some(CmdResult::CommitAndExit(EntityType::Insert(ins))) => ins,
             _ => panic!("expected CommitAndExit(Insert)"),

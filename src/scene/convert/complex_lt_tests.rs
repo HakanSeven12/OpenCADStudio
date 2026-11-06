@@ -4,11 +4,11 @@
 
 use std::collections::HashSet;
 
-use codec::entities::{Line, LwPolyline, LwVertex};
-use codec::tables::linetype::{LineTypeComplexContent, LineTypeComplexData, LineTypeElement};
-use codec::tables::{LineType, TextStyle};
-use codec::types::{Vector2, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::entities::{Line, LwPolyline, LwVertex};
+use document::tables::linetype::{LineTypeComplexContent, LineTypeComplexData, LineTypeElement};
+use document::tables::{LineType, TextStyle};
+use document::types::{Vector2, Vector3};
+use document::{Document, EntityType, Handle};
 
 use crate::scene::model::wire_model::WireModel;
 

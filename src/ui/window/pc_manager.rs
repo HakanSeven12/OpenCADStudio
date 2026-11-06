@@ -6,8 +6,8 @@
 use crate::app::Message;
 use crate::scene::model::point_cloud::{self, UNASSIGNED_OFF};
 use crate::ui::dock::PanelId;
-use codec::entities::ExtendedEntityData;
-use codec::{Document, EntityType, Handle};
+use document::entities::ExtendedEntityData;
+use document::{Document, EntityType, Handle};
 use iced::widget::{
     button, checkbox, column, container, mouse_area, row, scrollable, text, text_input, tooltip,
     Space,

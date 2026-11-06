@@ -341,7 +341,7 @@ mod shape_node_tests {
     use serde_json::{json, Value};
 
     /// The polyline each drawing-shape node makes, from `inputs`.
-    fn made(node: &str, inputs: Value) -> codec::entities::LwPolyline {
+    fn made(node: &str, inputs: Value) -> document::entities::LwPolyline {
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -353,7 +353,7 @@ mod shape_node_tests {
         }
         let i = app.active_tab;
         let made = app.tabs[i].scene.document.entities().find_map(|entity| match entity {
-            codec::EntityType::LwPolyline(polyline) => Some(polyline.clone()),
+            document::EntityType::LwPolyline(polyline) => Some(polyline.clone()),
             _ => None,
         });
         made.unwrap_or_else(|| panic!("{node} made no polyline"))
@@ -362,7 +362,7 @@ mod shape_node_tests {
     /// #2589: Rectangle, Polygon, Donut and Revision Cloud nodes.
     #[test]
     fn the_shape_nodes_draw_their_polylines() {
-        let corners = |p: &codec::entities::LwPolyline| -> Vec<(f64, f64)> {
+        let corners = |p: &document::entities::LwPolyline| -> Vec<(f64, f64)> {
             p.vertices.iter().map(|v| (v.location.x, v.location.y)).collect()
         };
         let rectangle = made("Rectangle", json!({"corner": {"x": 1, "y": 2, "z": 3}, "width": 4, "height": 2}));
@@ -405,7 +405,7 @@ mod radial_dimension_node_tests {
                 let _ = app.on_graph(super::GraphMsg::Set(port, value));
             }
             let dimension = app.tabs[i].scene.document.entities().find_map(|entity| match entity {
-                codec::EntityType::Dimension(dimension) => Some(dimension.base().actual_measurement),
+                document::EntityType::Dimension(dimension) => Some(dimension.base().actual_measurement),
                 _ => None,
             });
             assert_eq!(dimension, Some(measured), "{node}");
@@ -464,10 +464,10 @@ mod create_node_tests {
             .entities()
             .skip(before)
             .map(|entity| match entity {
-                codec::EntityType::Dimension(dimension) => match dimension.as_ref() {
-                    codec::entities::Dimension::Ordinate(_) => "Ordinate Dimension".into(),
-                    codec::entities::Dimension::Arc(_) => "Arc Length Dimension".into(),
-                    codec::entities::Dimension::LargeRadial(_) => "Jogged Dimension".into(),
+                document::EntityType::Dimension(dimension) => match dimension.as_ref() {
+                    document::entities::Dimension::Ordinate(_) => "Ordinate Dimension".into(),
+                    document::entities::Dimension::Arc(_) => "Arc Length Dimension".into(),
+                    document::entities::Dimension::LargeRadial(_) => "Jogged Dimension".into(),
                     _ => "Dimension".into(),
                 },
                 other => crate::entities::names::ui_name(other).into(),
@@ -538,7 +538,7 @@ mod modify_node_tests {
             let t = j.to_string();
             // A solid's JSON has no geometry; its ACIS data stands in for it.
             let body = match e {
-                codec::EntityType::Solid3D(solid) => {
+                document::EntityType::Solid3D(solid) => {
                     use std::hash::{Hash, Hasher};
                     let mut hasher = std::collections::hash_map::DefaultHasher::new();
                     format!("{:?}", solid.acis_data).hash(&mut hasher);

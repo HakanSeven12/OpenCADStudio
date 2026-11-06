@@ -77,7 +77,7 @@
 
 use super::{Message, OpenCADStudio};
 use crate::command::{CmdResult, SelectionEntity, StepInput};
-use codec::Handle;
+use document::Handle;
 use iced::Task;
 
 pub(super) mod clipboard;
@@ -210,7 +210,7 @@ impl OpenCADStudio {
         if let Some((scale, justification, style_name, style_handle)) = mline_settings {
             let tab = &mut self.tabs[self.active_tab];
             let header = &mut tab.scene.document.header;
-            let style_handle = style_handle.unwrap_or(codec::Handle::NULL);
+            let style_handle = style_handle.unwrap_or(document::Handle::NULL);
             let changed = (header.multiline_scale - scale).abs() > f64::EPSILON
                 || header.multiline_justification != justification
                 || !header.multiline_style.eq_ignore_ascii_case(&style_name)
@@ -298,17 +298,17 @@ impl OpenCADStudio {
     pub(crate) fn begin_table_cell_edit(
         &mut self,
         i: usize,
-        handle: codec::Handle,
+        handle: document::Handle,
         click: glam::DVec3,
     ) -> crate::modules::annotate::table_cmd::TableCellEditStart {
         use crate::modules::annotate::table_cmd::{table_cell_at, TableCellEditStart};
-        let target = if handle != codec::Handle::NULL {
+        let target = if handle != document::Handle::NULL {
             self.tabs[i]
                 .scene
                 .document
                 .get_entity(handle)
                 .and_then(|entity| match entity {
-                    codec::EntityType::Table(table) => Some((handle, table.clone())),
+                    document::EntityType::Table(table) => Some((handle, table.clone())),
                     _ => None,
                 })
         } else {
@@ -317,7 +317,7 @@ impl OpenCADStudio {
             // taking the last match selects the table on top if they overlap.
             let mut matched = None;
             for entity in self.tabs[i].scene.document.entities() {
-                if let codec::EntityType::Table(table) = entity {
+                if let document::EntityType::Table(table) = entity {
                     let h = table.common.handle;
                     let style = table.table_style_handle.and_then(|style_handle| {
                         self.tabs[i]
@@ -326,7 +326,7 @@ impl OpenCADStudio {
                             .objects
                             .get(&style_handle)
                             .and_then(|object| match object {
-                                codec::objects::ObjectType::TableStyle(style) => Some(style),
+                                document::objects::ObjectType::TableStyle(style) => Some(style),
                                 _ => None,
                             })
                     });
@@ -347,7 +347,7 @@ impl OpenCADStudio {
                 .objects
                 .get(&style_handle)
                 .and_then(|object| match object {
-                    codec::objects::ObjectType::TableStyle(style) => Some(style),
+                    document::objects::ObjectType::TableStyle(style) => Some(style),
                     _ => None,
                 })
         });
@@ -464,7 +464,7 @@ impl OpenCADStudio {
         &mut self,
         tab: usize,
         handle: Handle,
-        mut entities: Vec<codec::EntityType>,
+        mut entities: Vec<document::EntityType>,
     ) -> Vec<Handle> {
         let same_type = entities.len() == 1
             && self.tabs[tab]
@@ -508,7 +508,7 @@ impl OpenCADStudio {
         for &updated in &handles {
             if matches!(
                 self.tabs[tab].scene.document.get_entity(updated),
-                Some(codec::EntityType::Dimension(_))
+                Some(document::EntityType::Dimension(_))
             ) {
                 self.tabs[tab].scene.invalidate_dim_block_recorded(updated);
             }
@@ -1045,7 +1045,7 @@ impl OpenCADStudio {
             }
             CmdResult::CommitExplodedInsert { insert, keep_going } => {
                 let i = self.active_tab;
-                if let codec::EntityType::Insert(ins) = &insert {
+                if let document::EntityType::Insert(ins) = &insert {
                     let name = ins.block_name.clone();
                     self.record_block_insert(&name);
                 }
@@ -1729,13 +1729,13 @@ impl OpenCADStudio {
             let new = parts
                 .next()
                 .and_then(|v| v.parse::<u64>().ok())
-                .map(codec::Handle::new);
-            let others: Vec<codec::Handle> = parts
+                .map(document::Handle::new);
+            let others: Vec<document::Handle> = parts
                 .next()
                 .unwrap_or("")
                 .split(',')
                 .filter_map(|v| v.parse::<u64>().ok())
-                .map(codec::Handle::new)
+                .map(document::Handle::new)
                 .collect();
             if let (Some(new), false) = (new, others.is_empty() || choice == 'N') {
                 let dimdli = crate::scene::creation_style::drawing_dimdli(
@@ -1962,10 +1962,10 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
 
-        if handle == codec::Handle::NULL && self.selection_cycling {
+        if handle == document::Handle::NULL && self.selection_cycling {
             let mut candidates = Vec::new();
             for entity in self.tabs[i].scene.document.entities() {
-                if let codec::EntityType::Table(table) = entity {
+                if let document::EntityType::Table(table) = entity {
                     let h = table.common.handle;
                     let style = table.table_style_handle.and_then(|style_handle| {
                         self.tabs[i]
@@ -1974,7 +1974,7 @@ impl OpenCADStudio {
                             .objects
                             .get(&style_handle)
                             .and_then(|object| match object {
-                                codec::objects::ObjectType::TableStyle(style) => Some(style),
+                                document::objects::ObjectType::TableStyle(style) => Some(style),
                                 _ => None,
                             })
                     });
@@ -2033,7 +2033,7 @@ impl OpenCADStudio {
             !self.tabs[i].scene.is_layer_locked(*handle)
                 && matches!(
                     self.tabs[i].scene.document.get_entity(*handle),
-                    Some(codec::EntityType::MultiLeader(_))
+                    Some(document::EntityType::MultiLeader(_))
                 )
         });
         if !handles.is_empty() {
@@ -2068,8 +2068,8 @@ impl OpenCADStudio {
                 !self.tabs[i].scene.is_layer_locked(*handle)
                     && matches!(
                         self.tabs[i].scene.document.get_entity(*handle),
-                        Some(codec::EntityType::MultiLeader(leader))
-                            if leader.content_type == codec::entities::LeaderContentType::Block
+                        Some(document::EntityType::MultiLeader(leader))
+                            if leader.content_type == document::entities::LeaderContentType::Block
                     )
             })
             .collect();
@@ -2135,7 +2135,7 @@ impl OpenCADStudio {
 /// the nearest planar curve of the edited space within a small share of
 /// that space's extent, the way a pick box takes the object under a click.
 fn entity_at_typed_point(
-    document: &codec::Document,
+    document: &document::Document,
     owner: Handle,
     point: glam::DVec3,
 ) -> Option<Handle> {
@@ -2154,11 +2154,11 @@ fn entity_at_typed_point(
             match crate::scene::viewport_dimension_pick::planar_pick_distance(entity, point) {
                 Some(distance) => distance,
                 // A multileader answers by its leader lines and landings.
-                None if matches!(entity, codec::EntityType::MultiLeader(_)) => match entity {
-                    codec::EntityType::MultiLeader(ml) => {
+                None if matches!(entity, document::EntityType::MultiLeader(_)) => match entity {
+                    document::EntityType::MultiLeader(ml) => {
                         crate::modules::annotate::mleader_edit::mleader_pick_distance(
                             ml,
-                            codec::types::Vector3::new(point.x, point.y, point.z),
+                            document::types::Vector3::new(point.x, point.y, point.z),
                         )
                     }
                     _ => continue,
@@ -2167,9 +2167,9 @@ fn entity_at_typed_point(
                 // inside it picks it.
                 None if matches!(
                     entity,
-                    codec::EntityType::Text(_)
-                        | codec::EntityType::MText(_)
-                        | codec::EntityType::Ellipse(_)
+                    document::EntityType::Text(_)
+                        | document::EntityType::MText(_)
+                        | document::EntityType::Ellipse(_)
                 ) =>
                 {
                     let dx = (bounds.min.x - point.x)
@@ -2196,7 +2196,7 @@ fn entity_at_typed_point(
 
 /// One MLEADERALIGN run, as the command gathered it.
 struct MLeaderAlign {
-    reference: Option<codec::Handle>,
+    reference: Option<document::Handle>,
     mode: crate::modules::annotate::mleader_edit::MLeaderAlignMode,
     spacing: f64,
     from: glam::DVec3,
@@ -2205,7 +2205,7 @@ struct MLeaderAlign {
 
 /// Where a multileader's content meets its leader: the end of its first
 /// landing, else the stored content base point.
-fn mleader_base(ml: &codec::entities::MultiLeader) -> glam::DVec2 {
+fn mleader_base(ml: &document::entities::MultiLeader) -> glam::DVec2 {
     let ctx = &ml.context;
     if let Some(root) = ctx.leader_roots.first() {
         let d = &root.direction;
@@ -2217,7 +2217,7 @@ fn mleader_base(ml: &codec::entities::MultiLeader) -> glam::DVec2 {
                 root.connection_point.y + d.y * reach,
             );
         }
-        if ctx.content_base_point == codec::types::Vector3::ZERO {
+        if ctx.content_base_point == document::types::Vector3::ZERO {
             return glam::DVec2::new(root.connection_point.x, root.connection_point.y);
         }
     }
@@ -2226,7 +2226,7 @@ fn mleader_base(ml: &codec::entities::MultiLeader) -> glam::DVec2 {
 
 /// Move a multileader's content (and the landings that hold it) by `shift`;
 /// the arrowheads stay where they point.
-fn shift_mleader_content(ml: &mut codec::entities::MultiLeader, shift: glam::DVec2) {
+fn shift_mleader_content(ml: &mut document::entities::MultiLeader, shift: glam::DVec2) {
     let ctx = &mut ml.context;
     for point in [
         &mut ctx.content_base_point,
@@ -2243,10 +2243,10 @@ fn shift_mleader_content(ml: &mut codec::entities::MultiLeader, shift: glam::DVe
 }
 
 /// Size of a multileader's content measured along `dir`.
-fn mleader_extent_along(ml: &codec::entities::MultiLeader, dir: glam::DVec2) -> f64 {
+fn mleader_extent_along(ml: &document::entities::MultiLeader, dir: glam::DVec2) -> f64 {
     let ctx = &ml.context;
     let height = match ml.content_type {
-        codec::entities::LeaderContentType::MText => {
+        document::entities::LeaderContentType::MText => {
             let lines = ctx.text_string.split("\\P").count().max(1) as f64;
             let h = if ctx.text_height > 0.0 { ctx.text_height } else { ml.text_height };
             h * (1.0 + (lines - 1.0) * 5.0 / 3.0 * ctx.line_spacing_factor.max(0.0))
@@ -2264,15 +2264,15 @@ fn mleader_extent_along(ml: &codec::entities::MultiLeader, dir: glam::DVec2) -> 
 
 fn apply_mleader_align(
     scene: &mut crate::scene::Scene,
-    handles: &[codec::Handle],
+    handles: &[document::Handle],
     request: &MLeaderAlign,
 ) -> bool {
     use crate::modules::annotate::mleader_edit::MLeaderAlignMode as Mode;
-    let leader = |scene: &crate::scene::Scene, h: codec::Handle| match scene.document.get_entity(h) {
-        Some(codec::EntityType::MultiLeader(ml)) => Some((**ml).clone()),
+    let leader = |scene: &crate::scene::Scene, h: document::Handle| match scene.document.get_entity(h) {
+        Some(document::EntityType::MultiLeader(ml)) => Some((**ml).clone()),
         _ => None,
     };
-    let mut moves: Vec<(codec::Handle, glam::DVec2)> = Vec::new();
+    let mut moves: Vec<(document::Handle, glam::DVec2)> = Vec::new();
     match request.mode {
         Mode::Distribute => {
             let a = glam::DVec2::new(request.from.x, request.from.y);
@@ -2281,7 +2281,7 @@ fn apply_mleader_align(
             if span.length_squared() <= 1.0e-18 {
                 return false;
             }
-            let mut order: Vec<(f64, codec::Handle, glam::DVec2)> = handles
+            let mut order: Vec<(f64, document::Handle, glam::DVec2)> = handles
                 .iter()
                 .filter_map(|&h| leader(scene, h).map(|ml| (h, mleader_base(&ml))))
                 .map(|(h, base)| ((base - a).dot(span), h, base))
@@ -2297,7 +2297,7 @@ fn apply_mleader_align(
             let Some(reference) = request.reference.and_then(|h| leader(scene, h)) else {
                 return false;
             };
-            let segment = |ml: &codec::entities::MultiLeader| {
+            let segment = |ml: &document::entities::MultiLeader| {
                 let root = ml.context.leader_roots.first()?;
                 let line = root.lines.first()?;
                 let start = *line.points.last()?;
@@ -2332,7 +2332,7 @@ fn apply_mleader_align(
             else {
                 return false;
             };
-            let mut along: Vec<(f64, codec::Handle, glam::DVec2, f64)> = handles
+            let mut along: Vec<(f64, document::Handle, glam::DVec2, f64)> = handles
                 .iter()
                 .filter(|&&h| Some(h) != request.reference)
                 .filter_map(|&h| leader(scene, h).map(|ml| (h, ml)))
@@ -2370,7 +2370,7 @@ fn apply_mleader_align(
         if shift.length_squared() <= 1.0e-24 {
             continue;
         }
-        if let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handle) {
+        if let Some(document::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(handle) {
             shift_mleader_content(ml, shift);
             changed.push((handle, crate::scene::ChangeKind::Modified));
         }
@@ -2386,15 +2386,15 @@ fn apply_mleader_align(
 /// lose theirs.
 fn apply_mleader_collect(
     scene: &mut crate::scene::Scene,
-    handles: &[codec::Handle],
+    handles: &[document::Handle],
     point: glam::DVec3,
     layout: crate::modules::annotate::mleader_edit::MLeaderCollectLayout,
 ) -> bool {
     use crate::modules::annotate::mleader_edit::MLeaderCollectLayout as Layout;
-    let sizes: Vec<(codec::Handle, glam::DVec2)> = handles
+    let sizes: Vec<(document::Handle, glam::DVec2)> = handles
         .iter()
         .filter_map(|&h| {
-            let codec::EntityType::MultiLeader(ml) = scene.document.get_entity(h)? else {
+            let document::EntityType::MultiLeader(ml) = scene.document.get_entity(h)? else {
                 return None;
             };
             let name = ml
@@ -2417,7 +2417,7 @@ fn apply_mleader_collect(
     }
     let leader_source = *handles.last().unwrap_or(&sizes[0].0);
     let arrow_lines = match scene.document.get_entity(leader_source) {
-        Some(codec::EntityType::MultiLeader(ml)) => ml
+        Some(document::EntityType::MultiLeader(ml)) => ml
             .context
             .leader_roots
             .first()
@@ -2461,7 +2461,7 @@ fn apply_mleader_collect(
     };
     let mut changed = Vec::new();
     for (index, ((handle, _), centre)) in sizes.iter().zip(&centres).enumerate() {
-        let Some(codec::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(*handle)
+        let Some(document::EntityType::MultiLeader(ml)) = scene.document.get_entity_mut(*handle)
         else {
             continue;
         };

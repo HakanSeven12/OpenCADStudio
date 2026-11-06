@@ -13,8 +13,8 @@ use crate::app::style_ops::StyleKind;
 use crate::app::text_style_draft::TextStyleDraft;
 use crate::entities::text_support::{TTF_FLAG_BOLD, TTF_FLAG_ITALIC};
 use crate::ui::font_picker::{stroke_file, FontChoice};
-use codec::entities::mtext_format::{MTextScalar, SpanProperties};
-use codec::tables::TextStyle;
+use document::entities::mtext_format::{MTextScalar, SpanProperties};
+use document::tables::TextStyle;
 
 /// What the selected characters share of the values a text style stores;
 /// `None` where they differ.

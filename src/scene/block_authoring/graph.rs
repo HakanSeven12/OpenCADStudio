@@ -1,6 +1,6 @@
 //! Maintain native adjacency lists while adding/replacing action dependencies.
-use codec::objects::{BlockEvaluationEdge, BlockEvaluationGraph, DynamicBlockData, ObjectType};
-use codec::{Document, Handle};
+use document::objects::{BlockEvaluationEdge, BlockEvaluationGraph, DynamicBlockData, ObjectType};
+use document::{Document, Handle};
 
 pub(crate) fn valid_lists(g: &BlockEvaluationGraph, node: i32) -> bool {
     let Some(n) = g.nodes.iter().find(|n| n.id == node) else {

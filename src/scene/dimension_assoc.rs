@@ -1,10 +1,10 @@
-use codec::entities::Dimension;
-use codec::objects::{
+use document::entities::Dimension;
+use document::objects::{
     AssocDimensionAssociation, AssocDimensionReference, AssociativeData, AssociativeObject,
     ObjectType,
 };
-use codec::types::{Handle, Transform, Vector3};
-use codec::EntityType;
+use document::types::{Handle, Transform, Vector3};
+use document::EntityType;
 use kernel::geom2d::{
     angle_within_arc, arc as tessellate_arc, arc_span, closest_point, Arc as KernelArc, BulgeArc,
     Circle as KernelCircle, Curve as KernelCurve, DEFAULT_SEGMENTS_PER_RADIAN,
@@ -103,7 +103,7 @@ type DPoint = [f64; 3];
 
 /// The shared-contract vector (`glam`) as the codec's vector. `AcceptedSnap`
 /// speaks `glam` because the snap engine does; everything stored in a
-/// drawing speaks `opencadcodec`.
+/// drawing speaks `document`.
 fn dvec3(point: glam::DVec3) -> Vector3 {
     Vector3::new(point.x, point.y, point.z)
 }
@@ -476,7 +476,7 @@ fn ocs_point(x: f64, y: f64, elevation: f64, normal: Vector3) -> Vector3 {
     Vector3::new(point.0, point.1, point.2)
 }
 
-fn circle_curve(circle: &codec::entities::Circle) -> KernelCurve {
+fn circle_curve(circle: &document::entities::Circle) -> KernelCurve {
     KernelCurve::Circle(KernelCircle {
         centre: [circle.center.x, circle.center.y],
         radius: circle.radius,
@@ -1076,7 +1076,7 @@ fn remap_plane_offset(
 /// its first handle, so "some handle in `xrefs` exists" was true even for a
 /// reference whose actual source had been erased. Walking the chain asks the
 /// question that was meant — is the geometry still there.
-pub(crate) fn dimension_is_associative(document: &codec::Document, dimension: Handle) -> bool {
+pub(crate) fn dimension_is_associative(document: &document::Document, dimension: Handle) -> bool {
     document.objects.values().any(|object| {
         let ObjectType::Associative(object) = object else {
             return false;
@@ -1095,7 +1095,7 @@ pub(crate) fn dimension_is_associative(document: &codec::Document, dimension: Ha
 }
 
 pub(crate) fn constraint_from_associative_dimension(
-    document: &codec::Document,
+    document: &document::Document,
     handle: Handle,
 ) -> Option<(
     super::parametric_constraints::ConstraintKind,
@@ -1182,7 +1182,7 @@ pub(crate) fn constraint_from_associative_dimension(
 }
 
 pub(crate) fn radial_extension_points(
-    document: &codec::Document,
+    document: &document::Document,
     dimension: Handle,
     gap: f64,
     extension: f64,
@@ -2733,7 +2733,7 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{Circle, DimensionDiameter};
+    use document::entities::{Circle, DimensionDiameter};
 
     #[test]
     fn diameter_angle_sync_records_the_association_for_undo() {
@@ -2830,7 +2830,7 @@ fn centroid_shift(before: [Option<Vector3>; 2], after: [Option<Vector3>; 2]) -> 
     Vector3::new(delta.x / count, delta.y / count, delta.z / count)
 }
 
-fn linear_measurement(linear: &codec::entities::DimensionLinear) -> f64 {
+fn linear_measurement(linear: &document::entities::DimensionLinear) -> f64 {
     let plane = plane_from_normal(linear.first_point, linear.base.normal);
     let first = plane
         .project(dpoint(linear.first_point))
@@ -2927,11 +2927,11 @@ fn feature_reference(
 }
 
 fn persisted_measurement_scale(
-    doc: &codec::Document,
+    doc: &document::Document,
     entity: &EntityType,
 ) -> Option<MeasurementScale> {
     use crate::entities::dim_override;
-    use codec::xdata::XDataValue;
+    use document::xdata::XDataValue;
     let EntityType::Dimension(dimension) = entity else {
         return None;
     };
@@ -2975,7 +2975,7 @@ fn persisted_measurement_scale(
 /// made by earlier releases kept their source's association this way, which
 /// the reference application reports as a damaged drawing. Returns how many
 /// reactors were dropped.
-pub(crate) fn drop_stray_dimension_reactors(document: &mut codec::Document) -> usize {
+pub(crate) fn drop_stray_dimension_reactors(document: &mut document::Document) -> usize {
     let associations: rustc_hash::FxHashMap<Handle, (Handle, Vec<Handle>)> = document
         .objects
         .iter()

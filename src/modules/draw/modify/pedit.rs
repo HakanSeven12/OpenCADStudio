@@ -1,8 +1,8 @@
 // PEDIT edits polylines and polygon meshes.
 
-use codec::entities::LwVertex;
-use codec::types::{Vector2, Vector3};
-use codec::{EntityType, Handle};
+use document::entities::LwVertex;
+use document::types::{Vector2, Vector3};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::nurbs::clamped_uniform_knots;
 use kernel::geom2d::NurbsCurve;
@@ -75,7 +75,7 @@ pub struct PeditCommand {
     vertex_tangents: HashMap<usize, f64>,
     pending_tangents: Option<HashMap<usize, f64>>,
     tangent_history: Vec<HashMap<usize, f64>>,
-    mesh_smooth_type: codec::entities::polygon_mesh::SurfaceSmoothType,
+    mesh_smooth_type: document::entities::polygon_mesh::SurfaceSmoothType,
     mesh_smooth_density: (i16, i16),
     mesh_vertex_default: isize,
     pending_mesh_closed: Option<(bool, bool)>,
@@ -89,7 +89,7 @@ impl PeditCommand {
         surface_u_density: i16,
         surface_v_density: i16,
     ) -> Self {
-        use codec::entities::polygon_mesh::SurfaceSmoothType;
+        use document::entities::polygon_mesh::SurfaceSmoothType;
 
         let mesh_smooth_type = match surface_type {
             5 => SurfaceSmoothType::Quadratic,
@@ -874,7 +874,7 @@ impl CadCommand for PeditCommand {
                         "D" | "DESMOOTH" => Some(CmdResult::PeditOp {
                             handle,
                             op: PeditOp::SetMeshSmooth {
-                                smooth: codec::entities::polygon_mesh::SurfaceSmoothType::NoSmooth,
+                                smooth: document::entities::polygon_mesh::SurfaceSmoothType::NoSmooth,
                                 m_density: self.mesh_smooth_density.0,
                                 n_density: self.mesh_smooth_density.1,
                             },
@@ -1180,7 +1180,7 @@ pub enum PeditOp {
     SetMeshClosedM(bool),
     SetMeshClosedN(bool),
     SetMeshSmooth {
-        smooth: codec::entities::polygon_mesh::SurfaceSmoothType,
+        smooth: document::entities::polygon_mesh::SurfaceSmoothType,
         m_density: i16,
         n_density: i16,
     },
@@ -1241,7 +1241,7 @@ pub fn edit_vertex_range(
             polyline,
             polyline.is_closed,
             LwPolyline,
-            |value: &mut codec::entities::LwPolyline| {
+            |value: &mut document::entities::LwPolyline| {
                 value.is_closed = false;
             }
         ),
@@ -1249,7 +1249,7 @@ pub fn edit_vertex_range(
             polyline,
             polyline.flags.is_closed(),
             Polyline2D,
-            |value: &mut codec::entities::Polyline2D| {
+            |value: &mut document::entities::Polyline2D| {
                 value.flags.set_closed(false);
             }
         ),
@@ -1343,7 +1343,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                     if *insert {
                         polyline.vertices.insert(
                             index + 1,
-                            codec::entities::polyline::Vertex2D::new(location),
+                            document::entities::polyline::Vertex2D::new(location),
                         );
                     } else {
                         polyline.vertices[*index].location = location;
@@ -1369,12 +1369,12 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                 true
             }
             EntityType::Polyline2D(polyline) => {
-                let flag = codec::entities::polyline::PolylineFlags::LINETYPE_CONTINUOUS;
+                let flag = document::entities::polyline::PolylineFlags::LINETYPE_CONTINUOUS;
                 let bits = polyline.flags.bits();
                 if (bits & flag.bits() != 0) == *enabled {
                     return false;
                 }
-                polyline.flags = codec::entities::polyline::PolylineFlags::from_bits(if *enabled {
+                polyline.flags = document::entities::polyline::PolylineFlags::from_bits(if *enabled {
                     bits | flag.bits()
                 } else {
                     bits & !flag.bits()
@@ -1447,7 +1447,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                     return false;
                 }
                 mesh.flags.set(
-                    codec::entities::polygon_mesh::PolygonMeshFlags::CLOSED_M,
+                    document::entities::polygon_mesh::PolygonMeshFlags::CLOSED_M,
                     *closed,
                 );
                 true
@@ -1460,7 +1460,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                     return false;
                 }
                 mesh.flags.set(
-                    codec::entities::polygon_mesh::PolygonMeshFlags::CLOSED_N,
+                    document::entities::polygon_mesh::PolygonMeshFlags::CLOSED_N,
                     *closed,
                 );
                 true
@@ -1475,7 +1475,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
             EntityType::PolygonMesh(mesh) => {
                 let mut changed = mesh.smooth_type != *smooth;
                 mesh.smooth_type = *smooth;
-                if mesh.smooth_type != codec::entities::polygon_mesh::SurfaceSmoothType::NoSmooth {
+                if mesh.smooth_type != document::entities::polygon_mesh::SurfaceSmoothType::NoSmooth {
                     let m_density = (*m_density).clamp(2, 200);
                     let n_density = (*n_density).clamp(2, 200);
                     if mesh.m_smooth_density != m_density {
@@ -1505,7 +1505,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
                 {
                     return false;
                 }
-                vertex.location = codec::types::Vector3::new(point.x, point.y, point.z);
+                vertex.location = document::types::Vector3::new(point.x, point.y, point.z);
                 true
             }
             _ => false,
@@ -1518,7 +1518,7 @@ pub fn apply_pedit(entity: &mut EntityType, op: &PeditOp) -> bool {
 /// A Line or Arc as an equivalent 2-vertex LwPolyline (common carried over,
 /// handle NULL for the replace flow). `None` for anything else.
 pub fn convert_to_polyline(entity: &EntityType) -> Option<EntityType> {
-    let mut pl = codec::LwPolyline::new();
+    let mut pl = document::LwPolyline::new();
     match entity {
         EntityType::Line(l) => {
             let normal = DVec3::new(l.normal.x, l.normal.y, l.normal.z).try_normalize()?;
@@ -1583,10 +1583,10 @@ mod convert_tests {
     // onto the new entity instead of resetting to 0 (#916).
     #[test]
     fn convert_keeps_line_thickness() {
-        let mut l = codec::entities::Line::new();
-        l.start = codec::types::Vector3::new(2.0, 3.0, 4.0);
-        l.end = codec::types::Vector3::new(2.0, 5.0, 6.0);
-        l.normal = codec::types::Vector3::new(1.0, 0.0, 0.0);
+        let mut l = document::entities::Line::new();
+        l.start = document::types::Vector3::new(2.0, 3.0, 4.0);
+        l.end = document::types::Vector3::new(2.0, 5.0, 6.0);
+        l.normal = document::types::Vector3::new(1.0, 0.0, 0.0);
         l.thickness = 3.5;
         let Some(EntityType::LwPolyline(pl)) = convert_to_polyline(&EntityType::Line(l)) else {
             panic!("line must convert");
@@ -1596,15 +1596,15 @@ mod convert_tests {
             "converted polyline must keep source thickness, got {}",
             pl.thickness
         );
-        assert_eq!(pl.normal, codec::types::Vector3::new(1.0, 0.0, 0.0));
+        assert_eq!(pl.normal, document::types::Vector3::new(1.0, 0.0, 0.0));
         assert!((pl.elevation - 2.0).abs() < 1e-12);
     }
 
     #[test]
     fn convert_keeps_arc_thickness() {
-        let mut a = codec::entities::Arc::new();
-        a.center = codec::types::Vector3::new(0.0, 0.0, 4.0);
-        a.normal = codec::types::Vector3::new(0.0, 1.0, 0.0);
+        let mut a = document::entities::Arc::new();
+        a.center = document::types::Vector3::new(0.0, 0.0, 4.0);
+        a.normal = document::types::Vector3::new(0.0, 1.0, 0.0);
         a.radius = 5.0;
         a.start_angle = 0.0;
         a.end_angle = std::f64::consts::FRAC_PI_2;
@@ -1617,7 +1617,7 @@ mod convert_tests {
             "converted polyline must keep negative thickness, got {}",
             pl.thickness
         );
-        assert_eq!(pl.normal, codec::types::Vector3::new(0.0, 1.0, 0.0));
+        assert_eq!(pl.normal, document::types::Vector3::new(0.0, 1.0, 0.0));
         assert!((pl.elevation - 4.0).abs() < 1e-12);
     }
 }
@@ -1625,7 +1625,7 @@ mod convert_tests {
 // ── Curve fitting ─────────────────────────────────────────────────────────
 
 pub(crate) fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Option<EntityType> {
-    use codec::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
+    use document::entities::{Polyline2D, PolylineFlags, Vertex2D, VertexFlags};
     let mut polyline = match entity {
         EntityType::Polyline2D(p) => p.clone(),
         EntityType::LwPolyline(p) => {
@@ -1729,8 +1729,8 @@ pub(crate) fn fit_entity(entity: &EntityType, overrides: &[(usize, f64)]) -> Opt
 /// The vertices the user placed: curve-fit knees (flag 1) and spline samples
 /// (flag 8) are generated, and a spline frame vertex (flag 16) is a defining
 /// vertex once the fit is taken off.
-fn defining_vertices(polyline: &codec::entities::Polyline2D) -> Vec<codec::entities::Vertex2D> {
-    use codec::entities::VertexFlags;
+fn defining_vertices(polyline: &document::entities::Polyline2D) -> Vec<document::entities::Vertex2D> {
+    use document::entities::VertexFlags;
     polyline
         .vertices
         .iter()
@@ -1753,11 +1753,11 @@ fn defining_vertices(polyline: &codec::entities::Polyline2D) -> Vec<codec::entit
 
 /// Fit/Smooth "None": back to the defining vertices, keeping the bulges they
 /// carry.
-pub(crate) fn unfit_polyline2d(polyline: &mut codec::entities::Polyline2D) {
-    use codec::entities::PolylineFlags;
+pub(crate) fn unfit_polyline2d(polyline: &mut document::entities::Polyline2D) {
+    use document::entities::PolylineFlags;
     polyline.vertices = defining_vertices(polyline);
     polyline.flags = PolylineFlags::from_bits(polyline.flags.bits() & !(2 | 4));
-    polyline.smooth_surface = codec::entities::polyline::SmoothSurfaceType::None;
+    polyline.smooth_surface = document::entities::polyline::SmoothSurfaceType::None;
 }
 
 /// Fit/Smooth "Quadratic" / "Cubic": the defining vertices become the spline
@@ -1765,12 +1765,12 @@ pub(crate) fn unfit_polyline2d(polyline: &mut codec::entities::Polyline2D) {
 /// the B-spline they control (flag 8) follow the first of them. An open frame
 /// is clamped to its ends; a closed one wraps periodically.
 pub(crate) fn spline_fit_polyline2d(
-    polyline: &mut codec::entities::Polyline2D,
+    polyline: &mut document::entities::Polyline2D,
     degree: usize,
     segments: usize,
 ) -> bool {
-    use codec::entities::polyline::SmoothSurfaceType;
-    use codec::entities::{PolylineFlags, Vertex2D, VertexFlags};
+    use document::entities::polyline::SmoothSurfaceType;
+    use document::entities::{PolylineFlags, Vertex2D, VertexFlags};
     let frame = defining_vertices(polyline);
     let n = frame.len();
     if n <= degree {
@@ -1822,7 +1822,7 @@ fn decurve_entity(entity: &EntityType) -> Option<EntityType> {
     let mut result = match entity {
         EntityType::LwPolyline(p) => p.clone(),
         EntityType::Polyline2D(p) => {
-            let mut result = codec::LwPolyline::new();
+            let mut result = document::LwPolyline::new();
             result.common = p.common.clone();
             result.normal = p.normal;
             result.elevation = p.elevation;
@@ -1876,7 +1876,7 @@ fn decurve_entity(entity: &EntityType) -> Option<EntityType> {
 /// out, with the open case clamped by repeating end points and then the two
 /// ends pinned back afterwards to undo the drift that leaves — all of which
 /// a clamped knot vector expresses directly and exactly.
-fn spline_smooth(p: &mut codec::LwPolyline) -> bool {
+fn spline_smooth(p: &mut document::LwPolyline) -> bool {
     const DEGREE: usize = 3;
     const PER_SPAN: usize = 8;
 
@@ -1931,10 +1931,10 @@ fn spline_smooth(p: &mut codec::LwPolyline) -> bool {
 #[cfg(test)]
 mod editing_tests {
     use super::*;
-    use codec::entities::{Polyline2D, Vertex2D};
+    use document::entities::{Polyline2D, Vertex2D};
 
     fn lightweight(handle: u64, points: &[[f64; 2]]) -> EntityType {
-        let mut polyline = codec::LwPolyline::new();
+        let mut polyline = document::LwPolyline::new();
         polyline.common.handle = Handle::new(handle);
         polyline.vertices = points
             .iter()
@@ -2102,9 +2102,9 @@ mod editing_tests {
     #[test]
     fn multiple_decline_and_fuzz_join_keep_the_command_active() {
         *JOIN_TYPE.lock().unwrap_or_else(|error| error.into_inner()) = JoinType::Extend;
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.handle = Handle::new(11);
-        let mut arc = codec::entities::Arc::new();
+        let mut arc = document::entities::Arc::new();
         arc.common.handle = Handle::new(12);
         let mut declined = command(
             vec![EntityType::Line(line), EntityType::Arc(arc)],
@@ -2357,7 +2357,7 @@ pub fn join_selection_extend(
                         }
                         super::join::join_to_source(&a, &[(*handle, &b)])
                     } else {
-                        let mut line = codec::entities::Line::new();
+                        let mut line = document::entities::Line::new();
                         line.start = Vector3::new(a_points[1][0], a_points[1][1], a_points[1][2]);
                         line.end = Vector3::new(b_points[1][0], b_points[1][1], b_points[1][2]);
                         match &a {

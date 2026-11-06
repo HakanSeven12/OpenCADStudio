@@ -6,8 +6,8 @@
 //! reader may rebuild the table from that copy when it opens the DWG, so the
 //! copy must follow every edit of the table.
 
-use codec::objects::ObjectType;
-use codec::{Document, EntityType, Handle};
+use document::objects::ObjectType;
+use document::{Document, EntityType, Handle};
 
 const ROUNDTRIP: &str = "ACAD_XREC_ROUNDTRIP";
 

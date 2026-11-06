@@ -13,7 +13,7 @@
 use super::circle_gpu::CircleInstance;
 use super::ellipse_gpu::EllipseInstance;
 use super::wire_gpu::BlockWireInstance;
-use codec::Handle;
+use document::Handle;
 use iced::wgpu;
 use rustc_hash::FxHashMap;
 

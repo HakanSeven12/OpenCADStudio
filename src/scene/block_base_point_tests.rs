@@ -34,9 +34,9 @@ use crate::scene::render_graph::{
 };
 use crate::scene::{CreateBlockOptions, Scene};
 use crate::ui::window::block_definition::{BlockDefinitionState, BlockObjectMode};
-use codec::entities::{AttributeDefinition, AttributeEntity, Circle, Insert, Line};
-use codec::types::{Handle, Matrix4, Transform, Vector3};
-use codec::{Document, EntityType};
+use document::entities::{AttributeDefinition, AttributeEntity, Circle, Insert, Line};
+use document::types::{Handle, Matrix4, Transform, Vector3};
+use document::{Document, EntityType};
 use glam::DVec3;
 
 const BP_TEST: &str = "BP_TEST";

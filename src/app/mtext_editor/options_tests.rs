@@ -1,14 +1,14 @@
 //! Background mask and drawing direction, through the editor.
 use super::*;
 use crate::app::{Message, OpenCADStudio};
-use codec::types::Color;
-use codec::DxfVersion;
+use document::types::Color;
+use document::DxfVersion;
 
 /// An existing MTEXT opened in the editor.
 fn existing(mt: MText) -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     let height = mt.height;
     let value = mt.value.clone();
@@ -181,9 +181,9 @@ fn a_mask_survives_dwg_2004_and_later_and_dxf() {
 fn multileader_text_has_neither_option() {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
-    let ml = codec::entities::MultiLeader::default();
+    let ml = document::entities::MultiLeader::default();
     let h = app.tabs[1]
         .scene
         .document
@@ -193,14 +193,14 @@ fn multileader_text_has_neither_option() {
     assert!(!ed(&app).entity_options_supported());
     let _ = app.update(Message::MTextMaskToggle);
     let _ = app.update(Message::MTextDirection(
-        codec::entities::DrawingDirection::TopToBottom,
+        document::entities::DrawingDirection::TopToBottom,
     ));
     assert!(ed(&app).mask_draft.is_none() && ed(&app).direction.is_none());
 }
 
 #[test]
 fn direction_normal_vertical_and_by_style_are_saved_and_undone() {
-    use codec::entities::DrawingDirection as D;
+    use document::entities::DrawingDirection as D;
     let (mut app, h) = existing(text("abc"));
     assert_eq!(ed(&app).direction_value(), D::LeftToRight);
     // (Vertical text's own caret boxes come with #2374.)

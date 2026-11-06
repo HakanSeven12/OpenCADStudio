@@ -2,11 +2,11 @@
 pub(crate) mod graph;
 pub(crate) mod edit;
 pub(crate) mod metadata;
-use codec::objects::{
+use document::objects::{
     BlockEvalExpression, BlockEvalValue, DynamicBlockData, DynamicBlockObject, ObjectType,
 };
-use codec::xdata::{ExtendedDataRecord, XDataValue};
-use codec::{Document, EntityType, Handle};
+use document::xdata::{ExtendedDataRecord, XDataValue};
+use document::{Document, EntityType, Handle};
 
 pub(super) const MAJOR: i32 = 33;
 pub(super) const MINOR: i32 = 329;
@@ -169,7 +169,7 @@ pub(super) fn graph(
     Ok(Some(handle))
 }
 
-fn slots(graph: Option<&codec::objects::BlockEvaluationGraph>) -> Result<Slots, &'static str> {
+fn slots(graph: Option<&document::objects::BlockEvaluationGraph>) -> Result<Slots, &'static str> {
     let node = graph
         .and_then(|graph| graph.nodes.iter().map(|node| node.id).max())
         .unwrap_or(-1)
@@ -258,7 +258,7 @@ pub(super) fn prepare(
         dictionary,
         "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
         "AcDbDynamicBlockPurgePreventer",
-        DynamicBlockData::Representation(codec::objects::BlockRepresentationData {
+        DynamicBlockData::Representation(document::objects::BlockRepresentationData {
             flags: 1,
             block: definition,
         }),
@@ -330,7 +330,7 @@ pub(super) fn append_single(
     let DynamicBlockData::EvaluationGraph(graph) = &mut object.data else {
         unreachable!()
     };
-    graph.nodes.push(codec::objects::BlockEvaluationNode {
+    graph.nodes.push(document::objects::BlockEvaluationNode {
         id: slots.node,
         next_id: slots.eval,
         expression,
@@ -351,7 +351,7 @@ pub(super) fn append_components(
     expressions: &[Handle],
     components: &[usize],
 ) {
-    use codec::objects::{BlockEvaluationEdge, BlockEvaluationNode};
+    use document::objects::{BlockEvaluationEdge, BlockEvaluationNode};
     let ObjectType::DynamicBlock(object) = document.objects.get_mut(&handle).unwrap() else {
         unreachable!()
     };
@@ -411,16 +411,16 @@ pub(super) fn append_components(
 pub(super) fn register_classes(document: &mut Document, classes: &[(&str, &str, i32)]) {
     for &(dxf_name, cpp_class_name, maintenance_version) in classes {
         if let Some(existing) = document.classes.get_mut_by_name(dxf_name) {
-            existing.proxy_flags = codec::classes::ProxyFlags(1153);
+            existing.proxy_flags = document::classes::ProxyFlags(1153);
             existing.dwg_version = 25;
             existing.maintenance_version = maintenance_version;
             continue;
         }
-        document.classes.add_or_update(codec::classes::DxfClass {
+        document.classes.add_or_update(document::classes::DxfClass {
             dxf_name: dxf_name.to_string(),
             cpp_class_name: cpp_class_name.to_string(),
             application_name: "ObjectDBX Classes".to_string(),
-            proxy_flags: codec::classes::ProxyFlags(1153),
+            proxy_flags: document::classes::ProxyFlags(1153),
             instance_count: 0,
             was_zombie: false,
             is_an_entity: false,
@@ -436,7 +436,7 @@ pub(super) fn register_classes(document: &mut Document, classes: &[(&str, &str, 
 
 pub(super) fn ensure_app_id(document: &mut Document, name: &str) {
     if !document.app_ids.contains(name) {
-        let mut app = codec::tables::AppId::new(name);
+        let mut app = document::tables::AppId::new(name);
         app.handle = document.allocate_handle();
         let _ = document.app_ids.add(app);
     }
@@ -479,7 +479,7 @@ pub(super) fn dynamic(
 pub(crate) fn export_graph(
     document: &Document,
     definition: Handle,
-) -> Option<codec::BlockGraph> {
+) -> Option<document::BlockGraph> {
     if let Some(graph) = document.export_block_graph(definition) {
         return Some(graph);
     }

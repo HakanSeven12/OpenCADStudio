@@ -228,7 +228,7 @@ fn color_swatch<'a>(target: crate::app::UiColor, [r, g, b]: [u8; 3]) -> Element<
     button(swatch)
         .on_press(Message::OpenColorWindow(
             crate::app::ColorPickTarget::Interface(target),
-            codec::types::Color::Rgb { r, g, b },
+            document::types::Color::Rgb { r, g, b },
         ))
         .padding(0)
         .style(button::text)

@@ -8,7 +8,7 @@ const SET: &str = r"\pxi-1.5,l1.5,t1.5;";
 fn app(raw: &str) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     app.open_mtext_editor(DVec3::ZERO, None, raw, 2.5, None);
     app
@@ -160,7 +160,7 @@ fn a_tab_goes_in_at_the_caret_and_keeps_the_paragraph_tab_stops() {
 
 #[test]
 fn line_spacing_mode_and_a_typed_factor_are_saved_with_the_text() {
-    use codec::entities::LineSpacingStyle as S;
+    use document::entities::LineSpacingStyle as S;
     let mut app = app(r"a\Pb");
     let _ = app.update(Message::MTextLineSpacingMode(true));
     let _ = app.update(Message::MTextLineSpacingInput("1,75".into()));

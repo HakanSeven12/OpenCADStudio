@@ -103,8 +103,8 @@ impl OpenCADStudio {
                     .flatten();
                 let mut surface = empty_extruded_surface(direction, taper_angle);
                 if let (
-                    Some(codec::objects::SolidHistoryOperation::Extrusion(value)),
-                    codec::EntityType::Surface(entity),
+                    Some(document::objects::SolidHistoryOperation::Extrusion(value)),
+                    document::EntityType::Surface(entity),
                 ) = (&history, &mut surface)
                 {
                     if let Some(data) =
@@ -239,13 +239,13 @@ impl OpenCADStudio {
         let mut failed = 0usize;
         let mut self_intersections = 0usize;
         for handle in handles {
-            let Some(codec::EntityType::Surface(surface)) =
+            let Some(document::EntityType::Surface(surface)) =
                 self.tabs[i].scene.document.get_entity(handle)
             else {
                 failed += 1;
                 continue;
             };
-            let kernel_distance = if surface.kind == codec::entities::SurfaceKind::Revolved {
+            let kernel_distance = if surface.kind == document::entities::SurfaceKind::Revolved {
                 -distance
             } else {
                 distance
@@ -610,7 +610,7 @@ impl OpenCADStudio {
                 self.add_solid_model(
                     empty_solid3d(),
                     body,
-                    codec::objects::SolidHistoryOperation::Sweep(record),
+                    document::objects::SolidHistoryOperation::Sweep(record),
                 )
             };
             if created.is_null() {
@@ -740,7 +740,7 @@ impl OpenCADStudio {
                     if !handle.is_null() {
                         self.tabs[i].scene.create_solid_history(
                             handle,
-                            codec::objects::SolidHistoryOperation::Loft(record),
+                            document::objects::SolidHistoryOperation::Loft(record),
                         );
                         // An associative surface keeps reading its cross
                         // sections (each section a single object).
@@ -771,7 +771,7 @@ impl OpenCADStudio {
                     self.add_solid_model(
                         empty_solid3d(),
                         body,
-                        codec::objects::SolidHistoryOperation::Loft(record),
+                        document::objects::SolidHistoryOperation::Loft(record),
                     )
                 };
                 if created.is_null() {

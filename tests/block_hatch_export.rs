@@ -6,12 +6,12 @@
 // plot printed the block as bare monochrome outlines. `synced_hatch_models`
 // (the viewport) explodes visible INSERTs and materializes their fills; both
 // paths now share `exploded_insert_hatch_models`.
-use codec::entities::hatch::{
+use document::entities::hatch::{
     BoundaryEdge, BoundaryPath, BoundaryPathFlags, HatchPatternLine, LineEdge,
 };
-use codec::entities::Hatch;
-use codec::types::{Color as AcadColor, Vector2};
-use codec::EntityType;
+use document::entities::Hatch;
+use document::types::{Color as AcadColor, Vector2};
+use document::EntityType;
 use OpenCADStudio::scene::model::hatch_model::HatchPattern;
 use OpenCADStudio::scene::Scene;
 
@@ -76,7 +76,7 @@ fn block_internal_hatch_reaches_export() {
     // A blue hatch, wrapped into a block and inserted in model space — the
     // minimal shape of "coloured fill nested in a block".
     let h = scene.add_entity(EntityType::Hatch(Box::new(square_hatch(5))));
-    let identity = codec::types::Transform::identity();
+    let identity = document::types::Transform::identity();
     scene
         .create_block_from_entities(&[h], "LOGO", &identity, &identity)
         .expect("wrap hatch into a block + insert");
@@ -252,7 +252,7 @@ fn app_created_hatch_roundtrips_catalog_spacing() {
         boundary_exterior: None,
         boundary_sources: None,
         boundary_paths: None,
-        style: codec::entities::HatchStyleType::Normal,
+        style: document::entities::HatchStyleType::Normal,
         pattern: entry.gpu.clone(),
         name: "ANSI31".into(),
         color: [0.75, 0.75, 0.75, 0.85],
@@ -313,7 +313,7 @@ fn nested_hatch_serializes_only_outer_as_external() {
         boundary_exterior: None,
         boundary_sources: None,
         boundary_paths: None,
-        style: codec::entities::HatchStyleType::Normal,
+        style: document::entities::HatchStyleType::Normal,
         pattern: HatchPattern::Solid,
         name: "SOLID".into(),
         color: [0.45, 0.45, 0.45, 0.60],

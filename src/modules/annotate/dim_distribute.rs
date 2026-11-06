@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, SelectionEntity};
@@ -33,7 +33,7 @@ pub struct DimDistributeCommand {
 fn spaced(entity: &EntityType) -> bool {
     matches!(
         crate::entities::dimension::as_dimension(entity),
-        Some(codec::entities::Dimension::Linear(_) | codec::entities::Dimension::Aligned(_))
+        Some(document::entities::Dimension::Linear(_) | document::entities::Dimension::Aligned(_))
     )
 }
 

@@ -13,7 +13,7 @@ use crate::app::control::text_ops::{decode_dxf_escapes, replace_mtext_safe, Text
 use crate::app::{Message, OpenCADStudio};
 use crate::command::{CadCommand, CmdResult};
 use crate::ui::window::spell_dialog::{SpellFind, SpellMsg, SpellScope, SpellState};
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use iced::Task;
 
@@ -84,7 +84,7 @@ fn checked_text(entity: &EntityType, options: &crate::ui::window::spell_dialog::
     match entity {
         EntityType::Text(t) => Some(decode_dxf_escapes(&t.value)),
         EntityType::MText(m) => Some(decode_dxf_escapes(
-            &codec::entities::mtext_format::parse_mtext(&m.value, true).to_plain_text(),
+            &document::entities::mtext_format::parse_mtext(&m.value, true).to_plain_text(),
         )),
         EntityType::AttributeEntity(a) if options.attributes => {
             Some(decode_dxf_escapes(a.get_value()))

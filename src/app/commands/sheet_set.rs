@@ -10,8 +10,8 @@ use crate::ui::window::sheet_set::{
     Placing, PropRow, Properties, RowKey, SelectBlock, SheetSetMsg, SheetStatus, SsDialog,
     TemplatePick, ViewAction, Wizard, WizardMsg,
 };
-use codec::entities::Entity as _;
-use codec::sheet_set::{
+use document::entities::Entity as _;
+use document::sheet_set::{
     self as ss, ComponentKind, LayoutReference, SheetSetData, SheetSetDatabase,
 };
 use glam::DVec3;
@@ -29,12 +29,12 @@ pub(super) const SHEET_SET_SYSVARS: &[&str] = &[
 ];
 
 /// Paper-space layouts of a drawing in tab order: name and handle (hex).
-fn paper_layouts(doc: &codec::Document) -> Vec<(String, String)> {
+fn paper_layouts(doc: &document::Document) -> Vec<(String, String)> {
     let mut layouts: Vec<(i16, String, String)> = doc
         .objects
         .values()
         .filter_map(|o| match o {
-            codec::objects::ObjectType::Layout(l) if !l.name.eq_ignore_ascii_case("Model") => {
+            document::objects::ObjectType::Layout(l) if !l.name.eq_ignore_ascii_case("Model") => {
                 Some((
                     l.tab_order,
                     l.name.clone(),
@@ -278,16 +278,16 @@ impl CadCommand for SheetSetPlaceCommand {
 
 /// A model view to place: centre (world), width, height, target, direction.
 struct ModelView {
-    center: codec::types::Vector3,
+    center: document::types::Vector3,
     width: f64,
     height: f64,
-    target: codec::types::Vector3,
-    direction: codec::types::Vector3,
+    target: document::types::Vector3,
+    direction: document::types::Vector3,
 }
 
 /// Named view `view` of a model drawing, or its extents.
-fn model_view(doc: &codec::Document, view: Option<&str>) -> Option<ModelView> {
-    use codec::types::Vector3;
+fn model_view(doc: &document::Document, view: Option<&str>) -> Option<ModelView> {
+    use document::types::Vector3;
     if let Some(name) = view {
         let v = doc
             .views
@@ -1950,7 +1950,7 @@ impl OpenCADStudio {
         &mut self,
         path: &str,
         then: SheetSetMsg,
-    ) -> Result<std::sync::Arc<codec::Document>, Task<Message>> {
+    ) -> Result<std::sync::Arc<document::Document>, Task<Message>> {
         if let Some(doc) = self.sheet_set.drawings.get(path) {
             return Ok(doc);
         }
@@ -1978,14 +1978,14 @@ impl OpenCADStudio {
         scene.document = std::sync::Arc::try_unwrap(doc).unwrap_or_else(|doc| (*doc).clone());
         let wires = if name.is_empty() {
             let model = scene.document.header.model_space_block_handle;
-            let entities: Vec<codec::EntityType> = scene
+            let entities: Vec<document::EntityType> = scene
                 .document
                 .entities()
                 .filter(|e| e.common().owner_handle == model)
                 .filter(|e| {
                     !matches!(
                         e,
-                        codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)
+                        document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
                     )
                 })
                 .take(20_000)
@@ -2239,7 +2239,7 @@ impl OpenCADStudio {
         i: usize,
         file: &str,
         name: &str,
-        at: codec::types::Vector3,
+        at: document::types::Vector3,
         view: &str,
         sheet: &str,
         set: usize,
@@ -2249,9 +2249,9 @@ impl OpenCADStudio {
                 .push_error(crate::tf!("{}: cannot be read.", file).as_ref());
             return;
         };
-        let probe = codec::EntityType::Insert(codec::entities::Insert::new(
+        let probe = document::EntityType::Insert(document::entities::Insert::new(
             name.to_string(),
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
         ));
         let deps = crate::app::ClipboardDeps::capture(&source, std::slice::from_ref(&probe));
         self.merge_dependencies(i, &deps);
@@ -2269,30 +2269,30 @@ impl OpenCADStudio {
             .unwrap_or(source.header.insertion_units);
         let host = self.tabs[i].scene.document.header.insertion_units;
         let k = crate::app::properties::insert_unit_scale(host, units).unwrap_or(1.0);
-        let mut insert = codec::entities::Insert::new(name.to_string(), at).with_scale(k, k, k);
+        let mut insert = document::entities::Insert::new(name.to_string(), at).with_scale(k, k, k);
         let doc = &self.tabs[i].scene.document;
         let transform = crate::scene::render_graph::insert_transform(doc, &insert);
-        let attdefs: Vec<codec::entities::AttributeDefinition> = doc
+        let attdefs: Vec<document::entities::AttributeDefinition> = doc
             .block_records
             .get(name)
             .map(|br| {
                 br.entity_handles
                     .iter()
                     .filter_map(|h| match doc.get_entity(*h) {
-                        Some(codec::EntityType::AttributeDefinition(d)) => Some(d.clone()),
+                        Some(document::EntityType::AttributeDefinition(d)) => Some(d.clone()),
                         _ => None,
                     })
                     .collect()
             })
             .unwrap_or_default();
         for d in &attdefs {
-            let mut a = codec::entities::AttributeEntity::from_definition(d, None);
+            let mut a = document::entities::AttributeEntity::from_definition(d, None);
             a.apply_transform(&transform);
             insert.attributes.push(a);
         }
         let handle = self.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Insert(insert));
+            .add_entity(document::EntityType::Insert(insert));
         let Some(db) = self.sheet_set.sets.get(set) else {
             return;
         };
@@ -2313,7 +2313,7 @@ impl OpenCADStudio {
     /// The insertion point was picked: place the view (xref, viewport, paper
     /// named view, view label, sheet view record) or the block.
     fn place_at(&mut self, i: usize, x: f64, y: f64, scale: f64) {
-        use codec::types::Vector3;
+        use document::types::Vector3;
         let Some(placing) = self.sheet_set.placing.take() else {
             return;
         };
@@ -2363,11 +2363,11 @@ impl OpenCADStudio {
                 );
                 let model = scene.document.header.model_space_block_handle;
                 let inserted = scene.document.entities().any(|e| {
-                    e.common().owner_handle == model && matches!(e, codec::EntityType::Insert(ins) if ins.block_name.eq_ignore_ascii_case(&xref))
+                    e.common().owner_handle == model && matches!(e, document::EntityType::Insert(ins) if ins.block_name.eq_ignore_ascii_case(&xref))
                 });
                 if !inserted {
                     let saved = std::mem::replace(&mut scene.current_layout, "Model".to_string());
-                    scene.add_entity(codec::EntityType::Insert(codec::entities::Insert::new(
+                    scene.add_entity(document::EntityType::Insert(document::entities::Insert::new(
                         xref,
                         Vector3::ZERO,
                     )));
@@ -2375,7 +2375,7 @@ impl OpenCADStudio {
                 }
                 // The viewport: lower-left corner at the point, the view at the scale.
                 let (w, h) = (mv.width * scale, mv.height * scale);
-                let mut vp = codec::entities::Viewport::new();
+                let mut vp = document::entities::Viewport::new();
                 vp.center = Vector3::new(x + w / 2.0, y + h / 2.0, 0.0);
                 vp.width = w;
                 vp.height = h;
@@ -2388,9 +2388,9 @@ impl OpenCADStudio {
                     Vector3::new(mv.center.x - mv.target.x, mv.center.y - mv.target.y, 0.0);
                 vp.view_height = mv.height;
                 vp.custom_scale = scale;
-                scene.add_entity(codec::EntityType::Viewport(Box::new(vp)));
+                scene.add_entity(document::EntityType::Viewport(Box::new(vp)));
                 // A paper-space named view of the same name frames it.
-                let mut named = codec::tables::View::new(title.as_str());
+                let mut named = document::tables::View::new(title.as_str());
                 named.handle = scene.document.allocate_handle();
                 named.paper_space = true;
                 named.center = Vector3::new(x + w / 2.0, y + h / 2.0, 0.0);

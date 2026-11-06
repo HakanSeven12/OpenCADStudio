@@ -38,8 +38,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::entities::{Circle, EntityType, Line};
-use codec::types::{Color, Handle, LineWeight, Vector3};
+use document::entities::{Circle, EntityType, Line};
+use document::types::{Color, Handle, LineWeight, Vector3};
 use OpenCADStudio::scene::model::object::PropSection;
 use OpenCADStudio::scene::view::dispatch;
 use OpenCADStudio::scene::Scene;

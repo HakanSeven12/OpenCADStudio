@@ -1,7 +1,7 @@
 use super::{Message, ModalKind, OpenCADStudio};
-use codec::entities::{Insert, Line};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{Insert, Line};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 
 fn fixture() -> (OpenCADStudio, usize, Handle) {
     let mut app = OpenCADStudio::new_for_test();
@@ -579,7 +579,7 @@ fn block_visibility_state_is_shown_once_as_the_editable_row() {
 fn block_test_lookup_choice_evaluates_temporary_reference_only() {
     use crate::scene::model::object::PropValue;
     use crate::scene::{block_actions, block_distance_parameter as distance, block_lookup};
-    use codec::objects::BlockLookupAction;
+    use document::objects::BlockLookupAction;
 
     let (mut app, source, _) = fixture();
     let definition = app.tabs[source]
@@ -862,7 +862,7 @@ fn test_widget_picks_on_a_drawing_tab_do_nothing() {
 
 #[test]
 fn block_test_attributes_use_defaults_and_the_stored_base_point() {
-    use codec::entities::AttributeDefinition;
+    use document::entities::AttributeDefinition;
     let (mut app, source, _) = fixture();
     let doc = &mut app.tabs[source].scene.document;
     let owner = doc.block_records.get("SAMPLE").unwrap().handle;
@@ -1047,7 +1047,7 @@ fn a_list_whose_row_is_gone_closes_even_when_other_choices_remain() {
     let (mut app, test) = lookup_choice_tab();
     let real = lookup_choice_key(&app, test);
     let stale = crate::scene::model::object::BlockParameterKey {
-        parameter: codec::Handle::new(0x7fff),
+        parameter: document::Handle::new(0x7fff),
         ..real
     };
     let _ = app.update(Message::PropBlockPickerToggle {

@@ -40,7 +40,7 @@ use crate::ui::popup::context_menu::{
 use crate::ui::popup::quad_menu::{
     quad_panels_for_target, QuadMode, QuadMsg, QuadTarget, QuadUi,
 };
-use codec::Handle;
+use document::Handle;
 use iced::{Point, Task};
 
 impl OpenCADStudio {
@@ -81,14 +81,14 @@ impl OpenCADStudio {
                 && tab.scene.selected.iter().all(|handle| {
                     matches!(
                         tab.scene.document.get_entity(*handle),
-                        Some(codec::EntityType::Hatch(_))
+                        Some(document::EntityType::Hatch(_))
                     )
                 }),
             single_mleader: tab.scene.selected.len() == 1
                 && tab.scene.selected.iter().all(|handle| {
                     matches!(
                         tab.scene.document.get_entity(*handle),
-                        Some(codec::EntityType::MultiLeader(_))
+                        Some(document::EntityType::MultiLeader(_))
                     )
                 }),
             selected_constraint: tab.scene.selected_constraint,
@@ -1355,16 +1355,16 @@ mod tests {
         scene.document.add_layout("Zoom").unwrap();
         scene.set_current_layout("Zoom".into());
         scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
-        let mut viewport = codec::entities::Viewport::new();
+        let mut viewport = document::entities::Viewport::new();
         viewport.id = 2;
-        viewport.center = codec::types::Vector3::new(150.0, 100.0, 0.0);
+        viewport.center = document::types::Vector3::new(150.0, 100.0, 0.0);
         viewport.width = 200.0;
         viewport.height = 100.0;
         viewport.view_height = 200.0;
         viewport.custom_scale = 0.5;
-        viewport.view_direction = codec::types::Vector3::UNIT_Z;
+        viewport.view_direction = document::types::Vector3::UNIT_Z;
         viewport.turn_on();
-        let handle = scene.add_entity(codec::EntityType::Viewport(Box::new(viewport)));
+        let handle = scene.add_entity(document::EntityType::Viewport(Box::new(viewport)));
         scene.active_viewport = Some(handle);
         scene.normalize_active_viewport_view();
         (app, handle)
@@ -1400,7 +1400,7 @@ mod tests {
                 assert_eq!(camera.lens, paper.lens);
                 assert_eq!(camera.depth_half_range, paper.depth_half_range);
                 assert_eq!(camera.model_bounds, paper.model_bounds);
-                let Some(codec::EntityType::Viewport(viewport)) = scene.document.get_entity(handle)
+                let Some(document::EntityType::Viewport(viewport)) = scene.document.get_entity(handle)
                 else {
                     panic!("missing viewport");
                 };
@@ -1415,7 +1415,7 @@ mod tests {
                 let camera = app.tabs[0].scene.camera.borrow();
                 assert_eq!(camera.target, paper.target);
                 assert_eq!(camera.distance, paper.distance);
-                let Some(codec::EntityType::Viewport(viewport)) =
+                let Some(document::EntityType::Viewport(viewport)) =
                     app.tabs[0].scene.document.get_entity(handle)
                 else {
                     panic!("missing viewport");
@@ -1443,7 +1443,7 @@ mod tests {
                 let camera = scene.camera.borrow();
                 assert_eq!(camera.target, paper.target, "{command}: paper panned");
                 assert_eq!(camera.distance, paper.distance, "{command}: paper zoomed");
-                let Some(codec::EntityType::Viewport(viewport)) = scene.document.get_entity(handle)
+                let Some(document::EntityType::Viewport(viewport)) = scene.document.get_entity(handle)
                 else {
                     panic!("missing viewport");
                 };
@@ -1560,7 +1560,7 @@ mod tests {
                     .scene
                     .document
                     .entities()
-                    .filter(|e| matches!(e, codec::EntityType::Line(_)))
+                    .filter(|e| matches!(e, document::EntityType::Line(_)))
                     .count();
                 assert_eq!(lines, 3, "{mode:?}");
             }
@@ -1578,7 +1578,7 @@ mod tests {
             assert!(!menu_open(&app));
             assert_eq!(active(&app), None);
             let closed = app.tabs[0].scene.document.entities().any(|e| {
-                matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
+                matches!(e, document::EntityType::LwPolyline(p) if p.is_closed && p.vertices.len() == 3)
             });
             assert!(closed, "PLINE should have been closed by the menu pick");
         });
@@ -1650,7 +1650,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .any(|e| matches!(e, codec::EntityType::LwPolyline(p) if p.is_closed));
+                .any(|e| matches!(e, document::EntityType::LwPolyline(p) if p.is_closed));
             assert!(closed);
         });
     }
@@ -1694,7 +1694,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, codec::EntityType::Line(_)))
+                .filter(|e| matches!(e, document::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 3);
         });
@@ -1711,7 +1711,7 @@ mod tests {
                 .document
                 .entities()
                 .find_map(|e| match e {
-                    codec::EntityType::Line(l) => Some(l.common.handle),
+                    document::EntityType::Line(l) => Some(l.common.handle),
                     _ => None,
                 })
                 .expect("a line");
@@ -1726,7 +1726,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, codec::EntityType::Line(_)))
+                .filter(|e| matches!(e, document::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 0);
         });
@@ -1736,7 +1736,7 @@ mod tests {
 
     /// A drawing with one line, selected, its start grip hot at the origin.
     fn grip_app() -> (OpenCADStudio, Handle) {
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
         let mut app = app();
         app.snapper.snap_enabled = false;
         app.snapper.grid_snap_on = false;
@@ -1775,7 +1775,7 @@ mod tests {
 
     fn line_start(app: &OpenCADStudio, handle: Handle) -> (f64, f64) {
         match app.tabs[0].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(l)) => (l.start.x, l.start.y),
+            Some(document::EntityType::Line(l)) => (l.start.x, l.start.y),
             other => panic!("{other:?}"),
         }
     }
@@ -1874,7 +1874,7 @@ mod tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    codec::EntityType::Line(l) => Some((l.start.x, l.start.y)),
+                    document::EntityType::Line(l) => Some((l.start.x, l.start.y)),
                     _ => None,
                 })
                 .collect();
@@ -1894,7 +1894,7 @@ mod tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, codec::EntityType::Line(_)))
+                .filter(|e| matches!(e, document::EntityType::Line(_)))
                 .count();
             assert_eq!(count, 1);
         });
@@ -1981,7 +1981,7 @@ mod transparent_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|e| matches!(e, codec::EntityType::Line(_)))
+                .filter(|e| matches!(e, document::EntityType::Line(_)))
                 .count();
             assert_eq!(lines, 1);
         });
@@ -2047,7 +2047,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    codec::EntityType::Line(l) => Some(l.clone()),
+                    document::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2070,7 +2070,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    codec::EntityType::Line(l) => Some(l.clone()),
+                    document::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2088,7 +2088,7 @@ mod transparent_tests {
                 .document
                 .entities()
                 .filter_map(|e| match e {
-                    codec::EntityType::Line(l) => Some(l.clone()),
+                    document::EntityType::Line(l) => Some(l.clone()),
                     _ => None,
                 })
                 .collect();
@@ -2147,7 +2147,7 @@ mod quad_tests {
             .document
             .entities()
             .find_map(|e| match e {
-                codec::EntityType::Line(l) => Some(l.common.handle),
+                document::EntityType::Line(l) => Some(l.common.handle),
                 _ => None,
             })
             .expect("the test line");
@@ -2397,7 +2397,7 @@ mod quad_tests {
                 .document
                 .entities()
                 .find_map(|e| match e {
-                    codec::EntityType::Line(l) if l.common.handle != handle => {
+                    document::EntityType::Line(l) if l.common.handle != handle => {
                         Some(l.common.handle)
                     }
                     _ => None,

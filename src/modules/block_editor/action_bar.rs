@@ -1,6 +1,6 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::scene::block_action_bars::Group;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {

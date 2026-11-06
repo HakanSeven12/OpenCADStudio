@@ -5,7 +5,7 @@
 
 use super::*;
 use crate::ui::font_picker::{drawn_with, FontChoice, FontPickerEvent};
-use codec::tables::TextStyle;
+use document::tables::TextStyle;
 use iced_test::Simulator;
 
 fn style(name: &str, font_file: &str, family: &str) -> TextStyle {

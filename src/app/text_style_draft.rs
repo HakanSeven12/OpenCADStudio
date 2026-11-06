@@ -6,7 +6,7 @@
 //! a field whose text the user changed is parsed and written (#2413).
 
 use crate::entities::text_support::{TTF_FLAG_BOLD, TTF_FLAG_ITALIC};
-use codec::tables::TextStyle;
+use document::tables::TextStyle;
 use std::borrow::Cow;
 
 /// A number field: the text shown when the style was loaded, the text in the

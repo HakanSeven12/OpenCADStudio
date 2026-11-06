@@ -1,4 +1,4 @@
-use codec::{entities::Circle, types::Vector3, EntityType};
+use document::{entities::Circle, types::Vector3, EntityType};
 use glam::DVec3;
 use OpenCADStudio::command::WorkingPlane;
 use OpenCADStudio::scene::{model::presspull_model, Scene};

@@ -6,9 +6,9 @@ use crate::app::{ColorPickTarget, Message};
 use crate::scene::Scene;
 use crate::ui::dock::PanelId;
 use crate::ui::window::gradient_editor::{GradientEditorState, GradientMsg};
-use codec::entities::{EntityCommon, Hatch, HatchGradientPattern};
-use codec::types::{Color as AcadColor, LineWeight, Transparency};
-use codec::{Document, EntityType, Handle};
+use document::entities::{EntityCommon, Hatch, HatchGradientPattern};
+use document::types::{Color as AcadColor, LineWeight, Transparency};
+use document::{Document, EntityType, Handle};
 use iced::widget::{
     button, column, combo_box, container, image, row, slider, text, text_input, tooltip, Space,
 };

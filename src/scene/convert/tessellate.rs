@@ -1,4 +1,4 @@
-// Tessellation — convert opencadcodec EntityType to GPU-ready WireModel or MeshModel.
+// Tessellation — convert document EntityType to GPU-ready WireModel or MeshModel.
 //
 // Flow:
 //   EntityType
@@ -14,8 +14,8 @@
 // are tessellated by the FallbackTess fallback_geometry() path.
 
 use crate::entities::leader::LeaderTess;
-use codec::types::Color as AcadColor;
-use codec::{Document, EntityType, Handle};
+use document::types::Color as AcadColor;
+use document::{Document, EntityType, Handle};
 use glam::Vec3;
 
 use crate::scene::convert::acad_to_render::{convert, RenderObject};
@@ -91,7 +91,7 @@ use crate::entities::field::{BOX_ABOVE as FIELD_BOX_ABOVE, BOX_BELOW as FIELD_BO
 /// FIELD_BOX_ABOVE across it. `None` when the host's fields cannot be
 /// located in its text (the whole text is boxed then).
 fn field_run_corner_groups(
-    document: &codec::Document,
+    document: &document::Document,
     entity: &EntityType,
     stroke_groups: &[crate::scene::convert::acad_to_render::TextStroke],
     anno: f64,
@@ -141,7 +141,7 @@ fn field_run_corner_groups(
     };
     match entity {
         EntityType::MText(m) => {
-            let spans = codec::fields::field_spans(document, handle, &m.value)?;
+            let spans = document::fields::field_spans(document, handle, &m.value)?;
             let cells = crate::entities::mtext::glyph_boxes(m, document);
             let flip = if resolve_text_style(&m.style, document).is_upside_down {
                 std::f64::consts::PI
@@ -159,7 +159,7 @@ fn field_run_corner_groups(
         }
         // A multi-line attribute is laid out like MTEXT.
         EntityType::AttributeEntity(a) if multiline_attribute.is_some() => {
-            let spans = codec::fields::field_spans(document, handle, &a.value)?;
+            let spans = document::fields::field_spans(document, handle, &a.value)?;
             let (cells, origin, rotation) = multiline_attribute?;
             from_cells(
                 &mut lines,
@@ -176,7 +176,7 @@ fn field_run_corner_groups(
                 EntityType::AttributeEntity(a) => &a.value,
                 _ => return None,
             };
-            let spans = codec::fields::field_spans(document, handle, text)?;
+            let spans = document::fields::field_spans(document, handle, text)?;
             // One laid-out line per `\P`-separated line, in order.
             let mut start = 0;
             for (line_text, group) in text.split("\\P").zip(stroke_groups) {
@@ -243,7 +243,7 @@ fn field_run_corner_groups(
 
 fn oriented_mtext_corner_groups(
     verts: &[crate::scene::pipeline::text_gpu::TextVertex],
-    text: &codec::MText,
+    text: &document::MText,
     rotation: f64,
     pad: f64,
     annotation_scale: f64,
@@ -264,12 +264,12 @@ fn oriented_mtext_corner_groups(
     let gutter = columns.gutter.max(0.0) * annotation_scale;
     let total_width = width * count as f64 + gutter * count.saturating_sub(1) as f64;
     let anchor = match text.attachment_point {
-        codec::entities::mtext::AttachmentPoint::TopCenter
-        | codec::entities::mtext::AttachmentPoint::MiddleCenter
-        | codec::entities::mtext::AttachmentPoint::BottomCenter => 0.5,
-        codec::entities::mtext::AttachmentPoint::TopRight
-        | codec::entities::mtext::AttachmentPoint::MiddleRight
-        | codec::entities::mtext::AttachmentPoint::BottomRight => 1.0,
+        document::entities::mtext::AttachmentPoint::TopCenter
+        | document::entities::mtext::AttachmentPoint::MiddleCenter
+        | document::entities::mtext::AttachmentPoint::BottomCenter => 0.5,
+        document::entities::mtext::AttachmentPoint::TopRight
+        | document::entities::mtext::AttachmentPoint::MiddleRight
+        | document::entities::mtext::AttachmentPoint::BottomRight => 1.0,
         _ => 0.0,
     };
     let block_left = -anchor * total_width;
@@ -399,7 +399,7 @@ fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
         }
         EntityType::Polyline2D(p) => {
             let filtered = crate::entities::polyline::drawn_vertices2d(p);
-            let verts: &[codec::entities::Vertex2D] = filtered.as_deref().unwrap_or(&p.vertices);
+            let verts: &[document::entities::Vertex2D] = filtered.as_deref().unwrap_or(&p.vertices);
             let count = verts.len();
             let seg_count = if p.is_closed() {
                 count
@@ -855,10 +855,10 @@ fn point_cloud_wires(
     // faces so a click among the points selects it too.
     let mut shown = true;
     let (mut pick_tris, mut pick_tris_low) = (Vec::new(), Vec::new());
-    if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
+    if let document::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data {
         // Its box shows too with every point hidden (the reference does).
         shown = crate::scene::model::point_cloud::shows_no_points(document, data);
-        let c = codec::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
+        let c = document::entities::point_cloud_ex_corners(data).map(|c| [c.x, c.y, c.z]);
         let mut tris = Vec::with_capacity(36);
         for [a, b, d, e] in [
             [0, 1, 3, 2],
@@ -2964,7 +2964,7 @@ pub(crate) enum ArrowKind {
 
 pub(crate) fn arrow_from_block(
     doc: &Document,
-    handle: codec::types::Handle,
+    handle: document::types::Handle,
     dimasz: f32,
 ) -> ArrowKind {
     arrow_from_block_with_deferred_hatch(doc, handle, dimasz, false)
@@ -2972,7 +2972,7 @@ pub(crate) fn arrow_from_block(
 
 pub(crate) fn arrow_from_block_with_deferred_hatch(
     doc: &Document,
-    handle: codec::types::Handle,
+    handle: document::types::Handle,
     dimasz: f32,
     defer_hatch: bool,
 ) -> ArrowKind {
@@ -3101,7 +3101,7 @@ fn builtin_arrow_from_block_name(name: &str, dimasz: f32) -> Option<ArrowKind> {
 
 fn custom_arrow_from_block(
     doc: &Document,
-    record: &codec::tables::BlockRecord,
+    record: &document::tables::BlockRecord,
     dimasz: f32,
     defer_hatch: bool,
 ) -> Option<ArrowKind> {
@@ -3121,7 +3121,7 @@ fn custom_arrow_from_block(
         doc,
         record.handle,
         crate::scene::render_graph::BlockRole::ArrowHead,
-        codec::types::Vector3::ZERO,
+        document::types::Vector3::ZERO,
     )?;
     let mut lines = Vec::new();
     let mut fill = Vec::new();
@@ -3166,7 +3166,7 @@ fn append_custom_arrow_leaf(
         | EntityType::MultiLeader(_)
         | EntityType::Insert(_) => return,
         EntityType::Hatch(hatch) => {
-            append_custom_hatch_geometry(hatch, codec::types::Vector3::ZERO, lines, fill);
+            append_custom_hatch_geometry(hatch, document::types::Vector3::ZERO, lines, fill);
             return;
         }
         _ => {}
@@ -3197,22 +3197,22 @@ fn append_custom_arrow_leaf(
             append_custom_wire_points(
                 &wire.points,
                 &wire.points_low,
-                codec::types::Vector3::ZERO,
+                document::types::Vector3::ZERO,
                 lines,
             );
         }
         append_custom_fill_points(
             &wire.fill_tris,
             &wire.fill_tris_low,
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             fill,
         );
     }
 }
 
 fn append_custom_hatch_geometry(
-    hatch: &codec::entities::Hatch,
-    base: codec::types::Vector3,
+    hatch: &document::entities::Hatch,
+    base: document::types::Vector3,
     lines: &mut Vec<[f32; 3]>,
     fill: &mut Vec<[f32; 3]>,
 ) {
@@ -3342,7 +3342,7 @@ fn append_custom_band(wire: &WireModel, fill: &mut Vec<[f32; 3]>) {
 fn append_custom_wire_points(
     points: &[[f32; 3]],
     points_low: &[[f32; 3]],
-    base: codec::types::Vector3,
+    base: document::types::Vector3,
     out: &mut Vec<[f32; 3]>,
 ) {
     if points.is_empty() {
@@ -3370,7 +3370,7 @@ fn append_custom_wire_points(
 fn append_custom_fill_points(
     points: &[[f32; 3]],
     points_low: &[[f32; 3]],
-    base: codec::types::Vector3,
+    base: document::types::Vector3,
     out: &mut Vec<[f32; 3]>,
 ) {
     for (index, point) in points.iter().enumerate() {
@@ -3396,7 +3396,7 @@ pub(crate) struct DimGeom {
     /// sub-millimetre precision at UTM scale; consumers that need world-space
     /// points (explode) add this back. Zero for leader and multileader
     /// arrowheads, whose points are already world-space f32.
-    pub(crate) origin: codec::types::Vector3,
+    pub(crate) origin: document::types::Vector3,
 }
 
 impl DimGeom {
@@ -3406,12 +3406,12 @@ impl DimGeom {
             dim_lines: Vec::new(),
             arrow_lines: Vec::new(),
             arrow_fill: Vec::new(),
-            origin: codec::types::Vector3::ZERO,
+            origin: document::types::Vector3::ZERO,
         }
     }
 }
 
-/// Convert an opencadcodec `Color` to RGBA, falling back to `inherited` for
+/// Convert a document `Color` to RGBA, falling back to `inherited` for
 /// `ByLayer` / `ByBlock` (assumes those are already resolved upstream).
 pub(crate) fn color_or_inherit(c: &AcadColor, inherited: [f32; 4]) -> [f32; 4] {
     match c.rgb() {
@@ -3692,11 +3692,11 @@ mod tests {
     fn none_arrow_draws_what_its_block_holds() {
         // A drawing's "_NONE" holding a 0.25 circle, which AutoCAD 2025 draws.
         let mut doc = Document::new();
-        let circle = codec::entities::Circle::from_center_radius(codec::types::Vector3::ZERO, 0.25);
+        let circle = document::entities::Circle::from_center_radius(document::types::Vector3::ZERO, 0.25);
         crate::app::define_block_raw_doc(
             &mut doc,
             "_NONE",
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
             &[EntityType::Circle(circle)],
         );
         let handle = doc.block_records.get("_NONE").unwrap().handle;
@@ -3712,7 +3712,7 @@ mod tests {
 
         // AutoCAD's own "_None" is empty: no arrow.
         let mut doc = Document::new();
-        crate::app::define_block_raw_doc(&mut doc, "_None", codec::types::Vector3::ZERO, &[]);
+        crate::app::define_block_raw_doc(&mut doc, "_None", document::types::Vector3::ZERO, &[]);
         let handle = doc.block_records.get("_None").unwrap().handle;
         assert!(matches!(
             arrow_from_block(&doc, handle, 50.0),
@@ -4082,12 +4082,12 @@ mod tests {
         // too, exactly as for plain text.
         let wires = |value: &str, flags: i32| {
             let mut text =
-                codec::entities::MText::with_value(value, codec::types::Vector3::new(0., 0., 0.));
+                document::entities::MText::with_value(value, document::types::Vector3::new(0., 0., 0.));
             text.height = 2.5;
             text.background_fill_flags = flags;
-            text.background_color = codec::types::Color::Index(1);
+            text.background_color = document::types::Color::Index(1);
             tessellate(
-                &codec::Document::new(),
+                &document::Document::new(),
                 Handle::new(123),
                 &EntityType::MText(Box::new(text)),
                 false,

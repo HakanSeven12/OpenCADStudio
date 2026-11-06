@@ -1,7 +1,7 @@
 //! Native parameter grip counts and restoration of default grip locations.
 use super::*;
 use crate::scene::block_authoring::{self as authoring, *};
-use codec::objects::*;
+use document::objects::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -735,7 +735,7 @@ mod tests {
         block_actions as actions, block_distance_parameter as distance,
         block_orientation_parameter as orientation, Scene,
     };
-    use codec::{DwgReader, DwgWriter, DxfReader, DxfWriter, EntityType};
+    use document::{DwgReader, DwgWriter, DxfReader, DxfWriter, EntityType};
     use std::io::Cursor;
 
     fn fixture(family: usize) -> (Document, Handle, Handle) {
@@ -743,7 +743,7 @@ mod tests {
         scene.define_block_raw(
             "GRIPS",
             Vector3::ZERO,
-            vec![EntityType::Line(codec::entities::Line::from_points(
+            vec![EntityType::Line(document::entities::Line::from_points(
                 Vector3::UNIT_X,
                 Vector3::new(2., 0., 0.),
             ))],

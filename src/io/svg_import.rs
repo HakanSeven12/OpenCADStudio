@@ -15,11 +15,11 @@
 //! imported into, with its top-left corner at the block's origin; SVG's y
 //! runs down the page, so it runs down the drawing here too.
 
-use codec::entities::{
+use document::entities::{
     BoundaryEdge, BoundaryPath, Hatch, Polyline2D, PolylineEdge, Vertex2D,
 };
-use codec::types::{Color, Vector2, Vector3};
-use codec::EntityType;
+use document::types::{Color, Vector2, Vector3};
+use document::EntityType;
 use resvg::tiny_skia::PathSegment;
 use resvg::usvg::{self, Node, Paint};
 

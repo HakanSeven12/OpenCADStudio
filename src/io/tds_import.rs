@@ -5,8 +5,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codec::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
-use codec::types::Vector3;
+use document::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
+use document::types::Vector3;
 
 use crate::scene::sanitized_table_name;
 

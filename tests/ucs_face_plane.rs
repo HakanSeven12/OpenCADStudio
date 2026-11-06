@@ -7,7 +7,7 @@
 //! `ucs_from_normal` in `src/app/helpers.rs`, which is `pub(crate)` and so out
 //! of reach from here.
 
-use codec::{entities::Circle, types::Vector3, EntityType};
+use document::{entities::Circle, types::Vector3, EntityType};
 use OpenCADStudio::scene::model::{presspull_model, solid_model};
 
 /// Extrude a disc into a puck 10 units tall, centred on the origin.
@@ -110,7 +110,7 @@ fn ucs_pick_command_enables_solid_face_picking() {
     );
     assert!(!cmd_obj.entity_pick_uses_surface_point());
 
-    let handle = codec::Handle::new(0x2A);
+    let handle = document::Handle::new(0x2A);
     let pt = DVec3::new(10.5, 20.25, 30.125);
     let mut cmd = cmd_face;
     match cmd.on_entity_pick(handle, pt) {

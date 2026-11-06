@@ -1,6 +1,6 @@
 use super::*;
-use codec::entities::{BoundaryEdge, BoundaryPath, Circle, Line as LineEnt, LineEdge};
-use codec::types::{Vector2, Vector3};
+use document::entities::{BoundaryEdge, BoundaryPath, Circle, Line as LineEnt, LineEdge};
+use document::types::{Vector2, Vector3};
 
 fn path(points: &[[f64; 2]]) -> BoundaryPath {
     let mut path = BoundaryPath::new();
@@ -85,9 +85,9 @@ fn trim_hatch_rectangle_removes_clicked_half_without_an_external_outline() {
 #[test]
 fn trim_hatch_heavy_and_3d_polyline_cutters_are_projected_segment_by_segment() {
     let points = vec![Vector3::new(10.0, 0.0, 0.0), Vector3::new(10.0, 10.0, 0.0)];
-    let mut heavy = codec::entities::Polyline::from_points(points.clone());
+    let mut heavy = document::entities::Polyline::from_points(points.clone());
     heavy.common.handle = Handle::new(2);
-    let mut spatial = codec::entities::Polyline3D::new();
+    let mut spatial = document::entities::Polyline3D::new();
     spatial.common.handle = Handle::new(3);
     spatial.vertices = [
         Vector3::new(10.0, 0.0, 0.0),
@@ -97,7 +97,7 @@ fn trim_hatch_heavy_and_3d_polyline_cutters_are_projected_segment_by_segment() {
         Vector3::new(25.0, 5.0, 3.0),
     ]
     .into_iter()
-    .map(codec::entities::Vertex3DPolyline::new)
+    .map(document::entities::Vertex3DPolyline::new)
     .collect();
 
     for cutter in [EntityType::Polyline(heavy), EntityType::Polyline3D(spatial)] {
@@ -112,26 +112,26 @@ fn trim_hatch_heavy_and_3d_polyline_cutters_are_projected_segment_by_segment() {
 #[test]
 fn trim_hatch_does_not_read_mesh_vertex_order_as_a_cutting_path() {
     let points = vec![Vector3::new(10.0, 0.0, 0.0), Vector3::new(10.0, 10.0, 0.0)];
-    let mut polygon_mesh = codec::entities::Polyline::from_points(points.clone());
+    let mut polygon_mesh = document::entities::Polyline::from_points(points.clone());
     polygon_mesh.common.handle = Handle::new(2);
-    polygon_mesh.flags |= codec::entities::PolylineFlags::POLYGON_MESH;
-    let mut polyface = codec::entities::Polyline::from_points(points.clone());
+    polygon_mesh.flags |= document::entities::PolylineFlags::POLYGON_MESH;
+    let mut polyface = document::entities::Polyline::from_points(points.clone());
     polyface.common.handle = Handle::new(3);
-    polyface.flags |= codec::entities::PolylineFlags::POLYFACE_MESH;
-    let mut spatial_mesh = codec::entities::Polyline3D::new();
+    polyface.flags |= document::entities::PolylineFlags::POLYFACE_MESH;
+    let mut spatial_mesh = document::entities::Polyline3D::new();
     spatial_mesh.common.handle = Handle::new(4);
     spatial_mesh.flags.is_3d_mesh = true;
     spatial_mesh.vertices = points
         .iter()
         .copied()
-        .map(codec::entities::Vertex3DPolyline::new)
+        .map(document::entities::Vertex3DPolyline::new)
         .collect();
-    let mut spatial_polyface = codec::entities::Polyline3D::new();
+    let mut spatial_polyface = document::entities::Polyline3D::new();
     spatial_polyface.common.handle = Handle::new(5);
     spatial_polyface.flags.is_polyface_mesh = true;
     spatial_polyface.vertices = points
         .into_iter()
-        .map(codec::entities::Vertex3DPolyline::new)
+        .map(document::entities::Vertex3DPolyline::new)
         .collect();
 
     for cutter in [
@@ -150,18 +150,18 @@ fn trim_hatch_does_not_read_mesh_vertex_order_as_a_cutting_path() {
 #[test]
 fn trim_hatch_does_not_use_fit_control_points_as_chordal_cutters() {
     let points = vec![Vector3::new(10.0, 0.0, 0.0), Vector3::new(10.0, 10.0, 0.0)];
-    let mut curve_fit = codec::entities::Polyline::from_points(points.clone());
+    let mut curve_fit = document::entities::Polyline::from_points(points.clone());
     curve_fit.common.handle = Handle::new(2);
-    curve_fit.flags |= codec::entities::PolylineFlags::CURVE_FIT;
-    let mut spline_fit = codec::entities::Polyline::from_points(points.clone());
+    curve_fit.flags |= document::entities::PolylineFlags::CURVE_FIT;
+    let mut spline_fit = document::entities::Polyline::from_points(points.clone());
     spline_fit.common.handle = Handle::new(3);
-    spline_fit.flags |= codec::entities::PolylineFlags::SPLINE_FIT;
-    let mut spatial_spline = codec::entities::Polyline3D::from_points(points.clone());
+    spline_fit.flags |= document::entities::PolylineFlags::SPLINE_FIT;
+    let mut spatial_spline = document::entities::Polyline3D::from_points(points.clone());
     spatial_spline.common.handle = Handle::new(4);
     spatial_spline.flags.spline_fit = true;
-    let mut smoothed = codec::entities::Polyline3D::from_points(points);
+    let mut smoothed = document::entities::Polyline3D::from_points(points);
     smoothed.common.handle = Handle::new(5);
-    smoothed.smooth_type = codec::entities::polyline3d::SmoothSurfaceType::CubicBSpline;
+    smoothed.smooth_type = document::entities::polyline3d::SmoothSurfaceType::CubicBSpline;
 
     for cutter in [
         EntityType::Polyline(curve_fit),
@@ -325,11 +325,11 @@ fn trim_hatch_implied_line_ray_and_xline_limits_work() {
     assert!(cut(&h, &short, [15.0, 5.0]).is_none());
     let result = trim(&h, short.iter(), DVec3::new(15.0, 5.0, 0.0), true).unwrap();
     assert!((area(&result.kept) - 100.0).abs() < 1e-8);
-    let mut ray = codec::entities::Ray::new(Vector3::ZERO, Vector3::new(0.0, 1.0, 0.0));
+    let mut ray = document::entities::Ray::new(Vector3::ZERO, Vector3::new(0.0, 1.0, 0.0));
     ray.common.handle = Handle::new(2);
     ray.base_point = Vector3::new(10.0, -5.0, 0.0);
     ray.direction = Vector3::new(0.0, 1.0, 0.0);
-    let mut xline = codec::entities::XLine::new(Vector3::ZERO, Vector3::new(0.0, 1.0, 0.0));
+    let mut xline = document::entities::XLine::new(Vector3::ZERO, Vector3::new(0.0, 1.0, 0.0));
     xline.common.handle = Handle::new(2);
     xline.base_point = Vector3::new(10.0, 5.0, 0.0);
     xline.direction = Vector3::new(0.0, 1.0, 0.0);
@@ -343,7 +343,7 @@ fn trim_hatch_implied_line_ray_and_xline_limits_work() {
 fn trim_hatch_closed_spline_crossing_parameter_seam_keeps_the_correct_side() {
     let mut h = hatch();
     let mut boundary = BoundaryPath::new();
-    boundary.add_edge(BoundaryEdge::Spline(codec::entities::SplineEdge {
+    boundary.add_edge(BoundaryEdge::Spline(document::entities::SplineEdge {
         degree: 1,
         rational: false,
         periodic: true,
@@ -380,7 +380,7 @@ fn trim_hatch_coincident_circle_with_different_sampling_phase_is_noop() {
     let mut boundary = BoundaryPath::new();
     let start = std::f64::consts::PI / 48.0;
     boundary.add_edge(BoundaryEdge::CircularArc(
-        codec::entities::CircularArcEdge {
+        document::entities::CircularArcEdge {
             center: Vector2::new(0.0, 0.0),
             radius: 10.0,
             start_angle: start,

@@ -8,7 +8,7 @@ use glam::{DVec3, Mat4, Vec3};
 use iced::time::Instant;
 use iced::{Point, Rectangle};
 
-use codec::types::Handle;
+use document::types::Handle;
 use kernel::geom2d::Curve;
 
 use crate::command::{DimensionAssociationSource, TangentObject};

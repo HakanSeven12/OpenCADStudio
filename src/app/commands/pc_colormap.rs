@@ -4,12 +4,12 @@
 //! elevation colouring — as one undo step.
 
 use super::*;
-use codec::entities::{ExtendedEntityData, PointCloudExData};
-use codec::objects::{
+use document::entities::{ExtendedEntityData, PointCloudExData};
+use document::objects::{
     ClassObject, ClassObjectData, Dictionary, ObjectType, PointCloudColorMap, PointCloudColorRamp,
     PointCloudRampColor,
 };
-use codec::types::Handle;
+use document::types::Handle;
 
 use crate::ui::window::pdf_dialogs::{
     short, MapRamp, MapSlot, OutOfRange, PdfDialogMsg, PointCloudColorMapState,
@@ -20,9 +20,9 @@ const MAP_ENTRY: &str = "ACAD_POINTCLOUD_COLORMAP";
 /// The classification scheme the colour map names by default.
 const CLASSIFICATION_SCHEME: &str = "8AF59545-D22F-46B7-923C-912F71ED57DE";
 
-fn cloud_data(document: &codec::Document, handle: Handle) -> Option<&PointCloudExData> {
+fn cloud_data(document: &document::Document, handle: Handle) -> Option<&PointCloudExData> {
     match document.get_entity(handle)? {
-        codec::EntityType::Extended(extended) => match &extended.data {
+        document::EntityType::Extended(extended) => match &extended.data {
             ExtendedEntityData::PointCloudEx(data) => Some(data),
             _ => None,
         },
@@ -32,7 +32,7 @@ fn cloud_data(document: &codec::Document, handle: Handle) -> Option<&PointCloudE
 
 /// The drawing's colour map object, created (with the built-in schemes)
 /// under its dictionary when the drawing has none.
-fn ensure_color_map(document: &mut codec::Document) -> Option<Handle> {
+fn ensure_color_map(document: &mut document::Document) -> Option<Handle> {
     let existing = document
         .objects
         .iter()
@@ -154,7 +154,7 @@ impl OpenCADStudio {
         let data = cloud.and_then(|handle| cloud_data(document, handle));
         let height = data
             .map(|data| {
-                let corners = codec::entities::point_cloud_ex_corners(data);
+                let corners = document::entities::point_cloud_ex_corners(data);
                 let low = corners.iter().map(|c| c.z).fold(f64::MAX, f64::min);
                 let high = corners.iter().map(|c| c.z).fold(f64::MIN, f64::max);
                 (low, high)
@@ -423,7 +423,7 @@ impl OpenCADStudio {
             }
         }
         if let Some(handle) = cloud {
-            if let Some(codec::EntityType::Extended(extended)) = document.get_entity_mut(handle) {
+            if let Some(document::EntityType::Extended(extended)) = document.get_entity_mut(handle) {
                 if let ExtendedEntityData::PointCloudEx(data) = &mut extended.data {
                     data.intensity_color_scheme = intensity_slot.scheme;
                     data.intensity_as_gradient = intensity_slot.gradient;

@@ -2,7 +2,7 @@
 //!
 //! Analytic surfaces remain analytic instead of becoming facets.
 
-use codec::entities::acis::{SabReader, SabWriter, SatDocument};
+use document::entities::acis::{SabReader, SabWriter, SatDocument};
 use kernel::acis::append;
 use kernel::brep::Body;
 

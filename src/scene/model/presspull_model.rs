@@ -1,8 +1,8 @@
 //! PRESSPULL selection and curve-only previews. Geometry operations stay in the kernel.
 
-use codec::entities::{AcisData, EmbeddedEntity, Region, Wire};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{AcisData, EmbeddedEntity, Region, Wire};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::brep::{self, Body, FaceKey};
 use kernel::geom2d::{contains, ring_nesting_depths, signed_area, Curve, Line, Tolerance};

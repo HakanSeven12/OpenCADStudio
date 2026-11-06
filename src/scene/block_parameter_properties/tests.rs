@@ -3,8 +3,8 @@ use crate::scene::{
     block_distance_parameter as distance, block_orientation_parameter as orientation,
     block_point_parameter as point, Scene,
 };
-use codec::entities::{Insert, Line};
-use codec::types::Vector3;
+use document::entities::{Insert, Line};
+use document::types::Vector3;
 
 fn fixture(kind: usize, action: bool) -> (Document, Handle, Handle, Parameter) {
     let mut scene = Scene::new();

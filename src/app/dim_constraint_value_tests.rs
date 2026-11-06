@@ -7,7 +7,7 @@ use crate::command::StepInput;
 use crate::scene::parametric_constraints::{
     ConstraintKind, ParametricScope, DYNAMIC_DIMENSION_LAYER,
 };
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 /// Whole degrees for the corner's own label: the current dimension style's
@@ -144,7 +144,7 @@ fn label(
     app: &OpenCADStudio,
     tab: usize,
     handle: Handle,
-) -> (Option<String>, String, codec::types::Color) {
+) -> (Option<String>, String, document::types::Color) {
     let entity = app.tabs[tab]
         .scene
         .document
@@ -275,7 +275,7 @@ fn typing_a_value_at_the_angular_prompt_turns_the_second_side() {
         (
             Some("ang1=90".to_string()),
             DYNAMIC_DIMENSION_LAYER.to_string(),
-            codec::types::Color::Rgb {
+            document::types::Color::Rgb {
                 r: 103,
                 g: 109,
                 b: 118,
@@ -546,7 +546,7 @@ fn typing_a_value_at_the_radius_prompt_moves_the_rim() {
         (
             Some("rad1=40".to_string()),
             DYNAMIC_DIMENSION_LAYER.to_string(),
-            codec::types::Color::Rgb {
+            document::types::Color::Rgb {
                 r: 103,
                 g: 109,
                 b: 118,

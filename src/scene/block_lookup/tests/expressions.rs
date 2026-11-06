@@ -177,7 +177,7 @@ fn block_lookup_range_selection_intersects_native_lists_and_increments() {
         let DynamicBlockData::LinearParameter(p) = &mut object.data else {
             panic!()
         };
-        p.value_set = codec::objects::BlockParameterValueSet {
+        p.value_set = document::objects::BlockParameterValueSet {
             flags: if list { 8 } else { 4 },
             values: vec![2., 4., 6., 8.],
             increment: 2.,
@@ -193,7 +193,7 @@ fn block_lookup_range_selection_intersects_native_lists_and_increments() {
         let DynamicBlockData::LinearParameter(p) = &mut object.data else {
             panic!()
         };
-        p.value_set = codec::objects::BlockParameterValueSet {
+        p.value_set = document::objects::BlockParameterValueSet {
             flags: 3,
             minimum: 7.,
             maximum: 9.,
@@ -224,7 +224,7 @@ fn block_lookup_matching_range_still_checks_changed_native_value_sets() {
     let DynamicBlockData::LinearParameter(p) = &mut object.data else {
         panic!()
     };
-    p.value_set = codec::objects::BlockParameterValueSet {
+    p.value_set = document::objects::BlockParameterValueSet {
         flags: 3,
         minimum: 7.,
         maximum: 9.,

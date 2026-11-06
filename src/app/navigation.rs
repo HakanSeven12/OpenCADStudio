@@ -104,7 +104,7 @@ impl OpenCADStudio {
         let aspect = scene
             .active_viewport
             .and_then(|handle| match scene.document.get_entity(handle) {
-                Some(codec::EntityType::Viewport(vp)) => Some(vp.width / vp.height.max(1e-6)),
+                Some(document::EntityType::Viewport(vp)) => Some(vp.width / vp.height.max(1e-6)),
                 _ => None,
             })
             .unwrap_or((bounds.width / bounds.height.max(1.)).max(0.01) as f64);
@@ -407,7 +407,7 @@ mod tests {
             .document
             .entities()
             .find_map(|e| {
-                if let codec::EntityType::LwPolyline(p) = e {
+                if let document::EntityType::LwPolyline(p) = e {
                     Some(p)
                 } else {
                     None
@@ -493,11 +493,11 @@ mod tests {
         let mut app = app();
         let scene = &mut app.tabs[app.active_tab].scene;
         let paper_camera = scene.camera.borrow().clone();
-        let mut vp = codec::entities::Viewport::default();
+        let mut vp = document::entities::Viewport::default();
         vp.width = 200.;
         vp.height = 100.;
         vp.view_height = 50.;
-        let handle = scene.add_entity(codec::EntityType::Viewport(Box::new(vp)));
+        let handle = scene.add_entity(document::EntityType::Viewport(Box::new(vp)));
         scene.active_viewport = Some(handle);
         let mut camera = scene.navigation_camera();
         camera.target = DVec3::new(120., 30., 8.);
@@ -510,7 +510,7 @@ mod tests {
         assert!((round_trip.distance - camera.distance).abs() < 1e-4);
         assert_eq!(scene.camera.borrow().target, paper_camera.target);
         assert_eq!(scene.camera.borrow().distance, paper_camera.distance);
-        if let Some(codec::EntityType::Viewport(vp)) = scene.document.get_entity_mut(handle) {
+        if let Some(document::EntityType::Viewport(vp)) = scene.document.get_entity_mut(handle) {
             vp.status.locked = true;
         }
         camera.target.x += 100.;

@@ -1,8 +1,8 @@
 //! Editor picking and native definition-point edits. No proxy drawing entities.
 use super::*;
 use crate::scene::block_distance_parameter::{self as distance, Graphic};
-use codec::objects::{BlockGrip, BlockTwoPointParameter};
-use codec::types::Vector3;
+use document::objects::{BlockGrip, BlockTwoPointParameter};
+use document::types::Vector3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
@@ -750,8 +750,8 @@ mod tests {
                 }
             }
         }
-        let bytes = codec::DxfWriter::new(doc).write_to_vec().unwrap();
-        let saved = codec::DxfReader::from_reader(std::io::Cursor::new(bytes))
+        let bytes = document::DxfWriter::new(doc).write_to_vec().unwrap();
+        let saved = document::DxfReader::from_reader(std::io::Cursor::new(bytes))
             .unwrap()
             .read()
             .unwrap();

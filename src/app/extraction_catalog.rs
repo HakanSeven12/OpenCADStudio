@@ -2,8 +2,8 @@
 //! drawing object is listed under, and the properties (with their display
 //! names and categories) and formatted values it offers for it.
 
-use codec::types::Color;
-use codec::{Document, EntityType};
+use document::types::Color;
+use document::{Document, EntityType};
 
 /// One extractable property: its key, display name and category.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -279,8 +279,8 @@ fn local_date_time(time: std::time::SystemTime) -> String {
         .unwrap_or_default();
     let julian =
         seconds / 86_400.0 + 2_440_587.5 + crate::entities::field::utc_offset_days();
-    codec::fields::format_dt_in(
-        codec::fields::julian_parts(julian),
+    document::fields::format_dt_in(
+        document::fields::julian_parts(julian),
         "%c",
         &crate::entities::field::os_date_locale(),
     )
@@ -305,8 +305,8 @@ fn color_text(color: &Color) -> String {
     }
 }
 
-fn lineweight_text(weight: &codec::types::LineWeight) -> String {
-    use codec::types::LineWeight;
+fn lineweight_text(weight: &document::types::LineWeight) -> String {
+    use document::types::LineWeight;
     match weight {
         LineWeight::ByLayer => "ByLayer".into(),
         LineWeight::ByBlock => "ByBlock".into(),
@@ -349,7 +349,7 @@ pub(crate) fn value(entity: &EntityType, key: &str, facts: &DrawingFacts) -> Str
                 .get_record("PE_URL")
                 .and_then(|record| {
                     record.values.iter().find_map(|value| match value {
-                        codec::xdata::XDataValue::String(text) => Some(text.clone()),
+                        document::xdata::XDataValue::String(text) => Some(text.clone()),
                         _ => None,
                     })
                 })

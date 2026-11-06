@@ -31,7 +31,7 @@ impl OpenCADStudio {
             .objects
             .values()
             .find_map(|object| match object {
-                codec::objects::ObjectType::TableStyle(style)
+                document::objects::ObjectType::TableStyle(style)
                     if style.name.eq_ignore_ascii_case(value) =>
                 {
                     Some(style.name.clone())

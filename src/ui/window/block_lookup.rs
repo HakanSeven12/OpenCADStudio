@@ -1,6 +1,6 @@
 use crate::app::Message;
 use crate::scene::block_lookup::{self, Property};
-use codec::{
+use document::{
     objects::{BlockLookupAction, BlockLookupParameter},
     Handle,
 };

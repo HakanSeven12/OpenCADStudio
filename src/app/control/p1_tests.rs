@@ -469,7 +469,7 @@ fn entities_copy_to_another_open_document() {
         .to_owned();
     // A second document with its own layer table.
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(99));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
     let target = app.tabs[1].id;
 
     let r = app.automation_op(&format!(
@@ -520,7 +520,7 @@ fn a_copied_block_reference_arrives_with_its_definition() {
         .to_owned();
 
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(99));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
     let target = app.tabs[1].id;
     let r = app.automation_op(&format!(
         r#"{{"protocol":1,"op":"entities_copy_to","request_id":"xd2","document_id":{target},"handles":["{source}"]}}"#
@@ -581,7 +581,7 @@ fn a_copied_block_reference_arrives_with_its_definition() {
 /// points at.
 #[test]
 fn a_copied_image_arrives_registered_in_the_target() {
-    use codec::objects::{ImageDefinition, ObjectType};
+    use document::objects::{ImageDefinition, ObjectType};
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
     let definition = app.tabs[0].scene.document.allocate_handle();
@@ -593,16 +593,16 @@ fn a_copied_image_arrives_registered_in_the_target() {
         .objects
         .insert(definition, ObjectType::ImageDefinition(image_definition));
     let mut image =
-        codec::entities::RasterImage::new("fx.bmp", codec::types::Vector3::ZERO, 8.0, 8.0);
+        document::entities::RasterImage::new("fx.bmp", document::types::Vector3::ZERO, 8.0, 8.0);
     image.definition_handle = Some(definition);
     let source = app.tabs[0]
         .scene
         .document
-        .add_entity(codec::EntityType::RasterImage(image))
+        .add_entity(document::EntityType::RasterImage(image))
         .expect("the seeded image");
 
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(99));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
     let target = app.tabs[1].id;
     let r = app.automation_op(&format!(
         r#"{{"protocol":1,"op":"entities_copy_to","request_id":"xi1","document_id":{target},"handles":["{:X}"]}}"#,
@@ -614,10 +614,10 @@ fn a_copied_image_arrives_registered_in_the_target() {
     let doc = &app.tabs[1].scene.document;
     let pasted = doc
         .entities()
-        .find(|entity| matches!(entity, codec::EntityType::RasterImage(_)))
+        .find(|entity| matches!(entity, document::EntityType::RasterImage(_)))
         .map(|entity| entity.common().handle)
         .expect("the copied image is missing from the target");
-    let Some(codec::EntityType::RasterImage(image)) = doc.get_entity(pasted) else {
+    let Some(document::EntityType::RasterImage(image)) = doc.get_entity(pasted) else {
         unreachable!();
     };
     let Some(definition) = image
@@ -673,7 +673,7 @@ fn group_create_and_selection_sets() {
     let objects = &app.tabs[app.active_tab].scene.document.objects;
     assert!(objects.values().any(|o| matches!(
         o,
-        codec::objects::ObjectType::Group(group) if group.name == "FRAME"
+        document::objects::ObjectType::Group(group) if group.name == "FRAME"
     )));
 
     let r = app.automation_op(&format!(
@@ -792,7 +792,7 @@ fn diagnostic_layer_survives_plain_io_round_trip() {
     // Direct io round trip on a clone of the document.
     let doc = app.tabs[app.active_tab].scene.document.clone();
     let bytes =
-        crate::io::save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1032).expect("save to bytes");
+        crate::io::save_to_bytes(&doc, "dxf", document::DxfVersion::AC1032).expect("save to bytes");
     let path = std::env::temp_dir().join(format!("ocs_diag_{}.dxf", std::process::id()));
     std::fs::write(&path, &bytes).unwrap();
     let loaded = crate::io::load_file(&path).expect("load back");
@@ -919,11 +919,11 @@ fn wblock_normalize_shifts_the_export_to_the_origin() {
     let header = &app.tabs[app.active_tab].scene.document.header;
     assert_eq!(
         header.model_space_extents_min,
-        codec::types::Vector3::new(0.0, 0.0, 0.0)
+        document::types::Vector3::new(0.0, 0.0, 0.0)
     );
     assert_eq!(
         header.model_space_extents_max,
-        codec::types::Vector3::new(10.0, 10.0, 0.0)
+        document::types::Vector3::new(10.0, 10.0, 0.0)
     );
     let _ = std::fs::remove_file(&out);
 }
@@ -959,11 +959,11 @@ fn wblock_export_carries_the_saved_header_values() {
     assert!(header.update_date_julian > 0.0, "update stamp");
     assert_eq!(
         header.model_space_extents_min,
-        codec::types::Vector3::new(0.0, 0.0, 0.0)
+        document::types::Vector3::new(0.0, 0.0, 0.0)
     );
     assert_eq!(
         header.model_space_extents_max,
-        codec::types::Vector3::new(10.0, 20.0, 0.0)
+        document::types::Vector3::new(10.0, 20.0, 0.0)
     );
     let _ = std::fs::remove_file(&out);
 }
@@ -1557,8 +1557,8 @@ fn a_fixed_entity_resists_bounds_alignment() {
 /// refusal as its numeric rows.
 #[test]
 fn a_fixed_curve_resists_a_boolean_and_a_choice() {
-    use codec::entities::{Polyline2D, Spline, Vertex2D};
-    use codec::types::Vector3;
+    use document::entities::{Polyline2D, Spline, Vertex2D};
+    use document::types::Vector3;
 
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
@@ -1570,7 +1570,7 @@ fn a_fixed_curve_resists_a_boolean_and_a_choice() {
         .vertices
         .push(Vertex2D::new(Vector3::new(10.0, 0.0, 0.0)));
     let polyline_handle = app
-        .commit_entity_handle(codec::EntityType::Polyline2D(polyline))
+        .commit_entity_handle(document::EntityType::Polyline2D(polyline))
         .expect("the polyline commits");
     let mut spline = Spline::new();
     spline.control_points = vec![
@@ -1582,7 +1582,7 @@ fn a_fixed_curve_resists_a_boolean_and_a_choice() {
     spline.knots = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
     spline.weights = vec![1.0; 4];
     let spline_handle = app
-        .commit_entity_handle(codec::EntityType::Spline(spline.clone()))
+        .commit_entity_handle(document::EntityType::Spline(spline.clone()))
         .expect("the spline commits");
     for handle in [polyline_handle, spline_handle] {
         app.automation_op(&format!(
@@ -1613,7 +1613,7 @@ fn a_fixed_curve_resists_a_boolean_and_a_choice() {
         .document
         .get_entity(polyline_handle)
     {
-        Some(codec::EntityType::Polyline2D(polyline)) => {
+        Some(document::EntityType::Polyline2D(polyline)) => {
             assert!(!polyline.is_closed(), "the fixed polyline stayed open");
         }
         other => panic!("the polyline is still there: {other:?}"),
@@ -1642,7 +1642,7 @@ fn a_fixed_curve_resists_a_boolean_and_a_choice() {
         .document
         .get_entity(spline_handle)
     {
-        Some(codec::EntityType::Spline(after)) => {
+        Some(document::EntityType::Spline(after)) => {
             assert_eq!(
                 after.control_points, spline.control_points,
                 "the fixed spline kept its points"
@@ -1708,7 +1708,7 @@ fn a_fixed_entity_resists_a_stretch() {
 
     let before = app.command_line.history.len();
     let task = app.apply_cmd_result(CmdResult::StretchEntities {
-        handles: vec![codec::Handle::new(
+        handles: vec![document::Handle::new(
             u64::from_str_radix(&handle, 16).unwrap(),
         )],
         windows: vec![(
@@ -1753,7 +1753,7 @@ fn a_constraint_command_names_geometry_the_network_moves() {
     let mut long = None;
     let mut short = None;
     for entity in drawn["entities"].as_array().expect("the two lines") {
-        let handle = codec::Handle::new(
+        let handle = document::Handle::new(
             u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
         );
         if line_point(entity, "end").0 > 100.0 {
@@ -1817,7 +1817,7 @@ fn a_horizontal_command_names_geometry_the_network_moves() {
     let mut long = None;
     let mut slanted = None;
     for entity in drawn["entities"].as_array().expect("the two lines") {
-        let handle = codec::Handle::new(
+        let handle = document::Handle::new(
             u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
         );
         if line_point(entity, "end").0 > 100.0 {
@@ -1841,7 +1841,7 @@ fn a_horizontal_command_names_geometry_the_network_moves() {
     let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
         kind: ConstraintKind::Horizontal,
         selection: HorizontalConstraintSelection::Reference(ParametricRef::whole(slanted)),
-        direction: codec::types::Vector3::new(1.0, 0.0, 0.0),
+        direction: document::types::Vector3::new(1.0, 0.0, 0.0),
         label: "Horizontal",
     });
     let said: Vec<String> = app.command_line.history[before..]
@@ -1875,7 +1875,7 @@ fn a_move_command_does_not_report_geometry_the_solve_moves() {
     let mut long = None;
     let mut slanted = None;
     for entity in drawn["entities"].as_array().expect("the two lines") {
-        let handle = codec::Handle::new(
+        let handle = document::Handle::new(
             u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
         );
         if line_point(entity, "end").0 > 100.0 {
@@ -1944,7 +1944,7 @@ fn a_converted_constraint_clamps_the_grip_that_moves_it() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     let dimension = app.tabs[i].scene.add_entity(
         crate::modules::annotate::linear_dim::linear_dimension_entity(
             glam::DVec3::ZERO,
@@ -2000,7 +2000,7 @@ fn a_converted_constraint_clamps_the_grip_that_moves_a_level_line() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     app.tabs[i]
         .scene
         .parametric_constraint_set_mut(ParametricScope::ModelSpace)
@@ -2061,7 +2061,7 @@ fn a_created_constraint_clamps_the_grip_that_moves_it() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
         kind: ConstraintKind::DistanceX,
         first: ParametricRef::point(line, 0),
@@ -2103,7 +2103,7 @@ fn a_created_constraint_clamps_the_grip_that_moves_it() {
     );
     let span = |app: &OpenCADStudio| {
         let document = &app.tabs[app.active_tab].scene.document;
-        let codec::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
+        let document::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
             unreachable!("the participant is still a line");
         };
         entity.end.x - entity.start.x
@@ -2152,7 +2152,7 @@ fn a_deleted_constraint_stops_clamping_the_grip_that_moved_it() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
         kind: ConstraintKind::DistanceX,
         first: ParametricRef::point(line, 0),
@@ -2179,7 +2179,7 @@ fn a_deleted_constraint_stops_clamping_the_grip_that_moved_it() {
         .id;
     let span = |app: &OpenCADStudio| {
         let document = &app.tabs[app.active_tab].scene.document;
-        let codec::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
+        let document::EntityType::Line(entity) = document.get_entity(line).unwrap() else {
             unreachable!("the participant is still a line");
         };
         entity.end.x - entity.start.x
@@ -2235,7 +2235,7 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
         kind: ConstraintKind::DistanceX,
         first: ParametricRef::point(line, 0),
@@ -2261,7 +2261,7 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         .iter()
         .find(|entity| entity["handle"].as_str() != Some(handle.as_str()))
         .map(|entity| {
-            codec::Handle::new(u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap())
+            document::Handle::new(u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap())
         })
         .expect("the second line");
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
@@ -2279,9 +2279,9 @@ fn the_delete_command_frees_the_grip_it_clamped() {
         label: "Linear constraint",
     });
     app.drive_headless_task(task).unwrap();
-    let span = |app: &OpenCADStudio, target: codec::Handle| {
+    let span = |app: &OpenCADStudio, target: document::Handle| {
         let document = &app.tabs[app.active_tab].scene.document;
-        let codec::EntityType::Line(entity) = document.get_entity(target).unwrap() else {
+        let document::EntityType::Line(entity) = document.get_entity(target).unwrap() else {
             unreachable!("the participant is still a line");
         };
         entity.end.x - entity.start.x
@@ -2303,7 +2303,7 @@ fn the_delete_command_frees_the_grip_it_clamped() {
             .scene
             .parametric_constraint_set(ParametricScope::ModelSpace)
             .expect("the drawing keeps its constraint set");
-        let dimension = |entity: codec::Handle| {
+        let dimension = |entity: document::Handle| {
             set.constraints
                 .iter()
                 .filter(|constraint| constraint.refs.iter().any(|r| r.entity == entity))
@@ -2413,7 +2413,7 @@ fn erasing_a_constrained_line_takes_its_constraint_and_its_dimension() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
         kind: ConstraintKind::DistanceX,
         first: ParametricRef::point(line, 0),
@@ -2514,11 +2514,11 @@ fn erasing_one_of_two_lines_that_share_a_parameter_keeps_the_parameter() {
 
     fn constrained(
         app: &mut OpenCADStudio,
-        line: codec::Handle,
+        line: document::Handle,
         x: f64,
         name: &str,
         size: f64,
-    ) -> codec::Handle {
+    ) -> document::Handle {
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
             kind: ConstraintKind::DistanceX,
             first: ParametricRef::point(line, 0),
@@ -2560,7 +2560,7 @@ fn erasing_one_of_two_lines_that_share_a_parameter_keeps_the_parameter() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&first, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&first, 16).unwrap());
     let deleted_dimension = constrained(&mut app, line, 0.0, "d1", 100.0);
     app.automation_op(r#"{"op":"run","cmd":"LINE 200,0 240,0"}"#);
     let other = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
@@ -2568,7 +2568,7 @@ fn erasing_one_of_two_lines_that_share_a_parameter_keeps_the_parameter() {
         .expect("the read returns both lines")
         .iter()
         .find_map(|row| row["handle"].as_str().filter(|handle| **handle != first))
-        .map(|handle| codec::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+        .map(|handle| document::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
         .expect("the second line has its own handle");
     let survivor_dimension = constrained(&mut app, other, 200.0, "d2", 60.0);
     // Adding or renaming rejects a duplicate, so sharing arises from loaded
@@ -2679,7 +2679,7 @@ fn a_locked_layer_does_not_strand_the_dimension_of_an_erased_line() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
     let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
         kind: ConstraintKind::DistanceX,
         first: ParametricRef::point(line, 0),
@@ -2757,11 +2757,11 @@ fn the_delete_command_keeps_a_parameter_a_surviving_constraint_still_drives() {
 
     fn constrained(
         app: &mut OpenCADStudio,
-        line: codec::Handle,
+        line: document::Handle,
         x: f64,
         name: &str,
         size: f64,
-    ) -> codec::Handle {
+    ) -> document::Handle {
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
             kind: ConstraintKind::DistanceX,
             first: ParametricRef::point(line, 0),
@@ -2803,7 +2803,7 @@ fn the_delete_command_keeps_a_parameter_a_surviving_constraint_still_drives() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&first, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&first, 16).unwrap());
     let deleted_dimension = constrained(&mut app, line, 0.0, "d1", 100.0);
     app.automation_op(r#"{"op":"run","cmd":"LINE 200,0 240,0"}"#);
     let other = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
@@ -2811,7 +2811,7 @@ fn the_delete_command_keeps_a_parameter_a_surviving_constraint_still_drives() {
         .expect("the read returns both lines")
         .iter()
         .find_map(|row| row["handle"].as_str().filter(|handle| **handle != first))
-        .map(|handle| codec::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+        .map(|handle| document::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
         .expect("the second line has its own handle");
     let survivor_dimension = constrained(&mut app, other, 200.0, "d2", 60.0);
     // Both constraints name the same parameter. Adding or renaming rejects a
@@ -2913,11 +2913,11 @@ fn erasing_the_dimension_on_its_own_leaves_the_constraint_set_clean() {
 
     fn constrained(
         app: &mut OpenCADStudio,
-        line: codec::Handle,
+        line: document::Handle,
         y: f64,
         name: &str,
         expression: &str,
-    ) -> codec::Handle {
+    ) -> document::Handle {
         let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
             kind: ConstraintKind::DistanceX,
             first: ParametricRef::point(line, 0),
@@ -2959,14 +2959,14 @@ fn erasing_the_dimension_on_its_own_leaves_the_constraint_set_clean() {
         .as_str()
         .expect("the drawn line has a handle")
         .to_owned();
-    let line = codec::Handle::new(u64::from_str_radix(&first, 16).unwrap());
+    let line = document::Handle::new(u64::from_str_radix(&first, 16).unwrap());
     app.automation_op(r#"{"op":"run","cmd":"LINE 0,20 40,20"}"#);
     let other = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
         .as_array()
         .expect("the read returns both lines")
         .iter()
         .find_map(|row| row["handle"].as_str().filter(|handle| **handle != first))
-        .map(|handle| codec::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+        .map(|handle| document::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
         .expect("the second line has its own handle");
     let erased = constrained(&mut app, line, 0.0, "d1", "100");
     let kept = constrained(&mut app, other, 20.0, "d2", "60");
@@ -3051,7 +3051,7 @@ fn auto_coincident_names_geometry_the_network_moves() {
     let mut upright = None;
     let mut slanted = None;
     for entity in drawn["entities"].as_array().expect("the three lines") {
-        let handle = codec::Handle::new(
+        let handle = document::Handle::new(
             u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
         );
         let end = line_point(entity, "end");
@@ -3116,7 +3116,7 @@ fn a_parallel_command_names_geometry_the_network_moves() {
     let drawn = app.automation_op(r#"{"op":"query","type":"Line","detail":"geometry"}"#);
     let mut slanted = None;
     for entity in drawn["entities"].as_array().expect("the three lines") {
-        let handle = codec::Handle::new(
+        let handle = document::Handle::new(
             u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
         );
         if line_point(entity, "end").1 > 100.0 {
@@ -3172,7 +3172,7 @@ fn auto_constrain_names_geometry_the_network_moves() {
     let mut upright = None;
     let mut slanted = None;
     for entity in drawn["entities"].as_array().expect("the three lines") {
-        let handle = codec::Handle::new(
+        let handle = document::Handle::new(
             u64::from_str_radix(entity["handle"].as_str().unwrap(), 16).unwrap(),
         );
         let end = line_point(entity, "end");
@@ -3227,8 +3227,8 @@ fn auto_constrain_names_geometry_the_network_moves() {
 /// A block whose attributes an automation client fills by tag: WIDTH asks
 /// for a value, CONST carries a fixed one.
 fn define_attributed_block(app: &mut OpenCADStudio) {
-    use codec::entities::AttributeDefinition;
-    use codec::types::Vector3;
+    use document::entities::AttributeDefinition;
+    use document::types::Vector3;
     let definition = |tag: &str, value: &str, at: Vector3| {
         let mut definition =
             AttributeDefinition::new(tag.to_string(), format!("{tag}:"), value.to_string());
@@ -3243,12 +3243,12 @@ fn define_attributed_block(app: &mut OpenCADStudio) {
         "TAGGED",
         Vector3::ZERO,
         vec![
-            codec::EntityType::AttributeDefinition(definition(
+            document::EntityType::AttributeDefinition(definition(
                 "WIDTH",
                 "100",
                 Vector3::new(2.0, 3.0, 0.0),
             )),
-            codec::EntityType::AttributeDefinition(constant),
+            document::EntityType::AttributeDefinition(constant),
         ],
     );
 }
@@ -3274,7 +3274,7 @@ fn entities_create_insert_takes_attribute_values_by_tag() {
         .document
         .entities()
         .find_map(|entity| match entity {
-            codec::EntityType::Insert(insert) if insert.block_name == "TAGGED" => {
+            document::EntityType::Insert(insert) if insert.block_name == "TAGGED" => {
                 Some(insert.clone())
             }
             _ => None,
@@ -3288,7 +3288,7 @@ fn entities_create_insert_takes_attribute_values_by_tag() {
     assert_eq!(values, vec![("WIDTH", "250"), ("CONST", "fixed")]);
     assert_eq!(
         insert.attributes[0].insertion_point,
-        codec::types::Vector3::new(12.0, 3.0, 0.0),
+        document::types::Vector3::new(12.0, 3.0, 0.0),
         "the attribute is placed by the reference"
     );
     assert!(insert

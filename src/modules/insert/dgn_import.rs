@@ -14,14 +14,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use codec::entities::{
+use document::entities::{
     Arc, AttachmentPoint, Circle, DrawingDirection, Ellipse, Insert, Line, LineSpacingStyle,
     LwPolyline, LwVertex, MText, Point, Polyline3D, Spline, Text, TextHorizontalAlignment,
     TextVerticalAlignment,
 };
-use codec::tables::DimStyle;
-use codec::types::{Color, LineWeight, Vector2, Vector3};
-use codec::EntityType;
+use document::tables::DimStyle;
+use document::types::{Color, LineWeight, Vector2, Vector3};
+use document::EntityType;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::scene::model::underlay_vector::{
@@ -93,8 +93,8 @@ pub fn lineweight_of(weight: u32) -> i16 {
 
 /// An RGB colour as the colour index of the same RGB, else a true colour.
 pub fn color_of(rgb: [u8; 3]) -> Color {
-    let index = codec::types::aci_table::nearest_aci(rgb[0], rgb[1], rgb[2]);
-    if codec::types::aci_table::aci_to_rgb(index) == Some((rgb[0], rgb[1], rgb[2])) {
+    let index = document::types::aci_table::nearest_aci(rgb[0], rgb[1], rgb[2]);
+    if document::types::aci_table::aci_to_rgb(index) == Some((rgb[0], rgb[1], rgb[2])) {
         Color::Index(index)
     } else {
         Color::from_rgb(rgb[0], rgb[1], rgb[2])
@@ -206,7 +206,7 @@ fn arc_plane(u: P3, v: P3) -> (P3, bool) {
 
 /// The angle of `d` in the entity coordinate system of `normal`.
 fn ocs_angle(normal: P3, d: P3) -> f64 {
-    let m = codec::types::Matrix3::arbitrary_axis(v3(normal));
+    let m = document::types::Matrix3::arbitrary_axis(v3(normal));
     let (x, y) = (
         m * Vector3::new(1.0, 0.0, 0.0),
         m * Vector3::new(0.0, 1.0, 0.0),
@@ -216,7 +216,7 @@ fn ocs_angle(normal: P3, d: P3) -> f64 {
 
 /// A point in the entity coordinate system of `normal`.
 fn to_ocs(normal: P3, p: P3) -> Vector3 {
-    codec::types::Matrix3::arbitrary_axis(v3(normal)).transpose() * v3(p)
+    document::types::Matrix3::arbitrary_axis(v3(normal)).transpose() * v3(p)
 }
 
 /// The unit normal of the plane the points lie in (Newell's, turned to
@@ -319,7 +319,7 @@ fn outline(points: &[P3], bulges: &[f64], filled: bool, by_winding: bool) -> Vec
 /// marked associative with no source yet: the outline converted just before
 /// it becomes its source once both are in the drawing.
 fn solid_hatch(points: &[P3], bulges: &[f64]) -> Option<EntityType> {
-    use codec::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+    use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
     if points.len() < 3 || !flat(points) {
         return None;
     }
@@ -490,7 +490,7 @@ fn color_code(color: By<crate::scene::model::underlay_vector::DgnColor>) -> u16 
         By::Level => 256,
         By::Cell => 0,
         By::Own(c) => {
-            codec::types::aci_table::nearest_aci(c.table[0], c.table[1], c.table[2]) as u16
+            document::types::aci_table::nearest_aci(c.table[0], c.table[1], c.table[2]) as u16
         }
     }
 }
@@ -838,10 +838,10 @@ fn dimension_entity(
     axes: &[[f64; 2]; 2],
     style: &str,
     text: String,
-    overrides: &[(i16, codec::xdata::XDataValue)],
+    overrides: &[(i16, document::xdata::XDataValue)],
     layout: &DimTextLayout,
 ) -> Option<EntityType> {
-    use codec::entities::{Dimension, DimensionDiameter, DimensionLinear, DimensionRadius};
+    use document::entities::{Dimension, DimensionDiameter, DimensionLinear, DimensionRadius};
     let at = |k: usize| points.get(k).copied();
     let along = |p: P3, d: [f64; 2], t: f64| [p[0] + d[0] * t, p[1] + d[1] * t, p[2]];
     let mut entity = match kind {
@@ -966,9 +966,9 @@ fn dimension_settings(
     look: &DgnDimLook,
     style: Option<&DgnDimStyle>,
     color: u16,
-) -> (String, Vec<(i16, codec::xdata::XDataValue)>, DimTextLayout) {
+) -> (String, Vec<(i16, document::xdata::XDataValue)>, DimTextLayout) {
     use crate::entities::dim_override as ov;
-    use codec::xdata::XDataValue::{Integer16, Real};
+    use document::xdata::XDataValue::{Integer16, Real};
     let own = dgn_font(import, look.font);
     let style_font = style.and_then(|s| dgn_font(import, s.font));
     let differs = |file: &str| style_font.is_some_and(|(_, f)| !f.eq_ignore_ascii_case(file));
@@ -1016,7 +1016,7 @@ fn dimension_settings(
 /// triangles whose inner edges are hidden. A polyface numbers its vertices
 /// in 16 bits, so faces that need further vertices go on further meshes.
 fn polyfaces(points: &[P3], loops: &[Vec<i32>]) -> Vec<EntityType> {
-    use codec::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
+    use document::entities::{PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
     const MAX_VERTICES: usize = i16::MAX as usize;
     let mut out = Vec::new();
     let mut mesh = PolyfaceMesh::new();
@@ -1286,7 +1286,7 @@ impl<'a> Converter<'a> {
             }
             DgnGeom::Mesh { points, loops } => polyfaces(points, loops),
             DgnGeom::Leader { points, style } => {
-                let mut leader = codec::entities::Leader::new();
+                let mut leader = document::entities::Leader::new();
                 leader.vertices = points.iter().map(|p| v3(*p)).collect();
                 leader.dimension_style = dim_style_name(self.import, *style);
                 vec![EntityType::Leader(leader)]

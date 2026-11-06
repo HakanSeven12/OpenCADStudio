@@ -9,15 +9,15 @@
 //   Pick two lines (line-only; arcs are not chamferable).
 //   Finds intersection, backs off dist1 along line 1 and dist2 along line 2.
 
-use codec::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline, LwVertex};
+use document::entities::{Arc as ArcEnt, Line as LineEnt, LwPolyline, LwVertex};
 
 // Shared plane geometry, from opencadkernel via the local adapters.
 use super::geom;
 use super::geom::{arc_points as arc_pts, line_line as ll, normalize_angle as norm_angle};
 use crate::t;
-use codec::entities::EntityCommon;
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::EntityCommon;
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{
     circle_circle_points as circle_circle_pts, fillet_between_rays, fillets_between, line_circle,
@@ -2023,7 +2023,7 @@ impl CadCommand for FilletCommand {
         self.undo_last()
     }
 
-    fn on_document_undone(&mut self, document: &codec::Document) {
+    fn on_document_undone(&mut self, document: &document::Document) {
         self.all_entities = document
             .entities()
             .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
@@ -2783,7 +2783,7 @@ impl CadCommand for ChamferCommand {
         self.undo_last()
     }
 
-    fn on_document_undone(&mut self, document: &codec::Document) {
+    fn on_document_undone(&mut self, document: &document::Document) {
         self.all_entities = document
             .entities()
             .map(crate::entities::curve::entity_with_lwpolyline_world_xy)
@@ -3067,7 +3067,7 @@ mod tests {
     /// by an infinite factor: the center becomes (inf, NaN).
     fn overflowed_arc(sweep_sign: f64) -> ArcEnt {
         let mut arc = ArcEnt::new();
-        arc.center = codec::types::Vector3::new(f64::INFINITY, f64::NAN, 0.0);
+        arc.center = document::types::Vector3::new(f64::INFINITY, f64::NAN, 0.0);
         arc.radius = f64::INFINITY;
         arc.start_angle = 0.0;
         arc.end_angle = sweep_sign * std::f64::consts::PI;
@@ -3105,7 +3105,7 @@ mod tests {
         ));
         assert_eq!(keywords(&command), ["P", "R", "T"]);
         // The host hands the restored document back; the cache follows it.
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         let _ = doc.add_entity(line(0.0, 0.0, 20.0, 0.0, 7));
         command.on_document_undone(&doc);
         assert_eq!(command.all_entities.len(), 1);
@@ -3119,7 +3119,7 @@ mod tests {
         let polyline = |handle: u64, points: &[[f64; 2]]| {
             let mut p = LwPolyline::new();
             for &[x, y] in points {
-                p.add_point(codec::types::Vector2::new(x, y));
+                p.add_point(document::types::Vector2::new(x, y));
             }
             p.common.handle = Handle::new(handle);
             EntityType::LwPolyline(p)
@@ -3364,9 +3364,9 @@ mod tests {
         }
 
         let mut poly = LwPolyline::new();
-        poly.add_point(codec::types::Vector2::new(0.0, 0.0));
-        poly.add_point(codec::types::Vector2::new(10.0, 0.0));
-        poly.add_point(codec::types::Vector2::new(10.0, 10.0));
+        poly.add_point(document::types::Vector2::new(0.0, 0.0));
+        poly.add_point(document::types::Vector2::new(10.0, 0.0));
+        poly.add_point(document::types::Vector2::new(10.0, 10.0));
         poly.common.handle = Handle::new(3);
         let mut command = ChamferCommand::new(1.0, vec![EntityType::LwPolyline(poly)]);
         command.trim = false;
@@ -3470,9 +3470,9 @@ mod tests {
     #[test]
     fn zero_radius_polyline_fillet_keeps_a_single_corner_vertex() {
         let mut poly = LwPolyline::new();
-        poly.add_point(codec::types::Vector2::new(0.0, 0.0));
-        poly.add_point(codec::types::Vector2::new(10.0, 0.0));
-        poly.add_point(codec::types::Vector2::new(10.0, 10.0));
+        poly.add_point(document::types::Vector2::new(0.0, 0.0));
+        poly.add_point(document::types::Vector2::new(10.0, 0.0));
+        poly.add_point(document::types::Vector2::new(10.0, 10.0));
         poly.common.handle = Handle::new(3);
         let assert_sharp_corner = |out: &LwPolyline| {
             let points: Vec<[f64; 2]> =
@@ -3521,9 +3521,9 @@ mod tests {
     #[test]
     fn zero_distance_polyline_corner_keeps_a_single_vertex() {
         let mut poly = LwPolyline::new();
-        poly.add_point(codec::types::Vector2::new(0.0, 0.0));
-        poly.add_point(codec::types::Vector2::new(10.0, 0.0));
-        poly.add_point(codec::types::Vector2::new(10.0, 10.0));
+        poly.add_point(document::types::Vector2::new(0.0, 0.0));
+        poly.add_point(document::types::Vector2::new(10.0, 0.0));
+        poly.add_point(document::types::Vector2::new(10.0, 10.0));
         let Some(EntityType::LwPolyline(out)) =
             chamfer_lwpoly_corner(&poly, [5.0, 0.0], 0.0, [10.0, 5.0], 0.0)
         else {

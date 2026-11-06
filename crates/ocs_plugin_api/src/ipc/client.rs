@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use codec::xdata::ExtendedDataRecord;
-use codec::{Document, EntityType, Handle};
+use document::xdata::ExtendedDataRecord;
+use document::{Document, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 
@@ -924,8 +924,8 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::thread;
 
-    use codec::entities::Point;
-    use codec::{EntityType, Handle};
+    use document::entities::Point;
+    use document::{EntityType, Handle};
     use interprocess::local_socket::{
         traits::{Listener, Stream as StreamTrait},
         GenericNamespaced, ListenerOptions, Stream, ToNsName,

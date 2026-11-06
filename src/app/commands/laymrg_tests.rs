@@ -1,8 +1,8 @@
 use super::*;
 use crate::command::StepInput;
-use codec::entities::{AttributeEntity, Insert, Line};
-use codec::tables::{BlockRecord, Layer};
-use codec::{EntityType, Handle, Vector3};
+use document::entities::{AttributeEntity, Insert, Line};
+use document::tables::{BlockRecord, Layer};
+use document::{EntityType, Handle, Vector3};
 
 fn fixture() -> (OpenCADStudio, [Handle; 3]) {
     let mut app = OpenCADStudio::new_for_test();

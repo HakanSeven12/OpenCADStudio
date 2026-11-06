@@ -108,7 +108,7 @@ fn color_at(bytes: &[u8], ndc_x: f32) -> [u32; 3] {
 #[ignore = "requires a GPU adapter"]
 fn wipeout_respects_close_block_draw_order() {
     use crate::scene::{model::wire_model::TangentGeom, Scene};
-    use codec::{entities::Wipeout, types::Vector2, EntityType};
+    use document::{entities::Wipeout, types::Vector2, EntityType};
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = block_on(instance.request_adapter(&Default::default())).expect("GPU adapter");

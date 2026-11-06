@@ -7,8 +7,8 @@ use crate::scene::{ObjectIsolationState, Scene};
 use crate::snap::SnapResult;
 use crate::t;
 use crate::ui::{LayerPanel, PropertiesPanel};
-use codec::tables::{normalize_name, Ucs};
-use codec::{Document, EntityType, Handle};
+use document::tables::{normalize_name, Ucs};
+use document::{Document, EntityType, Handle};
 use iced;
 use std::any::Any;
 use std::collections::HashMap;
@@ -27,8 +27,8 @@ pub(super) enum LayisoMode {
 #[derive(Clone)]
 pub(super) struct LayisoLayerSnapshot {
     pub(super) name: String,
-    pub(super) before: codec::tables::Layer,
-    pub(super) after: codec::tables::Layer,
+    pub(super) before: document::tables::Layer,
+    pub(super) after: document::tables::Layer,
 }
 
 #[derive(Clone)]
@@ -137,7 +137,7 @@ pub(super) struct SketchSession {
     /// with snapping off gets that back rather than silently keeping it.
     pub(super) previous_snap_enabled: bool,
     /// Entity handles already present when the sketch opened.
-    pub(super) opened_with: std::collections::HashSet<codec::Handle>,
+    pub(super) opened_with: std::collections::HashSet<document::Handle>,
 }
 
 // ── Per-document tab state ─────────────────────────────────────────────────
@@ -197,11 +197,11 @@ pub(super) struct DocumentTab {
     pub(super) layer_walk_combo: iced::widget::combo_box::State<String>,
     pub(super) active_cmd: Option<Box<dyn CadCommand>>,
     /// MATCHPROP's last source; Enter at the source prompt picks it again.
-    pub(super) last_matchprop_src: codec::Handle,
+    pub(super) last_matchprop_src: document::Handle,
     /// Follow-up command for a Parameter Set macro after parameter placement.
     pub(super) pending_parameter_set_follow_up: Option<&'static str>,
-    pub(super) pending_xy_box_set: Option<(codec::Handle, crate::scene::block_actions::Kind, u8)>,
-    pub(super) pending_action_pair: Option<(codec::Handle, crate::scene::block_actions::Kind, u8)>,
+    pub(super) pending_xy_box_set: Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
+    pub(super) pending_action_pair: Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
     pub(super) measurement: super::measurement::MeasurementDisplay,
     /// Remaining command tokens queued behind a PAUSE (or `\`) awaiting user interaction.
     pub(super) pending_pause_tokens: Option<Vec<String>>,
@@ -213,7 +213,7 @@ pub(super) struct DocumentTab {
     /// The selection set the most recent command worked on, captured when a
     /// finishing command drops the live selection — re-selectable with the
     /// "Previous" keyword at any Select objects prompt (#426).
-    pub(super) prev_selection: Vec<codec::Handle>,
+    pub(super) prev_selection: Vec<document::Handle>,
     pub(super) last_cmd: Option<String>,
     /// INSNAME: the last block inserted in this drawing, offered as `-INSERT`'s
     /// default. It belongs to the drawing, so a name remembered here is never
@@ -250,9 +250,9 @@ pub(super) struct DocumentTab {
     /// not O(store). Cleared at each boundary; over the cap the sets
     /// degrade to empty (an honest full-walk signal).
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(super) plugin_dirty_entities: rustc_hash::FxHashSet<codec::Handle>,
+    pub(super) plugin_dirty_entities: rustc_hash::FxHashSet<document::Handle>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(super) plugin_dirty_records: rustc_hash::FxHashSet<(codec::Handle, String)>,
+    pub(super) plugin_dirty_records: rustc_hash::FxHashSet<(document::Handle, String)>,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) plugin_dirty_overflow: bool,
     /// Geometry epoch the last region set was published at; a plugin write
@@ -278,7 +278,7 @@ pub(super) struct DocumentTab {
     /// Dynamic-block visibility grip for the current single selection.
     pub(super) visibility_grip: Option<super::visibility::VisibilityGrip>,
     pub(super) wireframe: bool,
-    pub(super) render_mode: codec::entities::ViewportRenderMode,
+    pub(super) render_mode: document::entities::ViewportRenderMode,
     pub(super) visual_style: String,
     pub(super) last_cursor_world: glam::DVec3,
     pub(super) last_cursor_screen: iced::Point,
@@ -395,7 +395,7 @@ pub(super) struct DocumentTab {
     /// running: STRETCH on that selection stretches through it (#1068).
     pub(super) last_crossing_window: Option<([f64; 2], [f64; 2])>,
     /// Colours picked in this drawing this session, newest first. Not saved.
-    pub(super) recent_colors: Vec<codec::types::Color>,
+    pub(super) recent_colors: Vec<document::types::Color>,
 }
 
 impl DocumentTab {
@@ -439,7 +439,7 @@ impl DocumentTab {
     /// Record one entity a plugin write touched (API v13 dirty regions).
     /// `epoch_before` is the geometry epoch before that write.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(super) fn mark_plugin_entity_dirty(&mut self, handle: codec::Handle, epoch_before: u64) {
+    pub(super) fn mark_plugin_entity_dirty(&mut self, handle: document::Handle, epoch_before: u64) {
         if !self.plugin_dirty_degraded(epoch_before) {
             self.plugin_dirty_entities.insert(handle);
         }
@@ -449,7 +449,7 @@ impl DocumentTab {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) fn mark_plugin_record_dirty(
         &mut self,
-        handle: codec::Handle,
+        handle: document::Handle,
         app: String,
         epoch_before: u64,
     ) {
@@ -479,7 +479,7 @@ impl DocumentTab {
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub(super) fn take_plugin_dirty(
         &mut self,
-    ) -> (Vec<codec::Handle>, Vec<(codec::Handle, String)>) {
+    ) -> (Vec<document::Handle>, Vec<(document::Handle, String)>) {
         let entities = std::mem::take(&mut self.plugin_dirty_entities);
         let records = std::mem::take(&mut self.plugin_dirty_records);
         let degraded = std::mem::replace(&mut self.plugin_dirty_overflow, false);
@@ -543,7 +543,7 @@ impl DocumentTab {
     /// when the viewport uses world coordinates or the handle is not a viewport.
     pub(super) fn ucs_from_viewport(&self, h: Handle) -> Option<Ucs> {
         let vp = match self.scene.document.get_entity(h) {
-            Some(codec::EntityType::Viewport(vp)) => vp,
+            Some(document::EntityType::Viewport(vp)) => vp,
             _ => return None,
         };
         if !vp.ucs_per_viewport {
@@ -572,7 +572,7 @@ impl DocumentTab {
 
     pub(super) fn ucs_from_layout(&self) -> Option<Ucs> {
         let layout = self.scene.document.objects.values().find_map(|object| {
-            let codec::objects::ObjectType::Layout(layout) = object else {
+            let document::objects::ObjectType::Layout(layout) = object else {
                 return None;
             };
             (layout.name == self.scene.current_layout).then_some(layout)
@@ -585,17 +585,17 @@ impl DocumentTab {
             .find(|ucs| ucs.handle == layout.named_ucs)
             .cloned()
             .unwrap_or_else(|| Ucs::new("*PAPERUCS*"));
-        ucs.origin = codec::types::Vector3::new(
+        ucs.origin = document::types::Vector3::new(
             layout.ucs_origin.0,
             layout.ucs_origin.1,
             layout.ucs_origin.2,
         );
-        ucs.x_axis = codec::types::Vector3::new(
+        ucs.x_axis = document::types::Vector3::new(
             layout.ucs_x_axis.0,
             layout.ucs_x_axis.1,
             layout.ucs_x_axis.2,
         );
-        ucs.y_axis = codec::types::Vector3::new(
+        ucs.y_axis = document::types::Vector3::new(
             layout.ucs_y_axis.0,
             layout.ucs_y_axis.1,
             layout.ucs_y_axis.2,
@@ -637,7 +637,7 @@ impl DocumentTab {
     }
 
     fn sync_paper_ucs_header(&mut self) {
-        use codec::types::Vector3;
+        use document::types::Vector3;
         let header = &mut self.scene.document.header;
         match &self.active_ucs {
             Some(ucs) => {
@@ -672,7 +672,7 @@ impl DocumentTab {
     /// entered viewport's per-viewport UCS fields, or the document header's
     /// model-space UCS in the Model tab, or the layout UCS. Call after a change.
     pub(super) fn persist_active_ucs(&mut self) {
-        use codec::types::Vector3;
+        use document::types::Vector3;
         if let Some(index) = self.active_block_edit {
             let active_ucs = self.active_ucs.clone();
             if let Some(session) = self.block_edits.get_mut(index) {
@@ -689,7 +689,7 @@ impl DocumentTab {
                     false,
                 ),
             };
-            if let Some(codec::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h) {
+            if let Some(document::EntityType::Viewport(vp)) = self.scene.document.get_entity_mut(h) {
                 vp.ucs_origin = o;
                 vp.ucs_x_axis = x;
                 vp.ucs_y_axis = y;
@@ -738,7 +738,7 @@ impl DocumentTab {
                 ),
             };
             for object in self.scene.document.objects.values_mut() {
-                let codec::objects::ObjectType::Layout(layout) = object else {
+                let document::objects::ObjectType::Layout(layout) = object else {
                     continue;
                 };
                 if layout.name == self.scene.current_layout {
@@ -805,7 +805,7 @@ impl DocumentTab {
             layers: LayerPanel::default(),
             parameters_panel: Default::default(),
             active_cmd: None,
-            last_matchprop_src: codec::Handle::NULL,
+            last_matchprop_src: document::Handle::NULL,
             pending_parameter_set_follow_up: None,
             pending_xy_box_set: None,
             pending_action_pair: None,
@@ -841,7 +841,7 @@ impl DocumentTab {
             visibility_grip: None,
             table_grip: None,
             wireframe: false,
-            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: document::entities::ViewportRenderMode::Wireframe2D,
             visual_style: "Wireframe 2D".into(),
             last_cursor_world: glam::DVec3::ZERO,
             last_cursor_screen: iced::Point::ORIGIN,
@@ -1175,11 +1175,11 @@ pub(super) enum StructureSnapshot {
     /// Compatibility fallback for genuinely broad structural commands.
     Full(Document),
     /// Exact layer-table entries touched by one command.
-    Layers(Vec<TableEntryDelta<codec::tables::Layer>>),
+    Layers(Vec<TableEntryDelta<document::tables::Layer>>),
     /// Exact text-style entries touched by one command.
-    TextStyles(Vec<TableEntryDelta<codec::tables::TextStyle>>),
+    TextStyles(Vec<TableEntryDelta<document::tables::TextStyle>>),
     /// Exact dimension-style entries touched by one command.
-    DimStyles(Vec<TableEntryDelta<codec::tables::DimStyle>>),
+    DimStyles(Vec<TableEntryDelta<document::tables::DimStyle>>),
     /// Exact object-map entries touched by one command. This supports commands
     /// such as groups/dictionaries without retaining every unrelated object.
     Objects(Vec<ObjectEntryDelta>),
@@ -1225,8 +1225,8 @@ pub(super) struct TableEntryDelta<T> {
 #[derive(Clone)]
 pub(super) struct ObjectEntryDelta {
     pub(super) handle: Handle,
-    pub(super) before: Option<codec::objects::ObjectType>,
-    pub(super) after: Option<codec::objects::ObjectType>,
+    pub(super) before: Option<document::objects::ObjectType>,
+    pub(super) after: Option<document::objects::ObjectType>,
 }
 
 /// One parametric-constraint scope's before/after image within an entity delta.
@@ -1264,7 +1264,7 @@ pub(super) struct PendingHistorySnapshot {
     pub(super) selected_before: Vec<Handle>,
     pub(super) dirty_before: bool,
     pub(super) structure_before: Document,
-    pub(super) recorder: Arc<codec::document::EntityChangeRecorder>,
+    pub(super) recorder: Arc<document::document::EntityChangeRecorder>,
     /// First-touch before-values of reference-only designations (API v9)
     /// mutated inside this plugin scope (see `scene::reference_only`). Set
     /// mutations are not document writes, so the scope closes by reading the

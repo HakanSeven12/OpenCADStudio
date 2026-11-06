@@ -12,8 +12,8 @@
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
-use codec::objects::BlockVisibilityParameter;
-use codec::{EntityType, Handle};
+use document::objects::BlockVisibilityParameter;
+use document::{EntityType, Handle};
 
 use crate::scene::model::object::{
     BlockParameterComponent, BlockParameterKey, GripDef, GripShape, PropValue, Property,
@@ -92,7 +92,7 @@ struct StateMapping {
 }
 
 impl StateMapping {
-    fn changes(&self, doc: &codec::Document) -> Option<Vec<(Handle, bool)>> {
+    fn changes(&self, doc: &document::Document) -> Option<Vec<(Handle, bool)>> {
         let mut changes = Vec::new();
         for (index, &handle) in self.anon_handles.iter().enumerate() {
             if !self.governed_idx.contains(&index) {
@@ -203,7 +203,7 @@ impl OpenCADStudio {
     /// Column labels of a Block Properties Table, resolving each column's
     /// parameter display name.
     fn table_header(
-        doc: &codec::Document,
+        doc: &document::Document,
         def: Handle,
         view: &crate::scene::block_properties_table::TableView,
     ) -> String {
@@ -333,10 +333,10 @@ impl OpenCADStudio {
             .objects
             .values()
             .find_map(|value| match value {
-                codec::objects::ObjectType::DynamicBlock(obj) if obj.owner == graph => match &obj
+                document::objects::ObjectType::DynamicBlock(obj) if obj.owner == graph => match &obj
                     .data
                 {
-                    codec::objects::DynamicBlockData::PropertiesTableGrip(g) => Some(g.location),
+                    document::objects::DynamicBlockData::PropertiesTableGrip(g) => Some(g.location),
                     _ => None,
                 },
                 _ => None,
@@ -378,7 +378,7 @@ impl OpenCADStudio {
     /// parallel member order, so a member visible in the definition maps to the
     /// same position in the anonymous block.
     fn state_mapping(
-        doc: &codec::Document,
+        doc: &document::Document,
         def_block: Handle,
         anon_name: &str,
         state_idx: usize,
@@ -425,7 +425,7 @@ impl OpenCADStudio {
     /// cannot be told apart there are the same state as far as the reference
     /// is concerned, and the lowest index wins.
     fn current_visibility_state(
-        doc: &codec::Document,
+        doc: &document::Document,
         def_block: Handle,
         anon_name: &str,
         param: &BlockVisibilityParameter,
@@ -439,7 +439,7 @@ impl OpenCADStudio {
 
     /// Indexed Visibility choices for the shared dynamic property editor.
     pub(super) fn batch_visibility_property(
-        doc: &codec::Document,
+        doc: &document::Document,
         document: u64,
         insert: Handle,
     ) -> Option<Property> {
@@ -477,10 +477,10 @@ impl OpenCADStudio {
     }
 
     pub(super) fn stage_visibility_property(
-        doc: &codec::Document,
+        doc: &document::Document,
         key: BlockParameterKey,
         state: usize,
-    ) -> Result<Option<codec::Document>, &'static str> {
+    ) -> Result<Option<document::Document>, &'static str> {
         const INVALID: &str = "Select supported targets belonging to this block.";
         let (definition, parameter) = doc
             .dynamic_visibility_for_insert(key.insert)
@@ -492,7 +492,7 @@ impl OpenCADStudio {
         {
             return Err(INVALID);
         }
-        let changes = |doc: &codec::Document| {
+        let changes = |doc: &document::Document| {
             let EntityType::Insert(reference) = doc.get_entity(key.insert).ok_or(INVALID)? else {
                 return Err(INVALID);
             };
@@ -533,7 +533,7 @@ impl OpenCADStudio {
     /// The visibility parameter of a dynamic-block reference as a Properties
     /// row: the parameter's name, its states, and the one shown now.
     pub(super) fn visibility_property(
-        doc: &codec::Document,
+        doc: &document::Document,
         handle: Handle,
     ) -> Option<crate::scene::model::object::Property> {
         let Some(EntityType::Insert(ins)) = doc.get_entity(handle) else {
@@ -561,7 +561,7 @@ impl OpenCADStudio {
     /// state, as a read-only Properties row (#1862). None when it shows no
     /// nested block.
     pub(super) fn visible_blocks_property(
-        doc: &codec::Document,
+        doc: &document::Document,
         handle: Handle,
     ) -> Option<crate::scene::model::object::Property> {
         let Some(EntityType::Insert(ins)) = doc.get_entity(handle) else {

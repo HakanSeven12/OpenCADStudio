@@ -1,6 +1,6 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::scene::block_actions::{self as actions, Kind, Parameter, XyKeyPoint};
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -12,7 +12,7 @@ struct Candidate {
     name: String,
     at: DVec3,
     kind: Kind,
-    expected: codec::objects::ObjectType,
+    expected: document::objects::ObjectType,
 }
 
 pub(crate) struct AssociateCommand {

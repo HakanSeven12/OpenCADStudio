@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use codec::entities::{Underlay, UnderlayDefinition, UnderlayDisplayFlags, UnderlayType};
+use document::entities::{Underlay, UnderlayDefinition, UnderlayDisplayFlags, UnderlayType};
 
 use super::{model, sheet_without, Backdrop, Segment, Sheet};
 use crate::scene::model::wire_model::WireModel;

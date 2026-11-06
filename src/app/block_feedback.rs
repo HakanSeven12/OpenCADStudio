@@ -1,6 +1,6 @@
 use super::OpenCADStudio;
 use crate::scene::block_actions::{self as actions, feedback};
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use iced::{Point, Rectangle};
 use std::sync::Arc;
@@ -226,7 +226,7 @@ impl OpenCADStudio {
                 .and_then(|(insert, parameter)| {
                     let handle =
                         insert.or_else(|| tab.block_test.as_ref().map(|test| test.insert))?;
-                    let (source, definition): (&codec::Document, _) =
+                    let (source, definition): (&document::Document, _) =
                         if let Some(test) = tab.block_test.as_ref() {
                             (&test.baseline, test.definition)
                         } else {
@@ -275,7 +275,7 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::{
+    use document::{
         entities::{Insert, Line},
         objects::{BlockParameterValueSet, DynamicBlockData, ObjectType},
         types::Vector3,

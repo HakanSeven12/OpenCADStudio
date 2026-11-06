@@ -3,11 +3,11 @@
 //! step.
 
 use super::*;
-use codec::objects::{
+use document::objects::{
     ClassObject, ClassObjectData, Dictionary, ObjectType, PointCloudDefinition,
     PointCloudDefinitionReactor,
 };
-use codec::types::{Handle, Vector3};
+use document::types::{Handle, Vector3};
 
 use crate::modules::insert::pc_attach::PointCloudPlacement;
 
@@ -19,7 +19,7 @@ fn vector(v: glam::DVec3) -> Vector3 {
 
 /// The point cloud definitions dictionary under the named-objects root,
 /// created when the drawing has none.
-fn definitions_dictionary(document: &mut codec::Document) -> Option<Handle> {
+fn definitions_dictionary(document: &mut document::Document) -> Option<Handle> {
     let root = document.header.named_objects_dict_handle;
     let Some(ObjectType::Dictionary(root_dictionary)) = document.objects.get(&root) else {
         return None;
@@ -49,7 +49,7 @@ fn definitions_dictionary(document: &mut codec::Document) -> Option<Handle> {
 /// under the file's name ("Chair", "Chair(2)" …). Its point count and
 /// extents come from the file.
 fn ensure_definition(
-    document: &mut codec::Document,
+    document: &mut document::Document,
     path: &str,
     name: &str,
     points: &crate::scene::model::point_cloud::CloudPoints,
@@ -166,7 +166,7 @@ impl OpenCADStudio {
         let [x, y, z] = placement.axes;
         // As the reference creates a cloud: scan colours, the intensity
         // range 0–100 as a gradient, crops shown.
-        let data = codec::entities::PointCloudExData {
+        let data = document::entities::PointCloudExData {
             class_version: 1,
             extents_min,
             extents_max,
@@ -197,9 +197,9 @@ impl OpenCADStudio {
             elevation_as_gradient: false,
             croppings: Vec::new(),
         };
-        let entity = codec::EntityType::Extended(Box::new(codec::entities::ExtendedEntity {
-            common: codec::entities::EntityCommon::new(),
-            data: codec::entities::ExtendedEntityData::PointCloudEx(data),
+        let entity = document::EntityType::Extended(Box::new(document::entities::ExtendedEntity {
+            common: document::entities::EntityCommon::new(),
+            data: document::entities::ExtendedEntityData::PointCloudEx(data),
         }));
         if let Some(cloud) = self.commit_entity_handle(entity) {
             // The reactor, owned by the cloud, tells the definition who uses it.
@@ -217,8 +217,8 @@ impl OpenCADStudio {
             {
                 definition.reactors.push(reactor);
             }
-            if let Some(codec::EntityType::Extended(extended)) = document.get_entity_mut(cloud) {
-                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
+            if let Some(document::EntityType::Extended(extended)) = document.get_entity_mut(cloud) {
+                if let document::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
                 {
                     data.reactor_handle = reactor;
                 }

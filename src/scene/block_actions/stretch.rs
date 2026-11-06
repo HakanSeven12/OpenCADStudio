@@ -1,7 +1,7 @@
 //! A native Stretch action freezes its vertex membership at authoring time.
 use super::*;
-use codec::objects::{BlockPolarStretchAction, BlockStretchAction, BlockStretchHandle};
-use codec::types::Vector2;
+use document::objects::{BlockPolarStretchAction, BlockStretchAction, BlockStretchHandle};
+use document::types::Vector2;
 
 pub(crate) fn control_points(e: &EntityType) -> Result<Vec<DVec3>, &'static str> {
     let points = match e {
@@ -13,12 +13,12 @@ pub(crate) fn control_points(e: &EntityType) -> Result<Vec<DVec3>, &'static str>
             vec![v(a.start_point_wcs()), v(a.end_point_wcs())]
         }
         EntityType::Circle(c) => {
-            vec![v(codec::types::Matrix3::arbitrary_axis(c.normal) * c.center)]
+            vec![v(document::types::Matrix3::arbitrary_axis(c.normal) * c.center)]
         }
         EntityType::Ellipse(e) => vec![v(e.center)],
         EntityType::Point(p) => vec![v(p.location)],
         EntityType::Text(t) => vec![v(
-            codec::types::Matrix3::arbitrary_axis(t.normal) * t.insertion_point
+            document::types::Matrix3::arbitrary_axis(t.normal) * t.insertion_point
         )],
         EntityType::MText(t) => vec![v(t.insertion_point)],
         EntityType::LwPolyline(p) => {

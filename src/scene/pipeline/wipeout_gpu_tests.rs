@@ -79,7 +79,7 @@ fn thousand_wipeouts_share_bind_groups() {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: codec::entities::HatchStyleType::Normal,
+            style: document::entities::HatchStyleType::Normal,
             pattern: HatchPattern::Solid,
             name: "WIPEOUT".into(),
             color: [0.0, 0.0, 0.0, 1.0],

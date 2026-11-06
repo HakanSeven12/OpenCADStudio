@@ -1,7 +1,7 @@
 //! Native grip metadata shared by the editor and insertion commands.
 pub(crate) mod config;
 pub(crate) mod runtime;
-use codec::{
+use document::{
     objects::{BlockGrip, DynamicBlockData, ObjectType},
     types::Vector3,
     Document, Handle,
@@ -166,7 +166,7 @@ pub(crate) fn insertion_points(doc: &Document, definition: Handle) -> Vec<Vector
 mod tests {
     use super::*;
     use crate::scene::{block_distance_parameter as distance, Scene};
-    use codec::{DwgReader, DwgWriter, DxfReader, DxfWriter};
+    use document::{DwgReader, DwgWriter, DxfReader, DxfWriter};
     use std::io::Cursor;
 
     #[test]
@@ -180,7 +180,7 @@ mod tests {
         let label = Vector3::new(5.0, 2.0, 0.0);
         distance::create(doc, definition, distance::Kind::Linear, start, end, label).unwrap();
         let xdict = doc.extension_dictionary_handle(definition).unwrap();
-        let mut table = codec::objects::SortEntitiesTable::for_block(definition);
+        let mut table = document::objects::SortEntitiesTable::for_block(definition);
         table.handle = doc.allocate_handle();
         table.owner_handle = xdict;
         let sort = table.handle;

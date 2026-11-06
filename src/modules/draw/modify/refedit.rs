@@ -13,7 +13,7 @@
 //      into the referenced file for an xref); Discard drops the copies.
 
 use crate::t;
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 use std::collections::HashSet;
 
@@ -83,9 +83,9 @@ pub struct RefEditSession {
     /// Working-set objects moved out to the host with REFSET Remove.
     pub removed: HashSet<Handle>,
     /// Definition-local → world: the composed placement of the chain.
-    pub forward: codec::types::Transform,
+    pub forward: document::types::Transform,
     /// World → definition-local, applied on SAVE to bring edits back.
-    pub inverse: codec::types::Transform,
+    pub inverse: document::types::Transform,
     /// Handle watermark captured before the temp copies were created: every
     /// entity allocated at or above it during the session (drawn, pasted,
     /// offset, …) belongs to the working set, so Save folds it into the block
@@ -190,7 +190,7 @@ pub struct ChainLevel {
     pub insert: Handle,
     pub block_name: String,
     /// Definition-local → world for this level.
-    pub forward: codec::types::Transform,
+    pub forward: document::types::Transform,
 }
 
 /// The pickable objects of one definition, in world space, for Nested
@@ -201,7 +201,7 @@ pub type LevelHits = Vec<(Handle, Vec<Vec<[f64; 3]>>)>;
 /// block references recurse into their definitions).
 pub fn hit_paths(
     entity: &EntityType,
-    document: &codec::Document,
+    document: &document::Document,
     depth: usize,
 ) -> Vec<Vec<[f64; 3]>> {
     use crate::entities::traits::EntityTypeOps;
@@ -260,7 +260,7 @@ pub fn paths_distance(paths: &[Vec<[f64; 3]>], point: DVec3) -> Option<f64> {
 }
 
 /// The world-space objects of `level`'s definition with their hit paths.
-pub fn level_hits(document: &codec::Document, level: &ChainLevel) -> LevelHits {
+pub fn level_hits(document: &document::Document, level: &ChainLevel) -> LevelHits {
     let Some(br) = document.block_records.get(&level.block_name) else {
         return Vec::new();
     };
@@ -285,7 +285,7 @@ pub fn level_hits(document: &codec::Document, level: &ChainLevel) -> LevelHits {
 /// reference, then every definition-owned reference the nearest object under
 /// the point sits in. Without a point only the top level is returned.
 pub fn nesting_chain(
-    document: &codec::Document,
+    document: &document::Document,
     top: Handle,
     point: Option<DVec3>,
 ) -> Vec<ChainLevel> {
@@ -841,8 +841,8 @@ impl CadCommand for RefCloseCommand {
 
 /// Inverse of an affine placement (rotation / scale / mirror and translation),
 /// or None when it is singular.
-pub fn inverse_placement(t: &codec::types::Transform) -> Option<codec::types::Transform> {
-    use codec::types::{Matrix3, Matrix4};
+pub fn inverse_placement(t: &document::types::Transform) -> Option<document::types::Transform> {
+    use document::types::{Matrix3, Matrix4};
     let m = &t.matrix.m;
     let linear = Matrix3 {
         m: [
@@ -861,7 +861,7 @@ pub fn inverse_placement(t: &codec::types::Transform) -> Option<codec::types::Tr
         }
         out.m[row][3] = -(r[row][0] * tr[0] + r[row][1] * tr[1] + r[row][2] * tr[2]);
     }
-    Some(codec::types::Transform::from_matrix(out))
+    Some(document::types::Transform::from_matrix(out))
 }
 
 /// Apply the session's forward transform to a definition-local entity so it

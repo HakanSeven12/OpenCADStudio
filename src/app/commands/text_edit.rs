@@ -8,7 +8,7 @@ use crate::modules::annotate::text_edit::{
     TextAlignCommand, TextFrame,
 };
 use crate::modules::draw::select::SelectObjectsCommand;
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use iced::Task;
 
 impl OpenCADStudio {
@@ -91,7 +91,7 @@ impl OpenCADStudio {
         i: usize,
         label: &str,
         handles: &[Handle],
-        mut change: impl FnMut(&codec::Document, &EntityType) -> Option<EntityType>,
+        mut change: impl FnMut(&document::Document, &EntityType) -> Option<EntityType>,
     ) -> usize {
         let doc = &self.tabs[i].scene.document;
         let updates: Vec<(Handle, EntityType)> = handles
@@ -134,7 +134,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.deselect_all();
         let doc = &self.tabs[i].scene.document;
         // The height each object gets; `None` leaves it out.
-        let target: Box<dyn Fn(&codec::Document, &EntityType) -> Option<f64>> = match mode {
+        let target: Box<dyn Fn(&document::Document, &EntityType) -> Option<f64>> = match mode {
             "H" => {
                 let h: f64 = value.parse().unwrap_or(0.0);
                 Box::new(move |_, _| Some(h))

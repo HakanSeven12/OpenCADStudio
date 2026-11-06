@@ -2,7 +2,7 @@ use crate::{
     app::Message,
     scene::block_action_bars::{EntryKind, Group},
 };
-use codec::Handle;
+use document::Handle;
 use iced::{
     widget::{button, canvas, column, container, row, text, tooltip, Space},
     Color, Element, Fill, Point, Rectangle, Vector,

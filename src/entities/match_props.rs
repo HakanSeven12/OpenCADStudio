@@ -9,11 +9,11 @@
 /// itself). Text formatting crosses TEXT ↔ MTEXT; the dimension style crosses
 /// Dimension / Leader / Tolerance.
 pub fn match_special_props(
-    src: &codec::EntityType,
-    dst: &mut codec::EntityType,
+    src: &document::EntityType,
+    dst: &mut document::EntityType,
     opts: &MatchOpts,
 ) {
-    use codec::EntityType as E;
+    use document::EntityType as E;
 
     // Text-ish source formatting.
     let text_fmt = match src {
@@ -302,7 +302,7 @@ pub fn match_special_props(
     // size or gap keeps its ratio to the destination's own diameter.
     // Centre lines are rebuilt from their source lines caller-side.
     if let (true, E::Line(sl), E::Line(dl)) = (opts.has(MatchOpts::CENTER), src, dst as &mut E) {
-        use codec::entities::CenterMarkAssociation as Mark;
+        use document::entities::CenterMarkAssociation as Mark;
         if let (Some(s), Some(mut d)) = (
             Mark::read(&sl.common.extended_data),
             Mark::read(&dl.common.extended_data),
@@ -332,8 +332,8 @@ pub struct PolylineMatchStyle {
 }
 
 impl PolylineMatchStyle {
-    pub fn from_entity(entity: &codec::EntityType) -> Option<Self> {
-        use codec::EntityType as E;
+    pub fn from_entity(entity: &document::EntityType) -> Option<Self> {
+        use document::EntityType as E;
 
         match entity {
             E::LwPolyline(poly) => {
@@ -371,7 +371,7 @@ impl PolylineMatchStyle {
                 };
                 Some(Self {
                     plinegen: poly.flags.bits()
-                        & codec::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+                        & document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
                         != 0,
                     widths,
                 })
@@ -380,8 +380,8 @@ impl PolylineMatchStyle {
         }
     }
 
-    pub fn apply_to(&self, entity: &mut codec::EntityType) {
-        use codec::EntityType as E;
+    pub fn apply_to(&self, entity: &mut document::EntityType) {
+        use document::EntityType as E;
 
         match entity {
             E::LwPolyline(poly) => {
@@ -402,13 +402,13 @@ impl PolylineMatchStyle {
             }
             E::Polyline2D(poly) => {
                 let mut bits = poly.flags.bits();
-                let flag = codec::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits();
+                let flag = document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits();
                 if self.plinegen {
                     bits |= flag;
                 } else {
                     bits &= !flag;
                 }
-                poly.flags = codec::entities::PolylineFlags::from_bits(bits);
+                poly.flags = document::entities::PolylineFlags::from_bits(bits);
                 let sampled = resample_widths(&self.widths, poly.vertices.len());
                 let first = sampled.first().copied().unwrap_or((0.0, 0.0));
                 let can_use_defaults = widths_are_same(&sampled);
@@ -482,9 +482,9 @@ pub enum MatchLayerError {
 /// that resolve to nothing are skipped. Lock-filtering, undo, dirty-state and
 /// command-line echo stay caller-side in `handle_match_entity_layer`.
 pub fn match_layer_kernel(
-    doc: &mut codec::Document,
-    dest: &[codec::Handle],
-    src: codec::Handle,
+    doc: &mut document::Document,
+    dest: &[document::Handle],
+    src: document::Handle,
 ) -> Result<usize, MatchLayerError> {
     let layer = doc
         .get_entity(src)
@@ -605,8 +605,8 @@ pub fn active_settings_line(mode: u32) -> String {
 /// stay caller-side; lock-filtering, undo, dirty-state, selection and echo
 /// stay caller-side too.
 pub fn match_properties_kernel(
-    src: &codec::EntityType,
-    dst: &mut codec::EntityType,
+    src: &document::EntityType,
+    dst: &mut document::EntityType,
     opts: &MatchOpts,
 ) {
     let common = src.common().clone();
@@ -663,19 +663,19 @@ pub fn match_properties_kernel(
 mod match_layer_kernel_tests {
     use super::{match_layer_kernel, MatchLayerError};
 
-    fn line_on(layer: &str) -> codec::EntityType {
-        let mut line = codec::entities::Line::new();
+    fn line_on(layer: &str) -> document::EntityType {
+        let mut line = document::entities::Line::new();
         line.common.layer = layer.to_string();
-        codec::EntityType::Line(line)
+        document::EntityType::Line(line)
     }
 
-    fn layer_of(doc: &codec::Document, handle: codec::Handle) -> String {
+    fn layer_of(doc: &document::Document, handle: document::Handle) -> String {
         doc.get_entity(handle).unwrap().common().layer.clone()
     }
 
     #[test]
     fn copies_src_layer_onto_every_dest_and_returns_count() {
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         let src = doc.add_entity(line_on("WALLS")).unwrap();
         let a = doc.add_entity(line_on("0")).unwrap();
         let b = doc.add_entity(line_on("0")).unwrap();
@@ -690,7 +690,7 @@ mod match_layer_kernel_tests {
 
     #[test]
     fn missing_src_errors_and_leaves_dest_untouched() {
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         let dest = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();
 
@@ -702,7 +702,7 @@ mod match_layer_kernel_tests {
 
     #[test]
     fn skips_missing_dest_handles_but_counts_the_rest() {
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         let src = doc.add_entity(line_on("WALLS")).unwrap();
         let dest = doc.add_entity(line_on("0")).unwrap();
         let missing = doc.allocate_handle();
@@ -717,10 +717,10 @@ mod match_layer_kernel_tests {
 #[cfg(test)]
 mod match_properties_kernel_tests {
     use super::{match_properties_kernel, MatchOpts};
-    use codec::EntityType;
+    use document::EntityType;
 
     fn line_src() -> EntityType {
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.layer = "WALLS".to_string();
         line.common.linetype_scale = 2.5;
         line.thickness = 1.25;
@@ -728,7 +728,7 @@ mod match_properties_kernel_tests {
     }
 
     fn line_dst() -> EntityType {
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.layer = "0".to_string();
         line.common.linetype_scale = 1.0;
         line.thickness = 0.0;
@@ -753,12 +753,12 @@ mod match_properties_kernel_tests {
 
     #[test]
     fn transfers_text_style_via_special_props_flag() {
-        let mut src_text = codec::entities::Text::new();
+        let mut src_text = document::entities::Text::new();
         src_text.value = "SRC".into();
         src_text.style = "BIG".into();
         src_text.height = 5.0;
         let src = EntityType::Text(src_text);
-        let mut dst_text = codec::entities::Text::new();
+        let mut dst_text = document::entities::Text::new();
         dst_text.value = "DST".into();
         let mut dst = EntityType::Text(dst_text);
 

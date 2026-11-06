@@ -1,5 +1,5 @@
-use codec::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
-use codec::{Document, EntityType, Handle};
+use document::objects::{ObjectType, VisualStyle, VisualStyleProperty, VisualStylePropertyValue};
+use document::{Document, EntityType, Handle};
 
 #[derive(Clone, Debug)]
 pub struct MeshVisualStyle {
@@ -100,7 +100,7 @@ fn property_color(style: &VisualStyle, index: usize) -> Option<[f32; 4]> {
     };
     if matches!(
         color,
-        codec::types::Color::ByLayer | codec::types::Color::ByBlock
+        document::types::Color::ByLayer | document::types::Color::ByBlock
     ) {
         return None;
     }

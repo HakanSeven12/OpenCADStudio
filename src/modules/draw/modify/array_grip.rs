@@ -5,7 +5,7 @@ use crate::command::{CadCommand, CmdResult};
 use crate::scene::assoc_array::AssocArray;
 use crate::scene::assoc_array_grips::{Drag, Kind};
 use crate::scene::model::wire_model::WireModel;
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 pub struct ArrayGripCommand {
@@ -79,7 +79,7 @@ impl CadCommand for ArrayGripCommand {
         ))
     }
 
-    fn preview_entities(&mut self, document: &codec::Document, pt: DVec3) -> Vec<EntityType> {
+    fn preview_entities(&mut self, document: &document::Document, pt: DVec3) -> Vec<EntityType> {
         let changes = self.drag.changes(pt, self.ctrl);
         crate::scene::assoc_array_grips::preview(document, &self.array, &changes)
     }

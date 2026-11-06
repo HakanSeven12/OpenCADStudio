@@ -1,8 +1,8 @@
 use super::*;
 use crate::command::WorkingPlane;
-use codec::entities::{CenterLineAssociation, CenterLineSource, CenterLineSourceKind};
-use codec::objects::XRecordValue;
-use codec::types::Vector3;
+use document::entities::{CenterLineAssociation, CenterLineSource, CenterLineSourceKind};
+use document::objects::XRecordValue;
+use document::types::Vector3;
 use glam::DVec3;
 use kernel::geom2d::{centerline_between, closest_point, Curve, Line as KernelLine};
 
@@ -155,14 +155,14 @@ pub(crate) fn picked_source(
 
 /// The current endpoints of a centre-line source edge.
 pub(crate) fn source_segment(
-    document: &codec::Document,
+    document: &document::Document,
     source: &CenterLineSource,
 ) -> Option<(DVec3, DVec3)> {
     resolve_source(document, source)
 }
 
 fn resolve_source(
-    document: &codec::Document,
+    document: &document::Document,
     source: &CenterLineSource,
 ) -> Option<(DVec3, DVec3)> {
     let entity = document.get_entity(source.handle)?;
@@ -217,9 +217,9 @@ fn resolve_source(
 }
 
 fn rebuild_line(
-    document: &codec::Document,
+    document: &document::Document,
     association: &CenterLineAssociation,
-) -> Option<codec::Line> {
+) -> Option<document::Line> {
     let first = resolve_source(document, &association.first)?;
     let second = resolve_source(document, &association.second)?;
     construct_line(first, second, association)
@@ -229,7 +229,7 @@ pub(crate) fn construct_line(
     first: (DVec3, DVec3),
     second: (DVec3, DVec3),
     association: &CenterLineAssociation,
-) -> Option<codec::Line> {
+) -> Option<document::Line> {
     let plane = WorkingPlane::new(
         dvec(association.plane_origin),
         dvec(association.plane_x),
@@ -258,7 +258,7 @@ pub(crate) fn construct_line(
     let elevation = (first_start.z + first_end.z + second_start.z + second_end.z) * 0.25;
     let start = plane.to_world(DVec3::new(geometry.start[0], geometry.start[1], elevation));
     let end = plane.to_world(DVec3::new(geometry.end[0], geometry.end[1], elevation));
-    Some(codec::Line::from_points(vector(start), vector(end)))
+    Some(document::Line::from_points(vector(start), vector(end)))
 }
 
 /// Reverse index from a centre-line source handle to the carrier lines
@@ -480,7 +480,7 @@ impl Scene {
         first: (Handle, DVec3),
         second: (Handle, DVec3),
     ) -> bool {
-        let pick = |document: &codec::Document, (handle, point): (Handle, DVec3)| {
+        let pick = |document: &document::Document, (handle, point): (Handle, DVec3)| {
             picked_source(document.get_entity(handle)?, handle, point)
         };
         let (Some(first), Some(second)) = (pick(&self.document, first), pick(&self.document, second))
@@ -664,7 +664,7 @@ pub(crate) fn is_center_carrier(entity: &EntityType) -> bool {
         return false;
     };
     CenterLineAssociation::read(&line.common.extended_data).is_some()
-        || codec::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some()
+        || document::entities::CenterMarkAssociation::read(&line.common.extended_data).is_some()
 }
 
 impl Scene {
@@ -680,7 +680,7 @@ impl Scene {
         let EntityType::Line(line) = self.document.get_entity(handle)? else {
             return None;
         };
-        if let Some(mark) = codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        if let Some(mark) = document::entities::CenterMarkAssociation::read(&line.common.extended_data)
         {
             return Some((true, mark.associated));
         }
@@ -715,7 +715,7 @@ impl Scene {
             let before = recording.before.get(handle).and_then(|before| before.as_deref());
             let was_associated = match before {
                 Some(EntityType::Line(line)) => {
-                    codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
+                    document::entities::CenterMarkAssociation::read(&line.common.extended_data)
                         .map(|association| association.associated)
                         .or_else(|| {
                             CenterLineAssociation::read(&line.common.extended_data)
@@ -752,7 +752,7 @@ pub(crate) fn entity_has_center_association(entity: &EntityType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
+    use document::entities::Line;
 
     fn line(y: f64) -> EntityType {
         EntityType::Line(Line::from_points(

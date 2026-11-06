@@ -1,7 +1,7 @@
 //! Saved INSERT evaluation: definition geometry stays immutable; parameter
 //! values live in the native per-reference AppDataCache.
 use super::*;
-use codec::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
+use document::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
 
 fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
     let Some(ObjectType::Dictionary(d)) = doc.objects.get(&owner) else {
@@ -435,7 +435,7 @@ fn ensure_cache(
         r.handle = h;
         r.owner = owner;
         r.reactors.push(owner);
-        r.cloning_flags = codec::objects::DictionaryCloningFlags::KeepExisting;
+        r.cloning_flags = document::objects::DictionaryCloningFlags::KeepExisting;
         r.entries = vec![
             XRecordEntry::int32(1071, 0),
             XRecordEntry::int32(1071, 0),
@@ -1232,7 +1232,7 @@ fn write_table_history(
     rec.handle = h;
     rec.owner = owner;
     rec.reactors.push(owner);
-    rec.cloning_flags = codec::objects::DictionaryCloningFlags::KeepExisting;
+    rec.cloning_flags = document::objects::DictionaryCloningFlags::KeepExisting;
     rec.entries = entries;
     doc.objects.insert(h, ObjectType::XRecord(rec));
     if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&owner) {

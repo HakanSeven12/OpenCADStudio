@@ -168,8 +168,8 @@ pub enum Cell {
 /// not take it either.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Edit {
-    pub definition: codec::Handle,
-    pub parameter: codec::Handle,
+    pub definition: document::Handle,
+    pub parameter: document::Handle,
     pub component: crate::scene::model::object::BlockParameterComponent,
     pub name: String,
     pub cell: Cell,
@@ -199,7 +199,7 @@ impl Default for Panel {
 }
 
 impl Panel {
-    fn is_open(&self, definition: codec::Handle, name: &str, cell: Cell) -> bool {
+    fn is_open(&self, definition: document::Handle, name: &str, cell: Cell) -> bool {
         self.editing.as_ref().is_some_and(|edit| {
             edit.definition == definition && edit.name == name && edit.cell == cell
         })
@@ -226,7 +226,7 @@ fn cell(value: &str, width: f32) -> Element<'static, Message> {
 /// A numeric cell: its text is a button that opens the field, and the field is
 /// what commits the row.
 fn number_cell(
-    definition: codec::Handle,
+    definition: document::Handle,
     name: &str,
     value: &str,
     which: Cell,
@@ -320,7 +320,7 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
     .into()
 }
 
-fn row_line(entry: &Row, panel: &Panel, definition: codec::Handle) -> Element<'static, Message> {
+fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element<'static, Message> {
     let name = entry.name.as_str();
     let (expression, value) = if entry.numeric {
         (
@@ -373,7 +373,7 @@ fn row_line(entry: &Row, panel: &Panel, definition: codec::Handle) -> Element<'s
 pub fn view(
     rows: &[Row],
     panel: &Panel,
-    definition: codec::Handle,
+    definition: document::Handle,
     width: f32,
     chrome: Chrome,
 ) -> Element<'static, Message> {
@@ -476,7 +476,7 @@ mod tests {
         let _ = view(
             &sample(),
             &Panel::default(),
-            codec::Handle::new(1),
+            document::Handle::new(1),
             default_width,
             chrome(),
         );
@@ -542,7 +542,7 @@ mod tests {
         let _ = view(
             &rows,
             &filtered,
-            codec::Handle::new(1),
+            document::Handle::new(1),
             PanelId::ParametersManager.default_width(),
             chrome(),
         );
@@ -569,7 +569,7 @@ mod tests {
         .expect("headless renderer");
         let width = PanelId::ParametersManager.default_width();
         let mut ui = UserInterface::build(
-            view(&sample(), panel, codec::Handle::new(1), width, chrome()),
+            view(&sample(), panel, document::Handle::new(1), width, chrome()),
             iced::Size::new(width, 100_000.0),
             Cache::default(),
             &mut renderer,
@@ -658,7 +658,7 @@ mod tests {
             view(
                 &rows,
                 &Panel::default(),
-                codec::Handle::new(1),
+                document::Handle::new(1),
                 width,
                 chrome(),
             ),
@@ -684,12 +684,12 @@ mod tests {
 
     #[test]
     fn the_open_cell_is_the_one_clicked() {
-        let definition = codec::Handle::new(7);
-        let other = codec::Handle::new(8);
+        let definition = document::Handle::new(7);
+        let other = document::Handle::new(8);
         let panel = Panel {
             editing: Some(Edit {
                 definition,
-                parameter: codec::Handle::new(9),
+                parameter: document::Handle::new(9),
                 component: crate::scene::model::object::BlockParameterComponent::Angle,
                 name: "Angle1".to_owned(),
                 cell: Cell::Value,

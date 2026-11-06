@@ -830,7 +830,7 @@ mod tests {
             r"a\Pb\Nc",
         ] {
             let i = checked(raw);
-            let doc = codec::entities::mtext_format::parse_mtext(raw, true);
+            let doc = document::entities::mtext_format::parse_mtext(raw, true);
             let n = super::super::doc_to_cells(&doc).len();
             assert_eq!(i.visible_len, Some(n), "{raw:?}");
             for p in 0..=n {

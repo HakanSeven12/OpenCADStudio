@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::app::OpenCADStudio;
-    use codec::entities::{Circle, Line, LwPolyline, LwVertex};
-    use codec::types::Vector3;
-    use codec::{EntityType, Handle};
+    use document::entities::{Circle, Line, LwPolyline, LwVertex};
+    use document::types::Vector3;
+    use document::{EntityType, Handle};
     use serde_json::json;
 
     #[derive(Debug, Clone)]

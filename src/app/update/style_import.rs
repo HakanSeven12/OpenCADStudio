@@ -1,7 +1,7 @@
 //! Import named text and dimension styles into the open style manager.
 
 use crate::app::{Message, ModalKind, OpenCADStudio, StyleKind};
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use iced::Task;
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -374,7 +374,7 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::tables::{DimStyle, LineType, TextStyle};
+    use document::tables::{DimStyle, LineType, TextStyle};
 
     #[test]
     fn every_name_collision_gets_a_separate_decision() {

@@ -1,7 +1,7 @@
 use super::{Message, OpenCADStudio};
 use crate::command::CadCommand;
 use crate::scene::block_actions::{self as actions, Kind};
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use iced::Task;
 
 mod preview;
@@ -108,7 +108,7 @@ impl OpenCADStudio {
             }
         }
         if changed != 0 {
-            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Reset block references"));
+            self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Reset block references"));
             self.apply_action_document(i, staged);
             self.tabs[i].scene.bump_geometry();
             self.tabs[i].dirty = true;
@@ -177,7 +177,7 @@ impl OpenCADStudio {
         self.tabs[self.active_tab].active_cmd = Some(Box::new(command));
         Task::none()
     }
-    pub(super) fn apply_action_document(&mut self, i: usize, mut staged: codec::Document) {
+    pub(super) fn apply_action_document(&mut self, i: usize, mut staged: document::Document) {
         let doc = &mut self.tabs[i].scene.document;
         let changes = staged
             .entities()
@@ -286,14 +286,14 @@ impl OpenCADStudio {
     pub(in crate::app) fn start_block_action_for_parameter(
         &mut self,
         args: &str,
-        parameter: codec::Handle,
+        parameter: document::Handle,
     ) -> Task<Message> {
         self.start_block_action_for_parameter_at(args, parameter, None)
     }
     fn start_block_action_for_parameter_at(
         &mut self,
         args: &str,
-        parameter: codec::Handle,
+        parameter: document::Handle,
         xy_key_point: Option<actions::XyKeyPoint>,
     ) -> Task<Message> {
         let Some(kind) = Kind::parse(args) else {
@@ -328,7 +328,7 @@ impl OpenCADStudio {
     }
     pub(in crate::app) fn start_xy_box_set_action(
         &mut self,
-        parameter: codec::Handle,
+        parameter: document::Handle,
         kind: Kind,
         key_point: u8,
     ) -> Task<Message> {
@@ -343,7 +343,7 @@ impl OpenCADStudio {
     }
     pub(in crate::app) fn start_parameter_pair_action(
         &mut self,
-        parameter: codec::Handle,
+        parameter: document::Handle,
         kind: Kind,
         side: u8,
     ) -> Task<Message> {
@@ -401,7 +401,7 @@ impl OpenCADStudio {
                 match result {
                     Ok(changed) => {
                         if changed {
-                            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Associate block action"));
+                            self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Associate block action"));
                             self.apply_action_document(i, staged);
                             self.tabs[i].scene.bump_geometry();
                             self.tabs[i].dirty = true;
@@ -466,7 +466,7 @@ impl OpenCADStudio {
                 match result {
                     Ok(changed) => {
                         if changed {
-                            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Action selection set"));
+                            self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Action selection set"));
                             self.apply_action_document(i, staged);
                             self.tabs[i].scene.bump_geometry();
                             self.tabs[i].dirty = true;
@@ -543,7 +543,7 @@ impl OpenCADStudio {
                     Ok(handle)
                 }) {
                     Ok(_) => {
-                        self.push_undo_snapshot(i, super::document::HistoryLabel::formatted(format!("{} action", kind.name()), "action", super::document::HistoryLabel::Message(kind.name())));
+                        self.push_undo_snapshot(i, super::tab_document::HistoryLabel::formatted(format!("{} action", kind.name()), "action", super::tab_document::HistoryLabel::Message(kind.name())));
                         self.apply_action_document(i, staged);
                         self.tabs[i].scene.bump_geometry();
                         self.tabs[i].dirty = true;
@@ -647,7 +647,7 @@ impl OpenCADStudio {
                 ) {
                     Ok(staged) => {
                         if let Some(staged) = staged {
-                            self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Test block parameter"));
+                            self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Test block parameter"));
                             self.apply_action_document(i, staged);
                             self.tabs[i].scene.bump_geometry();
                             self.tabs[i].dirty = true;
@@ -906,7 +906,7 @@ impl OpenCADStudio {
         match actions::instance::evaluate_value(&tab.scene.document, handle, parameter, local) {
             Ok(staged) => {
                 if let Some(staged) = staged {
-                    self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Block reference parameter"));
+                    self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Block reference parameter"));
                     self.apply_action_document(i, staged);
                     self.tabs[i].scene.bump_geometry();
                     self.tabs[i].dirty = true;

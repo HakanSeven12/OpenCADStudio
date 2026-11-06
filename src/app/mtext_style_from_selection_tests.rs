@@ -7,9 +7,9 @@ use super::mtext_editor::{EditorMenu, MTextEditorState, ValueOrigin};
 use super::*;
 use crate::entities::text_support::TTF_FLAG_BOLD;
 use crate::ui::font_picker::FontChoice;
-use codec::entities::{EntityType, Text};
-use codec::tables::TextStyle;
-use codec::types::Vector3;
+use document::entities::{EntityType, Text};
+use document::tables::TextStyle;
+use document::types::Vector3;
 use glam::DVec3;
 
 /// A drawing whose style "Notes" has a fixed height of 2.5, width 0.8 and a

@@ -1,4 +1,4 @@
-// opencadcodec entity -> what the renderer draws.
+// document entity -> what the renderer draws.
 //
 // Every entity becomes one of a handful of shapes: a run of points, a run of
 // text strokes, a band of varying width, or a single dot. Curved entities are
@@ -6,7 +6,7 @@
 // defined once — so a circle drawn here and a circle extruded by the Model
 // tab come from the same definition and cannot disagree.
 
-use codec::{Document, EntityType};
+use document::{Document, EntityType};
 
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::model::wire_model::{SnapHint, TangentGeom};
@@ -46,24 +46,24 @@ pub struct TextPlane {
 /// elevation `z`) and the object system's X and Y axes, in world space.
 /// `None` for a run in the XY plane, which is drawn as it is.
 pub fn ocs_text_plane(
-    normal: codec::types::Vector3,
+    normal: document::types::Vector3,
     origin: [f64; 2],
     z: f64,
 ) -> Option<TextPlane> {
     if normal.x.abs() < 1e-12 && normal.y.abs() < 1e-12 && normal.z > 0.0 {
         return None;
     }
-    let m = codec::types::Matrix3::arbitrary_axis(normal);
-    let world = |v: codec::types::Vector3| {
+    let m = document::types::Matrix3::arbitrary_axis(normal);
+    let world = |v: document::types::Vector3| {
         let w = m * v;
         [w.x, w.y, w.z]
     };
-    let at = world(codec::types::Vector3::new(origin[0], origin[1], z));
+    let at = world(document::types::Vector3::new(origin[0], origin[1], z));
     Some(TextPlane {
         origin: at,
         scale_origin: at,
-        x_axis: world(codec::types::Vector3::new(1.0, 0.0, 0.0)),
-        y_axis: world(codec::types::Vector3::new(0.0, 1.0, 0.0)),
+        x_axis: world(document::types::Vector3::new(1.0, 0.0, 0.0)),
+        y_axis: world(document::types::Vector3::new(0.0, 1.0, 0.0)),
     })
 }
 

@@ -17,9 +17,9 @@
 
 use std::sync::Mutex;
 
-use codec::entities::{UnderlayDisplayFlags, UnderlayType};
-use codec::types::Handle;
-use codec::EntityType;
+use document::entities::{UnderlayDisplayFlags, UnderlayType};
+use document::types::Handle;
+use document::EntityType;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};

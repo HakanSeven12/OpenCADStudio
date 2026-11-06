@@ -2,7 +2,7 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use codec::{entities::Solid3D, EntityType, Handle};
+use document::{entities::Solid3D, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{
@@ -998,7 +998,7 @@ impl CadCommand for PresspullCommand {
         self.hover_cache.clone()
     }
 
-    fn on_entity_pick(&mut self, handle: codec::Handle, point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: document::Handle, point: DVec3) -> CmdResult {
         if !self.needs_entity_pick() {
             return CmdResult::NeedPoint;
         }
@@ -1371,7 +1371,7 @@ impl RevolveCommand {
 }
 
 fn revolve_axis(entity: &EntityType) -> Option<(DVec3, DVec3)> {
-    let point = |value: &codec::types::Vector3| DVec3::new(value.x, value.y, value.z);
+    let point = |value: &document::types::Vector3| DVec3::new(value.x, value.y, value.z);
     let (start, direction) = match entity {
         EntityType::Line(line) => (point(&line.start), point(&line.end) - point(&line.start)),
         EntityType::Ray(ray) => (point(&ray.base_point), point(&ray.direction)),
@@ -1449,7 +1449,7 @@ impl CadCommand for RevolveCommand {
     fn needs_entity_pick(&self) -> bool {
         self.step == RevolveStep::AxisObject
     }
-    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: document::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
@@ -3106,8 +3106,8 @@ pub fn empty_solid3d() -> EntityType {
 }
 
 pub fn empty_extruded_surface(direction: DVec3, taper_angle: f64) -> EntityType {
-    use codec::entities::{Surface, SurfaceData, SurfaceKind};
-    use codec::types::Vector3;
+    use document::entities::{Surface, SurfaceData, SurfaceKind};
+    use document::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Extruded);
     surface.u_isolines = 6;
@@ -3132,8 +3132,8 @@ pub fn empty_revolved_surface(
     angle: f64,
     start_angle: f64,
 ) -> EntityType {
-    use codec::entities::{Surface, SurfaceData, SurfaceKind};
-    use codec::types::Vector3;
+    use document::entities::{Surface, SurfaceData, SurfaceKind};
+    use document::types::Vector3;
 
     let mut surface = Surface::new(SurfaceKind::Revolved);
     let axis = (axis_end - axis_start).normalize_or(DVec3::Z);
@@ -3184,7 +3184,7 @@ mod extrude_command_tests {
         command.set_preselection(
             vec![(
                 Handle::new(1),
-                EntityType::Circle(codec::entities::Circle::new()),
+                EntityType::Circle(document::entities::Circle::new()),
             )],
             DVec3::ZERO,
             Some(DVec3::Z),
@@ -3206,7 +3206,7 @@ mod revolve_tests {
 
     #[test]
     fn cursor_angle_is_measured_about_the_model_axis() {
-        let profile = EntityType::Line(codec::entities::Line::from_coords(
+        let profile = EntityType::Line(document::entities::Line::from_coords(
             2.0, 0.0, 0.0, 2.0, 4.0, 0.0,
         ));
         let mut command = RevolveCommand::new([1.0; 4], 0);
@@ -3241,12 +3241,12 @@ mod thicken_command_tests {
         let mut command = ThickenCommand::new(vec![
             (
                 Handle::new(1),
-                EntityType::Line(codec::entities::Line::default()),
+                EntityType::Line(document::entities::Line::default()),
             ),
             (
                 handle,
-                EntityType::Surface(Box::new(codec::entities::Surface::new(
-                    codec::entities::SurfaceKind::Plane,
+                EntityType::Surface(Box::new(document::entities::Surface::new(
+                    document::entities::SurfaceKind::Plane,
                 ))),
             ),
         ]);

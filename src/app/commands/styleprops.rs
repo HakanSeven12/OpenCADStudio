@@ -110,7 +110,7 @@ impl OpenCADStudio {
                 || cmd.starts_with("CECOLOR ")
                 || cmd.starts_with("DDCOLOR ") =>
             {
-                use codec::types::Color;
+                use document::types::Color;
                 let describe = |c: &Color| match c {
                     Color::ByLayer => "ByLayer".to_string(),
                     Color::ByBlock => "ByBlock".to_string(),
@@ -216,9 +216,9 @@ impl OpenCADStudio {
                             );
                         } else {
                             let canon = if name.eq_ignore_ascii_case("BYLAYER") {
-                                Some(("ByLayer".to_string(), codec::types::Handle::NULL))
+                                Some(("ByLayer".to_string(), document::types::Handle::NULL))
                             } else if name.eq_ignore_ascii_case("BYBLOCK") {
-                                Some(("ByBlock".to_string(), codec::types::Handle::NULL))
+                                Some(("ByBlock".to_string(), document::types::Handle::NULL))
                             } else {
                                 // A catalog linetype loads on first use.
                                 crate::io::linetypes::ensure_catalog_linetype(
@@ -303,7 +303,7 @@ impl OpenCADStudio {
                     // Collect names in use (immutable borrows — own scope per pass).
                     // An INSERT's attributes live inside it, not in the entity
                     // list, so their layer, style and linetype count separately.
-                    let open_edits: Vec<codec::Handle> = self.tabs[i]
+                    let open_edits: Vec<document::Handle> = self.tabs[i]
                         .block_edits
                         .iter()
                         .map(|session| session.br_handle)
@@ -377,20 +377,20 @@ impl OpenCADStudio {
                 // Remove draw-order tables whose owning blocks are gone.
                 let mut n_sortents = 0usize;
                 if do_blocks {
-                    let live_blocks: rustc_hash::FxHashSet<codec::Handle> = self.tabs[i]
+                    let live_blocks: rustc_hash::FxHashSet<document::Handle> = self.tabs[i]
                         .scene
                         .document
                         .block_records
                         .iter()
                         .map(|br| br.handle)
                         .collect();
-                    let orphans: Vec<codec::Handle> = self.tabs[i]
+                    let orphans: Vec<document::Handle> = self.tabs[i]
                         .scene
                         .document
                         .objects
                         .iter()
                         .filter_map(|(h, o)| match o {
-                            codec::objects::ObjectType::SortEntitiesTable(s)
+                            document::objects::ObjectType::SortEntitiesTable(s)
                                 if !live_blocks.contains(&s.block_owner_handle) =>
                             {
                                 Some(*h)
@@ -506,11 +506,11 @@ impl OpenCADStudio {
                             .push_error(crate::t!("CHPROP: no entities selected.").as_ref());
                     } else {
                         // Validate value early to give clear errors
-                        let color_val: Option<codec::types::Color> = if prop == "COLOR" {
+                        let color_val: Option<document::types::Color> = if prop == "COLOR" {
                             value
                                 .parse::<i16>()
                                 .ok()
-                                .map(codec::types::Color::from_index)
+                                .map(document::types::Color::from_index)
                         } else {
                             None
                         };
@@ -519,12 +519,12 @@ impl OpenCADStudio {
                         } else {
                             None
                         };
-                        let transparency_val: Option<codec::types::Transparency> =
+                        let transparency_val: Option<document::types::Transparency> =
                             if prop == "TRANSPARENCY" {
                                 value
                                     .parse::<f64>()
                                     .ok()
-                                    .map(codec::types::Transparency::from_percent)
+                                    .map(document::types::Transparency::from_percent)
                             } else {
                                 None
                             };
@@ -643,7 +643,7 @@ impl OpenCADStudio {
                     while index < handles.len() {
                         let children = match self.tabs[i].scene.document.get_entity(handles[index])
                         {
-                            Some(codec::EntityType::Insert(insert)) => self.tabs[i]
+                            Some(document::EntityType::Insert(insert)) => self.tabs[i]
                                 .scene
                                 .document
                                 .block_records
@@ -738,7 +738,7 @@ impl OpenCADStudio {
                 }
             }
             value if value.starts_with("OVERKILL_APPLY ") => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let values: Vec<_> = value.split_whitespace().skip(1).collect();
                 if values.len() != 6 {
                     return Some(self.finish_dispatch(cmd));
@@ -755,7 +755,7 @@ impl OpenCADStudio {
                 // Reactors that are groups only record membership; any other
                 // live reactor (dimension association, hatch boundary, ...)
                 // makes the object associative.
-                let associative = |e: &codec::EntityType| {
+                let associative = |e: &document::EntityType| {
                     e.common().reactors.iter().any(|r| {
                         scene.document.get_entity(*r).is_some()
                             || scene
@@ -1796,7 +1796,7 @@ impl OpenCADStudio {
                         "PDFOSNAP" | "DWFOSNAP" | "DGNOSNAP" | "UOSNAP"
                     ) {
                         use crate::scene::model::pdf_vector as pv;
-                        use codec::entities::UnderlayType;
+                        use document::entities::UnderlayType;
                         // UOSNAP sets every kind and reads 2 while they differ.
                         let kind = match name.as_str() {
                             "PDFOSNAP" => Some(UnderlayType::Pdf),
@@ -3675,13 +3675,13 @@ impl OpenCADStudio {
                             linetypes.insert(lt.clone());
                         }
                         match e {
-                            codec::EntityType::Text(t) if !t.style.is_empty() => {
+                            document::EntityType::Text(t) if !t.style.is_empty() => {
                                 styles.insert(t.style.clone());
                             }
-                            codec::EntityType::MText(t) if !t.style.is_empty() => {
+                            document::EntityType::MText(t) if !t.style.is_empty() => {
                                 styles.insert(t.style.clone());
                             }
-                            codec::EntityType::Insert(ins) => {
+                            document::EntityType::Insert(ins) => {
                                 blocks.insert(ins.block_name.clone());
                             }
                             _ => {}
@@ -4474,7 +4474,7 @@ impl OpenCADStudio {
         // API and the control op all word it the same way.
         let mut block_error: Option<String> = None;
         let ok = if block {
-            let open_edits: Vec<codec::Handle> = self.tabs[i]
+            let open_edits: Vec<document::Handle> = self.tabs[i]
                 .block_edits
                 .iter()
                 .map(|session| session.br_handle)
@@ -4560,8 +4560,8 @@ fn parse_edge_color(value: &str) -> Option<Option<[u8; 3]>> {
 }
 
 /// RENAME for the remaining name-keyed symbol tables.
-fn rename_symbol(doc: &mut codec::Document, ty: &str, old: &str, new: &str) -> bool {
-    use codec::{EntityType, Table, TableEntry};
+fn rename_symbol(doc: &mut document::Document, ty: &str, old: &str, new: &str) -> bool {
+    use document::{EntityType, Table, TableEntry};
 
     fn rekey<T: TableEntry>(table: &mut Table<T>, old: &str, new: &str) -> bool {
         if !crate::scene::valid_block_name(new) {

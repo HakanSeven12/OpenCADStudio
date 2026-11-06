@@ -8,7 +8,7 @@ use crate::modules::insert::hyperlink_cmd::{
 };
 use crate::scene::hyperlink::{self, Link};
 use crate::ui::window::hyperlink_dialog::{HyperlinkMsg, HyperlinkOptions};
-use codec::Handle;
+use document::Handle;
 use iced::Task;
 
 /// The layer -HYPERLINK Area draws its rectangle on (red).
@@ -337,19 +337,19 @@ impl OpenCADStudio {
             if !scene.document.layers.contains(AREA_LAYER) {
                 scene.ensure_layer(AREA_LAYER);
                 if let Some(layer) = scene.document.layers.get_mut(AREA_LAYER) {
-                    layer.color = codec::types::Color::from_index(1);
+                    layer.color = document::types::Color::from_index(1);
                 }
             }
             let z = a[2];
-            let mut rectangle = codec::entities::Polyline3D::from_points(vec![
-                codec::types::Vector3::new(a[0], a[1], z),
-                codec::types::Vector3::new(b[0], a[1], z),
-                codec::types::Vector3::new(b[0], b[1], z),
-                codec::types::Vector3::new(a[0], b[1], z),
+            let mut rectangle = document::entities::Polyline3D::from_points(vec![
+                document::types::Vector3::new(a[0], a[1], z),
+                document::types::Vector3::new(b[0], a[1], z),
+                document::types::Vector3::new(b[0], b[1], z),
+                document::types::Vector3::new(a[0], b[1], z),
             ]);
             rectangle.close();
             rectangle.common.layer = AREA_LAYER.to_string();
-            if let Some(handle) = self.commit_entity_handle_preserve_layer(codec::EntityType::Polyline3D(rectangle)) {
+            if let Some(handle) = self.commit_entity_handle_preserve_layer(document::EntityType::Polyline3D(rectangle)) {
                 handles = vec![handle];
             }
         }

@@ -22,9 +22,9 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::entities::{EntityType, Insert, Line, Text};
-use codec::tables::BlockRecord;
-use codec::types::Vector3;
+use document::entities::{EntityType, Insert, Line, Text};
+use document::tables::BlockRecord;
+use document::types::Vector3;
 use OpenCADStudio::scene::Scene;
 
 const BLOCK_LINES: usize = 50;

@@ -1,6 +1,6 @@
 use super::*;
-use codec::entities::{CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind};
-use codec::types::Vector3;
+use document::entities::{CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind};
+use document::types::Vector3;
 use glam::DVec3;
 use kernel::geom2d::{closest_point, Arc as KernelArc, BulgeArc, Curve};
 
@@ -170,7 +170,7 @@ pub(crate) fn picked_mark_source(
 }
 
 fn resolve_source(
-    document: &codec::Document,
+    document: &document::Document,
     source: &CenterMarkSource,
 ) -> Option<(DVec3, f64, DVec3, DVec3)> {
     let entity = document.get_entity(source.handle)?;
@@ -336,7 +336,7 @@ fn apply_source_geometry(
     }
 }
 
-pub(crate) fn update_carrier(line: &mut codec::Line, association: &CenterMarkAssociation) {
+pub(crate) fn update_carrier(line: &mut document::Line, association: &CenterMarkAssociation) {
     let segments = mark_segments(association);
     let horizontal = segments
         .first()
@@ -578,7 +578,7 @@ pub(crate) fn entity_has_center_association(entity: &EntityType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{Circle, Line};
+    use document::entities::{Circle, Line};
 
     fn source_circle() -> EntityType {
         EntityType::Circle(Circle::from_center_radius(

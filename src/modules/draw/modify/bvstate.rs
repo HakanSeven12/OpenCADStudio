@@ -4,7 +4,7 @@
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::scene::block_visibility::NewStateVisibility;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 /// Separates the fields of the `_BVSTATE` step the command hands over.

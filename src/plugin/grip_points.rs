@@ -32,7 +32,7 @@ use std::collections::VecDeque;
 
 use rustc_hash::FxHashMap;
 
-use codec::Handle;
+use document::Handle;
 
 use crate::scene::model::object::GripShape;
 

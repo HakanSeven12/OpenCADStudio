@@ -12,8 +12,8 @@ use std::{fmt, sync::Arc};
 
 use crate::t;
 use crate::ui::ROW_H;
-use codec::types::{Color as AcadColor, LineWeight};
-use codec::Handle;
+use document::types::{Color as AcadColor, LineWeight};
+use document::Handle;
 use iced::widget::{
     button, canvas, column, combo_box, container, mouse_area, row, scrollable, text, text_input,
     tooltip,
@@ -150,7 +150,7 @@ impl canvas::Program<Message> for HatchPatternPreview {
                     boundary_exterior: None,
                     boundary_sources: None,
                     boundary_paths: None,
-                    style: codec::entities::HatchStyleType::Normal,
+                    style: document::entities::HatchStyleType::Normal,
                     pattern: self.pattern.clone(),
                     name: String::new(),
                     color: [1.0; 4],
@@ -2517,7 +2517,7 @@ pub fn acad_color_display(c: AcadColor) -> (Color, &'static str) {
             (Color::BLACK, aci_label(7))
         }
         AcadColor::Index(i) => {
-            let (r, g, b) = codec::types::aci_table::aci_to_rgb(i).unwrap_or((200, 200, 200));
+            let (r, g, b) = document::types::aci_table::aci_to_rgb(i).unwrap_or((200, 200, 200));
             (
                 Color::from_rgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0),
                 aci_label(i),

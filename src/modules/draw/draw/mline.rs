@@ -1,9 +1,9 @@
 // MLINE command — create a styled group of parallel lines.
 
-use codec::entities::{MLine, MLineFlags, MLineJustification, MLineSegment, MLineVertex};
-use codec::objects::MLineStyle;
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{MLine, MLineFlags, MLineJustification, MLineSegment, MLineVertex};
+use document::objects::MLineStyle;
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};

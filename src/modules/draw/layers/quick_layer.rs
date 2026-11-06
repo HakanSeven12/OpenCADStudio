@@ -1,5 +1,5 @@
 use crate::command::{CadCommand, CmdResult, CommandSuggestion, InputKind};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 /// Fast searchable layer picker.
@@ -9,7 +9,7 @@ use glam::DVec3;
 #[derive(Clone, Debug)]
 pub struct QuickLayerEntry {
     name: String,
-    color: Option<codec::types::Color>,
+    color: Option<document::types::Color>,
     visible: bool,
     frozen: bool,
     locked: bool,
@@ -18,7 +18,7 @@ pub struct QuickLayerEntry {
 impl QuickLayerEntry {
     pub fn new(
         name: String,
-        color: codec::types::Color,
+        color: document::types::Color,
         visible: bool,
         frozen: bool,
         locked: bool,

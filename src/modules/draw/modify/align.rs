@@ -11,7 +11,7 @@
 // With 3 pairs: rigid 3D placement without scaling
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};
@@ -299,8 +299,8 @@ impl AlignCommand {
         };
         CmdResult::TransformSelected(
             self.handles.clone(),
-            EntityTransform::Affine(codec::types::Transform::from_matrix(
-                codec::types::Matrix4 { m: matrix },
+            EntityTransform::Affine(document::types::Transform::from_matrix(
+                document::types::Matrix4 { m: matrix },
             )),
         )
     }
@@ -354,7 +354,7 @@ mod tests {
         };
         assert_eq!(handles, vec![handle]);
         for (from, expected) in source.into_iter().zip(target) {
-            let actual = transform.apply(codec::types::Vector3::new(from.x, from.y, from.z));
+            let actual = transform.apply(document::types::Vector3::new(from.x, from.y, from.z));
             let actual = DVec3::new(actual.x, actual.y, actual.z);
             assert!(actual.abs_diff_eq(expected, 1.0e-12));
         }

@@ -1,10 +1,10 @@
 use super::super::super::named_parameters::DrivingValue;
 use super::*;
 use crate::scene::parametric_constraints::{ParametricConstraintSet, ParametricScope};
-use codec::entities::{Arc, Circle, Ellipse, Line};
+use document::entities::{Arc, Circle, Ellipse, Line};
 
-fn fixture() -> (codec::Document, Vec<Handle>, ParametricConstraintSet) {
-    let mut doc = codec::Document::new();
+fn fixture() -> (document::Document, Vec<Handle>, ParametricConstraintSet) {
+    let mut doc = document::Document::new();
     let mut handles = vec![];
     for entity in [
         EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_X)),
@@ -205,9 +205,9 @@ fn block_constraint_status_does_not_classify_entities_from_a_foreign_scope() {
 fn display_fixture() -> (Scene, Handle, Vec<Handle>) {
     let mut scene = Scene::new();
     let mut a = Line::from_points(Vector3::ZERO, Vector3::UNIT_X);
-    a.common.color = codec::types::Color::Index(1);
+    a.common.color = document::types::Color::Index(1);
     let mut b = Line::from_points(Vector3::new(3., 0., 0.), Vector3::new(4., 0., 0.));
-    b.common.color = codec::types::Color::Index(5);
+    b.common.color = document::types::Color::Index(5);
     scene.define_block_raw(
         "STATUS_DISPLAY",
         Vector3::ZERO,
@@ -300,7 +300,7 @@ fn block_constraint_shading_never_changes_reference_or_plot_colors() {
     let (mut scene, definition, handles) = display_fixture();
     let insert = scene
         .document
-        .add_entity(EntityType::Insert(codec::entities::Insert::new(
+        .add_entity(EntityType::Insert(document::entities::Insert::new(
             "STATUS_DISPLAY",
             Vector3::ZERO,
         )))
@@ -402,7 +402,7 @@ fn block_constraint_mesh_shading_changes_only_display_materials() {
 fn block_constraint_shading_covers_gradient_fills_and_restores_their_colors() {
     use crate::scene::model::hatch_model::{GradientKind, HatchPattern};
     let (mut scene, _, _) = display_fixture();
-    let solid = codec::entities::Solid::new(
+    let solid = document::entities::Solid::new(
         Vector3::ZERO,
         Vector3::UNIT_X,
         Vector3::UNIT_Y,

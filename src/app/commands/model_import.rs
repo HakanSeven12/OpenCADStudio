@@ -131,13 +131,13 @@ impl OpenCADStudio {
         // old definition), and the inserts are pointed at the names the
         // blocks got. An insert of a block that could not be made is left
         // out.
-        fn retarget(entities: Vec<codec::EntityType>, defined: &HashMap<String, String>) -> Vec<codec::EntityType> {
+        fn retarget(entities: Vec<document::EntityType>, defined: &HashMap<String, String>) -> Vec<document::EntityType> {
             entities
                 .into_iter()
                 .filter_map(|entity| match entity {
-                    codec::EntityType::Insert(mut insert) => {
+                    document::EntityType::Insert(mut insert) => {
                         insert.block_name = defined.get(&insert.block_name)?.clone();
-                        Some(codec::EntityType::Insert(insert))
+                        Some(document::EntityType::Insert(insert))
                     }
                     other => Some(other),
                 })
@@ -196,7 +196,7 @@ impl OpenCADStudio {
             // The face name comes from the file.
             let name = crate::scene::sanitized_table_name(&format!("WMF-{}{n}", face.name), "WMF");
             if !scene.document.text_styles.contains(&name) {
-                let mut style = codec::tables::TextStyle::new(name.as_str());
+                let mut style = document::tables::TextStyle::new(name.as_str());
                 style.handle = scene.document.allocate_handle();
                 style.font_file =
                     crate::scene::text::sysfont::face_file(&face.name, face.bold, face.italic).unwrap_or_default();
@@ -205,7 +205,7 @@ impl OpenCADStudio {
             styles.push(name);
         }
         for (at, font) in &picture.text_fonts {
-            if let Some(codec::EntityType::Text(text)) = picture.entities.get_mut(*at) {
+            if let Some(document::EntityType::Text(text)) = picture.entities.get_mut(*at) {
                 text.style = styles[*font].clone();
             }
         }
@@ -262,7 +262,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         prefix: &str,
-        entities: Vec<codec::EntityType>,
+        entities: Vec<document::EntityType>,
         prompt: bool,
     ) -> Task<Message> {
         let (centre, size, pixel) = self.tabs[i].scene.view_window();
@@ -291,13 +291,13 @@ impl OpenCADStudio {
             self.tabs[i].active_cmd = Some(Box::new(command));
         } else {
             // The view's top-left corner, a pixel or two in.
-            let corner = codec::types::Vector3::new(
+            let corner = document::types::Vector3::new(
                 centre[0] - 0.5 * size[0] + pixel,
                 centre[1] + 0.5 * size[1] - 2.0 * pixel,
                 0.0,
             );
-            let insert = codec::entities::Insert::new(&name, corner);
-            self.tabs[i].scene.add_entity(codec::EntityType::Insert(insert));
+            let insert = document::entities::Insert::new(&name, corner);
+            self.tabs[i].scene.add_entity(document::EntityType::Insert(insert));
             self.refresh_properties();
         }
         Task::none()
@@ -478,7 +478,7 @@ impl OpenCADStudio {
         i: usize,
         request: crate::modules::insert::tds_import::TdsImportRequest,
     ) {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let Some(scene) = crate::scene::model::pdf_raster::source_bytes(&request.path)
             .and_then(|bytes| crate::io::tds_import::read(&bytes))
         else {
@@ -508,7 +508,7 @@ impl OpenCADStudio {
         let has_dictionary = matches!(document.objects.get(&dictionary), Some(ObjectType::Dictionary(_)));
         // Materials by name: the drawing's own when it has one, else one
         // made from the file's colours.
-        let mut materials: std::collections::HashMap<String, codec::Handle> = Default::default();
+        let mut materials: std::collections::HashMap<String, document::Handle> = Default::default();
         for name in &import.materials {
             let existing = document.objects.iter().find_map(|(h, o)| match o {
                 ObjectType::Material(m) if m.name.eq_ignore_ascii_case(name) => Some(*h),
@@ -519,17 +519,17 @@ impl OpenCADStudio {
                 None if !has_dictionary => continue,
                 None => {
                     let source = scene.materials.iter().find(|m| m.name == *name);
-                    let mut material = codec::objects::Material::new();
+                    let mut material = document::objects::Material::new();
                     material.handle = document.allocate_handle();
                     material.owner = dictionary;
                     material.name = name.clone();
                     let color = |rgb: Option<[u8; 3]>| match rgb {
-                        Some([r, g, b]) => codec::objects::MaterialColor {
+                        Some([r, g, b]) => document::objects::MaterialColor {
                             flag: 1,
                             factor: 1.0,
                             rgb: Some(crate::scene::convert::acis_import::packed_true_colour(r, g, b)),
                         },
-                        None => codec::objects::MaterialColor::default(),
+                        None => document::objects::MaterialColor::default(),
                     };
                     material.ambient_color = color(source.and_then(|m| m.ambient));
                     material.diffuse_color = color(source.and_then(|m| m.diffuse));
@@ -561,16 +561,16 @@ impl OpenCADStudio {
         }
         for part in &import.parts {
             if !document.layers.contains(&part.layer) {
-                let mut layer = codec::tables::Layer::new(part.layer.as_str());
+                let mut layer = document::tables::Layer::new(part.layer.as_str());
                 layer.handle = document.allocate_handle();
                 let _ = document.layers.add(layer);
             }
         }
         for view in &import.views {
-            let mut named = codec::tables::View::new(view.name.as_str());
-            named.target = codec::types::Vector3::new(view.target[0], view.target[1], view.target[2]);
+            let mut named = document::tables::View::new(view.name.as_str());
+            named.target = document::types::Vector3::new(view.target[0], view.target[1], view.target[2]);
             named.direction =
-                codec::types::Vector3::new(view.direction[0], view.direction[1], view.direction[2]);
+                document::types::Vector3::new(view.direction[0], view.direction[1], view.direction[2]);
             named.height = view.height;
             named.width = view.height * aspect;
             named.lens_length = view.lens;
@@ -604,8 +604,8 @@ impl OpenCADStudio {
         // Asked about meshes one by one, each mesh also links to its
         // material record.
         let asked = request.asked;
-        let mut records: HashMap<String, codec::Handle> = HashMap::new();
-        let mut waiting: Vec<(String, codec::Handle)> = Vec::new();
+        let mut records: HashMap<String, document::Handle> = HashMap::new();
+        let mut waiting: Vec<(String, document::Handle)> = Vec::new();
         for step in import.steps {
             match step {
                 TdsStep::Part(k) => {
@@ -613,7 +613,7 @@ impl OpenCADStudio {
                     let mut mesh = part.mesh;
                     mesh.common.layer = part.layer.clone();
                     if let Some(color) = part.color {
-                        mesh.common.color = codec::types::Color::Index(color);
+                        mesh.common.color = document::types::Color::Index(color);
                     }
                     mesh.common.material_handle =
                         part.material.as_ref().and_then(|m| materials.get(m).copied());
@@ -631,7 +631,7 @@ impl OpenCADStudio {
                             crate::io::tds_legacy::ENTITY_MATERIAL,
                         ));
                     }
-                    let handle = scene.add_entity(codec::EntityType::PolyfaceMesh(mesh));
+                    let handle = scene.add_entity(document::EntityType::PolyfaceMesh(mesh));
                     if let Some(m) = part.material.filter(|m| asked && !records.contains_key(m)) {
                         waiting.push((m, handle));
                     }
@@ -647,7 +647,7 @@ impl OpenCADStudio {
                     let finish = crate::io::tds_legacy::MaterialFinish::of(source);
                     let handle = materials.get(&name);
                     let handle = handle.map(|h| format!("{:X}", h.value())).unwrap_or_default();
-                    let mut insert = codec::entities::Insert::new("RM_SDB", codec::types::Vector3::ZERO);
+                    let mut insert = document::entities::Insert::new("RM_SDB", document::types::Vector3::ZERO);
                     insert.common.layer = current_layer.clone();
                     insert.common.extended_data.add_record(crate::io::tds_legacy::material_xdata(
                         &name,
@@ -666,13 +666,13 @@ impl OpenCADStudio {
                     with_attributes(&mut insert, crate::io::tds_legacy::material_block(), |tag| {
                         values.iter().find(|(t, _)| *t == tag).map(|(_, v)| v.clone())
                     });
-                    let record = scene.add_entity(codec::EntityType::Insert(insert));
+                    let record = scene.add_entity(document::EntityType::Insert(insert));
                     for (_, mesh) in waiting.iter().filter(|(m, _)| *m == name) {
                         if let Some(entity) = scene.document.get_entity_mut(*mesh) {
                             let finish = crate::io::tds_legacy::finish_xdata(record);
                             let data = &mut entity.common_mut().extended_data;
                             let rest: Vec<_> = data.records().to_vec();
-                            *data = codec::xdata::ExtendedData::new();
+                            *data = document::xdata::ExtendedData::new();
                             data.add_record(finish);
                             for r in rest {
                                 data.add_record(r);
@@ -683,7 +683,7 @@ impl OpenCADStudio {
                     records.insert(name, record);
                 }
                 TdsStep::Light { name, position, color, spot } => {
-                    let at = codec::types::Vector3::new(position[0], position[1], position[2]);
+                    let at = document::types::Vector3::new(position[0], position[1], position[2]);
                     let (block, definitions, record) = match spot {
                         None => (
                             "overhead",
@@ -696,16 +696,16 @@ impl OpenCADStudio {
                             crate::io::tds_legacy::spot_xdata(&name, target, color, hotspot, falloff),
                         ),
                     };
-                    let mut insert = codec::entities::Insert::new(block, at);
+                    let mut insert = document::entities::Insert::new(block, at);
                     if let Some((target, ..)) = spot {
-                        aim_at(&mut insert, at, codec::types::Vector3::new(target[0], target[1], target[2]));
+                        aim_at(&mut insert, at, document::types::Vector3::new(target[0], target[1], target[2]));
                     }
                     insert.common.layer = current_layer.clone();
                     insert.common.extended_data.add_record(record);
                     with_attributes(&mut insert, definitions, |tag| {
                         (tag == "SNAME").then(|| name.clone())
                     });
-                    scene.add_entity(codec::EntityType::Insert(insert));
+                    scene.add_entity(document::EntityType::Insert(insert));
                 }
             }
         }
@@ -723,20 +723,20 @@ impl OpenCADStudio {
 }
 
 /// A legacy render settings insert at the origin on the render layer.
-fn legacy_insert(block: &str, color: Option<u8>, spec: &str, app: &str) -> codec::EntityType {
-    let mut insert = codec::entities::Insert::new(block, codec::types::Vector3::ZERO);
+fn legacy_insert(block: &str, color: Option<u8>, spec: &str, app: &str) -> document::EntityType {
+    let mut insert = document::entities::Insert::new(block, document::types::Vector3::ZERO);
     insert.common.layer = crate::io::tds_legacy::LAYER.into();
     if let Some(c) = color {
-        insert.common.color = codec::types::Color::Index(c);
+        insert.common.color = document::types::Color::Index(c);
     }
     insert.common.extended_data.add_record(crate::io::tds_legacy::xdata(app, spec));
-    codec::EntityType::Insert(insert)
+    document::EntityType::Insert(insert)
 }
 
 /// Turns a spotlight's insert so the block's Y axis points from the
 /// light at `from` to its target, its X axis level: the insert's normal,
 /// rotation and (object coordinate) point.
-fn aim_at(insert: &mut codec::entities::Insert, from: codec::types::Vector3, to: codec::types::Vector3) {
+fn aim_at(insert: &mut document::entities::Insert, from: document::types::Vector3, to: document::types::Vector3) {
     use glam::DVec3;
     let y = DVec3::new(to.x - from.x, to.y - from.y, to.z - from.z).normalize_or_zero();
     let x = y.cross(DVec3::Z).try_normalize().unwrap_or(DVec3::X);
@@ -753,27 +753,27 @@ fn aim_at(insert: &mut codec::entities::Insert, from: codec::types::Vector3, to:
     .normalize();
     let ay = n.cross(ax);
     let p = DVec3::new(from.x, from.y, from.z);
-    insert.normal = codec::types::Vector3::new(n.x, n.y, n.z);
+    insert.normal = document::types::Vector3::new(n.x, n.y, n.z);
     insert.rotation = x.dot(ay).atan2(x.dot(ax));
-    insert.insert_point = codec::types::Vector3::new(p.dot(ax), p.dot(ay), p.dot(n));
+    insert.insert_point = document::types::Vector3::new(p.dot(ax), p.dot(ay), p.dot(n));
 }
 
 /// Gives an insert the attributes of a block's definitions (the legacy
 /// blocks' base is the origin), with `value` for a tag (else the
 /// definition's default).
 fn with_attributes(
-    insert: &mut codec::entities::Insert,
-    definitions: Vec<codec::EntityType>,
+    insert: &mut document::entities::Insert,
+    definitions: Vec<document::EntityType>,
     value: impl Fn(&str) -> Option<String>,
 ) {
     let transform =
-        crate::scene::render_graph::insert_transform_with_base(insert, codec::types::Vector3::ZERO);
+        crate::scene::render_graph::insert_transform_with_base(insert, document::types::Vector3::ZERO);
     for entity in definitions {
-        let codec::EntityType::AttributeDefinition(def) = entity else { continue };
-        let mut attribute = codec::entities::AttributeEntity::from_definition(&def, value(&def.tag));
+        let document::EntityType::AttributeDefinition(def) = entity else { continue };
+        let mut attribute = document::entities::AttributeEntity::from_definition(&def, value(&def.tag));
         // A centred or right-justified value starts its share of the drawn
         // width (start to last ink) before the alignment point.
-        use codec::entities::HorizontalAlignment as H;
+        use document::entities::HorizontalAlignment as H;
         let share = match attribute.horizontal_alignment {
             H::Center | H::Middle => 0.5,
             H::Right => 1.0,
@@ -791,7 +791,7 @@ fn with_attributes(
                     attribute.alignment_point.x - share * f64::from(bounds.ink_max[0]);
             }
         }
-        codec::entities::Entity::apply_transform(&mut attribute, &transform);
+        document::entities::Entity::apply_transform(&mut attribute, &transform);
         insert.attributes.push(attribute);
     }
 }
@@ -814,14 +814,14 @@ impl OpenCADStudio {
         let document = &mut scene.document;
         let lights = import.steps.iter().any(|s| matches!(s, TdsStep::Light { .. }));
         if lights && !document.text_styles.iter().any(|s| s.name.eq_ignore_ascii_case(LAYER)) {
-            let mut style = codec::tables::TextStyle::new(LAYER);
+            let mut style = document::tables::TextStyle::new(LAYER);
             style.handle = document.allocate_handle();
             style.height = 0.2;
             style.last_height = 2.5;
             style.font_file = crate::io::tds_legacy::FONT.into();
             let _ = document.text_styles.add(style);
         }
-        let mut blocks: Vec<(&str, Vec<codec::EntityType>, &str)> = Vec::new();
+        let mut blocks: Vec<(&str, Vec<document::EntityType>, &str)> = Vec::new();
         if import.globals {
             blocks.push(("AVE_RENDER", Vec::new(), LAYER));
             blocks.push(("AVE_GLOBAL", Vec::new(), LAYER));
@@ -840,7 +840,7 @@ impl OpenCADStudio {
             if scene.document.block_records.get(name).is_some() {
                 continue;
             }
-            scene.define_block_raw(name, codec::types::Vector3::ZERO, entities);
+            scene.define_block_raw(name, document::types::Vector3::ZERO, entities);
             let begin = scene.document.block_records.get(name).map(|b| b.block_entity_handle);
             if let Some(common) = begin.and_then(|h| scene.document.get_entity_mut(h)).map(|e| e.common_mut()) {
                 common.layer = layer.into();
@@ -858,7 +858,7 @@ mod svg_paste_tests {
         let i = app.active_tab;
         let line = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(codec::entities::Line::from_coords(
+            .add_entity(document::EntityType::Line(document::entities::Line::from_coords(
                 0.0, 0.0, 0.0, 40.0, 20.0, 0.0,
             )));
         let svg = crate::io::svg_clipboard::selection_svg(&app.tabs[i].scene, &[line]).expect("the line draws");

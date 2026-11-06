@@ -3,7 +3,7 @@
 //! Ordinary entity invisibility also hides these members in external readers.
 //! The active definition editor supplies the only display exception. This is
 //! application metadata, not a claim about another application's native format.
-use codec::{entities::EntityCommon, xdata::XDataValue, Document, EntityType, Handle};
+use document::{entities::EntityCommon, xdata::XDataValue, Document, EntityType, Handle};
 
 const APP: &str = "OCS_BLOCK_CONSTRUCTION";
 

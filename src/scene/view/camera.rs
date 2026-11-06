@@ -419,8 +419,8 @@ impl Camera {
     /// Carry the camera through a rigid model-space transform. BEDIT uses this
     /// when a transient UCS is baked into block-local geometry: the contents
     /// retain their on-screen framing while their canonical coordinates change.
-    pub fn apply_rigid_transform(&mut self, transform: &codec::types::Transform) {
-        let point = codec::types::Vector3::new(self.target.x, self.target.y, self.target.z);
+    pub fn apply_rigid_transform(&mut self, transform: &document::types::Transform) {
+        let point = document::types::Vector3::new(self.target.x, self.target.y, self.target.z);
         let point = transform.apply(point);
         self.target = DVec3::new(point.x, point.y, point.z);
 
@@ -460,7 +460,7 @@ impl Camera {
             let mut new_max = DVec3::splat(f64::NEG_INFINITY);
             for corner in corners {
                 let transformed =
-                    transform.apply(codec::types::Vector3::new(corner.x, corner.y, corner.z));
+                    transform.apply(document::types::Vector3::new(corner.x, corner.y, corner.z));
                 let transformed = DVec3::new(transformed.x, transformed.y, transformed.z);
                 new_min = new_min.min(transformed);
                 new_max = new_max.max(transformed);

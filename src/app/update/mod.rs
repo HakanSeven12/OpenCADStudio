@@ -3504,7 +3504,7 @@ impl OpenCADStudio {
                 // is per-tab while the panels are app-global.
                 self.close_quad();
                 self.tab_counter += 1;
-                let new_tab = super::document::DocumentTab::new_drawing(self.tab_counter);
+                let new_tab = super::tab_document::DocumentTab::new_drawing(self.tab_counter);
                 self.tabs.push(new_tab);
                 self.active_tab = self.tabs.len() - 1;
                 let idx = self.active_tab;
@@ -5007,19 +5007,19 @@ impl OpenCADStudio {
             }
             Message::LayerStateEditorMaskToggle(property) => {
                 let flag = match property {
-                    super::LayerStateProperty::On => codec::LayerStateMask::ON,
-                    super::LayerStateProperty::Frozen => codec::LayerStateMask::FROZEN,
-                    super::LayerStateProperty::Locked => codec::LayerStateMask::LOCKED,
-                    super::LayerStateProperty::Plot => codec::LayerStateMask::PLOT,
-                    super::LayerStateProperty::NewViewport => codec::LayerStateMask::NEW_VIEWPORT,
-                    super::LayerStateProperty::Color => codec::LayerStateMask::COLOR,
-                    super::LayerStateProperty::LineType => codec::LayerStateMask::LINE_TYPE,
-                    super::LayerStateProperty::LineWeight => codec::LayerStateMask::LINE_WEIGHT,
-                    super::LayerStateProperty::PlotStyle => codec::LayerStateMask::PLOT_STYLE,
-                    super::LayerStateProperty::Transparency => codec::LayerStateMask::TRANSPARENCY,
+                    super::LayerStateProperty::On => document::LayerStateMask::ON,
+                    super::LayerStateProperty::Frozen => document::LayerStateMask::FROZEN,
+                    super::LayerStateProperty::Locked => document::LayerStateMask::LOCKED,
+                    super::LayerStateProperty::Plot => document::LayerStateMask::PLOT,
+                    super::LayerStateProperty::NewViewport => document::LayerStateMask::NEW_VIEWPORT,
+                    super::LayerStateProperty::Color => document::LayerStateMask::COLOR,
+                    super::LayerStateProperty::LineType => document::LayerStateMask::LINE_TYPE,
+                    super::LayerStateProperty::LineWeight => document::LayerStateMask::LINE_WEIGHT,
+                    super::LayerStateProperty::PlotStyle => document::LayerStateMask::PLOT_STYLE,
+                    super::LayerStateProperty::Transparency => document::LayerStateMask::TRANSPARENCY,
                 };
                 if let Some(state) = self.layer_state_edit_draft.as_mut() {
-                    state.mask = codec::LayerStateMask::from_bits(state.mask.bits() ^ flag.bits());
+                    state.mask = document::LayerStateMask::from_bits(state.mask.bits() ^ flag.bits());
                 }
                 Task::none()
             }
@@ -5598,7 +5598,7 @@ impl OpenCADStudio {
                         for name in &targets {
                             if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 layer.transparency =
-                                    codec::types::Transparency::from_percent(v as f64 / 100.0);
+                                    document::types::Transparency::from_percent(v as f64 / 100.0);
                             }
                             if let Some(pl) = self.tabs[i]
                                 .layers
@@ -6529,7 +6529,7 @@ impl OpenCADStudio {
                 let lock = scene.viewports_display_locked() == Some(false);
                 let handles = scene.lockable_viewports();
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                    if let Some(codec::EntityType::Viewport(vp)) =
+                    if let Some(document::EntityType::Viewport(vp)) =
                         app.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         vp.status.locked = lock;
@@ -9237,13 +9237,13 @@ impl OpenCADStudio {
                     let cells = self.picked_cell_positions(i);
                     self.apply_property_op(i, "TABLE CELL BORDER", &handles, |app, handle| {
                         use crate::entities::table::TableCellBordersExt;
-                        if let Some(codec::EntityType::Table(table)) =
+                        if let Some(document::EntityType::Table(table)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             for &(row, column) in &cells {
                                 table.edit_cell_borders(row, column, |border| {
                                     border.line_weight = value;
-                                    codec::entities::table::BorderPropertyFlags::LINE_WEIGHT
+                                    document::entities::table::BorderPropertyFlags::LINE_WEIGHT
                                 });
                             }
                             table.block_record_handle = None;
@@ -9252,19 +9252,19 @@ impl OpenCADStudio {
                     return Task::none();
                 }
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                    if let Some(codec::EntityType::MultiLeader(leader)) =
+                    if let Some(document::EntityType::MultiLeader(leader)) =
                         app.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         if field == "line_weight" {
                             leader.line_weight = value;
                             leader.property_override_flags.insert(
-                                codec::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_WEIGHT,
+                                document::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_WEIGHT,
                             );
                             for root in &mut leader.context.leader_roots {
                                 for line in &mut root.lines {
                                     line.line_weight = value;
                                     line.override_flags.insert(
-                                        codec::entities::LeaderLinePropertyOverrideFlags::LINE_WEIGHT,
+                                        document::entities::LeaderLinePropertyOverrideFlags::LINE_WEIGHT,
                                     );
                                 }
                             }
@@ -9404,8 +9404,8 @@ impl OpenCADStudio {
                             "is_annotative" | "enable_annotation_scale" | "annotative_ctx" => {
                                 let doc = &app.tabs[i].scene.document;
                                 let cur = match doc.get_entity(handle) {
-                                    Some(codec::EntityType::MText(t)) => t.is_annotative,
-                                    Some(codec::EntityType::MultiLeader(m)) => {
+                                    Some(document::EntityType::MText(t)) => t.is_annotative,
+                                    Some(document::EntityType::MultiLeader(m)) => {
                                         m.enable_annotation_scale
                                     }
                                     // TEXT (and any other context-only type): its
@@ -9447,7 +9447,7 @@ impl OpenCADStudio {
                             // only switches the panel to per-axis rows.
                             "ins_uniform" => {
                                 let scales = match app.tabs[i].scene.document.get_entity(handle) {
-                                    Some(codec::EntityType::Insert(ins)) => {
+                                    Some(document::EntityType::Insert(ins)) => {
                                         Some((ins.x_scale(), ins.y_scale(), ins.z_scale()))
                                     }
                                     _ => None,
@@ -9460,7 +9460,7 @@ impl OpenCADStudio {
                                     app.tabs[i].props_asym_scale.insert(handle.value());
                                 } else {
                                     app.tabs[i].props_asym_scale.remove(&handle.value());
-                                    if let Some(codec::EntityType::Insert(ins)) =
+                                    if let Some(document::EntityType::Insert(ins)) =
                                         app.tabs[i].scene.document.get_entity_mut(handle)
                                     {
                                         ins.set_y_scale(sx);
@@ -9471,7 +9471,7 @@ impl OpenCADStudio {
                             "tbl_title_suppressed" | "tbl_header_suppressed" => {
                                 let next = {
                                     let document = &app.tabs[i].scene.document;
-                                    let Some(codec::EntityType::Table(table)) =
+                                    let Some(document::EntityType::Table(table)) =
                                         document.get_entity(handle)
                                     else {
                                         return;
@@ -9480,7 +9480,7 @@ impl OpenCADStudio {
                                         table.table_style_handle.and_then(|style_handle| {
                                             document.objects.get(&style_handle).and_then(|object| {
                                                 match object {
-                                                    codec::objects::ObjectType::TableStyle(
+                                                    document::objects::ObjectType::TableStyle(
                                                         style,
                                                     ) => Some(style),
                                                     _ => None,
@@ -9521,7 +9521,7 @@ impl OpenCADStudio {
                             }
                         }
                         if field.starts_with("tbl_") {
-                            if let Some(codec::EntityType::Table(table)) =
+                            if let Some(document::EntityType::Table(table)) =
                                 app.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 table.block_record_handle = None;
@@ -9538,22 +9538,22 @@ impl OpenCADStudio {
                 // Navigate the active vertex or table cell.
                 let n = if handles.len() == 1 {
                     match self.tabs[i].scene.document.get_entity(handles[0]) {
-                        Some(codec::EntityType::LwPolyline(p)) => p.vertices.len(),
-                        Some(codec::EntityType::Polyline2D(p)) => {
+                        Some(document::EntityType::LwPolyline(p)) => p.vertices.len(),
+                        Some(document::EntityType::Polyline2D(p)) => {
                             crate::entities::polyline::polyline2d_frame_indices(p).len()
                         }
-                        Some(codec::EntityType::PolygonMesh(p)) => p.vertices.len(),
-                        Some(codec::EntityType::Face3D(face)) => {
+                        Some(document::EntityType::PolygonMesh(p)) => p.vertices.len(),
+                        Some(document::EntityType::Face3D(face)) => {
                             if face.is_triangle() {
                                 3
                             } else {
                                 4
                             }
                         }
-                        Some(codec::EntityType::Polyline3D(p)) => {
+                        Some(document::EntityType::Polyline3D(p)) => {
                             crate::entities::polyline::polyline3d_control_vertex_count(p)
                         }
-                        Some(codec::EntityType::Table(table)) => {
+                        Some(document::EntityType::Table(table)) => {
                             table.row_count().saturating_mul(table.column_count())
                         }
                         _ => 0,
@@ -9838,13 +9838,13 @@ impl OpenCADStudio {
                 if !handles.is_empty() {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                         match app.tabs[i].scene.document.get_entity_mut(handle) {
-                            Some(codec::EntityType::MText(m)) => {
+                            Some(document::EntityType::MText(m)) => {
                                 m.background_color = color.clone();
                                 // Picking a colour turns the background on in Fill
                                 // mode (specific colour), preserving the frame bit.
                                 m.background_fill_flags = (m.background_fill_flags & !0x02) | 0x01;
                             }
-                            Some(codec::EntityType::Hatch(h)) => {
+                            Some(document::EntityType::Hatch(h)) => {
                                 crate::entities::hatch::set_background_color(h, &color);
                             }
                             _ => {}
@@ -9873,10 +9873,10 @@ impl OpenCADStudio {
                 let handles = self.property_target_handles(i);
                 if field == "indicator_fill_color" {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(codec::EntityType::Extended(extended)) =
+                        if let Some(document::EntityType::Extended(extended)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
-                            if let codec::entities::ExtendedEntityData::SectionObject(data) =
+                            if let document::entities::ExtendedEntityData::SectionObject(data) =
                                 &mut extended.data
                             {
                                 data.indicator_color = color;
@@ -9900,8 +9900,8 @@ impl OpenCADStudio {
                         | "dim_text_fill_color"
                 ) {
                     let fill_mode = (field == "dim_text_fill_color").then(|| match color {
-                        codec::types::Color::None => 0,
-                        codec::types::Color::ByBlock => 1,
+                        document::types::Color::None => 0,
+                        document::types::Color::ByBlock => 1,
                         _ => 2,
                     });
                     let aci = color.approximate_index();
@@ -9911,14 +9911,14 @@ impl OpenCADStudio {
                         "dim_text_fill_color" => crate::entities::dim_override::DIMTFILLCLR,
                         _ => crate::entities::dim_override::DIMCLRD,
                     };
-                    let targets: Vec<codec::Handle> = handles
+                    let targets: Vec<document::Handle> = handles
                         .iter()
                         .copied()
                         .filter(|&h| {
                             matches!(
                                 self.tabs[i].scene.document.get_entity(h),
-                                Some(codec::EntityType::Leader(_))
-                                    | Some(codec::EntityType::Dimension(_))
+                                Some(document::EntityType::Leader(_))
+                                    | Some(document::EntityType::Dimension(_))
                             )
                         })
                         .collect();
@@ -9929,7 +9929,7 @@ impl OpenCADStudio {
                                     &mut app.tabs[i].scene.document,
                                     handle,
                                     crate::entities::dim_override::DIMTFILL,
-                                    Some(codec::xdata::XDataValue::Integer16(
+                                    Some(document::xdata::XDataValue::Integer16(
                                         fill_mode.unwrap_or(2),
                                     )),
                                 );
@@ -9941,7 +9941,7 @@ impl OpenCADStudio {
                                 &mut app.tabs[i].scene.document,
                                 handle,
                                 code,
-                                Some(codec::xdata::XDataValue::Integer16(aci)),
+                                Some(document::xdata::XDataValue::Integer16(aci)),
                             );
                         });
                         self.tabs[i].properties.open_color_field = None;
@@ -9953,20 +9953,20 @@ impl OpenCADStudio {
                     "line_color" | "text_color" | "block_content_color" | "background_fill_color"
                 ) {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                            if let Some(codec::EntityType::MultiLeader(leader)) =
+                            if let Some(document::EntityType::MultiLeader(leader)) =
                                 app.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 match field.as_str() {
                                     "line_color" => {
                                         leader.line_color = color;
                                         leader.property_override_flags.insert(
-                                            codec::entities::MultiLeaderPropertyOverrideFlags::LINE_COLOR,
+                                            document::entities::MultiLeaderPropertyOverrideFlags::LINE_COLOR,
                                         );
                                         for root in &mut leader.context.leader_roots {
                                             for line in &mut root.lines {
                                                 line.line_color = color;
                                                 line.override_flags.insert(
-                                                    codec::entities::LeaderLinePropertyOverrideFlags::LINE_COLOR,
+                                                    document::entities::LeaderLinePropertyOverrideFlags::LINE_COLOR,
                                                 );
                                             }
                                         }
@@ -9975,14 +9975,14 @@ impl OpenCADStudio {
                                         leader.text_color = color;
                                         leader.context.text_color = color;
                                         leader.property_override_flags.insert(
-                                            codec::entities::MultiLeaderPropertyOverrideFlags::TEXT_COLOR,
+                                            document::entities::MultiLeaderPropertyOverrideFlags::TEXT_COLOR,
                                         );
                                     }
                                     "block_content_color" => {
                                         leader.block_content_color = color;
                                         leader.context.block_content_color = color;
                                         leader.property_override_flags.insert(
-                                            codec::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_COLOR,
+                                            document::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT_COLOR,
                                         );
                                     }
                                     "background_fill_color" => {
@@ -10002,14 +10002,14 @@ impl OpenCADStudio {
                     let cells = self.picked_cell_positions(i);
                     if !handles.is_empty() {
                         self.apply_property_op(i, "TABLE CELL COLOR", &handles, |app, handle| {
-                            let Some(codec::EntityType::Table(table)) =
+                            let Some(document::EntityType::Table(table)) =
                                 app.tabs[i].scene.document.get_entity_mut(handle)
                             else {
                                 return;
                             };
                             for &(row, column) in &cells {
                             if let Some(cell) = table.cell_mut(row, column) {
-                                use codec::entities::table::CellStateFlags;
+                                use document::entities::table::CellStateFlags;
                                 if cell.state.intersects(
                                     CellStateFlags::FORMAT_LOCKED
                                         | CellStateFlags::FORMAT_READ_ONLY,
@@ -10020,13 +10020,13 @@ impl OpenCADStudio {
                                 if field == "tbl_cell_content_color" {
                                     style.content_color = color;
                                     style.property_flags.insert(
-                                        codec::entities::table::CellStylePropertyFlags::CONTENT_COLOR,
+                                        document::entities::table::CellStylePropertyFlags::CONTENT_COLOR,
                                     );
                                 } else {
                                     style.background_color = color;
                                     style.fill_enabled = true;
                                     style.property_flags.insert(
-                                        codec::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
+                                        document::entities::table::CellStylePropertyFlags::BACKGROUND_COLOR,
                                     );
                                 }
                             }
@@ -10040,7 +10040,7 @@ impl OpenCADStudio {
                 if !handles.is_empty() {
                     let idx = if field == "gradient_color_2" { 1 } else { 0 };
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(codec::EntityType::Hatch(h)) =
+                        if let Some(document::EntityType::Hatch(h)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             while h.gradient_color.colors.len() <= idx {
@@ -10050,9 +10050,9 @@ impl OpenCADStudio {
                                     1.0
                                 };
                                 h.gradient_color.colors.push(
-                                    codec::entities::hatch::GradientColorEntry {
+                                    document::entities::hatch::GradientColorEntry {
                                         value,
-                                        color: codec::types::Color::Index(7),
+                                        color: document::types::Color::Index(7),
                                         ..Default::default()
                                     },
                                 );
@@ -13880,7 +13880,7 @@ impl OpenCADStudio {
 
             // ── TableStyle Dialog ─────────────────────────────────────────────
             Message::TableStyleDialogOpen => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let i = self.active_tab;
                 // The dialog opens on the current style.
                 let document = &self.tabs[i].scene.document;
@@ -13942,7 +13942,7 @@ impl OpenCADStudio {
             }
 
             Message::TableStyleSetFlow(value) => {
-                use codec::objects::TableFlowDirection;
+                use document::objects::TableFlowDirection;
                 let i = self.active_tab;
                 if let Some(s) = self.tablestyle_mut(i) {
                     s.flow_direction = match value.as_str() {
@@ -13983,7 +13983,7 @@ impl OpenCADStudio {
             Message::TableStyleTemplateRemove => self.on_table_style_template_remove(),
 
             Message::TableStyleToggle(field) => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let i = self.active_tab;
                 let name = self.tablestyle_selected.clone();
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
@@ -14001,7 +14001,7 @@ impl OpenCADStudio {
             }
 
             Message::TableStyleToggleAnnotative => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let i = self.active_tab;
                 let name = self.tablestyle_selected.clone();
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
@@ -14059,7 +14059,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::MlStyleDialogSetCurrent => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let i = self.active_tab;
                 let name = self.mlstyle_selected.clone();
                 let exists = self.tabs[i]
@@ -14142,7 +14142,7 @@ impl OpenCADStudio {
                 if let Some(style) = self.mlstyle_mut(i) {
                     style
                         .elements
-                        .push(codec::objects::MLineStyleElement::default());
+                        .push(document::objects::MLineStyleElement::default());
                 }
                 self.load_mlstyle_bufs(i);
                 Task::none()
@@ -14397,7 +14397,7 @@ impl OpenCADStudio {
                     let by_layer = self.color_picker_layer_color(&picker.target);
                     let tab = &self.tabs[self.active_tab];
                     picker = picker.with_drawing(
-                        crate::ui::color_select::document::collect(&tab.scene.document),
+                        crate::ui::color_select::drawing_colors::collect(&tab.scene.document),
                         &tab.recent_colors,
                         std::sync::Arc::clone(&self.color_books),
                         name,
@@ -14495,8 +14495,8 @@ impl OpenCADStudio {
     fn color_picker_current(
         &self,
         target: &crate::app::ColorPickTarget,
-        color: codec::types::Color,
-    ) -> (codec::types::Color, bool, Option<String>) {
+        color: document::types::Color,
+    ) -> (document::types::Color, bool, Option<String>) {
         let i = self.active_tab;
         let document = &self.tabs[i].scene.document;
         let name_of = |handle| {
@@ -14514,7 +14514,7 @@ impl OpenCADStudio {
                 let name = document
                     .layers
                     .get(layer)
-                    .and_then(crate::ui::color_select::document::layer_identity);
+                    .and_then(crate::ui::color_select::drawing_colors::layer_identity);
                 return (color, false, name);
             }
             _ => return (color, false, None),
@@ -14544,7 +14544,7 @@ impl OpenCADStudio {
     fn color_picker_layer_color(
         &self,
         target: &crate::app::ColorPickTarget,
-    ) -> Option<codec::types::Color> {
+    ) -> Option<document::types::Color> {
         let i = self.active_tab;
         let document = &self.tabs[i].scene.document;
         let layer = match target {
@@ -14577,7 +14577,7 @@ impl OpenCADStudio {
     /// is selected). `name` is a colour-book identity, `BOOK$NAME`.
     pub(super) fn set_property_color(
         &mut self,
-        color: codec::types::Color,
+        color: document::types::Color,
         name: Option<String>,
     ) -> Task<Message> {
         let i = self.active_tab;
@@ -14601,7 +14601,7 @@ impl OpenCADStudio {
     /// colour-book identity, `BOOK$NAME`.
     pub(super) fn set_layer_color(
         &mut self,
-        color: codec::types::Color,
+        color: document::types::Color,
         name: Option<&str>,
     ) -> Task<Message> {
         let i = self.active_tab;
@@ -14612,12 +14612,12 @@ impl OpenCADStudio {
     pub(super) fn set_ribbon_layer_color(
         &mut self,
         layer: &str,
-        color: codec::types::Color,
+        color: document::types::Color,
         name: Option<&str>,
     ) -> Task<Message> {
         if !matches!(
             color,
-            codec::types::Color::Index(1..=255) | codec::types::Color::Rgb { .. }
+            document::types::Color::Index(1..=255) | document::types::Color::Rgb { .. }
         ) || !self.tabs[self.active_tab]
             .scene
             .document
@@ -14634,7 +14634,7 @@ impl OpenCADStudio {
     fn set_layer_colors(
         &mut self,
         names: &[String],
-        color: codec::types::Color,
+        color: document::types::Color,
         name: Option<&str>,
     ) -> Task<Message> {
         let i = self.active_tab;
@@ -14673,12 +14673,12 @@ impl OpenCADStudio {
         Task::none()
     }
 
-    pub(crate) fn note_recent_color(&mut self, color: codec::types::Color) {
+    pub(crate) fn note_recent_color(&mut self, color: document::types::Color) {
         // Keep only real colours in the recent list. ByLayer / ByBlock / None
         // are logical CAD states rather than reusable colours.
         if matches!(
             &color,
-            codec::types::Color::Index(_) | codec::types::Color::Rgb { .. }
+            document::types::Color::Index(_) | document::types::Color::Rgb { .. }
         ) {
             // No duplicates: selecting an existing colour moves it to the front.
             let recent = &mut self.tabs[self.active_tab].recent_colors;
@@ -14743,7 +14743,7 @@ impl OpenCADStudio {
     /// selected style (staged, no commit), so edits survive switching as well
     /// as Apply.
     fn stage_tablestyle_bufs(&mut self) {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let i = self.active_tab;
         let name = self.tablestyle_selected.clone();
         let desc = self.ts_description.clone();
@@ -14828,11 +14828,11 @@ mod anno_scale_toggle_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut line = codec::entities::Line::new();
-        line.start = codec::types::Vector3::ZERO;
-        line.end = codec::types::Vector3::new(1.0, 0.0, 0.0);
+        let mut line = document::entities::Line::new();
+        line.start = document::types::Vector3::ZERO;
+        line.end = document::types::Vector3::new(1.0, 0.0, 0.0);
         let h = app
-            .commit_entity_handle(codec::EntityType::Line(line))
+            .commit_entity_handle(document::EntityType::Line(line))
             .expect("line commits");
         app.anno_object_scale_target = Some(h);
         (app, i)
@@ -14957,9 +14957,9 @@ mod free_text_entry_tests {
     use super::Message;
     use crate::app::{OpenCADStudio, TextEntryMode};
     use crate::modules::annotate::table_cmd::TableCellEditCommand;
-    use codec::entities::Table;
-    use codec::types::Vector3;
-    use codec::{EntityType, Handle};
+    use document::entities::Table;
+    use document::types::Vector3;
+    use document::{EntityType, Handle};
 
     /// A test drawing with a 2×2 table and the cell editor active on [0,0],
     /// seeded with `cell_text`.
@@ -15015,7 +15015,7 @@ mod free_text_entry_tests {
             .document
             .entities()
             .find_map(|entity| match entity {
-                codec::EntityType::LwPolyline(p) => Some(
+                document::EntityType::LwPolyline(p) => Some(
                     p.vertices.iter().map(|v| (v.location.x, v.location.y)).collect(),
                 ),
                 _ => None,
@@ -15125,7 +15125,7 @@ mod free_text_entry_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         app.command_line.input = "EXISTING".into();
-        app.clipboard = vec![codec::EntityType::Line(codec::entities::Line::default())];
+        app.clipboard = vec![document::EntityType::Line(document::entities::Line::default())];
 
         // A dialog field pasted natively: no command-line text, no PASTECLIP.
         let _ = app.update(Message::PasteShortcutResolved(
@@ -15147,7 +15147,7 @@ mod free_text_entry_tests {
         assert!(app.tabs[0].active_cmd.is_none());
 
         // Copied objects paste even though the command line holds focus.
-        app.clipboard = vec![codec::EntityType::Line(codec::entities::Line::default())];
+        app.clipboard = vec![document::EntityType::Line(document::entities::Line::default())];
         let _ = app.update(Message::PasteShortcutResolved(PasteFocus::CommandLine));
         assert!(app.tabs[0]
             .active_cmd

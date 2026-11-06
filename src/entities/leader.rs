@@ -1,5 +1,5 @@
-use codec::entities::{HooklineDirection, Leader, LeaderCreationType, LeaderPathType};
-use codec::Entity;
+use document::entities::{HooklineDirection, Leader, LeaderCreationType, LeaderPathType};
+use document::Entity;
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -47,8 +47,8 @@ fn draws_hookline(leader: &Leader) -> bool {
 fn to_render(leader: &Leader) -> RenderEntity {
     let verts = &leader.vertices;
     let nan = [f64::NAN; 3];
-    let p3 = |v: &codec::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
-    let p3f = |v: &codec::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
+    let p3 = |v: &document::types::Vector3| -> [f64; 3] { [v.x, v.y, v.z] };
+    let p3f = |v: &document::types::Vector3| -> [f32; 3] { [v.x as f32, v.y as f32, v.z as f32] };
 
     let mut points: Vec<[f64; 3]> = Vec::new();
     let mut tangents: Vec<TangentGeom> = Vec::new();
@@ -169,13 +169,13 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
                 let old_end = leader.vertices[n - 1];
 
                 let delta = match apply {
-                    GripApply::Absolute(p) => codec::types::Vector3::new(
+                    GripApply::Absolute(p) => document::types::Vector3::new(
                         p.x as f64 - old_elbow.x,
                         p.y as f64 - old_elbow.y,
                         p.z as f64 - old_elbow.z,
                     ),
                     GripApply::Translate(d) => {
-                        codec::types::Vector3::new(d.x as f64, d.y as f64, d.z as f64)
+                        document::types::Vector3::new(d.x as f64, d.y as f64, d.z as f64)
                     }
                 };
 
@@ -225,7 +225,7 @@ fn apply_grip(leader: &mut Leader, grip_id: usize, apply: GripApply) {
             }
         }
     } else if let GripApply::Translate(d) = apply {
-        leader.translate(codec::types::Vector3::new(
+        leader.translate(document::types::Vector3::new(
             d.x as f64, d.y as f64, d.z as f64,
         ));
     }
@@ -516,7 +516,7 @@ fn apply_transform(leader: &mut Leader, t: &EntityTransform) {
 // ── Trait impls ────────────────────────────────────────────────────────────
 
 impl RenderConvertible for Leader {
-    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &document::Document) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -578,7 +578,7 @@ impl crate::entities::traits::Grippable for Leader {
                 }
                 let v0 = &self.vertices[grip_id];
                 let v1 = &self.vertices[i1];
-                let mid = codec::types::Vector3::new(
+                let mid = document::types::Vector3::new(
                     (v0.x + v1.x) * 0.5,
                     (v0.y + v1.y) * 0.5,
                     (v0.z + v1.z) * 0.5,
@@ -616,8 +616,8 @@ impl crate::entities::traits::Transformable for Leader {
 pub trait LeaderTess {
     fn tessellate(
         &self,
-        document: &codec::Document,
-        handle: codec::Handle,
+        document: &document::Document,
+        handle: document::Handle,
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
@@ -628,8 +628,8 @@ pub trait LeaderTess {
 impl LeaderTess for Leader {
     fn tessellate(
         &self,
-        document: &codec::Document,
-        handle: codec::Handle,
+        document: &document::Document,
+        handle: document::Handle,
         selected: bool,
         entity_color: [f32; 4],
         line_weight_px: f32,
@@ -660,7 +660,7 @@ impl LeaderTess for Leader {
             });
             match dim_clr {
                 Some(idx) if idx != 0 && idx != 256 => {
-                    crate::scene::convert::tess_util::aci_to_rgba(&codec::types::Color::from_index(
+                    crate::scene::convert::tess_util::aci_to_rgba(&document::types::Color::from_index(
                         idx,
                     ))
                 }
@@ -671,13 +671,13 @@ impl LeaderTess for Leader {
         // ByBlock / Default and no override keep the resolved weight passed in.
         let line_weight_px = match dov::int(xd, dov::DIMLWD) {
             Some(lwd) if lwd >= 0 => crate::scene::view::render::lineweight_to_px(
-                &codec::types::LineWeight::from_value(lwd),
+                &document::types::LineWeight::from_value(lwd),
             ),
             _ => line_weight_px,
         };
         let name = handle.value().to_string();
         let p3 =
-            |v: &codec::types::Vector3| -> [f32; 3] { [(v.x) as f32, (v.y) as f32, (v.z) as f32] };
+            |v: &document::types::Vector3| -> [f32; 3] { [(v.x) as f32, (v.y) as f32, (v.z) as f32] };
 
         let verts = &self.vertices;
 
@@ -834,7 +834,7 @@ impl LeaderTess for Leader {
                 .unwrap_or(0);
             if dimtad != 0 {
                 let mt = match document.get_entity(self.annotation_handle) {
-                    Some(codec::entities::EntityType::MText(mt)) => {
+                    Some(document::entities::EntityType::MText(mt)) => {
                         Some((mt.extents_width, mt.insertion_point.x))
                     }
                     _ => None,

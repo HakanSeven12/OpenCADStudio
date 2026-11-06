@@ -1,6 +1,6 @@
 // DIMBREAK — create automatic, object-driven or manual gaps in dimensions.
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

@@ -1,6 +1,6 @@
-use codec::objects::{Material, MaterialColor, MaterialMap, ObjectType};
-use codec::xdata::XDataValue;
-use codec::{Document, EntityType, Handle};
+use document::objects::{Material, MaterialColor, MaterialMap, ObjectType};
+use document::xdata::XDataValue;
+use document::{Document, EntityType, Handle};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -578,10 +578,10 @@ fn load_map_image(_map: &MaterialMap, _base_dir: Option<&Path>) -> Option<Arc<Ma
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::objects::MaterialTexture;
-    use codec::types::Vector3;
-    use codec::xdata::{ExtendedDataRecord, XDataValue};
+    use document::entities::Line;
+    use document::objects::MaterialTexture;
+    use document::types::Vector3;
+    use document::xdata::{ExtendedDataRecord, XDataValue};
 
     #[test]
     fn procedural_checker_is_one_repeatable_two_by_two_tile() {

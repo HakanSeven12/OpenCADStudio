@@ -35,7 +35,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::objects::{ObjectType, XRecord};
+use document::objects::{ObjectType, XRecord};
 use OpenCADStudio::scene::Scene;
 
 const OBJECTS: usize = 20_000;
@@ -46,7 +46,7 @@ const RUNS: usize = 3;
 const WARMUP: usize = 1;
 
 fn build_scene() -> Scene {
-    let mut document = codec::Document::new();
+    let mut document = document::Document::new();
     // Force the conventional-name fallback (see the module comment).
     let model_layout = document
         .objects

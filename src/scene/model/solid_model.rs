@@ -261,15 +261,15 @@ pub fn section(body: &Body, axis: usize, value: f64) -> Vec<([f64; 3], [f64; 3])
 
 // ── Edge extraction (pick geometry + wireframe overlay) ─────────────────────
 
-/// Tessellate the solid's B-rep edges into opencadcodec `Wire`s. Stored on the
+/// Tessellate the solid's B-rep edges into document `Wire`s. Stored on the
 /// `Solid3D`/result entity for picking.
-pub fn edge_wires(body: &Body) -> Vec<codec::entities::Wire> {
-    use codec::types::Vector3;
+pub fn edge_wires(body: &Body) -> Vec<document::entities::Wire> {
+    use document::types::Vector3;
     tessellation(body)
         .edges
         .iter()
         .map(|edge| {
-            codec::entities::Wire::from_points(
+            document::entities::Wire::from_points(
                 edge.positions
                     .iter()
                     .map(|p| Vector3::new(p[0], p[1], p[2]))
@@ -287,7 +287,7 @@ pub fn edge_wires(body: &Body) -> Vec<codec::entities::Wire> {
 /// is presented as a separate, non-pickable outline until placement.
 pub fn grip_preview_wires(
     body: &Body,
-    handle: codec::Handle,
+    handle: document::Handle,
     isolines: [usize; 2],
     planar_isolines: bool,
 ) -> Vec<WireModel> {
@@ -383,7 +383,7 @@ pub fn planar_face_normal(body: &Body, face: FaceKey) -> Option<[f64; 3]> {
 /// - X-axis aligns along the boundary edge emanating from that vertex closest to the pick point.
 /// - Z-axis is the face's outward normal.
 /// - Y-axis is Z × X (in-plane, right-handed).
-pub fn planar_face_ucs(body: &Body, face: FaceKey, pick: [f64; 3]) -> Option<codec::tables::Ucs> {
+pub fn planar_face_ucs(body: &Body, face: FaceKey, pick: [f64; 3]) -> Option<document::tables::Ucs> {
     let normal = planar_face_normal(body, face)?;
     let z = DVec3::from_array(normal).normalize_or_zero();
     if z.length_squared() < 1e-12 {
@@ -485,10 +485,10 @@ pub fn planar_face_ucs(body: &Body, face: FaceKey, pick: [f64; 3]) -> Option<cod
 
     let y = z.cross(x).normalize_or_zero();
 
-    let mut ucs = codec::tables::Ucs::new("*ACTIVE*");
-    ucs.origin = codec::types::Vector3::new(origin.x, origin.y, origin.z);
-    ucs.x_axis = codec::types::Vector3::new(x.x, x.y, x.z);
-    ucs.y_axis = codec::types::Vector3::new(y.x, y.y, y.z);
+    let mut ucs = document::tables::Ucs::new("*ACTIVE*");
+    ucs.origin = document::types::Vector3::new(origin.x, origin.y, origin.z);
+    ucs.x_axis = document::types::Vector3::new(x.x, x.y, x.z);
+    ucs.y_axis = document::types::Vector3::new(y.x, y.y, y.z);
     Some(ucs)
 }
 
@@ -640,8 +640,8 @@ pub fn display_from_solid(
     chordal_deflection: Option<f64>,
     isolines: [usize; 2],
     planar_isolines: Option<bool>,
-) -> Option<(MeshLodSet, Vec<codec::entities::Wire>, [f64; 3])> {
-    use codec::types::Vector3;
+) -> Option<(MeshLodSet, Vec<document::entities::Wire>, [f64; 3])> {
+    use document::types::Vector3;
     let tessellation = display_tessellation(
         body,
         facet_resolution,
@@ -654,7 +654,7 @@ pub fn display_from_solid(
         .edges
         .iter()
         .map(|edge| {
-            codec::entities::Wire::from_points(
+            document::entities::Wire::from_points(
                 edge.positions
                     .iter()
                     .map(|point| Vector3::new(point[0], point[1], point[2]))
@@ -789,7 +789,7 @@ mod tests {
             scene.document.header.isolines = value;
             let body = cylinder_solid([0.0; 3], 5.0, 12.0).unwrap();
             scene
-                .prepare_solid_model_display(codec::Handle::new(0xDEAD), &body)
+                .prepare_solid_model_display(document::Handle::new(0xDEAD), &body)
                 .expect("cylinder display")
                 .0
                 .edge_verts

@@ -1,7 +1,7 @@
 // SOLID geometry comes from the kernel; entity coordinates stay in WCS here.
 
 use crate::t;
-use codec::entities::Solid;
+use document::entities::Solid;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, square_grip};
@@ -30,7 +30,7 @@ fn dvec3(v: [f64; 3]) -> glam::DVec3 {
 
 pub(crate) fn wcs_corners(solid: &Solid) -> [[f64; 3]; 4] {
     let n = normal_tuple(solid);
-    let w = |v: &codec::types::Vector3| {
+    let w = |v: &document::types::Vector3| {
         let (x, y, z) = crate::scene::view::transform::ocs_point_to_wcs((v.x, v.y, v.z), n);
         [x, y, z]
     };
@@ -184,7 +184,7 @@ pub(crate) fn wcs_bounds(solid: &Solid) -> Option<kernel::brep::Aabb> {
 }
 
 impl RenderConvertible for Solid {
-    fn to_render(&self, _document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, _document: &document::Document) -> Option<RenderEntity> {
         let geometry = solid_geometry(self)?;
         let mut lines = Vec::new();
         for &(start, end) in &geometry.edges {
@@ -362,7 +362,7 @@ impl Transformable for Solid {
 #[cfg(test)]
 mod overflow_tests {
     use super::*;
-    use codec::types::Vector3;
+    use document::types::Vector3;
 
     /// Corners 1e308 apart overflow the coplanarity tolerance to infinity,
     /// which the kernel's `Tolerance::new` rejects by panicking.

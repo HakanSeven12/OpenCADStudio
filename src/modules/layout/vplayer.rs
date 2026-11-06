@@ -11,7 +11,7 @@
 // Layer names are case-insensitive. Multiple space-separated names are accepted.
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -75,7 +75,7 @@ impl CadCommand for VplayerCommand {
 
         // Handle::NULL signals "apply to all viewports" in cmd_result.rs
         let vp_handle = if all_viewports {
-            codec::Handle::NULL
+            document::Handle::NULL
         } else {
             self.vp_handle
         };

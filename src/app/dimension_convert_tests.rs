@@ -6,7 +6,7 @@ use crate::command::StepInput;
 use crate::scene::parametric_constraints::{
     ConstraintKind, ParametricScope, DYNAMIC_DIMENSION_LAYER,
 };
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 
 /// A line and the associative dimension across it.
 fn fixture() -> (OpenCADStudio, usize, Handle, Handle) {
@@ -140,7 +140,7 @@ fn converting_an_associative_dimension_makes_it_the_constraints_dimension() {
             .color,
         // The same grey the dynamic form is written with everywhere else:
         // the conversion and `set_dimensional_constraint_form`.
-        codec::types::Color::Rgb {
+        document::types::Color::Rgb {
             r: 103,
             g: 109,
             b: 118

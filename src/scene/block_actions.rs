@@ -1,12 +1,12 @@
 //! Native Move/Scale/Stretch/Rotate/Flip/Array authoring and deterministic block evaluation.
 use super::block_authoring::{self as authoring, *};
-use codec::objects::{
+use document::objects::{
     BlockAction, BlockActionOffsets, BlockActionWithBasePoint, BlockArrayAction,
     BlockBasePointAction, BlockConnection, BlockElement, BlockEvalValue, BlockFlipAction,
     BlockMoveAction, BlockPolarStretchAction, BlockStretchAction, DynamicBlockData, ObjectType,
 };
-use codec::types::{Transform, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::types::{Transform, Vector3};
+use document::{Document, EntityType, Handle};
 use glam::DVec3;
 pub(crate) mod grip_roles;
 pub(crate) mod instance;
@@ -1229,7 +1229,7 @@ pub(crate) fn reframe(doc: &mut Document, definition: Handle, t: &Transform) -> 
                     .into_iter()
                     .map(|p| {
                         let p = t.apply(p);
-                        codec::types::Vector2::new(p.x, p.y)
+                        document::types::Vector2::new(p.x, p.y)
                     })
                     .collect();
             }
@@ -1240,7 +1240,7 @@ pub(crate) fn reframe(doc: &mut Document, definition: Handle, t: &Transform) -> 
                     .into_iter()
                     .map(|p| {
                         let p = t.apply(p);
-                        codec::types::Vector2::new(p.x, p.y)
+                        document::types::Vector2::new(p.x, p.y)
                     })
                     .collect();
             }
@@ -1260,7 +1260,7 @@ pub(crate) fn reframe(doc: &mut Document, definition: Handle, t: &Transform) -> 
 }
 
 /// Keep scratch parameter output in the same coordinate frame as its definition.
-pub(crate) fn reframe_value(eval: &mut codec::objects::BlockEvalExpression, plane: f64, transform: &Transform) {
+pub(crate) fn reframe_value(eval: &mut document::objects::BlockEvalExpression, plane: f64, transform: &Transform) {
     if let BlockEvalValue::Point([x, y]) = eval.value {
         if matches!(eval.value_code, 10 | 11) {
             let point = transform.apply(Vector3::new(x, y, plane));
@@ -2016,7 +2016,7 @@ fn supported_parameter(doc: &Document, handle: Handle) -> bool {
     let Some(ObjectType::DynamicBlock(o)) = doc.objects.get(&handle) else {
         return false;
     };
-    let valid_value_set = |s: &codec::objects::BlockParameterValueSet| {
+    let valid_value_set = |s: &document::objects::BlockParameterValueSet| {
         s.flags & !0x0f == 0
             && !(s.flags & 4 != 0 && s.flags & 8 != 0)
             && s.minimum.is_finite()
@@ -2177,7 +2177,7 @@ fn action_schedule(
     Ok((order, successors))
 }
 
-pub(crate) fn constrain_value_set(value: f64, set: &codec::objects::BlockParameterValueSet) -> f64 {
+pub(crate) fn constrain_value_set(value: f64, set: &document::objects::BlockParameterValueSet) -> f64 {
     let minimum = (set.flags & 1 != 0).then_some(set.minimum);
     let maximum = (set.flags & 2 != 0).then_some(set.maximum);
     let clamp = |value: f64| {
@@ -2211,7 +2211,7 @@ pub(crate) fn constrain_value_set(value: f64, set: &codec::objects::BlockParamet
     value
 }
 
-pub(crate) fn constrain_angle(value: f64, set: &codec::objects::BlockParameterValueSet) -> f64 {
+pub(crate) fn constrain_angle(value: f64, set: &document::objects::BlockParameterValueSet) -> f64 {
     if set.flags == 0 {
         return value;
     }

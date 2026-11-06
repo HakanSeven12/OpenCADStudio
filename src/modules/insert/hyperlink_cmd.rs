@@ -1,7 +1,7 @@
 // HYPERLINK object selection, -HYPERLINK and HYPERLINKOPTIONS.
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 fn hex(handles: &[Handle]) -> String {

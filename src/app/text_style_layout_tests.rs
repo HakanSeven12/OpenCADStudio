@@ -4,9 +4,9 @@
 
 use super::text_style_users::{TextKind, Usage};
 use super::*;
-use codec::entities::{AttributeDefinition, EntityType, MText, Text};
-use codec::tables::{BlockRecord, TextStyle};
-use codec::types::{Handle, Vector3};
+use document::entities::{AttributeDefinition, EntityType, MText, Text};
+use document::tables::{BlockRecord, TextStyle};
+use document::types::{Handle, Vector3};
 use iced_test::Simulator;
 
 /// A drawing with the styles "Notes" (height 2.5, used by two TEXTs, an

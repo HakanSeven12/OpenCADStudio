@@ -37,16 +37,16 @@ impl OpenCADStudio {
     /// UCS origin (0,0,0 in user coordinates).
     fn default_draw_start(&self, i: usize) -> glam::DVec3 {
         let tab = &self.tabs[i];
-        let endpoint = |entity: &codec::EntityType| {
+        let endpoint = |entity: &document::EntityType| {
             let last_grip = match entity {
-                codec::EntityType::Line(line) => {
+                document::EntityType::Line(line) => {
                     return Some(glam::DVec3::new(line.end.x, line.end.y, line.end.z));
                 }
-                codec::EntityType::Arc(_) => Some(2),
-                codec::EntityType::LwPolyline(polyline) => polyline.vertices.len().checked_sub(1),
-                codec::EntityType::Polyline(polyline) => polyline.vertices.len().checked_sub(1),
-                codec::EntityType::Polyline2D(polyline) => polyline.vertices.len().checked_sub(1),
-                codec::EntityType::Polyline3D(polyline) => polyline.vertices.len().checked_sub(1),
+                document::EntityType::Arc(_) => Some(2),
+                document::EntityType::LwPolyline(polyline) => polyline.vertices.len().checked_sub(1),
+                document::EntityType::Polyline(polyline) => polyline.vertices.len().checked_sub(1),
+                document::EntityType::Polyline2D(polyline) => polyline.vertices.len().checked_sub(1),
+                document::EntityType::Polyline3D(polyline) => polyline.vertices.len().checked_sub(1),
                 _ => None,
             }?;
             crate::scene::view::dispatch::grips(entity)
@@ -533,7 +533,7 @@ impl OpenCADStudio {
         let (kept, dropped): (Vec<Handle>, Vec<Handle>) = handles.into_iter().partition(|h| {
             matches!(
                 self.tabs[i].scene.document.get_entity(*h),
-                Some(codec::EntityType::Insert(_))
+                Some(document::EntityType::Insert(_))
             )
         });
         for handle in &dropped {
@@ -922,10 +922,10 @@ impl OpenCADStudio {
             let solid_pick = matches!(
                 self.tabs[i].scene.document.get_entity(*handle),
                 Some(
-                    codec::EntityType::Solid3D(_)
-                        | codec::EntityType::Surface(_)
-                        | codec::EntityType::Region(_)
-                        | codec::EntityType::Body(_)
+                    document::EntityType::Solid3D(_)
+                        | document::EntityType::Surface(_)
+                        | document::EntityType::Region(_)
+                        | document::EntityType::Body(_)
                 )
             );
             let direction = if solid_pick {
@@ -1742,11 +1742,11 @@ impl OpenCADStudio {
                         && !matches!(
                             self.tabs[i].scene.document.get_entity(handle),
                             Some(
-                                codec::EntityType::Solid3D(_)
-                                    | codec::EntityType::Region(_)
-                                    | codec::EntityType::Body(_)
-                                    | codec::EntityType::Surface(_)
-                                    | codec::EntityType::Mesh(_)
+                                document::EntityType::Solid3D(_)
+                                    | document::EntityType::Region(_)
+                                    | document::EntityType::Body(_)
+                                    | document::EntityType::Surface(_)
+                                    | document::EntityType::Mesh(_)
                             )
                         ) =>
                 {

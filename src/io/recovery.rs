@@ -22,7 +22,7 @@ pub struct RecoveryReport {
     pub source_path: Option<PathBuf>,
     pub size_bytes: u64,
     pub source_sha256: Option<String>,
-    pub read_stats: Option<codec::ReadStats>,
+    pub read_stats: Option<document::ReadStats>,
     pub entities_scanned: usize,
     pub parser_errors_recovered: usize,
     pub diagnostics: Vec<(String, String)>,
@@ -33,7 +33,7 @@ pub struct RecoveryReport {
     pub references_failed: usize,
     pub references_skipped: usize,
     pub reference_details: Vec<(String, String, String, Option<String>)>,
-    pub reference_stats: Vec<(String, codec::ReadStats)>,
+    pub reference_stats: Vec<(String, document::ReadStats)>,
     pub timings: OpenTimings,
     pub total_ms: u32,
     pub failure_phase: Option<String>,
@@ -50,10 +50,10 @@ impl RecoveryReport {
         path: &Path,
         size_bytes: u64,
         source_sha256: Option<String>,
-        read_stats: Option<codec::ReadStats>,
+        read_stats: Option<document::ReadStats>,
         entities_scanned: usize,
         references: &[XrefInfo],
-        notifications: &codec::notification::NotificationCollection,
+        notifications: &document::notification::NotificationCollection,
         save_as_required: bool,
         timings: OpenTimings,
         total_ms: u32,
@@ -115,7 +115,7 @@ impl RecoveryReport {
                 notifications
                     .iter()
                     .filter(|item| {
-                        item.notification_type == codec::notification::NotificationType::Error
+                        item.notification_type == document::notification::NotificationType::Error
                     })
                     .count()
             });
@@ -185,7 +185,7 @@ impl RecoveryReport {
         file_name: String,
         size_bytes: u64,
         source_sha256: Option<String>,
-        read_stats: Option<codec::ReadStats>,
+        read_stats: Option<document::ReadStats>,
         failure_phase: String,
         error: String,
         total_ms: u32,
@@ -243,7 +243,7 @@ impl RecoveryReport {
         lines.push(format!("Application revision: {}", env!("OCS_GIT_REV")));
         lines.push(format!("Build profile: {}", env!("OCS_BUILD_PROFILE")));
         lines.push(format!("Build features: {}", env!("OCS_BUILD_FEATURES")));
-        lines.push(format!("Reader version: {}", codec::VERSION));
+        lines.push(format!("Reader version: {}", document::VERSION));
         lines.push(format!("Reader revision: {}", reader_revision()));
         lines.push(format!("Platform: {}", diagnostic_platform()));
         lines.push(format!(
@@ -528,7 +528,7 @@ fn redact_source_path(message: &str, source: Option<&Path>) -> String {
     redacted
 }
 
-fn structured_diagnostic_line(diagnostic: &codec::ReadDiagnostic) -> String {
+fn structured_diagnostic_line(diagnostic: &document::ReadDiagnostic) -> String {
     let section = diagnostic.section.as_deref().unwrap_or("-");
     let offset = diagnostic
         .source_offset

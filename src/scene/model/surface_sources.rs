@@ -3,8 +3,8 @@
 //! so it follows edits of its sources and the drawing's associative network
 //! describes it on save.
 
-use codec::xdata::XDataValue;
-use codec::{EntityType, Handle};
+use document::xdata::XDataValue;
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 /// The application name under which a surface keeps its sources.
@@ -50,14 +50,14 @@ impl SurfaceSources {
 
 /// Keep the sources with the surface.
 pub fn link_surface_sources(
-    document: &mut codec::Document,
+    document: &mut document::Document,
     surface: Handle,
     sources: &SurfaceSources,
 ) {
     if surface.is_null() {
         return;
     }
-    let point = |p: DVec3| XDataValue::Point3D(codec::types::Vector3::new(p.x, p.y, p.z));
+    let point = |p: DVec3| XDataValue::Point3D(document::types::Vector3::new(p.x, p.y, p.z));
     let values = match sources {
         SurfaceSources::Extrude {
             profile,

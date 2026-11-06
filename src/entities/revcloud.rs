@@ -10,8 +10,8 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
-use codec::entities::{LwPolyline, LwVertex};
-use codec::xdata::{ExtendedDataRecord, XDataValue};
+use document::entities::{LwPolyline, LwVertex};
+use document::xdata::{ExtendedDataRecord, XDataValue};
 use glam::DVec3;
 use kernel::geom2d::{closest_point, signed_area, Curve, Polyline, PolylineVertex, Vec2};
 

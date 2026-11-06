@@ -1,6 +1,6 @@
-use codec::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::{Dimension, DimensionAngular2Ln, DimensionAngular3Pt};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 use kernel::geom2d::{
     closest_point, line_line, Arc as KernelArc, BulgeArc, Curve as KernelCurve, Line as KernelLine,
 };

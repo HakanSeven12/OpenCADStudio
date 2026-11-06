@@ -22,11 +22,11 @@ macro_rules! editor_history {
 editor_history! {
     height: String, height_dirty: bool, rotation: String, rotation_dirty: bool,
     style: String, font: String, width: String, object_style: super::raw_style::ObjectStyle,
-    object_color: Option<codec::types::Color>, color_aci: u16, oblique: String, char_space: String,
+    object_color: Option<document::types::Color>, color_aci: u16, oblique: String, char_space: String,
     annotative: bool, attachment: AttachmentPoint, line_spacing: f64, rect_width: f64,
-    line_spacing_style: codec::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
+    line_spacing_style: document::entities::LineSpacingStyle, line_spacing_draft: Option<String>,
     mask_draft: Option<super::entity_options::MaskDraft>,
-    direction: Option<codec::entities::DrawingDirection>,
+    direction: Option<document::entities::DrawingDirection>,
     field_host: Option<super::raw_field::FieldHost>,
     sel: Option<(usize, usize)>, caret: usize, sel_anchor: usize,
     typing_format: super::raw_edit::TypingFormat, rect_width_draft: Option<String>,
@@ -47,14 +47,14 @@ impl MTextEditorState {
 
     /// The colour the whole text is drawn with: the object's own, or a
     /// whole-text colour where the target has no object colour.
-    pub(in crate::app) fn whole_text_color(&self) -> codec::types::Color {
+    pub(in crate::app) fn whole_text_color(&self) -> document::types::Color {
         self.object_color.unwrap_or_else(|| {
             if matches!(self.color_aci, 0 | 256) {
                 self.original
                     .as_ref()
-                    .map_or(codec::types::Color::ByLayer, |m| m.common.color)
+                    .map_or(document::types::Color::ByLayer, |m| m.common.color)
             } else {
-                codec::types::Color::from_index(self.color_aci as i16)
+                document::types::Color::from_index(self.color_aci as i16)
             }
         })
     }
@@ -178,7 +178,7 @@ impl crate::app::OpenCADStudio {
 
     /// At least the factor (`false`) or exactly it (`true`).
     pub(in crate::app) fn mtext_line_spacing_mode(&mut self, exact: bool) {
-        use codec::entities::LineSpacingStyle as S;
+        use document::entities::LineSpacingStyle as S;
         let Some(ed) = self.mtext_editor.as_mut() else {
             return;
         };
@@ -460,20 +460,20 @@ impl crate::app::OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use crate::app::{Message, OpenCADStudio};
-    use codec::{EntityType, Handle, MText};
+    use document::{EntityType, Handle, MText};
     use glam::DVec3;
 
     fn app() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(1));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(1));
         app.active_tab = 1;
         app
     }
     fn with_text(raw: &str) -> (OpenCADStudio, Handle) {
         let mut app = app();
-        let mut mt = MText::with_value(raw, codec::types::Vector3::new(0., 0., 0.));
-        mt.common.color = codec::types::Color::Index(5);
+        let mut mt = MText::with_value(raw, document::types::Vector3::new(0., 0., 0.));
+        mt.common.color = document::types::Color::Index(5);
         mt.height = 2.5;
         let h = app.tabs[1]
             .scene
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn an_untouched_height_and_line_spacing_are_saved_exactly() {
         let mut app = app();
-        let mut mt = MText::with_value("ab", codec::types::Vector3::new(0., 0., 0.));
+        let mut mt = MText::with_value("ab", document::types::Vector3::new(0., 0., 0.));
         mt.height = 2.123456789;
         mt.line_spacing_factor = 1.1;
         let h = app.tabs[1]
@@ -587,13 +587,13 @@ mod tests {
     #[test]
     fn whole_text_colour_is_the_entity_colour_and_the_text_is_not_rewritten() {
         let (mut app, h) = with_text(r"\pxqc,t4;a{\C1;b}");
-        let _ = app.update(Message::MTextColorChanged(codec::types::Color::Index(3)));
+        let _ = app.update(Message::MTextColorChanged(document::types::Color::Index(3)));
         assert_eq!(
             app.mtext_editor.as_ref().unwrap().whole_text_color(),
-            codec::types::Color::Index(3)
+            document::types::Color::Index(3)
         );
         assert!(app.mtext_commit());
-        assert_eq!(mt_of(&app, h).common.color, codec::types::Color::Index(3));
+        assert_eq!(mt_of(&app, h).common.color, document::types::Color::Index(3));
         assert_eq!(mt_of(&app, h).value, r"\pxqc,t4;a{\C1;b}");
     }
 
@@ -601,7 +601,7 @@ mod tests {
     fn one_undo_brings_back_every_value_of_the_step() {
         let (mut app, h) = with_text("ab");
         let _ = app.update(Message::MTextRotation("45".into()));
-        let _ = app.update(Message::MTextColorChanged(codec::types::Color::Index(3)));
+        let _ = app.update(Message::MTextColorChanged(document::types::Color::Index(3)));
         app.mtext_type("c");
         app.mtext_undo();
         assert_eq!(app.mtext_editor.as_ref().unwrap().content.text(), "ab");
@@ -617,7 +617,7 @@ mod tests {
         assert!(app.mtext_commit());
         let mt = mt_of(&app, h);
         assert_eq!(mt.value, "abc");
-        assert_eq!(mt.common.color, codec::types::Color::Index(3));
+        assert_eq!(mt.common.color, document::types::Color::Index(3));
         assert!((mt.rotation.to_degrees() - 45.0).abs() < 1e-9);
     }
 

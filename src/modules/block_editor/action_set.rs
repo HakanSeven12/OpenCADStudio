@@ -1,8 +1,8 @@
 //! Edit native action selections without replacing their graph nodes.
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, PointPickContext};
 use crate::scene::block_actions::{self as actions, Kind, Parameter};
-use codec::objects::ObjectType;
-use codec::{Document, Handle};
+use document::objects::ObjectType;
+use document::{Document, Handle};
 use glam::DVec3;
 
 inventory::submit!(crate::command::CommandRegistration {
@@ -17,7 +17,7 @@ pub(crate) fn pick_point_marker(
     click: iced::Point,
     context: PointPickContext,
 ) -> Option<(Handle, String)> {
-    let project = |p: codec::types::Vector3| {
+    let project = |p: document::types::Vector3| {
         crate::scene::view::projection::project_screen(
             context.view,
             context.eye,
@@ -69,7 +69,7 @@ pub(crate) fn point_markers_in_region(
     if polygon.len() < 3 {
         return Vec::new();
     }
-    let project = |p: codec::types::Vector3| {
+    let project = |p: document::types::Vector3| {
         crate::scene::view::projection::project_screen(
             context.view,
             context.eye,

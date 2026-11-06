@@ -4,8 +4,8 @@
 //! mask transparency are always kept unless the user changed that very option.
 use super::*;
 use crate::app::OpenCADStudio;
-use codec::entities::DrawingDirection;
-use codec::types::Color;
+use document::entities::DrawingDirection;
+use document::types::Color;
 
 /// Mask flags: 0x01 fill on, 0x02 with the drawing window colour.
 const FILL: i32 = 0x01;

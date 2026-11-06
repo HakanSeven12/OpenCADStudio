@@ -24,7 +24,7 @@ impl OpenCADStudio {
     pub(crate) fn apply_link_updates(
         &mut self,
         i: usize,
-        updates: Vec<(codec::Handle, codec::Handle, Vec<Vec<String>>, usize)>,
+        updates: Vec<(document::Handle, document::Handle, Vec<Vec<String>>, usize)>,
     ) -> usize {
         if updates.is_empty() {
             return 0;
@@ -33,7 +33,7 @@ impl OpenCADStudio {
         let mut changed = Vec::new();
         for (table_handle, link_handle, rows, first_linked_row) in updates {
             let document = &mut self.tabs[i].scene.document;
-            let Some(codec::EntityType::Table(table)) = document.get_entity_mut(table_handle)
+            let Some(document::EntityType::Table(table)) = document.get_entity_mut(table_handle)
             else {
                 continue;
             };

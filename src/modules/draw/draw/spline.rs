@@ -4,8 +4,8 @@
 //   Click to add fit points. Enter (≥2 pts) → commits EntityType::Spline.
 
 use crate::t;
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle, Spline};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle, Spline};
 use std::collections::HashMap;
 
 use crate::command::{CadCommand, CmdResult};
@@ -580,7 +580,7 @@ mod tests {
 
     #[test]
     fn closed_fitted_polyline_conversion_preserves_a_periodic_spline() {
-        use codec::entities::{
+        use document::entities::{
             Polyline2D, PolylineFlags, SmoothSurfaceType, Vertex2D, VertexFlags,
         };
 

@@ -1,5 +1,5 @@
 use super::{
-    document::{
+    tab_document::{
         DeltaSnapshot, HistoryLabel, HistorySnapshot, ObjectEntryDelta, ObjectVisibilitySnapshot,
         ParametricConstraintsEntryDelta, PendingHistorySnapshot, ReferenceDesignationDelta,
         StructureSnapshot, TableEntryDelta,
@@ -7,7 +7,7 @@ use super::{
     OpenCADStudio,
 };
 use crate::scene::ObjectIsolationState;
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use rustc_hash::{FxHashMap, FxHashSet as HashSet};
 use std::sync::Arc;
 
@@ -73,7 +73,7 @@ pub(super) struct PendingDelta {
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
-    structure_before: Option<codec::Document>,
+    structure_before: Option<document::Document>,
 }
 
 pub(super) struct PendingLayerDelta {
@@ -81,7 +81,7 @@ pub(super) struct PendingLayerDelta {
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
-    before: Vec<(String, Option<codec::tables::Layer>)>,
+    before: Vec<(String, Option<document::tables::Layer>)>,
 }
 
 pub(super) struct PendingTextStyleDelta {
@@ -89,7 +89,7 @@ pub(super) struct PendingTextStyleDelta {
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
-    before: Vec<(String, Option<codec::tables::TextStyle>)>,
+    before: Vec<(String, Option<document::tables::TextStyle>)>,
 }
 
 pub(super) struct PendingDimStyleDelta {
@@ -97,7 +97,7 @@ pub(super) struct PendingDimStyleDelta {
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
-    before: Vec<(String, Option<codec::tables::DimStyle>)>,
+    before: Vec<(String, Option<document::tables::DimStyle>)>,
 }
 
 pub(super) struct PendingObjectDelta {
@@ -105,7 +105,7 @@ pub(super) struct PendingObjectDelta {
     current_layout: String,
     selected_before: Vec<Handle>,
     dirty_before: bool,
-    before: FxHashMap<Handle, codec::objects::ObjectType>,
+    before: FxHashMap<Handle, document::objects::ObjectType>,
 }
 
 impl OpenCADStudio {
@@ -194,7 +194,7 @@ impl OpenCADStudio {
         i: usize,
         label: impl Into<HistoryLabel>,
         before: Vec<(Handle, Arc<EntityType>)>,
-        object_before: Vec<(Handle, codec::objects::ObjectType)>,
+        object_before: Vec<(Handle, document::objects::ObjectType)>,
         dirty_before: bool,
     ) {
         self.finish_pending_history(i);
@@ -311,7 +311,7 @@ impl OpenCADStudio {
                     .get(&session.block_name)
                     .map(|record| (session.block_name.clone(), record.entity_handles.clone()))
             });
-        codec::Document::align_added_entity_structure(
+        document::Document::align_added_entity_structure(
             &mut pending.structure_before,
             &structure_after,
             &added_handles,
@@ -750,8 +750,8 @@ impl OpenCADStudio {
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));
     }
 
-    fn group_object_state(&self, i: usize) -> FxHashMap<Handle, codec::objects::ObjectType> {
-        use codec::objects::ObjectType;
+    fn group_object_state(&self, i: usize) -> FxHashMap<Handle, document::objects::ObjectType> {
+        use document::objects::ObjectType;
         let document = &self.tabs[i].scene.document;
         let dictionary = document.header.acad_group_dict_handle;
         document
@@ -899,7 +899,7 @@ impl OpenCADStudio {
                 entity,
                 EntityType::Extended(extended) if matches!(
                     extended.data,
-                    codec::entities::ExtendedEntityData::SectionObject(_)
+                    document::entities::ExtendedEntityData::SectionObject(_)
                 )
             )
         {
@@ -1042,7 +1042,7 @@ impl OpenCADStudio {
                         (before.is_none() && after.is_some()).then_some(*handle)
                     })
                     .collect();
-                codec::Document::align_added_entity_structure(
+                document::Document::align_added_entity_structure(
                     before_structure,
                     &after_structure,
                     &added_handles,
@@ -1098,7 +1098,7 @@ impl OpenCADStudio {
                 let inverse = self.tabs[i]
                     .scene
                     .document
-                    .swap_structure(std::mem::replace(stored, codec::Document::new()));
+                    .swap_structure(std::mem::replace(stored, document::Document::new()));
                 *stored = inverse;
                 self.tabs[i].scene.invalidate_dependency_index();
                 self.tabs[i].scene.bump_layout_epoch();
@@ -1174,11 +1174,11 @@ impl OpenCADStudio {
                     // an insert removes it (`before` is `None`), redoing
                     // re-inserts it — so both sides must be inspected.
                     layout_touched |=
-                        matches!(entry.before, Some(codec::objects::ObjectType::Layout(_)))
-                            || matches!(entry.after, Some(codec::objects::ObjectType::Layout(_)));
+                        matches!(entry.before, Some(document::objects::ObjectType::Layout(_)))
+                            || matches!(entry.after, Some(document::objects::ObjectType::Layout(_)));
                     scale_touched |=
-                        matches!(entry.before, Some(codec::objects::ObjectType::Scale(_)))
-                            || matches!(entry.after, Some(codec::objects::ObjectType::Scale(_)));
+                        matches!(entry.before, Some(document::objects::ObjectType::Scale(_)))
+                            || matches!(entry.after, Some(document::objects::ObjectType::Scale(_)));
                     if let Some(object) = value {
                         self.tabs[i]
                             .scene

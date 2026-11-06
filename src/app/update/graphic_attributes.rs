@@ -1,15 +1,15 @@
 //! Graphic Attributes palette: applies line attributes and associative fills
 //! to the selection, or to the creation defaults when nothing is selected.
 
-use crate::app::document::HistoryLabel;
+use crate::app::tab_document::HistoryLabel;
 use crate::app::{Message, OpenCADStudio};
 use crate::scene::model::hatch_model::{GradientKind, HatchPattern};
 use crate::ui::window::gradient_editor::{GradientColorMode, GradientEditorState, GradientMsg};
 use crate::ui::window::graphic_attributes::{
     self as palette, GraphicAttribute, GraphicAttributesMsg, HatchEditorState, PendingFillClose,
 };
-use codec::types::{Color as AcadColor, LineWeight, Transparency};
-use codec::{EntityType, Handle};
+use document::types::{Color as AcadColor, LineWeight, Transparency};
+use document::{EntityType, Handle};
 use iced::Task;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -53,14 +53,14 @@ fn fill_pattern(value: GraphicAttribute) -> Option<(String, HatchPattern)> {
 
 /// Convert a selected HATCH to another fill kind in place.
 fn set_hatch_graphic_attribute(
-    hatch: &mut codec::entities::Hatch,
+    hatch: &mut document::entities::Hatch,
     value: GraphicAttribute,
     visible_color: [f32; 4],
 ) {
     match value {
         GraphicAttribute::Solid => {
-            hatch.pattern = codec::entities::HatchPattern::new("SOLID");
-            hatch.pattern_type = codec::entities::HatchPatternType::Predefined;
+            hatch.pattern = document::entities::HatchPattern::new("SOLID");
+            hatch.pattern_type = document::entities::HatchPatternType::Predefined;
             hatch.is_solid = true;
             hatch.gradient_color.enabled = false;
         }
@@ -77,7 +77,7 @@ fn set_hatch_graphic_attribute(
             let origin = hatch.pattern_origin();
             crate::entities::hatch::translate_pattern_geometry(&mut pattern, origin.x, origin.y);
             hatch.pattern = pattern;
-            hatch.pattern_type = codec::entities::HatchPatternType::Predefined;
+            hatch.pattern_type = document::entities::HatchPatternType::Predefined;
             hatch.is_solid = false;
             hatch.gradient_color.enabled = false;
         }
@@ -91,7 +91,7 @@ fn set_hatch_graphic_attribute(
             hatch.gradient_color.shift = 0.0;
             hatch.gradient_color.is_single_color = false;
             hatch.gradient_color.colors = vec![
-                codec::entities::hatch::GradientColorEntry {
+                document::entities::hatch::GradientColorEntry {
                     value: 0.0,
                     color: AcadColor::Rgb {
                         r: channel(visible_color[0]),
@@ -100,7 +100,7 @@ fn set_hatch_graphic_attribute(
                     },
                     ..Default::default()
                 },
-                codec::entities::hatch::GradientColorEntry {
+                document::entities::hatch::GradientColorEntry {
                     value: 1.0,
                     color: AcadColor::Rgb {
                         r: 46,
@@ -162,7 +162,7 @@ fn concrete_graphic_attributes(
     linetype: &str,
     lineweight: LineWeight,
     transparency: Transparency,
-    layer: Option<&codec::tables::Layer>,
+    layer: Option<&document::tables::Layer>,
 ) -> ConcreteGraphicAttributes {
     let layer_color = layer.map_or(AcadColor::Index(7), |layer| match layer.color {
         AcadColor::ByLayer | AcadColor::ByBlock => AcadColor::Index(7),
@@ -561,7 +561,7 @@ impl OpenCADStudio {
             HistoryLabel::Message("Create Layer with active settings"),
             std::slice::from_ref(&layer_name),
         );
-        let mut layer = codec::tables::Layer::new(name);
+        let mut layer = document::tables::Layer::new(name);
         layer.handle = self.tabs[i].scene.document.allocate_handle();
         layer.color = values.color;
         layer.line_type = values.linetype;
@@ -688,12 +688,12 @@ impl OpenCADStudio {
                 gradient.is_single_color = state.color_mode == GradientColorMode::One;
                 gradient.color_tint = state.shade_tint as f64;
                 gradient.colors = vec![
-                    codec::entities::hatch::GradientColorEntry {
+                    document::entities::hatch::GradientColorEntry {
                         value: 0.0,
                         color: state.color_1,
                         ..Default::default()
                     },
-                    codec::entities::hatch::GradientColorEntry {
+                    document::entities::hatch::GradientColorEntry {
                         value: 1.0,
                         color: state.color_2,
                         ..Default::default()
@@ -842,7 +842,7 @@ impl OpenCADStudio {
             };
             let normal = working.z.normalize_or(glam::DVec3::Z);
             let storage = crate::entities::curve::ocs_plane(
-                codec::types::Vector3::new(normal.x, normal.y, normal.z),
+                document::types::Vector3::new(normal.x, normal.y, normal.z),
                 working.origin.dot(normal),
             );
             let plane = crate::command::WorkingPlane::new(
@@ -1045,8 +1045,8 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{Line, LwPolyline};
-    use codec::types::Vector2;
+    use document::entities::{Line, LwPolyline};
+    use document::types::Vector2;
 
     fn ga(message: GraphicAttributesMsg) -> Message {
         Message::GraphicAttributes(message)
@@ -1078,7 +1078,7 @@ mod tests {
         }
     }
 
-    fn hatches(app: &OpenCADStudio) -> Vec<&codec::entities::Hatch> {
+    fn hatches(app: &OpenCADStudio) -> Vec<&document::entities::Hatch> {
         app.tabs[app.active_tab]
             .scene
             .document
@@ -1090,7 +1090,7 @@ mod tests {
             .collect()
     }
 
-    fn common(app: &OpenCADStudio, handle: Handle) -> &codec::entities::EntityCommon {
+    fn common(app: &OpenCADStudio, handle: Handle) -> &document::entities::EntityCommon {
         app.tabs[app.active_tab]
             .scene
             .document
@@ -1332,14 +1332,14 @@ mod tests {
         let i = app.active_tab;
         app.tabs[i].scene.deselect_all();
 
-        let _ = app.on_line_color(codec::types::Color::Index(2));
+        let _ = app.on_line_color(document::types::Color::Index(2));
         let _ = app.on_line_linetype("Continuous".to_string());
-        let _ = app.on_line_lineweight(codec::types::LineWeight::Value(35));
+        let _ = app.on_line_lineweight(document::types::LineWeight::Value(35));
         let _ = app.on_line_linetype_scale(2.5);
-        let _ = app.on_line_transparency(codec::types::Transparency::from_percent(0.3));
+        let _ = app.on_line_transparency(document::types::Transparency::from_percent(0.3));
 
         let header = &app.tabs[i].scene.document.header;
-        assert_eq!(header.current_entity_color, codec::types::Color::Index(2));
+        assert_eq!(header.current_entity_color, document::types::Color::Index(2));
         assert_eq!(header.current_linetype_name, "Continuous");
         assert_eq!(header.current_line_weight, 35);
         assert!((header.current_entity_linetype_scale - 2.5).abs() < f64::EPSILON);
@@ -1366,10 +1366,10 @@ mod tests {
                 .layers
                 .get_mut("0")
                 .expect("default layer");
-            layer.color = codec::types::Color::Index(3);
+            layer.color = document::types::Color::Index(3);
             layer.line_type = "Continuous".to_string();
-            layer.line_weight = codec::types::LineWeight::Value(50);
-            layer.transparency = codec::types::Transparency::from_percent(0.25);
+            layer.line_weight = document::types::LineWeight::Value(50);
+            layer.transparency = document::types::Transparency::from_percent(0.25);
         }
         let handle = app.tabs[i].scene.add_entity(EntityType::Line(Line::new()));
         app.tabs[i].scene.select_entity(handle, false);
@@ -1381,9 +1381,9 @@ mod tests {
             .get_entity(handle)
             .expect("line")
             .common();
-        assert_eq!(common.color, codec::types::Color::ByBlock);
+        assert_eq!(common.color, document::types::Color::ByBlock);
         assert_eq!(common.linetype, "ByBlock");
-        assert_eq!(common.line_weight, codec::types::LineWeight::ByBlock);
+        assert_eq!(common.line_weight, document::types::LineWeight::ByBlock);
         assert!(common.transparency.is_by_block());
 
         let _ = app.on_graphic_attributes_set_all(true);
@@ -1394,9 +1394,9 @@ mod tests {
             .get_entity(handle)
             .expect("line")
             .common();
-        assert_eq!(common.color, codec::types::Color::Index(3));
+        assert_eq!(common.color, document::types::Color::Index(3));
         assert_eq!(common.linetype, "Continuous");
-        assert_eq!(common.line_weight, codec::types::LineWeight::Value(50));
+        assert_eq!(common.line_weight, document::types::LineWeight::Value(50));
         assert!((common.transparency.as_percent() - 0.25).abs() < 0.01);
     }
 
@@ -1405,10 +1405,10 @@ mod tests {
         let mut app = fresh();
         let i = app.active_tab;
         app.tabs[i].scene.deselect_all();
-        let _ = app.on_line_color(codec::types::Color::Index(2));
+        let _ = app.on_line_color(document::types::Color::Index(2));
         let _ = app.on_line_linetype("Continuous".to_string());
-        let _ = app.on_line_lineweight(codec::types::LineWeight::Value(35));
-        let _ = app.on_line_transparency(codec::types::Transparency::from_percent(0.3));
+        let _ = app.on_line_lineweight(document::types::LineWeight::Value(35));
+        let _ = app.on_line_transparency(document::types::Transparency::from_percent(0.3));
 
         let _ = app.create_graphic_attributes_layer("Invalid\nLayer");
         assert!(app.tabs[i]
@@ -1435,9 +1435,9 @@ mod tests {
             .layers
             .get("Graphic Settings")
             .expect("created layer");
-        assert_eq!(layer.color, codec::types::Color::Index(2));
+        assert_eq!(layer.color, document::types::Color::Index(2));
         assert_eq!(layer.line_type, "Continuous");
-        assert_eq!(layer.line_weight, codec::types::LineWeight::Value(35));
+        assert_eq!(layer.line_weight, document::types::LineWeight::Value(35));
         assert!((layer.transparency.as_percent() - 0.3).abs() < 0.01);
     }
 
@@ -1590,7 +1590,7 @@ mod tests {
     fn closed_square_on(app: &mut OpenCADStudio, layer: &str) -> Handle {
         let i = app.active_tab;
         if app.tabs[i].scene.document.layers.get(layer).is_none() {
-            let mut new_layer = codec::tables::Layer::new(layer);
+            let mut new_layer = document::tables::Layer::new(layer);
             new_layer.handle = app.tabs[i].scene.document.allocate_handle();
             let _ = app.tabs[i].scene.document.layers.add(new_layer);
         }

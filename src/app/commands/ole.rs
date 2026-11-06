@@ -4,7 +4,7 @@
 
 use crate::app::{Message, OpenCADStudio};
 use crate::entities::ole2frame::{self, FrameState};
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use iced::Task;
 
 /// OLEQUALITY: the plot quality new OLE objects take (0 monochrome, 1 low
@@ -59,7 +59,7 @@ impl OpenCADStudio {
                     .entities()
                     .filter_map(|entity| match entity {
                         EntityType::Ole2Frame(ole)
-                            if ole.ole_object_type == codec::entities::OleObjectType::Link =>
+                            if ole.ole_object_type == document::entities::OleObjectType::Link =>
                         {
                             Some(ole.source_application.clone())
                         }
@@ -251,7 +251,7 @@ impl OpenCADStudio {
         &self,
         i: usize,
         handle: Handle,
-        ole: &codec::entities::Ole2Frame,
+        ole: &document::entities::Ole2Frame,
         sections: &mut [crate::scene::model::object::PropSection],
     ) {
         use crate::scene::model::object::PropValue;
@@ -282,7 +282,7 @@ impl OpenCADStudio {
 }
 
 /// MSOLESCALE of the drawing (1 when not set).
-fn ms_ole_scale(document: &codec::Document) -> f64 {
+fn ms_ole_scale(document: &document::Document) -> f64 {
     crate::io::drawing_variable(document, "MSOLESCALE")
         .and_then(|value| value.trim().parse::<f64>().ok())
         .unwrap_or(1.0)

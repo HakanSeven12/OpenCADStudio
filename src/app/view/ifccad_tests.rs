@@ -12,7 +12,7 @@ fn ifccad_format_label_keeps_the_ifcx_extension_and_legacy_selection() {
         assert_eq!(crate::io::parse_save_format(label).0, "ifcx");
         assert_eq!(crate::io::canonical_save_format(label), "IFCCAD");
     }
-    assert_eq!(codec::Format::name(&codec::Ifcx), "IFCX");
+    assert_eq!(document::Format::name(&document::Ifcx), "IFCX");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,7 +25,7 @@ fn save(app: &mut OpenCADStudio, tab: usize, ext: &str, purpose: SavePurpose) ->
     app.queue_native_save(
         tab,
         path,
-        codec::DxfVersion::AC1032,
+        document::DxfVersion::AC1032,
         purpose,
         SaveContinuation::None,
         false,
@@ -106,9 +106,9 @@ fn ifccad_consent_belongs_to_the_saved_tab_and_includes_conversion_losses() {
     app.tabs[0]
         .scene
         .document
-        .add_entity(codec::EntityType::Ray(codec::entities::Ray::new(
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::UNIT_X,
+        .add_entity(document::EntityType::Ray(document::entities::Ray::new(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::UNIT_X,
         )))
         .unwrap();
     let _ = save(&mut app, 0, "ifcx", SavePurpose::Manual);

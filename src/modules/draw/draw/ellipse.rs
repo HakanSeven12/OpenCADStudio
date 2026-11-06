@@ -6,8 +6,8 @@
 //   ELLIPSE_ARC  — Ellipse Arc   (shape as above, then start/end parametric angles)
 
 use crate::t;
-use codec::types::Vector3;
-use codec::{Ellipse, EntityType};
+use document::types::Vector3;
+use document::{Ellipse, EntityType};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::IconKind;
@@ -134,8 +134,8 @@ fn ellipse_polyline(
     t_end: f64,
     plane: WorkingPlane,
 ) -> Option<EntityType> {
-    use codec::entities::{LwPolyline, LwVertex};
-    use codec::types::Vector2;
+    use document::entities::{LwPolyline, LwVertex};
+    use document::types::Vector2;
     let r_major = major.length();
     if r_major < 1e-9 {
         return None;

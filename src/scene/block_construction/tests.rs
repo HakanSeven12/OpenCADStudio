@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::{render_graph, Scene};
-use codec::{
+use document::{
     entities::{Circle, Insert, Line},
     types::{Color, Vector3},
 };
@@ -85,7 +85,7 @@ fn block_construction_roundtrip_revert_preserves_geometry_and_unrelated_metadata
             reopened.get_entity(handles[0]).unwrap().common()
         ));
     }
-    let mut layer = codec::tables::Layer::new("RESTORED");
+    let mut layer = document::tables::Layer::new("RESTORED");
     layer.handle = doc.allocate_handle();
     doc.layers.add(layer).unwrap();
     assert_eq!(

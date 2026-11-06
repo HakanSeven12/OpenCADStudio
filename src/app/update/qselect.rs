@@ -2,7 +2,7 @@
 
 use crate::app::{OpenCADStudio, QSelectCondition, QSelectState};
 use crate::command::{CadCommand, CmdResult};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use iced::Task;
 
@@ -201,20 +201,20 @@ mod tests {
 
     #[test]
     fn sample_round_trip_keeps_selection_and_dialog_geometry() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         let first = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(10.0, 0.0, 0.0),
             )));
         let sample = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(20.0, 0.0, 0.0),
             )));

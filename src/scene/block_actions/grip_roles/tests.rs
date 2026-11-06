@@ -159,7 +159,7 @@ fn block_xy_shared_coordinate_grips_drive_endpoint_actions() {
         )
         .unwrap();
         let insert = doc
-            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            .add_entity(EntityType::Insert(document::entities::Insert::new(
                 "ACTIONS",
                 Vector3::ZERO,
             )))
@@ -180,8 +180,8 @@ fn block_xy_shared_coordinate_grips_drive_endpoint_actions() {
             point: false,
             linear_axis: None,
             limits: runtime::Limits::read(&doc, definition, &p),
-            to_world: codec::types::Transform::identity(),
-            to_local: codec::types::Transform::identity(),
+            to_world: document::types::Transform::identity(),
+            to_local: document::types::Transform::identity(),
         };
         let Value::Frame { base, end } = input.value(cursor + grip.offset) else {
             panic!()

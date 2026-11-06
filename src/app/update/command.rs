@@ -20,8 +20,8 @@ use crate::scene::{
 };
 use crate::ui::window::attribute_editor::{AttrRow, AttrTab};
 use crate::ui::PropertiesPanel;
-use codec::types::Color as AcadColor;
-use codec::{EntityType as AcadEntityType, Handle};
+use document::types::Color as AcadColor;
+use document::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
@@ -297,7 +297,7 @@ impl OpenCADStudio {
         // fresh blank drawing (legacy behaviour).
         if self.tabs.len() == 1 {
             self.tab_counter += 1;
-            self.tabs[0] = crate::app::document::DocumentTab::new_drawing(self.tab_counter);
+            self.tabs[0] = crate::app::tab_document::DocumentTab::new_drawing(self.tab_counter);
             self.active_tab = 0;
             self.apply_display_defaults(0);
         } else {
@@ -1576,7 +1576,7 @@ impl OpenCADStudio {
 
                 // Toggle frozen_layers on the viewport entity
                 for e in self.tabs[i].scene.document.entities_mut() {
-                    if let codec::EntityType::Viewport(vp) = e {
+                    if let document::EntityType::Viewport(vp) = e {
                         if vp.common.handle == vp_handle {
                             if vp.frozen_layers.contains(&layer_handle) {
                                 vp.frozen_layers.retain(|h| h != &layer_handle);
@@ -1615,7 +1615,7 @@ impl OpenCADStudio {
             n += 1;
         };
         self.push_undo_snapshot(i, "LAYER NEW");
-        use codec::tables::layer::Layer as DocLayer;
+        use document::tables::layer::Layer as DocLayer;
         // A layer needs a real handle or it is dropped on a DWG save
         // (the format is handle-based; issue #67).
         let mut dl = DocLayer::new(&new_name);
@@ -1726,7 +1726,7 @@ impl OpenCADStudio {
             return Task::none();
         };
         self.push_undo_snapshot(i, "LAYER DELETE");
-        let handles: Vec<codec::Handle> = self.tabs[i]
+        let handles: Vec<document::Handle> = self.tabs[i]
             .scene
             .document
             .entities()
@@ -1824,7 +1824,7 @@ impl OpenCADStudio {
                     .layers
                     .get(&name)
                     .map(|l| l.handle)
-                    .unwrap_or(codec::types::Handle::NULL);
+                    .unwrap_or(document::types::Handle::NULL);
                 self.tabs[i].scene.document.header.current_layer_name = name.clone();
                 self.tabs[i].scene.document.header.current_layer_handle = handle;
                 self.tabs[i].active_layer = name.clone();
@@ -2071,7 +2071,7 @@ impl OpenCADStudio {
         ) {
             let is_dimension = matches!(
                 self.tabs[i].scene.document.get_entity(popup.handle),
-                Some(codec::EntityType::Dimension(_))
+                Some(document::EntityType::Dimension(_))
             );
             if is_dimension {
                 let movement = match item.action {
@@ -2106,7 +2106,7 @@ impl OpenCADStudio {
                 // Only multileaders use the whole-object grip.
                 let is_multileader = matches!(
                     self.tabs[i].scene.document.get_entity(popup.handle),
-                    Some(codec::EntityType::MultiLeader(_))
+                    Some(document::EntityType::MultiLeader(_))
                 );
                 let (grip_id, is_translate) =
                     if matches!(item.action, GripMenuAction::MoveWithLeader) && is_multileader {
@@ -2260,7 +2260,7 @@ impl OpenCADStudio {
         // structural, so it can't ride the in-place apply below.
         if matches!(item.action, GripMenuAction::BreakVertex) {
             let pieces = match self.tabs[i].scene.document.get_entity(popup.handle) {
-                Some(codec::EntityType::LwPolyline(p)) => {
+                Some(document::EntityType::LwPolyline(p)) => {
                     crate::entities::lwpolyline::break_at_vertex(p, popup.grip_id)
                 }
                 _ => None,
@@ -2367,10 +2367,10 @@ impl OpenCADStudio {
                 .document
                 .get_entity(popup.handle)
                 .is_some_and(|entity| match (item.action, entity) {
-                    (GripMenuAction::ShowFit, codec::EntityType::Spline(spline)) => {
+                    (GripMenuAction::ShowFit, document::EntityType::Spline(spline)) => {
                         crate::entities::spline::shows_fit_points(spline)
                     }
-                    (GripMenuAction::ShowControlVertices, codec::EntityType::Spline(spline)) => {
+                    (GripMenuAction::ShowControlVertices, document::EntityType::Spline(spline)) => {
                         crate::entities::spline::shows_control_vertices(spline)
                     }
                     _ => false,
@@ -2387,7 +2387,7 @@ impl OpenCADStudio {
                 .document
                 .get_entity(popup.handle)
                 .and_then(|e| match e {
-                    codec::EntityType::MultiLeader(ml) => Some(
+                    document::EntityType::MultiLeader(ml) => Some(
                         ml.context
                             .leader_roots
                             .iter()
@@ -2604,16 +2604,16 @@ impl OpenCADStudio {
         };
         let height = width / aspect;
         let origin = self.tabs[i].last_cursor_world;
-        let mut image = codec::entities::RasterImage::with_size(
+        let mut image = document::entities::RasterImage::with_size(
             &name,
-            codec::types::Vector3::new(origin.x, origin.y, origin.z),
+            document::types::Vector3::new(origin.x, origin.y, origin.z),
             pixels_w as f64,
             pixels_h as f64,
             width,
             height,
         );
-        image.flags = codec::entities::ImageDisplayFlags::SHOW_IMAGE
-            | codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
+        image.flags = document::entities::ImageDisplayFlags::SHOW_IMAGE
+            | document::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY;
         let short = std::path::Path::new(&name)
             .file_name()
             .and_then(|n| n.to_str())
@@ -2630,7 +2630,7 @@ impl OpenCADStudio {
             .as_ref(),
         );
         self.apply_cmd_result(crate::command::CmdResult::CommitAndExit(
-            codec::EntityType::RasterImage(image),
+            document::EntityType::RasterImage(image),
         ))
     }
 
@@ -2734,7 +2734,7 @@ impl OpenCADStudio {
                 .layers
                 .get(&layer)
                 .map(|l| l.handle)
-                .unwrap_or(codec::types::Handle::NULL);
+                .unwrap_or(document::types::Handle::NULL);
             self.tabs[i].scene.document.header.current_layer_name = layer.clone();
             self.tabs[i].scene.document.header.current_layer_handle = handle;
             self.tabs[i].active_layer = layer.clone();
@@ -2786,7 +2786,7 @@ impl OpenCADStudio {
 
     pub(super) fn on_ribbon_lineweight_changed(
         &mut self,
-        lw: codec::types::LineWeight,
+        lw: document::types::LineWeight,
     ) -> Task<Message> {
         let i = self.active_tab;
         self.ribbon.close_dropdown();
@@ -2831,7 +2831,7 @@ impl OpenCADStudio {
                 .iter()
                 .find(|x| x.name.eq_ignore_ascii_case(&lt))
                 .map(|x| x.handle)
-                .unwrap_or(codec::types::Handle::NULL);
+                .unwrap_or(document::types::Handle::NULL);
             self.tabs[i].scene.document.header.current_linetype_name = lt.clone();
             self.tabs[i].scene.document.header.current_linetype_handle = handle;
             self.tabs[i].dirty = true;
@@ -2908,7 +2908,7 @@ impl OpenCADStudio {
                 self.ribbon.active_table_style = name.clone();
                 let i = self.active_tab;
                 let found = self.tabs[i].scene.document.objects.values().any(
-                    |o| matches!(o, codec::objects::ObjectType::TableStyle(ts) if ts.name == name),
+                    |o| matches!(o, document::objects::ObjectType::TableStyle(ts) if ts.name == name),
                 );
                 if found {
                     self.tabs[i].scene.document.header.current_table_style_name = name;
@@ -2928,7 +2928,7 @@ impl OpenCADStudio {
     pub(super) fn apply_hatch_pattern(
         &mut self,
         i: usize,
-        handles: &[codec::Handle],
+        handles: &[document::Handle],
         name: String,
     ) -> Task<Message> {
         if !handles.is_empty() {
@@ -2936,7 +2936,7 @@ impl OpenCADStudio {
             if let Some(entry) = hatch_patterns::find(&name) {
                 self.push_undo_snapshot(i, "HATCHEDIT");
                 for &handle in handles {
-                    if let Some(codec::EntityType::Hatch(dxf)) =
+                    if let Some(document::EntityType::Hatch(dxf)) =
                         self.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         let mut pattern = hatch_patterns::build_dxf_pattern(entry);
@@ -2963,7 +2963,7 @@ impl OpenCADStudio {
                             entry.gpu,
                             crate::scene::model::hatch_model::HatchPattern::Solid
                         );
-                        dxf.pattern_type = codec::entities::HatchPatternType::Predefined;
+                        dxf.pattern_type = document::entities::HatchPatternType::Predefined;
                         dxf.gradient_color.enabled = false;
                     }
                     if let Some(model) = self.tabs[i].scene.hatches.get_mut(&handle) {
@@ -3017,7 +3017,7 @@ impl OpenCADStudio {
         if field == "ext_pcx_locked" {
             let handles = self.point_cloud_lock_targets(i);
             self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                if let Some(codec::EntityType::Extended(extended)) =
+                if let Some(document::EntityType::Extended(extended)) =
                     app.tabs[i].scene.document.get_entity_mut(handle)
                 {
                     crate::entities::traits::PropertyEditable::apply_geom_prop(
@@ -3046,7 +3046,7 @@ impl OpenCADStudio {
             };
             let document = &self.tabs[i].scene.document;
             let (toggle, current) = match document.get_entity(handle) {
-                Some(codec::EntityType::MText(text)) => ("is_annotative", text.is_annotative),
+                Some(document::EntityType::MText(text)) => ("is_annotative", text.is_annotative),
                 // The same per-object state the row shows and the toggle
                 // flips; a dimension's style only seeds it. (#1917)
                 Some(entity) => (
@@ -3074,7 +3074,7 @@ impl OpenCADStudio {
             ) {
                 let unchanged = handles.iter().all(|handle| {
                     match self.tabs[i].scene.document.get_entity(*handle) {
-                        Some(codec::EntityType::Spline(spline)) => match field {
+                        Some(document::EntityType::Spline(spline)) => match field {
                             "spline_method" => {
                                 value
                                     == if crate::entities::spline::shows_fit_points(spline) {
@@ -3102,7 +3102,7 @@ impl OpenCADStudio {
                             }
                             _ => false,
                         },
-                        Some(codec::EntityType::Hatch(hatch)) => match field {
+                        Some(document::EntityType::Hatch(hatch)) => match field {
                             "fill_type" => {
                                 value
                                     == if hatch.gradient_color.is_single_color {
@@ -3121,21 +3121,21 @@ impl OpenCADStudio {
                             "style" => {
                                 value
                                     == match hatch.style {
-                                        codec::entities::HatchStyleType::Normal => "Normal",
-                                        codec::entities::HatchStyleType::Outer => "Outer",
-                                        codec::entities::HatchStyleType::Ignore => "Ignore",
+                                        document::entities::HatchStyleType::Normal => "Normal",
+                                        document::entities::HatchStyleType::Outer => "Outer",
+                                        document::entities::HatchStyleType::Ignore => "Ignore",
                                     }
                             }
                             "pattern_type_label" => {
                                 value
                                     == match hatch.pattern_type {
-                                        codec::entities::HatchPatternType::Predefined => {
+                                        document::entities::HatchPatternType::Predefined => {
                                             "Predefined"
                                         }
-                                        codec::entities::HatchPatternType::UserDefined => {
+                                        document::entities::HatchPatternType::UserDefined => {
                                             "User Defined"
                                         }
-                                        codec::entities::HatchPatternType::Custom => "Custom",
+                                        document::entities::HatchPatternType::Custom => "Custom",
                                     }
                             }
                             _ => false,
@@ -3176,13 +3176,13 @@ impl OpenCADStudio {
                 // Material source: ByLayer / ByBlock clear the handle; a
                 // named material sets flag 3 + its handle (resolved here
                 // because the update loop holds the document).
-                let mat_handle: Option<codec::Handle> = self.tabs[i]
+                let mat_handle: Option<document::Handle> = self.tabs[i]
                     .scene
                     .document
                     .objects
                     .iter()
                     .find_map(|(h, o)| match o {
-                        codec::objects::ObjectType::Material(m) if m.name == value => Some(*h),
+                        document::objects::ObjectType::Material(m) if m.name == value => Some(*h),
                         _ => None,
                     });
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
@@ -3218,7 +3218,7 @@ impl OpenCADStudio {
             }
             if field == "tol_text_style" {
                 use crate::entities::dim_override as dov;
-                use codec::xdata::XDataValue;
+                use document::xdata::XDataValue;
                 let style_handle = self.tabs[i]
                     .scene
                     .document
@@ -3231,7 +3231,7 @@ impl OpenCADStudio {
                         if app.tabs[i].scene.is_layer_locked(handle)
                             || !matches!(
                                 app.tabs[i].scene.document.get_entity(handle),
-                                Some(codec::EntityType::Tolerance(_))
+                                Some(document::EntityType::Tolerance(_))
                             )
                         {
                             return;
@@ -3257,7 +3257,7 @@ impl OpenCADStudio {
                     }
                     if matches!(
                         app.tabs[i].scene.document.get_entity(handle),
-                        Some(codec::EntityType::Dimension(_))
+                        Some(document::EntityType::Dimension(_))
                     ) {
                         let applied = crate::entities::dim_override::set_property(
                             &mut app.tabs[i].scene.document,
@@ -3271,7 +3271,7 @@ impl OpenCADStudio {
                                 .document
                                 .get_entity_mut(handle)
                                 .and_then(crate::entities::dimension::as_dimension_mut);
-                            if let Some(codec::entities::Dimension::LargeRadial(dimension)) = radial
+                            if let Some(document::entities::Dimension::LargeRadial(dimension)) = radial
                             {
                                 dimension.base.text_user_positioned = false;
                             }
@@ -3285,7 +3285,7 @@ impl OpenCADStudio {
                 self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
                     if matches!(
                         app.tabs[i].scene.document.get_entity(handle),
-                        Some(codec::EntityType::Viewport(_))
+                        Some(document::EntityType::Viewport(_))
                     ) {
                         let _ = app.tabs[i]
                             .scene
@@ -3306,7 +3306,7 @@ impl OpenCADStudio {
                     .cloned();
                 if let Some(ucs) = ucs_data {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(codec::EntityType::Viewport(vp)) =
+                        if let Some(document::EntityType::Viewport(vp)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             vp.ucs_handle = ucs.handle;
@@ -3334,7 +3334,7 @@ impl OpenCADStudio {
                     .cloned();
                 if let Some(view) = view_data {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(codec::EntityType::Viewport(vp)) =
+                        if let Some(document::EntityType::Viewport(vp)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             vp.view_target = view.target.clone();
@@ -3402,7 +3402,7 @@ impl OpenCADStudio {
                     }
                     let Some(mut state) = app.tabs[i].scene.document.get_entity(handle).and_then(
                         |entity| match entity {
-                            codec::EntityType::Surface(surface) => {
+                            document::EntityType::Surface(surface) => {
                                 Some(crate::entities::solid3d::surface_property_state(surface))
                             }
                             _ => None,
@@ -3451,7 +3451,7 @@ impl OpenCADStudio {
                         if app.tabs[i].scene.is_layer_locked(handle) {
                             return;
                         }
-                        if let Some(codec::EntityType::Tolerance(tolerance)) =
+                        if let Some(document::EntityType::Tolerance(tolerance)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             tolerance.dimension_style_handle = Some(style_handle);
@@ -3493,13 +3493,13 @@ impl OpenCADStudio {
                 if linetype.is_some() {
                     self.apply_property_op(i, "TABLE CELL BORDER", &handles, |app, handle| {
                         use crate::entities::table::TableCellBordersExt;
-                        if let Some(codec::EntityType::Table(table)) =
+                        if let Some(document::EntityType::Table(table)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             for &(row, column) in &cells {
                                 table.edit_cell_borders(row, column, |border| {
                                     border.line_type_handle = linetype;
-                                    codec::entities::table::BorderPropertyFlags::LINE_TYPE
+                                    document::entities::table::BorderPropertyFlags::LINE_TYPE
                                 });
                             }
                             table.block_record_handle = None;
@@ -3517,7 +3517,7 @@ impl OpenCADStudio {
                         .objects
                         .iter()
                         .find_map(|(handle, object)| match object {
-                            codec::objects::ObjectType::TableStyle(style)
+                            document::objects::ObjectType::TableStyle(style)
                                 if style.name.eq_ignore_ascii_case(value.trim()) =>
                             {
                                 Some(*handle)
@@ -3526,7 +3526,7 @@ impl OpenCADStudio {
                         });
                 if let Some(style_handle) = style_handle {
                     self.apply_property_op(i, "CHPROP", &handles, |app, handle| {
-                        if let Some(codec::EntityType::Table(table)) =
+                        if let Some(document::EntityType::Table(table)) =
                             app.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             table.table_style_handle = Some(style_handle);
@@ -3541,7 +3541,7 @@ impl OpenCADStudio {
                     // Unresolvable name: preserve the old tail's
                     // block_record clearing without pushing a snapshot.
                     for &handle in &handles {
-                        if let Some(codec::EntityType::Table(table)) =
+                        if let Some(document::EntityType::Table(table)) =
                             self.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             table.block_record_handle = None;
@@ -3582,7 +3582,7 @@ impl OpenCADStudio {
                 let resolved_mleader_style = (field == "mleader_style")
                     .then(|| {
                         doc.objects.values().find_map(|object| match object {
-                            codec::objects::ObjectType::MultiLeaderStyle(style)
+                            document::objects::ObjectType::MultiLeaderStyle(style)
                                 if style.name == value =>
                             {
                                 Some(style.clone())
@@ -3591,7 +3591,7 @@ impl OpenCADStudio {
                         })
                     })
                     .flatten();
-                let resolved: Option<codec::Handle> = match field {
+                let resolved: Option<document::Handle> = match field {
                     "mleader_style" => resolved_mleader_style.as_ref().map(|style| style.handle),
                     "text_style_handle" => doc
                         .text_styles
@@ -3630,7 +3630,7 @@ impl OpenCADStudio {
                             );
                             style_annotation = Some(style.is_annotative);
                         }
-                    } else if let Some(codec::EntityType::MultiLeader(ml)) =
+                    } else if let Some(document::EntityType::MultiLeader(ml)) =
                         self.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         match field {
@@ -3639,7 +3639,7 @@ impl OpenCADStudio {
                                     ml.text_style_handle = Some(h);
                                     ml.context.text_style_handle = Some(h);
                                     ml.property_override_flags.insert(
-                                                codec::entities::MultiLeaderPropertyOverrideFlags::TEXT_STYLE,
+                                                document::entities::MultiLeaderPropertyOverrideFlags::TEXT_STYLE,
                                             );
                                 }
                             }
@@ -3649,12 +3649,12 @@ impl OpenCADStudio {
                                     for line in &mut root.lines {
                                         line.arrowhead_handle = resolved;
                                         line.override_flags.insert(
-                                                    codec::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD,
+                                                    document::entities::LeaderLinePropertyOverrideFlags::ARROWHEAD,
                                                 );
                                     }
                                 }
                                 ml.property_override_flags.insert(
-                                    codec::entities::MultiLeaderPropertyOverrideFlags::ARROWHEAD,
+                                    document::entities::MultiLeaderPropertyOverrideFlags::ARROWHEAD,
                                 );
                             }
                             "line_type_handle" => {
@@ -3663,12 +3663,12 @@ impl OpenCADStudio {
                                     for line in &mut root.lines {
                                         line.line_type_handle = resolved;
                                         line.override_flags.insert(
-                                                    codec::entities::LeaderLinePropertyOverrideFlags::LINE_TYPE,
+                                                    document::entities::LeaderLinePropertyOverrideFlags::LINE_TYPE,
                                                 );
                                     }
                                 }
                                 ml.property_override_flags.insert(
-                                            codec::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_TYPE,
+                                            document::entities::MultiLeaderPropertyOverrideFlags::LEADER_LINE_TYPE,
                                         );
                             }
                             "block_content_handle" => {
@@ -3679,7 +3679,7 @@ impl OpenCADStudio {
                                     ml.context.block_content_location =
                                         ml.context.content_base_point;
                                     ml.property_override_flags.insert(
-                                                codec::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT,
+                                                document::entities::MultiLeaderPropertyOverrideFlags::BLOCK_CONTENT,
                                             );
                                 }
                             }
@@ -3712,8 +3712,8 @@ impl OpenCADStudio {
                 // reverts to the style); the other two map a label to
                 // the DIMLWD / DIMTAD enum value.
                 use crate::entities::dim_override as dov;
-                use codec::xdata::XDataValue;
-                let arrow_h: Option<codec::Handle> =
+                use document::xdata::XDataValue;
+                let arrow_h: Option<document::Handle> =
                     if field == "arrow_block" && value != "Closed filled" {
                         self.tabs[i]
                             .scene
@@ -3733,7 +3733,7 @@ impl OpenCADStudio {
                     // a multi-type selection can't get stray overrides.
                     if !matches!(
                         self.tabs[i].scene.document.get_entity(handle),
-                        Some(codec::EntityType::Leader(_))
+                        Some(document::EntityType::Leader(_))
                     ) {
                         continue;
                     }
@@ -3765,7 +3765,7 @@ impl OpenCADStudio {
                                     doc,
                                     handle,
                                     dov::DIMLDRBLK,
-                                    Some(XDataValue::Handle(codec::Handle::NULL)),
+                                    Some(XDataValue::Handle(document::Handle::NULL)),
                                 );
                             } else if let Some(h) = arrow_h {
                                 dov::set(doc, handle, dov::DIMLDRBLK, Some(XDataValue::Handle(h)));
@@ -3846,7 +3846,7 @@ impl OpenCADStudio {
                                 .document
                                 .get_entity(handle)
                                 .and_then(|entity| match entity {
-                                    codec::EntityType::Insert(ins) => {
+                                    document::EntityType::Insert(ins) => {
                                         let record = self.tabs[i]
                                             .scene
                                             .document
@@ -3901,7 +3901,7 @@ impl OpenCADStudio {
                     .document
                     .header
                     .acad_plotstylename_dict_handle;
-                let ph: Option<codec::Handle> =
+                let ph: Option<document::Handle> =
                     crate::scene::annotative::as_dict(&self.tabs[i].scene.document, dict_h)
                         .and_then(|d| d.entries.iter().find(|(n, _)| *n == value).map(|(_, h)| *h));
                 for &handle in &handles {
@@ -3974,7 +3974,7 @@ impl OpenCADStudio {
                             .document
                             .get_entity(handle)
                             .and_then(|entity| match entity {
-                                codec::EntityType::MLine(mline) => {
+                                document::EntityType::MLine(mline) => {
                                     crate::entities::mline::resolved_mline_style(
                                         mline,
                                         &self.tabs[i].scene.document,
@@ -3994,21 +3994,21 @@ impl OpenCADStudio {
                         crate::scene::view::dispatch::apply_geom_prop_in_working_plane(
                             entity, field, &value, plane,
                         );
-                        match (entity as &mut codec::EntityType, text_style.as_ref()) {
-                            (codec::EntityType::Text(text), Some(style)) => {
+                        match (entity as &mut document::EntityType, text_style.as_ref()) {
+                            (document::EntityType::Text(text), Some(style)) => {
                                 if style.height > 0.0 {
                                     text.height = style.height;
                                 }
                                 text.width_factor = style.width_factor;
                                 text.oblique_angle = style.oblique_angle;
                             }
-                            (codec::EntityType::MText(text), Some(style)) if style.height > 0.0 => {
+                            (document::EntityType::MText(text), Some(style)) if style.height > 0.0 => {
                                 text.height = style.height;
                             }
                             _ => {}
                         }
                         if matches!(field, "ml_justification" | "ml_scale") {
-                            if let (codec::EntityType::MLine(mline), Some(style)) =
+                            if let (document::EntityType::MLine(mline), Some(style)) =
                                 (entity, mline_style.as_ref())
                             {
                                 crate::modules::draw::draw::mline::sync_mline_element_parameters(
@@ -4020,8 +4020,8 @@ impl OpenCADStudio {
                     if let Some(annotative) = dim_style_annotative {
                         let document = &mut self.tabs[i].scene.document;
                         let current = match document.get_entity(handle) {
-                            Some(codec::EntityType::Dimension(dimension))
-                                if !matches!(**dimension, codec::entities::Dimension::Arc(_)) =>
+                            Some(document::EntityType::Dimension(dimension))
+                                if !matches!(**dimension, document::entities::Dimension::Arc(_)) =>
                             {
                                 crate::scene::annotative::object_is_annotative(
                                     document,
@@ -4045,7 +4045,7 @@ impl OpenCADStudio {
             }
             if field.starts_with("tbl_") {
                 for &handle in &handles {
-                    if let Some(codec::EntityType::Table(table)) =
+                    if let Some(document::EntityType::Table(table)) =
                         self.tabs[i].scene.document.get_entity_mut(handle)
                     {
                         table.block_record_handle = None;
@@ -4090,19 +4090,19 @@ impl OpenCADStudio {
                     self.refresh_properties();
                 }
                 "material" => {
-                    let mat_handle: Option<codec::Handle> = self.tabs[i]
+                    let mat_handle: Option<document::Handle> = self.tabs[i]
                         .scene
                         .document
                         .objects
                         .iter()
                         .find_map(|(h, o)| match o {
-                            codec::objects::ObjectType::Material(m) if m.name == value => Some(*h),
+                            document::objects::ObjectType::Material(m) if m.name == value => Some(*h),
                             _ => None,
                         });
                     match value.as_str() {
                         "ByLayer" | "ByBlock" | "Global" => {
                             self.tabs[i].scene.document.header.current_material_handle =
-                                codec::Handle::NULL;
+                                document::Handle::NULL;
                         }
                         _ => {
                             if let Some(h) = mat_handle {
@@ -4139,7 +4139,7 @@ impl OpenCADStudio {
                         .objects
                         .values()
                         .find_map(|object| {
-                            let codec::objects::ObjectType::Layout(layout) = object else {
+                            let document::objects::ObjectType::Layout(layout) = object else {
                                 return None;
                             };
                             layout
@@ -4151,7 +4151,7 @@ impl OpenCADStudio {
                     if current != next {
                         self.push_undo_snapshot(i, "PLOTSTYLE");
                         for object in self.tabs[i].scene.document.objects.values_mut() {
-                            if let codec::objects::ObjectType::Layout(layout) = object {
+                            if let document::objects::ObjectType::Layout(layout) = object {
                                 if layout.name.eq_ignore_ascii_case(&layout_name) {
                                     layout.plot_style_sheet = next.clone();
                                     layout.plot_flags.plot_plot_styles = !next.is_empty();
@@ -4191,7 +4191,7 @@ impl OpenCADStudio {
                     let current = active_viewport
                         .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
                         .and_then(|entity| match entity {
-                            codec::EntityType::Viewport(viewport) => {
+                            document::EntityType::Viewport(viewport) => {
                                 Some(viewport.ucs_icon_visible)
                             }
                             _ => None,
@@ -4214,7 +4214,7 @@ impl OpenCADStudio {
                     if current != next {
                         self.push_undo_snapshot(i, "UCSICON");
                         if let Some(handle) = active_viewport {
-                            if let Some(codec::EntityType::Viewport(viewport)) =
+                            if let Some(document::EntityType::Viewport(viewport)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 viewport.ucs_icon_visible = next;
@@ -4245,7 +4245,7 @@ impl OpenCADStudio {
                     let current = active_viewport
                         .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
                         .and_then(|entity| match entity {
-                            codec::EntityType::Viewport(viewport) => {
+                            document::EntityType::Viewport(viewport) => {
                                 Some(viewport.status.ucs_icon_at_origin)
                             }
                             _ => None,
@@ -4268,7 +4268,7 @@ impl OpenCADStudio {
                     if current != next {
                         self.push_undo_snapshot(i, "UCSICON");
                         if let Some(handle) = active_viewport {
-                            if let Some(codec::EntityType::Viewport(viewport)) =
+                            if let Some(document::EntityType::Viewport(viewport)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 viewport.status.ucs_icon_at_origin = next;
@@ -4299,7 +4299,7 @@ impl OpenCADStudio {
                     let current = active_viewport
                         .and_then(|handle| self.tabs[i].scene.document.get_entity(handle))
                         .and_then(|entity| match entity {
-                            codec::EntityType::Viewport(viewport) => {
+                            document::EntityType::Viewport(viewport) => {
                                 Some(viewport.ucs_per_viewport)
                             }
                             _ => None,
@@ -4322,7 +4322,7 @@ impl OpenCADStudio {
                     if current != next {
                         self.push_undo_snapshot(i, "UCSVP");
                         if let Some(handle) = active_viewport {
-                            if let Some(codec::EntityType::Viewport(viewport)) =
+                            if let Some(document::EntityType::Viewport(viewport)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 viewport.ucs_per_viewport = next;
@@ -4346,7 +4346,7 @@ impl OpenCADStudio {
                     self.refresh_properties();
                 }
                 "view_visual_style" => {
-                    use codec::entities::ViewportRenderMode as Mode;
+                    use document::entities::ViewportRenderMode as Mode;
                     let mode = match value.as_str() {
                         "2D Wireframe" | "Wireframe 2D" => Some(Mode::Wireframe2D),
                         "3D Wireframe" | "Wireframe 3D" => Some(Mode::Wireframe3D),
@@ -4553,7 +4553,7 @@ impl OpenCADStudio {
                     "ul_width" | "ul_height" => {
                         let scale = handles.iter().find_map(|handle| {
                             match self.tabs[i].scene.document.get_entity(*handle) {
-                                Some(codec::EntityType::Underlay(underlay)) => {
+                                Some(document::EntityType::Underlay(underlay)) => {
                                     crate::entities::underlay::size_to_scale(
                                         underlay,
                                         &self.tabs[i].scene.document,
@@ -4580,13 +4580,13 @@ impl OpenCADStudio {
                         .filter_map(|handle| {
                             let entity = self.tabs[i].scene.document.get_entity(*handle)?;
                             match (field, entity) {
-                                ("current_fit_point", codec::EntityType::Spline(spline)) => {
+                                ("current_fit_point", document::EntityType::Spline(spline)) => {
                                     Some(spline.fit_points.len())
                                 }
-                                ("current_control_point", codec::EntityType::Spline(spline)) => {
+                                ("current_control_point", document::EntityType::Spline(spline)) => {
                                     Some(crate::entities::spline::control_vertex_count(spline))
                                 }
-                                ("pm_current_vertex", codec::EntityType::PolygonMesh(mesh)) => {
+                                ("pm_current_vertex", document::EntityType::PolygonMesh(mesh)) => {
                                     Some(mesh.vertices.len())
                                 }
                                 _ => None,
@@ -4613,7 +4613,7 @@ impl OpenCADStudio {
                             .objects
                             .iter()
                             .find_map(|(handle, object)| match object {
-                                codec::objects::ObjectType::TableStyle(style)
+                                document::objects::ObjectType::TableStyle(style)
                                     if style.name.eq_ignore_ascii_case(val.trim()) =>
                                 {
                                     Some(*handle)
@@ -4622,7 +4622,7 @@ impl OpenCADStudio {
                             });
                     if let Some(style_handle) = style_handle {
                         for &handle in &handles {
-                            if let Some(codec::EntityType::Table(table)) =
+                            if let Some(document::EntityType::Table(table)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 table.table_style_handle = Some(style_handle);
@@ -4647,7 +4647,7 @@ impl OpenCADStudio {
                         let host = self.tabs[i].scene.document.header.insertion_units;
                         for &handle in &handles {
                             let factor = match self.tabs[i].scene.document.get_entity(handle) {
-                                Some(codec::EntityType::Insert(ins)) => self.tabs[i]
+                                Some(document::EntityType::Insert(ins)) => self.tabs[i]
                                     .scene
                                     .document
                                     .block_records
@@ -4658,7 +4658,7 @@ impl OpenCADStudio {
                                     .unwrap_or(1.0),
                                 _ => continue,
                             };
-                            if let Some(codec::EntityType::Insert(ins)) =
+                            if let Some(document::EntityType::Insert(ins)) =
                                 self.tabs[i].scene.document.get_entity_mut(handle)
                             {
                                 match axis {
@@ -4677,7 +4677,7 @@ impl OpenCADStudio {
                     self.apply_block_name_commit(i, &handles, val.trim());
                 } else if field == "frozen_layers" {
                     // Resolve layer names → handles, then apply to viewports.
-                    let layer_handles: Vec<codec::Handle> = val
+                    let layer_handles: Vec<document::Handle> = val
                         .split(',')
                         .map(|s| s.trim())
                         .filter(|s| !s.is_empty())
@@ -4692,7 +4692,7 @@ impl OpenCADStudio {
                         })
                         .collect();
                     for &handle in &handles {
-                        if let Some(codec::EntityType::Viewport(vp)) =
+                        if let Some(document::EntityType::Viewport(vp)) =
                             self.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             vp.frozen_layers = layer_handles.clone();
@@ -4731,7 +4731,7 @@ impl OpenCADStudio {
                                             &mut self.tabs[i].scene.document,
                                             handle,
                                             dov::DIMTXT,
-                                            Some(codec::xdata::XDataValue::Real(height)),
+                                            Some(document::xdata::XDataValue::Real(height)),
                                         );
                                     }
                                 }
@@ -4739,7 +4739,7 @@ impl OpenCADStudio {
                             _ if field.starts_with("dim_") => {
                                 if matches!(
                                     self.tabs[i].scene.document.get_entity(handle),
-                                    Some(codec::EntityType::Dimension(_))
+                                    Some(document::EntityType::Dimension(_))
                                 ) {
                                     let applied = crate::entities::dim_override::set_property(
                                         &mut self.tabs[i].scene.document,
@@ -4748,7 +4748,7 @@ impl OpenCADStudio {
                                         &val,
                                     );
                                     if applied && field == "dim_text_inside" {
-                                        if let Some(codec::entities::Dimension::LargeRadial(
+                                        if let Some(document::entities::Dimension::LargeRadial(
                                             dimension,
                                         )) = self.tabs[i]
                                             .scene
@@ -4813,7 +4813,7 @@ impl OpenCADStudio {
                                         &mut self.tabs[i].scene.document,
                                         handle,
                                         code,
-                                        Some(codec::xdata::XDataValue::Real(n)),
+                                        Some(document::xdata::XDataValue::Real(n)),
                                     );
                                 }
                             }
@@ -4863,7 +4863,7 @@ impl OpenCADStudio {
                                     let mline_style =
                                         self.tabs[i].scene.document.get_entity(handle).and_then(
                                             |entity| match entity {
-                                                codec::EntityType::MLine(mline) => {
+                                                document::EntityType::MLine(mline) => {
                                                     crate::entities::mline::resolved_mline_style(
                                                         mline,
                                                         &self.tabs[i].scene.document,
@@ -4890,7 +4890,7 @@ impl OpenCADStudio {
                                                     plane,
                                                 );
                                         if field == "ml_scale" {
-                                            if let (codec::EntityType::MLine(mline), Some(style)) =
+                                            if let (document::EntityType::MLine(mline), Some(style)) =
                                                 (entity, mline_style.as_ref())
                                             {
                                                 crate::modules::draw::draw::mline::sync_mline_element_parameters(
@@ -4921,7 +4921,7 @@ impl OpenCADStudio {
                 }
                 if field.starts_with("tbl_") {
                     for &handle in &handles {
-                        if let Some(codec::EntityType::Table(table)) =
+                        if let Some(document::EntityType::Table(table)) =
                             self.tabs[i].scene.document.get_entity_mut(handle)
                         {
                             table.block_record_handle = None;
@@ -4968,7 +4968,7 @@ impl OpenCADStudio {
     /// the definition the selection references is renamed and every insert of
     /// it follows, including a reference showing an evaluated copy of it.
     /// Anonymous/xref definitions are refused.
-    fn apply_block_name_commit(&mut self, i: usize, handles: &[codec::Handle], new: &str) {
+    fn apply_block_name_commit(&mut self, i: usize, handles: &[document::Handle], new: &str) {
         if new.is_empty() {
             return;
         }
@@ -4998,7 +4998,7 @@ impl OpenCADStudio {
                 let Some((from, differs)) =
                     self.tabs[i].scene.document.get_entity(handle).and_then(
                         |entity| match entity {
-                            codec::EntityType::Insert(ins) => {
+                            document::EntityType::Insert(ins) => {
                                 let record = self.tabs[i]
                                     .scene
                                     .document
@@ -5044,9 +5044,9 @@ impl OpenCADStudio {
         }
         // New name → rename. Only when every selected insert references the
         // same definition; a mixed selection makes the rename target ambiguous.
-        let mut old: Option<Option<codec::Handle>> = None;
+        let mut old: Option<Option<document::Handle>> = None;
         for &handle in handles {
-            if let Some(codec::EntityType::Insert(ins)) =
+            if let Some(document::EntityType::Insert(ins)) =
                 self.tabs[i].scene.document.get_entity(handle)
             {
                 let (name, definition, _) = crate::app::control::block_ops::resolve_effective_block(
@@ -5106,7 +5106,7 @@ impl OpenCADStudio {
         };
         self.push_undo_snapshot(i, "ATTEDIT");
         for &handle in &handles {
-            if let Some(codec::EntityType::Insert(ins)) =
+            if let Some(document::EntityType::Insert(ins)) =
                 self.tabs[i].scene.document.get_entity_mut(handle)
             {
                 if let Some(attr) = ins.attributes.iter_mut().find(|a| a.tag == tag) {
@@ -5159,7 +5159,7 @@ impl OpenCADStudio {
     /// Open the attribute editor dialog for the given INSERT, loading a working
     /// copy of its attribute values. No-op (with a hint) when the block has no
     /// attributes. Entry points: double-clicking such a block, or ATTEDIT.
-    pub(crate) fn open_attribute_editor(&mut self, handle: codec::Handle) {
+    pub(crate) fn open_attribute_editor(&mut self, handle: document::Handle) {
         let i = self.active_tab;
         if self.reject_locked_edit(i, handle) {
             return;
@@ -5168,7 +5168,7 @@ impl OpenCADStudio {
         // Ok((block, rows)) to open; Err(msg) to report and stay closed. The
         // borrow of `doc` ends with this match, before any `self` mutation.
         let result = match doc.get_entity(handle) {
-            Some(codec::EntityType::Insert(ins)) if !ins.attributes.is_empty() => {
+            Some(document::EntityType::Insert(ins)) if !ins.attributes.is_empty() => {
                 // The prompt text lives on the block's ATTDEFs, not on the
                 // attribute instances — map tag → prompt from the definition.
                 let meta = block_attr_meta(doc, &ins.block_name);
@@ -5179,7 +5179,7 @@ impl OpenCADStudio {
                     .collect::<Vec<_>>();
                 Ok((ins.block_name.clone(), rows))
             }
-            Some(codec::EntityType::Insert(_)) => Err("ATTEDIT  This block has no attributes."),
+            Some(document::EntityType::Insert(_)) => Err("ATTEDIT  This block has no attributes."),
             _ => Err("ATTEDIT  Select a block with attributes."),
         };
         match result {
@@ -5248,7 +5248,7 @@ impl OpenCADStudio {
 
         self.push_undo_snapshot(i, "ATTEDIT");
         let mut changed = false;
-        if let Some(codec::EntityType::Insert(ins)) =
+        if let Some(document::EntityType::Insert(ins)) =
             self.tabs[i].scene.document.get_entity_mut(handle)
         {
             if ins.block_name == block && rows.len() == ins.attributes.len() {
@@ -5277,13 +5277,13 @@ pub(crate) struct BlockAttrMeta {
 /// Map each attribute tag to the metadata (prompt text, constant flag) declared on
 /// the block's matching ATTDEF. Tags with no definition are absent.
 pub(crate) fn block_attr_meta(
-    doc: &codec::Document,
+    doc: &document::Document,
     block_name: &str,
 ) -> rustc_hash::FxHashMap<String, BlockAttrMeta> {
     let mut map = rustc_hash::FxHashMap::default();
     if let Some(br) = doc.block_records.get(block_name) {
         for &eh in &br.entity_handles {
-            if let Some(codec::EntityType::AttributeDefinition(ad)) = doc.get_entity(eh) {
+            if let Some(document::EntityType::AttributeDefinition(ad)) = doc.get_entity(eh) {
                 map.insert(
                     ad.tag.clone(),
                     BlockAttrMeta {
@@ -5300,7 +5300,7 @@ pub(crate) fn block_attr_meta(
 /// Build the editor's working copy of one attribute. Angles are shown in
 /// degrees; numeric fields become strings so the user can type freely.
 pub(crate) fn attr_row_from_entity(
-    a: &codec::entities::AttributeEntity,
+    a: &document::entities::AttributeEntity,
     meta: &rustc_hash::FxHashMap<String, BlockAttrMeta>,
 ) -> AttrRow {
     let fmt = |v: f64| format!("{v}");
@@ -5331,7 +5331,7 @@ pub(crate) fn attr_row_from_entity(
 /// Write one edited row back onto its attribute; returns whether anything
 /// changed. Numeric fields are parsed (angles from degrees); an unparseable
 /// field is left as-is. Constant attributes ignore edits to their value.
-pub(crate) fn apply_attr_row(a: &mut codec::entities::AttributeEntity, row: &AttrRow) -> bool {
+pub(crate) fn apply_attr_row(a: &mut document::entities::AttributeEntity, row: &AttrRow) -> bool {
     let mut ch = false;
     if !row.is_constant && a.get_value() != row.value {
         a.set_value(row.value.clone());
@@ -5423,8 +5423,8 @@ mod transparency_property_tests {
         let mut app = OpenCADStudio::new_for_test();
         let i = app.active_tab;
         let handle = app
-            .commit_entity_handle(codec::EntityType::Hatch(Box::new(
-                codec::entities::Hatch::new(),
+            .commit_entity_handle(document::EntityType::Hatch(Box::new(
+                document::entities::Hatch::new(),
             )))
             .expect("solid hatch");
         app.tabs[i].scene.select_entity(handle, true);
@@ -5522,8 +5522,8 @@ mod transparency_property_tests {
 #[cfg(test)]
 mod layer_rename_tests {
     use crate::app::OpenCADStudio;
-    use codec::entities::Line;
-    use codec::{EntityType, Handle};
+    use document::entities::Line;
+    use document::{EntityType, Handle};
 
     fn app_with_editing_layer() -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
@@ -5737,7 +5737,7 @@ mod layer_name_target_tests {
 
     #[test]
     fn ribbon_layer_color_changes_only_named_layer_and_supports_undo() {
-        use codec::types::Color;
+        use document::types::Color;
         let mut app = app_with_zulu_alpha();
         let i = app.active_tab;
         let _ = app.update(Message::LayerSelect("ALPHA".into()));
@@ -5751,10 +5751,10 @@ mod layer_name_target_tests {
             .color;
         let old = app.tabs[i].scene.document.layers.get("ZULU").unwrap().color;
         let creation = app.tabs[i].scene.document.header.current_entity_color;
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.color = Color::Index(2);
         line.common.layer = "ZULU".into();
-        let handle = app.tabs[i].scene.add_entity(codec::EntityType::Line(line));
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(line));
         app.tabs[i].scene.select_entity(handle, true);
         let epoch = app.tabs[i].scene.geometry_epoch;
         let _ = app.update(Message::RibbonLayerColorChanged {
@@ -5960,7 +5960,7 @@ mod layer_name_target_tests {
         assert_eq!(app.tabs[i].scene.document.header.current_layer_name, current);
 
         for name in ["Defpoints", "XREF|WALLS"] {
-            let mut layer = codec::tables::layer::Layer::new(name);
+            let mut layer = document::tables::layer::Layer::new(name);
             layer.handle = app.tabs[i].scene.document.allocate_handle();
             let _ = app.tabs[i].scene.document.layers.add(layer);
             app.sync_layer_panel(i);
@@ -6138,14 +6138,14 @@ mod tablestyle_ribbon_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut extra = codec::objects::TableStyle::standard();
+        let mut extra = document::objects::TableStyle::standard();
         extra.name = "EXTRA".to_string();
         extra.handle = app.tabs[i].scene.document.allocate_handle();
         app.tabs[i]
             .scene
             .document
             .objects
-            .insert(extra.handle, codec::objects::ObjectType::TableStyle(extra));
+            .insert(extra.handle, document::objects::ObjectType::TableStyle(extra));
         app.tabs[i].dirty = false;
         let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
         assert_eq!(
@@ -6164,14 +6164,14 @@ mod tablestyle_ribbon_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut extra = codec::objects::TableStyle::standard();
+        let mut extra = document::objects::TableStyle::standard();
         extra.name = "EXTRA".to_string();
         extra.handle = app.tabs[i].scene.document.allocate_handle();
         app.tabs[i]
             .scene
             .document
             .objects
-            .insert(extra.handle, codec::objects::ObjectType::TableStyle(extra));
+            .insert(extra.handle, document::objects::ObjectType::TableStyle(extra));
         let _ = app.on_ribbon_style_changed(StyleKey::TableStyle, "EXTRA".to_string());
         app.open_table_insert();
         assert_eq!(
@@ -6203,14 +6203,14 @@ mod tablestyle_buffer_tests {
 #[cfg(test)]
 mod plot_style_ctb_guard_tests {
     use crate::app::OpenCADStudio;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
-    fn line_handle(app: &mut OpenCADStudio) -> codec::Handle {
+    fn line_handle(app: &mut OpenCADStudio) -> document::Handle {
         let mut line = Line::new();
         line.start = Vector3::ZERO;
         line.end = Vector3::new(1.0, 0.0, 0.0);
-        app.commit_entity_handle(codec::EntityType::Line(line))
+        app.commit_entity_handle(document::EntityType::Line(line))
             .expect("line should commit")
     }
 
@@ -6498,9 +6498,9 @@ mod tab_close_tests {
 mod grip_ctrl_cycle_tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::scene::model::object::GripMenuAction;
-    use codec::entities::LwPolyline;
-    use codec::types::Vector2;
-    use codec::{EntityType, Handle};
+    use document::entities::LwPolyline;
+    use document::types::Vector2;
+    use document::{EntityType, Handle};
     use glam::DVec3;
 
     fn app_with_polyline() -> (OpenCADStudio, usize, Handle) {
@@ -6649,8 +6649,8 @@ mod grip_ctrl_cycle_tests {
 
     #[test]
     fn ctrl_leaves_other_grips_alone() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;

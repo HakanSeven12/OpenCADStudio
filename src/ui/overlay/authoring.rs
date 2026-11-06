@@ -22,7 +22,7 @@ pub struct AuthoringVisualOptions {
 impl AuthoringVisualOptions {
     pub(crate) fn new(
         prefs: &crate::app::settings::BlockEditorPreferences,
-        doc: &codec::Document,
+        doc: &document::Document,
         bg: [f32; 4],
     ) -> Self {
         let foreground = if bg[0] * 0.2126 + bg[1] * 0.7152 + bg[2] * 0.0722 < 0.5 {
@@ -34,7 +34,7 @@ impl AuthoringVisualOptions {
             .layers
             .get(&doc.header.current_layer_name)
             .and_then(|l| match l.color {
-                codec::types::Color::Index(7) => None,
+                document::types::Color::Index(7) => None,
                 c => c.rgb(),
             })
             .map(|(r, g, b)| Color::from_rgb8(r, g, b))
@@ -86,7 +86,7 @@ pub(crate) fn display_color(value: &str, by_layer: Color, foreground: Color) -> 
                 .collect();
             Color::from_rgb8(channels[0], channels[1], channels[2])
         }
-        _ => codec::types::aci_table::aci_to_rgb(value.parse().unwrap_or(7))
+        _ => document::types::aci_table::aci_to_rgb(value.parse().unwrap_or(7))
             .map(|(r, g, b)| Color::from_rgb8(r, g, b))
             .unwrap_or(foreground),
     }

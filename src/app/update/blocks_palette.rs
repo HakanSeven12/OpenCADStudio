@@ -437,16 +437,16 @@ impl OpenCADStudio {
     /// drawing; with `redefine` an existing definition takes the source's.
     fn import_block_definition(
         &mut self,
-        source: &codec::Document,
+        source: &document::Document,
         name: &str,
         redefine: bool,
     ) -> Result<(), String> {
         if source.block_records.get(name).is_none() {
             return Err(crate::tf!("Block \"{}\" not found.", name).into_owned());
         }
-        let probe = codec::EntityType::Insert(codec::entities::Insert::new(
+        let probe = document::EntityType::Insert(document::entities::Insert::new(
             name.to_string(),
-            codec::types::Vector3::ZERO,
+            document::types::Vector3::ZERO,
         ));
         let deps = crate::app::ClipboardDeps::capture(source, std::slice::from_ref(&probe));
         let i = self.active_tab;
@@ -562,7 +562,7 @@ impl OpenCADStudio {
                     .document
                     .entities()
                     .find_map(|e| match e {
-                        codec::EntityType::Insert(ins)
+                        document::EntityType::Insert(ins)
                             if ins.block_name.eq_ignore_ascii_case(&name) =>
                         {
                             Some(ins.common.handle)
@@ -582,12 +582,12 @@ impl OpenCADStudio {
                 Tab::Current => {
                     let name = item.name();
                     let i = self.active_tab;
-                    let open_edits: Vec<codec::Handle> = self.tabs[i]
+                    let open_edits: Vec<document::Handle> = self.tabs[i]
                         .block_edits
                         .iter()
                         .map(|session| session.br_handle)
                         .collect();
-                    self.push_undo_snapshot(i, crate::app::document::HistoryLabel::formatted(format!("Delete block {name}"), "delete-block", name.to_owned().into()));
+                    self.push_undo_snapshot(i, crate::app::tab_document::HistoryLabel::formatted(format!("Delete block {name}"), "delete-block", name.to_owned().into()));
                     let outcome = crate::scene::block_service::delete(
                         &mut self.tabs[i].scene,
                         &name,
@@ -937,8 +937,8 @@ impl OpenCADStudio {
 /// layout's, whose contents are the drawing itself and can be large. Unlike
 /// `Scene::custom_block_names`, this keeps anonymous records, because a
 /// generated record can hold a named one and so carries its changes.
-fn palette_records(doc: &codec::Document) -> impl Iterator<Item = &codec::tables::BlockRecord> {
-    use codec::TableEntry;
+fn palette_records(doc: &document::Document) -> impl Iterator<Item = &document::tables::BlockRecord> {
+    use document::TableEntry;
     doc.block_records
         .iter()
         .filter(|br| !br.is_standard() && !br.is_layout())
@@ -947,7 +947,7 @@ fn palette_records(doc: &codec::Document) -> impl Iterator<Item = &codec::tables
 /// `changed` (upper-cased block names) plus every block of `doc` holding one
 /// of them, directly or through other blocks.
 fn with_holding_blocks(
-    doc: &codec::Document,
+    doc: &document::Document,
     mut changed: std::collections::HashSet<String>,
 ) -> std::collections::HashSet<String> {
     let uses: Vec<(String, Vec<String>)> = palette_records(doc)
@@ -955,7 +955,7 @@ fn with_holding_blocks(
             let used = doc
                 .entities_in_block(&br.name)
                 .filter_map(|e| match e {
-                    codec::EntityType::Insert(insert) => {
+                    document::EntityType::Insert(insert) => {
                         Some(insert.block_name.to_ascii_uppercase())
                     }
                     _ => None,
@@ -980,8 +980,8 @@ fn with_holding_blocks(
 /// The blocks of `after` the palette lists whose record or contents differ
 /// from `before`'s (new ones included).
 pub(crate) fn changed_block_names(
-    before: &codec::Document,
-    after: &codec::Document,
+    before: &document::Document,
+    after: &document::Document,
 ) -> Vec<String> {
     palette_records(after)
         .filter(|br| {

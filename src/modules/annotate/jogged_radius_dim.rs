@@ -1,6 +1,6 @@
-use codec::entities::{Dimension, DimensionLargeRadial};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::{Dimension, DimensionLargeRadial};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{

@@ -31,7 +31,7 @@ impl OpenCADStudio {
     pub(super) fn start_underlay_attach(
         &mut self,
         i: usize,
-        kind: codec::entities::UnderlayType,
+        kind: document::entities::UnderlayType,
         file: &str,
     ) {
         use crate::command::CadCommand;
@@ -73,19 +73,19 @@ impl OpenCADStudio {
                 Some(Task::none())
             }
             ("DWFATTACH", true) if dialog => Some(Task::done(Message::UnderlayAttachPick(
-                codec::entities::UnderlayType::Dwf,
+                document::entities::UnderlayType::Dwf,
             ))),
             ("DGNATTACH", true) if dialog => Some(Task::done(Message::UnderlayAttachPick(
-                codec::entities::UnderlayType::Dgn,
+                document::entities::UnderlayType::Dgn,
             ))),
             // A file after DWFATTACH / DGNATTACH, or the - forms, go on the
             // command line.
             ("DWFATTACH" | "-DWFATTACH", _) => {
-                self.start_underlay_attach(i, codec::entities::UnderlayType::Dwf, rest);
+                self.start_underlay_attach(i, document::entities::UnderlayType::Dwf, rest);
                 Some(Task::none())
             }
             ("DGNATTACH" | "-DGNATTACH", _) => {
-                self.start_underlay_attach(i, codec::entities::UnderlayType::Dgn, rest);
+                self.start_underlay_attach(i, document::entities::UnderlayType::Dgn, rest);
                 Some(Task::none())
             }
             // POINTCLOUDATTACH picks the file; with a file, or as
@@ -288,13 +288,13 @@ impl OpenCADStudio {
         #[cfg(not(target_arch = "wasm32"))]
         if let Ok(source) = crate::io::load_file(std::path::Path::new(path)) {
             let owner = source.header.model_space_block_handle;
-            let entities: Vec<codec::EntityType> = source
+            let entities: Vec<document::EntityType> = source
                 .entities()
                 .filter(|e| e.common().owner_handle == owner)
                 .filter(|e| {
                     !matches!(
                         e,
-                        codec::EntityType::Block(_) | codec::EntityType::BlockEnd(_)
+                        document::EntityType::Block(_) | document::EntityType::BlockEnd(_)
                     )
                 })
                 .take(MAX_PREVIEW_ENTITIES + 1)
@@ -317,7 +317,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         request: XrefAttachRequest,
-        mut entity: codec::EntityType,
+        mut entity: document::EntityType,
     ) {
         let pending = self.begin_undo(i, "XATTACH", 1, false);
         let host = self.tabs[i].current_path.clone();
@@ -325,7 +325,7 @@ impl OpenCADStudio {
         if host.is_none() && request.path_type == Pathtype::Relative {
             self.tabs[i].xref_relative_on_save.insert(name.clone());
         }
-        if let codec::EntityType::Insert(insert) = &mut entity {
+        if let document::EntityType::Insert(insert) = &mut entity {
             insert.block_name = name;
         }
         // Resolving merged the reference's layers and linetypes — mirror
@@ -400,7 +400,7 @@ impl OpenCADStudio {
             Message::UnderlayAttachPick(kind) => Task::perform(
                 async move {
                     let (title, filter, extensions): (&str, &str, &[&str]) = match kind {
-                        codec::entities::UnderlayType::Dgn => {
+                        document::entities::UnderlayType::Dgn => {
                             ("Select DGN File", "DGN Files", &["dgn"])
                         }
                         _ => ("Select DWF File", "DWF Files", &["dwf", "dwfx"]),
@@ -477,9 +477,9 @@ impl OpenCADStudio {
                     },
                     "dwf" | "dwfx" | "dgn" => {
                         let kind = if ext == "dgn" {
-                            codec::entities::UnderlayType::Dgn
+                            document::entities::UnderlayType::Dgn
                         } else {
-                            codec::entities::UnderlayType::Dwf
+                            document::entities::UnderlayType::Dwf
                         };
                         let path = path.to_string_lossy().into_owned();
                         match std::fs::read(&path) {

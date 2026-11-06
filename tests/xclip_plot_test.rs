@@ -1,8 +1,8 @@
-use codec::entities::{Insert, Line};
-use codec::objects::{Dictionary, DictionaryWithDefault, ObjectType, SpatialFilter};
-use codec::tables::BlockRecord;
-use codec::types::{Matrix4, Vector2, Vector3};
-use codec::EntityType;
+use document::entities::{Insert, Line};
+use document::objects::{Dictionary, DictionaryWithDefault, ObjectType, SpatialFilter};
+use document::tables::BlockRecord;
+use document::types::{Matrix4, Vector2, Vector3};
+use document::EntityType;
 use OpenCADStudio::scene::pick::xclip::{insert_spatial_filter, world_clip_polygon_for_transform};
 use OpenCADStudio::scene::Scene;
 

@@ -3,9 +3,9 @@
 //! external references stay, and one Undo brings everything back (#2413).
 
 use super::*;
-use codec::entities::{AttributeEntity, EntityType, Insert, MText, Text};
-use codec::tables::{BlockRecord, TextStyle};
-use codec::types::{Handle, Vector3};
+use document::entities::{AttributeEntity, EntityType, Insert, MText, Text};
+use document::tables::{BlockRecord, TextStyle};
+use document::types::{Handle, Vector3};
 
 /// A clean drawing with the style "Notes" (height 2.5, width 1).
 fn app_with_notes() -> OpenCADStudio {

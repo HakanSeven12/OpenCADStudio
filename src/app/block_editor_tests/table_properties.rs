@@ -59,7 +59,7 @@ fn table_fixture_with_limits(
     )
     .unwrap();
     // Properties remains usable when the table's display grip is disabled.
-    let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[source]
+    let document::objects::ObjectType::DynamicBlock(object) = app.tabs[source]
         .scene
         .document
         .objects
@@ -68,12 +68,12 @@ fn table_fixture_with_limits(
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PropertiesTable(table) = &mut object.data else {
+    let document::objects::DynamicBlockData::PropertiesTable(table) = &mut object.data else {
         panic!()
     };
     table.parameter.property_count = 0;
     if limits {
-        let codec::objects::ObjectType::DynamicBlock(object) = app.tabs[source]
+        let document::objects::ObjectType::DynamicBlock(object) = app.tabs[source]
             .scene
             .document
             .objects
@@ -82,7 +82,7 @@ fn table_fixture_with_limits(
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
+        let document::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
             panic!()
         };
         parameter.value_set.flags = 8;
@@ -267,12 +267,12 @@ fn block_table_properties_reject_stale_hidden_locked_and_invalid_choices() {
     assert_eq!(app.tabs[i].scene.document, edited);
     app.refresh_properties();
     let key = row(&app).0;
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         app.tabs[i].scene.document.objects.get_mut(&handle).unwrap()
     else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::PropertiesTable(table) = &mut object.data else {
+    let document::objects::DynamicBlockData::PropertiesTable(table) = &mut object.data else {
         panic!()
     };
     table.parameter.parameter.show_properties = false;
@@ -655,10 +655,10 @@ fn a_value_list_is_not_painted_when_its_grip_is_gone() {
         "the open list hangs from the grip while the grip is drawn"
     );
     let doc = &mut app.tabs[i].scene.document;
-    let Some(codec::objects::ObjectType::DynamicBlock(native)) = doc.objects.get_mut(&table) else {
+    let Some(document::objects::ObjectType::DynamicBlock(native)) = doc.objects.get_mut(&table) else {
         panic!("the fixture's table is a dynamic block object");
     };
-    let codec::objects::DynamicBlockData::PropertiesTable(rows) = &mut native.data else {
+    let document::objects::DynamicBlockData::PropertiesTable(rows) = &mut native.data else {
         panic!("the table object holds the properties table");
     };
     rows.parameter.property_count = 0;
@@ -771,7 +771,7 @@ fn the_value_list_closes_when_its_drawing_tab_is_left() {
     let (mut app, _, def, _, _, table) = table_fixture(false);
     let home = app.active_tab;
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     let other = app.tabs.len() - 1;
     crate::scene::block_grips::config::set(&mut app.tabs[home].scene.document, def, table, Some(1))
         .unwrap();
@@ -793,7 +793,7 @@ fn the_value_list_closes_when_its_drawing_tab_is_closed() {
     let (mut app, _, def, _, _, table) = table_fixture(false);
     let home = app.active_tab;
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     crate::scene::block_grips::config::set(&mut app.tabs[home].scene.document, def, table, Some(1))
         .unwrap();
     app.refresh_properties();
@@ -916,12 +916,12 @@ fn block_table_row_history_preserves_transported_linear_frames() {
                 Vector3::new(5., 7., 0.),
             )
             .unwrap();
-            let codec::objects::ObjectType::DynamicBlock(object) =
+            let document::objects::ObjectType::DynamicBlock(object) =
                 doc.objects.get_mut(&child).unwrap()
             else {
                 panic!()
             };
-            let codec::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
+            let document::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
             else {
                 panic!()
             };
@@ -1021,7 +1021,7 @@ fn block_table_row_history_preserves_transported_linear_frames() {
 fn drawing1_dxf_and_berb_dwg_stretch_grips_evaluate_without_error() {
     let dxf_path = r"C:\Users\Atelier La Medina\AppData\Local\Temp\Rar$DRa40168.24845.rartemp\Drawing1.dxf";
     if std::path::Path::new(dxf_path).exists() {
-        let doc = codec::DxfReader::from_file(std::path::Path::new(dxf_path))
+        let doc = document::DxfReader::from_file(std::path::Path::new(dxf_path))
             .unwrap()
             .read()
             .unwrap();
@@ -1061,7 +1061,7 @@ fn drawing1_dxf_and_berb_dwg_stretch_grips_evaluate_without_error() {
 
     let dwg_path = r"C:\Users\Atelier La Medina\Desktop\berb.dwg";
     if std::path::Path::new(dwg_path).exists() {
-        let doc = codec::DwgReader::from_file(std::path::Path::new(dwg_path))
+        let doc = document::DwgReader::from_file(std::path::Path::new(dwg_path))
             .unwrap()
             .read()
             .unwrap();

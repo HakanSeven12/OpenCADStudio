@@ -1,7 +1,7 @@
 //! Definition-level annotation metadata shared by block creation and editing.
 
-use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
-use codec::{Document, EntityType, Handle};
+use document::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+use document::{Document, EntityType, Handle};
 
 fn flag(data: Option<&ExtendedData>, app: &str) -> Option<bool> {
     data?
@@ -37,7 +37,7 @@ pub(crate) fn hyperlink(document: &Document, name: &str) -> (String, String) {
 
 fn ensure_application(document: &mut Document, app: &str) {
     if !document.app_ids.contains(app) {
-        let mut entry = codec::tables::AppId::new(app);
+        let mut entry = document::tables::AppId::new(app);
         entry.handle = document.allocate_handle();
         document
             .app_ids

@@ -4,9 +4,9 @@
 
 use super::text_style_users::{Property, StyleChange};
 use super::*;
-use codec::entities::{EntityType, MText, Text};
-use codec::tables::TextStyle;
-use codec::types::{Handle, Vector3};
+use document::entities::{EntityType, MText, Text};
+use document::tables::TextStyle;
+use document::types::{Handle, Vector3};
 use iced_test::Simulator;
 
 /// A clean drawing with the styles `names`, each height 2.5 and width 1.

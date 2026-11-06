@@ -1,13 +1,13 @@
 //! Maps parametric constraints to the drawing format's associative object graph.
 
-use codec::objects::{
+use document::objects::{
     Assoc2dConstraintGroup, AssocAction, AssocActionDependency, AssocConstraintNode,
     AssocConstraintNodeData, AssocDependency, AssocDimDependencyBody, AssocEvalValue,
     AssocEvalVariant, AssocGeomDependency, AssocNetwork, AssocPersistentSubentId,
     AssocValueDependency, AssocVariable, AssociativeData, AssociativeObject, ObjectType,
 };
-use codec::types::{Handle, Vector3};
-use codec::{Document, EntityType};
+use document::types::{Handle, Vector3};
+use document::{Document, EntityType};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -1471,14 +1471,14 @@ fn ensure_associative_classes_registered(document: &mut Document) {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
         }
-        document.classes.add_or_update(codec::classes::DxfClass {
+        document.classes.add_or_update(document::classes::DxfClass {
             dxf_name: dxf_name.to_string(),
             cpp_class_name: cpp_class_name.to_string(),
             application_name: "ObjectDBX Classes".to_string(),
-            proxy_flags: codec::classes::ProxyFlags(
-                codec::classes::ProxyFlags::ERASE_ALLOWED.0
-                    | codec::classes::ProxyFlags::CLONING_ALLOWED.0
-                    | codec::classes::ProxyFlags::DISABLES_PROXY_WARNING_DIALOG.0,
+            proxy_flags: document::classes::ProxyFlags(
+                document::classes::ProxyFlags::ERASE_ALLOWED.0
+                    | document::classes::ProxyFlags::CLONING_ALLOWED.0
+                    | document::classes::ProxyFlags::DISABLES_PROXY_WARNING_DIALOG.0,
             ),
             instance_count: 0,
             was_zombie: false,
@@ -1551,7 +1551,7 @@ fn ensure_global_network_dictionary(document: &mut Document) -> Handle {
 
     remove_dictionary_entry(document, root_handle, NETWORK_DICTIONARY_KEY);
     let dictionary_handle = document.allocate_handle();
-    let mut dictionary = codec::objects::Dictionary::new();
+    let mut dictionary = document::objects::Dictionary::new();
     dictionary.handle = dictionary_handle;
     dictionary.owner = root_handle;
     dictionary.reactors.push(root_handle);
@@ -2730,8 +2730,8 @@ fn pending_swept_surfaces(document: &Document) -> Vec<(Handle, Handle, Handle)> 
     let mut pending = document
         .entities()
         .filter(|entity| {
-            matches!(entity, codec::EntityType::Surface(surface)
-            if matches!(surface.surface_data, codec::entities::SurfaceData::Swept { .. }))
+            matches!(entity, document::EntityType::Surface(surface)
+            if matches!(surface.surface_data, document::entities::SurfaceData::Swept { .. }))
         })
         .filter_map(|entity| {
             let (profile, path) = sweep_model::sweep_sources(entity)?;
@@ -2763,7 +2763,7 @@ fn pending_source_surfaces(
         .collect();
     let mut pending = document
         .entities()
-        .filter(|entity| matches!(entity, codec::EntityType::Surface(_)))
+        .filter(|entity| matches!(entity, document::EntityType::Surface(_)))
         .filter_map(|entity| {
             let sources = surface_sources::surface_sources(entity)?;
             let surface = entity.common().handle;
@@ -2812,7 +2812,7 @@ fn edge_action_param(
     read: Handle,
     (action_type, subcurve_kind, curve): crate::scene::model::sweep_model::AssocCurve,
 ) -> AssociativeData {
-    use codec::objects::{
+    use document::objects::{
         AssocActionParam, AssocEdgeActionParam, AssocSingleDependencyActionParam,
     };
     AssociativeData::EdgeActionParam(AssocEdgeActionParam {
@@ -2919,7 +2919,7 @@ fn region_subent_entries(loops: &[usize], step: i32, first_id: i32) -> Vec<i32> 
 /// Returns the edges' ids, or `None` when the drawing's manager has a form
 /// this cannot extend.
 fn register_region_subents(document: &mut Document, loops: &[usize]) -> Option<Vec<i32>> {
-    use codec::objects::AssocPersSubentManager;
+    use document::objects::AssocPersSubentManager;
     let root = document.header.named_objects_dict_handle;
     let existing = match document.objects.get(&root) {
         Some(ObjectType::Dictionary(dictionary)) => dictionary.get(SUBENT_MANAGER_KEY),
@@ -3028,7 +3028,7 @@ fn source_reads(
         document,
         source,
         "ACAD_STEPID",
-        Some(vec![codec::xdata::XDataValue::Integer32(ids.first()? - 1)]),
+        Some(vec![document::xdata::XDataValue::Integer32(ids.first()? - 1)]),
     );
     let curves = loops.into_iter().flatten().collect::<Vec<_>>();
     let pairs = curves
@@ -3084,7 +3084,7 @@ fn materialize_source_surface_actions(
     first_index: i32,
 ) -> Vec<Handle> {
     use crate::scene::model::surface_sources::SurfaceSources;
-    use codec::objects::*;
+    use document::objects::*;
     let mut added = Vec::new();
     for (surface, sources) in pending.iter() {
         let surface = *surface;
@@ -3384,17 +3384,17 @@ fn materialize_swept_surface_actions(
     first_index: i32,
 ) -> Vec<Handle> {
     use crate::scene::model::sweep_model;
-    use codec::objects::*;
+    use document::objects::*;
     let mut added = Vec::new();
     for (surface, profile, path) in pending.iter().copied() {
         let document = &*allocator.document;
         let Some(surface_entity) = document.get_entity(surface) else {
             continue;
         };
-        let codec::EntityType::Surface(surface_value) = surface_entity else {
+        let document::EntityType::Surface(surface_value) = surface_entity else {
             continue;
         };
-        let codec::entities::SurfaceData::Swept { options, .. } = &surface_value.surface_data
+        let document::entities::SurfaceData::Swept { options, .. } = &surface_value.surface_data
         else {
             continue;
         };
@@ -4056,7 +4056,7 @@ fn materialize_scope(
     // under the owner's extension dictionary; its parameter commands do not
     // find a network stored directly there.
     let holder_handle = allocator.document.allocate_handle();
-    let mut holder = codec::objects::Dictionary::new();
+    let mut holder = document::objects::Dictionary::new();
     holder.handle = holder_handle;
     holder.owner = dictionary_handle;
     holder.duplicate_cloning = 1;
@@ -4467,9 +4467,9 @@ mod tests {
     };
     use super::*;
     use crate::scene::ChangeKind;
-    use codec::entities::{Arc, Circle, Insert, Line, LwPolyline, Ray, Spline, XLine};
-    use codec::tables::BlockRecord;
-    use codec::types::Vector2;
+    use document::entities::{Arc, Circle, Insert, Line, LwPolyline, Ray, Spline, XLine};
+    use document::tables::BlockRecord;
+    use document::types::Vector2;
 
     fn line_entity(scene: &mut Scene, start: (f64, f64), end: (f64, f64)) -> Handle {
         scene.add_entity(EntityType::Line(Line::from_points(
@@ -5059,7 +5059,7 @@ mod tests {
         let mut block = BlockRecord::new("fixture");
         block.handle = scene.document.allocate_handle();
         scene.document.block_records.add(block).unwrap();
-        let point = scene.add_entity(EntityType::Point(codec::entities::Point::at(Vector3::new(
+        let point = scene.add_entity(EntityType::Point(document::entities::Point::at(Vector3::new(
             1.0, 2.0, 0.0,
         ))));
         let insert = scene.add_entity(EntityType::Insert(Insert::new(
@@ -5740,7 +5740,7 @@ mod tests {
         for ext in ["dxf", "dwg"] {
             let mut scene = Scene::new();
             let ellipse = scene.add_entity(EntityType::Ellipse(
-                codec::entities::Ellipse::from_center_axes(
+                document::entities::Ellipse::from_center_axes(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(4.0, 0.0, 0.0),
                     0.5,

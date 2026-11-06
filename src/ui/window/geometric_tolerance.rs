@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use codec::Handle;
+use document::Handle;
 use iced::widget::{button, checkbox, column, container, row, text, text_input, Space};
 use iced::{Border, Element, Fill, Length, Theme};
 

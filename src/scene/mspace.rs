@@ -14,7 +14,7 @@ impl Scene {
             None => return paper_pt,
         };
         let vp = match self.document.get_entity(vp_handle) {
-            Some(codec::EntityType::Viewport(vp)) => vp,
+            Some(document::EntityType::Viewport(vp)) => vp,
             _ => return paper_pt,
         };
         // Uses the viewport's own `view_target` — kept valid by
@@ -48,7 +48,7 @@ impl Scene {
             None => return model_pt,
         };
         let vp = match self.document.get_entity(vp_handle) {
-            Some(codec::EntityType::Viewport(vp)) => vp,
+            Some(document::EntityType::Viewport(vp)) => vp,
             _ => return model_pt,
         };
         let scale = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
@@ -280,8 +280,8 @@ mod viewport_zoom_tests {
     #[test]
     fn a_hard_notch_keeps_shrinking_the_active_viewport() {
         let mut scene = Scene::new();
-        let mut viewport = codec::entities::Viewport::new();
-        viewport.center = codec::types::Vector3::new(0.0, 0.0, 0.0);
+        let mut viewport = document::entities::Viewport::new();
+        viewport.center = document::types::Vector3::new(0.0, 0.0, 0.0);
         viewport.width = 100.0;
         viewport.height = 100.0;
         viewport.view_height = 200.0;
@@ -317,7 +317,7 @@ mod clip_tests {
     #[test]
     fn concave_clip_boundary_rejects_the_notch() {
         let mut scene = Scene::new();
-        let mut poly = codec::entities::LwPolyline::from_points(
+        let mut poly = document::entities::LwPolyline::from_points(
             [
                 (0.0, 0.0),
                 (10.0, 0.0),
@@ -326,13 +326,13 @@ mod clip_tests {
                 (5.0, 10.0),
                 (0.0, 10.0),
             ]
-            .map(|(x, y)| codec::types::Vector2::new(x, y))
+            .map(|(x, y)| document::types::Vector2::new(x, y))
             .to_vec(),
         );
         poly.is_closed = true;
         let clip = scene.add_entity(EntityType::LwPolyline(poly));
-        let mut viewport = codec::entities::Viewport::new();
-        viewport.center = codec::types::Vector3::new(5.0, 5.0, 0.0);
+        let mut viewport = document::entities::Viewport::new();
+        viewport.center = document::types::Vector3::new(5.0, 5.0, 0.0);
         viewport.width = 20.0;
         viewport.height = 20.0;
         viewport.clip_boundary_handle = clip;
@@ -368,7 +368,7 @@ impl Scene {
             return;
         };
         let eff_h = cam.ortho_size() as f64 * 2.0;
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             vp.view_target.x = cam.target.x;
             vp.view_target.y = cam.target.y;
             vp.view_center.x = 0.0;
@@ -405,7 +405,7 @@ impl Scene {
             return false;
         };
         let (width, height, locked) = match self.document.get_entity(viewport_handle) {
-            Some(codec::EntityType::Viewport(viewport)) => {
+            Some(document::EntityType::Viewport(viewport)) => {
                 (viewport.width, viewport.height, viewport.status.locked)
             }
             _ => return false,
@@ -423,7 +423,7 @@ impl Scene {
         let pixels = (bordered && paper_wpp.is_finite() && paper_wpp > 0.0)
             .then(|| ((width / paper_wpp) as f32, (height / paper_wpp) as f32));
         camera.fit_to_bounds_bordered_f32(min, max, (width / height.max(1e-9)) as f32, pixels);
-        if let Some(codec::EntityType::Viewport(viewport)) =
+        if let Some(document::EntityType::Viewport(viewport)) =
             self.document.get_entity_mut(viewport_handle)
         {
             viewport.view_target.x = camera.target.x;
@@ -457,7 +457,7 @@ impl Scene {
 
         // Read viewport dims (immutable borrow ends here).
         let (view_height, vp_height, locked) = match self.document.get_entity(vp_handle) {
-            Some(codec::EntityType::Viewport(vp)) => {
+            Some(document::EntityType::Viewport(vp)) => {
                 (vp.view_height as f32, vp.height as f32, vp.status.locked)
             }
             _ => return,
@@ -483,7 +483,7 @@ impl Scene {
         let cam_up = vp_cam.rotation * glam::Vec3::Y;
         let model_delta = -(cam_right * screen_dx * speed) + (cam_up * screen_dy * speed);
 
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             vp.view_target.x += model_delta.x as f64;
             vp.view_target.y += model_delta.y as f64;
             vp.view_target.z += model_delta.z as f64;
@@ -505,7 +505,7 @@ impl Scene {
             Some(h) => h,
             None => return,
         };
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -562,7 +562,7 @@ impl Scene {
         // negating Y here made each drag step read back a Y-mirrored camera,
         // flipping the model between a rotation and its opposite every frame.
         let eye = cam.rotation * glam::Vec3::Z;
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -608,7 +608,7 @@ impl Scene {
             .normalize_or(glam::Vec3::Y);
         let roll = up0.cross(desired_up).dot(dir).atan2(up0.dot(desired_up));
         let twist = -roll as f64;
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return;
             }
@@ -647,7 +647,7 @@ impl Scene {
         let roll = up0.cross(desired_up).dot(dir).atan2(up0.dot(desired_up));
         let twist = -roll as f64;
         let mut changed = false;
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(vp_handle) {
             if vp.status.locked {
                 return false;
             }
@@ -667,10 +667,10 @@ impl Scene {
 
     /// Render mode of the active paper-space viewport, or `None` when no
     /// viewport is active (PSPACE / model layout).
-    pub fn active_viewport_render_mode(&self) -> Option<codec::entities::ViewportRenderMode> {
+    pub fn active_viewport_render_mode(&self) -> Option<document::entities::ViewportRenderMode> {
         let h = self.active_viewport?;
         match self.document.get_entity(h) {
-            Some(codec::EntityType::Viewport(vp)) => Some(vp.render_mode),
+            Some(document::EntityType::Viewport(vp)) => Some(vp.render_mode),
             _ => None,
         }
     }
@@ -680,12 +680,12 @@ impl Scene {
     /// so the caller can fall back to the model-layout render mode.
     pub fn set_active_viewport_render_mode(
         &mut self,
-        mode: codec::entities::ViewportRenderMode,
+        mode: document::entities::ViewportRenderMode,
     ) -> bool {
         let Some(h) = self.active_viewport else {
             return false;
         };
-        if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(h) {
+        if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(h) {
             vp.render_mode = mode;
             true
         } else {
@@ -694,7 +694,7 @@ impl Scene {
     }
 
     /// Visual style of the active Model tile (for the render-mode picker).
-    pub fn active_model_tile_render_mode(&self) -> codec::entities::ViewportRenderMode {
+    pub fn active_model_tile_render_mode(&self) -> document::entities::ViewportRenderMode {
         let tiles = self.model_tiles.borrow();
         let active = self
             .active_model_tile
@@ -703,11 +703,11 @@ impl Scene {
         tiles
             .get(active)
             .map(|t| t.render_mode)
-            .unwrap_or(codec::entities::ViewportRenderMode::Wireframe2D)
+            .unwrap_or(document::entities::ViewportRenderMode::Wireframe2D)
     }
 
     /// Set only the active Model tile's render mode. Other tiles keep theirs.
-    pub fn set_active_model_tile_render_mode(&self, mode: codec::entities::ViewportRenderMode) {
+    pub fn set_active_model_tile_render_mode(&self, mode: document::entities::ViewportRenderMode) {
         let mut tiles = self.model_tiles.borrow_mut();
         let active = self
             .active_model_tile
@@ -750,7 +750,7 @@ impl Scene {
 
     pub(crate) fn navigation_locked(&self) -> bool {
         self.active_viewport.is_some_and(|h| {
-            !matches!(self.document.get_entity(h), Some(codec::EntityType::Viewport(v)) if !v.status.locked)
+            !matches!(self.document.get_entity(h), Some(document::EntityType::Viewport(v)) if !v.status.locked)
         })
     }
 
@@ -763,7 +763,7 @@ impl Scene {
         let is_viewport = |handle: &Handle| {
             matches!(
                 self.document.get_entity(*handle),
-                Some(codec::EntityType::Viewport(vp))
+                Some(document::EntityType::Viewport(vp))
                     if !Self::is_sheet_viewport(&self.document, vp)
             )
         };
@@ -781,7 +781,7 @@ impl Scene {
             handles.iter().all(|handle| {
                 matches!(
                     self.document.get_entity(*handle),
-                    Some(codec::EntityType::Viewport(vp)) if vp.status.locked
+                    Some(document::EntityType::Viewport(vp)) if vp.status.locked
                 )
             })
         })
@@ -794,7 +794,7 @@ impl Scene {
             return false;
         }
         if let Some(handle) = self.active_viewport {
-            if let Some(codec::EntityType::Viewport(vp)) = self.document.get_entity_mut(handle) {
+            if let Some(document::EntityType::Viewport(vp)) = self.document.get_entity_mut(handle) {
                 vp.view_target.x = camera.target.x;
                 vp.view_target.y = camera.target.y;
                 vp.view_target.z = camera.target.z;

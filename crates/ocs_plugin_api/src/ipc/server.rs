@@ -3,17 +3,17 @@
 use crate::host::HostApi;
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
-fn addressable_document_snapshot(host: &dyn HostApi) -> codec::Document {
+fn addressable_document_snapshot(host: &dyn HostApi) -> document::Document {
     let mut snapshot = host.document().clone();
     let attributes = host
         .document()
         .entities()
         .filter_map(|entity| match entity {
-            codec::EntityType::Insert(insert) => Some(insert.attributes.clone()),
+            document::EntityType::Insert(insert) => Some(insert.attributes.clone()),
             _ => None,
         })
         .flatten()
-        .map(codec::EntityType::AttributeEntity)
+        .map(document::EntityType::AttributeEntity)
         .collect::<Vec<_>>();
     for attribute in attributes {
         // Attribute entities remain canonical children of INSERT in the host

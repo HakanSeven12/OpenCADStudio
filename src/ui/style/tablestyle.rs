@@ -7,7 +7,7 @@
 use crate::app::Message;
 use crate::t;
 use crate::ui::style::common::muted_style;
-use codec::objects::{NamedTableCellStyle, TableCellStyleData, TableStyle, TABLE_GRID_EDGES};
+use document::objects::{NamedTableCellStyle, TableCellStyleData, TableStyle, TABLE_GRID_EDGES};
 use iced::widget::{button, canvas, checkbox, column, pick_list, row, text, text_input, Column};
 use iced::{mouse, Color, Element, Length, Point, Rectangle, Size, Theme};
 use std::borrow::Cow;
@@ -81,10 +81,10 @@ pub struct TableStyleView<'a> {
     pub cell_vmargin: &'a str,
     pub cell_format: &'a str,
     pub edge_spacing: &'a [String; 6],
-    pub text_styles: Vec<(String, codec::Handle)>,
-    pub linetypes: Vec<(String, codec::Handle)>,
+    pub text_styles: Vec<(String, document::Handle)>,
+    pub linetypes: Vec<(String, document::Handle)>,
     /// The style's starting table.
-    pub template: Option<&'a codec::entities::Table>,
+    pub template: Option<&'a document::entities::Table>,
     pub rename_active: Option<&'a str>,
     pub rename_buf: &'a str,
     pub color_open: Option<&'static str>,
@@ -93,9 +93,9 @@ pub struct TableStyleView<'a> {
 /// The name a cell style shows: the three row styles by their role.
 fn cell_style_label(name: &str) -> Cow<'static, str> {
     match name {
-        codec::objects::TITLE_CELL_STYLE => t!("Title"),
-        codec::objects::HEADER_CELL_STYLE => t!("Header"),
-        codec::objects::DATA_CELL_STYLE => t!("Data"),
+        document::objects::TITLE_CELL_STYLE => t!("Title"),
+        document::objects::HEADER_CELL_STYLE => t!("Header"),
+        document::objects::DATA_CELL_STYLE => t!("Data"),
         other => Cow::Owned(other.to_string()),
     }
 }
@@ -144,8 +144,8 @@ fn line_weight_choices() -> Vec<EnumChoice> {
     list
 }
 
-fn edge_color_code(color: &codec::types::Color) -> String {
-    use codec::types::Color as C;
+fn edge_color_code(color: &document::types::Color) -> String {
+    use document::types::Color as C;
     match color {
         C::ByBlock => "0".into(),
         C::ByLayer => "256".into(),
@@ -192,8 +192,8 @@ struct PreviewCell {
     edges: [PreviewEdge; 6],
 }
 
-fn rgb(color: &codec::types::Color) -> Option<Color> {
-    use codec::types::Color as C;
+fn rgb(color: &document::types::Color) -> Option<Color> {
+    use document::types::Color as C;
     match color {
         C::ByBlock | C::ByLayer | C::None => None,
         other => other.rgb().map(|(r, g, b)| Color::from_rgb8(r, g, b)),
@@ -213,7 +213,7 @@ fn preview_cell(style: &TableCellStyleData) -> PreviewCell {
                 .filter(|weight| *weight > 0)
                 .map_or(1.0, |weight| (weight as f32 / 35.0).clamp(1.0, 4.0)),
             double: grid.is_some_and(|grid| {
-                grid.border.border_type == codec::objects::TableBorderType::Double
+                grid.border.border_type == document::objects::TableBorderType::Double
             }),
             dashed: grid.is_some_and(|grid| !grid.line_type.is_null()),
         }
@@ -450,12 +450,12 @@ fn table_preview(v: &TableStyleView<'_>, style: &TableStyle) -> PreviewLayout {
             .map(|cell| preview_cell(&cell.cell_style))
             .unwrap_or_else(|| preview_cell(&TableCellStyleData::default()))
     };
-    let flow_up = style.flow_direction == codec::objects::TableFlowDirection::Up;
+    let flow_up = style.flow_direction == document::objects::TableFlowDirection::Up;
     if let Some(table) = v.template {
         let rows = table
             .rows
             .iter()
-            .map(|row| by_id(row.style_id, codec::objects::DATA_CELL_STYLE))
+            .map(|row| by_id(row.style_id, document::objects::DATA_CELL_STYLE))
             .collect();
         return PreviewLayout::Table {
             widths: table.columns.iter().map(|c| c.width as f32).collect(),
@@ -474,9 +474,9 @@ fn table_preview(v: &TableStyleView<'_>, style: &TableStyle) -> PreviewLayout {
             flow_up,
         };
     }
-    let title = style.cell_style(codec::objects::TITLE_CELL_STYLE);
-    let header = style.cell_style(codec::objects::HEADER_CELL_STYLE);
-    let data = style.cell_style(codec::objects::DATA_CELL_STYLE);
+    let title = style.cell_style(document::objects::TITLE_CELL_STYLE);
+    let header = style.cell_style(document::objects::HEADER_CELL_STYLE);
+    let data = style.cell_style(document::objects::DATA_CELL_STYLE);
     let height = |cell: Option<&NamedTableCellStyle>| {
         cell.map_or(1.0, |cell| {
             let format = &cell.cell_style.content_format;
@@ -542,7 +542,7 @@ fn cell_input<'a>(
 fn cell_color<'a>(
     v: &TableStyleView<'a>,
     field: &'static str,
-    color: &codec::types::Color,
+    color: &document::types::Color,
     none: bool,
 ) -> Element<'a, Message> {
     let current = *color;
@@ -570,7 +570,7 @@ fn cell_style_bar<'a>(v: &TableStyleView<'a>, style: &TableStyle) -> Element<'a,
         .cell_styles()
         .map(|cell| choice(cell.name.clone(), cell_style_label(&cell.name)))
         .collect();
-    let builtin = codec::objects::is_row_cell_style(v.cell);
+    let builtin = document::objects::is_row_cell_style(v.cell);
     let mut rename = button(text(t!("Rename")).size(11)).padding([3, 8]);
     let mut delete = button(text(t!("Delete")).size(11)).padding([3, 8]);
     if !builtin {
@@ -735,7 +735,7 @@ fn borders_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Colum
         let linetype = grid.map_or(0, |grid| grid.line_type.value());
         let color = grid.map_or_else(|| "0".to_string(), |grid| edge_color_code(&grid.border.color));
         let double = grid.is_some_and(|grid| {
-            grid.border.border_type == codec::objects::TableBorderType::Double
+            grid.border.border_type == document::objects::TableBorderType::Double
         });
         let edit = move |field: &'static str| {
             move |value: String| Message::TableStyleEdgeEdit { edge, field, value }

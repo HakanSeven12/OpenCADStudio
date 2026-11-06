@@ -101,7 +101,7 @@ impl Scene {
             .iter()
             .copied()
             .filter(|&handle| {
-                let Some(codec::EntityType::Insert(insert)) = self.document.get_entity(handle)
+                let Some(document::EntityType::Insert(insert)) = self.document.get_entity(handle)
                 else {
                     return false;
                 };
@@ -290,7 +290,7 @@ impl Scene {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: codec::entities::HatchStyleType::Normal,
+            style: document::entities::HatchStyleType::Normal,
             pattern: HatchPattern::Solid,
             name: "AREA_PREVIEW".into(),
             color: [0.0; 4],
@@ -373,7 +373,7 @@ impl Scene {
         self.selection.borrow_mut().gesture.preview_box = None;
     }
 
-    pub fn wire_models_for(&self, handles: &[codec::Handle]) -> Vec<WireModel> {
+    pub fn wire_models_for(&self, handles: &[document::Handle]) -> Vec<WireModel> {
         let wires = handles
             .iter()
             .flat_map(|h| {
@@ -395,7 +395,7 @@ impl Scene {
     /// Current candidate geometry for a hot grip. Solid-history candidates
     /// live outside the document until placement; ordinary entities continue
     /// to use their current tessellation.
-    pub fn grip_wire_models_for(&self, handles: &[codec::Handle]) -> Vec<WireModel> {
+    pub fn grip_wire_models_for(&self, handles: &[document::Handle]) -> Vec<WireModel> {
         handles
             .iter()
             .flat_map(|handle| {
@@ -597,7 +597,7 @@ impl Scene {
     /// Entities need not be in the document — they are tessellated directly.
     /// Resolve cached block copies before consumers transform or count their
     /// points, just like the handle-based edit preview snapshots.
-    pub fn wires_for_entities(&self, entities: &[codec::EntityType]) -> Vec<WireModel> {
+    pub fn wires_for_entities(&self, entities: &[document::EntityType]) -> Vec<WireModel> {
         let wires = entities
             .iter()
             .flat_map(|e| self.tessellate_one(e))
@@ -616,7 +616,7 @@ impl Scene {
     /// expand through the block cache; invisible members (another visibility
     /// state) are left out, as on the canvas. Unknown / empty block → `vec![]`.
     pub(crate) fn block_preview_wires(&self, name: &str) -> Vec<WireModel> {
-        use codec::EntityType;
+        use document::EntityType;
         let Some(br) = self.document.block_records.get(name) else {
             return vec![];
         };
@@ -639,9 +639,9 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
-    use codec::EntityType;
+    use document::entities::Line;
+    use document::types::Vector3;
+    use document::EntityType;
 
     #[test]
     fn block_preview_wires_tessellates_block_entities() {

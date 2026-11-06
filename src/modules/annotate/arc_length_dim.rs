@@ -1,6 +1,6 @@
-use codec::entities::{Dimension, DimensionArc};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::{Dimension, DimensionArc};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 use glam::DVec3;
 use kernel::geom2d::tessellate::{arc, DEFAULT_SEGMENTS_PER_RADIAN};
 

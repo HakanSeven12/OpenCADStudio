@@ -4,7 +4,7 @@ use super::{
     render_graph, Scene,
 };
 use crate::command::{EntityTransform, PointPickContext, WorkingPlane};
-use codec::{
+use document::{
     entities::Insert,
     objects::{DynamicBlockData, ObjectType},
     Document, EntityType, Handle,
@@ -42,7 +42,7 @@ pub(crate) fn insertion_grips(doc: &Document, name: &str) -> Vec<Alignment> {
     reference_grips(
         doc,
         definition.handle,
-        &Insert::new(name, codec::types::Vector3::ZERO),
+        &Insert::new(name, document::types::Vector3::ZERO),
     )
 }
 

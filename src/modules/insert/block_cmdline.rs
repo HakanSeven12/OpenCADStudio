@@ -2,7 +2,7 @@
 //! -BEDIT and ATTSYNC, with the reference's prompts and messages, and the
 //! choices the Block Definition / Write Block dialogs remember.
 
-use codec::{Document, Handle};
+use document::{Document, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -125,7 +125,7 @@ impl BlockTable {
                 && br.entity_handles.iter().any(|h| {
                     matches!(
                         doc.get_entity(*h),
-                        Some(codec::EntityType::AttributeDefinition(_))
+                        Some(document::EntityType::AttributeDefinition(_))
                     )
                 })
             {
@@ -1054,7 +1054,7 @@ mod tests {
 
     fn plan_table() -> BlockTable {
         let mut document = Document::new();
-        let mut record = codec::tables::BlockRecord::new("PLAN");
+        let mut record = document::tables::BlockRecord::new("PLAN");
         record.handle = document.allocate_handle();
         document
             .block_records

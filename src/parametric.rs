@@ -45,8 +45,8 @@
 //! constant-pitch space spiral, while a plan ramp curve is a 2D law —
 //! staging one for the other would be mathematically wrong.
 
-use codec::entities::{Arc, EntityType, Line, LwPolyline, LwVertex, Spline};
-use codec::types::{Vector2, Vector3};
+use document::entities::{Arc, EntityType, Line, LwPolyline, LwVertex, Spline};
+use document::types::{Vector2, Vector3};
 use ocs_plugin_api::host::{
     MAX_PLUGIN_LIVE_ENTITIES, ParametricChain, ParametricPlane, ParametricSample,
     ParametricSegment, Ramp,
@@ -1913,7 +1913,7 @@ mod tests {
         // ride the shared drawing model, and the record model's XRecords —
         // the plugins' declared truth — survive the SAME file round trip.
         // Loss reports must stay empty for both formats.
-        use codec::Format;
+        use document::Format;
 
         // 1) Declare + stage.
         let plan = demo_plan_chain();
@@ -1924,48 +1924,48 @@ mod tests {
         // One staged entity carries the record model's XDATA (the
         // placement class the entity-bound records ride in).
         if let EntityType::LwPolyline(polyline) = &mut all_entities[1] {
-            let mut record = codec::xdata::ExtendedDataRecord::new("PLUGIN");
+            let mut record = document::xdata::ExtendedDataRecord::new("PLUGIN");
             record
-                .add_value(codec::xdata::XDataValue::String("alignment display carrier".into()));
-            record.add_value(codec::xdata::XDataValue::Real(104.0));
+                .add_value(document::xdata::XDataValue::String("alignment display carrier".into()));
+            record.add_value(document::xdata::XDataValue::Real(104.0));
             polyline.common.extended_data.add_record(record);
         }
 
         // 2) A document + the staged set + the record model's XRecords.
-        let mut document = codec::Document::new();
+        let mut document = document::Document::new();
         // 2b) The display layers are registered entries of the document's
         // layer table (the plugin consumer creates its display layers
         // before staging; an unregistered layer name falls back to "0" on
         // read, by the model's own contract).
         document
             .layers
-            .add(codec::tables::Layer::new("PLUGIN_DISPLAY"))
+            .add(document::tables::Layer::new("PLUGIN_DISPLAY"))
             .unwrap();
         document
             .layers
-            .add(codec::tables::Layer::new("PLUGIN_PROFILE"))
+            .add(document::tables::Layer::new("PLUGIN_PROFILE"))
             .unwrap();
         let mut staged_handles = Vec::new();
         for entity in all_entities {
             staged_handles.push(document.add_entity(entity).unwrap());
         }
-        let appid = codec::tables::AppId::new("PLUGIN");
+        let appid = document::tables::AppId::new("PLUGIN");
         document.app_ids.add(appid).unwrap();
         let nod_handle = document.header.named_objects_dict_handle;
         let dict_handle = document.allocate_handle();
         let record_handle = document.allocate_handle();
-        let mut record = codec::objects::XRecord::named("PLUGIN_ALIGN_DISPLAY");
+        let mut record = document::objects::XRecord::named("PLUGIN_ALIGN_DISPLAY");
         record.handle = record_handle;
         record.owner = dict_handle;
         record.entries = vec![
-            codec::objects::XRecordEntry::string(1, "parametric chain v14"),
-            codec::objects::XRecordEntry::double(140, 104.0),
-            codec::objects::XRecordEntry::int32(420, 7),
+            document::objects::XRecordEntry::string(1, "parametric chain v14"),
+            document::objects::XRecordEntry::double(140, 104.0),
+            document::objects::XRecordEntry::int32(420, 7),
         ];
         document
             .objects
-            .insert(record_handle, codec::objects::ObjectType::XRecord(record));
-        let mut dict = codec::objects::Dictionary::new();
+            .insert(record_handle, document::objects::ObjectType::XRecord(record));
+        let mut dict = document::objects::Dictionary::new();
         dict.handle = dict_handle;
         dict.owner = nod_handle;
         dict.hard_owner = true;
@@ -1975,8 +1975,8 @@ mod tests {
         dict.add_entry("PLUGIN_ALIGN_DISPLAY", record_handle);
         document
             .objects
-            .insert(dict_handle, codec::objects::ObjectType::Dictionary(dict));
-        if let Some(codec::objects::ObjectType::Dictionary(nod)) = document.objects.get_mut(&nod_handle)
+            .insert(dict_handle, document::objects::ObjectType::Dictionary(dict));
+        if let Some(document::objects::ObjectType::Dictionary(nod)) = document.objects.get_mut(&nod_handle)
         {
             nod.add_entry("PLUGIN", dict_handle);
         }
@@ -1985,18 +1985,18 @@ mod tests {
         let original_record =
             document.objects.get(&record_handle).cloned().expect("record present");
         let original_kind_of =
-            |h: codec::Handle| document.get_entity(h).map(|e| std::mem::discriminant(e));
+            |h: document::Handle| document.get_entity(h).map(|e| std::mem::discriminant(e));
         let expected_kinds: Vec<_> = staged_handles
             .iter()
             .map(|h| original_kind_of(*h).expect("handle present"))
             .collect();
 
-        let (dxf_bytes, dxf_losses) = codec::Dxf.write(&document).unwrap();
+        let (dxf_bytes, dxf_losses) = document::Dxf.write(&document).unwrap();
         assert!(
             dxf_losses.is_empty(),
             "DXF write must not lose anything: {dxf_losses:?}"
         );
-        let (dxf_doc, dxf_read_losses) = codec::Dxf.read(&dxf_bytes).unwrap();
+        let (dxf_doc, dxf_read_losses) = document::Dxf.read(&dxf_bytes).unwrap();
         assert!(
             dxf_read_losses.is_empty(),
             "DXF read must not lose anything: {dxf_read_losses:?}"
@@ -2004,12 +2004,12 @@ mod tests {
         assert_staged(&dxf_doc, &staged_handles, &expected_kinds);
         assert_record_model(&dxf_doc, &original_record);
 
-        let (dwg_bytes, dwg_losses) = codec::Dwg.write(&document).unwrap();
+        let (dwg_bytes, dwg_losses) = document::Dwg.write(&document).unwrap();
         assert!(
             dwg_losses.is_empty(),
             "DWG write must not lose anything: {dwg_losses:?}"
         );
-        let (dwg_doc, dwg_read_losses) = codec::Dwg.read(&dwg_bytes).unwrap();
+        let (dwg_doc, dwg_read_losses) = document::Dwg.read(&dwg_bytes).unwrap();
         assert!(
             dwg_read_losses.is_empty(),
             "DWG read must not lose anything: {dwg_read_losses:?}"
@@ -2019,7 +2019,7 @@ mod tests {
 
         // 4) The entity-bound record rides too: the staged polyline's
         // XDATA (the PLUGIN app record) survives, values verbatim.
-        let assert_xdata = |document: &codec::Document, stage: &str| {
+        let assert_xdata = |document: &document::Document, stage: &str| {
             let entity = document
                 .get_entity(staged_handles[1])
                 .expect("staged polyline present");
@@ -2038,16 +2038,16 @@ mod tests {
         assert_xdata(&dwg_doc, "DWG");
 
         // 5) The second hop (file -> document -> file) must be stationary.
-        let (dxf_bytes2, dxf_losses2) = codec::Dxf.write(&dxf_doc).unwrap();
+        let (dxf_bytes2, dxf_losses2) = document::Dxf.write(&dxf_doc).unwrap();
         assert!(dxf_losses2.is_empty());
-        let (dxf_doc2, _) = codec::Dxf.read(&dxf_bytes2).unwrap();
+        let (dxf_doc2, _) = document::Dxf.read(&dxf_bytes2).unwrap();
         assert_record_model(&dxf_doc2, &original_record);
         assert_staged(&dxf_doc2, &staged_handles, &expected_kinds);
 
         fn assert_staged(
-            document: &codec::Document,
-            staged: &[codec::Handle],
-            kinds: &[std::mem::Discriminant<codec::EntityType>],
+            document: &document::Document,
+            staged: &[document::Handle],
+            kinds: &[std::mem::Discriminant<document::EntityType>],
         ) {
             for (i, (handle, kind)) in staged.iter().zip(kinds.iter()).enumerate() {
                 let entity = document
@@ -2062,18 +2062,18 @@ mod tests {
             }
         }
 
-        fn assert_record_model(document: &codec::Document, original: &codec::objects::ObjectType) {
+        fn assert_record_model(document: &document::Document, original: &document::objects::ObjectType) {
             // The XRecord's entries must survive BYTE-IDENTICAL, alongside
             // its dictionary and the NOD linkage (record + display live and
             // die together in the same file).
-            let codec::objects::ObjectType::XRecord(original_record) = original else {
+            let document::objects::ObjectType::XRecord(original_record) = original else {
                 panic!("expected an XRecord");
             };
             let read = document
                 .objects
                 .get(&original_record.handle)
                 .unwrap_or_else(|| panic!("XRecord lost in the round trip"));
-            let codec::objects::ObjectType::XRecord(read_record) = read else {
+            let document::objects::ObjectType::XRecord(read_record) = read else {
                 panic!("XRecord became another object");
             };
             assert_eq!(
@@ -2086,7 +2086,7 @@ mod tests {
                 .objects
                 .get(&original_record.owner)
                 .expect("the record's dictionary survived");
-            let codec::objects::ObjectType::Dictionary(dict) = dict_read else {
+            let document::objects::ObjectType::Dictionary(dict) = dict_read else {
                 panic!("dictionary became another object");
             };
             assert!(

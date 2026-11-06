@@ -7,7 +7,7 @@ use crate::scene::{
     block_orientation_parameter::{self, Kind},
     WireModel,
 };
-use codec::{types::Vector3, Handle};
+use document::{types::Vector3, Handle};
 use glam::DVec3;
 
 /// Values answered at the base-point prompt before the parameter exists.

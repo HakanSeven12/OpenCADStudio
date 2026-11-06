@@ -1,5 +1,5 @@
-use codec::entities::acis::{SabReader, SatBody, SatDocument};
-use codec::entities::{Body, Region, Solid3D, Surface};
+use document::entities::acis::{SabReader, SatBody, SatDocument};
+use document::entities::{Body, Region, Solid3D, Surface};
 use kernel::brep::Body as KernelBody;
 
 use crate::scene::model::mesh_model::{MeshLodSet, MeshModel};
@@ -79,7 +79,7 @@ pub(crate) fn finalize_mesh(
     verts: Vec<[f64; 3]>,
     normals: Vec<[f32; 3]>,
     indices: Vec<u32>,
-    triangle_material_handles: Vec<Option<codec::Handle>>,
+    triangle_material_handles: Vec<Option<document::Handle>>,
     triangle_colors: Vec<Option<[f32; 4]>>,
     color: [f32; 4],
     xform: Option<([f64; 9], [f64; 3], f64)>,
@@ -167,7 +167,7 @@ pub fn kernel_surface_body(surface: &Surface) -> Option<KernelBody> {
     kernel_acis_body(&surface.acis_data)
 }
 
-pub(crate) fn kernel_acis_body(acis: &codec::entities::AcisData) -> Option<KernelBody> {
+pub(crate) fn kernel_acis_body(acis: &document::entities::AcisData) -> Option<KernelBody> {
     let sat = parse_acis(|| acis.parse(), acis.is_binary, &acis.sab_data)?;
     let (mut bodies, loss) = kernel::acis::lift(&sat);
     if !loss.is_empty() || bodies.len() != 1 {
@@ -177,7 +177,7 @@ pub(crate) fn kernel_acis_body(acis: &codec::entities::AcisData) -> Option<Kerne
     bodies.pop()
 }
 
-fn remap_acis_material_bindings(set: &mut MeshLodSet, acis: &codec::entities::AcisData) {
+fn remap_acis_material_bindings(set: &mut MeshLodSet, acis: &document::entities::AcisData) {
     for lod in &mut set.lods {
         for handle in lod.triangle_material_handles.iter_mut().flatten() {
             let reference = handle.value() as i32;
@@ -200,7 +200,7 @@ fn finish(
     chordal_deflection: Option<f64>,
     isolines: [usize; 2],
     planar_isolines: Option<bool>,
-    acis: &codec::entities::AcisData,
+    acis: &document::entities::AcisData,
 ) -> Option<MeshLodSet> {
     let mut set = tessellate_acis(
         &sat,
@@ -264,7 +264,7 @@ pub fn tessellate_body(
 }
 
 pub fn tessellate_surface(
-    surface: &codec::entities::Surface,
+    surface: &document::entities::Surface,
     color: [f32; 4],
     facet_res: f64,
     chordal_deflection: Option<f64>,

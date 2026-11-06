@@ -4,9 +4,9 @@
 fn region_snap_insert_keeps_boundary_wires_hidden() {
     use crate::scene::cache::block_cache::{expand_insert, BlockCache};
     use crate::scene::view::render::InheritStyle;
-    use codec::entities::Insert;
-    use codec::tables::BlockRecord;
-    use codec::types::Vector3;
+    use document::entities::Insert;
+    use document::tables::BlockRecord;
+    use document::types::Vector3;
     for boundary in [
         ring(&[[0.0, 0.0], [20.0, 0.0], [20.0, 20.0], [0.0, 20.0]]),
         vec![Curve::Circle(Circle {
@@ -33,7 +33,7 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
         region.common_mut().owner_handle = owner;
         document.add_entity(region).unwrap();
         let mut line =
-            codec::entities::Line::from_points(Vector3::ZERO, Vector3::new(5.0, 0.0, 0.0));
+            document::entities::Line::from_points(Vector3::ZERO, Vector3::new(5.0, 0.0, 0.0));
         line.common.owner_handle = owner;
         document.add_entity(EntityType::Line(line)).unwrap();
         let insert = Insert::new("REGION_SNAPS", Vector3::ZERO);
@@ -125,7 +125,7 @@ fn region_snap_insert_keeps_boundary_wires_hidden() {
         }
     }
 }
-use codec::{Document, EntityType, Handle};
+use document::{Document, EntityType, Handle};
 use glam::{DVec3, Mat4, Vec3};
 use iced::{Point, Rectangle};
 use kernel::geom2d::{Circle, Curve, Line};
@@ -166,8 +166,8 @@ fn wires(entity: &EntityType) -> Vec<WireModel> {
 
 #[test]
 fn native_region_binary_without_wires_is_pickable_at_circular_boundary() {
-    use codec::entities::acis::{SabWriter, SatDocument};
-    use codec::entities::{AcisData, Region};
+    use document::entities::acis::{SabWriter, SatDocument};
+    use document::entities::{AcisData, Region};
     let loops = vec![
         vec![Curve::Circle(Circle {
             centre: [0.0, 0.0],
@@ -640,9 +640,9 @@ fn region_snap_intersects_other_geometry_and_keeps_shell_and_display() {
     assert!(region_wires[1..]
         .iter()
         .all(|w| w.snap_only && !w.display_visible && !w.plot_visible));
-    let mut line = codec::entities::Line::new();
-    line.start = codec::types::Vector3::new(-20.0, 0.0, 0.0);
-    line.end = codec::types::Vector3::new(20.0, 0.0, 0.0);
+    let mut line = document::entities::Line::new();
+    line.start = document::types::Vector3::new(-20.0, 0.0, 0.0);
+    line.end = document::types::Vector3::new(20.0, 0.0, 0.0);
     let mut crossing = wires(&EntityType::Line(line));
     for wire in &mut crossing {
         wire.name = "456".into();
@@ -658,8 +658,8 @@ fn region_snap_intersects_other_geometry_and_keeps_shell_and_display() {
 
 #[test]
 fn region_snap_wire_only_fallback_and_sibling_line_behavior() {
-    use codec::entities::{Region, Wire};
-    use codec::types::Vector3;
+    use document::entities::{Region, Wire};
+    use document::types::Vector3;
     let mut region = Region::new();
     region.wires = vec![Wire::from_points(vec![
         Vector3::new(0.0, 0.0, 0.0),
@@ -680,7 +680,7 @@ fn region_snap_wire_only_fallback_and_sibling_line_behavior() {
         DVec3::new(5.0, 0.0, 0.0),
         None,
     );
-    let mut line = codec::entities::Line::new();
+    let mut line = document::entities::Line::new();
     line.start = Vector3::new(0.0, 0.0, 0.0);
     line.end = Vector3::new(10.0, 0.0, 0.0);
     let line_wires = wires(&EntityType::Line(line));

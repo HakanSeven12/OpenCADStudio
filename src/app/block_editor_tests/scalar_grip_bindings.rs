@@ -4,7 +4,7 @@ use crate::scene::{
     block_grips::{config, runtime},
     block_orientation_parameter as orientation,
 };
-use codec::objects::{DynamicBlockData, ObjectType};
+use document::objects::{DynamicBlockData, ObjectType};
 use glam::DVec3;
 
 #[test]

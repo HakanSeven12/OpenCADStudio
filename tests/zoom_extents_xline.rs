@@ -1,8 +1,8 @@
 // Regression for #284: ZOOM Extents must ignore the ±1e6 display segments
 // that XLine/Ray tessellate into, instead of fitting the camera to them.
-use codec::entities::{Line, XLine};
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::{Line, XLine};
+use document::types::Vector3;
+use document::EntityType;
 use OpenCADStudio::scene::Scene;
 
 fn add_rect(scene: &mut Scene) {

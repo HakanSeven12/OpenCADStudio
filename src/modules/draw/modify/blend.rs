@@ -6,9 +6,9 @@
 //! geometric curvature (G2).
 
 use crate::t;
-use codec::entities::{EntityCommon, Spline};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{EntityCommon, Spline};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::DVec3;
 use kernel::space::curve as space_curve;
 use kernel::space::NurbsCurve3;
@@ -435,7 +435,7 @@ fn polyline_endpoint(points: &[DVec3], click: DVec3) -> Option<EndpointFrame> {
     }
 }
 
-fn arc_endpoint(arc: &codec::entities::Arc, click: DVec3) -> Option<EndpointFrame> {
+fn arc_endpoint(arc: &document::entities::Arc, click: DVec3) -> Option<EndpointFrame> {
     if arc.radius <= EPS {
         return None;
     }
@@ -467,7 +467,7 @@ fn arc_endpoint(arc: &codec::entities::Arc, click: DVec3) -> Option<EndpointFram
     })
 }
 
-fn lw_point(poly: &codec::entities::LwPolyline, index: usize) -> DVec3 {
+fn lw_point(poly: &document::entities::LwPolyline, index: usize) -> DVec3 {
     let normal = to_dvec(poly.normal).normalize_or_zero();
     let p = poly.vertices[index].location;
     ocs_to_dvec(p.x, p.y, poly.elevation, normal)

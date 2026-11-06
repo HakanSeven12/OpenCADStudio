@@ -24,7 +24,7 @@ fn block_alignment_insertion_command_paths_refresh_geometry_preserve_history_and
             let target = app.tabs[i]
                 .scene
                 .document
-                .add_entity(EntityType::Line(codec::entities::Line::from_points(
+                .add_entity(EntityType::Line(document::entities::Line::from_points(
                     Vector3::new(200., 0., 0.),
                     Vector3::new(200., 100., 0.),
                 )))

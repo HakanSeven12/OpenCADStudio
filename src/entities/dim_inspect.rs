@@ -9,8 +9,8 @@
 //!   is shown, 32 the rate is shown;
 //! * 395 — the label, 396 — the rate (only written while shown).
 
-use codec::entities::EntityCommon;
-use codec::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
+use document::entities::EntityCommon;
+use document::xdata::{ExtendedData, ExtendedDataRecord, XDataValue};
 
 pub const APP: &str = "ACAD_DSTYLE_DIMINSPECT";
 
@@ -182,14 +182,14 @@ mod tests {
 /// the text ends, an angular one in points half the frame height out.
 pub(crate) fn layout(
     inspection: &Inspection,
-    value: codec::EntityType,
-    document: &codec::Document,
+    value: document::EntityType,
+    document: &document::Document,
     gap: f64,
-) -> Vec<codec::EntityType> {
-    use codec::entities::text::{TextHorizontalAlignment as H, TextVerticalAlignment as V};
-    use codec::entities::{Arc, Line};
-    use codec::types::Vector3;
-    use codec::EntityType;
+) -> Vec<document::EntityType> {
+    use document::entities::text::{TextHorizontalAlignment as H, TextVerticalAlignment as V};
+    use document::entities::{Arc, Line};
+    use document::types::Vector3;
+    use document::EntityType;
 
     let (anchor, height, rotation, style, width_factor, plain) = match &value {
         EntityType::Text(text) => (
@@ -274,7 +274,7 @@ pub(crate) fn layout(
             }
             EntityType::MText(mtext) => {
                 mtext.insertion_point = at;
-                mtext.attachment_point = codec::entities::AttachmentPoint::MiddleCenter;
+                mtext.attachment_point = document::entities::AttachmentPoint::MiddleCenter;
             }
             _ => {}
         }
@@ -292,7 +292,7 @@ pub(crate) fn layout(
         let at = along(center, x + width / 2.0, 0.0);
         match text {
             Some(text) => {
-                let mut part = codec::entities::Text::with_value(text.clone(), at)
+                let mut part = document::entities::Text::with_value(text.clone(), at)
                     .with_height(height)
                     .with_rotation(rotation);
                 part.style = style.clone();
@@ -356,9 +356,9 @@ pub(crate) fn layout(
 
 /// The value text's properties for an added part, without its handle and
 /// XDATA.
-fn part_common(value: &codec::EntityType) -> EntityCommon {
+fn part_common(value: &document::EntityType) -> EntityCommon {
     let mut common = value.common().clone();
-    common.handle = codec::Handle::NULL;
+    common.handle = document::Handle::NULL;
     common.extended_data = ExtendedData::new();
     common
 }

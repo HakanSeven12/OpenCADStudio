@@ -1,16 +1,16 @@
 use super::*;
 
 fn restore_layiso_layer(
-    current: &mut codec::tables::Layer,
-    saved: &crate::app::document::LayisoLayerSnapshot,
-    mode: crate::app::document::LayisoMode,
+    current: &mut document::tables::Layer,
+    saved: &crate::app::tab_document::LayisoLayerSnapshot,
+    mode: crate::app::tab_document::LayisoMode,
 ) -> bool {
     let mut changed = false;
     if current.flags.off == saved.after.flags.off {
         current.flags.off = saved.before.flags.off;
         changed = true;
     }
-    if mode == crate::app::document::LayisoMode::LockAndFade
+    if mode == crate::app::tab_document::LayisoMode::LockAndFade
         && current.flags.locked == saved.after.flags.locked
     {
         current.flags.locked = saved.before.flags.locked;
@@ -235,7 +235,7 @@ impl OpenCADStudio {
                     );
                     return Some(Task::none());
                 }
-                let handles: Vec<codec::Handle> = self.tabs[i]
+                let handles: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .document
                     .entities()
@@ -616,7 +616,7 @@ impl OpenCADStudio {
                         .layers
                         .get(&layer)
                         .map(|l| l.handle)
-                        .unwrap_or(codec::types::Handle::NULL);
+                        .unwrap_or(document::types::Handle::NULL);
                     self.tabs[i].scene.document.header.current_layer_name = layer.clone();
                     self.tabs[i].scene.document.header.current_layer_handle = handle;
                     self.tabs[i].active_layer = layer.clone();
@@ -732,14 +732,14 @@ impl OpenCADStudio {
             }
 
             "LAYISO SETTINGS OFF" => {
-                self.tabs[i].layiso_mode = crate::app::document::LayisoMode::Off;
+                self.tabs[i].layiso_mode = crate::app::tab_document::LayisoMode::Off;
                 self.command_line
                     .push_info(crate::t!("LAYISO Settings: Off.").as_ref());
                 self.start_layiso(i);
             }
 
             "LAYISO SETTINGS LOCKANDFADE" => {
-                self.tabs[i].layiso_mode = crate::app::document::LayisoMode::LockAndFade;
+                self.tabs[i].layiso_mode = crate::app::tab_document::LayisoMode::LockAndFade;
                 self.command_line
                     .push_info(crate::t!("LAYISO Settings: Lock and Fade.").as_ref());
                 self.start_layiso(i);
@@ -893,7 +893,7 @@ impl OpenCADStudio {
                     })
                     .collect();
 
-                let selected: Vec<codec::Handle> = self.tabs[i]
+                let selected: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
@@ -930,7 +930,7 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 };
 
-                let handles: Vec<codec::Handle> = self.tabs[i]
+                let handles: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
@@ -1036,14 +1036,14 @@ impl OpenCADStudio {
                 // ambiguous, so keep the explicit source-pick prompt for them.
                 let src = match self.tabs[i].scene.selected_entities().as_slice() {
                     [(handle, _)] => *handle,
-                    _ => codec::Handle::NULL,
+                    _ => document::Handle::NULL,
                 };
                 // Consume the preselection so it cannot become a destination.
                 self.tabs[i].scene.deselect_all();
                 let last = self.tabs[i].last_matchprop_src;
                 let last = match self.tabs[i].scene.document.get_entity(last) {
                     Some(_) => last,
-                    None => codec::Handle::NULL,
+                    None => document::Handle::NULL,
                 };
                 let cmd = MatchPropCommand::new(src).with_last(last);
                 if !src.is_null() {
@@ -1118,9 +1118,9 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod layiso_tests {
     use super::*;
-    use crate::app::document::{LayisoLayerSnapshot, LayisoMode};
-    use codec::tables::Layer;
-    use codec::types::Transparency;
+    use crate::app::tab_document::{LayisoLayerSnapshot, LayisoMode};
+    use document::tables::Layer;
+    use document::types::Transparency;
 
     fn snapshot(before: Layer, after: Layer) -> LayisoLayerSnapshot {
         LayisoLayerSnapshot {
@@ -1541,11 +1541,11 @@ impl OpenCADStudio {
 
         // Model framing follows model units; sheet framing stays in paper units.
         let sheets = self.tabs[i].scene.sheet_viewport_handles();
-        let scaled: std::collections::HashSet<codec::Handle> = handles.iter().copied().collect();
+        let scaled: std::collections::HashSet<document::Handle> = handles.iter().copied().collect();
         let mut reframed = 0usize;
         for entity in self.tabs[i].scene.document.entities_mut() {
             let handle = entity.common().handle;
-            let codec::entities::EntityType::Viewport(vp) = entity else {
+            let document::entities::EntityType::Viewport(vp) = entity else {
                 continue;
             };
             let is_sheet = !scaled.contains(&handle) && sheets.contains(&handle);
@@ -1735,13 +1735,13 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         history_len: usize,
-        before: Option<crate::app::document::LayisoState>,
-        after: Option<crate::app::document::LayisoState>,
+        before: Option<crate::app::tab_document::LayisoState>,
+        after: Option<crate::app::tab_document::LayisoState>,
     ) {
         if self.tabs[i].history.undo_stack.len() == history_len {
             return;
         }
-        if let Some(crate::app::document::HistorySnapshot::Delta(delta)) =
+        if let Some(crate::app::tab_document::HistorySnapshot::Delta(delta)) =
             self.tabs[i].history.undo_stack.last_mut()
         {
             delta.layiso_state = Some((before, after));
@@ -1781,7 +1781,7 @@ impl OpenCADStudio {
         let mode = self.tabs[i].layiso_mode;
         let layiso_history_before = self.tabs[i].layiso_state.clone();
         let current_layer = self.tabs[i].active_layer.clone();
-        let before: Vec<(String, codec::tables::Layer)> = self.tabs[i]
+        let before: Vec<(String, document::tables::Layer)> = self.tabs[i]
             .scene
             .document
             .layers
@@ -1798,8 +1798,8 @@ impl OpenCADStudio {
                     && name != &current_layer
                     && name != "0"
                     && match mode {
-                        crate::app::document::LayisoMode::Off => !layer.is_off(),
-                        crate::app::document::LayisoMode::LockAndFade => !layer.is_locked(),
+                        crate::app::tab_document::LayisoMode::Off => !layer.is_off(),
+                        crate::app::tab_document::LayisoMode::LockAndFade => !layer.is_locked(),
                     }
             })
             .map(|(name, _)| name.clone())
@@ -1809,10 +1809,10 @@ impl OpenCADStudio {
         for name in &names {
             if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(name) {
                 match mode {
-                    crate::app::document::LayisoMode::Off => layer.turn_off(),
+                    crate::app::tab_document::LayisoMode::Off => layer.turn_off(),
                     // A locked layer already draws faded; its saved
                     // transparency is left alone.
-                    crate::app::document::LayisoMode::LockAndFade => layer.lock(),
+                    crate::app::tab_document::LayisoMode::LockAndFade => layer.lock(),
                 }
             }
         }
@@ -1830,14 +1830,14 @@ impl OpenCADStudio {
                 after_by_name
                     .get(&name)
                     .cloned()
-                    .map(|after| crate::app::document::LayisoLayerSnapshot {
+                    .map(|after| crate::app::tab_document::LayisoLayerSnapshot {
                         name,
                         before,
                         after,
                     })
             })
             .collect();
-        let layiso_history_after = Some(crate::app::document::LayisoState {
+        let layiso_history_after = Some(crate::app::tab_document::LayisoState {
             mode,
             layers: snapshots,
         });
@@ -1874,10 +1874,10 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         layer: &str,
-        viewport: codec::Handle,
-        color: codec::types::Color,
+        viewport: document::Handle,
+        color: document::types::Color,
     ) {
-        use codec::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
+        use document::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
         let Some(layer) = self.tabs[i].scene.document.layers.get(layer).map(|l| l.handle) else {
             return;
         };
@@ -1911,11 +1911,11 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         name: &str,
-        only: Option<codec::layer_state::LayerStateMask>,
+        only: Option<document::layer_state::LayerStateMask>,
     ) -> usize {
-        use codec::layer_state::LayerStateMask as Mask;
-        use codec::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
-        use codec::EntityType;
+        use document::layer_state::LayerStateMask as Mask;
+        use document::objects::{KnownXRecordKind as Kind, XRecordValue as Value};
+        use document::EntityType;
         let scene = &mut self.tabs[i].scene;
         let viewport = scene.active_viewport.filter(|handle| {
             scene.current_layout != "Model"
@@ -2116,8 +2116,8 @@ impl OpenCADStudio {
 /// `None` means "every property the state captured".
 fn parse_layer_state_filter(
     text: &str,
-) -> Result<Option<codec::layer_state::LayerStateMask>, String> {
-    use codec::layer_state::LayerStateMask as Mask;
+) -> Result<Option<document::layer_state::LayerStateMask>, String> {
+    use document::layer_state::LayerStateMask as Mask;
     let text = text.trim();
     if text.is_empty() {
         return Ok(None);
@@ -2157,8 +2157,8 @@ fn las_text(value: &str) -> String {
     value.replace(['\t', '\n', '\r'], " ")
 }
 
-fn las_color(color: codec::types::Color) -> String {
-    use codec::types::Color;
+fn las_color(color: document::types::Color) -> String {
+    use document::types::Color;
     match color {
         Color::ByLayer => "bylayer".to_string(),
         Color::ByBlock => "byblock".to_string(),
@@ -2168,8 +2168,8 @@ fn las_color(color: codec::types::Color) -> String {
     }
 }
 
-fn las_parse_color(text: &str) -> codec::types::Color {
-    use codec::types::Color;
+fn las_parse_color(text: &str) -> document::types::Color {
+    use document::types::Color;
     if let Some(rest) = text.strip_prefix("index:") {
         return rest.parse::<u8>().map(Color::Index).unwrap_or(Color::Index(7));
     }
@@ -2193,8 +2193,8 @@ fn las_parse_color(text: &str) -> codec::types::Color {
     }
 }
 
-fn las_alpha(transparency: Option<codec::types::Transparency>) -> String {
-    use codec::types::Transparency;
+fn las_alpha(transparency: Option<document::types::Transparency>) -> String {
+    use document::types::Transparency;
     match transparency {
         Some(Transparency::ByLayer) => "bylayer".to_string(),
         Some(Transparency::ByBlock) => "byblock".to_string(),
@@ -2203,8 +2203,8 @@ fn las_alpha(transparency: Option<codec::types::Transparency>) -> String {
     }
 }
 
-fn las_parse_alpha(text: &str) -> Option<codec::types::Transparency> {
-    use codec::types::Transparency;
+fn las_parse_alpha(text: &str) -> Option<document::types::Transparency> {
+    use document::types::Transparency;
     if let Some(rest) = text.strip_prefix("explicit:") {
         return rest.parse::<u8>().ok().map(Transparency::Explicit);
     }
@@ -2217,7 +2217,7 @@ fn las_parse_alpha(text: &str) -> Option<codec::types::Transparency> {
 
 /// Write a layer state as the line-oriented `.las` interchange text. Every
 /// property the state captured round-trips, including the current layer.
-fn layer_state_to_las(state: &codec::layer_state::LayerState) -> String {
+fn layer_state_to_las(state: &document::layer_state::LayerState) -> String {
     let mut out = String::from("OCSLAS\t1\n");
     out.push_str(&format!("NAME\t{}\n", las_text(&state.name)));
     out.push_str(&format!("DESC\t{}\n", las_text(&state.description)));
@@ -2243,8 +2243,8 @@ fn layer_state_to_las(state: &codec::layer_state::LayerState) -> String {
     out
 }
 
-fn layer_state_from_las(text: &str) -> Result<codec::layer_state::LayerState, String> {
-    use codec::layer_state::{LayerState, LayerStateLayer, LayerStateMask};
+fn layer_state_from_las(text: &str) -> Result<document::layer_state::LayerState, String> {
+    use document::layer_state::{LayerState, LayerStateLayer, LayerStateMask};
     let mut state = LayerState {
         name: String::new(),
         description: String::new(),
@@ -2272,7 +2272,7 @@ fn layer_state_from_las(text: &str) -> Result<codec::layer_state::LayerState, St
                     continue;
                 }
                 state.layers.push(LayerStateLayer {
-                    layer_handle: codec::types::Handle::NULL,
+                    layer_handle: document::types::Handle::NULL,
                     layer_name: values[0].to_string(),
                     off: values[1] == "1",
                     frozen: values[2] == "1",
@@ -2285,7 +2285,7 @@ fn layer_state_from_las(text: &str) -> Result<codec::layer_state::LayerState, St
                     line_type: values[7].to_string(),
                     line_weight: values[8]
                         .parse::<i16>()
-                        .map(codec::types::LineWeight::from_value)
+                        .map(document::types::LineWeight::from_value)
                         .unwrap_or_default(),
                     plot_style: values[9].to_string(),
                     transparency: values.get(10).and_then(|value| las_parse_alpha(value)),

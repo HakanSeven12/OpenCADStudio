@@ -23,7 +23,7 @@ impl OpenCADStudio {
                     .objects
                     .iter()
                     .filter_map(|(handle, object)| match object {
-                        codec::objects::ObjectType::MLineStyle(style) => {
+                        document::objects::ObjectType::MLineStyle(style) => {
                             Some((*handle, style.clone()))
                         }
                         _ => None,
@@ -124,7 +124,7 @@ impl OpenCADStudio {
                     .unwrap_or("")
                     .trim();
                 let tokens: Vec<&str> = rest.split_whitespace().collect();
-                let selection: Vec<codec::Handle> = self.tabs[i]
+                let selection: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -138,15 +138,15 @@ impl OpenCADStudio {
                         .or_else(|| token.strip_prefix("0X"))
                         .unwrap_or(token);
                     let value = u64::from_str_radix(hex, 16).ok()?;
-                    let handle = codec::Handle::new(value);
+                    let handle = document::Handle::new(value);
                     self.tabs[i]
                         .scene
                         .document
                         .get_entity(handle)
-                        .filter(|entity| matches!(entity, codec::EntityType::Insert(_)))
+                        .filter(|entity| matches!(entity, document::EntityType::Insert(_)))
                         .map(|_| handle)
                 });
-                let mut targets: Vec<codec::Handle> = match first_handle {
+                let mut targets: Vec<document::Handle> = match first_handle {
                     Some(handle) => vec![handle],
                     None => selection.clone(),
                 };
@@ -173,7 +173,7 @@ impl OpenCADStudio {
                             .document
                             .entities()
                             .filter_map(|entity| match entity {
-                                codec::EntityType::Insert(_) => Some(entity.common().handle),
+                                document::EntityType::Insert(_) => Some(entity.common().handle),
                                 _ => None,
                             })
                             .collect();
@@ -187,7 +187,7 @@ impl OpenCADStudio {
                         if self.tabs[i].scene.is_layer_locked(*handle) {
                             continue;
                         }
-                        if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
+                        if let Some(document::EntityType::Insert(ins)) = self.tabs[i]
                             .scene
                             .document
                             .entities_mut()
@@ -241,7 +241,7 @@ impl OpenCADStudio {
                     let mut lines = Vec::new();
                     let mut found_any = false;
                     for handle in &targets {
-                        if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
+                        if let Some(document::EntityType::Insert(ins)) = self.tabs[i]
                             .scene
                             .document
                             .get_entity(*handle)
@@ -293,7 +293,7 @@ impl OpenCADStudio {
                             if self.tabs[i].scene.is_layer_locked(*handle) {
                                 continue;
                             }
-                            if let Some(codec::EntityType::Insert(ins)) = self.tabs[i]
+                            if let Some(document::EntityType::Insert(ins)) = self.tabs[i]
                                 .scene
                                 .document
                                 .entities_mut()
@@ -595,7 +595,7 @@ impl OpenCADStudio {
                     .document
                     .entities()
                     .filter_map(|entity| match entity {
-                        codec::EntityType::Face3D(face) => Some((face.common.handle, face.clone())),
+                        document::EntityType::Face3D(face) => Some((face.common.handle, face.clone())),
                         _ => None,
                     })
                     .collect();
@@ -935,7 +935,7 @@ impl OpenCADStudio {
                 let normal = working_plane.z.normalize_or(glam::DVec3::Z);
                 let elevation = working_plane.origin.dot(normal);
                 let storage = crate::entities::curve::ocs_plane(
-                    codec::types::Vector3::new(normal.x, normal.y, normal.z),
+                    document::types::Vector3::new(normal.x, normal.y, normal.z),
                     elevation,
                 );
                 let plane = crate::command::WorkingPlane::new(
@@ -1011,7 +1011,7 @@ impl OpenCADStudio {
                             )
                         });
                         let (scale, angle) = match entity {
-                            Some(codec::EntityType::Hatch(hatch)) => (
+                            Some(document::EntityType::Hatch(hatch)) => (
                                 hatch.pattern_scale as f32,
                                 hatch.pattern_angle.to_degrees() as f32,
                             ),
@@ -1376,7 +1376,7 @@ impl OpenCADStudio {
                         self.command_line.push_output("No constraints found.");
                         return None;
                     }
-                    let dimensions: Vec<codec::Handle> = ids
+                    let dimensions: Vec<document::Handle> = ids
                         .iter()
                         .filter_map(|id| before.dimensions.get(id).copied())
                         .collect();
@@ -1702,7 +1702,7 @@ impl OpenCADStudio {
                         annotational,
                         decimals,
                     );
-                    if let Some(codec::EntityType::Dimension(mut dimension)) =
+                    if let Some(document::EntityType::Dimension(mut dimension)) =
                         self.tabs[i].scene.document.get_entity(handle).cloned()
                     {
                         let before = self.tabs[i].scene.document.get_entity_arc(handle);
@@ -1718,7 +1718,7 @@ impl OpenCADStudio {
                             dimension.base_mut().common.layer =
                                 crate::scene::parametric_constraints::DYNAMIC_DIMENSION_LAYER
                                     .to_string();
-                            dimension.base_mut().common.color = codec::types::Color::Rgb {
+                            dimension.base_mut().common.color = document::types::Color::Rgb {
                                 r: 103,
                                 g: 109,
                                 b: 118,
@@ -1726,7 +1726,7 @@ impl OpenCADStudio {
                         }
                         self.tabs[i]
                             .scene
-                            .update_entity(codec::EntityType::Dimension(dimension));
+                            .update_entity(document::EntityType::Dimension(dimension));
                     }
                     let set = self.tabs[i].scene.parametric_constraint_set_mut(scope);
                     let id = set.add(kind, refs, Some(DrivingValue::Named(name)));
@@ -1811,7 +1811,7 @@ impl OpenCADStudio {
                         return Some(self.apply_cmd_result(CmdResult::AddHorizontalConstraint {
                             kind,
                             selection: HorizontalConstraintSelection::Reference(reference),
-                            direction: codec::types::Vector3::new(
+                            direction: document::types::Vector3::new(
                                 direction.x,
                                 direction.y,
                                 direction.z,
@@ -2483,7 +2483,7 @@ impl OpenCADStudio {
                     .filter(|handle| {
                         matches!(
                             self.tabs[i].scene.document.get_entity(*handle),
-                            Some(codec::EntityType::Solid3D(_))
+                            Some(document::EntityType::Solid3D(_))
                         )
                     })
                     .collect::<Vec<_>>();
@@ -2544,12 +2544,12 @@ impl OpenCADStudio {
                             matches!(
                                 scene.document.get_entity(*handle),
                                 Some(
-                                    codec::EntityType::Solid3D(_)
-                                        | codec::EntityType::Region(_)
-                                        | codec::EntityType::Surface(_)
-                                        | codec::EntityType::Mesh(_)
-                                        | codec::EntityType::PolygonMesh(_)
-                                        | codec::EntityType::PolyfaceMesh(_)
+                                    document::EntityType::Solid3D(_)
+                                        | document::EntityType::Region(_)
+                                        | document::EntityType::Surface(_)
+                                        | document::EntityType::Mesh(_)
+                                        | document::EntityType::PolygonMesh(_)
+                                        | document::EntityType::PolyfaceMesh(_)
                                 )
                             )
                         })
@@ -2558,9 +2558,9 @@ impl OpenCADStudio {
                         matches!(
                             scene.document.get_entity(*handle),
                             Some(
-                                codec::EntityType::Mesh(_)
-                                    | codec::EntityType::PolygonMesh(_)
-                                    | codec::EntityType::PolyfaceMesh(_)
+                                document::EntityType::Mesh(_)
+                                    | document::EntityType::PolygonMesh(_)
+                                    | document::EntityType::PolyfaceMesh(_)
                             )
                         )
                     });
@@ -2601,12 +2601,12 @@ impl OpenCADStudio {
                     .find(|(_, entity)| {
                         matches!(
                             entity,
-                            codec::EntityType::Line(_)
-                                | codec::EntityType::Arc(_)
-                                | codec::EntityType::Circle(_)
-                                | codec::EntityType::Ellipse(_)
-                                | codec::EntityType::LwPolyline(_)
-                                | codec::EntityType::Spline(_)
+                            document::EntityType::Line(_)
+                                | document::EntityType::Arc(_)
+                                | document::EntityType::Circle(_)
+                                | document::EntityType::Ellipse(_)
+                                | document::EntityType::LwPolyline(_)
+                                | document::EntityType::Spline(_)
                         )
                     })
                     .map(|(handle, entity)| (handle, entity.clone()));
@@ -2629,12 +2629,12 @@ impl OpenCADStudio {
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(iced::Task::none());
                 }
-                use codec::entities::Region;
-                use codec::types::Vector3;
+                use document::entities::Region;
+                use document::types::Vector3;
                 let mut regions = Vec::new();
                 let mut sources = Vec::new();
                 for (handle, e) in self.tabs[i].scene.selected_entities().iter() {
-                    if !matches!(e, codec::EntityType::Region(_)) {
+                    if !matches!(e, document::EntityType::Region(_)) {
                         let Some((plane, loops, true)) =
                             crate::scene::model::presspull_model::profile_geometry(e)
                         else {
@@ -2813,10 +2813,10 @@ impl OpenCADStudio {
                         .filter_map(|entity| {
                             matches!(
                                 entity,
-                                codec::EntityType::Solid3D(_)
-                                    | codec::EntityType::Surface(_)
-                                    | codec::EntityType::Region(_)
-                                    | codec::EntityType::Body(_)
+                                document::EntityType::Solid3D(_)
+                                    | document::EntityType::Surface(_)
+                                    | document::EntityType::Region(_)
+                                    | document::EntityType::Body(_)
                             )
                             .then_some(entity.common().handle)
                         })
@@ -2838,10 +2838,10 @@ impl OpenCADStudio {
                         .document
                         .entities()
                         .filter_map(|entity| {
-                            let codec::EntityType::Extended(extended) = entity else {
+                            let document::EntityType::Extended(extended) = entity else {
                                 return None;
                             };
-                            let codec::entities::ExtendedEntityData::SectionObject(data) =
+                            let document::entities::ExtendedEntityData::SectionObject(data) =
                                 &extended.data
                             else {
                                 return None;
@@ -2974,17 +2974,17 @@ impl OpenCADStudio {
                             matches!(
                                 scene.document.get_entity(*handle),
                                 Some(
-                                    codec::EntityType::Solid3D(_)
-                                        | codec::EntityType::Surface(_)
-                                        | codec::EntityType::Mesh(_)
-                                        | codec::EntityType::PolygonMesh(_)
-                                        | codec::EntityType::PolyfaceMesh(_)
+                                    document::EntityType::Solid3D(_)
+                                        | document::EntityType::Surface(_)
+                                        | document::EntityType::Mesh(_)
+                                        | document::EntityType::PolygonMesh(_)
+                                        | document::EntityType::PolyfaceMesh(_)
                                 )
                             )
                         })
                         .collect::<Vec<_>>();
                     scene.restore_solid_models(&targets);
-                    let mesh_extent = |handle: &codec::Handle| {
+                    let mesh_extent = |handle: &document::Handle| {
                         let entity = scene.document.get_entity(*handle)?;
                         let (vertices, _) = crate::entities::mesh::mesh_polygons(entity)?;
                         vertices.iter().fold(None, |bounds, point| {
@@ -3094,7 +3094,7 @@ impl OpenCADStudio {
                 let editable = (sel.len() == 1).then(|| sel[0].0).filter(|h| {
                     self.tabs[i].scene.document.get_entity(*h).is_some_and(|e| {
                         super::super::text_inline::read_text_field(e).is_some()
-                            || matches!(e, codec::EntityType::Leader(_))
+                            || matches!(e, document::EntityType::Leader(_))
                     })
                 });
                 if let Some(h) = editable {
@@ -3187,7 +3187,7 @@ mod region_tests {
                 .map(|entity| {
                     (
                         entity.common().handle,
-                        matches!(entity, codec::EntityType::Circle(_)),
+                        matches!(entity, document::EntityType::Circle(_)),
                     )
                 })
                 .collect();
@@ -3208,7 +3208,7 @@ mod region_tests {
                 .scene
                 .document
                 .entities()
-                .filter(|entity| matches!(entity, codec::EntityType::Region(_)))
+                .filter(|entity| matches!(entity, document::EntityType::Region(_)))
                 .count();
             assert_eq!(region_count, 1);
 

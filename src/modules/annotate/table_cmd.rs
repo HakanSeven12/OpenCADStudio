@@ -4,10 +4,10 @@
 // data rows. The command remembers its previous settings and supports either a
 // fixed insertion point or a two-corner sizing window.
 
-use codec::entities::table::{CellRange, CellStyle, CellStylePropertyFlags};
-use codec::entities::TableBuilder;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::table::{CellRange, CellStyle, CellStylePropertyFlags};
+use document::entities::TableBuilder;
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 use std::sync::Mutex;
 
@@ -89,7 +89,7 @@ pub fn session() -> std::sync::MutexGuard<'static, TableDefaults> {
 /// Row heights of a table: a row is `lines` lines of its text — four thirds
 /// of the text height each — plus the style's top and bottom margins.
 pub fn row_heights(
-    style: Option<&codec::objects::TableStyle>,
+    style: Option<&document::objects::TableStyle>,
     title: bool,
     header: bool,
     data_rows: usize,
@@ -103,7 +103,7 @@ pub fn row_heights(
 /// row is `lines` lines of its cell style's text plus its top and bottom
 /// margins.
 pub fn row_heights_for(
-    style: Option<&codec::objects::TableStyle>,
+    style: Option<&document::objects::TableStyle>,
     names: [&str; 3],
     title: bool,
     header: bool,
@@ -145,11 +145,11 @@ pub fn row_heights_for(
 /// the title, header and data cell styles; others are user cell styles.
 pub fn cell_style_name(name: &str) -> String {
     if name.eq_ignore_ascii_case("Title") {
-        codec::objects::TITLE_CELL_STYLE.to_string()
+        document::objects::TITLE_CELL_STYLE.to_string()
     } else if name.eq_ignore_ascii_case("Header") {
-        codec::objects::HEADER_CELL_STYLE.to_string()
+        document::objects::HEADER_CELL_STYLE.to_string()
     } else if name.eq_ignore_ascii_case("Data") {
-        codec::objects::DATA_CELL_STYLE.to_string()
+        document::objects::DATA_CELL_STYLE.to_string()
     } else {
         name.to_string()
     }
@@ -159,10 +159,10 @@ pub fn cell_style_name(name: &str) -> String {
 #[derive(Clone)]
 pub struct StyleChoice {
     pub name: String,
-    pub handle: codec::Handle,
-    pub style: codec::objects::TableStyle,
+    pub handle: document::Handle,
+    pub style: document::objects::TableStyle,
     /// The style's starting table, if it has one.
-    pub template: Option<codec::entities::Table>,
+    pub template: Option<document::entities::Table>,
 }
 
 /// What a table made from a style's starting table takes from it (the
@@ -231,8 +231,8 @@ fn template_option(options: &mut TemplateOptions, index: usize) -> &mut bool {
 }
 
 /// An empty, unmerged cell with the cell style of `cell`.
-fn blank_cell_like(cell: &codec::entities::table::TableCell) -> codec::entities::table::TableCell {
-    let mut blank = codec::entities::table::TableCell::new();
+fn blank_cell_like(cell: &document::entities::table::TableCell) -> document::entities::table::TableCell {
+    let mut blank = document::entities::table::TableCell::new();
     blank.style_id = cell.style_id;
     blank.style = cell.style.clone();
     blank
@@ -242,23 +242,23 @@ fn blank_cell_like(cell: &codec::entities::table::TableCell) -> codec::entities:
 /// and sizes, the cell contents `options` keep, and `extra_rows` /
 /// `extra_columns` more rows and columns like its last ones.
 pub fn table_from_template(
-    template: &codec::entities::Table,
-    style: &codec::objects::TableStyle,
-    style_handle: codec::Handle,
+    template: &document::entities::Table,
+    style: &document::objects::TableStyle,
+    style_handle: document::Handle,
     options: TemplateOptions,
     extra_rows: usize,
     extra_columns: usize,
-) -> codec::entities::Table {
-    use codec::entities::table::TableCellContentType;
+) -> document::entities::Table {
+    use document::entities::table::TableCellContentType;
     let mut table = template.clone();
-    table.common = codec::entities::EntityCommon::default();
+    table.common = document::entities::EntityCommon::default();
     table.table_style_handle = Some(style_handle);
     table.block_record_handle = None;
     table.block_name.clear();
     let class_of = |id: i32| {
         style
             .cell_style_by_id(id)
-            .map_or(codec::objects::CELL_CLASS_DATA, |cell| cell.style_type)
+            .map_or(document::objects::CELL_CLASS_DATA, |cell| cell.style_type)
     };
     for row in &mut table.rows {
         let row_class = class_of(row.style_id);
@@ -271,7 +271,7 @@ pub fn table_from_template(
             } else {
                 row_class
             };
-            let keep_text = if class == codec::objects::CELL_CLASS_LABEL {
+            let keep_text = if class == document::objects::CELL_CLASS_LABEL {
                 options.label_text
             } else {
                 options.data_text
@@ -361,7 +361,7 @@ pub struct TableCommand {
     command: &'static str,
     style: Option<StyleChoice>,
     styles: Vec<StyleChoice>,
-    links: Vec<(String, codec::Handle)>,
+    links: Vec<(String, document::Handle)>,
     /// None: Auto (window mode fills the window with it).
     columns: Option<usize>,
     data_rows: Option<usize>,
@@ -378,7 +378,7 @@ pub struct TableCommand {
     extra_columns: usize,
 }
 
-fn cell_style_from_row(style: &codec::objects::RowCellStyle) -> CellStyle {
+fn cell_style_from_row(style: &document::objects::RowCellStyle) -> CellStyle {
     let mut result = CellStyle::new();
     result.property_flags = CellStylePropertyFlags::DATA_TYPE
         | CellStylePropertyFlags::DATA_FORMAT
@@ -400,7 +400,7 @@ fn cell_style_from_row(style: &codec::objects::RowCellStyle) -> CellStyle {
     result
 }
 
-pub(crate) fn selected_row_style(table_style: &codec::objects::TableStyle, name: &str) -> CellStyle {
+pub(crate) fn selected_row_style(table_style: &document::objects::TableStyle, name: &str) -> CellStyle {
     let style = if name.eq_ignore_ascii_case("Title") {
         &table_style.title_row_style
     } else if name.eq_ignore_ascii_case("Header") {
@@ -494,7 +494,7 @@ impl TableCommand {
     pub fn command_line(
         style: Option<StyleChoice>,
         styles: Vec<StyleChoice>,
-        links: Vec<(String, codec::Handle)>,
+        links: Vec<(String, document::Handle)>,
         metric: bool,
     ) -> Self {
         let defaults = *session();
@@ -1155,7 +1155,7 @@ impl CadCommand for TableTemplatePickCommand {
         true
     }
 
-    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: document::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() {
             return CmdResult::NeedPoint;
         }
@@ -1203,7 +1203,7 @@ pub(crate) enum TableCellEditStart {
 
 impl TableCellHit {
     /// Flat cell index, matching the Properties palette ordering.
-    pub fn index(&self, table: &codec::entities::Table) -> usize {
+    pub fn index(&self, table: &document::entities::Table) -> usize {
         self.row * table.column_count() + self.column
     }
 }
@@ -1214,8 +1214,8 @@ impl TableCellHit {
 /// object the table references, when the caller has the document at hand;
 /// the table's embedded base style covers the common fallbacks.
 pub(crate) fn table_cell_at(
-    table: &codec::entities::Table,
-    table_style: Option<&codec::objects::TableStyle>,
+    table: &document::entities::Table,
+    table_style: Option<&document::objects::TableStyle>,
     click_world: DVec3,
 ) -> Option<TableCellHit> {
     let horizontal = glam::DVec3::new(
@@ -1268,8 +1268,8 @@ pub(crate) fn table_cell_at(
 /// away from the cell's edges: a pick near a grid line takes the table, one
 /// inside a cell takes the cell.
 pub(crate) fn table_cell_inside(
-    table: &codec::entities::Table,
-    table_style: Option<&codec::objects::TableStyle>,
+    table: &document::entities::Table,
+    table_style: Option<&document::objects::TableStyle>,
     point: DVec3,
     margin: f64,
 ) -> Option<(usize, usize)> {
@@ -1304,8 +1304,8 @@ pub(crate) fn table_cell_inside(
 }
 
 /// True when the cell's content may not be edited (locked or read-only).
-pub(crate) fn cell_locked(table: &codec::entities::Table, row: usize, column: usize) -> bool {
-    use codec::entities::table::CellStateFlags;
+pub(crate) fn cell_locked(table: &document::entities::Table, row: usize, column: usize) -> bool {
+    use document::entities::table::CellStateFlags;
     table.cell(row, column).is_some_and(|cell| {
         cell.state
             .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
@@ -1341,7 +1341,7 @@ impl CadCommand for TableditCommand {
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         CmdResult::EditTableCell {
-            handle: codec::Handle::NULL,
+            handle: document::Handle::NULL,
             point,
         }
     }
@@ -1358,16 +1358,16 @@ inventory::submit!(crate::command::CommandRegistration {
 });
 
 pub struct TableCellEditCommand {
-    handle: codec::Handle,
-    table: codec::entities::Table,
+    handle: document::Handle,
+    table: document::entities::Table,
     row: usize,
     column: usize,
 }
 
 impl TableCellEditCommand {
     pub fn new(
-        handle: codec::Handle,
-        table: &codec::entities::Table,
+        handle: document::Handle,
+        table: &document::entities::Table,
         row: usize,
         column: usize,
     ) -> Self {
@@ -1387,7 +1387,7 @@ impl TableCellEditCommand {
     }
 
     fn set_value_type(&mut self, data_type: i32, unit_type: i32, picture: &str) {
-        use codec::entities::table::CellStylePropertyFlags as P;
+        use document::entities::table::CellStylePropertyFlags as P;
         use crate::entities::table::{cell_data_category, cell_data_kind, CELL_DATA_CATEGORIES};
         // A cell whose type turns into a number aligns Top Right, whatever
         // its table style's alignment (measured with Top Center, Middle
@@ -1427,7 +1427,7 @@ impl TableCellEditCommand {
 }
 
 impl CadCommand for TableCellEditCommand {
-    fn table_cell(&self) -> Option<(codec::Handle, usize, usize)> {
+    fn table_cell(&self) -> Option<(document::Handle, usize, usize)> {
         Some((self.handle, self.row, self.column))
     }
 
@@ -1462,7 +1462,7 @@ impl CadCommand for TableCellEditCommand {
     }
 
     fn on_text_input(&mut self, text: &str) -> Option<CmdResult> {
-        use codec::entities::table::CellStateFlags;
+        use document::entities::table::CellStateFlags;
         // Typed text sets a General cell's type, or a number cell's picture.
         if let Some((data_type, unit_type, picture)) =
             crate::entities::table::typed_entry_type(&self.table, self.row, self.column, text)
@@ -1507,9 +1507,9 @@ mod tabledit_tests {
     //! default orientation (horizontal +X, flow down).
     use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableditCommand};
     use crate::command::{CadCommand, CmdResult};
-    use codec::entities::table::CellStateFlags;
-    use codec::entities::Table;
-    use codec::types::Vector3;
+    use document::entities::table::CellStateFlags;
+    use document::entities::Table;
+    use document::types::Vector3;
     use glam::DVec3;
 
     fn table_2x2() -> Table {
@@ -1589,7 +1589,7 @@ mod tabledit_tests {
         assert!(!cmd.needs_entity_pick());
         match cmd.on_point(DVec3::new(1.0, 2.0, 0.0)) {
             CmdResult::EditTableCell { handle, point } => {
-                assert_eq!(handle, codec::Handle::NULL);
+                assert_eq!(handle, document::Handle::NULL);
                 assert_eq!(point, DVec3::new(1.0, 2.0, 0.0));
             }
             _ => panic!("expected EditTableCell"),
@@ -1601,7 +1601,7 @@ mod tabledit_tests {
     #[test]
     fn table_cell_edit_formats_newlines() {
         let table = table_2x2();
-        let handle = codec::Handle::new(42);
+        let handle = document::Handle::new(42);
         let mut edit_cmd = TableCellEditCommand::new(handle, &table, 0, 0);
         let result = edit_cmd
             .on_text_input("Line1/nLine2\\nLine3\nLine4")
@@ -1609,7 +1609,7 @@ mod tabledit_tests {
         match result {
             CmdResult::ReplaceMany(repl, _) => {
                 assert_eq!(repl.len(), 1);
-                if let codec::EntityType::Table(t) = &repl[0].1[0] {
+                if let document::EntityType::Table(t) = &repl[0].1[0] {
                     assert_eq!(t.cell_text(0, 0).unwrap(), "Line1\\PLine2\\PLine3\\PLine4");
                 } else {
                     panic!("expected Table entity");

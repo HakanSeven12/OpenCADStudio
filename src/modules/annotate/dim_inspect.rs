@@ -2,7 +2,7 @@
 // command line. The dimensions are picked between the first question and
 // the shape (see the app's DIMINSPECT dispatch); this command asks the rest.
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

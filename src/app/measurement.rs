@@ -252,7 +252,7 @@ mod measurement_tests {
 
     #[test]
     fn measurement_radius_and_lines_real_entity_injection() {
-        use codec::{
+        use document::{
             entities::{Circle, Line},
             types::Vector3,
             EntityType,

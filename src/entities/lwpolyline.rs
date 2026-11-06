@@ -1,4 +1,4 @@
-use codec::entities::{LwPolyline, LwVertex};
+use document::entities::{LwPolyline, LwVertex};
 use kernel::geom2d::{
     Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2,
 };
@@ -145,12 +145,12 @@ pub(crate) fn split_bulges_from_point(
 /// ensures this placement originated from an arc, so straight-segment Add
 /// Vertex remains two straight segments when the cursor moves off the chord.
 pub(crate) fn refit_added_arc_vertex(
-    entity: &mut codec::EntityType,
+    entity: &mut document::EntityType,
     vertex_id: usize,
     original_bulge: f64,
 ) {
     match entity {
-        codec::EntityType::LwPolyline(polyline) => {
+        document::EntityType::LwPolyline(polyline) => {
             let n = polyline.vertices.len();
             if vertex_id == 0 || vertex_id >= n {
                 return;
@@ -171,7 +171,7 @@ pub(crate) fn refit_added_arc_vertex(
             polyline.vertices[prev].bulge = first.clamp(-1e6, 1e6);
             polyline.vertices[vertex_id].bulge = second.clamp(-1e6, 1e6);
         }
-        codec::EntityType::Polyline2D(polyline) => {
+        document::EntityType::Polyline2D(polyline) => {
             let n = polyline.vertices.len();
             if vertex_id == 0 || vertex_id >= n {
                 return;
@@ -584,8 +584,8 @@ fn centerline_metadata(
 
 /// Split at vertex `idx`: a closed polyline re-opens there (one piece); an
 /// open one splits into two (interior vertices only). `None` when invalid.
-pub(crate) fn break_at_vertex(p: &codec::LwPolyline, idx: usize) -> Option<Vec<codec::EntityType>> {
-    use codec::EntityType;
+pub(crate) fn break_at_vertex(p: &document::LwPolyline, idx: usize) -> Option<Vec<document::EntityType>> {
+    use document::EntityType;
     let n = p.vertices.len();
     if n < 3 || idx >= n {
         return None;
@@ -595,7 +595,7 @@ pub(crate) fn break_at_vertex(p: &codec::LwPolyline, idx: usize) -> Option<Vec<c
         verts.extend_from_slice(&p.vertices[idx..]);
         verts.extend_from_slice(&p.vertices[..=idx]);
         let mut out = p.clone();
-        out.common.handle = codec::Handle::NULL;
+        out.common.handle = document::Handle::NULL;
         out.is_closed = false;
         out.vertices = verts;
         return Some(vec![EntityType::LwPolyline(out)]);
@@ -604,13 +604,13 @@ pub(crate) fn break_at_vertex(p: &codec::LwPolyline, idx: usize) -> Option<Vec<c
         return None;
     }
     let mut a = p.clone();
-    a.common.handle = codec::Handle::NULL;
+    a.common.handle = document::Handle::NULL;
     a.vertices = p.vertices[..=idx].to_vec();
     if let Some(last) = a.vertices.last_mut() {
         last.bulge = 0.0;
     }
     let mut b = p.clone();
-    b.common.handle = codec::Handle::NULL;
+    b.common.handle = document::Handle::NULL;
     b.vertices = p.vertices[idx..].to_vec();
     Some(vec![EntityType::LwPolyline(a), EntityType::LwPolyline(b)])
 }
@@ -955,7 +955,7 @@ fn edit_polyline_geometry(polyline: &mut LwPolyline, edit: impl FnOnce(&mut Poly
     let mut geometry = kernel_polyline(polyline);
     if edit(&mut geometry) {
         for (target, source) in polyline.vertices.iter_mut().zip(geometry.vertices) {
-            target.location = codec::types::Vector2::new(source.position[0], source.position[1]);
+            target.location = document::types::Vector2::new(source.position[0], source.position[1]);
             target.bulge = source.bulge;
         }
     }
@@ -998,11 +998,11 @@ fn apply_transform(pline: &mut LwPolyline, t: &EntityTransform) {
 }
 
 impl RenderConvertible for LwPolyline {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         let mut render = to_render(self, document.header.fill_mode);
         // Arc segments offer their centres and quadrants.
         if self.vertices.iter().any(|v| v.bulge != 0.0) {
-            let entity = codec::EntityType::LwPolyline(self.clone());
+            let entity = document::EntityType::LwPolyline(self.clone());
             render
                 .snap_pts
                 .extend(crate::entities::curve::arc_segment_snaps(&entity));
@@ -1257,7 +1257,7 @@ impl crate::entities::traits::Grippable for LwPolyline {
         if signed_distance.abs() <= Tolerance::default().linear() {
             return;
         }
-        let direction = codec::types::Vector2::new(axis[0], axis[1]) * signed_distance.signum();
+        let direction = document::types::Vector2::new(axis[0], axis[1]) * signed_distance.signum();
         self.vertices[i0].location = self.vertices[o0].location + direction * value;
         self.vertices[i1].location = self.vertices[o1].location + direction * value;
     }
@@ -1373,7 +1373,7 @@ impl crate::entities::traits::Transformable for LwPolyline {
 /// first vertex), so the relative-to-eye hatch fill keeps sub-unit precision at
 /// UTM-scale coordinates — building them in absolute f32 collapsed the band into
 /// a string of squares far from the origin.
-pub(crate) fn wide_fills(pl: &codec::entities::LwPolyline) -> ([f64; 2], Vec<Vec<[f32; 2]>>) {
+pub(crate) fn wide_fills(pl: &document::entities::LwPolyline) -> ([f64; 2], Vec<Vec<[f32; 2]>>) {
     // Codes 43 / 40 / 41 store the band's FULL width, and
     // `polyline_segment_fill` offsets ±hw about the centreline — so halve it.
     // Feeding the stored width in whole draws every wide polyline twice as wide
@@ -1428,7 +1428,7 @@ pub(crate) fn wide_fills(pl: &codec::entities::LwPolyline) -> ([f64; 2], Vec<Vec
     (origin, out)
 }
 
-impl crate::entities::traits::MassPropsCalc for codec::entities::LwPolyline {
+impl crate::entities::traits::MassPropsCalc for document::entities::LwPolyline {
     fn mass_props(&self) -> crate::entities::traits::MassProps {
         let p = self;
         let n = p.vertices.len();
@@ -1467,8 +1467,8 @@ mod tests {
 
     use crate::entities::traits::{Grippable, PropertyEditable};
     use crate::scene::model::object::GripMenuAction;
-    use codec::entities::{LwPolyline, LwVertex};
-    use codec::{Vector2, Vector3};
+    use document::entities::{LwPolyline, LwVertex};
+    use document::{Vector2, Vector3};
 
     fn make_test_lwpolyline(count: usize, constant_width: f64) -> LwPolyline {
         let mut pl = LwPolyline::default();

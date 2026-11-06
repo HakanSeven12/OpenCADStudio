@@ -15,7 +15,7 @@
 //   1. Center point → 2. Item count (text) → 3. Total angle in degrees (text)
 
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform, WorkingPlane};
@@ -523,7 +523,7 @@ impl CadCommand for ArrayPolarCommand {
 //   → Returns BatchCopy with Translate transforms derived from path samples.
 
 use crate::entities::curve::entity_curve;
-use codec::EntityType;
+use document::EntityType;
 use std::f64::consts::PI as FPI;
 use std::f64::consts::TAU as FTAU;
 

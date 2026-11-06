@@ -2,7 +2,7 @@
 // are asked in turn. A point (or a picked object) moves that point onto the
 // object and associates it; Enter (<next>) leaves the point as it is.
 
-use codec::{EntityType, Handle};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind, ReassociateTarget};

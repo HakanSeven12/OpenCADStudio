@@ -8,8 +8,8 @@
 use rustc_hash::FxHashMap as HashMap;
 use std::sync::OnceLock;
 
-use codec::tables::linetype::{LineType, LineTypeComplexContent, LineTypeElement};
-use codec::{Document, TableEntry};
+use document::tables::linetype::{LineType, LineTypeComplexContent, LineTypeElement};
+use document::{Document, TableEntry};
 
 // ── Complex linetype types ────────────────────────────────────────────────
 
@@ -28,7 +28,7 @@ pub enum LtRotation {
 }
 
 impl LtRotation {
-    fn of(data: &codec::tables::linetype::LineTypeComplexData) -> Self {
+    fn of(data: &document::tables::linetype::LineTypeComplexData) -> Self {
         if data.upright {
             Self::Upright
         } else if data.absolute_rotation {
@@ -482,7 +482,7 @@ fn find_shape_file(file: &str, lin_dir: Option<&std::path::Path>) -> Option<Stri
 
 /// The drawing's shape-file STYLE for `file`, added when missing (an empty
 /// name, as shape files are stored).
-fn shape_file_style(doc: &mut Document, file: &str) -> codec::Handle {
+fn shape_file_style(doc: &mut Document, file: &str) -> document::Handle {
     if let Some(style) = doc
         .text_styles
         .iter()
@@ -490,7 +490,7 @@ fn shape_file_style(doc: &mut Document, file: &str) -> codec::Handle {
     {
         return style.handle;
     }
-    let mut style = codec::tables::TextStyle::new("");
+    let mut style = document::tables::TextStyle::new("");
     style.handle = doc.allocate_handle();
     style.is_shape_file = true;
     style.font_file = file.to_string();
@@ -514,7 +514,7 @@ fn complex_elements(
     plain: &[LineTypeElement],
     lin_dir: Option<&std::path::Path>,
 ) -> Option<Vec<LineTypeElement>> {
-    use codec::tables::linetype::LineTypeComplexData;
+    use document::tables::linetype::LineTypeComplexData;
     let mut out: Vec<LineTypeElement> = Vec::new();
     let mut lengths = plain.iter();
     for segment in &lt.segments {
@@ -927,7 +927,7 @@ fn push_lt_segment(token: &str, out: &mut Vec<LtSegment>) {
 #[cfg(test)]
 mod header_tests {
     use super::{parse, populate_document_from_source};
-    use codec::Document;
+    use document::Document;
 
     /// A `.lin` header's description is optional, and without one the comma
     /// goes too: `*PLAIN` followed by its `A,` line is a whole definition.
@@ -979,7 +979,7 @@ mod rotation_tests {
 #[cfg(test)]
 mod shape_file_tests {
     use super::{document_complex_lt, populate_document_from_source, LtSegment};
-    use codec::Document;
+    use document::Document;
 
     /// A `.lin` shape from its own shape file (not one of the bundled
     /// substitutes) loads with the shape it names, the file found next to

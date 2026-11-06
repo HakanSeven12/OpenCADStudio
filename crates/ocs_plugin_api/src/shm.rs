@@ -29,7 +29,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
-use codec::{Document, EntityType, Handle};
+use document::{Document, EntityType, Handle};
 use memmap2::{Mmap, MmapMut, MmapOptions};
 use rkyv::{check_archived_root, to_bytes, Archive, Deserialize, Serialize};
 
@@ -459,8 +459,8 @@ pub struct LayerView {
     pub name: String,
 }
 
-impl From<&codec::tables::Layer> for LayerView {
-    fn from(layer: &codec::tables::Layer) -> Self {
+impl From<&document::tables::Layer> for LayerView {
+    fn from(layer: &document::tables::Layer) -> Self {
         Self {
             handle: layer.handle.value(),
             name: layer.name.clone(),
@@ -475,8 +475,8 @@ pub struct AppIdView {
     pub name: String,
 }
 
-impl From<&codec::tables::AppId> for AppIdView {
-    fn from(app_id: &codec::tables::AppId) -> Self {
+impl From<&document::tables::AppId> for AppIdView {
+    fn from(app_id: &document::tables::AppId) -> Self {
         Self {
             handle: app_id.handle.value(),
             name: app_id.name.clone(),
@@ -554,8 +554,8 @@ impl ReaderEntityKind {
 // ── V4 full-entity document view ────────────────────────────────────────────
 
 /// Serializable V4 document view. The outer structure is rkyv; each entity's
-/// `data` is a bincode-encoded `codec::EntityType` so that the plugin can
-/// reconstruct the full typed entity without relying on opencadcodec's own rkyv
+/// `data` is a bincode-encoded `document::EntityType` so that the plugin can
+/// reconstruct the full typed entity without relying on document's own rkyv
 /// support.
 #[derive(Archive, Serialize, Deserialize, Debug, Clone)]
 #[archive(check_bytes)]
@@ -620,9 +620,9 @@ impl From<&EntityType> for EntityViewV4 {
 mod tests {
     use super::*;
     use crate::host::{DocumentReader, ReaderEntityKind};
-    use codec::entities::Point;
-    use codec::tables::Layer;
-    use codec::{Document, EntityType};
+    use document::entities::Point;
+    use document::tables::Layer;
+    use document::{Document, EntityType};
 
     fn unique_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(

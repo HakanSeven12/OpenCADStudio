@@ -10,18 +10,18 @@
 //! opened drawing back into carriers, so objects made by other applications
 //! are edited, follow their sources and keep their properties alike.
 
-use codec::entities::{
+use document::entities::{
     CenterLineAssociation, CenterLineSource, CenterLineSourceKind, CenterMarkAssociation,
     CenterMarkSource, CenterMarkSourceKind, EntityType, Insert, Line,
 };
-use codec::objects::{
+use document::objects::{
     AssocAction, AssocActionBody, AssocActionDependency, AssocActionParam, AssocCurveValue,
     AssocDependency, AssocEdgeActionParam, AssocEvalValue, AssocEvalVariant, AssocGeomDependency,
     AssocPersistentSubentId, AssocSingleDependencyActionParam, AssocSmartCenterActionBody,
     AssocSubcurveKind, AssocValueParam, AssocValueParamVariable, AssociativeData, ObjectType,
 };
-use codec::types::Vector3;
-use codec::{Document, Handle};
+use document::types::Vector3;
+use document::{Document, Handle};
 use glam::DVec3;
 
 use crate::scene::assoc_array::{associative, block_network, next_anonymous_name};
@@ -64,11 +64,11 @@ fn register_classes(document: &mut Document) {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
         }
-        document.classes.add_or_update(codec::classes::DxfClass {
+        document.classes.add_or_update(document::classes::DxfClass {
             dxf_name: dxf_name.to_string(),
             cpp_class_name: cpp_class_name.to_string(),
             application_name: application.to_string(),
-            proxy_flags: codec::classes::ProxyFlags(proxy),
+            proxy_flags: document::classes::ProxyFlags(proxy),
             instance_count: 0,
             was_zombie: false,
             is_an_entity: false,
@@ -364,7 +364,7 @@ fn export_one(document: &mut Document, handle: Handle) {
 
     // The picture block.
     let name = next_anonymous_name(document);
-    let mut record = codec::tables::BlockRecord::new(&name);
+    let mut record = document::tables::BlockRecord::new(&name);
     record.flags.anonymous = true;
     record.explodable = true;
     let record_handle = document.allocate_handle();
@@ -375,7 +375,7 @@ fn export_one(document: &mut Document, handle: Handle) {
     if document.block_records.add(record).is_err() {
         return;
     }
-    let mut block = codec::entities::Block::new(&name, Vector3::ZERO);
+    let mut block = document::entities::Block::new(&name, Vector3::ZERO);
     block.common.handle = block_handle;
     block.common.owner_handle = record_handle;
     block.common.layer = line.common.layer.clone();
@@ -384,8 +384,8 @@ fn export_one(document: &mut Document, handle: Handle) {
         let mut part = Line::from_points(vector(points[0]), vector(points[1]));
         part.common.owner_handle = record_handle;
         part.common.layer = line.common.layer.clone();
-        part.common.color = codec::types::Color::ByBlock;
-        part.common.transparency = codec::types::Transparency::ByBlock;
+        part.common.color = document::types::Color::ByBlock;
+        part.common.transparency = document::types::Transparency::ByBlock;
         part.common.linetype_scale = line.common.linetype_scale;
         part.common.line_weight = line.common.line_weight;
         part.common.linetype = if *patterned {
@@ -399,7 +399,7 @@ fn export_one(document: &mut Document, handle: Handle) {
     // The terminator is allocated after the picture so handle order matches
     // record order inside the definition.
     let end_handle = document.allocate_handle();
-    let mut block_end = codec::entities::BlockEnd::new();
+    let mut block_end = document::entities::BlockEnd::new();
     block_end.common.handle = end_handle;
     block_end.common.owner_handle = record_handle;
     block_end.common.layer = line.common.layer.clone();
@@ -418,11 +418,11 @@ fn export_one(document: &mut Document, handle: Handle) {
     insert
         .common
         .extended_data
-        .remove_record(codec::entities::CENTERMARK_XDATA_APPLICATION);
+        .remove_record(document::entities::CENTERMARK_XDATA_APPLICATION);
     insert
         .common
         .extended_data
-        .remove_record(codec::entities::CENTERLINE_XDATA_APPLICATION);
+        .remove_record(document::entities::CENTERLINE_XDATA_APPLICATION);
 
     // The action.
     let network = block_network(document, owner);
@@ -1013,11 +1013,11 @@ fn import_one(document: &mut Document, stored: Stored) {
         *entity = EntityType::Line(carrier);
     }
     for application in [
-        codec::entities::CENTERMARK_XDATA_APPLICATION,
-        codec::entities::CENTERLINE_XDATA_APPLICATION,
+        document::entities::CENTERMARK_XDATA_APPLICATION,
+        document::entities::CENTERLINE_XDATA_APPLICATION,
     ] {
         if !document.app_ids.contains(application) {
-            let mut app = codec::tables::AppId::new(application);
+            let mut app = document::tables::AppId::new(application);
             app.handle = document.allocate_handle();
             let _ = document.app_ids.add(app);
         }

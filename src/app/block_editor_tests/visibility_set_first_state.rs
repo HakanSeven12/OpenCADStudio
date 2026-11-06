@@ -94,7 +94,7 @@ fn a_member_drawn_after_the_graph_reaches_the_visibility_copy_tagged() {
     assert!(
         tag.values
             .iter()
-            .any(|value| matches!(value, codec::xdata::XDataValue::Handle(handle) if *handle == late.common.handle)),
+            .any(|value| matches!(value, document::xdata::XDataValue::Handle(handle) if *handle == late.common.handle)),
         "and the tag names the object it sits on: {tag:?}"
     );
 }

@@ -19,8 +19,8 @@ use crate::scene::{
     self, hover_id, CubeRegion, Scene, VIEWCUBE_DRAW_PX, VIEWCUBE_PAD, VIEWCUBE_PX,
 };
 use crate::ui::PropertiesPanel;
-use codec::types::Color as AcadColor;
-use codec::{EntityType as AcadEntityType, Handle};
+use document::types::Color as AcadColor;
+use document::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 use std::sync::Arc;
@@ -815,7 +815,7 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn sync_render_mode_to_active_tile(&mut self, i: usize) {
-        use codec::entities::ViewportRenderMode as M;
+        use document::entities::ViewportRenderMode as M;
         if self.tabs[i].scene.current_layout != "Model" {
             return;
         }
@@ -1525,9 +1525,9 @@ impl OpenCADStudio {
 
     pub(super) fn on_set_render_mode(
         &mut self,
-        mode: codec::entities::ViewportRenderMode,
+        mode: document::entities::ViewportRenderMode,
     ) -> Task<Message> {
-        use codec::entities::ViewportRenderMode as M;
+        use document::entities::ViewportRenderMode as M;
         let i = self.active_tab;
         let label = match mode {
             M::Wireframe2D => "Wireframe 2D",
@@ -1568,10 +1568,10 @@ impl OpenCADStudio {
     pub(crate) fn apply_render_mode(
         &mut self,
         i: usize,
-        mode: codec::entities::ViewportRenderMode,
+        mode: document::entities::ViewportRenderMode,
         label: &str,
     ) {
-        use codec::entities::ViewportRenderMode as M;
+        use document::entities::ViewportRenderMode as M;
         self.tabs[i].render_mode = mode;
         // Write the style onto the active Model tile alone so it
         // sticks when that tile loses focus and the other tiles keep
@@ -1591,7 +1591,7 @@ impl OpenCADStudio {
     pub(super) fn on_cursor_moved(
         &mut self,
         p: Point,
-        expected_viewport: Option<codec::Handle>,
+        expected_viewport: Option<document::Handle>,
     ) -> Task<Message> {
         if self.color_picker.is_some() {
             return Task::none();
@@ -3923,7 +3923,7 @@ impl OpenCADStudio {
                 } else {
                     self.tabs[i].scene.set_hover_highlight(None);
                 }
-                let hover_handle = hovered.unwrap_or(codec::Handle::NULL);
+                let hover_handle = hovered.unwrap_or(document::Handle::NULL);
                 let wants_entity = self.tabs[i]
                     .active_cmd
                     .as_ref()
@@ -4342,8 +4342,8 @@ impl OpenCADStudio {
         }
         let document = &tab.scene.document;
         let color = match document.header.current_entity_color {
-            codec::types::Color::ByLayer => document.layers.get(&tab.active_layer)?.color,
-            codec::types::Color::ByBlock => codec::types::Color::Index(7),
+            document::types::Color::ByLayer => document.layers.get(&tab.active_layer)?.color,
+            document::types::Color::ByBlock => document::types::Color::Index(7),
             color => color,
         };
         let rgba = crate::scene::convert::tess_util::aci_to_rgba(&color);
@@ -4841,12 +4841,12 @@ impl OpenCADStudio {
             snap_pixels_to_canvas(s, tile_b);
         }
 
-        use codec::types::Vector3;
+        use document::types::Vector3;
         let v3 = |d: glam::DVec3| Vector3::new(d.x, d.y, d.z);
         {
             let ucs = self.tabs[i]
                 .active_ucs
-                .get_or_insert_with(|| codec::tables::Ucs::new("*ACTIVE*"));
+                .get_or_insert_with(|| document::tables::Ucs::new("*ACTIVE*"));
             match kind {
                 crate::app::UcsGripKind::Origin => {
                     ucs.origin = v3(world);
@@ -4933,7 +4933,7 @@ impl OpenCADStudio {
             None
         };
         let same_basis =
-            |a: Option<&codec::tables::Ucs>, b: Option<&codec::tables::Ucs>| match (a, b) {
+            |a: Option<&document::tables::Ucs>, b: Option<&document::tables::Ucs>| match (a, b) {
                 (None, None) => true,
                 (Some(a), Some(b)) => {
                     a.origin == b.origin
@@ -5797,15 +5797,15 @@ impl OpenCADStudio {
                 self.refresh_properties();
                 return Task::none();
             }
-            let solid = |entity: Option<&codec::EntityType>| {
+            let solid = |entity: Option<&document::EntityType>| {
                 matches!(
                     entity,
                     Some(
-                        codec::EntityType::Solid3D(_)
-                            | codec::EntityType::Region(_)
-                            | codec::EntityType::Body(_)
-                            | codec::EntityType::Surface(_)
-                            | codec::EntityType::Mesh(_)
+                        document::EntityType::Solid3D(_)
+                            | document::EntityType::Region(_)
+                            | document::EntityType::Body(_)
+                            | document::EntityType::Surface(_)
+                            | document::EntityType::Mesh(_)
                     )
                 )
             };
@@ -6587,7 +6587,7 @@ impl OpenCADStudio {
                     if !measures
                         || !matches!(
                             self.tabs[i].scene.document.get_entity(handle),
-                            Some(codec::EntityType::Viewport(_))
+                            Some(document::EntityType::Viewport(_))
                         )
                     {
                         return true;
@@ -6624,7 +6624,7 @@ impl OpenCADStudio {
                                 if bounded_pick
                                     && matches!(
                                         self.tabs[i].scene.document.get_entity(handle),
-                                        Some(codec::EntityType::Solid3D(_)),
+                                        Some(document::EntityType::Solid3D(_)),
                                     )
                                 {
                                     // The aperture caught an edge outside its face.
@@ -6642,7 +6642,7 @@ impl OpenCADStudio {
                         if uses_surface_point && entity_pick_point.is_finite() {
                             if matches!(
                                 self.tabs[i].scene.document.get_entity(handle),
-                                Some(codec::EntityType::Solid3D(_))
+                                Some(document::EntityType::Solid3D(_))
                             ) {
                                 self.tabs[i]
                                     .scene
@@ -6668,7 +6668,7 @@ impl OpenCADStudio {
                         .is_some_and(|c| c.measures_through_viewports())
                         && matches!(
                             self.tabs[i].scene.document.get_entity(handle),
-                            Some(codec::EntityType::Insert(_))
+                            Some(document::EntityType::Insert(_))
                         )
                     {
                         let scene = &self.tabs[i].scene;
@@ -6744,7 +6744,7 @@ impl OpenCADStudio {
                                 )
                             });
                             let (scale, angle) = match entity {
-                                Some(codec::EntityType::Hatch(hatch)) => (
+                                Some(document::EntityType::Hatch(hatch)) => (
                                     hatch.pattern_scale as f32,
                                     hatch.pattern_angle.to_degrees() as f32,
                                 ),
@@ -7473,7 +7473,7 @@ properties={:.1}ms picked={}",
                             let hit_hatch = hit.is_some_and(|handle| {
                                 matches!(
                                     self.tabs[i].scene.document.get_entity(handle),
-                                    Some(codec::EntityType::Hatch(_))
+                                    Some(document::EntityType::Hatch(_))
                                 )
                             });
                             let pick_ms = crate::perf::elapsed_ms(t_arm);
@@ -7833,7 +7833,7 @@ properties={:.1}ms picked={}",
 
                 // Nothing with an editor was double-clicked: enter the
                 // clicked viewport.
-                let wire_hit: Option<codec::Handle> = raw_wire_hit.and_then(|h| {
+                let wire_hit: Option<document::Handle> = raw_wire_hit.and_then(|h| {
                     if let Some(AcadEntityType::Viewport(vp)) =
                         self.tabs[i].scene.document.get_entity(h)
                     {
@@ -8418,7 +8418,7 @@ properties={:.1}ms picked={}",
 
     pub(super) fn on_viewport_click(
         &mut self,
-        expected_viewport: Option<codec::Handle>,
+        expected_viewport: Option<document::Handle>,
     ) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].scene.active_viewport != expected_viewport
@@ -8765,7 +8765,7 @@ properties={:.1}ms picked={}",
             let is_solid = hovered.is_some_and(|handle| {
                 matches!(
                     self.tabs[i].scene.document.get_entity(handle),
-                    Some(codec::EntityType::Solid3D(_)),
+                    Some(document::EntityType::Solid3D(_)),
                 )
             });
             // An aperture may catch an edge beside, rather than on, a face.
@@ -8781,7 +8781,7 @@ properties={:.1}ms picked={}",
                 .document
                 .entities()
                 .filter_map(|entity| {
-                    matches!(entity, codec::EntityType::Solid3D(_))
+                    matches!(entity, document::EntityType::Solid3D(_))
                         .then_some(entity.common().handle)
                 })
                 .collect::<Vec<_>>();
@@ -9222,7 +9222,7 @@ properties={:.1}ms picked={}",
                     .unwrap_or_default();
                 self.tabs[i].scene.new_layout_plot_style = plot_style.clone();
                 for obj in self.tabs[i].scene.document.objects.values_mut() {
-                    if let codec::objects::ObjectType::Layout(l) = obj {
+                    if let document::objects::ObjectType::Layout(l) = obj {
                         if l.name == new_name {
                             l.flags = layout_flags;
                             crate::scene::apply_default_page_setup(l, &plot_style);
@@ -9468,7 +9468,7 @@ properties={:.1}ms picked={}",
                 .collect();
             let rebuilds_table = changes.iter().any(|(handle, _)| {
                 matches!(self.tabs[i].scene.document.get_entity(*handle),
-                    Some(codec::EntityType::Table(table)) if table.block_record_handle.is_none())
+                    Some(document::EntityType::Table(table)) if table.block_record_handle.is_none())
             });
             if rebuilds_table {
                 // Picture rebuilds replace block members, possibly adding a
@@ -9509,14 +9509,14 @@ properties={:.1}ms picked={}",
                 .unwrap_or_default();
             // A grip that detaches a centre object says so, as moving it does.
             for (handle, original) in &originals {
-                let codec::EntityType::Line(line) = original else {
+                let document::EntityType::Line(line) = original else {
                     continue;
                 };
                 let data = &line.common.extended_data;
-                let was_associated = codec::entities::CenterMarkAssociation::read(data)
+                let was_associated = document::entities::CenterMarkAssociation::read(data)
                     .map(|association| association.associated)
                     .or_else(|| {
-                        codec::entities::CenterLineAssociation::read(data)
+                        document::entities::CenterLineAssociation::read(data)
                             .map(|association| association.associated)
                     });
                 if was_associated == Some(true) {
@@ -9636,11 +9636,11 @@ mod table_grip_picture_tests;
 #[cfg(test)]
 mod hatch_double_click_tests {
     use crate::app::{Message, OpenCADStudio};
-    use codec::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
-    use codec::types::Vector2;
+    use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+    use document::types::Vector2;
 
     /// A solid hatch over (0,0)–(10,10), and the window point at its centre.
-    fn app_with_hatch() -> (OpenCADStudio, codec::Handle, iced::Point, iced::Point) {
+    fn app_with_hatch() -> (OpenCADStudio, document::Handle, iced::Point, iced::Point) {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -9657,7 +9657,7 @@ mod hatch_double_click_tests {
         hatch.paths.push(path);
         let handle = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Hatch(Box::new(hatch)));
+            .add_entity(document::EntityType::Hatch(Box::new(hatch)));
 
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
         app.tabs[i].scene.camera.borrow_mut().fit_to_bounds_f64(
@@ -9988,7 +9988,7 @@ mod rapid_drawing_tests {
 
     #[test]
     fn otrack_rapid_moves_defer_and_stationary_ticks_acquire_once() {
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
         use crate::snap::SnapType;
         let mut app = drawing_app("LINE");
         let i = app.active_tab;
@@ -10157,7 +10157,7 @@ mod rapid_drawing_tests {
     fn stretch_cursor_move_keeps_live_lines_visible_even_during_fast_pointer_updates() {
         use crate::command::{CadCommand, CmdResult};
         use crate::modules::draw::modify::stretch::StretchCommand;
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -10408,7 +10408,7 @@ mod rapid_drawing_tests {
 
     #[test]
     fn otrack_departure_resets_acquired_latch_after_removing_final_reference() {
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
         use crate::snap::SnapType;
         let mut app = drawing_app("LINE");
         let i = app.active_tab;
@@ -10487,7 +10487,7 @@ mod rapid_drawing_tests {
 
     #[test]
     fn parallel_snap_acquires_reference_on_line_interior() {
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
         use crate::snap::SnapType;
         let mut app = drawing_app("LINE");
         let i = app.active_tab;
@@ -10656,25 +10656,25 @@ mod selection_preview_tests {
         app.ortho_mode = false;
         app.polar_mode = false;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
-        let mut text = codec::entities::MText::with_value(
+        let mut text = document::entities::MText::with_value(
             "asd asd asd asd",
-            codec::types::Vector3::new(100.0, 50.0, 0.0),
+            document::types::Vector3::new(100.0, 50.0, 0.0),
         );
         text.height = 2.5;
         text.rectangle_width = 60.0;
         text.rectangle_height = Some(10.0);
         text.rotation = rotation;
-        text.attachment_point = codec::entities::AttachmentPoint::TopLeft;
+        text.attachment_point = document::entities::AttachmentPoint::TopLeft;
         let handle = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::MText(Box::new(text)));
+            .add_entity(document::EntityType::MText(Box::new(text)));
         app.tabs[i].scene.selected.insert(handle);
         app.refresh_selected_grips();
         (app, handle)
     }
 
-    fn mtext_size_value(app: &OpenCADStudio, handle: Handle) -> &codec::entities::MText {
-        let Some(codec::EntityType::MText(text)) = app.tabs[app.active_tab].scene.document.get_entity(handle)
+    fn mtext_size_value(app: &OpenCADStudio, handle: Handle) -> &document::entities::MText {
+        let Some(document::EntityType::MText(text)) = app.tabs[app.active_tab].scene.document.get_entity(handle)
         else {
             panic!("expected MTEXT")
         };
@@ -10777,7 +10777,7 @@ mod selection_preview_tests {
         use crate::scene::parametric_constraints::{
             ConstraintKind, ParametricRef, ParametricScope,
         };
-        use codec::{
+        use document::{
             entities::{Arc, Line},
             types::Vector3,
             EntityType,
@@ -10985,7 +10985,7 @@ mod selection_preview_tests {
     #[test]
     fn grip_moves_keep_perpendicular_constraints_live_and_undoable() {
         use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef};
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11067,7 +11067,7 @@ mod selection_preview_tests {
         use crate::scene::parametric_constraints::{
             ConstraintKind, ParametricRef, ParametricScope,
         };
-        use codec::{entities::LwPolyline, types::Vector2, EntityType};
+        use document::{entities::LwPolyline, types::Vector2, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11230,7 +11230,7 @@ mod selection_preview_tests {
         use crate::scene::parametric_constraints::{
             ConstraintKind, ParametricRef, ParametricScope,
         };
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
 
         for vertical in [false, true] {
             let mut app = OpenCADStudio::new_for_test();
@@ -11295,7 +11295,7 @@ mod selection_preview_tests {
 
     #[test]
     fn a_point_step_takes_the_point_where_the_button_went_down() {
-        use codec::EntityType;
+        use document::EntityType;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -11347,7 +11347,7 @@ mod selection_preview_tests {
 
     #[test]
     fn xline_direction_grip_drag_changes_direction() {
-        use codec::{types::Vector3, EntityType};
+        use document::{types::Vector3, EntityType};
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -11356,7 +11356,7 @@ mod selection_preview_tests {
         // the press (it sits at the origin in a fresh drawing).
         let handle = app.tabs[i]
             .scene
-            .add_entity(EntityType::XLine(codec::entities::XLine::new(
+            .add_entity(EntityType::XLine(document::entities::XLine::new(
                 Vector3::new(100.0, 50.0, 0.0),
                 Vector3::new(0.0, 1.0, 0.0),
             )));
@@ -11404,7 +11404,7 @@ mod selection_preview_tests {
         use crate::scene::parametric_constraints::{
             ConstraintKind, ParametricRef, ParametricScope,
         };
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11457,10 +11457,10 @@ mod selection_preview_tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn hyperlink_click_respects_existing_pointer_owners() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
-        use codec::xdata::{ExtendedDataRecord, XDataValue};
-        use codec::EntityType;
+        use document::entities::Line;
+        use document::types::Vector3;
+        use document::xdata::{ExtendedDataRecord, XDataValue};
+        use document::EntityType;
         use glam::DVec3;
 
         for mode in ["link", "plain", "pan", "orbit", "zoom", "grip", "command"] {
@@ -11630,7 +11630,7 @@ mod selection_preview_tests {
     #[test]
     fn line_snap_to_3d_endpoint_keeps_elevation() {
         use crate::snap::SnapType;
-        use codec::{entities::Line, types::Vector3, EntityType};
+        use document::{entities::Line, types::Vector3, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11685,7 +11685,7 @@ mod selection_preview_tests {
     #[test]
     fn line_snaps_to_box_corner() {
         use crate::snap::SnapType;
-        use codec::{entities::Solid3D, EntityType};
+        use document::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11779,7 +11779,7 @@ mod selection_preview_tests {
     #[test]
     fn box_corner_answers_2d_endpoint_with_3d_master_off() {
         use crate::snap::SnapType;
-        use codec::{entities::Solid3D, EntityType};
+        use document::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11847,7 +11847,7 @@ mod selection_preview_tests {
     #[test]
     fn line_snaps_to_box_face_center() {
         use crate::snap::SnapType;
-        use codec::{entities::Solid3D, EntityType};
+        use document::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11913,7 +11913,7 @@ mod selection_preview_tests {
     #[test]
     fn line_snaps_to_box_face_nearest() {
         use crate::snap::SnapType;
-        use codec::{entities::Solid3D, EntityType};
+        use document::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -11980,7 +11980,7 @@ mod selection_preview_tests {
     /// grey-box (real mesh, real helper) since it needs no event plumbing.
     #[test]
     fn face_perpendicular_needs_base_and_interior_foot() {
-        use codec::{entities::Solid3D, EntityType};
+        use document::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -12057,7 +12057,7 @@ mod selection_preview_tests {
     #[test]
     fn line_snaps_to_box_edge_midpoint() {
         use crate::snap::SnapType;
-        use codec::{entities::Solid3D, EntityType};
+        use document::{entities::Solid3D, EntityType};
 
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
@@ -12147,7 +12147,7 @@ mod selection_preview_tests {
 #[cfg(test)]
 mod behind_eye_snap_tests {
     use super::*;
-    use codec::{entities::Solid3D, EntityType};
+    use document::{entities::Solid3D, EntityType};
 
     fn app_with_box(center_z: f64) -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
@@ -12327,14 +12327,14 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod stretch_shift_click_tests {
     use crate::app::OpenCADStudio;
-    use codec::EntityType;
+    use document::EntityType;
     use glam::DVec3;
 
     #[test]
     fn shift_click_takes_a_whole_object_out_of_stretch() {
         use crate::modules::draw::modify::stretch::StretchCommand;
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;

@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use codec::xdata::ExtendedDataRecord;
-use codec::{Document, EntityType, Handle};
+use document::xdata::ExtendedDataRecord;
+use document::{Document, EntityType, Handle};
 use interprocess::local_socket::traits::Stream as StreamTrait;
 use interprocess::local_socket::{GenericNamespaced, Stream, ToNsName};
 use interprocess::TryClone;
@@ -1073,8 +1073,8 @@ impl HostApi for V4PluginHostApi {
 
     fn entities_batch(
         &self,
-        handles: &[codec::Handle],
-    ) -> Result<Vec<Option<codec::EntityType>>, String> {
+        handles: &[document::Handle],
+    ) -> Result<Vec<Option<document::EntityType>>, String> {
         // API v12: per-entity reads — refresh passes never need to re-clone
         // the invalidated document snapshot after writes.
         match self.request(PluginRequest::GetEntitiesBatch {
@@ -1118,7 +1118,7 @@ impl HostApi for V4PluginHostApi {
     fn update_xrecords(
         &mut self,
         updates: &[crate::host::XRecordUpdate],
-    ) -> Result<Vec<Result<codec::Handle, String>>, String> {
+    ) -> Result<Vec<Result<document::Handle, String>>, String> {
         // API v13: one frame (one undo composition) replaces the whole
         // per-record write loop.
         match self.request(PluginRequest::UpdateXRecords {
@@ -1419,7 +1419,7 @@ mod tests {
     use crate::ipc::transport::recv;
     use crate::ipc::v4::protocol::{HostToPluginV4, PluginToHostV4};
     use crate::test_lock::ENV_LOCK;
-    use codec::entities::Point;
+    use document::entities::Point;
 
     fn unique_socket_name() -> String {
         static COUNTER: AtomicU64 = AtomicU64::new(0);

@@ -8,9 +8,9 @@
 
 use std::sync::Mutex;
 
-use codec::entities::{AttachmentPoint, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::entities::{AttachmentPoint, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

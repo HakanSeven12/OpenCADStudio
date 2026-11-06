@@ -1,6 +1,6 @@
 //! Read-only authoring dependencies and finite value-set display samples.
 use super::*;
-use codec::objects::BlockParameterValueSet;
+use document::objects::BlockParameterValueSet;
 
 const MAX_MARKERS: usize = 256;
 

@@ -5,9 +5,9 @@
 //! (`overhead`) at each point light — the records and their extended data
 //! as the reference importer writes them.
 
-use codec::entities::{Arc, AttributeDefinition, EntityType, HorizontalAlignment, Line};
-use codec::types::{Color, Vector3};
-use codec::xdata::{ExtendedDataRecord, XDataValue};
+use document::entities::{Arc, AttributeDefinition, EntityType, HorizontalAlignment, Line};
+use document::types::{Color, Vector3};
+use document::xdata::{ExtendedDataRecord, XDataValue};
 
 /// The layer and text style the records use.
 pub const LAYER: &str = "ASHADE";
@@ -47,7 +47,7 @@ pub const ENTITY_MATERIAL: &str = "1002={|1000=|1002={|1071=0|1070=0|1070=0|1002
 
 /// A mesh's link to its material block reference, when the materials
 /// stay out of the objects.
-pub fn finish_xdata(material_record: codec::Handle) -> ExtendedDataRecord {
+pub fn finish_xdata(material_record: document::Handle) -> ExtendedDataRecord {
     let mut record = ExtendedDataRecord::new("AVE_FINISH");
     record.add_value(XDataValue::ControlString("{".into()));
     record.add_value(XDataValue::Integer16(0));

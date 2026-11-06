@@ -24,9 +24,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use codec::entities::{LwPolyline, LwVertex};
-use codec::types::{Color, Handle, Vector2, Vector3};
-use codec::{EntityType, Line, Point as CadPoint};
+use document::entities::{LwPolyline, LwVertex};
+use document::types::{Color, Handle, Vector2, Vector3};
+use document::{EntityType, Line, Point as CadPoint};
 use glam::{DMat3, DVec2, DVec3};
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -1240,7 +1240,7 @@ impl CadCommand for SectionCommand {
     fn inject_picked_entity(&mut self, entity: EntityType) {
         self.picked = matches!(
             &entity,
-            EntityType::Extended(e) if matches!(e.data, codec::entities::ExtendedEntityData::PointCloudEx(_))
+            EntityType::Extended(e) if matches!(e.data, document::entities::ExtendedEntityData::PointCloudEx(_))
         );
     }
 

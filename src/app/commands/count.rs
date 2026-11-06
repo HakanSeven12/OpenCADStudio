@@ -9,8 +9,8 @@ use crate::modules::annotate::field_cmd::FieldPlaceCommand;
 use crate::ui::window::count_palette::{
     aci_rgba, CountMode, CountMsg, CountTarget, RowAction, AREA_LAYER,
 };
-use codec::count::{area_json, block_json, single_json, CountKey};
-use codec::{EntityType, Handle};
+use document::count::{area_json, block_json, single_json, CountKey};
+use document::{EntityType, Handle};
 use iced::Task;
 
 /// The variables this family answers for.
@@ -36,7 +36,7 @@ fn parse_xy(s: &str) -> Option<[f64; 2]> {
 }
 
 /// A field referring to `boundary` keeps the count area's polyline.
-fn boundary_in_use(doc: &codec::Document, boundary: Handle) -> bool {
+fn boundary_in_use(doc: &document::Document, boundary: Handle) -> bool {
     let needle = format!("\"boundaryObjectHandle\":\"{}\"", hex(boundary));
     doc.fields.values().any(|f| f.code.contains(&needle))
 }
@@ -461,7 +461,7 @@ impl OpenCADStudio {
             }
             "O" => {
                 let h = parse_handle(tokens.get(1)?)?;
-                let ring = codec::count::boundary_polygon(&self.tabs[i].scene.document, h)?;
+                let ring = document::count::boundary_polygon(&self.tabs[i].scene.document, h)?;
                 Some((Some(ring), Some((h, false))))
             }
             _ => None,
@@ -474,18 +474,18 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, "COUNT");
         let doc = &mut self.tabs[i].scene.document;
         if !doc.layers.contains(AREA_LAYER) {
-            let mut layer = codec::tables::Layer::new(AREA_LAYER);
+            let mut layer = document::tables::Layer::new(AREA_LAYER);
             layer.handle = doc.allocate_handle();
-            layer.color = codec::types::Color::from_index(152);
+            layer.color = document::types::Color::from_index(152);
             layer.is_plottable = false;
             layer.flags.locked = true;
             layer.line_type = "Continuous".into();
             let _ = doc.layers.add(layer);
         }
-        let mut pl = codec::entities::LwPolyline::new();
+        let mut pl = document::entities::LwPolyline::new();
         pl.vertices = ring
             .iter()
-            .map(|p| codec::entities::LwVertex::new(codec::types::Vector2::new(p[0], p[1])))
+            .map(|p| document::entities::LwVertex::new(document::types::Vector2::new(p[0], p[1])))
             .collect();
         pl.is_closed = true;
         pl.common.layer = AREA_LAYER.into();
@@ -652,7 +652,7 @@ impl OpenCADStudio {
                 hosts.extend(record.entity_handles.iter().copied());
             }
         }
-        let attributes: Vec<&codec::entities::EntityCommon> = handles
+        let attributes: Vec<&document::entities::EntityCommon> = handles
             .iter()
             .filter_map(|h| match doc.get_entity(*h) {
                 Some(EntityType::Insert(insert)) => {
@@ -693,9 +693,9 @@ impl OpenCADStudio {
     fn place_count_table(&mut self, i: usize, point: [f64; 3], names: Vec<String>) {
         let doc = &self.tabs[i].scene.document;
         let area = self.tabs[i].count.as_ref().and_then(|m| m.area.clone());
-        let instances = codec::count::block_instances(doc, area.as_deref());
+        let instances = document::count::block_instances(doc, area.as_deref());
         let mut names: Vec<String> = if names.is_empty() {
-            codec::count::block_counts(&instances)
+            document::count::block_counts(&instances)
                 .into_iter()
                 .map(|c| c.name)
                 .collect()
@@ -712,8 +712,8 @@ impl OpenCADStudio {
         };
         names.sort_by_key(|n| n.to_ascii_uppercase());
         names.dedup_by_key(|n| n.to_ascii_uppercase());
-        let mut table = codec::entities::TableBuilder::new(names.len() + 1, 2)
-            .at(codec::types::Vector3::new(point[0], point[1], point[2]))
+        let mut table = document::entities::TableBuilder::new(names.len() + 1, 2)
+            .at(document::types::Vector3::new(point[0], point[1], point[2]))
             .row_height(0.36)
             .column_width(3.6)
             .build();
@@ -721,7 +721,7 @@ impl OpenCADStudio {
         // As the reference writes it: no title row, data rows centred
         // (table and cell overrides), header cells without overrides.
         table.value_flags = 22;
-        table.legacy_style_override = Some(codec::entities::table::LegacyTableStyleOverride {
+        table.legacy_style_override = Some(document::entities::table::LegacyTableStyleOverride {
             flags: 0x10001,
             title_suppressed: Some(true),
             row_alignments: vec![5],
@@ -733,10 +733,10 @@ impl OpenCADStudio {
             table.set_cell_text(r + 1, 0, name);
             if let Some(cell) = table.cell_mut(r + 1, 1) {
                 // The count comes from the field; the cell keeps no text.
-                let mut content = codec::entities::table::CellContent::text("");
+                let mut content = document::entities::table::CellContent::text("");
                 content.value.flags = 1;
                 cell.contents = vec![content];
-                cell.cell_type = codec::entities::table::CellType::Text;
+                cell.cell_type = document::entities::table::CellType::Text;
             }
         }
         for (r, row) in table.rows.iter_mut().enumerate() {
@@ -748,7 +748,7 @@ impl OpenCADStudio {
                     cell.flag = 0x40000;
                 } else {
                     cell.flag = 0x40001;
-                    let mut style = codec::entities::CellStyle::new();
+                    let mut style = document::entities::CellStyle::new();
                     style.override_flags = 0x01;
                     style.alignment = 5;
                     cell.style = Some(style);
@@ -776,7 +776,7 @@ impl OpenCADStudio {
                     r + 1,
                     1,
                     r"%<\_FldIdx 0>%".to_string(),
-                    vec![codec::fields::NewField::new(code.clone(), value)],
+                    vec![document::fields::NewField::new(code.clone(), value)],
                 )
             })
             .collect();
@@ -793,12 +793,12 @@ impl OpenCADStudio {
         let Some(entity) = doc.get_entity(h) else {
             return;
         };
-        let outline = codec::count::entity_outline(doc, entity);
+        let outline = document::count::entity_outline(doc, entity);
         if outline.is_empty() {
             return;
         }
         let (mut lo, mut hi) = (glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN));
-        for c in outline.iter().flat_map(codec::count::Piece::points) {
+        for c in outline.iter().flat_map(document::count::Piece::points) {
             let p = glam::DVec3::new(c.x, c.y, c.z);
             lo = lo.min(p);
             hi = hi.max(p);
@@ -836,15 +836,15 @@ impl OpenCADStudio {
     /// The Field dialog's Show Count Instances: count mode on what the
     /// expression counts.
     pub(in crate::app) fn show_count_instances(&mut self, i: usize, json: &str) {
-        match codec::count::parse_query(json) {
-            Some(codec::count::CountQuery::Block {
+        match document::count::parse_query(json) {
+            Some(document::count::CountQuery::Block {
                 name,
                 key,
                 boundary,
             }) => {
                 if let Some(b) = boundary {
                     if let Some(ring) =
-                        codec::count::boundary_polygon(&self.tabs[i].scene.document, b)
+                        document::count::boundary_polygon(&self.tabs[i].scene.document, b)
                     {
                         let mut mode = self.tabs[i].count.take().unwrap_or_default();
                         if mode.boundary.map(|(h, _)| h) != Some(b) {
@@ -857,7 +857,7 @@ impl OpenCADStudio {
                 }
                 self.open_count_target(i, name, key);
             }
-            Some(codec::count::CountQuery::Single(handles)) if !handles.is_empty() => {
+            Some(document::count::CountQuery::Single(handles)) if !handles.is_empty() => {
                 let hexes: Vec<String> = handles.iter().map(|h| hex(*h)).collect();
                 let area = if self.tabs[i].count.is_some() {
                     "K"
@@ -919,7 +919,7 @@ impl OpenCADStudio {
             CountMsg::TableAll(on) => {
                 let names: Vec<String> = if on {
                     let area = self.tabs[i].count.as_ref().and_then(|m| m.area.clone());
-                    let instances = codec::count::block_instances(
+                    let instances = document::count::block_instances(
                         &self.tabs[i].scene.document,
                         area.as_deref(),
                     );

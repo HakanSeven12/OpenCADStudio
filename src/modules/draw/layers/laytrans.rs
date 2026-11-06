@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use codec::tables::Layer;
+use document::tables::Layer;
 
 use crate::scene::Scene;
 
@@ -119,7 +119,7 @@ pub fn load_targets(path: &Path) -> Result<Vec<TargetLayer>, String> {
 /// Extract the translation targets from an already-parsed drawing — the
 /// tail of [`load_targets`], reused by the web flow, which parses the
 /// picked file's bytes before it gets here.
-pub fn targets_from_document(document: &codec::Document) -> Result<Vec<TargetLayer>, String> {
+pub fn targets_from_document(document: &document::Document) -> Result<Vec<TargetLayer>, String> {
     let mut targets: Vec<TargetLayer> = document
         .layers
         .iter()
@@ -230,7 +230,7 @@ pub fn translate(
             // Whatever reference the target drawing held it through does not
             // come with it.
             layer.flags.xref_dependent = false;
-            layer.xref_block_record_handle = codec::Handle::NULL;
+            layer.xref_block_record_handle = document::Handle::NULL;
             let _ = scene.document.layers.add(layer);
         }
         let moved = merge_layer(scene, &mapping.from, &mapping.to, options.force_bylayer);
@@ -260,7 +260,7 @@ pub fn translate(
 pub fn merge_layer(scene: &mut Scene, from: &str, to: &str, force_bylayer: bool) -> usize {
     let mut moved = 0usize;
     for entity in scene.document.entities_mut() {
-        if let codec::EntityType::Insert(insert) = entity {
+        if let document::EntityType::Insert(insert) = entity {
             for attribute in &mut insert.attributes {
                 if attribute.common.layer == from {
                     move_common(&mut attribute.common, to, force_bylayer);
@@ -278,30 +278,30 @@ pub fn merge_layer(scene: &mut Scene, from: &str, to: &str, force_bylayer: bool)
     moved
 }
 
-fn move_common(common: &mut codec::entities::EntityCommon, to: &str, force_bylayer: bool) {
+fn move_common(common: &mut document::entities::EntityCommon, to: &str, force_bylayer: bool) {
     common.layer = to.to_string();
     if force_bylayer {
-        common.color = codec::Color::ByLayer;
+        common.color = document::Color::ByLayer;
         common.color_name = None;
         common.color_book_handle = None;
         common.linetype = String::new();
         common.linetype_handle = None;
-        common.line_weight = codec::LineWeight::ByLayer;
+        common.line_weight = document::LineWeight::ByLayer;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{AttributeEntity, EntityType, Insert};
-    use codec::Vector3;
+    use document::entities::{AttributeEntity, EntityType, Insert};
+    use document::Vector3;
 
     #[test]
     fn merge_layer_moves_attributes_inside_inserts() {
         let mut scene = Scene::new();
         let mut attribute = AttributeEntity::new("TAG".into(), "value".into());
         attribute.common.layer = "A".into();
-        attribute.common.color = codec::Color::from_index(1);
+        attribute.common.color = document::Color::from_index(1);
         let mut insert = Insert::new("BLK", Vector3::ZERO);
         insert.attributes.push(attribute);
         let handle = scene.add_entity(EntityType::Insert(insert));
@@ -314,6 +314,6 @@ mod tests {
         assert_eq!(moved, 1);
         assert_eq!(insert.common.layer, "0");
         assert_eq!(insert.attributes[0].common.layer, "B");
-        assert_eq!(insert.attributes[0].common.color, codec::Color::ByLayer);
+        assert_eq!(insert.attributes[0].common.color, document::Color::ByLayer);
     }
 }

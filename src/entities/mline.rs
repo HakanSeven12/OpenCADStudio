@@ -1,5 +1,5 @@
-use codec::entities::{MLine, MLineFlags, MLineSegment, MLineVertex};
-use codec::types::Vector3;
+use document::entities::{MLine, MLineFlags, MLineSegment, MLineVertex};
+use document::types::Vector3;
 use kernel::geom2d::{intersect::line_line, Vec2};
 use kernel::space::Plane;
 
@@ -14,7 +14,7 @@ use crate::t;
 /// One styled line or cap of a multiline.
 pub struct MLineLine {
     pub points: Vec<[f64; 3]>,
-    pub color: codec::types::Color,
+    pub color: document::types::Color,
     pub linetype: String,
 }
 
@@ -140,7 +140,7 @@ pub(crate) fn mline_miter_factor(vertex: &MLineVertex, normal: Vector3) -> f64 {
 
 fn adjusted_mline_endpoint(
     mline: &MLine,
-    style: &codec::objects::MLineStyle,
+    style: &document::objects::MLineStyle,
     vertex: usize,
     point: [f64; 3],
 ) -> [f64; 3] {
@@ -428,7 +428,7 @@ fn restore_shifted_mline_segment(
 pub(crate) fn normalize_scripted_mline(
     old: Option<&MLine>,
     new: &mut MLine,
-    document: &codec::Document,
+    document: &document::Document,
 ) -> Result<(), String> {
     let style = resolved_mline_style(new, document)
         .ok_or_else(|| format!("MLine style {:?} does not exist", new.style_name))?;
@@ -473,9 +473,9 @@ pub(crate) fn normalize_scripted_mline(
 /// Resolve a multiline into styled parallel lines in WCS.
 pub fn resolved_mline_style<'a>(
     m: &MLine,
-    document: &'a codec::Document,
-) -> Option<&'a codec::objects::MLineStyle> {
-    use codec::objects::ObjectType;
+    document: &'a document::Document,
+) -> Option<&'a document::objects::MLineStyle> {
+    use document::objects::ObjectType;
 
     m.style_handle
         .and_then(|handle| match document.objects.get(&handle) {
@@ -492,17 +492,17 @@ pub fn resolved_mline_style<'a>(
         })
 }
 
-pub fn mline_lines(m: &MLine, document: &codec::Document) -> Vec<MLineLine> {
+pub fn mline_lines(m: &MLine, document: &document::Document) -> Vec<MLineLine> {
     mline_lines_resolved(m, resolved_mline_style(m, document))
 }
 
-pub fn mline_lines_with_style(m: &MLine, style: &codec::objects::MLineStyle) -> Vec<MLineLine> {
+pub fn mline_lines_with_style(m: &MLine, style: &document::objects::MLineStyle) -> Vec<MLineLine> {
     mline_lines_resolved(m, Some(style))
 }
 
-fn mline_lines_resolved(m: &MLine, style: Option<&codec::objects::MLineStyle>) -> Vec<MLineLine> {
-    use codec::entities::{MLineFlags, MLineJustification};
-    use codec::types::Color;
+fn mline_lines_resolved(m: &MLine, style: Option<&document::objects::MLineStyle>) -> Vec<MLineLine> {
+    use document::entities::{MLineFlags, MLineJustification};
+    use document::types::Color;
 
     if m.vertices.is_empty() {
         return Vec::new();
@@ -758,7 +758,7 @@ fn semicircle_cap(
 
 pub fn mline_fill_triangles_with_style(
     m: &MLine,
-    style: &codec::objects::MLineStyle,
+    style: &document::objects::MLineStyle,
 ) -> Vec<[f64; 3]> {
     if !style.flags.fill_on || m.vertices.len() < 2 || style.elements.len() < 2 {
         return Vec::new();
@@ -793,9 +793,9 @@ pub fn mline_fill_triangles_with_style(
         .map(|element| element.offset)
         .fold(f64::NEG_INFINITY, f64::max);
     let shift = match m.justification {
-        codec::entities::MLineJustification::Top => -maximum,
-        codec::entities::MLineJustification::Zero => 0.0,
-        codec::entities::MLineJustification::Bottom => -minimum,
+        document::entities::MLineJustification::Top => -maximum,
+        document::entities::MLineJustification::Zero => 0.0,
+        document::entities::MLineJustification::Bottom => -minimum,
     };
     let offset_point = |vertex: usize, element: usize, endpoint: bool| -> [f64; 3] {
         let item = &m.vertices[vertex];
@@ -870,7 +870,7 @@ pub fn mline_fill_triangles_with_style(
 }
 
 impl RenderConvertible for MLine {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         if self.vertices.is_empty() {
             return None;
         }
@@ -932,13 +932,13 @@ impl Grippable for MLine {
             return;
         };
         let position = match apply {
-            GripApply::Translate(delta) => codec::types::Vector3::new(
+            GripApply::Translate(delta) => document::types::Vector3::new(
                 vertex.position.x + delta.x as f64,
                 vertex.position.y + delta.y as f64,
                 vertex.position.z + delta.z as f64,
             ),
             GripApply::Absolute(point) => {
-                codec::types::Vector3::new(point.x as f64, point.y as f64, point.z as f64)
+                document::types::Vector3::new(point.x as f64, point.y as f64, point.z as f64)
             }
         };
         let count = self.vertices.len();
@@ -1201,9 +1201,9 @@ impl Grippable for MLine {
 impl PropertyEditable for MLine {
     fn geometry_properties(&self, _text_style_names: &[String]) -> Vec<PropSection> {
         let just_str = match self.justification {
-            codec::entities::MLineJustification::Top => "Top",
-            codec::entities::MLineJustification::Zero => "Zero",
-            codec::entities::MLineJustification::Bottom => "Bottom",
+            document::entities::MLineJustification::Top => "Top",
+            document::entities::MLineJustification::Zero => "Zero",
+            document::entities::MLineJustification::Bottom => "Bottom",
         };
         vec![PropSection {
             title: t!("Misc").into_owned(),
@@ -1229,13 +1229,13 @@ impl PropertyEditable for MLine {
         match field {
             "ml_closed" => {
                 let closed = if value == "toggle" {
-                    !self.flags.contains(codec::entities::MLineFlags::CLOSED)
+                    !self.flags.contains(document::entities::MLineFlags::CLOSED)
                 } else {
                     value == "true"
                 };
                 let offsets = mline_perpendicular_offsets(self);
                 self.flags.set(
-                    codec::entities::MLineFlags::CLOSED,
+                    document::entities::MLineFlags::CLOSED,
                     closed && self.vertices.len() >= 3,
                 );
                 rebuild_mline_geometry(self);
@@ -1244,9 +1244,9 @@ impl PropertyEditable for MLine {
             }
             "ml_justification" => {
                 self.justification = match value {
-                    "Top" => codec::entities::MLineJustification::Top,
-                    "Bottom" => codec::entities::MLineJustification::Bottom,
-                    _ => codec::entities::MLineJustification::Zero,
+                    "Top" => document::entities::MLineJustification::Top,
+                    "Bottom" => document::entities::MLineJustification::Bottom,
+                    _ => document::entities::MLineJustification::Zero,
                 };
                 return;
             }
@@ -1371,8 +1371,8 @@ impl Transformable for MLine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{MLineJustification, MLineVertex};
-    use codec::objects::{MLineStyle, MLineStyleElement};
+    use document::entities::{MLineJustification, MLineVertex};
+    use document::objects::{MLineStyle, MLineStyleElement};
 
     const TOLERANCE: f64 = 1.0e-9;
 

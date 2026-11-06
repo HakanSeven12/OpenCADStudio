@@ -1,5 +1,5 @@
 use crate::command::{CadCommand, CmdOption, CmdResult};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 static MODE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(255);
@@ -11,13 +11,13 @@ pub fn set_mode(value: u8) {
 }
 
 pub fn apply_mask(
-    common: &mut codec::entities::EntityCommon,
+    common: &mut document::entities::EntityCommon,
     mask: u8,
     change_byblock: bool,
 ) -> bool {
     let before = common.clone();
-    if mask & 1 != 0 && (change_byblock || common.color != codec::types::Color::ByBlock) {
-        common.color = codec::types::Color::ByLayer;
+    if mask & 1 != 0 && (change_byblock || common.color != document::types::Color::ByBlock) {
+        common.color = document::types::Color::ByLayer;
         common.color_name = None;
         common.color_book_handle = None;
     }
@@ -25,9 +25,9 @@ pub fn apply_mask(
         common.linetype = "ByLayer".to_string();
         common.linetype_handle = None;
     }
-    if mask & 4 != 0 && (change_byblock || common.line_weight != codec::types::LineWeight::ByBlock)
+    if mask & 4 != 0 && (change_byblock || common.line_weight != document::types::LineWeight::ByBlock)
     {
-        common.line_weight = codec::types::LineWeight::ByLayer;
+        common.line_weight = document::types::LineWeight::ByLayer;
     }
     if mask & 8 != 0 && (change_byblock || common.material_flags != 1) {
         common.material_flags = 0;
@@ -38,9 +38,9 @@ pub fn apply_mask(
         common.plotstyle_handle = None;
     }
     if mask & 128 != 0
-        && (change_byblock || common.transparency != codec::types::Transparency::BY_BLOCK)
+        && (change_byblock || common.transparency != document::types::Transparency::BY_BLOCK)
     {
-        common.transparency = codec::types::Transparency::BY_LAYER;
+        common.transparency = document::types::Transparency::BY_LAYER;
     }
     *common != before
 }
@@ -243,8 +243,8 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::EntityCommon;
-    use codec::types::{Color, Transparency};
+    use document::entities::EntityCommon;
+    use document::types::{Color, Transparency};
 
     #[test]
     fn mask_changes_only_requested_properties() {

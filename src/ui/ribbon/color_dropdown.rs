@@ -12,7 +12,7 @@ use crate::app::Message;
 use crate::t;
 use crate::ui::properties::acad_color_display;
 use crate::ui::style::chrome;
-use codec::types::Color as AcadColor;
+use document::types::Color as AcadColor;
 use iced::widget::{button, column, container, row, text, Space};
 use iced::{Background, Border, Element, Length, Padding, Theme};
 
@@ -83,7 +83,7 @@ pub const QUICK_PICK_GRID: [[(u8, u8, u8); 9]; 5] = [
 #[allow(dead_code)]
 pub fn aci_1_9() -> [(u8, u8, u8); 9] {
     std::array::from_fn(|i| {
-        codec::types::aci_table::aci_to_rgb((i + 1) as u8).unwrap_or((128, 128, 128))
+        document::types::aci_table::aci_to_rgb((i + 1) as u8).unwrap_or((128, 128, 128))
     })
 }
 

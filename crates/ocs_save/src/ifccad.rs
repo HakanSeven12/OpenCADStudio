@@ -3,12 +3,12 @@
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use codec::{Document, Format};
+use document::{Document, Format};
 use serde_json::Value;
 
 // Ask the pinned writer for its profile instead of maintaining a second version constant.
 static SUPPORTED_PROFILE: LazyLock<Option<String>> = LazyLock::new(|| {
-    let (bytes, _) = codec::Ifcx.write(&Document::new()).ok()?;
+    let (bytes, _) = document::Ifcx.write(&Document::new()).ok()?;
     let value: Value = serde_json::from_slice(&bytes).ok()?;
     drawing_values(&value)?
         .values()

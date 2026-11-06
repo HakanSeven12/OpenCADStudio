@@ -1,6 +1,6 @@
 use super::{FindMatchKey, FindResult, Message, OpenCADStudio};
 use crate::entities::traits::EntityTypeOps;
-use codec::EntityType;
+use document::EntityType;
 use iced::Task;
 
 impl OpenCADStudio {
@@ -360,7 +360,7 @@ fn replace_entity_text(
 }
 
 fn replace_match_text(
-    document: &mut codec::Document,
+    document: &mut document::Document,
     target: FindMatchKey,
     search: &str,
     replacement: &str,
@@ -391,7 +391,7 @@ fn replace_match_text(
 
 /// Row context for a match: its (single-line, shortened) text, object type
 /// and layer.
-fn describe_match(document: &codec::Document, key: FindMatchKey) -> FindResult {
+fn describe_match(document: &document::Document, key: FindMatchKey) -> FindResult {
     let (text, kind, layer) = match key {
         FindMatchKey::Entity(handle) | FindMatchKey::BlockEntityInInsert { entity: handle, .. } => {
             document.get_entity(handle).map_or_else(Default::default, |entity| {
@@ -429,7 +429,7 @@ fn describe_match(document: &codec::Document, key: FindMatchKey) -> FindResult {
     }
 }
 
-fn match_owner_handle(target: FindMatchKey) -> codec::Handle {
+fn match_owner_handle(target: FindMatchKey) -> document::Handle {
     match target {
         FindMatchKey::Entity(handle) => handle,
         FindMatchKey::BlockEntityInInsert { insert, .. } => insert,
@@ -437,7 +437,7 @@ fn match_owner_handle(target: FindMatchKey) -> codec::Handle {
     }
 }
 
-fn match_document_handle(target: FindMatchKey) -> codec::Handle {
+fn match_document_handle(target: FindMatchKey) -> document::Handle {
     match target {
         FindMatchKey::Entity(handle) => handle,
         FindMatchKey::BlockEntityInInsert { entity, .. } => entity,
@@ -463,9 +463,9 @@ fn match_label(target: FindMatchKey) -> String {
 }
 
 fn block_contains_entity(
-    document: &codec::Document,
+    document: &document::Document,
     block_name: &str,
-    target: codec::Handle,
+    target: document::Handle,
     visited: &mut Vec<String>,
 ) -> bool {
     if visited

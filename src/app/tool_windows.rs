@@ -1118,10 +1118,10 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.add_entity(codec::EntityType::Line(
-            codec::entities::Line::from_points(
-                codec::types::Vector3::ZERO,
-                codec::types::Vector3::UNIT_X,
+        app.tabs[i].scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::ZERO,
+                document::types::Vector3::UNIT_X,
             ),
         ));
         app.automation_op(r#"{"op":"run","cmd":"BLOCK"}"#);
@@ -1391,7 +1391,7 @@ mod tests {
         assert_eq!(app.active_modal, None);
         // Another drawing: tools on the outgoing one close.
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(app.tabs.len() + 1));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(app.tabs.len() + 1));
         let other = app.tabs.len() - 1;
         let _ = app.update_root(Message::TabSwitch(other));
         assert!(!app.tool_open(ModalKind::DraftingSettings));

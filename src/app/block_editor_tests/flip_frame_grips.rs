@@ -35,11 +35,11 @@ fn transported_flip_grip_uses_reference_frame_in_drawing_and_test_block() {
             Vector3::new(4., 6., 0.),
         )
         .unwrap();
-        let codec::objects::ObjectType::DynamicBlock(o) = doc.objects.get_mut(&flip).unwrap()
+        let document::objects::ObjectType::DynamicBlock(o) = doc.objects.get_mut(&flip).unwrap()
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::FlipParameter(p) = &mut o.data else {
+        let document::objects::DynamicBlockData::FlipParameter(p) = &mut o.data else {
             panic!()
         };
         p.parameter.parameter.chain_actions = true;
@@ -171,12 +171,12 @@ fn flipped_linear_grip_and_properties_follow_the_reflected_axis_with_history() {
         .unwrap();
         let flip_action =
             actions::create(doc, def, actions::Kind::Flip, flip, &[member], DVec3::ZERO).unwrap();
-        let codec::objects::ObjectType::DynamicBlock(o) =
+        let document::objects::ObjectType::DynamicBlock(o) =
             doc.objects.get_mut(&flip_action).unwrap()
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::FlipAction(action) = &mut o.data else {
+        let document::objects::DynamicBlockData::FlipAction(action) = &mut o.data else {
             panic!()
         };
         action.action.dependencies.extend([linear, move_action]);
@@ -355,23 +355,23 @@ fn moving_flip_axis_updates_linked_grips_with_undo_and_redo() {
                 Vector3::UNIT_Y,
             )
             .unwrap();
-            let codec::objects::ObjectType::DynamicBlock(o) = doc.objects.get_mut(&flip).unwrap()
+            let document::objects::ObjectType::DynamicBlock(o) = doc.objects.get_mut(&flip).unwrap()
             else {
                 panic!()
             };
-            let codec::objects::DynamicBlockData::FlipParameter(p) = &mut o.data else {
+            let document::objects::DynamicBlockData::FlipParameter(p) = &mut o.data else {
                 panic!()
             };
             p.parameter.parameter.chain_actions = chained;
             let flip_action =
                 actions::create(doc, def, actions::Kind::Flip, flip, &[member], DVec3::ZERO)
                     .unwrap();
-            let codec::objects::ObjectType::DynamicBlock(o) =
+            let document::objects::ObjectType::DynamicBlock(o) =
                 doc.objects.get_mut(&flip_action).unwrap()
             else {
                 panic!()
             };
-            let codec::objects::DynamicBlockData::FlipAction(action) = &mut o.data else {
+            let document::objects::DynamicBlockData::FlipAction(action) = &mut o.data else {
                 panic!()
             };
             action.action.dependencies.extend([child, linked]);

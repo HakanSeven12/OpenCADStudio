@@ -23,10 +23,10 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::entities::{
+use document::entities::{
     CenterLineAssociation, CenterLineSource, CenterLineSourceKind, EntityType, Line,
 };
-use codec::types::{Handle, Vector3};
+use document::types::{Handle, Vector3};
 use OpenCADStudio::scene::{ChangeKind, Scene};
 
 const LINES: usize = 100_000;

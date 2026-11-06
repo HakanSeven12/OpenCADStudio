@@ -8,7 +8,7 @@
 //!
 //! Lift and tessellation failures are reported as an incomplete result.
 
-use codec::entities::acis::SatDocument;
+use document::entities::acis::SatDocument;
 use kernel::acis::lift;
 use kernel::brep;
 
@@ -60,14 +60,14 @@ pub fn tessellate_sat(
     let mut triangle_materials = Vec::new();
     let mut triangle_colors = Vec::new();
     let mut curved_gens = Vec::new();
-    let face_materials: std::collections::HashMap<i32, codec::Handle> = document
+    let face_materials: std::collections::HashMap<i32, document::Handle> = document
         .records
         .iter()
         .filter(|record| record.entity_type == "material-adesk-attrib")
         .filter_map(|record| {
             let owner = record.token_pointer(2)?.0;
             let handle = record.token(3)?.as_integer()?;
-            (owner >= 0 && handle > 0).then(|| (owner, codec::Handle::new(handle as u64)))
+            (owner >= 0 && handle > 0).then(|| (owner, document::Handle::new(handle as u64)))
         })
         .collect();
     // A true colour attribute outranks the index one beside it, which only
@@ -89,9 +89,9 @@ pub fn tessellate_sat(
                 value = (value & 0x00FF_FFFF) | 0x0100_0000;
             }
             let source = if (1..=255).contains(&value) {
-                codec::Color::from_index(value as i16)
+                document::Color::from_index(value as i16)
             } else if value > 257 {
-                codec::Color::from_true_color_value(value as i32)
+                document::Color::from_true_color_value(value as i32)
             } else {
                 return None;
             };

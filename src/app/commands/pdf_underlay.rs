@@ -3,16 +3,16 @@
 
 use super::*;
 use crate::ui::ribbon::UnderlayContext;
-use codec::entities::{Underlay, UnderlayDisplayFlags};
+use document::entities::{Underlay, UnderlayDisplayFlags};
 
 impl OpenCADStudio {
     /// The selected underlays when they are all of one kind, or nothing
     /// when anything else (or another kind) is selected.
-    fn selected_pdf_underlays(&self, i: usize) -> Vec<(codec::Handle, Underlay)> {
-        let mut out: Vec<(codec::Handle, Underlay)> = Vec::new();
+    fn selected_pdf_underlays(&self, i: usize) -> Vec<(document::Handle, Underlay)> {
+        let mut out: Vec<(document::Handle, Underlay)> = Vec::new();
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             match entity {
-                codec::EntityType::Underlay(u)
+                document::EntityType::Underlay(u)
                     if out
                         .first()
                         .is_none_or(|(_, first)| first.underlay_type == u.underlay_type) =>
@@ -26,12 +26,12 @@ impl OpenCADStudio {
     }
 
     /// The selected xrefs, or nothing when anything else is selected.
-    pub(in crate::app) fn selected_xrefs(&self, i: usize) -> Vec<codec::Handle> {
+    pub(in crate::app) fn selected_xrefs(&self, i: usize) -> Vec<document::Handle> {
         let doc = &self.tabs[i].scene.document;
         let mut out = Vec::new();
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             let xref = match entity {
-                codec::EntityType::Insert(ins) => doc
+                document::EntityType::Insert(ins) => doc
                     .block_records
                     .get(&ins.block_name)
                     .is_some_and(|br| br.flags.is_xref || br.flags.is_xref_overlay),
@@ -77,12 +77,12 @@ impl OpenCADStudio {
     fn selected_point_clouds(
         &self,
         i: usize,
-    ) -> Vec<(codec::Handle, codec::entities::PointCloudExData)> {
+    ) -> Vec<(document::Handle, document::entities::PointCloudExData)> {
         let mut out = Vec::new();
         for (handle, entity) in self.tabs[i].scene.selected_entities() {
             match entity {
-                codec::EntityType::Extended(extended) => match &extended.data {
-                    codec::entities::ExtendedEntityData::PointCloudEx(data) => {
+                document::EntityType::Extended(extended) => match &extended.data {
+                    document::entities::ExtendedEntityData::PointCloudEx(data) => {
                         out.push((handle, data.clone()))
                     }
                     _ => return Vec::new(),
@@ -95,17 +95,17 @@ impl OpenCADStudio {
 
     /// POINTCLOUDSTYLIZE's result: the clouds that carry the data take the
     /// stylization (one undo step); the rest are named.
-    fn stylize_point_clouds(&mut self, i: usize, handles: &[codec::Handle], stylization: i16) {
+    fn stylize_point_clouds(&mut self, i: usize, handles: &[document::Handle], stylization: i16) {
         let mut done = Vec::new();
         for &handle in handles {
             if self.tabs[i].scene.is_layer_locked(handle) {
                 continue;
             }
             let document = &self.tabs[i].scene.document;
-            let Some(codec::EntityType::Extended(extended)) = document.get_entity(handle) else {
+            let Some(document::EntityType::Extended(extended)) = document.get_entity(handle) else {
                 continue;
             };
-            let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
+            let document::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
                 continue;
             };
             let cloud = crate::scene::model::point_cloud::resolve_source(document, data)
@@ -130,10 +130,10 @@ impl OpenCADStudio {
         if !done.is_empty() {
             self.push_undo_snapshot(i, "POINTCLOUDSTYLIZE");
             for handle in &done {
-                if let Some(codec::EntityType::Extended(extended)) =
+                if let Some(document::EntityType::Extended(extended)) =
                     self.tabs[i].scene.document.get_entity_mut(*handle)
                 {
-                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) =
+                    if let document::entities::ExtendedEntityData::PointCloudEx(data) =
                         &mut extended.data
                     {
                         crate::entities::extended::set_point_cloud_stylization(data, stylization);
@@ -157,7 +157,7 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         label: &str,
-        edit: impl Fn(&mut codec::entities::PointCloudExData),
+        edit: impl Fn(&mut document::entities::PointCloudExData),
     ) {
         let handles: Vec<_> = self
             .selected_point_clouds(i)
@@ -170,10 +170,10 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, label);
         for handle in &handles {
-            if let Some(codec::EntityType::Extended(extended)) =
+            if let Some(document::EntityType::Extended(extended)) =
                 self.tabs[i].scene.document.get_entity_mut(*handle)
             {
-                if let codec::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
+                if let document::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
                 {
                     edit(data);
                 }
@@ -221,10 +221,10 @@ impl OpenCADStudio {
                 };
                 let hidden = pc_manager::toggled(&cloud.hidden, &cloud.scans, &row);
                 self.push_undo_snapshot(i, "POINTCLOUDMANAGER");
-                if let Some(codec::EntityType::Extended(extended)) =
+                if let Some(document::EntityType::Extended(extended)) =
                     self.tabs[i].scene.document.get_entity_mut(handle)
                 {
-                    if let codec::entities::ExtendedEntityData::PointCloudEx(data) =
+                    if let document::entities::ExtendedEntityData::PointCloudEx(data) =
                         &mut extended.data
                     {
                         data.hidden_regions = if hidden.iter().any(|h| h == UNASSIGNED_OFF) {
@@ -272,7 +272,7 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, label);
         for handle in &handles {
-            if let Some(codec::EntityType::Underlay(u)) =
+            if let Some(document::EntityType::Underlay(u)) =
                 self.tabs[i].scene.document.get_entity_mut(*handle)
             {
                 edit(u);
@@ -372,7 +372,7 @@ impl OpenCADStudio {
                 if self.tabs[i].scene.is_layer_locked(handle) {
                     return Some(Task::none());
                 }
-                let Some(codec::EntityType::Extended(cloud)) =
+                let Some(document::EntityType::Extended(cloud)) =
                     self.tabs[i].scene.document.get_entity(handle).cloned()
                 else {
                     return Some(Task::none());
@@ -401,7 +401,7 @@ impl OpenCADStudio {
             // The chosen objects' point clouds, then the option.
             "_PCSTYLIZE" => {
                 use crate::command::CadCommand;
-                let handles: Vec<codec::Handle> = self.tabs[i]
+                let handles: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .into_iter()
@@ -419,9 +419,9 @@ impl OpenCADStudio {
             c if c.starts_with("_PCSTYLIZEAPPLY ") => {
                 let mut parts = c.split_whitespace().skip(1);
                 let stylization: i16 = parts.next().and_then(|v| v.parse().ok()).unwrap_or(1);
-                let handles: Vec<codec::Handle> = parts
+                let handles: Vec<document::Handle> = parts
                     .filter_map(|h| u64::from_str_radix(h, 16).ok())
-                    .map(codec::Handle::new)
+                    .map(document::Handle::new)
                     .collect();
                 self.stylize_point_clouds(i, &handles, stylization);
             }

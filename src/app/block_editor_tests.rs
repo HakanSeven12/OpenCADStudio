@@ -1,8 +1,8 @@
 use super::block_editor::block_reference_count;
 use super::{Message, ModalKind, OpenCADStudio};
-use codec::entities::{Insert, Line};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{Insert, Line};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 
 mod construction_visibility;
 mod retained_save_as;
@@ -397,8 +397,8 @@ fn block_construction_command_history_display_cancel_and_stale_session() {
         let snapshot = stack.last().unwrap();
         assert_eq!(snapshot.label(), "Edit construction geometry");
         assert!(matches!(snapshot,
-            super::document::HistorySnapshot::Delta(delta)
-                if matches!(delta.label, super::document::HistoryLabel::Message(_))));
+            super::tab_document::HistorySnapshot::Delta(delta)
+                if matches!(delta.label, super::tab_document::HistoryLabel::Message(_))));
         let expected = crate::t!("Edit construction geometry").into_owned();
         assert_eq!(super::history::history_dropdown_labels(stack).first(), Some(&expected));
         let crate::ui::popup::context_menu::MenuContext::Idle { undo_label, redo_label, .. } =
@@ -551,7 +551,7 @@ fn block_actions_topology_save_updates_values_members_properties_and_history() {
         panic!()
     };
     line.end.x = 2.;
-    line.common.color = codec::types::Color::Index(3);
+    line.common.color = document::types::Color::Index(3);
     app.tabs[i].scene.erase_entities(&old_members[1..]);
     app.finish_pending_history(i);
     circle(&mut app, 7.);
@@ -584,11 +584,11 @@ fn block_actions_topology_save_updates_values_members_properties_and_history() {
             .entity_handles[0];
         assert_eq!(
             doc.get_entity(member).unwrap().common().color,
-            codec::types::Color::Index(3)
+            document::types::Color::Index(3)
         );
     }
-    let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
-    app.tabs[i].scene.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+    app.tabs[i].scene.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .unwrap();
     check(&app, 2., 7.);
@@ -652,11 +652,11 @@ fn block_actions_topology_save_coalesces_bounded_layer_history_in_both_direction
         .layers
         .get_mut("0")
         .unwrap()
-        .color = codec::types::Color::Index(1);
+        .color = document::types::Color::Index(1);
     app.commit_layer_undo(i, pending);
     let _ = app.dispatch_command("BSAVE");
     assert!(
-        matches!(app.tabs[i].history.undo_stack.last(),Some(super::document::HistorySnapshot::Delta(d)) if matches!(d.structure,Some(super::document::StructureSnapshot::Combined(_))))
+        matches!(app.tabs[i].history.undo_stack.last(),Some(super::tab_document::HistorySnapshot::Delta(d)) if matches!(d.structure,Some(super::tab_document::StructureSnapshot::Combined(_))))
     );
     app.undo_steps(1);
     assert_eq!(
@@ -669,7 +669,7 @@ fn block_actions_topology_save_coalesces_bounded_layer_history_in_both_direction
     let doc = &app.tabs[i].scene.document;
     assert_eq!(
         doc.layers.get("0").unwrap().color,
-        codec::types::Color::Index(1)
+        document::types::Color::Index(1)
     );
     let EntityType::Insert(ins) = doc.get_entity(reference).unwrap() else {
         panic!()
@@ -736,8 +736,8 @@ fn block_actions_topology_local_undo_after_save_resave_has_no_orphan_members() {
         panic!()
     };
     assert_eq!(circle.center.x, 7.);
-    let bytes = codec::DwgWriter::write_to_vec(doc).unwrap();
-    let reopened = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(doc).unwrap();
+    let reopened = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .unwrap();
     let record = reopened.block_records.get(&ins.block_name).unwrap();
@@ -910,8 +910,8 @@ fn block_actions_set_edit_refresh_local_history_discard_save_and_drawing_history
     );
     app.redo_steps(1);
     check(&app, 0., 5.);
-    let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
-    app.tabs[i].scene.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+    app.tabs[i].scene.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .unwrap();
     check(&app, 0., 5.);
@@ -1129,8 +1129,8 @@ fn block_actions_stretch_frame_selection_history_test_and_saved_grip() {
         app.tabs[i].scene.document.get_entity(member),
         changed.get_entity(member)
     );
-    let bytes = codec::DwgWriter::write_to_vec(&changed).unwrap();
-    app.tabs[i].scene.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&changed).unwrap();
+    app.tabs[i].scene.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .unwrap();
     begin(&mut app, reference);
@@ -1230,8 +1230,8 @@ fn block_actions_save_close_and_reedit_evaluated_reference() {
     assert_ne!(insert.block_name, "EDIT_ME");
     // Native save/reload must preserve the link from the evaluated variant to
     // the definition that owns the parameters and actions.
-    let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
-    app.tabs[i].scene.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+    app.tabs[i].scene.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .unwrap();
     app.tabs[i].scene.selected.insert(reference);
@@ -1395,8 +1395,8 @@ fn block_actions_rotate_flip_mouse_grips_authoring_history_and_reopen() {
             assert_eq!(app.tabs[source].scene.document, baseline);
             let _ = app.dispatch_command("BCLOSETESTBLOCK");
         } else {
-            let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
-            app.tabs[i].scene.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+            let bytes = document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+            app.tabs[i].scene.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
                 .read()
                 .unwrap();
             app.tabs[i].scene.selected.insert(insert);
@@ -1512,8 +1512,8 @@ fn block_actions_drawing_grips_history_cancel_transform_and_reopen() {
         app.tabs[i].scene.document.get_entity(reference),
         changed.get_entity(reference)
     );
-    let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
-    app.tabs[i].scene.document = codec::DwgReader::from_stream(std::io::Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+    app.tabs[i].scene.document = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
         .read()
         .unwrap();
     app.refresh_properties();
@@ -1542,7 +1542,7 @@ fn authoring_edit_basepoint_attribute_relocation_undo_and_cancel() {
     let handle = crate::scene::block_basepoint::parameter(&app.tabs[i].scene.document, def)
         .unwrap()
         .0;
-    let mut attribute = codec::entities::AttributeEntity::new("TAG".into(), "value".into());
+    let mut attribute = document::entities::AttributeEntity::new("TAG".into(), "value".into());
     attribute.insertion_point = Vector3::new(7., 8., 0.);
     let EntityType::Insert(insert) = app.tabs[i]
         .scene
@@ -1688,8 +1688,8 @@ fn authoring_edit_mouse_selection_endpoint_label_marker_history_and_reopen() {
         .all(|g| !super::block_authoring_edit::is_editor_grip(g.id)));
     // Persisted native coordinates, rather than session-only display positions.
     use std::io::Cursor;
-    let bytes = codec::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
-    let loaded = codec::DwgReader::from_stream(Cursor::new(bytes))
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[i].scene.document).unwrap();
+    let loaded = document::DwgReader::from_stream(Cursor::new(bytes))
         .read()
         .unwrap();
     assert_eq!(
@@ -1986,7 +1986,7 @@ fn double_clicking_block_parameter_label_starts_rename() {
 #[test]
 fn linear_parameter_value_set_is_editable_and_undoable_in_properties() {
     use crate::scene::block_actions::{self as actions, Kind};
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
 
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -2042,13 +2042,13 @@ fn linear_parameter_value_set_is_editable_and_undoable_in_properties() {
 fn the_chain_actions_row_toggles_the_parameter_and_undoes() {
     use crate::scene::block_actions::{self as actions, Kind};
     use crate::scene::model::object::PropValue;
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
 
     fn linear(
         app: &OpenCADStudio,
         tab: usize,
         parameter: Handle,
-    ) -> &codec::objects::BlockLinearParameter {
+    ) -> &document::objects::BlockLinearParameter {
         let ObjectType::DynamicBlock(object) = &app.tabs[tab].scene.document.objects[&parameter]
         else {
             panic!("expected a dynamic parameter")
@@ -2462,14 +2462,14 @@ fn stretch_pair_sets_guide_both_frames_with_undo_and_cancel() {
             let authored = actions::actions(&app.tabs[i].scene.document, definition);
             assert_eq!(authored.len(), side + 1);
             assert_eq!(authored[side].2, kind);
-            let codec::objects::ObjectType::DynamicBlock(object) =
+            let document::objects::ObjectType::DynamicBlock(object) =
                 &app.tabs[i].scene.document.objects[&authored[side].0]
             else {
                 panic!()
             };
             let connections = match &object.data {
-                codec::objects::DynamicBlockData::StretchAction(a) => &a.connections,
-                codec::objects::DynamicBlockData::MoveAction(a) => &a.connections,
+                document::objects::DynamicBlockData::StretchAction(a) => &a.connections,
+                document::objects::DynamicBlockData::MoveAction(a) => &a.connections,
                 _ => panic!(),
             };
             assert_eq!(
@@ -2577,14 +2577,14 @@ fn xy_box_set_guides_four_separate_action_selections() {
             let _ = app.feed_command(crate::command::StepInput::Point(glam::DVec3::ZERO));
             let authored = actions::actions(&app.tabs[i].scene.document, definition);
             let action = authored.last().unwrap();
-            let codec::objects::ObjectType::DynamicBlock(object) =
+            let document::objects::ObjectType::DynamicBlock(object) =
                 &app.tabs[i].scene.document.objects[&action.0]
             else {
                 panic!()
             };
             let connections = match &object.data {
-                codec::objects::DynamicBlockData::MoveAction(a) => &a.connections,
-                codec::objects::DynamicBlockData::StretchAction(a) => &a.connections,
+                document::objects::DynamicBlockData::MoveAction(a) => &a.connections,
+                document::objects::DynamicBlockData::StretchAction(a) => &a.connections,
                 _ => panic!(),
             };
             assert_eq!(
@@ -2875,7 +2875,7 @@ fn block_actions_test_reference_transform_visibility_and_noop_history() {
     assert_eq!(app.tabs[i].scene.document, before);
 }
 
-fn authored_points(app: &OpenCADStudio) -> Vec<codec::objects::BlockPointParameter> {
+fn authored_points(app: &OpenCADStudio) -> Vec<document::objects::BlockPointParameter> {
     let tab = &app.tabs[app.active_tab];
     let definition = tab
         .scene
@@ -3584,12 +3584,12 @@ fn a_rotation_takes_its_chain_description_and_palette_answers_at_the_base_prompt
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation)
         .expect("placed rotation parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&rotation.handle).expect("rotation record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
         panic!("expected a rotation parameter");
     };
     assert!(native.parameter.parameter.chain_actions);
@@ -3624,12 +3624,12 @@ fn a_rotation_keeps_the_defaults_shown_at_each_question() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation)
         .expect("placed rotation parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&rotation.handle).expect("rotation record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
         panic!("expected a rotation parameter");
     };
     assert!(!native.parameter.parameter.chain_actions);
@@ -3679,12 +3679,12 @@ fn a_linear_takes_its_chain_description_and_palette_answers_at_the_base_prompt()
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
         .expect("placed linear parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&linear.handle).expect("linear record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
         panic!("expected a linear parameter");
     };
     assert!(native.parameter.parameter.chain_actions);
@@ -3727,12 +3727,12 @@ fn a_rotation_takes_its_value_set() {
                 parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
             })
             .expect("placed rotation parameter");
-        let codec::objects::ObjectType::DynamicBlock(object) =
+        let document::objects::ObjectType::DynamicBlock(object) =
             doc.objects.get(&rotation.handle).expect("rotation record")
         else {
             panic!("expected a dynamic block record");
         };
-        let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+        let document::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
             panic!("expected a rotation parameter");
         };
         assert_eq!(
@@ -3769,12 +3769,12 @@ fn a_rotation_takes_its_value_set() {
                 && parameter.handle != first
         })
         .expect("the rotation with the list");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&listed.handle).expect("rotation record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
         panic!("expected a rotation parameter");
     };
     assert_eq!(
@@ -3806,14 +3806,14 @@ fn a_rotation_takes_its_value_set() {
                 && parameter.handle != second
         })
         .expect("the rotation answered with no set");
-    let codec::objects::ObjectType::DynamicBlock(object) = doc
+    let document::objects::ObjectType::DynamicBlock(object) = doc
         .objects
         .get(&answered_none.handle)
         .expect("rotation record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
         panic!("expected a rotation parameter");
     };
     assert_eq!(
@@ -3876,12 +3876,12 @@ fn a_flip_takes_its_name_and_property_label() {
     };
     {
         let doc = &app.tabs[i].scene.document;
-        let codec::objects::ObjectType::DynamicBlock(object) =
+        let document::objects::ObjectType::DynamicBlock(object) =
             doc.objects.get(&first).expect("flip record")
         else {
             panic!("expected a dynamic block record");
         };
-        let codec::objects::DynamicBlockData::FlipParameter(native) = &object.data else {
+        let document::objects::DynamicBlockData::FlipParameter(native) = &object.data else {
             panic!("expected a flip parameter");
         };
         assert_eq!(
@@ -3917,12 +3917,12 @@ fn a_flip_takes_its_name_and_property_label() {
         .filter(|parameter| parameter.kind == crate::scene::block_orientation_parameter::Kind::Flip)
         .find(|parameter| parameter.handle != first)
         .expect("second flip parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&second.handle).expect("second flip record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::FlipParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::FlipParameter(native) = &object.data else {
         panic!("expected a flip parameter");
     };
     assert_eq!(native.flip_label, "Flip state1");
@@ -3966,12 +3966,12 @@ fn a_rotation_takes_a_name_and_one_property_label() {
             parameter.kind == crate::scene::block_orientation_parameter::Kind::Rotation
         })
         .expect("placed rotation parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&rotation.handle).expect("rotation record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::RotationParameter(native) = &object.data else {
         panic!("expected a rotation parameter");
     };
     assert_eq!(
@@ -4056,12 +4056,12 @@ fn a_linear_takes_a_name_and_one_label_and_asks_for_no_angle() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
         .expect("placed linear parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&linear.handle).expect("linear record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
         panic!("expected a linear parameter");
     };
     assert_eq!(
@@ -4125,12 +4125,12 @@ fn a_polar_takes_a_distance_and_then_an_angle_value_set() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Polar)
         .expect("placed polar parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&polar.handle).expect("polar record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::PolarParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::PolarParameter(native) = &object.data else {
         panic!("expected a polar parameter");
     };
     assert_eq!(native.distance_value_set.flags, 1 | 2 | 4);
@@ -4192,12 +4192,12 @@ fn an_xy_takes_a_horizontal_and_then_a_vertical_value_set() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::XY)
         .expect("placed xy parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&xy.handle).expect("xy record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::XYParameter(native) = &object.data else {
         panic!("expected an xy parameter");
     };
     assert_eq!(native.x_value_set.flags, 8);
@@ -4237,12 +4237,12 @@ fn a_polar_angle_increment_is_asked_and_stored_in_radians() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Polar)
         .expect("placed polar parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&polar.handle).expect("polar record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::PolarParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::PolarParameter(native) = &object.data else {
         panic!("expected a polar parameter");
     };
     assert_eq!(native.distance_value_set.flags, 1, "an explicit None stores no set");
@@ -4291,12 +4291,12 @@ fn an_xy_placement_writes_its_name_and_two_labels() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::XY)
         .expect("placed xy parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&xy.handle).expect("xy record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::XYParameter(native) = &object.data else {
         panic!("expected an xy parameter");
     };
     assert_eq!(native.parameter.parameter.element.name, "Frame");
@@ -4343,12 +4343,12 @@ fn an_xy_placement_keeps_the_offered_default_name_and_labels() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::XY)
         .expect("placed xy parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&xy.handle).expect("xy record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::XYParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::XYParameter(native) = &object.data else {
         panic!("expected an xy parameter");
     };
     assert_eq!(native.parameter.parameter.element.name, "XY");
@@ -4425,12 +4425,12 @@ fn a_linear_takes_its_base_location_and_value_set() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
         .expect("placed linear parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&linear.handle).expect("linear record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
         panic!("expected a linear parameter");
     };
     assert_eq!(
@@ -4464,12 +4464,12 @@ fn a_linear_takes_its_base_location_and_value_set() {
         })
         .find(|parameter| parameter.handle != first)
         .expect("second linear parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&second.handle).expect("second linear record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
         panic!("expected a linear parameter");
     };
     assert_eq!(native.value_set.flags, 8);
@@ -4504,12 +4504,12 @@ fn a_distance_keeps_the_defaults_shown_at_each_question() {
         .into_iter()
         .find(|parameter| parameter.kind == crate::scene::block_distance_parameter::Kind::Linear)
         .expect("placed linear parameter");
-    let codec::objects::ObjectType::DynamicBlock(object) =
+    let document::objects::ObjectType::DynamicBlock(object) =
         doc.objects.get(&linear.handle).expect("linear record")
     else {
         panic!("expected a dynamic block record");
     };
-    let codec::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
+    let document::objects::DynamicBlockData::LinearParameter(native) = &object.data else {
         panic!("expected a linear parameter");
     };
     assert!(
@@ -5218,12 +5218,12 @@ fn xy_parameter_stores_endpoint_distances_and_reads_typed_points_absolutely() {
             definition,
         );
         let placed = parameters.last().unwrap();
-        let codec::objects::ObjectType::DynamicBlock(object) =
+        let document::objects::ObjectType::DynamicBlock(object) =
             &app.tabs[i].scene.document.objects[&placed.handle]
         else {
             panic!()
         };
-        let codec::objects::DynamicBlockData::XYParameter(parameter) = &object.data else {
+        let document::objects::DynamicBlockData::XYParameter(parameter) = &object.data else {
             panic!()
         };
         (
@@ -6046,7 +6046,7 @@ fn visibility_ribbon_manager_rejects_stale_target_and_stale_document() {
 
 #[test]
 fn local_undo_preserves_imported_native_networks_when_constraints_are_unchanged() {
-    use codec::objects::{
+    use document::objects::{
         AssocNetwork, AssociativeData, AssociativeObject, Dictionary, ObjectType,
     };
     let (mut app, reference) = fixture();
@@ -6223,7 +6223,7 @@ fn save_as_dialog_cancel_and_enter_follow_the_current_session() {
 
 #[test]
 fn save_as_preserves_base_point_description_units_and_nested_attributes() {
-    use codec::entities::AttributeEntity;
+    use document::entities::AttributeEntity;
     let (mut app, reference) = fixture();
     let i = app.active_tab;
     app.tabs[i]
@@ -6303,7 +6303,7 @@ fn save_as_preserves_base_point_description_units_and_nested_attributes() {
 
 #[test]
 fn save_as_clones_extension_dictionaries_and_draw_order_independently() {
-    use codec::objects::{
+    use document::objects::{
         Dictionary, ObjectType, SortEntitiesTable, XRecord, XRecordEntry, XRecordValue,
     };
     let (mut app, reference) = fixture();
@@ -6487,7 +6487,7 @@ fn save_as_copies_native_authoring_graphs_and_keeps_reference_values_independent
     use crate::scene::{
         block_actions as actions, block_lookup as lookup, block_properties_table as tables,
     };
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     use std::io::Cursor;
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -6595,11 +6595,11 @@ fn save_as_copies_native_authoring_graphs_and_keeps_reference_values_independent
     }
     for saved in [
         doc.clone(),
-        codec::DwgReader::from_stream(Cursor::new(codec::DwgWriter::write_to_vec(doc).unwrap()))
+        document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(doc).unwrap()))
             .read()
             .unwrap(),
-        codec::DxfReader::from_reader(Cursor::new(
-            codec::DxfWriter::new(doc).write_to_vec().unwrap(),
+        document::DxfReader::from_reader(Cursor::new(
+            document::DxfWriter::new(doc).write_to_vec().unwrap(),
         ))
         .unwrap()
         .read()
@@ -6738,7 +6738,7 @@ fn save_as_existing_dynamic_definition_retains_both_graphs_and_undoes_atomically
 
 #[test]
 fn save_as_refuses_unsupported_owned_graphs_without_losing_edits() {
-    use codec::objects::{DynamicBlockObject, ObjectType};
+    use document::objects::{DynamicBlockObject, ObjectType};
     let (mut app, reference) = fixture();
     let i = app.active_tab;
     let mut object = DynamicBlockObject::new("BLOCKLINEARPARAMETER", "LinearParameter");
@@ -6772,7 +6772,7 @@ fn save_as_refuses_unsupported_owned_graphs_without_losing_edits() {
 
 #[test]
 fn save_as_retains_new_shared_layers_and_nested_definitions() {
-    use codec::entities::{AttributeDefinition, AttributeEntity, MText};
+    use document::entities::{AttributeDefinition, AttributeEntity, MText};
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
     let i = app.active_tab;
@@ -6780,7 +6780,7 @@ fn save_as_retains_new_shared_layers_and_nested_definitions() {
     let _ = app.dispatch_command("CLAYER COPY_LAYER");
     let mut definition = AttributeDefinition::new("TAG".into(), "Prompt".into(), "first".into());
     definition.is_multiline = true;
-    definition.mtext_flag = codec::entities::attribute_definition::MTextFlag::MultiLine;
+    definition.mtext_flag = document::entities::attribute_definition::MTextFlag::MultiLine;
     let mut text = MText::new();
     text.value = "first\\Psecond".into();
     definition.embedded_mtext = Some(Box::new(text));
@@ -7237,7 +7237,7 @@ fn erasing_the_last_member_saves_an_empty_definition_and_undo_restores_it() {
 fn close_all_resumes_after_discarding_a_dirty_block() {
     let (mut app, reference) = fixture();
     let first = app.tabs[app.active_tab].id;
-    app.tabs.push(super::document::DocumentTab::new_drawing(2));
+    app.tabs.push(super::tab_document::DocumentTab::new_drawing(2));
     let second = app.tabs.last().unwrap().id;
     begin(&mut app, reference);
     circle(&mut app, 1.0);
@@ -7682,7 +7682,7 @@ fn locked_bedit_discard_preserves_block_epoch_and_render_caches() {
     assert_eq!(app.tabs[tab].scene.block_epoch, epoch_before);
 }
 
-fn placed_visibility(app: &OpenCADStudio) -> &codec::objects::BlockVisibilityParameter {
+fn placed_visibility(app: &OpenCADStudio) -> &document::objects::BlockVisibilityParameter {
     let tab = &app.tabs[app.active_tab];
     let definition = tab
         .scene
@@ -7815,7 +7815,7 @@ fn visibility_parameter_placement_rejects_duplicates_stale_context_and_nonfinite
 
 #[test]
 fn visibility_parameter_placement_preserves_an_opaque_authoring_graph() {
-    use codec::objects::{DynamicBlockObject, DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockObject, DynamicBlockData, ObjectType};
     let (mut app, reference) = fixture();
     let i = app.active_tab;
     let doc = &mut app.tabs[i].scene.document;
@@ -7880,11 +7880,11 @@ fn visibility_parameter_placement_roundtrips_its_location_and_reference_grip_in_
             .objects
             .values()
             .filter_map(|object| match object {
-                codec::objects::ObjectType::DynamicBlock(object)
+                document::objects::ObjectType::DynamicBlock(object)
                     if object.owner == parameter.owner =>
                 {
                     match &object.data {
-                        codec::objects::DynamicBlockData::VisibilityGrip(grip) => {
+                        document::objects::DynamicBlockData::VisibilityGrip(grip) => {
                             Some(grip.location)
                         }
                         _ => None,
@@ -8024,8 +8024,8 @@ fn block_action_association_repairs_multiple_orphans_with_local_undo_and_stale_g
     let mut handles=vec![];
     for x in [3.0,5.0] {
         let action=actions::create(&mut app.tabs[i].scene.document,definition,Kind::Move,original.handle,&[target],glam::DVec3::new(x,3.0,0.0)).unwrap();
-        let Some(codec::objects::ObjectType::DynamicBlock(object))=app.tabs[i].scene.document.objects.get_mut(&action) else { panic!() };
-        let codec::objects::DynamicBlockData::MoveAction(native)=&mut object.data else { panic!() };
+        let Some(document::objects::ObjectType::DynamicBlock(object))=app.tabs[i].scene.document.objects.get_mut(&action) else { panic!() };
+        let document::objects::DynamicBlockData::MoveAction(native)=&mut object.data else { panic!() };
         native.connections.iter_mut().for_each(|connection| connection.code=-1);
         handles.push(action);
     }
@@ -8052,8 +8052,8 @@ fn block_action_association_repairs_multiple_orphans_with_local_undo_and_stale_g
     app.undo_steps(1);
     assert_eq!(actions::association::orphaned(&app.tabs[i].scene.document,definition),vec![handles[1]]);
     let expected=app.tabs[i].scene.document.objects[&handles[1]].clone();
-    let Some(codec::objects::ObjectType::DynamicBlock(object))=app.tabs[i].scene.document.objects.get_mut(&handles[1]) else { panic!() };
-    let codec::objects::DynamicBlockData::MoveAction(native)=&mut object.data else { panic!() };
+    let Some(document::objects::ObjectType::DynamicBlock(object))=app.tabs[i].scene.document.objects.get_mut(&handles[1]) else { panic!() };
+    let document::objects::DynamicBlockData::MoveAction(native)=&mut object.data else { panic!() };
     native.action.display_location.x+=1.0;
     let before=app.tabs[i].scene.document.clone();
     let depth=app.tabs[i].history.undo_stack.len();
@@ -8124,8 +8124,8 @@ fn block_grip_cycling_dialog_is_staged_undoable_and_rejects_stale_grips() {
     let _=app.update(Message::BlockCycleApply);
     assert_eq!(app.tabs[i].history.undo_stack.len(),depth+1);
     let _=app.dispatch_command("BCYCLEORDER");
-    let Some(codec::objects::ObjectType::DynamicBlock(object))=app.tabs[i].scene.document.objects.get_mut(&handles[0]) else { panic!() };
-    let codec::objects::DynamicBlockData::LinearGrip(grip)=&mut object.data else { panic!() };
+    let Some(document::objects::ObjectType::DynamicBlock(object))=app.tabs[i].scene.document.objects.get_mut(&handles[0]) else { panic!() };
+    let document::objects::DynamicBlockData::LinearGrip(grip)=&mut object.data else { panic!() };
     grip.grip.location.x+=1.0;
     let externally_changed=app.tabs[i].scene.document.clone();
     let _=app.update(Message::BlockCycleApply);
@@ -8253,8 +8253,8 @@ fn block_action_bars_open_lookup_and_orphan_association_and_ignore_stale_callbac
     let targets = members(&app);
     let action = actions::create(&mut app.tabs[i].scene.document, definition, Kind::Move,
         parameter.handle, &targets, glam::DVec3::new(4.,4.,0.)).unwrap();
-    let Some(codec::objects::ObjectType::DynamicBlock(object)) = app.tabs[i].scene.document.objects.get_mut(&action) else { panic!() };
-    let codec::objects::DynamicBlockData::MoveAction(native) = &mut object.data else { panic!() };
+    let Some(document::objects::ObjectType::DynamicBlock(object)) = app.tabs[i].scene.document.objects.get_mut(&action) else { panic!() };
+    let document::objects::DynamicBlockData::MoveAction(native) = &mut object.data else { panic!() };
     native.connections.iter_mut().for_each(|connection| connection.code = -1);
     assert!(bars::groups(&app.tabs[i].scene.document, definition).iter().any(|group|
         group.entries.iter().any(|entry| entry.handle == action && matches!(entry.kind,bars::EntryKind::Orphan(_)))));
@@ -8373,7 +8373,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     let member = targets[0];
     let move_action = actions::create(&mut app.tabs[i].scene.document, definition, Kind::Move, parameter, &targets, glam::DVec3::ZERO).unwrap();
     let scale_action = actions::create(&mut app.tabs[i].scene.document, definition, Kind::Scale, parameter, &targets, glam::DVec3::ZERO).unwrap();
-    let name = |doc: &codec::Document, action: Handle| {
+    let name = |doc: &document::Document, action: Handle| {
         actions::actions(doc, definition)
             .into_iter()
             .find(|(handle, ..)| *handle == action)
@@ -8391,7 +8391,7 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
     let depth = app.tabs[i].history.undo_stack.len();
     // The parameter runs from ten to twenty units, so the move shifts the member
     // ten along X and the scale doubles it about the origin it starts at.
-    let drive = |doc: &codec::Document| {
+    let drive = |doc: &document::Document| {
         let baseline = doc.clone();
         let mut driven = doc.clone();
         actions::evaluate(&mut driven, &baseline, definition, parameter, glam::DVec3::new(20., 0., 0.)).unwrap();
@@ -8449,10 +8449,10 @@ fn the_chain_row_records_the_action_whose_effect_runs_next() {
         .collect();
     let names = [name(doc, extra), move_name];
     let list = serde_json::to_string(&names).unwrap();
-    let codec::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&scale_action).unwrap() else {
+    let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&scale_action).unwrap() else {
         panic!()
     };
-    let codec::objects::DynamicBlockData::ScaleAction(scale) = &mut object.data else {
+    let document::objects::DynamicBlockData::ScaleAction(scale) = &mut object.data else {
         panic!()
     };
     scale.action.action.action_ids = vec![driver];
@@ -8617,8 +8617,8 @@ fn polar_stretch_authoring_collects_rotation_selection_and_edits_it_with_local_u
     assert!(app.tabs[i].active_cmd.is_none());
     let action=actions::actions(&app.tabs[i].scene.document,definition).iter().find(|(_,_,kind,_)|*kind==Kind::PolarStretch).unwrap().0;
     let native=app.tabs[i].scene.document.objects[&action].clone();
-    let codec::objects::ObjectType::DynamicBlock(object)=&native else {panic!()};
-    let codec::objects::DynamicBlockData::PolarStretchAction(polar)=&object.data else {panic!()};
+    let document::objects::ObjectType::DynamicBlock(object)=&native else {panic!()};
+    let document::objects::DynamicBlockData::PolarStretchAction(polar)=&object.data else {panic!()};
     assert_eq!(polar.handles,vec![targets[1]]);
     assert_eq!(polar.action.dependencies,targets);
     assert_eq!(polar.distance_multiplier,2.);
@@ -8629,8 +8629,8 @@ fn polar_stretch_authoring_collects_rotation_selection_and_edits_it_with_local_u
     feed(&mut app,"RotateOnly");
     let _=app.feed_command(crate::command::StepInput::Enter);
     assert!(app.tabs[i].active_cmd.is_none());
-    let codec::objects::ObjectType::DynamicBlock(object)=&app.tabs[i].scene.document.objects[&action] else {panic!()};
-    let codec::objects::DynamicBlockData::PolarStretchAction(polar)=&object.data else {panic!()};
+    let document::objects::ObjectType::DynamicBlock(object)=&app.tabs[i].scene.document.objects[&action] else {panic!()};
+    let document::objects::DynamicBlockData::PolarStretchAction(polar)=&object.data else {panic!()};
     assert!(polar.handles.is_empty());
     assert_eq!(app.tabs[i].history.undo_stack.len(),depth+2);
     app.undo_steps(1);
@@ -8658,7 +8658,7 @@ fn block_action_base_properties_edit_native_pivot_with_local_undo() {
     let _ = app.update(Message::PropBoolToggle("authoring_action_base_dependent"));
     let base = actions::options::base(&app.tabs[i].scene.document, action).unwrap();
     assert!(!base.dependent);
-    assert_eq!(base.base_point, codec::types::Vector3::new(2., 3., 0.));
+    assert_eq!(base.base_point, document::types::Vector3::new(2., 3., 0.));
     assert!(app.tabs[i].properties.sections.iter().flat_map(|s| &s.props).any(|p| p.field == "authoring_action_base_x"));
     let _ = app.update(Message::PropGeomInput { field: "authoring_action_base_x", value: "9/2".into() });
     let _ = app.update(Message::PropGeomCommit("authoring_action_base_x"));
@@ -8752,7 +8752,7 @@ fn block_action_base_offset_properties_refresh_references_and_keep_history() {
 fn block_polar_stretch_end_binding_command_scratch_and_reference_history() {
     use crate::scene::block_actions::{self as actions, Kind};
     use crate::command::{CmdResult, StepInput};
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     use glam::DVec3;
     for testing in [false, true] {
         let (mut app, reference) = fixture();
@@ -8821,7 +8821,7 @@ fn block_polar_stretch_end_binding_command_scratch_and_reference_history() {
             insert: (!testing).then_some(insert), document, definition, parameter: parameter.handle,
             value: actions::Value::Point(DVec3::new(0., 15., 0.)),
         });
-        let geometry = |doc: &codec::Document| {
+        let geometry = |doc: &document::Document| {
             let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
             let line = doc.block_records.get(&reference.block_name).unwrap().entity_handles.iter().find_map(|h| match doc.get_entity(*h) { Some(EntityType::Line(line)) => Some(line), _ => None }).unwrap();
             (line.start, line.end)
@@ -8843,7 +8843,7 @@ fn block_polar_stretch_end_binding_command_scratch_and_reference_history() {
 #[test]
 fn block_action_self_grip_selection_edits_keep_native_links_and_reference_history() {
     use crate::scene::{block_actions as actions, block_grips::config};
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     use glam::DVec3;
     for testing in [false, true] {
         let (mut app, reference) = fixture();
@@ -8886,7 +8886,7 @@ fn block_action_self_grip_selection_edits_keep_native_links_and_reference_histor
         let _ = app.handle_block_action_result(crate::command::CmdResult::EvaluateBlockParameter { grip: None,
             insert: (!testing).then_some(insert), document, definition, parameter: parameter.handle, value: actions::Value::Point(DVec3::new(0., 15., 0.)),
         });
-        let circle_center = |doc: &codec::Document| {
+        let circle_center = |doc: &document::Document| {
             let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
             doc.block_records.get(&reference.block_name).unwrap().entity_handles.iter().find_map(|h| match doc.get_entity(*h) {
                 Some(EntityType::Circle(circle)) => Some(circle.center), _ => None,
@@ -9169,12 +9169,12 @@ fn block_runtime_native_roles_drag_cancel_undo_redo_and_preserve_relocated_grips
 #[test]
 fn alignment_parameter_defaults_to_perpendicular_and_accepts_an_explicit_type() {
     use crate::scene::block_orientation_parameter::{self as orientation, Kind};
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
     let i = app.active_tab;
     let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
-    let perpendicular = |doc: &codec::Document, handle: Handle| match &doc.objects[&handle] {
+    let perpendicular = |doc: &document::Document, handle: Handle| match &doc.objects[&handle] {
         ObjectType::DynamicBlock(object) => match &object.data {
             DynamicBlockData::AlignmentParameter(p) => p.align_perpendicular,
             _ => panic!(),
@@ -9227,7 +9227,7 @@ fn alignment_parameter_defaults_to_perpendicular_and_accepts_an_explicit_type() 
 #[test]
 fn block_alignment_type_placement_properties_history_and_native_roundtrips() {
     use crate::scene::block_orientation_parameter::{self as orientation, Kind};
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     use std::io::Cursor;
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
@@ -9236,7 +9236,7 @@ fn block_alignment_type_placement_properties_history_and_native_roundtrips() {
     let _ = app.run_command_line("BPARAMETER ALIGNMENT 0,0 TYPE P 10,0");
     let parameter = orientation::parameters(&app.tabs[i].scene.document, definition).into_iter()
         .find(|p| p.kind == Kind::Alignment).unwrap().handle;
-    let perpendicular = |doc: &codec::Document| match &doc.objects[&parameter] {
+    let perpendicular = |doc: &document::Document| match &doc.objects[&parameter] {
         ObjectType::DynamicBlock(object) => match &object.data {
             DynamicBlockData::AlignmentParameter(p) => p.align_perpendicular,
             _ => panic!(),
@@ -9269,8 +9269,8 @@ fn block_alignment_type_placement_properties_history_and_native_roundtrips() {
     let _ = app.update(Message::PropGeomChoiceChanged { field: "authoring_alignment_type", value: "Perpendicular".into() });
     let doc = &app.tabs[i].scene.document;
     for saved in [
-        codec::DwgReader::from_stream(Cursor::new(codec::DwgWriter::write_to_vec(doc).unwrap())).read().unwrap(),
-        codec::DxfReader::from_reader(Cursor::new(codec::DxfWriter::new(doc).write_to_vec().unwrap())).unwrap().read().unwrap(),
+        document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(doc).unwrap())).read().unwrap(),
+        document::DxfReader::from_reader(Cursor::new(document::DxfWriter::new(doc).write_to_vec().unwrap())).unwrap().read().unwrap(),
     ] { assert!(perpendicular(&saved)); }
     let before = app.tabs[i].scene.document.clone();
     assert!(orientation::set_alignment_type(&mut app.tabs[i].scene.document, Handle::NULL, parameter, false).is_err());
@@ -9358,8 +9358,8 @@ fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
             assert_eq!(app.tabs[i].scene.document.get_entity(insert), Some(&changed));
             let doc = &app.tabs[i].scene.document;
             for saved in [
-                codec::DwgReader::from_stream(Cursor::new(codec::DwgWriter::write_to_vec(doc).unwrap())).read().unwrap(),
-                codec::DxfReader::from_reader(Cursor::new(codec::DxfWriter::new(doc).write_to_vec().unwrap())).unwrap().read().unwrap(),
+                document::DwgReader::from_stream(Cursor::new(document::DwgWriter::write_to_vec(doc).unwrap())).read().unwrap(),
+                document::DxfReader::from_reader(Cursor::new(document::DxfWriter::new(doc).write_to_vec().unwrap())).unwrap().read().unwrap(),
             ] {
                 let restored = crate::scene::block_alignment::grips(&saved, definition, insert).remove(0);
                 assert!(restored.anchor.distance(aligned.anchor) < 1e-8);
@@ -9931,10 +9931,10 @@ fn a_written_parameter_value_moves_the_reference_geometry() {
             _ => None,
         })
         .unwrap();
-    let starts = |doc: &codec::Document| {
+    let starts = |doc: &document::Document| {
         doc.entities()
             .filter_map(|entity| match entity {
-                codec::EntityType::Line(line) => Some(line.start),
+                document::EntityType::Line(line) => Some(line.start),
                 _ => None,
             })
             .collect::<Vec<_>>()
@@ -9960,7 +9960,7 @@ fn a_written_parameter_value_moves_the_reference_geometry() {
         "the written value moved a copy of the member 30 along the parameter"
     );
     let definition_member = match app.tabs[i].scene.document.get_entity(target) {
-        Some(codec::EntityType::Line(line)) => line.start,
+        Some(document::EntityType::Line(line)) => line.start,
         other => panic!("the definition member is not a plain line: {other:?}"),
     };
     assert_eq!(
@@ -10037,7 +10037,7 @@ fn block_parameter_without_actions_hides_runtime_grips_and_rejects_stale_activat
         block_actions as actions, block_distance_parameter as distance,
         block_orientation_parameter as orientation, block_point_parameter as point,
     };
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     for testing in [false, true] {
         for kind in 0..6 {
             let (mut app, reference) = fixture();
@@ -10224,7 +10224,7 @@ fn block_key_point_grip_eligibility_and_pending_result_follow_reassociation() {
         block_actions as actions, block_distance_parameter as distance,
         block_grips::{config, runtime},
     };
-    use codec::objects::{DynamicBlockData, ObjectType};
+    use document::objects::{DynamicBlockData, ObjectType};
     use glam::DVec3;
     for testing in [false, true] {
         let (mut app, reference) = fixture();

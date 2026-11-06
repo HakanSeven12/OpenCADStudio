@@ -9,8 +9,8 @@
 //
 // Control-point dragging is already supported via the grip editing system.
 
-use codec::types::Vector3;
-use codec::EntityType;
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult};
@@ -52,16 +52,16 @@ enum Step {
 
 pub struct SplineditCommand {
     step: Step,
-    handle: codec::Handle,
-    spline: Option<codec::entities::Spline>,
-    pending: Option<codec::entities::Spline>,
-    history: Vec<(codec::Handle, codec::entities::Spline)>,
+    handle: document::Handle,
+    spline: Option<document::entities::Spline>,
+    pending: Option<document::entities::Spline>,
+    history: Vec<(document::Handle, document::entities::Spline)>,
     pick_context: Option<crate::command::PointPickContext>,
     join_candidates: Vec<crate::command::SelectionEntity>,
     delete_source: bool,
 }
 
-fn clear_fit_method(spline: &mut codec::entities::Spline) {
+fn clear_fit_method(spline: &mut document::entities::Spline) {
     spline.fit_points.clear();
     spline.begin_tangent = Vector3::ZERO;
     spline.end_tangent = Vector3::ZERO;
@@ -81,7 +81,7 @@ impl SplineditCommand {
     pub fn new() -> Self {
         Self {
             step: Step::SelectSpline,
-            handle: codec::Handle::NULL,
+            handle: document::Handle::NULL,
             spline: None,
             pending: None,
             history: Vec::new(),
@@ -118,7 +118,7 @@ impl SplineditCommand {
                     kernel::space::Vec3::from(points[0]).dot(kernel::space::Vec3::from(normal));
                 let normal = Vector3::new(normal[0], normal[1], normal[2]);
                 let plane = crate::entities::curve::ocs_plane(normal.clone(), elevation);
-                let mut polyline = codec::LwPolyline::new();
+                let mut polyline = document::LwPolyline::new();
                 polyline.common = source.common.clone();
                 polyline.elevation = elevation;
                 polyline.normal = normal;
@@ -127,14 +127,14 @@ impl SplineditCommand {
                     .iter()
                     .map(|point| {
                         let uv = plane.project(*point)?;
-                        Some(codec::entities::LwVertex::new(codec::types::Vector2::new(
+                        Some(document::entities::LwVertex::new(document::types::Vector2::new(
                             uv[0], uv[1],
                         )))
                     })
                     .collect::<Option<Vec<_>>>()?;
                 EntityType::LwPolyline(polyline)
             } else {
-                let mut polyline = codec::entities::Polyline3D::from_points(
+                let mut polyline = document::entities::Polyline3D::from_points(
                     points
                         .iter()
                         .map(|p| Vector3::new(p[0], p[1], p[2]))
@@ -155,7 +155,7 @@ impl SplineditCommand {
         if self.delete_source {
             CmdResult::ReplaceMany(vec![(self.handle, vec![entity])], Vec::new())
         } else {
-            entity.common_mut().handle = codec::Handle::NULL;
+            entity.common_mut().handle = document::Handle::NULL;
             CmdResult::ReplaceMany(Vec::new(), vec![entity])
         }
     }
@@ -184,7 +184,7 @@ impl SplineditCommand {
         self.rebuild_fit(result)
     }
 
-    fn rebuild_fit(&mut self, mut result: codec::entities::Spline) -> CmdResult {
+    fn rebuild_fit(&mut self, mut result: document::entities::Spline) -> CmdResult {
         let Some(source) = self.spline.as_ref() else {
             return CmdResult::NeedPoint;
         };
@@ -315,7 +315,7 @@ impl SplineditCommand {
             .is_some_and(|spline| spline.flags.closed || spline.flags.periodic)
     }
 
-    fn replace(&mut self, spline: codec::entities::Spline) -> CmdResult {
+    fn replace(&mut self, spline: document::entities::Spline) -> CmdResult {
         self.pending = Some(spline.clone());
         CmdResult::ReplaceManyContinue(vec![(self.handle, vec![EntityType::Spline(spline)])])
     }
@@ -350,7 +350,7 @@ impl SplineditCommand {
         &self,
         point: Option<DVec3>,
         degree: Option<usize>,
-    ) -> Option<codec::entities::Spline> {
+    ) -> Option<document::entities::Spline> {
         let source = self.spline.as_ref()?;
         if let Some(degree) = degree {
             let current = usize::try_from(source.degree).ok()?;
@@ -520,7 +520,7 @@ impl CadCommand for SplineditCommand {
             self.join_candidates = entities;
         }
     }
-    fn on_selection_complete(&mut self, handles: Vec<codec::Handle>) -> CmdResult {
+    fn on_selection_complete(&mut self, handles: Vec<document::Handle>) -> CmdResult {
         self.join_candidates
             .retain(|item| handles.contains(&item.handle) && item.handle != self.handle);
         CmdResult::NeedPoint
@@ -537,7 +537,7 @@ impl CadCommand for SplineditCommand {
             _ => None,
         };
     }
-    fn on_entity_pick(&mut self, handle: codec::Handle, _pt: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, handle: document::Handle, _pt: DVec3) -> CmdResult {
         if handle.is_null() || self.spline.is_none() {
             return CmdResult::NeedPoint;
         }
@@ -545,7 +545,7 @@ impl CadCommand for SplineditCommand {
         self.step = Step::Options;
         CmdResult::NeedPoint
     }
-    fn on_entity_replaced(&mut self, old: codec::Handle, new: &[codec::Handle]) {
+    fn on_entity_replaced(&mut self, old: document::Handle, new: &[document::Handle]) {
         if old == self.handle {
             if let (Some(&handle), Some(replacement)) = (new.first(), self.pending.take()) {
                 if let Some(previous) = self.spline.replace(replacement) {
@@ -1011,14 +1011,14 @@ impl CadCommand for SplineditCommand {
 }
 /// Apply a spline operation (CLOSE/OPEN/REVERSE) to a spline entity.
 /// Called from `cmd_result.rs` when the ReplaceEntity sentinel is detected.
-pub fn apply_spline_op(doc: &mut codec::Document, handle: codec::Handle, op: &str) {
+pub fn apply_spline_op(doc: &mut document::Document, handle: document::Handle, op: &str) {
     let Some(EntityType::Spline(spline)) = doc.get_entity_mut(handle) else {
         return;
     };
     apply_to_spline(spline, op);
 }
 
-fn apply_to_spline(spline: &mut codec::entities::Spline, op: &str) {
+fn apply_to_spline(spline: &mut document::entities::Spline, op: &str) {
     let result = match op {
         "__SPLINEDIT_CLOSE__" => change_closure(spline, true),
         "__SPLINEDIT_OPEN__" => change_closure(spline, false),
@@ -1031,9 +1031,9 @@ fn apply_to_spline(spline: &mut codec::entities::Spline, op: &str) {
 }
 
 fn change_closure(
-    source: &codec::entities::Spline,
+    source: &document::entities::Spline,
     closed: bool,
-) -> Option<codec::entities::Spline> {
+) -> Option<document::entities::Spline> {
     use kernel::space::{NurbsCurve3, Parameterization};
     if (source.flags.closed || source.flags.periodic) == closed {
         return None;
@@ -1139,8 +1139,8 @@ fn change_closure(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Spline;
-    use codec::Handle;
+    use document::entities::Spline;
+    use document::Handle;
     use iced::Rectangle;
 
     fn control_spline(points: &[[f64; 3]], degree: usize) -> Spline {
@@ -1453,7 +1453,7 @@ inventory::submit!(crate::command::CommandRegistration {
     names: &["SPLINEDIT"]
 }); // SplineditCommand
 
-fn spatial_spline(source: &codec::entities::Spline) -> Option<kernel::space::NurbsCurve3> {
+fn spatial_spline(source: &document::entities::Spline) -> Option<kernel::space::NurbsCurve3> {
     let curve = if crate::entities::spline::uses_fit_method(source) {
         crate::entities::spline::fit_nurbs3(source)?
     } else {

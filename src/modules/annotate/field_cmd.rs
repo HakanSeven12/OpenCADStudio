@@ -1,10 +1,10 @@
 // FIELD — places the field chosen in the Field dialog as a multi-line text,
 // and the object pick behind the dialog's "Select object" button.
 
-use codec::entities::mtext::AttachmentPoint;
-use codec::entities::MText;
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::mtext::AttachmentPoint;
+use document::entities::MText;
+use document::types::{Handle, Vector3};
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};

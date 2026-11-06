@@ -1,9 +1,9 @@
 //! Model files IMPORT reads: ACIS text (SAT), STEP and IGES, as the drawing
 //! objects they become.
 
-use codec::entities::{Entity as _, Insert};
-use codec::types::{Color, Matrix4, Transform, Vector3};
-use codec::EntityType;
+use document::entities::{Entity as _, Insert};
+use document::types::{Color, Matrix4, Transform, Vector3};
+use document::EntityType;
 
 use crate::scene::convert::acis_import::{painted_body_entity, sat_entities};
 
@@ -231,7 +231,7 @@ pub fn read(
                 })
                 .collect();
             for (curve, color, layer) in &model.curves {
-                let mut spline = codec::entities::Spline::new();
+                let mut spline = document::entities::Spline::new();
                 crate::entities::spline::replace_with_nurbs(&mut spline, curve);
                 spline.common.color = *color;
                 spline.common.layer = layer.clone();

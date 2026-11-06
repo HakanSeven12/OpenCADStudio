@@ -37,7 +37,7 @@ impl UnitContext {
     /// The settings as this drawing holds them. Every place that formats or
     /// reads a number seeds the context from here, so none of them can be
     /// working from a different idea of the drawing's conventions.
-    pub fn from_header(header: &codec::document::HeaderVariables) -> Self {
+    pub fn from_header(header: &document::document::HeaderVariables) -> Self {
         Self {
             lunits: header.linear_unit_format,
             luprec: header.linear_unit_precision,
@@ -80,7 +80,7 @@ thread_local! {
 }
 
 /// Record which text styles fix their height, from the drawing's style table.
-pub fn set_fixed_text_heights(document: &codec::Document) {
+pub fn set_fixed_text_heights(document: &document::Document) {
     FIXED_TEXT_HEIGHTS.with(|cell| {
         let mut map = cell.borrow_mut();
         map.clear();

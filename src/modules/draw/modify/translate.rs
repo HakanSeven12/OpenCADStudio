@@ -6,7 +6,7 @@
 //   Step 2: pick destination → translates all selected entities by (dest - base);
 //           Enter uses the base point as the displacement (commercial solutions).
 
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, EntityTransform};

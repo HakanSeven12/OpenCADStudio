@@ -4,7 +4,7 @@ use crate::scene::{
     block_orientation_parameter as orientation, block_point_parameter as point, block_visibility,
     Scene,
 };
-use codec::types::Vector3;
+use document::types::Vector3;
 
 fn fixture() -> (Document, Handle, Vec<Handle>) {
     let mut scene = Scene::new();

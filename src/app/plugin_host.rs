@@ -2,8 +2,8 @@
 
 use std::any::Any;
 
-use codec::tables::AppId;
-use codec::xdata::ExtendedDataRecord;
+use document::tables::AppId;
+use document::xdata::ExtendedDataRecord;
 use ocs_plugin_api::host::{
     Document, EntityType, Handle, HostApi, HostSettingValue, PluginClassParameterRow,
 };
@@ -138,7 +138,7 @@ impl<'a> HostSession<'a> {
             .or_else(|| self.nested_attribute(handle))
     }
 
-    fn replace_nested_attribute(&mut self, attribute: codec::entities::AttributeEntity) -> bool {
+    fn replace_nested_attribute(&mut self, attribute: document::entities::AttributeEntity) -> bool {
         let owner = attribute.common.owner_handle;
         let handle = attribute.common.handle;
         let Some(EntityType::Insert(mut insert)) = self.document().get_entity(owner).cloned()
@@ -333,7 +333,7 @@ impl<'a> HostSession<'a> {
             .objects
             .iter()
             .find_map(|(handle, object)| match object {
-                codec::objects::ObjectType::ImageDefinition(definition)
+                document::objects::ObjectType::ImageDefinition(definition)
                     if definition.file_name == image.file_path =>
                 {
                     Some(*handle)
@@ -344,7 +344,7 @@ impl<'a> HostSession<'a> {
             Some(handle) => handle,
             None => {
                 let handle = self.document_mut().allocate_handle();
-                let mut definition = codec::objects::ImageDefinition::with_dimensions(
+                let mut definition = document::objects::ImageDefinition::with_dimensions(
                     image.file_path.clone(),
                     width,
                     height,
@@ -362,7 +362,7 @@ impl<'a> HostSession<'a> {
                 }
                 self.document_mut().objects.insert(
                     handle,
-                    codec::objects::ObjectType::ImageDefinition(definition),
+                    document::objects::ObjectType::ImageDefinition(definition),
                 );
                 handle
             }
@@ -371,11 +371,11 @@ impl<'a> HostSession<'a> {
         // `size` is the image's pixel size, and an untouched clip boundary
         // covers the whole image, so both follow the file.
         let untouched_clip = image.clip_boundary
-            == codec::entities::ClipBoundary::full_image(image.size.x, image.size.y);
-        image.size = codec::types::Vector2::new(f64::from(width), f64::from(height));
+            == document::entities::ClipBoundary::full_image(image.size.x, image.size.y);
+        image.size = document::types::Vector2::new(f64::from(width), f64::from(height));
         if untouched_clip {
             image.clip_boundary =
-                codec::entities::ClipBoundary::full_image(f64::from(width), f64::from(height));
+                document::entities::ClipBoundary::full_image(f64::from(width), f64::from(height));
         }
         Ok(())
     }
@@ -682,7 +682,7 @@ impl<'a> HostSession<'a> {
 
     // ── XDATA convenience ──────────────────────────────────────────────────
     // Plugins persist domain data as XDATA on plain entities so it round-trips
-    // through DWG/DXF. These wrap the `codec::xdata` API keyed by entity
+    // through DWG/DXF. These wrap the `document::xdata` API keyed by entity
     // handle and keep the APPID table in sync.
 
     /// Read the XDATA record for `app_name` attached to entity `handle`, if any.
@@ -887,7 +887,7 @@ impl<'a> HostSession<'a> {
                 .ok_or("the geometry kernel refused these dimensions")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the solid could not be exported losslessly")?;
-                let mut solid = codec::entities::Solid3D::new();
+                let mut solid = document::entities::Solid3D::new();
                 solid.wires = model::edge_wires(&body);
                 solid.set_sat_document(&sat);
                 if let Some(layer) = layer {
@@ -920,9 +920,9 @@ impl<'a> HostSession<'a> {
                     .ok_or("the geometry kernel could not build a region from this profile")?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the region could not be exported losslessly")?;
-                let mut region = codec::entities::Region::new();
+                let mut region = document::entities::Region::new();
                 region.point_of_reference =
-                    codec::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
+                    document::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
                 region.wires = model::edge_wires(&body);
                 region.set_sat_document(&sat);
                 region.common.layer = layer;
@@ -951,11 +951,11 @@ impl<'a> HostSession<'a> {
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the surface could not be exported losslessly")?;
                 let mut surface =
-                    codec::entities::Surface::new(codec::entities::SurfaceKind::Plane);
+                    document::entities::Surface::new(document::entities::SurfaceKind::Plane);
                 surface.point_of_reference =
-                    codec::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
+                    document::types::Vector3::new(plane.origin[0], plane.origin[1], plane.origin[2]);
                 surface.wires = model::edge_wires(&body);
-                surface.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
+                surface.acis_data = document::entities::AcisData::from_sat(&sat.to_sat_string());
                 surface.common.layer = layer;
                 self.commit_profile_result(
                     EntityType::Surface(Box::new(surface)),
@@ -988,7 +988,7 @@ impl<'a> HostSession<'a> {
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&body)
                     .ok_or("the extrusion could not be exported losslessly")?;
                 let result = if closed {
-                    let mut solid = codec::entities::Solid3D::new();
+                    let mut solid = document::entities::Solid3D::new();
                     solid.wires = model::edge_wires(&body);
                     solid.set_sat_document(&sat);
                     solid.common.layer = layer;
@@ -997,9 +997,9 @@ impl<'a> HostSession<'a> {
                     // An open profile sweeps to a surface. The generic kind
                     // carries only the payload, as OCS does after a boolean.
                     let mut surface =
-                        codec::entities::Surface::new(codec::entities::SurfaceKind::Generic);
+                        document::entities::Surface::new(document::entities::SurfaceKind::Generic);
                     surface.wires = model::edge_wires(&body);
-                    surface.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
+                    surface.acis_data = document::entities::AcisData::from_sat(&sat.to_sat_string());
                     surface.common.layer = layer;
                     EntityType::Surface(Box::new(surface))
                 };
@@ -1020,7 +1020,7 @@ impl<'a> HostSession<'a> {
                     crate::io::ole_embed::EmbeddedImage::from_file(std::path::Path::new(&path))
                         .map_err(|error| format!("cannot read the picture {path:?}: {error}"))?;
                 let (upper_left, lower_right) = crate::io::ole_embed::corners_from_placement(
-                    codec::types::Vector3::new(origin[0], origin[1], origin[2]),
+                    document::types::Vector3::new(origin[0], origin[1], origin[2]),
                     width,
                     picture.aspect(),
                 );
@@ -1053,7 +1053,7 @@ impl<'a> HostSession<'a> {
                 let operand = |host: &Self,
                                handle: Handle,
                                which: &str|
-                 -> Result<codec::entities::Solid3D, String> {
+                 -> Result<document::entities::Solid3D, String> {
                     match host.document().get_entity(handle) {
                         Some(EntityType::Solid3D(solid)) => Ok(solid.clone()),
                         Some(_) => Err(format!("the {which} operand must be a Solid3D")),
@@ -1069,7 +1069,7 @@ impl<'a> HostSession<'a> {
                         }
                     }
                 }
-                let lift = |solid: &codec::entities::Solid3D, which: &str| {
+                let lift = |solid: &document::entities::Solid3D, which: &str| {
                     crate::scene::convert::solid3d_tess::kernel_acis_body(&solid.acis_data).ok_or_else(|| {
                         format!("the {which} solid's payload cannot be lifted losslessly, so nothing was changed")
                     })
@@ -1090,7 +1090,7 @@ impl<'a> HostSession<'a> {
                 })?;
                 let sat = crate::scene::convert::acis_export::solid_to_sat(&combined)
                     .ok_or("the result could not be exported losslessly, so nothing was changed")?;
-                let mut solid = codec::entities::Solid3D::new();
+                let mut solid = document::entities::Solid3D::new();
                 solid.common = a.common.clone();
                 solid.common.handle = Handle::NULL;
                 solid.common.owner_handle = Handle::NULL;
@@ -1169,12 +1169,12 @@ impl<'a> HostSession<'a> {
                         value.wires = model::edge_wires(&moved);
                         value.silhouettes.clear();
                         value.history_handle = None;
-                        value.acis_data = codec::entities::AcisData::from_sat(&sat.to_sat_string());
+                        value.acis_data = document::entities::AcisData::from_sat(&sat.to_sat_string());
                         // A moved plane is still a plane; a swept surface no longer
                         // matches its stored sweep parameters, so it becomes generic.
-                        if value.kind != codec::entities::SurfaceKind::Plane {
-                            value.kind = codec::entities::SurfaceKind::Generic;
-                            value.surface_data = codec::entities::SurfaceData::Generic;
+                        if value.kind != document::entities::SurfaceKind::Plane {
+                            value.kind = document::entities::SurfaceKind::Generic;
+                            value.surface_data = document::entities::SurfaceData::Generic;
                         }
                     }
                     _ => {
@@ -1414,14 +1414,14 @@ impl<'a> HostSession<'a> {
             None => "Continuous".to_string(),
         };
 
-        let mut layer = codec::tables::Layer::new(trimmed);
+        let mut layer = document::tables::Layer::new(trimmed);
         let handle = doc.allocate_handle();
         layer.handle = handle;
-        layer.color = config.color.unwrap_or(codec::types::Color::Index(7));
+        layer.color = config.color.unwrap_or(document::types::Color::Index(7));
         layer.line_type = resolved_lt;
         layer.line_weight = config
             .lineweight
-            .unwrap_or(codec::types::LineWeight::ByLayer);
+            .unwrap_or(document::types::LineWeight::ByLayer);
         layer.flags.off = config.off.unwrap_or(false);
         if let Some(frz) = config.frozen {
             if frz {
@@ -1434,7 +1434,7 @@ impl<'a> HostSession<'a> {
         layer.is_plottable = config.plottable.unwrap_or(true);
         layer.transparency = config
             .transparency
-            .unwrap_or(codec::types::Transparency::ByLayer);
+            .unwrap_or(document::types::Transparency::ByLayer);
         layer.description = config.description.unwrap_or_default();
 
         let _ = doc.layers.add(layer);
@@ -1467,20 +1467,20 @@ impl<'a> HostSession<'a> {
             name == "0" || name.eq_ignore_ascii_case("Defpoints")
         };
         let same_name = |a: &str, b: &str| a.trim().to_uppercase() == b.trim().to_uppercase();
-        let check_color = |color: &codec::types::Color| match color {
-            codec::types::Color::ByLayer
-            | codec::types::Color::ByBlock
-            | codec::types::Color::None => {
+        let check_color = |color: &document::types::Color| match color {
+            document::types::Color::ByLayer
+            | document::types::Color::ByBlock
+            | document::types::Color::None => {
                 Err("a layer color must be an index 1-255 or an RGB value".to_owned())
             }
-            codec::types::Color::Index(0) => Err("a layer color index must be 1-255".to_owned()),
+            document::types::Color::Index(0) => Err("a layer color index must be 1-255".to_owned()),
             _ => Ok(()),
         };
         let check_config = |config: &ocs_plugin_api::host::LayerConfig| -> Result<(), String> {
             if let Some(color) = &config.color {
                 check_color(color)?;
             }
-            if let Some(codec::types::LineWeight::Value(value)) = config.lineweight {
+            if let Some(document::types::LineWeight::Value(value)) = config.lineweight {
                 if !(0..=211).contains(&value) {
                     return Err(
                         "a layer lineweight must be between 0 and 211 (1/100 mm)".to_owned()
@@ -1931,10 +1931,10 @@ impl<'a> HostSession<'a> {
             }
             Ok(())
         };
-        let build = |lt: &mut codec::tables::LineType, pattern: &[f64]| {
+        let build = |lt: &mut document::tables::LineType, pattern: &[f64]| {
             lt.elements = pattern
                 .iter()
-                .map(|length| codec::tables::linetype::LineTypeElement {
+                .map(|length| document::tables::linetype::LineTypeElement {
                     length: *length,
                     complex: None,
                 })
@@ -1964,7 +1964,7 @@ impl<'a> HostSession<'a> {
                 check_pattern(&pattern)?;
                 check_description(&description)?;
                 self.push_undo("Create linetype");
-                let mut lt = codec::tables::LineType::new(name.clone());
+                let mut lt = document::tables::LineType::new(name.clone());
                 lt.description = description;
                 build(&mut lt, &pattern);
                 let handle = self.document_mut().allocate_handle();
@@ -2126,7 +2126,7 @@ impl<'a> HostSession<'a> {
         &mut self,
         operation: ocs_plugin_api::host::TableOperation,
     ) -> Result<Handle, String> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         use ocs_plugin_api::host::TableOperation;
         if self.tab != self.app.active_tab {
             return Err(
@@ -2275,10 +2275,10 @@ impl<'a> HostSession<'a> {
                 }
                 let rotation_code = match rotation {
                     None => None,
-                    Some(0) => Some(codec::objects::PlotRotation::None),
-                    Some(90) => Some(codec::objects::PlotRotation::Degrees90),
-                    Some(180) => Some(codec::objects::PlotRotation::Degrees180),
-                    Some(270) => Some(codec::objects::PlotRotation::Degrees270),
+                    Some(0) => Some(document::objects::PlotRotation::None),
+                    Some(90) => Some(document::objects::PlotRotation::Degrees90),
+                    Some(180) => Some(document::objects::PlotRotation::Degrees180),
+                    Some(270) => Some(document::objects::PlotRotation::Degrees270),
                     Some(_) => {
                         return Err("the plot rotation must be 0, 90, 180 or 270 degrees".to_owned())
                     }
@@ -2314,13 +2314,13 @@ impl<'a> HostSession<'a> {
                         layout.plot_scale_numerator = numerator;
                         layout.plot_scale_denominator = denominator;
                         layout.plot_scale_factor = numerator / denominator;
-                        layout.plot_scale_type = codec::objects::ScaledType::CustomScale.to_code();
+                        layout.plot_scale_type = document::objects::ScaledType::CustomScale.to_code();
                         layout.plot_flags.use_standard_scale = false;
                     }
                     let quarter_turn = layout.plot_rotation
-                        == codec::objects::PlotRotation::Degrees90.to_code()
+                        == document::objects::PlotRotation::Degrees90.to_code()
                         || layout.plot_rotation
-                            == codec::objects::PlotRotation::Degrees270.to_code();
+                            == document::objects::PlotRotation::Degrees270.to_code();
                     let (x, y) = if quarter_turn {
                         (layout.paper_height, layout.paper_width)
                     } else {
@@ -2354,7 +2354,7 @@ impl<'a> HostSession<'a> {
         &mut self,
         operation: ocs_plugin_api::host::TableOperation,
     ) -> Result<Handle, String> {
-        use codec::entities::EntityType as E;
+        use document::entities::EntityType as E;
         use ocs_plugin_api::host::TableOperation;
         let editable_block = |doc: &Document, name: &str| -> Result<(String, Handle), String> {
             let record = doc
@@ -2447,7 +2447,7 @@ impl<'a> HostSession<'a> {
                 let (stored, handle) = editable_block(self.document(), &name)?;
                 if let Some(record) = self.document_mut().block_records.get_mut(&stored) {
                     record.base_point =
-                        codec::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
+                        document::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
                     if let Some(text) = description {
                         record.description = text;
                     }
@@ -2460,7 +2460,7 @@ impl<'a> HostSession<'a> {
                 if let Some(marker) = marker {
                     if let Some(E::Block(block)) = self.document_mut().get_entity_mut(marker) {
                         block.base_point =
-                            codec::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
+                            document::types::Vector3::new(base_point[0], base_point[1], base_point[2]);
                     }
                 }
                 if erase_originals {
@@ -2684,7 +2684,7 @@ impl<'a> HostSession<'a> {
                 if self.app.style_exists(StyleKind::Text, &name) {
                     return Err(format!("text style {name:?} already exists"));
                 }
-                let mut style = codec::tables::TextStyle::new(name.clone());
+                let mut style = document::tables::TextStyle::new(name.clone());
                 apply_text_style_config(&mut style, &config)?;
                 self.push_undo("Create text style");
                 let handle = self.document_mut().allocate_handle();
@@ -2744,7 +2744,7 @@ impl<'a> HostSession<'a> {
                             .cloned()
                             .expect("checked above")
                     }
-                    None => codec::tables::DimStyle::new(name.clone()),
+                    None => document::tables::DimStyle::new(name.clone()),
                 };
                 let mut style = apply_dim_style_json(self.document(), &base, &properties)?;
                 self.push_undo("Create dimension style");
@@ -3012,7 +3012,7 @@ impl<'a> HostSession<'a> {
     /// a missing fragment is an error, and so is a fragment that exists but
     /// names a non-dictionary object.
     fn xrecord_dictionary_at(&self, dictionary_path: &[&str]) -> Result<Handle, String> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let root = self.document().header.named_objects_dict_handle;
         if !matches!(
             self.document().objects.get(&root),
@@ -3050,7 +3050,7 @@ impl<'a> HostSession<'a> {
         &self,
         dictionary_path: &[&str],
     ) -> Result<(Handle, usize), String> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let root = self.document().header.named_objects_dict_handle;
         if !matches!(
             self.document().objects.get(&root),
@@ -3092,7 +3092,7 @@ impl<'a> HostSession<'a> {
         &mut self,
         dictionary_path: &[&str],
     ) -> Result<Handle, String> {
-        use codec::objects::{Dictionary, ObjectType};
+        use document::objects::{Dictionary, ObjectType};
         let root = self.document().header.named_objects_dict_handle;
         if !matches!(
             self.document().objects.get(&root),
@@ -3172,9 +3172,9 @@ impl<'a> HostSession<'a> {
         &mut self,
         dictionary_path: &[&str],
         name: &str,
-        entries: Vec<codec::objects::XRecordEntry>,
+        entries: Vec<document::objects::XRecordEntry>,
     ) -> Result<Handle, String> {
-        use codec::objects::{ObjectType, XRecord};
+        use document::objects::{ObjectType, XRecord};
         let name = validated_symbol_name(name, "an XRecord name")?;
         validated_xrecord_entries(&entries)?;
         // Pre-check the path: fragments that already exist must be
@@ -3224,8 +3224,8 @@ impl<'a> HostSession<'a> {
         &self,
         dictionary_path: &[&str],
         name: &str,
-    ) -> Result<Vec<codec::objects::XRecordEntry>, String> {
-        use codec::objects::ObjectType;
+    ) -> Result<Vec<document::objects::XRecordEntry>, String> {
+        use document::objects::ObjectType;
         let (_, _, handle) = self.xrecord_lookup(dictionary_path, name)?;
         match self.document().objects.get(&handle) {
             Some(ObjectType::XRecord(record)) => Ok(record.entries.clone()),
@@ -3247,9 +3247,9 @@ impl<'a> HostSession<'a> {
         &mut self,
         dictionary_path: &[&str],
         name: &str,
-        entries: Vec<codec::objects::XRecordEntry>,
+        entries: Vec<document::objects::XRecordEntry>,
     ) -> Result<Handle, String> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         validated_xrecord_entries(&entries)?;
         let (_, _, handle) = self.xrecord_lookup(dictionary_path, name)?;
         let own_scope = self.ensure_xrecord_undo_scope("Update XRecord");
@@ -3290,8 +3290,8 @@ impl<'a> HostSession<'a> {
         &mut self,
         dictionary_path: &[&str],
         name: &str,
-    ) -> Result<codec::objects::XRecord, String> {
-        use codec::objects::ObjectType;
+    ) -> Result<document::objects::XRecord, String> {
+        use document::objects::ObjectType;
         let (dictionary, name, handle) = self.xrecord_lookup(dictionary_path, name)?;
         let own_scope = self.ensure_xrecord_undo_scope("Delete XRecord");
         let removed = match self.document_mut().objects.remove(&handle) {
@@ -3319,7 +3319,7 @@ impl<'a> HostSession<'a> {
     /// and export without knowing names in advance. Non-XRecord entries are
     /// not listed.
     pub fn list_xrecords(&self, dictionary_path: &[&str]) -> Result<Vec<String>, String> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let dictionary = self.xrecord_dictionary_at(dictionary_path)?;
         let Some(ObjectType::Dictionary(entries)) = self.document().objects.get(&dictionary) else {
             return Err(format!("dictionary {dictionary:?} does not exist"));
@@ -3453,7 +3453,7 @@ impl<'a> HostSession<'a> {
     pub fn entities_batch(
         &self,
         handles: &[Handle],
-    ) -> Result<Vec<Option<codec::EntityType>>, String> {
+    ) -> Result<Vec<Option<document::EntityType>>, String> {
         if self.app.tabs.len() <= self.tab {
             return Err(format!("tab {} does not exist", self.tab));
         }
@@ -3502,7 +3502,7 @@ impl<'a> HostSession<'a> {
                 let resolve = |pick: &ocs_plugin_api::host::PluginConstraintPick,
                                exclude: Option<Handle>| {
                     let point =
-                        codec::types::Vector3::new(pick.point[0], pick.point[1], pick.point[2]);
+                        document::types::Vector3::new(pick.point[0], pick.point[1], pick.point[2]);
                     if pick.whole_curve {
                         pick.handle.and_then(|handle| {
                             crate::scene::parametric_constraints::parametric_curve_ref_for_pick(
@@ -3730,14 +3730,14 @@ impl<'a> HostSession<'a> {
             // staged entity (write_record registers the APPID so the stamp
             // survives the file), carrying the schema version and the record
             // linkage.
-            let mut stamp = ocs_plugin_api::host::codec::xdata::ExtendedDataRecord::new(
+            let mut stamp = ocs_plugin_api::host::document::xdata::ExtendedDataRecord::new(
                 instance.class_id.clone(),
             );
-            stamp.add_value(ocs_plugin_api::host::codec::xdata::XDataValue::Integer32(
+            stamp.add_value(ocs_plugin_api::host::document::xdata::XDataValue::Integer32(
                 instance.schema_version as i32,
             ));
             if !instance.design_record.is_empty() {
-                stamp.add_value(ocs_plugin_api::host::codec::xdata::XDataValue::String(
+                stamp.add_value(ocs_plugin_api::host::document::xdata::XDataValue::String(
                     instance.design_record.clone(),
                 ));
             }
@@ -3976,7 +3976,7 @@ impl<'a> HostSession<'a> {
         dictionary_path: &[&str],
         name: &str,
     ) -> Result<(Handle, String, Handle), String> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let dictionary = self.xrecord_dictionary_at(dictionary_path)?;
         let name = validated_symbol_name(name, "an XRecord name")?;
         let Some(ObjectType::Dictionary(entries)) = self.document().objects.get(&dictionary) else {
@@ -4013,7 +4013,7 @@ pub(in crate::app) struct PluginClassInstanceBinding {
 pub(in crate::app) fn resolve_plugin_class_binding(
     app: &OpenCADStudio,
     tab: usize,
-    handle: codec::Handle,
+    handle: document::Handle,
 ) -> Result<PluginClassInstanceBinding, String> {
     let Some(entity) = app.tabs[tab].scene.document.get_entity(handle) else {
         return Err(format!("entity {handle:?} does not exist"));
@@ -4029,7 +4029,7 @@ pub(in crate::app) fn resolve_plugin_class_binding(
         let Some(declaration) = registry.find(owner, &record.application_name) else {
             continue;
         };
-        let Some(codec::xdata::XDataValue::Integer32(schema)) = record.values.first() else {
+        let Some(document::xdata::XDataValue::Integer32(schema)) = record.values.first() else {
             return Err(format!(
                 "entity {handle:?} carries the class stamp {:?} without its schema version",
                 record.application_name
@@ -4043,7 +4043,7 @@ pub(in crate::app) fn resolve_plugin_class_binding(
             )
         })?;
         let design_record = match record.values.get(1) {
-            Some(codec::xdata::XDataValue::String(linkage)) => linkage.clone(),
+            Some(document::xdata::XDataValue::String(linkage)) => linkage.clone(),
             _ => String::new(),
         };
         if schema != declaration.schema_version {
@@ -4072,14 +4072,14 @@ pub(in crate::app) fn resolve_plugin_class_binding(
 pub(in crate::app) fn find_design_record_entries(
     app: &OpenCADStudio,
     tab: usize,
-    _handle: codec::Handle,
+    _handle: document::Handle,
     name: &str,
-) -> Result<(Vec<String>, Vec<codec::objects::XRecordEntry>), String> {
-    use codec::objects::ObjectType;
+) -> Result<(Vec<String>, Vec<document::objects::XRecordEntry>), String> {
+    use document::objects::ObjectType;
     let name = validated_symbol_name(name, "a design record name")?;
     let doc = &app.tabs[tab].scene.document;
     let root = doc.header.named_objects_dict_handle;
-    let is_dictionary = |candidate: codec::Handle| {
+    let is_dictionary = |candidate: document::Handle| {
         matches!(doc.objects.get(&candidate), Some(ObjectType::Dictionary(_)))
     };
     if is_dictionary(root) {
@@ -4139,14 +4139,14 @@ pub(in crate::app) fn rows_from_schema(
 /// stay untouched by the reader.
 pub(in crate::app) fn rows_from_entries(
     binding: &PluginClassInstanceBinding,
-    entries: &[codec::objects::XRecordEntry],
+    entries: &[document::objects::XRecordEntry],
 ) -> Result<Vec<PluginClassParameterRow>, String> {
-    use codec::objects::XRecordValue;
+    use document::objects::XRecordValue;
     use ocs_plugin_api::host::PluginClassParameterKind;
     let mut rows = rows_from_schema(binding);
     let mut index = 0usize;
     while index + 1 < entries.len() {
-        let codec::objects::XRecordValue::String(pair_name) = &entries[index].value else {
+        let document::objects::XRecordValue::String(pair_name) = &entries[index].value else {
             return Err(format!(
                 "the design record of class {:?} breaks its alternating (name, value) pair \
                  layout at entry {index}",
@@ -4207,8 +4207,8 @@ pub(in crate::app) fn update_parameter_pair(
     name: &str,
     value_kind: ocs_plugin_api::host::PluginClassParameterKind,
     value: &str,
-    entries: Vec<codec::objects::XRecordEntry>,
-) -> Result<Vec<codec::objects::XRecordEntry>, String> {
+    entries: Vec<document::objects::XRecordEntry>,
+) -> Result<Vec<document::objects::XRecordEntry>, String> {
     let Some(name_index) =
         find_parameter_pair(&binding.class_id, &binding.design_record, name, &entries)?
     else {
@@ -4222,7 +4222,7 @@ pub(in crate::app) fn update_parameter_pair(
     let value_index = name_index + 1;
     let code = entries[value_index].code;
     let mut entries = entries;
-    entries[value_index] = codec::objects::XRecordEntry::new(code, parsed);
+    entries[value_index] = document::objects::XRecordEntry::new(code, parsed);
     Ok(entries)
 }
 
@@ -4233,12 +4233,12 @@ fn find_parameter_pair(
     class_id: &str,
     record_name: &str,
     name: &str,
-    entries: &[codec::objects::XRecordEntry],
+    entries: &[document::objects::XRecordEntry],
 ) -> Result<Option<usize>, String> {
     let mut found: Option<usize> = None;
     let mut index = 0usize;
     while index < entries.len() {
-        let codec::objects::XRecordValue::String(pair_name) = &entries[index].value else {
+        let document::objects::XRecordValue::String(pair_name) = &entries[index].value else {
             return Err(format!(
                 "the design record {record_name:?} of class {class_id:?} breaks its \
                  alternating (name, value) pair layout at entry {index}"
@@ -4272,8 +4272,8 @@ fn parse_parameter_value(
     value: &str,
     class_id: &str,
     name: &str,
-) -> Result<codec::objects::XRecordValue, String> {
-    use codec::objects::XRecordValue;
+) -> Result<document::objects::XRecordValue, String> {
+    use document::objects::XRecordValue;
     use ocs_plugin_api::host::PluginClassParameterKind;
     match value_kind {
         PluginClassParameterKind::Real => {
@@ -4356,7 +4356,7 @@ fn validated_symbol_name(raw: &str, what: &str) -> Result<String, String> {
 /// a group code the codec model admits (1..=369; 5 and 105 are reserved for
 /// object handles). Refused before any change so bad input never reaches a
 /// file.
-fn validated_xrecord_entries(entries: &[codec::objects::XRecordEntry]) -> Result<(), String> {
+fn validated_xrecord_entries(entries: &[document::objects::XRecordEntry]) -> Result<(), String> {
     for entry in entries {
         if !(1..=369).contains(&entry.code) {
             return Err(format!(
@@ -4375,7 +4375,7 @@ fn validated_xrecord_entries(entries: &[codec::objects::XRecordEntry]) -> Result
 }
 
 fn apply_text_style_config(
-    style: &mut codec::tables::TextStyle,
+    style: &mut document::tables::TextStyle,
     config: &ocs_plugin_api::host::TextStyleConfig,
 ) -> Result<(), String> {
     let text = |what: &str, value: &str| {
@@ -4440,9 +4440,9 @@ fn apply_text_style_config(
 /// must name an existing text style, whose handle is linked here.
 fn apply_dim_style_json(
     doc: &Document,
-    base: &codec::tables::DimStyle,
+    base: &document::tables::DimStyle,
     properties: &str,
-) -> Result<codec::tables::DimStyle, String> {
+) -> Result<document::tables::DimStyle, String> {
     let patch: serde_json::Value = serde_json::from_str(properties)
         .map_err(|e| format!("dimension style properties are not valid JSON: {e}"))?;
     let serde_json::Value::Object(patch) = patch else {
@@ -4464,7 +4464,7 @@ fn apply_dim_style_json(
         }
         object.insert(key, new);
     }
-    let mut style: codec::tables::DimStyle =
+    let mut style: document::tables::DimStyle =
         serde_json::from_value(value).map_err(|e| format!("invalid dimension style value: {e}"))?;
     if !(style.dimscale.is_finite() && style.dimscale > 0.0) {
         return Err("dimscale must be greater than zero".to_owned());
@@ -4489,8 +4489,8 @@ fn apply_dim_style_json(
 /// The stored spelling of `name` in the drawing's linetype table, loading the
 /// standard linetypes first when it is not there yet. `None` when the drawing
 /// cannot supply it: a layer must not reference a linetype that does not exist.
-fn resolve_linetype(doc: &mut codec::Document, name: &str) -> Option<String> {
-    let stored = |doc: &codec::Document| doc.line_types.get(name).map(|lt| lt.name.clone());
+fn resolve_linetype(doc: &mut document::Document, name: &str) -> Option<String> {
+    let stored = |doc: &document::Document| doc.line_types.get(name).map(|lt| lt.name.clone());
     stored(doc).or_else(|| {
         crate::io::linetypes::populate_document(doc);
         stored(doc)
@@ -4715,7 +4715,7 @@ impl HostApi for HostSession<'_> {
     ) -> Result<(), String> {
         self.set_plugin_grips(plugin_id, grips)
     }
-    fn entities_batch(&self, handles: &[Handle]) -> Result<Vec<Option<codec::EntityType>>, String> {
+    fn entities_batch(&self, handles: &[Handle]) -> Result<Vec<Option<document::EntityType>>, String> {
         self.entities_batch(handles)
     }
     fn constraint_create(
@@ -5449,8 +5449,8 @@ mod tests {
     use super::*;
     use crate::app::OpenCADStudio;
     use crate::entities::traits::RenderConvertible;
-    use codec::entities::{Line, Point};
-    use codec::xdata::XDataValue;
+    use document::entities::{Line, Point};
+    use document::xdata::XDataValue;
     use ocs_plugin_api::host::DocumentReader;
 
     #[test]
@@ -5481,24 +5481,24 @@ mod tests {
             let record_handle = Handle::new(next);
             let block_handle = Handle::new(next + 1);
             let block_end_handle = Handle::new(next + 2);
-            let mut record = codec::tables::BlockRecord::new("TAGBLOCK");
+            let mut record = document::tables::BlockRecord::new("TAGBLOCK");
             record.handle = record_handle;
             record.block_entity_handle = block_handle;
             record.block_end_handle = block_end_handle;
             host.document_mut().block_records.add(record).unwrap();
-            let mut block = codec::entities::Block::new("TAGBLOCK", codec::types::Vector3::ZERO);
+            let mut block = document::entities::Block::new("TAGBLOCK", document::types::Vector3::ZERO);
             block.common.handle = block_handle;
             block.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::Block(block))
                 .unwrap();
-            let mut end = codec::entities::BlockEnd::new();
+            let mut end = document::entities::BlockEnd::new();
             end.common.handle = block_end_handle;
             end.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::BlockEnd(end))
                 .unwrap();
-            let mut definition = codec::entities::AttributeDefinition::new(
+            let mut definition = document::entities::AttributeDefinition::new(
                 "PART_NO".into(),
                 "Part number".into(),
                 "PN-001".into(),
@@ -5510,17 +5510,17 @@ mod tests {
                 .unwrap();
             insert_handle = host
                 .document_mut()
-                .add_entity(EntityType::Insert(codec::entities::Insert::new(
+                .add_entity(EntityType::Insert(document::entities::Insert::new(
                     "TAGBLOCK",
-                    codec::types::Vector3::new(10.0, 0.0, 0.0),
+                    document::types::Vector3::new(10.0, 0.0, 0.0),
                 )))
                 .unwrap();
 
             let mut attribute =
-                codec::entities::AttributeEntity::new("PART_NO".into(), "PN-101".into());
+                document::entities::AttributeEntity::new("PART_NO".into(), "PN-101".into());
             attribute.common.owner_handle = insert_handle;
             attribute.attdef_handle = definition_handle;
-            attribute.insertion_point = codec::types::Vector3::new(10.0, 2.0, 0.0);
+            attribute.insertion_point = document::types::Vector3::new(10.0, 2.0, 0.0);
             host.push_undo("Create attribute");
             attribute_handle = host.add_entity(EntityType::AttributeEntity(attribute));
             assert!(!attribute_handle.is_null());
@@ -5582,8 +5582,8 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let annotation = host.add_entity(EntityType::Text(codec::entities::Text::default()));
-        let mut leader = codec::entities::Leader::default();
+        let annotation = host.add_entity(EntityType::Text(document::entities::Text::default()));
+        let mut leader = document::entities::Leader::default();
         leader.annotation_handle = annotation;
         let leader_handle = host.add_entity(EntityType::Leader(leader));
         host.set_selection(&[leader_handle]).unwrap();
@@ -5597,10 +5597,10 @@ mod tests {
         let (first, second);
         {
             let mut host = HostSession::new(&mut app, 0);
-            first = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+            first = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
                 1.0, 0.0, 0.0,
             ))));
-            second = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+            second = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
                 2.0, 0.0, 0.0,
             ))));
             let mut a = host.document().get_entity(first).unwrap().clone();
@@ -5659,11 +5659,11 @@ mod tests {
         let mut host = HostSession::new(&mut app, 0);
         let entries = || {
             vec![
-                codec::objects::XRecordEntry::string(1, "{\"k\":\"road\",\"s\":1}"),
-                codec::objects::XRecordEntry::double(40, 0.125),
-                codec::objects::XRecordEntry::int16(70, 3),
-                codec::objects::XRecordEntry::int32(90, -45000),
-                codec::objects::XRecordEntry::bool(290, true),
+                document::objects::XRecordEntry::string(1, "{\"k\":\"road\",\"s\":1}"),
+                document::objects::XRecordEntry::double(40, 0.125),
+                document::objects::XRecordEntry::int16(70, 3),
+                document::objects::XRecordEntry::int32(90, -45000),
+                document::objects::XRecordEntry::bool(290, true),
             ]
         };
 
@@ -5684,7 +5684,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let beta = host.create_xrecord(&["PLUGIN"], "beta", entries()).unwrap();
         let root = host.document().header.named_objects_dict_handle;
         let cvifc_entries = match host.document().objects.get(&root) {
-            Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
+            Some(document::objects::ObjectType::Dictionary(dictionary)) => dictionary
                 .entries
                 .iter()
                 .filter(|(key, _)| key.eq_ignore_ascii_case("PLUGIN"))
@@ -5723,14 +5723,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             host.update_xrecord(
                 &["PLUGIN"],
                 "ALPHA",
-                vec![codec::objects::XRecordEntry::string(1, "v2")]
+                vec![document::objects::XRecordEntry::string(1, "v2")]
             )
             .unwrap(),
             alpha
         );
         assert_eq!(
             host.read_xrecord(&["PLUGIN"], "alpha").unwrap(),
-            vec![codec::objects::XRecordEntry::string(1, "v2")]
+            vec![document::objects::XRecordEntry::string(1, "v2")]
         );
 
         // Entries are validated before any change: reserved and out-of-range
@@ -5739,7 +5739,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .create_xrecord(
                 &["PLUGIN"],
                 "gamma",
-                vec![codec::objects::XRecordEntry::int16(5, 1)]
+                vec![document::objects::XRecordEntry::int16(5, 1)]
             )
             .unwrap_err()
             .contains("reserved"));
@@ -5747,7 +5747,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .create_xrecord(
                 &["PLUGIN"],
                 "gamma",
-                vec![codec::objects::XRecordEntry::int16(400, 1)]
+                vec![document::objects::XRecordEntry::int16(400, 1)]
             )
             .unwrap_err()
             .contains("out of range"));
@@ -5755,12 +5755,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .update_xrecord(
                 &["PLUGIN"],
                 "alpha",
-                vec![codec::objects::XRecordEntry::int16(105, 1)]
+                vec![document::objects::XRecordEntry::int16(105, 1)]
             )
             .is_err());
         assert_eq!(
             host.read_xrecord(&["PLUGIN"], "alpha").unwrap(),
-            vec![codec::objects::XRecordEntry::string(1, "v2")]
+            vec![document::objects::XRecordEntry::string(1, "v2")]
         );
         // Dictionary and record names are symbol names.
         assert!(host.create_xrecord(&["PLUGIN"], "  ", entries()).is_err());
@@ -5803,11 +5803,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
     fn xrecord_mutations_are_single_undo_steps_that_restore_objects() {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
-        let original_entries = || vec![codec::objects::XRecordEntry::string(1, "one")];
+        let original_entries = || vec![document::objects::XRecordEntry::string(1, "one")];
         let changed_entries = || {
             vec![
-                codec::objects::XRecordEntry::string(1, "changed"),
-                codec::objects::XRecordEntry::int16(70, 9),
+                document::objects::XRecordEntry::string(1, "changed"),
+                document::objects::XRecordEntry::int16(70, 9),
             ]
         };
         let (alpha, beta);
@@ -5835,16 +5835,16 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         // Four mutating calls = four undo steps; the refusals recorded none.
         assert_eq!(app.tabs[0].history.undo_stack.len(), 4);
 
-        let xrecord = |doc: &Document, handle: Handle| -> Option<codec::objects::XRecord> {
+        let xrecord = |doc: &Document, handle: Handle| -> Option<document::objects::XRecord> {
             match doc.objects.get(&handle) {
-                Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
+                Some(document::objects::ObjectType::XRecord(record)) => Some(record.clone()),
                 _ => None,
             }
         };
         let has_dictionary_entry = |doc: &Document, name: &str| -> bool {
             let root = doc.header.named_objects_dict_handle;
             match doc.objects.get(&root) {
-                Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
+                Some(document::objects::ObjectType::Dictionary(dictionary)) => dictionary
                     .entries
                     .iter()
                     .any(|(key, _)| key.eq_ignore_ascii_case(name)),
@@ -5893,11 +5893,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
     fn xrecord_writes_join_a_plugin_initiated_undo_scope() {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
-        let original_entries = || vec![codec::objects::XRecordEntry::string(1, "one")];
+        let original_entries = || vec![document::objects::XRecordEntry::string(1, "one")];
         let changed_entries = || {
             vec![
-                codec::objects::XRecordEntry::string(1, "changed"),
-                codec::objects::XRecordEntry::int16(70, 9),
+                document::objects::XRecordEntry::string(1, "changed"),
+                document::objects::XRecordEntry::int16(70, 9),
             ]
         };
         let (alpha, nested, entity);
@@ -5925,7 +5925,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             let removed = host.delete_xrecord(&["PLUGIN"], "beta").unwrap();
             assert_eq!(removed.handle, beta);
             // Entity writes join the same scope and land in the same step.
-            entity = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+            entity = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
                 3.0, 0.0, 0.0,
             ))));
         }
@@ -5934,16 +5934,16 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_eq!(app.tabs[0].history.undo_stack.len(), 1);
         assert_eq!(app.tabs[0].history.undo_stack[0].label(), "PLUGIN: import");
 
-        let xrecord = |doc: &Document, handle: Handle| -> Option<codec::objects::XRecord> {
+        let xrecord = |doc: &Document, handle: Handle| -> Option<document::objects::XRecord> {
             match doc.objects.get(&handle) {
-                Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
+                Some(document::objects::ObjectType::XRecord(record)) => Some(record.clone()),
                 _ => None,
             }
         };
         let has_dictionary_entry = |doc: &Document, name: &str| -> bool {
             let root = doc.header.named_objects_dict_handle;
             match doc.objects.get(&root) {
-                Some(codec::objects::ObjectType::Dictionary(dictionary)) => dictionary
+                Some(document::objects::ObjectType::Dictionary(dictionary)) => dictionary
                     .entries
                     .iter()
                     .any(|(key, _)| key.eq_ignore_ascii_case(name)),
@@ -5982,11 +5982,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let mut host = HostSession::new(&mut app, 0);
         let entries = || {
             vec![
-                codec::objects::XRecordEntry::string(1, "{\"k\":\"road\",\"s\":1}"),
-                codec::objects::XRecordEntry::double(40, 0.125),
-                codec::objects::XRecordEntry::int16(70, 3),
-                codec::objects::XRecordEntry::int32(90, -45000),
-                codec::objects::XRecordEntry::bool(290, true),
+                document::objects::XRecordEntry::string(1, "{\"k\":\"road\",\"s\":1}"),
+                document::objects::XRecordEntry::double(40, 0.125),
+                document::objects::XRecordEntry::int16(70, 3),
+                document::objects::XRecordEntry::int32(90, -45000),
+                document::objects::XRecordEntry::bool(290, true),
             ]
         };
         // Create carries a first payload, then the update replaces it: if the
@@ -5995,38 +5995,38 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         host.create_xrecord(
             &["PLUGIN", "RECORDS"],
             "alpha",
-            vec![codec::objects::XRecordEntry::string(1, "stale")],
+            vec![document::objects::XRecordEntry::string(1, "stale")],
         )
         .unwrap();
         host.update_xrecord(&["PLUGIN", "RECORDS"], "alpha", entries())
             .unwrap();
 
         let find_xrecord =
-            |doc: &Document, path: &[&str], name: &str| -> Option<codec::objects::XRecord> {
+            |doc: &Document, path: &[&str], name: &str| -> Option<document::objects::XRecord> {
                 let mut current = doc.header.named_objects_dict_handle;
                 for fragment in path {
                     match doc.objects.get(&current) {
-                        Some(codec::objects::ObjectType::Dictionary(dictionary)) => {
+                        Some(document::objects::ObjectType::Dictionary(dictionary)) => {
                             current = dictionary.get(fragment)?
                         }
                         _ => return None,
                     }
                 }
-                let Some(codec::objects::ObjectType::Dictionary(dictionary)) =
+                let Some(document::objects::ObjectType::Dictionary(dictionary)) =
                     doc.objects.get(&current)
                 else {
                     return None;
                 };
                 let handle = dictionary.get(name)?;
                 match doc.objects.get(&handle) {
-                    Some(codec::objects::ObjectType::XRecord(record)) => Some(record.clone()),
+                    Some(document::objects::ObjectType::XRecord(record)) => Some(record.clone()),
                     _ => None,
                 }
             };
 
         let dwg = crate::io::load_bytes(
             "xrec.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let reloaded = find_xrecord(&dwg, &["PLUGIN", "RECORDS"], "alpha")
@@ -6035,7 +6035,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
 
         let dxf = crate::io::load_bytes(
             "xrec.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -6137,17 +6137,17 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             matches!(host.document().get_entity(handle), Some(EntityType::Line(line)) if line.end.x == 5.0),
             "rejected batch changed the line"
         );
-        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).expect("write edited DWG");
-        let dwg_doc = codec::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
+        let dwg_bytes = document::DwgWriter::write_to_vec(host.document()).expect("write edited DWG");
+        let dwg_doc = document::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
             .read()
             .expect("reopen edited DWG");
         assert!(
             matches!(dwg_doc.get_entity(handle), Some(EntityType::Line(line)) if line.end.x == 5.0)
         );
-        let dxf_bytes = codec::DxfWriter::new(host.document())
+        let dxf_bytes = document::DxfWriter::new(host.document())
             .write_to_vec()
             .expect("write edited DXF");
-        let dxf_doc = codec::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
+        let dxf_doc = document::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
             .expect("open edited DXF")
             .read()
             .expect("reopen edited DXF");
@@ -6229,7 +6229,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         assert_eq!(
             created.insertion_point,
-            codec::types::Vector3::new(1.0, 2.0, 0.0)
+            document::types::Vector3::new(1.0, 2.0, 0.0)
         );
         assert_eq!(created.dimension_style_name, "Standard");
         let created = created.clone();
@@ -6277,9 +6277,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         assert_eq!(
             edited.insertion_point,
-            codec::types::Vector3::new(4.0, 5.0, 0.0)
+            document::types::Vector3::new(4.0, 5.0, 0.0)
         );
-        assert_eq!(edited.direction, codec::types::Vector3::UNIT_Y);
+        assert_eq!(edited.direction, document::types::Vector3::UNIT_Y);
         assert_eq!(edited.text, "POSITION%%v0.2");
         assert_eq!(edited.common, created.common);
         assert_eq!(edited.normal, created.normal);
@@ -6322,18 +6322,18 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .text
             .contains("does not exist"));
 
-        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
-        let dwg_doc = codec::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
+        let dwg_bytes = document::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg_doc = document::DwgReader::from_stream(std::io::Cursor::new(dwg_bytes))
             .read()
             .unwrap();
         assert!(
             matches!(dwg_doc.get_entity(handle), Some(EntityType::Tolerance(value))
             if value.insertion_point.x == 4.0 && value.text == "POSITION%%v0.2")
         );
-        let dxf_bytes = codec::DxfWriter::new(host.document())
+        let dxf_bytes = document::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
-        let dxf_doc = codec::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
+        let dxf_doc = document::DxfReader::from_reader(std::io::Cursor::new(dxf_bytes))
             .unwrap()
             .read()
             .unwrap();
@@ -6392,7 +6392,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
         let style_handle = host.document_mut().allocate_handle();
-        let mut style = codec::tables::TextStyle::new("TestShapes");
+        let mut style = document::tables::TextStyle::new("TestShapes");
         style.handle = style_handle;
         style.is_shape_file = true;
         style.font_file = shx_path.to_string_lossy().into_owned();
@@ -6474,7 +6474,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         assert_eq!(
             edited.insertion_point,
-            codec::types::Vector3::new(4.0, 5.0, 0.0)
+            document::types::Vector3::new(4.0, 5.0, 0.0)
         );
         assert_eq!(edited.size, 3.0);
         assert_eq!(edited.rotation, 0.5);
@@ -6531,13 +6531,13 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .text
             .contains("does not exist"));
 
-        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg_bytes = document::DwgWriter::write_to_vec(host.document()).unwrap();
         let dwg_doc = crate::io::load_bytes("shape.dwg", dwg_bytes).unwrap();
         let dwg_entity = dwg_doc.get_entity(handle).expect("Shape survives DWG");
         assert!(matches!(dwg_entity, EntityType::Shape(value)
             if value.shape_number == 1 && value.size == 3.0 && value.rotation == 0.5));
         assert_real_glyph(dwg_entity, &dwg_doc);
-        let dxf_bytes = codec::DxfWriter::new(host.document())
+        let dxf_bytes = document::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         let dxf_doc = crate::io::load_bytes("shape.dxf", dxf_bytes).unwrap();
@@ -6591,25 +6591,25 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let block_record_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
         let block_end_handle = Handle::new(next + 2);
-        let mut block_record = codec::tables::BlockRecord::new("TAGBLOCK");
+        let mut block_record = document::tables::BlockRecord::new("TAGBLOCK");
         block_record.handle = block_record_handle;
         block_record.block_entity_handle = block_handle;
         block_record.block_end_handle = block_end_handle;
         host.document_mut().block_records.add(block_record).unwrap();
-        let mut block = codec::entities::Block::new("TAGBLOCK", codec::types::Vector3::ZERO);
+        let mut block = document::entities::Block::new("TAGBLOCK", document::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = block_record_handle;
         host.document_mut()
             .add_entity(EntityType::Block(block))
             .unwrap();
-        let mut block_end = codec::entities::BlockEnd::new();
+        let mut block_end = document::entities::BlockEnd::new();
         block_end.common.handle = block_end_handle;
         block_end.common.owner_handle = block_record_handle;
         host.document_mut()
             .add_entity(EntityType::BlockEnd(block_end))
             .unwrap();
         let insert =
-            codec::entities::Insert::new("TAGBLOCK", codec::types::Vector3::new(10.0, 0.0, 0.0));
+            document::entities::Insert::new("TAGBLOCK", document::types::Vector3::new(10.0, 0.0, 0.0));
         let insert_handle = host
             .document_mut()
             .add_entity(EntityType::Insert(insert))
@@ -6697,7 +6697,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         assert_eq!(
             edited.insertion_point,
-            codec::types::Vector3::new(4.0, 5.0, 0.0)
+            document::types::Vector3::new(4.0, 5.0, 0.0)
         );
         assert_eq!(edited.default_value, "PN-002");
         assert_eq!(edited.rotation, 0.25);
@@ -6757,7 +6757,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 matches!(actual, Some(EntityType::AttributeDefinition(value))
                 if value.common.owner_handle == block_record_handle
                     && value.tag == "PART_NO" && value.default_value == "PN-002"
-                    && value.insertion_point == codec::types::Vector3::new(4.0, 5.0, 0.0)
+                    && value.insertion_point == document::types::Vector3::new(4.0, 5.0, 0.0)
                     && (value.rotation - 0.25).abs() < 1e-12),
                 "{label}: {actual:?}"
             );
@@ -6780,14 +6780,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 if value.block_name == "TAGBLOCK")
             );
         };
-        let dwg_bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg_bytes = document::DwgWriter::write_to_vec(host.document()).unwrap();
         let dwg_doc = crate::io::load_bytes("attribute-definition.dwg", dwg_bytes).unwrap();
         assert_persisted("DWG", &dwg_doc, true);
-        let dxf_bytes = codec::DxfWriter::new(host.document())
+        let dxf_bytes = document::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         let dxf_doc = crate::io::load_bytes("attribute-definition.dxf", dxf_bytes).unwrap();
-        // The pinned opencadcodec DXF ATTDEF reader retains identity, placement,
+        // The pinned document DXF ATTDEF reader retains identity, placement,
         // height, value, prompt and rotation, but currently drops several
         // optional AcDbText fields such as width factor. Keep that external
         // codec gap explicit in the coverage ledger rather than claiming a
@@ -6805,14 +6805,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         // Document intentionally leaves the block membership slot in place
         // so delta undo can restore the shared entity without rewriting the
         // record. Writers must still omit the absent entity.
-        let deleted_dwg = codec::DwgWriter::write_to_vec(host.document()).unwrap();
+        let deleted_dwg = document::DwgWriter::write_to_vec(host.document()).unwrap();
         assert!(
             crate::io::load_bytes("attribute-definition-deleted.dwg", deleted_dwg)
                 .unwrap()
                 .get_entity(handle)
                 .is_none()
         );
-        let deleted_dxf = codec::DxfWriter::new(host.document())
+        let deleted_dxf = document::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         assert!(
@@ -6855,39 +6855,39 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let record_handle = Handle::new(next);
         let block_handle = Handle::new(next + 1);
         let end_handle = Handle::new(next + 2);
-        let mut record = codec::tables::BlockRecord::new("TAGBLOCK");
+        let mut record = document::tables::BlockRecord::new("TAGBLOCK");
         record.handle = record_handle;
         record.block_entity_handle = block_handle;
         record.block_end_handle = end_handle;
         host.document_mut().block_records.add(record).unwrap();
-        let mut block = codec::entities::Block::new("TAGBLOCK", codec::types::Vector3::ZERO);
+        let mut block = document::entities::Block::new("TAGBLOCK", document::types::Vector3::ZERO);
         block.common.handle = block_handle;
         block.common.owner_handle = record_handle;
         host.document_mut()
             .add_entity(EntityType::Block(block))
             .unwrap();
-        let mut end = codec::entities::BlockEnd::new();
+        let mut end = document::entities::BlockEnd::new();
         end.common.handle = end_handle;
         end.common.owner_handle = record_handle;
         host.document_mut()
             .add_entity(EntityType::BlockEnd(end))
             .unwrap();
-        let mut definition = codec::entities::AttributeDefinition::new(
+        let mut definition = document::entities::AttributeDefinition::new(
             "PART_NO".into(),
             "Part number".into(),
             "PN-001".into(),
         );
         definition.common.owner_handle = record_handle;
-        definition.insertion_point = codec::types::Vector3::new(0.0, 2.0, 0.0);
+        definition.insertion_point = document::types::Vector3::new(0.0, 2.0, 0.0);
         let definition_handle = host
             .document_mut()
             .add_entity(EntityType::AttributeDefinition(definition))
             .unwrap();
         let insert_handle = host
             .document_mut()
-            .add_entity(EntityType::Insert(codec::entities::Insert::new(
+            .add_entity(EntityType::Insert(document::entities::Insert::new(
                 "TAGBLOCK",
-                codec::types::Vector3::new(10.0, 0.0, 0.0),
+                document::types::Vector3::new(10.0, 0.0, 0.0),
             )))
             .unwrap();
 
@@ -6962,7 +6962,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_eq!(edited.value, "PN-102");
         assert_eq!(
             edited.insertion_point,
-            codec::types::Vector3::new(12.0, 3.0, 0.0)
+            document::types::Vector3::new(12.0, 3.0, 0.0)
         );
         assert_eq!(edited.common, created.common);
         assert_eq!(edited.attdef_handle, definition_handle);
@@ -7010,14 +7010,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_saved(
             &crate::io::load_bytes(
                 "attribute.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             )
             .unwrap(),
         );
         assert_saved(
             &crate::io::load_bytes(
                 "attribute.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             )
@@ -7041,14 +7041,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_deleted(
             &crate::io::load_bytes(
                 "attribute-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             )
             .unwrap(),
         );
         assert_deleted(
             &crate::io::load_bytes(
                 "attribute-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             )
@@ -7225,12 +7225,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         let reopened_dwg = crate::io::load_bytes(
             "hatch.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let reopened_dxf = crate::io::load_bytes(
             "hatch.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -7250,9 +7250,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             *document.get_entity_mut(hatch_handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(
                 matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(hatch_handle),
@@ -7270,11 +7270,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         for (name, bytes) in [
             (
                 "hatch-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             ),
             (
                 "hatch-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             ),
@@ -7454,7 +7454,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert!(!edited.arrow_enabled);
         assert_eq!(
             edited.annotation_offset,
-            codec::types::Vector3::new(1.0, 2.0, 0.0)
+            document::types::Vector3::new(1.0, 2.0, 0.0)
         );
         assert_eq!(edited.annotation_handle, text_handle);
         assert_eq!(edited.common, created_leader.common);
@@ -7464,7 +7464,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_eq!(edited.origin, created_leader.origin);
         assert_eq!(
             edited.override_color,
-            codec::types::Color::Rgb { r: 255, g: 0, b: 0 }
+            document::types::Color::Rgb { r: 255, g: 0, b: 0 }
         );
         assert_eq!(host.selection(), vec![leader_handle]);
         assert_geometry(&expected, host.document());
@@ -7515,7 +7515,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
 
         // Both formats keep the path, annotation link, arrow flag and offset.
         // DWG R2010+ derives text_height/text_width/hookline_enabled instead of
-        // storing them (opencadcodec writes them for R13-R2007/R13-R14 only), so
+        // storing them (document writes them for R13-R2007/R13-R14 only), so
         // only DXF must round-trip those three.
         let assert_saved =
             |document: &Document, is_dxf: bool| {
@@ -7527,13 +7527,13 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 assert!(!leader.arrow_enabled);
                 // The script sets a true colour. DXF's LEADER group 77 holds an ACI
                 // index only, so it cannot carry one, and the DWG writer does not
-                // store `override_color` at all (BLOCKER, opencadcodec): it reopens as
+                // store `override_color` at all (BLOCKER, document): it reopens as
                 // ByLayer in both formats.
-                assert_eq!(leader.override_color, codec::types::Color::ByLayer,
-                "opencadcodec now persists a true-colour Leader.override_color; drop the blocker");
+                assert_eq!(leader.override_color, document::types::Color::ByLayer,
+                "document now persists a true-colour Leader.override_color; drop the blocker");
                 assert_eq!(
                     leader.annotation_offset,
-                    codec::types::Vector3::new(1.0, 2.0, 0.0)
+                    document::types::Vector3::new(1.0, 2.0, 0.0)
                 );
                 assert_eq!(leader.dimension_style, "Standard");
                 if is_dxf {
@@ -7556,12 +7556,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             };
         let reopened_dwg = crate::io::load_bytes(
             "leader.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let reopened_dxf = crate::io::load_bytes(
             "leader.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -7578,15 +7578,15 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             let EntityType::Leader(leader) = &mut after else {
                 unreachable!()
             };
-            leader.vertices[3] = codec::types::Vector3::new(35.0, 12.0, 0.0);
+            leader.vertices[3] = document::types::Vector3::new(35.0, 12.0, 0.0);
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after)
                 .unwrap();
             *document.get_entity_mut(leader_handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(
                 matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(leader_handle),
@@ -7607,11 +7607,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         for (name, bytes) in [
             (
                 "leader-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             ),
             (
                 "leader-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             ),
@@ -7683,7 +7683,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .objects
             .iter()
             .find_map(|(handle, object)| match object {
-                codec::objects::ObjectType::MLineStyle(style) if style.name == "Standard" => {
+                document::objects::ObjectType::MLineStyle(style) if style.name == "Standard" => {
                     Some(*handle)
                 }
                 _ => None,
@@ -7717,8 +7717,8 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         assert_eq!(created_mline.style_handle, Some(style_handle));
         assert_eq!(created_mline.style_element_count, 2);
-        assert_eq!(created_mline.start_point, codec::types::Vector3::ZERO);
-        let first_parameters = |mline: &codec::entities::MLine, vertex: usize| -> Vec<f64> {
+        assert_eq!(created_mline.start_point, document::types::Vector3::ZERO);
+        let first_parameters = |mline: &document::entities::MLine, vertex: usize| -> Vec<f64> {
             mline.vertices[vertex]
                 .segments
                 .iter()
@@ -7778,7 +7778,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_eq!(edited.scale_factor, 2.0);
         assert_eq!(
             edited.justification,
-            codec::entities::MLineJustification::Top
+            document::entities::MLineJustification::Top
         );
         assert_eq!(edited.style_handle, created_mline.style_handle);
         assert_eq!(edited.common, created_mline.common);
@@ -7837,12 +7837,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             assert_eq!(mline.scale_factor, 2.0);
             assert_eq!(
                 mline.justification,
-                codec::entities::MLineJustification::Top
+                document::entities::MLineJustification::Top
             );
             assert_eq!(mline.style_name, "Standard");
             assert_eq!(
                 mline.vertices[2].position,
-                codec::types::Vector3::new(10.0, 10.0, 0.0)
+                document::types::Vector3::new(10.0, 10.0, 0.0)
             );
             let (a, b) = (first_parameters(mline, 1), first_parameters(edited, 1));
             assert!(
@@ -7853,12 +7853,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         };
         let reopened_dwg = crate::io::load_bytes(
             "mline.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let reopened_dxf = crate::io::load_bytes(
             "mline.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -7874,7 +7874,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             let EntityType::MLine(mline) = &mut after else {
                 unreachable!()
             };
-            mline.vertices[2].position = codec::types::Vector3::new(10.0, 12.0, 0.0);
+            mline.vertices[2].position = document::types::Vector3::new(10.0, 12.0, 0.0);
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
             ocs_plugin_api::entity_coverage::validate_canvas_entity_references(&document, &after)
                 .unwrap();
@@ -7888,9 +7888,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             crate::entities::mline::normalize_scripted_mline(Some(old), mline, &document).unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(
                 matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle),
@@ -7909,11 +7909,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         for (name, bytes) in [
             (
                 "mline-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             ),
             (
                 "mline-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             ),
@@ -7993,8 +7993,8 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         std::fs::write(&path, script).unwrap();
         dispatch(&mut host, &format!("PY_RUN {}", path.display()));
         let _ = std::fs::remove_file(&path);
-        let subtype_of = |dimension: &codec::entities::Dimension| -> &'static str {
-            use codec::entities::Dimension as D;
+        let subtype_of = |dimension: &document::entities::Dimension| -> &'static str {
+            use document::entities::Dimension as D;
             match dimension {
                 D::Aligned(_) => "Aligned",
                 D::Linear(_) => "Linear",
@@ -8095,7 +8095,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_eq!(edited.base().text, "<> mm");
         assert_eq!(
             edited.base().attachment_point,
-            codec::entities::AttachmentPointType::TopCenter
+            document::entities::AttachmentPointType::TopCenter
         );
         assert_eq!(edited.base().common, before.base().common);
         assert_eq!(edited.base().style_name, before.base().style_name);
@@ -8189,12 +8189,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let mut failures = Vec::new();
         let dwg = crate::io::load_bytes(
             "dimension.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "dimension.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -8234,7 +8234,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             let EntityType::Dimension(dimension) = &mut after else {
                 unreachable!()
             };
-            if let codec::entities::Dimension::Linear(value) = &mut **dimension {
+            if let document::entities::Dimension::Linear(value) = &mut **dimension {
                 value.second_point.x = 30.0;
             }
             ocs_plugin_api::entity_coverage::validate_entity_mutation(&before, &after).unwrap();
@@ -8246,9 +8246,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             crate::entities::dimension::normalize_scripted_dimension(dimension);
             *document.get_entity_mut(linear).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             let reopened = crate::io::load_bytes(name, bytes).unwrap();
             assert!((measured(&reopened, linear) - 30.0).abs() < 1e-6, "{name}");
@@ -8371,7 +8371,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert_eq!(edited.text_height, created_ml.text_height);
         assert_eq!(
             edited.line_color,
-            codec::types::Color::Rgb {
+            document::types::Color::Rgb {
                 r: 0,
                 g: 128,
                 b: 255
@@ -8441,12 +8441,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let mut gaps = Vec::new();
         let dwg = crate::io::load_bytes(
             "mleader.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "mleader.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -8494,9 +8494,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 .unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(
                 matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle),
@@ -8516,11 +8516,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         for (name, bytes) in [
             (
                 "mleader-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             ),
             (
                 "mleader-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             ),
@@ -8594,7 +8594,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         );
         assert_eq!(
             created_table.insertion_point,
-            codec::types::Vector3::new(5.0, 5.0, 0.0)
+            document::types::Vector3::new(5.0, 5.0, 0.0)
         );
         assert!(
             !host.app.tabs[0].scene.wire_models_for(&[handle]).is_empty(),
@@ -8671,12 +8671,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let mut gaps = Vec::new();
         let dwg = crate::io::load_bytes(
             "table.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "table.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -8737,9 +8737,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 .unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             assert!(
                 matches!(crate::io::load_bytes(name, bytes).unwrap().get_entity(handle),
@@ -8759,11 +8759,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         for (name, bytes) in [
             (
                 "table-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             ),
             (
                 "table-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             ),
@@ -8856,9 +8856,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         if make_polyline {
             // The legacy Polyline is update-only: the host makes one to edit.
             let points = [(0.0, 0.0, 0.0), (10.0, 0.0, 2.0), (10.0, 5.0, 4.0)]
-                .map(|(x, y, z)| codec::types::Vector3::new(x, y, z));
+                .map(|(x, y, z)| document::types::Vector3::new(x, y, z));
             host.add_entity(EntityType::Polyline(
-                codec::entities::Polyline::from_points(points.to_vec()),
+                document::entities::Polyline::from_points(points.to_vec()),
             ));
         }
         let make_ole = create_script.contains("MAKEOLE");
@@ -8877,7 +8877,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             crate::io::ole_embed::add_embedded_image(
                 host.document_mut(),
                 &picture,
-                codec::types::Vector3::new(10.0, 10.0, 0.0),
+                document::types::Vector3::new(10.0, 10.0, 0.0),
                 20.0,
             )
             .unwrap();
@@ -8890,27 +8890,27 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 Handle::new(next + 1),
                 Handle::new(next + 2),
             );
-            let mut record = codec::tables::BlockRecord::new("AUDITBLK");
+            let mut record = document::tables::BlockRecord::new("AUDITBLK");
             record.handle = record_handle;
             record.block_entity_handle = block_handle;
             record.block_end_handle = end_handle;
             host.document_mut().block_records.add(record).unwrap();
-            let mut block = codec::entities::Block::new("AUDITBLK", codec::types::Vector3::ZERO);
+            let mut block = document::entities::Block::new("AUDITBLK", document::types::Vector3::ZERO);
             block.common.handle = block_handle;
             block.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::Block(block))
                 .unwrap();
-            let mut end = codec::entities::BlockEnd::new();
+            let mut end = document::entities::BlockEnd::new();
             end.common.handle = end_handle;
             end.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::BlockEnd(end))
                 .unwrap();
             if update_only {
-                let insert = codec::entities::Insert::new(
+                let insert = document::entities::Insert::new(
                     "AUDITBLK",
-                    codec::types::Vector3::new(1.0, 2.0, 0.0),
+                    document::types::Vector3::new(1.0, 2.0, 0.0),
                 );
                 host.add_entity(EntityType::Insert(insert));
             }
@@ -8938,15 +8938,15 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 .find(|r| r.is_paper_space())
                 .map(|r| r.handle)
                 .unwrap();
-            let mut viewport = codec::entities::Viewport::new();
+            let mut viewport = document::entities::Viewport::new();
             viewport.common.owner_handle = owner;
             let viewport_handle = host.add_entity(EntityType::Viewport(Box::new(viewport)));
             let scale_handle = host.document_mut().allocate_handle();
-            let mut scale = codec::objects::Scale::new("1:1", 1.0, 1.0);
+            let mut scale = document::objects::Scale::new("1:1", 1.0, 1.0);
             scale.handle = scale_handle;
             host.document_mut()
                 .objects
-                .insert(scale_handle, codec::objects::ObjectType::Scale(scale));
+                .insert(scale_handle, document::objects::ObjectType::Scale(scale));
             create_script = create_script
                 .replace("VIEWPORTHANDLE", &viewport_handle.value().to_string())
                 .replace("SCALEHANDLE", &scale_handle.value().to_string());
@@ -8957,11 +8957,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         if create_script.contains("DEFHANDLE") {
             // Scripts reference an underlay definition that the drawing owns.
             let handle = host.document_mut().allocate_handle();
-            let mut definition = codec::objects::UnderlayDefinition::pdf("plan.pdf", "1");
+            let mut definition = document::objects::UnderlayDefinition::pdf("plan.pdf", "1");
             definition.handle = handle;
             host.document_mut().objects.insert(
                 handle,
-                codec::objects::ObjectType::UnderlayDefinition(definition),
+                document::objects::ObjectType::UnderlayDefinition(definition),
             );
             create_script = create_script.replace("DEFHANDLE", &handle.value().to_string());
         }
@@ -8983,7 +8983,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 .objects
                 .values()
                 .find_map(|object| match object {
-                    codec::objects::ObjectType::Layout(l) if l.block_record == owner => {
+                    document::objects::ObjectType::Layout(l) if l.block_record == owner => {
                         Some(l.name.clone())
                     }
                     _ => None,
@@ -9046,12 +9046,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
 
         let dwg = crate::io::load_bytes(
             "mesh.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "mesh.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -9086,9 +9086,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 .unwrap();
             *document.get_entity_mut(handle).unwrap() = after;
             let bytes = if name.ends_with("dwg") {
-                codec::DwgWriter::write_to_vec(&document).unwrap()
+                document::DwgWriter::write_to_vec(&document).unwrap()
             } else {
-                codec::DxfWriter::new(&document).write_to_vec().unwrap()
+                document::DxfWriter::new(&document).write_to_vec().unwrap()
             };
             let reopened = crate::io::load_bytes(name, bytes).unwrap();
             let expected_digest = if name.ends_with("dxf") && !case.expect_reedited_dxf.is_empty() {
@@ -9116,11 +9116,11 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         for (name, bytes) in [
             (
                 "mesh-deleted.dwg",
-                codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+                document::DwgWriter::write_to_vec(host.document()).unwrap(),
             ),
             (
                 "mesh-deleted.dxf",
-                codec::DxfWriter::new(host.document())
+                document::DxfWriter::new(host.document())
                     .write_to_vec()
                     .unwrap(),
             ),
@@ -10195,18 +10195,18 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 Handle::new(next + 1),
                 Handle::new(next + 2),
             );
-            let mut record = codec::tables::BlockRecord::new(name);
+            let mut record = document::tables::BlockRecord::new(name);
             record.handle = record_handle;
             record.block_entity_handle = block_handle;
             record.block_end_handle = end_handle;
             host.document_mut().block_records.add(record).unwrap();
-            let mut block = codec::entities::Block::new(name, codec::types::Vector3::ZERO);
+            let mut block = document::entities::Block::new(name, document::types::Vector3::ZERO);
             block.common.handle = block_handle;
             block.common.owner_handle = record_handle;
             host.document_mut()
                 .add_entity(EntityType::Block(block))
                 .unwrap();
-            let mut end = codec::entities::BlockEnd::new();
+            let mut end = document::entities::BlockEnd::new();
             end.common.handle = end_handle;
             end.common.owner_handle = record_handle;
             host.document_mut()
@@ -10306,9 +10306,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             is_kind: |entity| matches!(entity, EntityType::Ole2Frame(_)),
             digest: |entity| match entity {
                 EntityType::Ole2Frame(v) => {
-                    let picture = match codec::entities::extract_presentation(&v.encoded_payload())
+                    let picture = match document::entities::extract_presentation(&v.encoded_payload())
                     {
-                        Some(codec::entities::OlePresentation::Raster(bytes)) => bytes.len(),
+                        Some(document::entities::OlePresentation::Raster(bytes)) => bytes.len(),
                         _ => 0,
                     };
                     format!(
@@ -10346,14 +10346,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
     fn spike_kernel_body_round_trip() {
         use crate::scene::convert::solid3d_tess::{kernel_acis_body, kernel_body};
         use crate::scene::model::solid_model as sm;
-        let make = |body: &kernel::brep::Body| -> codec::entities::Solid3D {
+        let make = |body: &kernel::brep::Body| -> document::entities::Solid3D {
             let sat = crate::scene::convert::acis_export::solid_to_sat(body).expect("solid_to_sat");
-            let mut solid = codec::entities::Solid3D::new();
+            let mut solid = document::entities::Solid3D::new();
             solid.wires = sm::edge_wires(body);
             solid.set_sat_document(&sat);
             solid
         };
-        let report = |label: &str, solid: &codec::entities::Solid3D| {
+        let report = |label: &str, solid: &document::entities::Solid3D| {
             let body = kernel_body(solid);
             eprintln!(
                 "SPIKE {label}: lift={} volume={:?} wires={} sat_bytes={} binary={}",
@@ -10366,16 +10366,16 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             body
         };
         let boxed = sm::box_solid([0.0, 0.0, 0.0], 10.0, 6.0, 4.0).unwrap();
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         let solid = make(&boxed);
         report("created box", &solid);
         let handle = doc.add_entity(EntityType::Solid3D(solid.clone())).unwrap();
 
         // Round trip both formats and compare payloads.
         let dwg =
-            crate::io::load_bytes("s.dwg", codec::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
+            crate::io::load_bytes("s.dwg", document::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
         let dxf =
-            crate::io::load_bytes("s.dxf", codec::DxfWriter::new(&doc).write_to_vec().unwrap())
+            crate::io::load_bytes("s.dxf", document::DxfWriter::new(&doc).write_to_vec().unwrap())
                 .unwrap();
         for (label, reopened) in [("DWG", &dwg), ("DXF", &dxf)] {
             let Some(EntityType::Solid3D(back)) = reopened.get_entity(handle) else {
@@ -10455,7 +10455,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         }
 
         // The same payload inside a Body entity and a Region-like container.
-        let mut body_entity = codec::entities::Body::new();
+        let mut body_entity = document::entities::Body::new();
         body_entity
             .set_sat_document(&crate::scene::convert::acis_export::solid_to_sat(&boxed).unwrap());
         let lifted = kernel_acis_body(&body_entity.acis_data);
@@ -10466,9 +10466,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         );
         let bh = doc.add_entity(EntityType::Body(body_entity)).unwrap();
         let dwg =
-            crate::io::load_bytes("b.dwg", codec::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
+            crate::io::load_bytes("b.dwg", document::DwgWriter::write_to_vec(&doc).unwrap()).unwrap();
         let dxf =
-            crate::io::load_bytes("b.dxf", codec::DxfWriter::new(&doc).write_to_vec().unwrap())
+            crate::io::load_bytes("b.dxf", document::DxfWriter::new(&doc).write_to_vec().unwrap())
                 .unwrap();
         for (label, reopened) in [("DWG", &dwg), ("DXF", &dxf)] {
             match reopened.get_entity(bh) {
@@ -10717,7 +10717,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let snapshot = host.document().get_entity(box_handle).unwrap().clone();
         let count_before = solids(&host).len();
         let undo_now = host.app.tabs[0].history.undo_stack.len();
-        let empty_payload = codec::entities::Solid3D::new();
+        let empty_payload = document::entities::Solid3D::new();
         let unliftable = host.add_entity(EntityType::Solid3D(empty_payload.clone()));
         let unliftable_before = host.document().get_entity(unliftable).unwrap().clone();
         for (command, message) in [
@@ -10754,9 +10754,9 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             "refusals record no undo step"
         );
         // Transforming a non-solid is refused.
-        let line = host.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::new(1.0, 0.0, 0.0),
+        let line = host.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(1.0, 0.0, 0.0),
         )));
         dispatch(
             &mut host,
@@ -10778,12 +10778,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let moved_extent = extent(&host, box_handle);
         let dwg = crate::io::load_bytes(
             "solid.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "solid.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -10860,7 +10860,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let mut host = HostSession::new(&mut app, 0);
         // A Body entity carrying a kernel box; scripts cannot create one.
         let boxed = sm::box_solid([0.0; 3], 4.0, 4.0, 4.0).unwrap();
-        let mut body = codec::entities::Body::new();
+        let mut body = document::entities::Body::new();
         body.set_sat_document(&crate::scene::convert::acis_export::solid_to_sat(&boxed).unwrap());
         body.wires = sm::edge_wires(&boxed);
         let handle = host.add_entity(EntityType::Body(body));
@@ -10912,7 +10912,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             "{:?}",
             extent(&host)
         );
-        let bytes = codec::DwgWriter::write_to_vec(host.document()).unwrap();
+        let bytes = document::DwgWriter::write_to_vec(host.document()).unwrap();
         let reopened = crate::io::load_bytes("body.dwg", bytes).unwrap();
         let Some(EntityType::Body(back)) = reopened.get_entity(handle) else {
             panic!("DWG lost the body")
@@ -11068,18 +11068,18 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert!(last(&host).contains("Region"));
 
         // V: refusals change nothing and leave no undo step.
-        let open_line = host.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::new(5.0, 0.0, 0.0),
+        let open_line = host.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(5.0, 0.0, 0.0),
         )));
-        let mut open_poly = codec::entities::LwPolyline::new();
+        let mut open_poly = document::entities::LwPolyline::new();
         open_poly.vertices = vec![
-            codec::entities::LwVertex::new(codec::types::Vector2::new(0.0, 0.0)),
-            codec::entities::LwVertex::new(codec::types::Vector2::new(4.0, 0.0)),
-            codec::entities::LwVertex::new(codec::types::Vector2::new(4.0, 4.0)),
+            document::entities::LwVertex::new(document::types::Vector2::new(0.0, 0.0)),
+            document::entities::LwVertex::new(document::types::Vector2::new(4.0, 0.0)),
+            document::entities::LwVertex::new(document::types::Vector2::new(4.0, 4.0)),
         ];
         let open_poly = host.add_entity(EntityType::LwPolyline(open_poly));
-        let ray = host.add_entity(EntityType::Ray(codec::entities::Ray::default()));
+        let ray = host.add_entity(EntityType::Ray(document::entities::Ray::default()));
         let entity_count = host.document().entities().count();
         let undo_now = host.app.tabs[0].history.undo_stack.len();
         for (command, message) in [
@@ -11143,12 +11143,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         // a reopened region moves again.
         let dwg = crate::io::load_bytes(
             "region.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "region.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -11223,7 +11223,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
     fn audit_python_surface_lifecycle_over_real_ipc() {
         use crate::scene::convert::solid3d_tess::kernel_acis_body;
         use crate::scene::model::solid_model as sm;
-        use codec::entities::SurfaceKind;
+        use document::entities::SurfaceKind;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -11376,7 +11376,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         assert!(last(&host).contains("Surface"));
 
         // V: refusals change nothing and leave no undo step.
-        let ray = host.add_entity(EntityType::Ray(codec::entities::Ray::default()));
+        let ray = host.add_entity(EntityType::Ray(document::entities::Ray::default()));
         let circle = host
             .document()
             .entities()
@@ -11536,12 +11536,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         // the isolines, and a reopened surface moves again.
         let dwg = crate::io::load_bytes(
             "surface.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "surface.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -11781,13 +11781,13 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         );
 
         // V: refusals change nothing and leave no undo step.
-        let line = host.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::ZERO,
-            codec::types::Vector3::new(1.0, 0.0, 0.0),
+        let line = host.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::ZERO,
+            document::types::Vector3::new(1.0, 0.0, 0.0),
         )));
-        let unliftable = host.add_entity(EntityType::Solid3D(codec::entities::Solid3D::new()));
-        let mut plane = codec::entities::Surface::new(codec::entities::SurfaceKind::Plane);
-        plane.acis_data = codec::entities::AcisData::new();
+        let unliftable = host.add_entity(EntityType::Solid3D(document::entities::Solid3D::new()));
+        let mut plane = document::entities::Surface::new(document::entities::SurfaceKind::Plane);
+        plane.acis_data = document::entities::AcisData::new();
         let surface = host.add_entity(EntityType::Surface(Box::new(plane)));
         let far = {
             dispatch(&mut host, "PY_EVAL ocs.active_document.solids.box(center=(500, 500, 500), size=(1, 1, 1)).handle");
@@ -11858,12 +11858,12 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         let expected_extent = extent_in(host.document(), drilled);
         let dwg = crate::io::load_bytes(
             "boolean.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "boolean.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -12024,7 +12024,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
 
     #[test]
     fn audit_python_section_symbol_references_over_real_ipc() {
-        use codec::objects::{ClassObject, ClassObjectData, ObjectType};
+        use document::objects::{ClassObject, ClassObjectData, ObjectType};
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -12046,7 +12046,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         );
         let view_rep = object(&mut host, ClassObjectData::ViewRep(Default::default()));
         let scale = host.document_mut().allocate_handle();
-        let mut scale_object = codec::objects::Scale::new("1:1", 1.0, 1.0);
+        let mut scale_object = document::objects::Scale::new("1:1", 1.0, 1.0);
         scale_object.handle = scale;
         host.document_mut()
             .objects
@@ -12171,8 +12171,8 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 })
                 .collect();
             all.sort_by_key(|f| f.common.handle.value());
-            match codec::entities::extract_presentation(&all[index].encoded_payload()) {
-                Some(codec::entities::OlePresentation::Raster(bytes)) => bytes,
+            match document::entities::extract_presentation(&all[index].encoded_payload()) {
+                Some(document::entities::OlePresentation::Raster(bytes)) => bytes,
                 other => panic!("no embedded raster: {other:?}"),
             }
         };
@@ -12276,7 +12276,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .objects
             .values()
             .find_map(|o| match o {
-                codec::objects::ObjectType::Layout(l) if l.block_record == paper => {
+                document::objects::ObjectType::Layout(l) if l.block_record == paper => {
                     Some(l.name.clone())
                 }
                 _ => None,
@@ -12383,7 +12383,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
         // Control: the engine's default id 0 is not invisible here (there is no
         // sheet viewport to confuse it with), so the derived id matters for
         // uniqueness, not for visibility.
-        let mut bare = codec::entities::Viewport::new();
+        let mut bare = document::entities::Viewport::new();
         bare.common.owner_handle = paper;
         bare.width = 40.0;
         bare.height = 30.0;
@@ -12415,10 +12415,10 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             .save(&path)
             .unwrap();
         for linked in [false, true] {
-            let mut doc = codec::Document::new();
-            let mut img = codec::entities::RasterImage::with_size(
+            let mut doc = document::Document::new();
+            let mut img = document::entities::RasterImage::with_size(
                 &path,
-                codec::types::Vector3::ZERO,
+                document::types::Vector3::ZERO,
                 8.0,
                 4.0,
                 16.0,
@@ -12426,25 +12426,25 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
             );
             if linked {
                 let h = doc.allocate_handle();
-                let mut def = codec::objects::ImageDefinition::with_dimensions(path.clone(), 8, 4);
+                let mut def = document::objects::ImageDefinition::with_dimensions(path.clone(), 8, 4);
                 def.handle = h;
                 def.is_loaded = true;
                 doc.objects
-                    .insert(h, codec::objects::ObjectType::ImageDefinition(def));
+                    .insert(h, document::objects::ObjectType::ImageDefinition(def));
                 img.definition_handle = Some(h);
             }
             let handle = doc.add_entity(EntityType::RasterImage(img)).unwrap();
             for (label, document) in [
                 (
                     "DWG",
-                    crate::io::load_bytes("i.dwg", codec::DwgWriter::write_to_vec(&doc).unwrap())
+                    crate::io::load_bytes("i.dwg", document::DwgWriter::write_to_vec(&doc).unwrap())
                         .unwrap(),
                 ),
                 (
                     "DXF",
                     crate::io::load_bytes(
                         "i.dxf",
-                        codec::DxfWriter::new(&doc).write_to_vec().unwrap(),
+                        document::DxfWriter::new(&doc).write_to_vec().unwrap(),
                     )
                     .unwrap(),
                 ),
@@ -12453,14 +12453,14 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
                 let defs = document
                     .objects
                     .values()
-                    .filter(|o| matches!(o, codec::objects::ObjectType::ImageDefinition(_)))
+                    .filter(|o| matches!(o, document::objects::ObjectType::ImageDefinition(_)))
                     .count();
                 let reactors = document
                     .objects
                     .values()
-                    .filter(|o| matches!(o, codec::objects::ObjectType::ImageDefinitionReactor(_)))
+                    .filter(|o| matches!(o, document::objects::ObjectType::ImageDefinitionReactor(_)))
                     .count();
-                let dicts = document.objects.values().filter(|o| matches!(o, codec::objects::ObjectType::Dictionary(d) if d.entries.iter().any(|(k, _)| k.contains("IMAGE")))).count();
+                let dicts = document.objects.values().filter(|o| matches!(o, document::objects::ObjectType::Dictionary(d) if d.entries.iter().any(|(k, _)| k.contains("IMAGE")))).count();
                 match entity {
                     Some(EntityType::RasterImage(i)) => eprintln!("SPIKE linked={linked} {label}: file_path_ok={} definition={:?} reactor={:?} defs={defs} reactors={reactors} image_dicts={dicts}",
                         i.file_path == path, i.definition_handle.map(|h| h.value()), i.definition_reactor_handle.map(|h| h.value())),
@@ -12475,7 +12475,7 @@ assert_eq!(host.read_xrecord(&["plugin"], "alpha").unwrap(), entries());
     /// one undo step per change, and DWG/DXF persistence of every property.
     #[test]
     fn audit_python_layer_table_over_real_ipc() {
-        use codec::types::{Color, LineWeight};
+        use document::types::{Color, LineWeight};
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -12579,7 +12579,7 @@ check('currentmissing', lambda: L.set_current('Nope'))
             assert_eq!(structure.description, "load bearing", "{label}");
             assert_ne!(
                 structure.transparency,
-                codec::types::Transparency::ByLayer,
+                document::types::Transparency::ByLayer,
                 "{label}: transparency"
             );
             let grid = document
@@ -12612,12 +12612,12 @@ check('currentmissing', lambda: L.set_current('Nope'))
         check_state("live", host.document());
         let dwg = crate::io::load_bytes(
             "layers.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "layers.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -12848,12 +12848,12 @@ check('d_modmissing', lambda: D.modify('Nope', dimscale=2))
         );
         let dwg = crate::io::load_bytes(
             "styles.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "styles.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -13107,12 +13107,12 @@ check('modify_missing', lambda: B.modify('Nope', description='x'))
         );
         let dwg = crate::io::load_bytes(
             "blocks.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "blocks.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -13326,12 +13326,12 @@ check('unknown_insert_block', lambda: doc.create_entity('Insert', block_name='Gh
         check_state("live", host.document());
         let dwg = crate::io::load_bytes(
             "bc.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "bc.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -13522,7 +13522,7 @@ check('ly_badscale', lambda: LY.set_page('Sheet1', scale=(0, 1)))
             );
             let layouts = |name: &str| {
                 document.objects.values().find_map(|o| match o {
-                    codec::objects::ObjectType::Layout(l)
+                    document::objects::ObjectType::Layout(l)
                         if l.name == name && !l.block_record.is_null() =>
                     {
                         Some(l.clone())
@@ -13569,12 +13569,12 @@ check('ly_badscale', lambda: LY.set_page('Sheet1', scale=(0, 1)))
         );
         let dwg = crate::io::load_bytes(
             "ltl.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "ltl.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -13597,7 +13597,7 @@ LT.delete('Temp')
         assert_eq!(refused, 0);
         let document = host.document();
         assert!(document.line_types.get("Temp").is_none());
-        assert!(!document.objects.values().any(|o| matches!(o, codec::objects::ObjectType::Layout(l) if l.name == "Sheet1" || l.name == "Details")));
+        assert!(!document.objects.values().any(|o| matches!(o, document::objects::ObjectType::Layout(l) if l.name == "Sheet1" || l.name == "Details")));
         assert!(
             !document
                 .entities()
@@ -13782,7 +13782,7 @@ check('bad_point', lambda: ocs.command_step('point', {'point': [0, 0, 0]}))
         assert!(failed.is_empty(), "wrapper failures: {failed:?}");
         assert_eq!(refused, 9);
 
-        let lines: Vec<codec::entities::Line> = host
+        let lines: Vec<document::entities::Line> = host
             .document()
             .entities()
             .filter_map(|e| match e {
@@ -13790,7 +13790,7 @@ check('bad_point', lambda: ocs.command_step('point', {'point': [0, 0, 0]}))
                 _ => None,
             })
             .collect();
-        let circles: Vec<codec::entities::Circle> = host
+        let circles: Vec<document::entities::Circle> = host
             .document()
             .entities()
             .filter_map(|e| match e {
@@ -13798,7 +13798,7 @@ check('bad_point', lambda: ocs.command_step('point', {'point': [0, 0, 0]}))
                 _ => None,
             })
             .collect();
-        let arcs: Vec<codec::entities::Arc> = host
+        let arcs: Vec<document::entities::Arc> = host
             .document()
             .entities()
             .filter_map(|e| match e {
@@ -13934,7 +13934,7 @@ check('bad_point', lambda: ocs.command_step('point', {'point': [0, 0, 0]}))
             "lengthen: {:?}",
             describe()
         );
-        let polylines: Vec<codec::entities::LwPolyline> = host
+        let polylines: Vec<document::entities::LwPolyline> = host
             .document()
             .entities()
             .filter_map(|e| match e {
@@ -14241,7 +14241,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
     #[test]
     fn audit_python_raster_image_definition_linkage_over_real_ipc() {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let Some(plugin_path) = std::env::var_os("OCS_TEST_PYTHON_PLUGIN") else {
             return;
         };
@@ -14354,12 +14354,12 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         check("live", host.document());
         let dwg = crate::io::load_bytes(
             "link.dwg",
-            codec::DwgWriter::write_to_vec(host.document()).unwrap(),
+            document::DwgWriter::write_to_vec(host.document()).unwrap(),
         )
         .unwrap();
         let dxf = crate::io::load_bytes(
             "link.dxf",
-            codec::DxfWriter::new(host.document())
+            document::DxfWriter::new(host.document())
                 .write_to_vec()
                 .unwrap(),
         )
@@ -14465,8 +14465,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let target = {
             let mut host = HostSession::new(&mut app, 0);
             host.add_entity(EntityType::Line(Line::from_points(
-                codec::types::Vector3::new(6.0, 7.0, 0.0),
-                codec::types::Vector3::new(9.0, 7.0, 0.0),
+                document::types::Vector3::new(6.0, 7.0, 0.0),
+                document::types::Vector3::new(9.0, 7.0, 0.0),
             )))
         };
         let entity_token = request(&mut app, "Pick an entity", true);
@@ -14535,7 +14535,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(2));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(2));
         app.tabs[1].is_start = false;
         let tab0 = app.tabs[0].id;
         let tab1 = app.tabs[1].id;
@@ -14756,7 +14756,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let handle;
         {
             let mut host = HostSession::new(&mut app, 0);
-            handle = host.add_entity(EntityType::MLine(codec::entities::MLine::default()));
+            handle = host.add_entity(EntityType::MLine(document::entities::MLine::default()));
             let original = host.document().get_entity(handle).unwrap();
             let changed =
                 ocs_plugin_api::entity_coverage::patch_canvas_layer(original, "HATCHES").unwrap();
@@ -14790,7 +14790,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         {
             let mut host = HostSession::new(&mut app, 0);
             let insert =
-                codec::entities::Insert::new("DOOR", codec::types::Vector3::new(1.0, 2.0, 0.0));
+                document::entities::Insert::new("DOOR", document::types::Vector3::new(1.0, 2.0, 0.0));
             handle = host.add_entity(EntityType::Insert(insert));
             let mut changed = host.document().get_entity(handle).unwrap().clone();
             if let EntityType::Insert(insert) = &mut changed {
@@ -14954,7 +14954,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         let pts: Vec<EntityType> = (0..5)
             .map(|i| {
-                EntityType::Point(Point::at(codec::types::Vector3::new(
+                EntityType::Point(Point::at(document::types::Vector3::new(
                     i as f64, i as f64, 0.0,
                 )))
             })
@@ -14979,7 +14979,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
             1.0, 1.0, 0.0,
         ))));
         let epoch_before = host.app.tabs[0].scene.geometry_epoch;
@@ -15007,9 +15007,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
     }
 
     fn reference_test_line(end_x: f64, y: f64, handle: Handle) -> EntityType {
-        let mut line = codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, y, 0.0),
-            codec::types::Vector3::new(end_x, y, 0.0),
+        let mut line = document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, y, 0.0),
+            document::types::Vector3::new(end_x, y, 0.0),
         );
         line.common.handle = handle;
         EntityType::Line(line)
@@ -15083,7 +15083,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // scope: an entity write plus two markings is ONE step under the
         // plugin's label.
         host.push_undo("PLUGIN: refresh");
-        let preview = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+        let preview = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
             3.0, 0.0, 0.0,
         ))));
         host.set_reference_only(preview, true).unwrap();
@@ -15137,7 +15137,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
         // DWG: the marker string appears nowhere in the saved bytes, and a
         // reopened file carries neither the host APPID nor the marker record.
-        let dwg = codec::DwgWriter::write_to_vec(host.document()).unwrap();
+        let dwg = document::DwgWriter::write_to_vec(host.document()).unwrap();
         assert!(
             !contains_marker(&dwg),
             "DWG save must not contain the designation marker"
@@ -15152,12 +15152,12 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             .get_record("OCS")
             .is_none());
         assert!(
-            !contains_marker(&codec::DwgWriter::write_to_vec(&reloaded).unwrap()),
+            !contains_marker(&document::DwgWriter::write_to_vec(&reloaded).unwrap()),
             "a re-save of the reopened file stays marker-free"
         );
 
         // DXF: same contract for the text format.
-        let dxf = codec::DxfWriter::new(host.document())
+        let dxf = document::DxfWriter::new(host.document())
             .write_to_vec()
             .unwrap();
         assert!(
@@ -15314,7 +15314,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut host = HostSession::new(&mut app, 0);
 
         assert!(!host.document().layers.contains("PLUGIN-LAYER"));
-        let mut pt = Point::at(codec::types::Vector3::new(3.0, 3.0, 0.0));
+        let mut pt = Point::at(document::types::Vector3::new(3.0, 3.0, 0.0));
         pt.common.layer = "PLUGIN-LAYER".to_string();
         host.add_entity(EntityType::Point(pt));
 
@@ -15350,7 +15350,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
             2.0, 2.0, 0.0,
         ))));
         assert!(host.document().get_entity(h).is_some());
@@ -15370,9 +15370,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let handle = {
             let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::new(1.0, 1.0, 0.0);
+            line.end = document::types::Vector3::new(3.0, 1.0, 0.0);
             let handle = host.add_entity(EntityType::Line(line));
             host.set_selection(&[handle]).unwrap();
             handle
@@ -15397,8 +15397,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             let mut host = HostSession::new(&mut app, 0);
             let mut edited = host.document().get_entity(handle).cloned().unwrap();
             if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(101.0, 1.0, 0.0);
-                line.end = codec::types::Vector3::new(103.0, 1.0, 0.0);
+                line.start = document::types::Vector3::new(101.0, 1.0, 0.0);
+                line.end = document::types::Vector3::new(103.0, 1.0, 0.0);
             }
             assert!(host.update_entity(edited));
         }
@@ -15424,9 +15424,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let handle = {
             let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(0.0, 0.0, 0.0);
-            line.end = codec::types::Vector3::new(2.0, 0.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::new(0.0, 0.0, 0.0);
+            line.end = document::types::Vector3::new(2.0, 0.0, 0.0);
             let handle = host.add_entity(EntityType::Line(line));
             host.set_selection(&[handle]).unwrap();
             handle
@@ -15437,8 +15437,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             let mut host = HostSession::new(&mut app, 0);
             let mut edited = host.document().get_entity(handle).cloned().unwrap();
             if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(50.0, 0.0, 0.0);
-                line.end = codec::types::Vector3::new(52.0, 0.0, 0.0);
+                line.start = document::types::Vector3::new(50.0, 0.0, 0.0);
+                line.end = document::types::Vector3::new(52.0, 0.0, 0.0);
             }
             host.update_entities_transaction("Move line", vec![edited])
                 .unwrap();
@@ -15464,9 +15464,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let handle = {
             let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::new(1.0, 1.0, 0.0);
+            line.end = document::types::Vector3::new(3.0, 1.0, 0.0);
             let handle = host.add_entity(EntityType::Line(line));
             host.set_selection(&[handle]).unwrap();
             handle
@@ -15489,9 +15489,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let handle = {
             let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::new(1.0, 1.0, 0.0);
+            line.end = document::types::Vector3::new(3.0, 1.0, 0.0);
             host.add_entity(EntityType::Line(line))
         };
         app.refresh_selected_grips();
@@ -15500,7 +15500,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             let mut host = HostSession::new(&mut app, 0);
             let mut edited = host.document().get_entity(handle).cloned().unwrap();
             if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(10.0, 1.0, 0.0);
+                line.start = document::types::Vector3::new(10.0, 1.0, 0.0);
             }
             // Still succeeds; nothing was selected, so no panic, no phantom
             // grips.
@@ -15515,9 +15515,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let _handle = {
             let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(1.0, 1.0, 0.0);
-            line.end = codec::types::Vector3::new(3.0, 1.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::new(1.0, 1.0, 0.0);
+            line.end = document::types::Vector3::new(3.0, 1.0, 0.0);
             let handle = host.add_entity(EntityType::Line(line));
             host.set_selection(&[handle]).unwrap();
             handle
@@ -15532,14 +15532,14 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert_eq!(app.active_tab, 0);
         {
             let mut host = HostSession::new(&mut app, 1);
-            let mut line = codec::entities::Line::new();
-            line.start = codec::types::Vector3::new(100.0, 100.0, 0.0);
-            line.end = codec::types::Vector3::new(102.0, 100.0, 0.0);
+            let mut line = document::entities::Line::new();
+            line.start = document::types::Vector3::new(100.0, 100.0, 0.0);
+            line.end = document::types::Vector3::new(102.0, 100.0, 0.0);
             let background = host.add_entity(EntityType::Line(line));
             host.set_selection(&[background]).unwrap();
             let mut edited = host.document().get_entity(background).cloned().unwrap();
             if let EntityType::Line(line) = &mut edited {
-                line.start = codec::types::Vector3::new(200.0, 100.0, 0.0);
+                line.start = document::types::Vector3::new(200.0, 100.0, 0.0);
             }
             assert!(host.update_entity(edited));
         }
@@ -15563,8 +15563,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         fn on_point(&mut self, pt: [f64; 3]) -> ocs_plugin_api::host::CommandStep {
             use ocs_plugin_api::host::CommandStep;
             if self.got_first {
-                let p = codec::entities::Point::at(codec::types::Vector3::new(pt[0], pt[1], pt[2]));
-                CommandStep::CommitAndEnd(codec::EntityType::Point(p))
+                let p = document::entities::Point::at(document::types::Vector3::new(pt[0], pt[1], pt[2]));
+                CommandStep::CommitAndEnd(document::EntityType::Point(p))
             } else {
                 self.got_first = true;
                 CommandStep::NeedPoint
@@ -15760,11 +15760,11 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         }
         fn on_object_pick(
             &mut self,
-            _handle: codec::Handle,
+            _handle: document::Handle,
             pt: [f64; 3],
         ) -> ocs_plugin_api::host::CommandStep {
-            let p = codec::entities::Point::at(codec::types::Vector3::new(pt[0], pt[1], pt[2]));
-            ocs_plugin_api::host::CommandStep::CommitAndEnd(codec::EntityType::Point(p))
+            let p = document::entities::Point::at(document::types::Vector3::new(pt[0], pt[1], pt[2]));
+            ocs_plugin_api::host::CommandStep::CommitAndEnd(document::EntityType::Point(p))
         }
     }
 
@@ -15774,8 +15774,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         app.tabs[0].is_start = false;
         let target = {
             let mut host = HostSession::new(&mut app, 0);
-            let h = host.add_entity(codec::EntityType::Point(codec::entities::Point::at(
-                codec::types::Vector3::new(3.0, 4.0, 0.0),
+            let h = host.add_entity(document::EntityType::Point(document::entities::Point::at(
+                document::types::Vector3::new(3.0, 4.0, 0.0),
             )));
             host.start_interactive(Box::new(PickThenMark));
             h
@@ -15798,8 +15798,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        host.add_entity(codec::EntityType::Point(codec::entities::Point::at(
-            codec::types::Vector3::new(7.0, 8.0, 0.0),
+        host.add_entity(document::EntityType::Point(document::entities::Point::at(
+            document::types::Vector3::new(7.0, 8.0, 0.0),
         )));
         let reader = host.document_reader();
         assert_eq!(reader.entity_count(), 1);
@@ -15820,8 +15820,8 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         .unwrap();
         assert_eq!(reader.entity_count(), 0);
 
-        host.add_entity(codec::EntityType::Point(codec::entities::Point::at(
-            codec::types::Vector3::new(1.0, 2.0, 0.0),
+        host.add_entity(document::EntityType::Point(document::entities::Point::at(
+            document::types::Vector3::new(1.0, 2.0, 0.0),
         )));
 
         assert_eq!(reader.entity_count(), 1);
@@ -15834,7 +15834,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
         let mut host = HostSession::new(&mut app, 0);
-        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
             7.0, 8.0, 0.0,
         ))));
 
@@ -15871,7 +15871,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         >::open(std::path::Path::new(&info.path))
         .unwrap();
 
-        let h = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+        let h = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
             1.0, 2.0, 0.0,
         ))));
         assert_eq!(reader.entity_count(), 1);
@@ -15905,7 +15905,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             ..Default::default()
         };
         let handle = host.add_layer(config).expect("should create layer");
-        assert_ne!(handle, codec::Handle::NULL);
+        assert_ne!(handle, document::Handle::NULL);
 
         // Verify defaults were applied
         let layer = host
@@ -15913,9 +15913,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             .layers
             .get("ELECTRICAL")
             .expect("layer should exist");
-        assert_eq!(layer.color, codec::types::Color::Index(7));
+        assert_eq!(layer.color, document::types::Color::Index(7));
         assert_eq!(layer.line_type, "Continuous");
-        assert_eq!(layer.line_weight, codec::types::LineWeight::ByLayer);
+        assert_eq!(layer.line_weight, document::types::LineWeight::ByLayer);
         assert!(!layer.flags.off);
         assert!(!layer.flags.frozen);
         assert!(!layer.flags.locked);
@@ -15924,7 +15924,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // 2. Duplicate add_layer should be rejected (return None)
         let dup_config = LayerConfig {
             name: "ELECTRICAL".to_string(),
-            color: Some(codec::types::Color::Index(1)),
+            color: Some(document::types::Color::Index(1)),
             ..Default::default()
         };
         assert!(
@@ -15935,7 +15935,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // 3. Modify only color and locked; other properties should remain untouched
         let mod_config = LayerConfig {
             name: "ELECTRICAL".to_string(),
-            color: Some(codec::types::Color::Index(1)),
+            color: Some(document::types::Color::Index(1)),
             locked: Some(true),
             ..Default::default()
         };
@@ -15946,16 +15946,16 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             .layers
             .get("ELECTRICAL")
             .expect("layer should exist");
-        assert_eq!(updated.color, codec::types::Color::Index(1)); // Modified to red
+        assert_eq!(updated.color, document::types::Color::Index(1)); // Modified to red
         assert!(updated.flags.locked); // Modified to locked
         assert_eq!(updated.line_type, "Continuous"); // Kept as-is
-        assert_eq!(updated.line_weight, codec::types::LineWeight::ByLayer); // Kept as-is
+        assert_eq!(updated.line_weight, document::types::LineWeight::ByLayer); // Kept as-is
         assert!(!updated.flags.off); // Kept as-is
 
         // 4. Modify nonexistent layer returns false
         let non_existent = LayerConfig {
             name: "DOES_NOT_EXIST".to_string(),
-            color: Some(codec::types::Color::Index(2)),
+            color: Some(document::types::Color::Index(2)),
             ..Default::default()
         };
         assert!(!host.modify_layer(non_existent));
@@ -15977,10 +15977,10 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // 1. Add entity via HostSession (simulating plugin add_entity / add_line)
         {
             let mut host = HostSession::new(&mut app, 0);
-            let mut line = codec::entities::Line::from_coords(0.0, 0.0, 0.0, 10.0, 10.0, 0.0);
+            let mut line = document::entities::Line::from_coords(0.0, 0.0, 0.0, 10.0, 10.0, 0.0);
             line.common.layer = "DYNAMIC_PLUGIN_LINES".to_string();
-            let handle = host.add_entity(codec::EntityType::Line(line));
-            assert_ne!(handle, codec::Handle::NULL);
+            let handle = host.add_entity(document::EntityType::Line(line));
+            assert_ne!(handle, document::Handle::NULL);
         }
 
         // Verify layer is created in document AND refreshed in ribbon + layer panel
@@ -16002,9 +16002,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         );
 
         // 2. Commit entity via command driver (simulating interactive tool / palette commit)
-        let mut line2 = codec::entities::Line::from_coords(10.0, 10.0, 0.0, 20.0, 20.0, 0.0);
+        let mut line2 = document::entities::Line::from_coords(10.0, 10.0, 0.0, 20.0, 20.0, 0.0);
         line2.common.layer = "SURVEY_TRAVERSE".to_string();
-        let _ = app.commit_entity_handle_preserve_layer(codec::EntityType::Line(line2));
+        let _ = app.commit_entity_handle_preserve_layer(document::EntityType::Line(line2));
 
         // Verify SURVEY_TRAVERSE layer is created and refreshed in ribbon + layer panel
         assert!(app.tabs[0]
@@ -16116,7 +16116,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         assert!(host.execute_command("VSCURRENT FLATSHADED\n"));
         assert_eq!(
             host.app.tabs[0].render_mode,
-            ocs_plugin_api::host::codec::entities::ViewportRenderMode::FlatShaded
+            ocs_plugin_api::host::document::entities::ViewportRenderMode::FlatShaded
         );
 
         // 12. Drafting aids toggle via drive_headless_task
@@ -16533,13 +16533,13 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                     .read_record(*handle, "PLUGIN_ALIGN_DISPLAY")
                     .expect("the class identity stamp");
                 assert_eq!(stamped.values.len(), 2);
-                let ocs_plugin_api::host::codec::xdata::XDataValue::Integer32(version) =
+                let ocs_plugin_api::host::document::xdata::XDataValue::Integer32(version) =
                     stamped.values[0]
                 else {
                     panic!("the stamp carries the schema version as an integer");
                 };
                 assert_eq!(version, 4);
-                let ocs_plugin_api::host::codec::xdata::XDataValue::String(record) =
+                let ocs_plugin_api::host::document::xdata::XDataValue::String(record) =
                     stamped.values[1].clone()
                 else {
                     panic!("the stamp carries the design record linkage");
@@ -16567,7 +16567,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // under the auto-registered APPID) and the staged display set
         // survive BOTH file formats with empty loss rows; the stamp values
         // (schema version + record linkage) stay byte-identical.
-        use codec::{Dwg, Dxf, Format};
+        use document::{Dwg, Dxf, Format};
 
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
@@ -16580,7 +16580,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                 .stage_plugin_class_instance("PLUGIN", &traverse_instance())
                 .expect("the class instance stages");
         }
-        let read_stamp = |document: &codec::Document, handle: codec::Handle| {
+        let read_stamp = |document: &document::Document, handle: document::Handle| {
             let entity = document
                 .get_entity(handle)
                 .unwrap_or_else(|| panic!("staged entity {handle:?} lost"));
@@ -16594,9 +16594,9 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         };
         fn round_trip<F: Format>(
             format: &F,
-            document: &codec::Document,
-            handles: &[codec::Handle],
-            stamp: &dyn Fn(&codec::Document, codec::Handle) -> Vec<codec::xdata::XDataValue>,
+            document: &document::Document,
+            handles: &[document::Handle],
+            stamp: &dyn Fn(&document::Document, document::Handle) -> Vec<document::xdata::XDataValue>,
             name: &str,
         ) {
             let (bytes, losses) = format.write(document).unwrap();
@@ -16971,18 +16971,18 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                 &["PLUGIN"],
                 "PLUGIN_ALIGN_DISPLAY",
                 vec![
-                    codec::objects::XRecordEntry::string(1, "peak_gradient"),
-                    codec::objects::XRecordEntry::new(
+                    document::objects::XRecordEntry::string(1, "peak_gradient"),
+                    document::objects::XRecordEntry::new(
                         140,
-                        codec::objects::XRecordValue::Double(0.06),
+                        document::objects::XRecordValue::Double(0.06),
                     ),
-                    codec::objects::XRecordEntry::string(1, "segments"),
-                    codec::objects::XRecordEntry::new(
+                    document::objects::XRecordEntry::string(1, "segments"),
+                    document::objects::XRecordEntry::new(
                         90,
-                        codec::objects::XRecordValue::Int32(3),
+                        document::objects::XRecordValue::Int32(3),
                     ),
-                    codec::objects::XRecordEntry::string(1, "locked_note"),
-                    codec::objects::XRecordEntry::string(1, "per alignment sheet"),
+                    document::objects::XRecordEntry::string(1, "locked_note"),
+                    document::objects::XRecordEntry::string(1, "per alignment sheet"),
                 ],
             )
             .expect("the design record seeds its namespace");
@@ -17083,12 +17083,12 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             }];
             host.register_plugin_class("PLUGIN", &declaration)
                 .expect("the parameter schema registers");
-            handle = host.add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+            handle = host.add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
                 12.0, 3.0, 0.0,
             ))));
-            let mut stamp = codec::xdata::ExtendedDataRecord::new("PLUGIN_ALIGN_DISPLAY");
-            stamp.add_value(codec::xdata::XDataValue::Integer32(4));
-            stamp.add_value(codec::xdata::XDataValue::String(
+            let mut stamp = document::xdata::ExtendedDataRecord::new("PLUGIN_ALIGN_DISPLAY");
+            stamp.add_value(document::xdata::XDataValue::Integer32(4));
+            stamp.add_value(document::xdata::XDataValue::String(
                 "PLUGIN_ALIGN_DISPLAY".to_string(),
             ));
             assert!(host.write_record(handle, stamp), "the stamp rides");
@@ -17096,10 +17096,10 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
                 &["PLUGIN"],
                 "PLUGIN_ALIGN_DISPLAY",
                 vec![
-                    codec::objects::XRecordEntry::string(1, "peak_gradient"),
-                    codec::objects::XRecordEntry::new(
+                    document::objects::XRecordEntry::string(1, "peak_gradient"),
+                    document::objects::XRecordEntry::new(
                         140,
-                        codec::objects::XRecordValue::Double(0.06),
+                        document::objects::XRecordValue::Double(0.06),
                     ),
                 ],
             )
@@ -17170,7 +17170,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         {
             let mut host = HostSession::new(&mut plain, 0);
             let unstamped = host
-                .add_entity(EntityType::Point(Point::at(codec::types::Vector3::new(
+                .add_entity(EntityType::Point(Point::at(document::types::Vector3::new(
                     1.0, 1.0, 0.0,
                 ))));
             plain.tabs[0].scene.selected.insert(unstamped);

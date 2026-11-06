@@ -1,11 +1,11 @@
 //! Native Block Properties Table authoring.
 use super::block_authoring::{self as authoring, *};
-use codec::objects::{
+use document::objects::{
     BlockElement, BlockEvalValue, BlockGrip, BlockGripExpression, BlockOnePointParameter,
     BlockParameter, BlockPropertiesTable, BlockPropertiesTableField, BlockPropertiesTableValue,
     DynamicBlockData, ObjectType,
 };
-use codec::{Document, Handle};
+use document::{Document, Handle};
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Column {
@@ -675,7 +675,7 @@ fn handle_field(code: i32, value: Handle) -> BlockPropertiesTableField {
 mod tests {
     use super::*;
     use crate::scene::{block_distance_parameter as distance, Scene};
-    use codec::{types::Vector3, DwgReader, DwgWriter, DxfReader, DxfWriter};
+    use document::{types::Vector3, DwgReader, DwgWriter, DxfReader, DxfWriter};
     use std::io::Cursor;
 
     fn fixture() -> (Document, Handle, Vec<Column>) {

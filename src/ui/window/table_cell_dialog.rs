@@ -527,7 +527,7 @@ impl CellFormatState {
                 }
             }
             3 | 6 => {
-                if let Some(at) = codec::fields::FORMULA_FORMATS
+                if let Some(at) = document::fields::FORMULA_FORMATS
                     .iter()
                     .position(|(_, code)| !code.is_empty() && picture.starts_with(code))
                 {
@@ -553,7 +553,7 @@ impl CellFormatState {
     fn units(&self) -> Vec<&'static str> {
         match self.kind {
             0 => ANGLE_FORMATS.iter().map(|(name, _)| *name).collect(),
-            3 | 6 => codec::fields::FORMULA_FORMATS.iter().map(|(name, _)| *name).collect(),
+            3 | 6 => document::fields::FORMULA_FORMATS.iter().map(|(name, _)| *name).collect(),
             _ => Vec::new(),
         }
     }
@@ -584,7 +584,7 @@ impl CellFormatState {
             0 => ANGLE_FORMATS[self.unit.min(6)].1.to_string(),
             1 | 5 => "%lu2".to_string(),
             2 => return self.date.clone(),
-            3 | 6 => codec::fields::FORMULA_FORMATS[self.unit.min(6)].1.to_string(),
+            3 | 6 => document::fields::FORMULA_FORMATS[self.unit.min(6)].1.to_string(),
             _ => return String::new(),
         };
         if base.is_empty() {

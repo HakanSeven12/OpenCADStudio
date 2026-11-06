@@ -4,9 +4,9 @@
 //! transformed through their block instances. The caller projects viewport
 //! references onto the sheet. All arithmetic uses `f64`.
 
-use codec::objects::AssocDimensionReference;
-use codec::types::{Handle, Matrix4, Transform, Vector3};
-use codec::{Document, EntityType};
+use document::objects::AssocDimensionReference;
+use document::types::{Handle, Matrix4, Transform, Vector3};
+use document::{Document, EntityType};
 use kernel::geom2d::{closest_point, Curve as KernelCurve};
 use kernel::space::Plane;
 
@@ -464,7 +464,7 @@ fn tangent_point(
 }
 
 fn spline_tangent_point(
-    spline: &codec::entities::Spline,
+    spline: &document::entities::Spline,
     reference: &AssocDimensionReference,
     context: FeatureContext,
 ) -> Option<Vector3> {
@@ -604,8 +604,8 @@ fn imported_endpoint(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::LwPolyline;
-    use codec::types::Vector2;
+    use document::entities::LwPolyline;
+    use document::types::Vector2;
 
     /// Three segments of different lengths, so a segment parameter and a
     /// whole-curve parameter land in different places.

@@ -165,7 +165,7 @@ pub(crate) fn tessellate_entity(
                 // including holes, then sample only for this cached display.
                 let mut boundaries = Vec::new();
                 if let Ok(kernel::brep::LoftSection::Profile { plane, wires, .. }) =
-                    kernel::acis::loft_section_geometry(&[codec::entities::EmbeddedEntity::Region(
+                    kernel::acis::loft_section_geometry(&[document::entities::EmbeddedEntity::Region(
                         region.clone(),
                     )])
                 {
@@ -807,14 +807,14 @@ use view::camera::Camera;
 pub use view::camera::Projection;
 
 use crate::command::EntityTransform;
-use codec::entities::{Block, BlockEnd, Insert as DxfInsert};
-use codec::entities::{
+use document::entities::{Block, BlockEnd, Insert as DxfInsert};
+use document::entities::{
     BoundaryEdge, BoundaryPath, Hatch as DxfHatch, PolylineEdge, Solid as DxfSolid,
 };
-use codec::objects::ObjectType;
-use codec::tables::normalize_name;
-use codec::types::Vector2;
-use codec::{Document, EntityType, Handle, TableEntry};
+use document::objects::ObjectType;
+use document::tables::normalize_name;
+use document::types::Vector2;
+use document::{Document, EntityType, Handle, TableEntry};
 use glam;
 use iced::time::Duration;
 use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
@@ -1279,7 +1279,7 @@ fn compose_wire_gpu_patches(first: &WireGpuPatch, second: WireGpuPatch) -> WireG
 #[cfg(test)]
 mod wire_gpu_patch_tests {
     use super::{compose_wire_gpu_patches, ChangeKind, WireGpuPatch, WireIndexEdit};
-    use codec::Handle;
+    use document::Handle;
     use std::sync::Arc;
 
     fn patch(handle: Handle, kind: ChangeKind, edit: WireIndexEdit) -> WireGpuPatch {
@@ -1580,7 +1580,7 @@ pub(crate) fn sanitized_table_name(raw: &str, fallback: &str) -> String {
 /// Produced in the file-load background task so the UI thread only assigns.
 #[derive(Debug, Clone)]
 pub struct DerivedCaches {
-    pub read_stats: Option<codec::ReadStats>,
+    pub read_stats: Option<document::ReadStats>,
     pub source_sha256: Option<String>,
     pub local_extent_max: f32,
     pub local_center: [f64; 2],
@@ -1654,7 +1654,7 @@ fn build_derived_caches_impl(
         .objects
         .values()
         .find_map(|obj| {
-            if let codec::objects::ObjectType::Layout(l) = obj {
+            if let document::objects::ObjectType::Layout(l) = obj {
                 if l.name == "Model" && !l.block_record.is_null() {
                     Some(l.block_record)
                 } else {
@@ -1815,7 +1815,7 @@ fn build_derived_caches_impl(
                 }
                 EntityType::Ole2Frame(ole) => ImageModel::from_ole2frame(ole).map(|m| (handle, m)),
                 EntityType::Underlay(u) => match doc.objects.get(&u.definition_handle) {
-                    Some(codec::objects::ObjectType::UnderlayDefinition(def)) => {
+                    Some(document::objects::ObjectType::UnderlayDefinition(def)) => {
                         // Paper-space underlays adjust to the white sheet.
                         let owner = u.common.owner_handle;
                         let background = if owner.is_null() || owner == model_block {
@@ -1849,7 +1849,7 @@ fn build_derived_caches_impl(
         .objects
         .values()
         .filter_map(|o| match o {
-            codec::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
+            document::objects::ObjectType::Layout(l) if !l.block_record.is_null() => {
                 Some(l.block_record)
             }
             _ => None,
@@ -2071,7 +2071,7 @@ struct OffsetPrep {
     owned_by_other_block: rustc_hash::FxHashSet<Handle>,
 }
 
-fn offset_prep(doc: &codec::Document, model_block: Handle) -> OffsetPrep {
+fn offset_prep(doc: &document::Document, model_block: Handle) -> OffsetPrep {
     let model_br = doc.block_records.iter().find(|br| br.handle == model_block);
     let mspace_set: Option<rustc_hash::FxHashSet<Handle>> = model_br
         .filter(|br| !br.entity_handles.is_empty())
@@ -2173,7 +2173,7 @@ fn offset_centroid(e: &EntityType, model_block: Handle, prep: &OffsetPrep) -> Op
 /// which would land in the empty gap between them.
 fn cluster_extent_from_centers(
     centers: Vec<[f64; 3]>,
-    header: &codec::document::HeaderVariables,
+    header: &document::document::HeaderVariables,
 ) -> ([f64; 2], f32) {
     const SANE_EXTENT: f64 = CLUSTER_SANE_EXTENT;
     let entity_ok = !centers.is_empty();
@@ -2248,7 +2248,7 @@ pub struct ViewportInstance {
     /// Screen rectangle (pixels, canvas-relative) this viewport fills.
     pub screen_rect: iced::Rectangle,
     pub camera: Camera,
-    pub render_mode: codec::entities::ViewportRenderMode,
+    pub render_mode: document::entities::ViewportRenderMode,
     /// `true` when this is the viewport receiving cursor input.
     pub active: bool,
     /// `true` when this view's grid is switched on — drives `grid_views`, so the
@@ -2271,7 +2271,7 @@ pub(crate) struct ModelTile {
     pub(crate) camera: Camera,
     /// Visual style for this tile alone — each pane carries its own so
     /// changing one tile's render mode never touches the others.
-    pub(crate) render_mode: codec::entities::ViewportRenderMode,
+    pub(crate) render_mode: document::entities::ViewportRenderMode,
     /// Grid display + grid-snap for this viewport alone, round-tripped through
     /// its VPort entry. The app mirrors the *active* tile's pair into the live
     /// grid/snap toggles. (#121)
@@ -2289,7 +2289,7 @@ enum ViewSnapshot {
     Floating {
         layout: String,
         handle: Handle,
-        viewport: Box<codec::entities::Viewport>,
+        viewport: Box<document::entities::Viewport>,
     },
 }
 
@@ -2375,8 +2375,8 @@ fn offset_mesh_lod_set(mut set: MeshLodSet) -> MeshLodSet {
 }
 
 /// Build a lightweight placement over immutable block-local geometry.
-fn transform_block_mesh_lod_set(set: &MeshLodSet, xform: &codec::types::Transform) -> MeshLodSet {
-    use codec::types::Vector3;
+fn transform_block_mesh_lod_set(set: &MeshLodSet, xform: &document::types::Transform) -> MeshLodSet {
+    use document::types::Vector3;
     let source = set.instance_source.clone().unwrap_or_else(|| {
         std::sync::Arc::new(model::mesh_model::MeshInstanceSource {
             handle: set.entity_handle().unwrap_or(Handle::new(0)),
@@ -3237,7 +3237,7 @@ pub struct Scene {
 }
 
 fn section_frame(
-    data: &codec::entities::SectionObjectData,
+    data: &document::entities::SectionObjectData,
 ) -> Option<(glam::DVec3, glam::DVec3, glam::DVec3, glam::DVec3)> {
     let first = data.vertices.first()?;
     let last = data.vertices.last()?;
@@ -3260,7 +3260,7 @@ fn section_frame(
 
 #[derive(Clone)]
 struct LiveSection {
-    data: codec::entities::SectionObjectData,
+    data: document::entities::SectionObjectData,
     slice_depth: Option<f64>,
 }
 
@@ -3268,7 +3268,7 @@ fn section_plane(
     origin: glam::DVec3,
     tangent: glam::DVec3,
     normal: glam::DVec3,
-    body_to_world: Option<&codec::types::Transform>,
+    body_to_world: Option<&document::types::Transform>,
 ) -> Option<kernel::space::Plane> {
     let Some(transform) = body_to_world else {
         return kernel::space::Plane::orthonormal(
@@ -3278,20 +3278,20 @@ fn section_plane(
         );
     };
     let matrix = transform.matrix.m;
-    let linear = codec::types::Matrix3::from_rows(
+    let linear = document::types::Matrix3::from_rows(
         [matrix[0][0], matrix[0][1], matrix[0][2]],
         [matrix[1][0], matrix[1][1], matrix[1][2]],
         [matrix[2][0], matrix[2][1], matrix[2][2]],
     );
     let inverse = linear.inverse()?;
-    let translation = codec::types::Vector3::new(matrix[0][3], matrix[1][3], matrix[2][3]);
+    let translation = document::types::Vector3::new(matrix[0][3], matrix[1][3], matrix[2][3]);
     let origin = inverse
-        .transform_point(codec::types::Vector3::new(origin.x, origin.y, origin.z) - translation);
+        .transform_point(document::types::Vector3::new(origin.x, origin.y, origin.z) - translation);
     let tangent =
-        inverse.transform_point(codec::types::Vector3::new(tangent.x, tangent.y, tangent.z));
+        inverse.transform_point(document::types::Vector3::new(tangent.x, tangent.y, tangent.z));
     let normal = linear
         .transpose()
-        .transform_point(codec::types::Vector3::new(normal.x, normal.y, normal.z));
+        .transform_point(document::types::Vector3::new(normal.x, normal.y, normal.z));
     kernel::space::Plane::orthonormal(
         [origin.x, origin.y, origin.z],
         [tangent.x, tangent.y, tangent.z],
@@ -3331,7 +3331,7 @@ impl Scene {
                     height: 1.0,
                 },
                 camera: Camera::default(),
-                render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
+                render_mode: document::entities::ViewportRenderMode::Wireframe2D,
                 grid_on: false,
                 snap_on: false,
             }]),
@@ -3897,7 +3897,7 @@ impl Scene {
             entity,
             EntityType::Extended(extended) if matches!(
                 extended.data,
-                codec::entities::ExtendedEntityData::SectionObject(_)
+                document::entities::ExtendedEntityData::SectionObject(_)
             )
         );
         if self.meshes.contains_key(&handle)
@@ -4253,11 +4253,11 @@ impl Scene {
                     let before = self.document.objects.get(handle).cloned();
                     self.record_undo_object_before(*handle, before);
                 }
-                let lists: Vec<(Handle, codec::objects::ObjectType)> = self
+                let lists: Vec<(Handle, document::objects::ObjectType)> = self
                     .document
                     .objects
                     .iter()
-                    .filter(|(_, object)| matches!(object, codec::objects::ObjectType::FieldList(_)))
+                    .filter(|(_, object)| matches!(object, document::objects::ObjectType::FieldList(_)))
                     .map(|(handle, object)| (*handle, object.clone()))
                     .collect();
                 for (handle, before) in lists {
@@ -4888,7 +4888,7 @@ impl Scene {
                 _ => None,
             })
             .collect();
-        let is_definition = |record: &codec::tables::BlockRecord| {
+        let is_definition = |record: &document::tables::BlockRecord| {
             let name = record.name.to_ascii_uppercase();
             !layout_blocks.contains(&record.handle)
                 && !name.starts_with("*MODEL_SPACE")
@@ -5131,7 +5131,7 @@ impl Scene {
         &self,
         handle: Handle,
         solid: &kernel::brep::Body,
-    ) -> Option<(MeshLodSet, Vec<codec::entities::Wire>, [f64; 3])> {
+    ) -> Option<(MeshLodSet, Vec<document::entities::Wire>, [f64; 3])> {
         let color = self
             .document
             .get_entity(handle)
@@ -5189,7 +5189,7 @@ impl Scene {
         &mut self,
         handle: Handle,
         solid: kernel::brep::Body,
-        display: (MeshLodSet, Vec<codec::entities::Wire>, [f64; 3]),
+        display: (MeshLodSet, Vec<document::entities::Wire>, [f64; 3]),
     ) -> bool {
         let (mut set, wires, center) = display;
         // New command results can be prepared before their handle exists.
@@ -5219,7 +5219,7 @@ impl Scene {
             );
         }
         if let Some(entity) = self.document.get_entity_mut(handle) {
-            let reference = codec::types::Vector3::new(center[0], center[1], center[2]);
+            let reference = document::types::Vector3::new(center[0], center[1], center[2]);
             match entity {
                 EntityType::Solid3D(entity) => {
                     entity.point_of_reference = reference;
@@ -5250,7 +5250,7 @@ impl Scene {
         if !display.0.complete
             && matches!(
                 self.document.solid_history_operation(handle),
-                Some(codec::objects::SolidHistoryOperation::Loft(_))
+                Some(document::objects::SolidHistoryOperation::Loft(_))
             )
         {
             return false;
@@ -5512,7 +5512,7 @@ impl Scene {
                     matches!(
                         self.document.get_entity(h),
                         Some(EntityType::Underlay(u))
-                            if u.underlay_type == codec::entities::UnderlayType::Dwf
+                            if u.underlay_type == document::entities::UnderlayType::Dwf
                     )
                 });
             let keep_bright = dwf_page || handle.is_some_and(|h| keep.contains(&h));
@@ -5569,15 +5569,15 @@ impl Scene {
             self.document.header.paper_space_linetype_scaling = flags & 1 != 0;
             self.document.header.paper_space_limit_check = flags & 2 != 0;
             self.document.header.paper_space_insertion_base =
-                codec::types::Vector3::new(insertion_base.0, insertion_base.1, insertion_base.2);
+                document::types::Vector3::new(insertion_base.0, insertion_base.1, insertion_base.2);
             self.document.header.paper_space_extents_min =
-                codec::types::Vector3::new(min_extents.0, min_extents.1, min_extents.2);
+                document::types::Vector3::new(min_extents.0, min_extents.1, min_extents.2);
             self.document.header.paper_space_extents_max =
-                codec::types::Vector3::new(max_extents.0, max_extents.1, max_extents.2);
+                document::types::Vector3::new(max_extents.0, max_extents.1, max_extents.2);
             self.document.header.paper_space_limits_min =
-                codec::types::Vector2::new(min_limits.0, min_limits.1);
+                document::types::Vector2::new(min_limits.0, min_limits.1);
             self.document.header.paper_space_limits_max =
-                codec::types::Vector2::new(max_limits.0, max_limits.1);
+                document::types::Vector2::new(max_limits.0, max_limits.1);
         }
     }
 
@@ -5669,8 +5669,8 @@ impl Scene {
     }
 
     pub(crate) fn layout_sheet_viewport_handle(
-        document: &codec::Document,
-        layout: &codec::objects::Layout,
+        document: &document::Document,
+        layout: &document::objects::Layout,
     ) -> Handle {
         let owned_viewport = |handle| match document.get_entity(handle) {
             Some(EntityType::Viewport(vp)) if vp.common.owner_handle == layout.block_record => {
@@ -5726,8 +5726,8 @@ impl Scene {
     }
 
     pub(crate) fn is_sheet_viewport(
-        document: &codec::Document,
-        vp: &codec::entities::Viewport,
+        document: &document::Document,
+        vp: &document::entities::Viewport,
     ) -> bool {
         if vp.id == 1 {
             return true;
@@ -5815,9 +5815,9 @@ impl Scene {
         }
 
         // Create the full-screen overall viewport covering the paper limits.
-        let mut vp = codec::entities::Viewport::new();
+        let mut vp = document::entities::Viewport::new();
         vp.id = 1;
-        vp.status = codec::entities::ViewportStatusFlags::default_on();
+        vp.status = document::entities::ViewportStatusFlags::default_on();
         fit_sheet_viewport(&mut vp, min_lim, max_lim);
         if let Ok(handle) = self
             .document
@@ -5884,12 +5884,12 @@ impl Scene {
         let Some(((x0, y0), (x1, y1))) = self.printable_area_limits() else {
             return;
         };
-        let mut viewport = codec::entities::Viewport::new();
-        viewport.center = codec::types::Vector3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, 0.0);
+        let mut viewport = document::entities::Viewport::new();
+        viewport.center = document::types::Vector3::new((x0 + x1) / 2.0, (y0 + y1) / 2.0, 0.0);
         viewport.width = (x1 - x0).abs() * 0.8;
         viewport.height = (y1 - y0).abs() * 0.8;
         viewport.id = 2;
-        viewport.status = codec::entities::ViewportStatusFlags::default_on();
+        viewport.status = document::entities::ViewportStatusFlags::default_on();
         if let Ok(handle) = self
             .document
             .add_entity_to_layout(EntityType::Viewport(Box::new(viewport)), layout_name)
@@ -5904,7 +5904,7 @@ impl Scene {
 
     fn is_content_viewport_in_layout(
         &self,
-        vp: &codec::entities::Viewport,
+        vp: &document::entities::Viewport,
         layout_block: Handle,
     ) -> bool {
         if vp.common.owner_handle != layout_block {
@@ -5933,7 +5933,7 @@ impl Scene {
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(v) if v.common.owner_handle == layout_block => {
+                document::EntityType::Viewport(v) if v.common.owner_handle == layout_block => {
                     Some(v.id)
                 }
                 _ => None,
@@ -6095,7 +6095,7 @@ impl Scene {
             boundary_exterior: None,
             boundary_sources: None,
             boundary_paths: None,
-            style: codec::entities::HatchStyleType::Normal,
+            style: document::entities::HatchStyleType::Normal,
             pattern: crate::scene::model::hatch_model::HatchPattern::Solid,
             name: "SOLID".to_string(),
             color: self.paper_bg_color,
@@ -6173,13 +6173,13 @@ impl Scene {
     }
 
     /// The effective plot settings embedded in the current layout.
-    pub fn effective_plot_settings(&self) -> Option<codec::objects::PlotSettings> {
+    pub fn effective_plot_settings(&self) -> Option<document::objects::PlotSettings> {
         self.plot_settings_for(&self.current_layout)
     }
 
     /// Plot settings embedded in a specific layout.
-    pub fn plot_settings_for(&self, name: &str) -> Option<codec::objects::PlotSettings> {
-        use codec::objects::{
+    pub fn plot_settings_for(&self, name: &str) -> Option<document::objects::PlotSettings> {
+        use document::objects::{
             ObjectType, PaperMargin, PlotPaperUnits, PlotRotation, PlotSettings, PlotType,
             PlotWindow, ScaledType, ShadePlotMode, ShadePlotResolutionLevel,
         };
@@ -6234,7 +6234,7 @@ impl Scene {
     pub fn set_layout_plot_settings(
         &mut self,
         name: &str,
-        ps: &codec::objects::PlotSettings,
+        ps: &document::objects::PlotSettings,
     ) -> bool {
         let Some(layout) = self.document.objects.values_mut().find_map(|object| {
             let ObjectType::Layout(layout) = object else {
@@ -6327,7 +6327,7 @@ impl Scene {
 
     /// Millimetre → paper-space-unit factor for a specific layout (see
     /// [`Scene::paper_space_unit_factor`]).
-    fn layout_unit_factor(l: &codec::objects::Layout) -> f64 {
+    fn layout_unit_factor(l: &document::objects::Layout) -> f64 {
         // Millimetres represented by one plotted page unit: an inch page
         // (plot_paper_units == 0) is 25.4 mm, a millimetre page is 1 mm.
         let page_unit_mm = if l.plot_paper_units == 0 { 25.4 } else { 1.0 };
@@ -6745,7 +6745,7 @@ impl Scene {
     /// back to the owner dictionary shared by the drawing's `Scale` objects.
     /// Returns `None` only when the drawing genuinely has no scale list.
     pub(crate) fn scalelist_dict_handle(&self) -> Option<Handle> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let root_h = self.document.header.named_objects_dict_handle;
         if let Some(h) = crate::scene::annotative::as_dict(&self.document, root_h)
             .and_then(|d| d.get("ACAD_SCALELIST"))
@@ -6782,7 +6782,7 @@ impl Scene {
     /// built-in family. A ratio keeps the plot scale readable in a page setup
     /// (`1 : 250` rather than `0.004 : 1`).
     pub(crate) fn scale_ratio(&self, name: &str) -> Option<(f64, f64)> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let stored = self.document.objects.values().find_map(|o| match o {
             ObjectType::Scale(s) if !s.is_temporary && s.name.eq_ignore_ascii_case(name) => {
                 Some((s.paper_units, s.drawing_units))
@@ -6840,7 +6840,7 @@ impl Scene {
     /// files key the entries by an internal identifier (`*A1`, `A0`, …) that
     /// bears no relation to the scale name.
     pub(crate) fn scale_object_handle(&self, name: &str) -> Option<Handle> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         self.document.objects.iter().find_map(|(h, o)| match o {
             ObjectType::Scale(s) if !s.is_temporary && s.name.eq_ignore_ascii_case(name) => {
                 Some(*h)
@@ -6947,8 +6947,8 @@ impl Scene {
     }
 
     pub fn annotation_all_visible(&self) -> bool {
-        use codec::objects::XRecordValue;
-        use codec::xdata::XDataValue;
+        use document::objects::XRecordValue;
+        use document::xdata::XDataValue;
         // A value set here for this layout comes first. Past that, Model reads
         // the drawing's ANNOALLVISIBLE and is on without one. A paper layout
         // keeps its own value in the layout's xdata, and only an "on": it has
@@ -6996,7 +6996,7 @@ impl Scene {
     }
 
     pub fn set_annotation_all_visible(&mut self, value: bool) {
-        use codec::objects::{XRecordEntry, XRecordValue};
+        use document::objects::{XRecordEntry, XRecordValue};
         let Some(layout) = self.current_layout_object_handle() else {
             return;
         };
@@ -7019,7 +7019,7 @@ impl Scene {
     /// Store the value where the file format keeps it, so it stays with the
     /// drawing outside this program: see [`Self::annotation_all_visible`].
     fn write_annotation_visibility_to_drawing(&mut self, layout: Handle, value: bool) {
-        use codec::xdata::{ExtendedDataRecord, XDataValue};
+        use document::xdata::{ExtendedDataRecord, XDataValue};
         if self.current_layout == "Model" {
             let value = if value { "1" } else { "0" };
             crate::io::set_drawing_variable(&mut self.document, "ANNOALLVISIBLE", value);
@@ -7029,7 +7029,7 @@ impl Scene {
             let _ = self
                 .document
                 .app_ids
-                .add(codec::tables::AppId::new(LAYOUT_ANNOTATION_VISIBILITY_APP));
+                .add(document::tables::AppId::new(LAYOUT_ANNOTATION_VISIBILITY_APP));
             let mut record = ExtendedDataRecord::new(LAYOUT_ANNOTATION_VISIBILITY_APP);
             record.add_value(XDataValue::Integer16(1));
             let xdata = self.document.object_xdata.entry(layout).or_default();
@@ -7198,7 +7198,7 @@ impl Scene {
     /// dictionary (and registers it in the root dictionary) when the drawing
     /// has none of its own — many minimal files carry no scale list at all.
     pub fn add_scale(&mut self, name: &str, paper: f64, drawing: f64) -> bool {
-        use codec::objects::{Dictionary, ObjectType, Scale};
+        use document::objects::{Dictionary, ObjectType, Scale};
         // Reject a duplicate by the scale's display name (the dictionary key may
         // be an unrelated internal identifier, so check the objects directly).
         if self.scale_object_handle(name).is_some() {
@@ -7260,7 +7260,7 @@ impl Scene {
     /// no such scale exists. The current annotation scale should not be removed
     /// — the caller guards that.
     pub fn remove_scale(&mut self, name: &str) -> bool {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let Some(sh) = self.scale_object_handle(name) else {
             return false;
         };
@@ -7336,7 +7336,7 @@ impl Scene {
     /// Rename `old_name` and/or change its paper:drawing ratio. Returns `false`
     /// if the scale is missing or the new name collides with another scale.
     pub fn edit_scale(&mut self, old_name: &str, new_name: &str, paper: f64, drawing: f64) -> bool {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let Some(sh) = self.scale_object_handle(old_name) else {
             return false;
         };
@@ -7385,7 +7385,7 @@ impl Scene {
         if layout_block.is_null() {
             return vec![];
         }
-        let mut result: Vec<(codec::Handle, String, Vec<codec::Handle>)> = content
+        let mut result: Vec<(document::Handle, String, Vec<document::Handle>)> = content
             .iter()
             .filter_map(|handle| {
                 let Some(EntityType::Viewport(vp)) = self.document.get_entity(*handle) else {
@@ -7417,12 +7417,12 @@ impl Scene {
                         self.document
                             .layer_viewport_overrides(
                                 layer.handle,
-                                codec::objects::KnownXRecordKind::LayerViewportColorOverride,
+                                document::objects::KnownXRecordKind::LayerViewportColorOverride,
                             )
                             .into_iter()
                             .find(|(viewport, _)| *viewport == handle)
                             .and_then(|(_, value)| match value {
-                                codec::objects::XRecordValue::Int32(value) => Some((
+                                document::objects::XRecordValue::Int32(value) => Some((
                                     layer.handle,
                                     crate::scene::view::render::layer_override_color(value),
                                 )),
@@ -9260,7 +9260,7 @@ impl Scene {
     /// and their saved display modes remain unchanged.
     pub fn plot_wire_groups(
         &self,
-        render_mode_override: Option<codec::entities::ViewportRenderMode>,
+        render_mode_override: Option<document::entities::ViewportRenderMode>,
     ) -> (Vec<WireModel>, Vec<WireModel>) {
         let _constraint_display = self.suppress_constraint_shading();
         let apply_mode = |wires: &mut Vec<WireModel>, mode| {
@@ -9469,7 +9469,7 @@ impl Scene {
         self.draw_depth_generation
             .set(self.draw_depth_generation.get().wrapping_add(1));
 
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         // Per-block SortEntitiesTable overrides: block -> (entity_val -> sort_val).
         let mut overrides: HashMap<Handle, HashMap<u64, u64>> = HashMap::default();
         for obj in self.document.objects.values() {
@@ -10076,7 +10076,7 @@ impl Scene {
                 let mut placed = model.clone();
                 if context.is_instanced() {
                     for (corner, low) in placed.corners.iter_mut().zip(&mut placed.corners_low) {
-                        let point = codec::types::Vector3::new(
+                        let point = document::types::Vector3::new(
                             corner[0] as f64 + low[0] as f64,
                             corner[1] as f64 + low[1] as f64,
                             corner[2] as f64 + low[2] as f64,
@@ -10090,7 +10090,7 @@ impl Scene {
                         ];
                     }
                     for vertex in &mut placed.verts {
-                        let point = codec::types::Vector3::new(
+                        let point = document::types::Vector3::new(
                             vertex.pos[0] as f64 + vertex.pos_low[0] as f64,
                             vertex.pos[1] as f64 + vertex.pos_low[1] as f64,
                             vertex.pos[2] as f64 + vertex.pos_low[2] as f64,
@@ -10285,7 +10285,7 @@ impl Scene {
                                     }
                                     Some(EntityType::Extended(extended)) => matches!(
                                         extended.data,
-                                        codec::entities::ExtendedEntityData::SectionObject(_)
+                                        document::entities::ExtendedEntityData::SectionObject(_)
                                     ),
                                     _ => false,
                                 }
@@ -10518,7 +10518,7 @@ impl Scene {
     /// True when the current space's walk hides this layer — the predicate
     /// every visibility gate ANDs in next to its off/frozen test. No set,
     /// or a layer outside any space (unknown record), never hides.
-    pub fn layer_walk_hidden(&self, layer: Option<&codec::tables::layer::Layer>) -> bool {
+    pub fn layer_walk_hidden(&self, layer: Option<&document::tables::layer::Layer>) -> bool {
         let Some(layer) = layer else {
             return false;
         };
@@ -10748,7 +10748,7 @@ impl Scene {
                 let EntityType::Extended(extended) = entity else {
                     return None;
                 };
-                let codec::entities::ExtendedEntityData::SectionObject(data) = &extended.data
+                let document::entities::ExtendedEntityData::SectionObject(data) = &extended.data
                 else {
                     return None;
                 };
@@ -10791,7 +10791,7 @@ impl Scene {
         };
         let (_, wires, center) = self.prepare_solid_model_display(handle, &body).ok_or(())?;
         let mut entity = self.document.get_entity(handle).cloned().ok_or(())?;
-        let reference = codec::types::Vector3::new(center[0], center[1], center[2]);
+        let reference = document::types::Vector3::new(center[0], center[1], center[2]);
         match &mut entity {
             EntityType::Solid3D(solid) => {
                 solid.point_of_reference = reference;
@@ -10815,7 +10815,7 @@ impl Scene {
             }
             // The cut mesh is drawn as the solid it bounds.
             EntityType::Mesh(_) | EntityType::PolygonMesh(_) | EntityType::PolyfaceMesh(_) => {
-                let mut solid = codec::entities::Solid3D::new();
+                let mut solid = document::entities::Solid3D::new();
                 solid.common = entity.common().clone();
                 solid.point_of_reference = reference;
                 solid.wires = wires;
@@ -10859,9 +10859,9 @@ impl Scene {
 
     fn section_body(
         body: &kernel::brep::Body,
-        data: &codec::entities::SectionObjectData,
+        data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
-        body_to_world: Option<&codec::types::Transform>,
+        body_to_world: Option<&document::types::Transform>,
     ) -> Result<Option<kernel::brep::Body>, ()> {
         let planes = Self::section_planes(data, slice_depth, body_to_world).ok_or(())?;
         let mut current = body.clone();
@@ -10878,9 +10878,9 @@ impl Scene {
     /// the section plane, then the back of a slice, the ends of a boundary
     /// and the top and bottom of a volume.
     fn section_planes(
-        data: &codec::entities::SectionObjectData,
+        data: &document::entities::SectionObjectData,
         slice_depth: Option<f64>,
-        body_to_world: Option<&codec::types::Transform>,
+        body_to_world: Option<&document::types::Transform>,
     ) -> Option<Vec<kernel::space::Plane>> {
         let (origin, tangent, vertical, viewing) = section_frame(data)?;
         let mut planes = vec![section_plane(origin, tangent, viewing, body_to_world)?];
@@ -11047,7 +11047,7 @@ impl Scene {
             .map(|(epoch, _)| *epoch != self.geometry_epoch)
             .unwrap_or(true);
         if stale {
-            use codec::objects::KnownXRecordKind;
+            use document::objects::KnownXRecordKind;
             let kinds = [
                 KnownXRecordKind::LayerViewportAlphaOverride,
                 KnownXRecordKind::LayerViewportColorOverride,
@@ -11215,14 +11215,14 @@ impl Scene {
                     let EntityType::Extended(extended) = entity else {
                         return;
                     };
-                    let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data
+                    let document::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data
                     else {
                         return;
                     };
                     let transform = context.is_instanced().then_some(&context.transform);
                     // Object Color stylization draws the cloud in its own colour.
                     let common = entity.common();
-                    let color = if matches!(common.color, codec::types::Color::ByLayer) {
+                    let color = if matches!(common.color, document::types::Color::ByLayer) {
                         self.document
                             .layers
                             .get(&common.layer)
@@ -11276,7 +11276,7 @@ impl Scene {
             let EntityType::Extended(extended) = entity else {
                 continue;
             };
-            let codec::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
+            let document::entities::ExtendedEntityData::PointCloudEx(data) = &extended.data else {
                 continue;
             };
             let common = entity.common();
@@ -11292,7 +11292,7 @@ impl Scene {
             {
                 continue;
             }
-            let color = if matches!(common.color, codec::types::Color::ByLayer) {
+            let color = if matches!(common.color, document::types::Color::ByLayer) {
                 self.document
                     .layers
                     .get(&common.layer)
@@ -11655,10 +11655,10 @@ impl Scene {
     /// uses its own resolved colour / layer. Returned colours are bg-adapted.
     fn chain_mesh_inherit(
         &self,
-        ins: &codec::entities::Insert,
+        ins: &document::entities::Insert,
         parent: &BlockMeshInherit,
     ) -> BlockMeshInherit {
-        use codec::types::Color;
+        use document::types::Color;
         let bg = self.current_bg();
         let on_l0 = crate::scene::view::render::is_effective_layer_zero(&ins.common.layer);
         let insert_entity = EntityType::Insert(ins.clone());
@@ -11730,7 +11730,7 @@ impl Scene {
         own_alpha: f32,
     ) -> Option<[f32; 4]> {
         let inherit = inherit?;
-        use codec::types::Color;
+        use document::types::Color;
         let common = e.common();
         let on_l0 = crate::scene::view::render::is_effective_layer_zero(&common.layer);
         let has_book_color = crate::scene::view::render::has_resolved_book_color(&self.document, e);
@@ -13550,7 +13550,7 @@ impl Scene {
         &mut self,
         bounds: iced::Rectangle,
         local: iced::Point,
-    ) -> Option<(codec::tables::Ucs, glam::DVec3)> {
+    ) -> Option<(document::tables::Ucs, glam::DVec3)> {
         let camera = self.camera.borrow();
         let view_rot = camera.view_proj_rte(bounds);
         let eye = camera.eye();
@@ -13813,7 +13813,7 @@ impl Scene {
         frozen_layers: Option<&HashSet<Handle>>,
         annotation_scale_handle: Option<Handle>,
         all_visible: bool,
-        layer: Option<&codec::tables::layer::Layer>,
+        layer: Option<&document::tables::layer::Layer>,
     ) -> bool {
         let c = e.common();
         if self.display_entity_invisible(c) {
@@ -13883,7 +13883,7 @@ impl Scene {
         // View culling is not applied.
         only: Option<&HashSet<Handle>>,
     ) -> Vec<WireModel> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
 
         // Each INSERT tessellated below resolves its block's base point.
         let _owners = block_authoring::DictionaryOwners::publish(&self.document);
@@ -13923,7 +13923,7 @@ impl Scene {
         // incremental patch, so a changed entity is included/excluded exactly as
         // a from-scratch build would (no divergence).
         // Resolve each distinct layer name once for this candidate pass.
-        type LayerRef<'a> = Option<&'a codec::tables::layer::Layer>;
+        type LayerRef<'a> = Option<&'a document::tables::layer::Layer>;
         let layer_of: RefCell<rustc_hash::FxHashMap<&'doc str, LayerRef<'doc>>> =
             RefCell::new(rustc_hash::FxHashMap::default());
         let visibility_ok = |e: &'doc EntityType| {
@@ -14695,7 +14695,7 @@ vis_index={:.1} visible_probe={:.1}",
             .objects
             .values()
             .filter_map(|object| match object {
-                codec::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => {
+                document::objects::ObjectType::Layout(layout) if !layout.block_record.is_null() => {
                     Some(layout.block_record)
                 }
                 _ => None,
@@ -15586,7 +15586,7 @@ vis_index={:.1} visible_probe={:.1}",
         let center = (min + max) * 0.5;
 
         let vp = match self.document.get_entity_mut(vp_handle) {
-            Some(codec::EntityType::Viewport(vp)) => vp,
+            Some(document::EntityType::Viewport(vp)) => vp,
             _ => return,
         };
         let direction = glam::DVec3::new(
@@ -15634,7 +15634,7 @@ vis_index={:.1} visible_probe={:.1}",
 
 /// A page setup never initialized: no paper size and no media name (the
 /// reference writes a layout so until it is first opened).
-pub fn page_setup_uninitialized(layout: &codec::objects::Layout) -> bool {
+pub fn page_setup_uninitialized(layout: &document::objects::Layout) -> bool {
     layout.paper_size.trim().is_empty() && layout.paper_width <= 0.0 && layout.paper_height <= 0.0
 }
 
@@ -15642,7 +15642,7 @@ pub fn page_setup_uninitialized(layout: &codec::objects::Layout) -> bool {
 /// uninitialized state and no viewports, as the reference stores a layout
 /// it has not opened yet. A layout already holding a viewport onto the model
 /// (one added by automation) is plainly set up and is written as it is.
-pub(crate) fn write_layout_unopened(document: &mut codec::Document, layout_name: &str) {
+pub(crate) fn write_layout_unopened(document: &mut document::Document, layout_name: &str) {
     let block = document.objects.values().find_map(|object| match object {
         ObjectType::Layout(layout) if layout.name == layout_name => Some(layout.block_record),
         _ => None,
@@ -15655,7 +15655,7 @@ pub(crate) fn write_layout_unopened(document: &mut codec::Document, layout_name:
     if has_model_view {
         return;
     }
-    let fresh = codec::objects::Layout::new(layout_name);
+    let fresh = document::objects::Layout::new(layout_name);
     let mut block = Handle::NULL;
     for object in document.objects.values_mut() {
         if let ObjectType::Layout(layout) = object {
@@ -15678,22 +15678,22 @@ pub(crate) fn write_layout_unopened(document: &mut codec::Document, layout_name:
 
 /// Size a sheet (overall paper) viewport to the paper limits `min`..`max`,
 /// framing the whole sheet with a small margin.
-fn fit_sheet_viewport(vp: &mut codec::entities::Viewport, min: (f64, f64), max: (f64, f64)) {
+fn fit_sheet_viewport(vp: &mut document::entities::Viewport, min: (f64, f64), max: (f64, f64)) {
     let height = (max.1 - min.1).abs().max(1.0);
     // Paper-space center is an (x, y) point with z = 0.
-    let center = codec::types::Vector3::new((min.0 + max.0) / 2.0, (min.1 + max.1) / 2.0, 0.0);
+    let center = document::types::Vector3::new((min.0 + max.0) / 2.0, (min.1 + max.1) / 2.0, 0.0);
     vp.center = center;
     vp.width = (max.0 - min.0).abs().max(1.0);
     vp.height = height;
     vp.view_target = center;
-    vp.view_center = codec::types::Vector3::ZERO;
+    vp.view_center = document::types::Vector3::ZERO;
     vp.view_height = height * 1.1;
 }
 
 /// Takes a layout's sheet (overall paper) viewport out of its block (entity
 /// and membership). Viewports onto the model are the user's drawing and stay:
 /// a file may carry them on a layout whose page setup was never filled in.
-pub(crate) fn drop_layout_viewports(document: &mut codec::Document, block: Handle) {
+pub(crate) fn drop_layout_viewports(document: &mut document::Document, block: Handle) {
     if block.is_null() {
         return;
     }
@@ -15764,11 +15764,11 @@ impl Default for Scene {
 #[cfg(test)]
 mod section_tests {
     use super::*;
-    use codec::entities::{
+    use document::entities::{
         EntityCommon, ExtendedEntity, ExtendedEntityData, SectionObjectData, Solid3D,
     };
-    use codec::objects::ClassObjectData;
-    use codec::types::{Color, Vector3};
+    use document::objects::ClassObjectData;
+    use document::types::{Color, Vector3};
 
     fn section(state: i32, depth: f64) -> SectionObjectData {
         let vertices = vec![Vector3::new(5.0, 2.0, 5.0), Vector3::new(5.0, 8.0, 5.0)];
@@ -15832,11 +15832,11 @@ mod section_tests {
     #[test]
     fn instance_transform_pulls_the_section_plane_into_body_space() {
         let body = kernel::brep::make::cuboid([0.0; 3], [10.0; 3]).unwrap();
-        let transform = codec::types::Transform::from_scaling(codec::types::Vector3::new(
+        let transform = document::types::Transform::from_scaling(document::types::Vector3::new(
             2.0, 1.0, 1.0,
         ))
-        .then(&codec::types::Transform::from_translation(
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        .then(&document::types::Transform::from_translation(
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         ));
         let mut data = section(1, 0.0);
         for point in &mut data.vertices {
@@ -15987,8 +15987,8 @@ mod journal_tests {
 
     #[test]
     fn insert_add_and_update_publish_targeted_deltas() {
-        use codec::entities::Insert;
-        use codec::types::Vector3;
+        use document::entities::Insert;
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let before_add = s.geometry_epoch;
@@ -16017,8 +16017,8 @@ mod journal_tests {
 
     #[test]
     fn dependency_categories_invalidate_only_affected_render_handles() {
-        use codec::entities::{Line, MText, Point, Text};
-        use codec::types::Vector3;
+        use document::entities::{Line, MText, Point, Text};
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let line = s.add_entity(EntityType::Line(Line::from_points(
@@ -16058,8 +16058,8 @@ mod journal_tests {
 
     #[test]
     fn object_visibility_uses_entity_deltas() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let hidden = s.add_entity(EntityType::Line(Line::from_points(
@@ -16109,8 +16109,8 @@ mod journal_tests {
     #[test]
     fn the_partition_membership_test_separates_lines_from_curves() {
         use crate::scene::pipeline::wire_arena::feeds_analytical_uploads;
-        use codec::entities::{Circle, Line};
-        use codec::types::Vector3;
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let feeds = |scene: &Scene, handle: Handle| {
@@ -16142,8 +16142,8 @@ mod journal_tests {
     /// Incremental additions preserve existing depths; full rebuilds invalidate them.
     #[test]
     fn adding_an_entity_leaves_existing_draw_depths_alone() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         fn add(scene: &mut Scene, x: f64) -> Handle {
             scene.add_entity(EntityType::Line(Line::from_points(
@@ -16185,8 +16185,8 @@ mod journal_tests {
     /// A folded addition must match the full document-order scan.
     #[test]
     fn folding_one_addition_matches_the_full_scan() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         fn add(scene: &mut Scene, x: f64) -> Handle {
@@ -16237,8 +16237,8 @@ mod journal_tests {
     // equal a from-scratch rebuild after any add / move / erase.
     #[test]
     fn block_member_index_matches_the_full_scan() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         fn line(a: (f64, f64), b: (f64, f64)) -> EntityType {
             EntityType::Line(Line::from_points(
@@ -16291,9 +16291,9 @@ mod journal_tests {
     /// case-insensitive table.
     #[test]
     fn the_layer_memo_respects_case_insensitive_layer_names() {
-        use codec::entities::Line;
-        use codec::tables::layer::Layer;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::tables::layer::Layer;
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let mut hidden = Layer::new("Walls");
@@ -16340,9 +16340,9 @@ mod journal_tests {
 
     #[test]
     fn imported_model_space_hatch_without_layout_object_is_a_layer_target() {
-        use codec::entities::Hatch;
-        use codec::objects::ObjectType;
-        use codec::tables::layer::Layer;
+        use document::entities::Hatch;
+        use document::objects::ObjectType;
+        use document::tables::layer::Layer;
 
         let mut scene = Scene::new();
         scene.document.layers.add_or_replace(Layer::new("Shadows"));
@@ -16382,8 +16382,8 @@ mod journal_tests {
     /// The loader's handed-over draw depths must equal a local rebuild.
     #[test]
     fn the_handed_over_draw_depth_map_matches_a_recompute() {
-        use codec::entities::{Circle, Line};
-        use codec::types::Vector3;
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         scene.add_entity(EntityType::Line(Line::from_points(
@@ -16436,8 +16436,8 @@ mod journal_tests {
 
     #[test]
     fn prepared_open_geometry_keeps_layout_for_the_first_edit_patch() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         fn line(y: f64) -> EntityType {
             EntityType::Line(Line::from_points(
@@ -16482,8 +16482,8 @@ mod journal_tests {
 
     #[test]
     fn entity_index_incremental_matches_full_rebuild() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         fn line(a: (f64, f64), b: (f64, f64)) -> EntityType {
             EntityType::Line(Line::from_points(
@@ -16539,8 +16539,8 @@ mod journal_tests {
     // same draw order) after add / move / erase — and the patch path must run.
     #[test]
     fn resident_set_incremental_matches_full_rebuild() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         fn line(a: (f64, f64), b: (f64, f64)) -> EntityType {
             EntityType::Line(Line::from_points(
@@ -16656,8 +16656,8 @@ mod journal_tests {
     /// draw order, masks and wipeouts have no effect among them.
     #[test]
     fn added_entities_get_separable_draw_depths() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         fn add(scene: &mut Scene, y: f64) -> Handle {
             scene.add_entity(EntityType::Line(Line::from_points(
@@ -16693,8 +16693,8 @@ mod journal_tests {
 
     #[test]
     fn draw_depth_add_and_erase_keep_existing_labels_stable() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         let line = |y: f64| {
             EntityType::Line(Line::from_points(
@@ -16749,8 +16749,8 @@ mod journal_tests {
 
     #[test]
     fn plain_geometry_keeps_insert_hatch_cache_warm() {
-        use codec::entities::{Insert, Line};
-        use codec::types::Vector3;
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let initial = s.insert_hatches_for_click();
@@ -16778,8 +16778,8 @@ mod journal_tests {
 
     #[test]
     fn added_insert_updates_insert_hatches_without_rebuilding_the_others() {
-        use codec::entities::{BoundaryEdge, BoundaryPath, Hatch, Insert, PolylineEdge};
-        use codec::types::{Vector2, Vector3};
+        use document::entities::{BoundaryEdge, BoundaryPath, Hatch, Insert, PolylineEdge};
+        use document::types::{Vector2, Vector3};
 
         let mut hatch = Hatch::new();
         hatch.is_solid = true;
@@ -16827,8 +16827,8 @@ mod journal_tests {
 
     #[test]
     fn patched_mesh_models_match_a_full_rebuild() {
-        use codec::entities::{Insert, PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
-        use codec::types::Vector3;
+        use document::entities::{Insert, PolyfaceFace, PolyfaceMesh, PolyfaceVertex};
+        use document::types::Vector3;
 
         let mut mesh = PolyfaceMesh::new();
         for (x, y) in [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)] {
@@ -16895,8 +16895,8 @@ mod journal_tests {
 
     #[test]
     fn patched_hatch_models_match_a_full_rebuild() {
-        use codec::entities::{BoundaryEdge, BoundaryPath, Hatch, Insert, PolylineEdge};
-        use codec::types::{Vector2, Vector3};
+        use document::entities::{BoundaryEdge, BoundaryPath, Hatch, Insert, PolylineEdge};
+        use document::types::{Vector2, Vector3};
 
         let mut hatch = Hatch::new();
         hatch.is_solid = true;
@@ -16964,8 +16964,8 @@ mod journal_tests {
 
     #[test]
     fn selecting_plain_geometry_keeps_hatch_models_warm() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let line = s.add_entity(EntityType::Line(Line::from_points(
@@ -16983,8 +16983,8 @@ mod journal_tests {
 
     #[test]
     fn plain_line_erase_keeps_unrelated_category_and_text_caches_warm() {
-        use codec::entities::Line;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let line = s.add_entity(EntityType::Line(Line::from_points(
@@ -17051,8 +17051,8 @@ mod journal_tests {
     /// classifier, so this needs no picture on disk.
     #[test]
     fn erasing_resolvable_raster_keeps_text_cache_warm() {
-        use codec::entities::RasterImage;
-        use codec::types::Vector3;
+        use document::entities::RasterImage;
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let image = s.add_entity(EntityType::RasterImage(RasterImage::with_size(
@@ -17100,9 +17100,9 @@ mod journal_tests {
     /// A raster pointing at a path that cannot exist. `resolve_image` memoises
     /// per path for the life of the process, so each test uses its own path and
     /// cannot inherit another's cached answer.
-    fn broken_raster(tag: &str) -> codec::entities::RasterImage {
-        use codec::entities::RasterImage;
-        use codec::types::Vector3;
+    fn broken_raster(tag: &str) -> document::entities::RasterImage {
+        use document::entities::RasterImage;
+        use document::types::Vector3;
 
         RasterImage::with_size(
             &format!("/nonexistent-ocs-test/{tag}/missing-reference.png"),
@@ -17122,10 +17122,10 @@ mod journal_tests {
 #[cfg(test)]
 mod associative_refresh_dedup_tests {
     use super::*;
-    use codec::entities::{
+    use document::entities::{
         CenterLineAssociation, CenterLineSource, CenterLineSourceKind, EntityType, Line,
     };
-    use codec::types::Vector3;
+    use document::types::Vector3;
 
     fn line(y: f64) -> EntityType {
         EntityType::Line(Line::from_points(
@@ -17208,9 +17208,9 @@ mod associative_refresh_dedup_tests {
 #[cfg(test)]
 mod viewport_hidden_handles_tests {
     use super::*;
-    use codec::classes::DxfClass;
-    use codec::entities::{EntityType, Insert, Viewport};
-    use codec::types::Vector3;
+    use document::classes::DxfClass;
+    use document::entities::{EntityType, Insert, Viewport};
+    use document::types::Vector3;
 
     /// The pre-memo implementation, kept literal: one full scan per call.
     fn literal(scene: &Scene, vp: Handle) -> HashSet<Handle> {
@@ -17278,7 +17278,7 @@ mod viewport_hidden_handles_tests {
                 dxf_name: "ACIDBLOCKREFERENCE".to_string(),
                 cpp_class_name: "AcDbBlockRepresentationContext".to_string(),
                 application_name: "ObjectDBX Classes".to_string(),
-                proxy_flags: codec::classes::ProxyFlags(1153),
+                proxy_flags: document::classes::ProxyFlags(1153),
                 instance_count: 0,
                 was_zombie: false,
                 is_an_entity: false,
@@ -17376,8 +17376,8 @@ mod viewport_hidden_handles_tests {
 mod delta_undo_tests {
     use super::*;
     use crate::command::EntityTransform;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
     use glam::DVec3;
 
     fn line(x1: f64, y1: f64, x2: f64, y2: f64) -> EntityType {
@@ -17512,9 +17512,9 @@ mod delta_undo_tests {
 
     #[test]
     fn raster_add_records_only_its_image_definition_object() {
-        use codec::entities::RasterImage;
-        use codec::objects::ObjectType;
-        use codec::types::Vector3;
+        use document::entities::RasterImage;
+        use document::objects::ObjectType;
+        use document::types::Vector3;
 
         let mut scene = Scene::new();
         let image = RasterImage::with_size(
@@ -17548,7 +17548,7 @@ mod delta_undo_tests {
 
     #[test]
     fn grouped_erase_records_group_object_without_poisoning() {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
 
         let mut scene = Scene::new();
         let h1 = scene.add_entity(line(0.0, 0.0, 1.0, 0.0));
@@ -17619,7 +17619,7 @@ mod redraw_tests {
                 height: 1.0,
             },
             camera: Camera::default(),
-            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: document::entities::ViewportRenderMode::Wireframe2D,
             active,
             grid_on: false,
             paper_sheet: false,
@@ -17779,7 +17779,7 @@ mod layout_cache_tests {
         let extra = s.document.allocate_handle();
         s.document
             .objects
-            .insert(extra, ObjectType::XRecord(codec::objects::XRecord::new()));
+            .insert(extra, ObjectType::XRecord(document::objects::XRecord::new()));
         assert_eq!(s.model_space_block_handle(), repointed);
 
         // Layout edits move the layout epoch, so the new target stays seen.
@@ -17797,9 +17797,9 @@ mod layout_cache_tests {
 
     #[test]
     fn a_restricted_build_matches_the_full_build_for_its_handles() {
-        use codec::entities::Line;
-        use codec::tables::layer::Layer;
-        use codec::types::Vector3;
+        use document::entities::Line;
+        use document::tables::layer::Layer;
+        use document::types::Vector3;
 
         let mut s = Scene::new();
         let mut hidden = Layer::new("Walls");
@@ -17855,9 +17855,9 @@ mod layout_cache_tests {
     fn memoized_plain_line_matches_fresh_background() {
         let mut s = Scene::new();
         s.bg_color = [0.1, 0.1, 0.1, 1.0];
-        let handle = s.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        let handle = s.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         )));
         let build = |s: &Scene| {
             s.wires_for_block_culled(
@@ -17896,9 +17896,9 @@ mod layout_cache_tests {
     #[test]
     fn model_extents_reuse_resident_geometry_in_every_layout() {
         let mut s = Scene::new();
-        s.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(1_000_000.0, 2_000_000.0, 30.0),
-            codec::types::Vector3::new(1_000_010.0, 2_000_020.0, 40.0),
+        s.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(1_000_000.0, 2_000_000.0, 30.0),
+            document::types::Vector3::new(1_000_010.0, 2_000_020.0, 40.0),
         )));
         s.document.add_layout("Review").unwrap();
         for layout in ["Model", "Review"] {
@@ -17930,22 +17930,22 @@ mod layout_cache_tests {
 
     #[test]
     fn model_space_extents_mixed_entities_accuracy() {
-        use codec::types::{Vector2, Vector3};
+        use document::types::{Vector2, Vector3};
         let mut s = Scene::new();
         // Line from (0, 0, 10) to (50, 100, 20)
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.start = Vector3::new(0.0, 0.0, 10.0);
         line.end = Vector3::new(50.0, 100.0, 20.0);
         s.add_entity(EntityType::Line(line));
 
         // Circle at (200, 200, 0) with radius 50
-        let mut circle = codec::entities::Circle::new();
+        let mut circle = document::entities::Circle::new();
         circle.center = Vector3::new(200.0, 200.0, 0.0);
         circle.radius = 50.0;
         s.add_entity(EntityType::Circle(circle));
 
         // Arc at (-100, -50, -5) with radius 25, angles 0 to PI
-        let mut arc = codec::entities::Arc::new();
+        let mut arc = document::entities::Arc::new();
         arc.center = Vector3::new(-100.0, -50.0, -5.0);
         arc.radius = 25.0;
         arc.start_angle = 0.0;
@@ -17953,10 +17953,10 @@ mod layout_cache_tests {
         s.add_entity(EntityType::Arc(arc));
 
         // LwPolyline from (300, -200) to (400, -100)
-        let mut pl = codec::entities::LwPolyline::new();
+        let mut pl = document::entities::LwPolyline::new();
         pl.vertices = vec![
-            codec::entities::LwVertex::new(Vector2::new(300.0, -200.0)),
-            codec::entities::LwVertex::new(Vector2::new(400.0, -100.0)),
+            document::entities::LwVertex::new(Vector2::new(300.0, -200.0)),
+            document::entities::LwVertex::new(Vector2::new(400.0, -100.0)),
         ];
         s.add_entity(EntityType::LwPolyline(pl));
 
@@ -17987,7 +17987,7 @@ mod layout_cache_tests {
     #[test]
     fn resident_wires_are_zoom_independent_and_gpu_analytical() {
         let mut s = Scene::new();
-        let mut circle = codec::entities::Circle::default();
+        let mut circle = document::entities::Circle::default();
         circle.radius = 100.0;
         let handle = s.add_entity(EntityType::Circle(circle));
 
@@ -18025,31 +18025,31 @@ mod layout_cache_tests {
     fn block_circles_and_arcs_extract_as_analytical_gpu_instances() {
         let mut s = Scene::new();
         // Create initial entities
-        let mut circle = codec::entities::Circle::default();
+        let mut circle = document::entities::Circle::default();
         circle.radius = 50.0;
         let c_h = s.add_entity(EntityType::Circle(circle));
 
-        let mut arc = codec::entities::Arc::default();
+        let mut arc = document::entities::Arc::default();
         arc.radius = 25.0;
         arc.start_angle = 0.0;
         arc.end_angle = std::f64::consts::PI;
         let a_h = s.add_entity(EntityType::Arc(arc));
 
-        let line = codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(100.0, 100.0, 0.0),
+        let line = document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(100.0, 100.0, 0.0),
         );
         let l_h = s.add_entity(EntityType::Line(line));
 
         // Create block and place insert at (200, 300, 0)
-        let xform = codec::types::Transform::from_translation(codec::types::Vector3::new(
+        let xform = document::types::Transform::from_translation(document::types::Vector3::new(
             200.0, 300.0, 0.0,
         ));
         let _ = s
             .create_block_from_entities(
                 &[c_h, a_h, l_h],
                 "TEST_ANALYTICAL_BLOCK",
-                &codec::types::Transform::identity(),
+                &document::types::Transform::identity(),
                 &xform,
             )
             .unwrap();
@@ -18069,17 +18069,17 @@ mod layout_cache_tests {
     #[test]
     fn single_bulge_polyline_extracts_as_analytical_gpu_arc() {
         let mut s = Scene::new();
-        let mut pline = codec::entities::LwPolyline::new();
+        let mut pline = document::entities::LwPolyline::new();
         pline.vertices = vec![
-            codec::entities::LwVertex {
-                location: codec::types::Vector2::new(0.0, 0.0),
+            document::entities::LwVertex {
+                location: document::types::Vector2::new(0.0, 0.0),
                 bulge: 1.0, // semicircle
                 start_width: 0.0,
                 end_width: 0.0,
                 vertex_id: 0,
             },
-            codec::entities::LwVertex {
-                location: codec::types::Vector2::new(100.0, 0.0),
+            document::entities::LwVertex {
+                location: document::types::Vector2::new(100.0, 0.0),
                 bulge: 0.0,
                 start_width: 0.0,
                 end_width: 0.0,
@@ -18102,19 +18102,19 @@ mod layout_cache_tests {
     #[test]
     fn multi_bulge_polyline_extracts_as_analytical_gpu_arcs() {
         let mut s = Scene::new();
-        let mut pline = codec::entities::LwPolyline::new();
+        let mut pline = document::entities::LwPolyline::new();
         // A circle represented as a closed 2-vertex polyline with two semicircle bulges (standard CAD polyline circle)
         pline.is_closed = true;
         pline.vertices = vec![
-            codec::entities::LwVertex {
-                location: codec::types::Vector2::new(0.0, 0.0),
+            document::entities::LwVertex {
+                location: document::types::Vector2::new(0.0, 0.0),
                 bulge: 1.0,
                 start_width: 0.0,
                 end_width: 0.0,
                 vertex_id: 0,
             },
-            codec::entities::LwVertex {
-                location: codec::types::Vector2::new(100.0, 0.0),
+            document::entities::LwVertex {
+                location: document::types::Vector2::new(100.0, 0.0),
                 bulge: 1.0,
                 start_width: 0.0,
                 end_width: 0.0,
@@ -18141,8 +18141,8 @@ mod layout_cache_tests {
 
     #[test]
     fn mixed_bulge_polyline_splits_into_analytical_arcs_and_straight_lines() {
-        use codec::entities::{LwPolyline, LwVertex};
-        use codec::types::Vector2;
+        use document::entities::{LwPolyline, LwVertex};
+        use document::types::Vector2;
 
         let mut scene = Scene::new();
         let mut pline = LwPolyline::new();
@@ -18264,7 +18264,7 @@ mod layout_cache_tests {
         scene
             .document
             .ucss
-            .add_or_replace(codec::tables::Ucs::new("TEST_CACHED_UCS"));
+            .add_or_replace(document::tables::Ucs::new("TEST_CACHED_UCS"));
         scene.bump_ucs_epoch();
         let after = scene.cached_ucs_names();
         assert!(
@@ -18284,12 +18284,12 @@ mod layout_cache_tests {
         scene.add_layout("P1").unwrap();
         scene.current_layout = "P1".to_string();
         assert!(scene.add_scale("1:50", 1.0, 50.0));
-        let mut vp = codec::entities::Viewport::new();
+        let mut vp = document::entities::Viewport::new();
         vp.width = 100.0;
         vp.height = 100.0;
         let handle = scene
             .document
-            .add_entity_to_layout(codec::EntityType::Viewport(Box::new(vp)), "P1")
+            .add_entity_to_layout(document::EntityType::Viewport(Box::new(vp)), "P1")
             .unwrap();
         assert!(scene.set_viewport_scale_named_for(handle, "1:50").is_some());
         assert!(scene.active_viewport.is_none());
@@ -18315,15 +18315,15 @@ mod layout_cache_tests {
         scene.current_layout = "P1".to_string();
         assert!(scene.add_scale("1:1", 1.0, 1.0));
         assert!(scene.add_scale("1:100 m", 1000.0, 100.0));
-        let mut vp = codec::entities::Viewport::new();
+        let mut vp = document::entities::Viewport::new();
         vp.width = 100.0;
         vp.height = 100.0;
         let handle = scene
             .document
-            .add_entity_to_layout(codec::EntityType::Viewport(Box::new(vp)), "P1")
+            .add_entity_to_layout(document::EntityType::Viewport(Box::new(vp)), "P1")
             .unwrap();
         assert!(scene.set_viewport_scale_named_for(handle, "1:100 m").is_some());
-        let Some(codec::EntityType::Viewport(vp)) = scene.document.get_entity(handle) else {
+        let Some(document::EntityType::Viewport(vp)) = scene.document.get_entity(handle) else {
             panic!("viewport");
         };
         assert!((vp.custom_scale - 10.0).abs() < 1e-9, "{}", vp.custom_scale);
@@ -18348,19 +18348,19 @@ mod layout_cache_tests {
         scene.current_layout = "P1".to_string();
         assert!(scene.add_scale("1:50", 1.0, 50.0));
         let viewport = |scene: &mut Scene| {
-            let mut vp = codec::entities::Viewport::new();
+            let mut vp = document::entities::Viewport::new();
             vp.width = 100.0;
             vp.height = 100.0;
             scene
                 .document
-                .add_entity_to_layout(codec::EntityType::Viewport(Box::new(vp)), "P1")
+                .add_entity_to_layout(document::EntityType::Viewport(Box::new(vp)), "P1")
                 .unwrap()
         };
         let only = viewport(&mut scene);
         scene.bump_geometry();
         assert_eq!(scene.scale_target_viewport(), Some(only));
         assert!(scene.set_viewport_scale_named("1:50").is_some());
-        let Some(codec::EntityType::Viewport(vp)) = scene.document.get_entity(only) else {
+        let Some(document::EntityType::Viewport(vp)) = scene.document.get_entity(only) else {
             panic!("viewport");
         };
         assert!((vp.custom_scale - 0.02).abs() < 1e-9);
@@ -18387,9 +18387,9 @@ mod layout_cache_tests {
 #[cfg(test)]
 mod update_entities_batch_tests {
     use super::Scene;
-    use codec::entities::{Block, BlockEnd, Line};
-    use codec::types::Vector3;
-    use codec::{EntityType, Handle};
+    use document::entities::{Block, BlockEnd, Line};
+    use document::types::Vector3;
+    use document::{EntityType, Handle};
 
     /// Fresh scene holding two block sentinels (Block + BlockEnd) and one plain
     /// line; returns their handles in that order.
@@ -18519,7 +18519,7 @@ pub(crate) fn is_point_cloud(entity: &EntityType) -> bool {
     matches!(
         entity,
         EntityType::Extended(extended)
-            if matches!(extended.data, codec::entities::ExtendedEntityData::PointCloudEx(_))
+            if matches!(extended.data, document::entities::ExtendedEntityData::PointCloudEx(_))
     )
 }
 
@@ -18528,16 +18528,16 @@ pub(crate) fn is_locked_point_cloud(entity: &EntityType) -> bool {
     matches!(
         entity,
         EntityType::Extended(extended)
-            if matches!(&extended.data, codec::entities::ExtendedEntityData::PointCloudEx(data) if data.locked)
+            if matches!(&extended.data, document::entities::ExtendedEntityData::PointCloudEx(data) if data.locked)
     )
 }
 
 #[cfg(test)]
 mod world_box_handle_tests {
     use super::Scene;
-    use codec::entities::{Insert, Line};
-    use codec::types::Vector3;
-    use codec::EntityType;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
 
     fn line(a: [f64; 2], b: [f64; 2]) -> EntityType {
         EntityType::Line(Line::from_points(

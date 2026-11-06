@@ -4,7 +4,7 @@ use crate::scene::{
     block_alignment::{Alignment, Targets},
     model::object::{GripDef, GripShape},
 };
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use iced::Task;
 
@@ -77,7 +77,7 @@ impl OpenCADStudio {
         let result = self.aligned_reference(i, document, &alignment, cursor, context, flipped);
         match result {
             Ok(Some(entity)) => {
-                self.push_undo_snapshot(i, super::document::HistoryLabel::Message("Align block reference"));
+                self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Align block reference"));
                 let mut staged = self.tabs[i].scene.document.clone();
                 *staged.get_entity_mut(insert).unwrap() = entity;
                 self.apply_action_document(i, staged);
@@ -105,7 +105,7 @@ impl OpenCADStudio {
         cursor: DVec3,
         context: Option<crate::command::PointPickContext>,
         flipped: bool,
-    ) -> Result<Option<codec::EntityType>, &'static str> {
+    ) -> Result<Option<document::EntityType>, &'static str> {
         let tab = &self.tabs[i];
         let insert = expected.reference.common.handle;
         if tab.id != document || tab.selected_handle != Some(insert) {

@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use codec::Document;
+use document::Document;
 
 /// The community folder's GitHub contents API (lists name + download URL).
 #[cfg(not(target_arch = "wasm32"))]
@@ -367,7 +367,7 @@ mod tests {
         std::fs::write(dir.join("exists.shx"), b"stub").unwrap();
         let mut doc = Document::new();
         let mk = |name: &str, file: &str| {
-            let mut style = codec::TextStyle::new(name);
+            let mut style = document::TextStyle::new(name);
             style.font_file = file.into();
             style
         };

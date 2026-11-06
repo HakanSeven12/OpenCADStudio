@@ -1,7 +1,7 @@
-use codec::entities::{Insert, MText};
-use codec::tables::{BlockRecord, TextStyle};
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::entities::{Insert, MText};
+use document::tables::{BlockRecord, TextStyle};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 use OpenCADStudio::scene::cache::block_cache::{expand_insert, BlockCache};
 use OpenCADStudio::scene::view::render::InheritStyle;
 use OpenCADStudio::scene::WireModel;

@@ -5,16 +5,16 @@ use super::{Message, ModalKind, OpenCADStudio};
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::insert::insert_block::InsertBlockCommand;
 use crate::ui::window::insert_attr_dialog::InsertAttrMsg;
-use codec::entities::AttributeDefinition;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::AttributeDefinition;
+use document::types::Vector3;
+use document::EntityType;
 
 pub(super) fn askable(tag: &str, prompt: &str, default: &str) -> AttributeDefinition {
     AttributeDefinition::new(tag.to_string(), prompt.to_string(), default.to_string())
 }
 
 fn member_line() -> EntityType {
-    EntityType::Line(codec::entities::Line::from_points(
+    EntityType::Line(document::entities::Line::from_points(
         Vector3::ZERO,
         Vector3::new(20.0, 0.0, 0.0),
     ))

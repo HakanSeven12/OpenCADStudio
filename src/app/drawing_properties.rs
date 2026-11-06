@@ -3,7 +3,7 @@
 
 use super::{Message, ModalKind, OpenCADStudio};
 use crate::ui::window::drawing_properties::{DwgPropsMsg, State, SummaryField, Tab};
-use codec::document::SummaryInfo;
+use document::document::SummaryInfo;
 use iced::Task;
 
 /// Why a custom property table cannot be stored.
@@ -37,7 +37,7 @@ fn format_julian(jd: f64) -> String {
     }
     let locale = crate::entities::field::os_date_locale();
     let picture = format!("{}  HH:mm:ss", locale.long_date);
-    codec::fields::format_dt_in(codec::fields::julian_parts(jd), &picture, &locale)
+    document::fields::format_dt_in(document::fields::julian_parts(jd), &picture, &locale)
 }
 
 /// Editing time kept in days, shown as `D days H:MM:SS`.
@@ -60,7 +60,7 @@ fn format_editing_time(days: f64) -> String {
 /// The summary as the dialog shows it. The hyperlink base is one drawing
 /// value kept in the summary and in the header (HYPERLINKBASE sets both); the
 /// DXF writer prefers the summary and falls back to the header, so do the same.
-fn summary_as_shown(doc: &codec::Document) -> SummaryInfo {
+fn summary_as_shown(doc: &document::Document) -> SummaryInfo {
     let mut info = doc.summary_info.clone();
     if info.hyperlink_base.is_empty() {
         info.hyperlink_base = doc.header.hyperlink_base.clone();
@@ -315,7 +315,7 @@ mod tests {
     /// the dialog's OK has stored it.
     #[test]
     fn ok_updates_the_text_showing_a_custom_property_field() {
-        use codec::entities::{EntityType, MText};
+        use document::entities::{EntityType, MText};
         let mut app = app_with_summary();
         let i = app.active_tab;
         let document = &mut app.tabs[i].scene.document;
@@ -340,7 +340,7 @@ mod tests {
     /// S2: undo puts back the summary and the text showing a field of it.
     #[test]
     fn undo_restores_summary_and_field_text() {
-        use codec::entities::{EntityType, MText};
+        use document::entities::{EntityType, MText};
         let mut app = app_with_summary();
         let i = app.active_tab;
         app.tabs[i].scene.document.summary_info.custom_properties[0].1 = "A".into();

@@ -779,7 +779,7 @@ impl Ribbon {
             QatBuiltin::Color => {
                 // ByLayer shows the current layer's colour, as on the ribbon.
                 let swatch = super::layer_color(&self.layer_infos, &self.active_layer)
-                    .filter(|_| self.active_color == codec::types::Color::ByLayer)
+                    .filter(|_| self.active_color == document::types::Color::ByLayer)
                     .unwrap_or_else(|| {
                         crate::ui::properties::acad_color_display(self.active_color).0
                     });

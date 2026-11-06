@@ -2,7 +2,7 @@
 use super::*;
 use crate::scene::block_authoring::{edit, metadata};
 use crate::scene::block_grips::runtime;
-use codec::{
+use document::{
     objects::{DynamicBlockData, ObjectType},
     Document,
 };

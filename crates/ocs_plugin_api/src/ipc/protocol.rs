@@ -25,8 +25,8 @@ use crate::manifest::ApiVersion;
 use crate::ribbon::owned::{OwnedEntityClasses, OwnedPluginManifest, OwnedRibbonGroup};
 
 pub use crate::host::PreviewWire;
-pub use codec::xdata::{ExtendedDataRecord, XDataValue};
-pub use codec::{Document, EntityType, Handle};
+pub use document::xdata::{ExtendedDataRecord, XDataValue};
+pub use document::{Document, EntityType, Handle};
 
 /// Events the host forwards to an active plugin `InteractiveCommand`.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,7 +1,7 @@
 //! Dock drawing: the edges (icon strip and shown group), floating pallets,
 //! the + menu and the drag preview.
 
-use crate::app::document::DocumentTab;
+use crate::app::tab_document::DocumentTab;
 use crate::app::{Message, OpenCADStudio};
 use crate::t;
 use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_FLOAT_BAR_W};
@@ -514,7 +514,7 @@ impl OpenCADStudio {
                             session.br_handle,
                         ),
                     ),
-                    None => (codec::Handle::NULL, Vec::new()),
+                    None => (document::Handle::NULL, Vec::new()),
                 };
                 crate::ui::window::parameters_manager::view(
                     &rows,

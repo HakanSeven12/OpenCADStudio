@@ -5,7 +5,7 @@
 use std::fmt::Write;
 
 use crate::scene::{Scene, WireModel};
-use codec::Handle;
+use document::Handle;
 
 fn point(wire: &WireModel, index: usize) -> [f64; 2] {
     let high = wire.points[index];

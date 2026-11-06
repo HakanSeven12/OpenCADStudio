@@ -1,6 +1,6 @@
 // Kernel B-rep solid modelling and exact ACIS persistence.
 
-use codec::{
+use document::{
     entities::{AcisData, EntityCommon, Region, Solid3D, Surface, SurfaceData, SurfaceKind, Wire},
     objects::{SolidHistoryBoolean, SolidHistoryOperation},
     EntityType, Handle,
@@ -439,7 +439,7 @@ impl super::OpenCADStudio {
                 .push_error(crate::t!("The surface could not be encoded as ACIS.").as_ref());
             return Handle::NULL;
         };
-        inner.acis_data = codec::entities::AcisData::from_sat(&document.to_sat_string());
+        inner.acis_data = document::entities::AcisData::from_sat(&document.to_sat_string());
         let handle = if apply_creation_style {
             self.commit_entity_handle(entity)
         } else {
@@ -449,7 +449,7 @@ impl super::OpenCADStudio {
             return Handle::NULL;
         };
         let require_complete = self.tabs[i].scene.document.get_entity(handle).is_some_and(|entity|
-            matches!(entity, EntityType::Surface(value) if value.kind == codec::entities::SurfaceKind::Lofted));
+            matches!(entity, EntityType::Surface(value) if value.kind == document::entities::SurfaceKind::Lofted));
         if !self.tabs[i].scene.register_solid_model(handle, surface)
             || (require_complete
                 && self.tabs[i]
@@ -2351,8 +2351,8 @@ impl super::OpenCADStudio {
     /// (X/Y/Z = `axis` at `value`) cuts the one selected solid, as Line
     /// entities.
     pub(super) fn solid_section(&mut self, axis: usize, value: f64) -> Task<Message> {
-        use codec::types::Vector3;
-        use codec::Line;
+        use document::types::Vector3;
+        use document::Line;
 
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
@@ -2455,8 +2455,8 @@ impl super::OpenCADStudio {
     /// Bézier formula (the curve provably interpolates each vertex), with a
     /// clamped piecewise-Bézier knot vector the spline renderer reads directly.
     pub(super) fn fit_spline(&mut self) -> Task<Message> {
-        use codec::entities::Spline;
-        use codec::types::Vector3;
+        use document::entities::Spline;
+        use document::types::Vector3;
 
         let i = self.active_tab;
         let found: Option<(Handle, Vec<[f64; 3]>)> = self.tabs[i]
@@ -2535,8 +2535,8 @@ impl super::OpenCADStudio {
     /// Line entities, giving a flattened 2D shot of the model. Reuses the cached
     /// solid's edge wires (the same source SECTION uses).
     pub(super) fn solid_flatshot(&mut self) -> Task<Message> {
-        use codec::types::Vector3;
-        use codec::Line;
+        use document::types::Vector3;
+        use document::Line;
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.is_empty() {
@@ -2569,8 +2569,8 @@ impl super::OpenCADStudio {
     /// CONVTOSURFACE — convert the selected solid(s) into Surface entities,
     /// carrying the solid's edge wires (reuses the cached B-rep's edge wires).
     pub(super) fn solid_convtosurface(&mut self) -> Task<Message> {
-        use codec::entities::{Surface, SurfaceKind, Wire as AWire};
-        use codec::types::Vector3;
+        use document::entities::{Surface, SurfaceKind, Wire as AWire};
+        use document::types::Vector3;
         let i = self.active_tab;
         let handles = self.selected_solid_handles();
         if handles.is_empty() {

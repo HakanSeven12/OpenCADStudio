@@ -8,7 +8,7 @@
 //     Polyline2D  → Lines + Arcs
 //     Polyline3D  → Lines
 //     Polyline    → Lines
-//     Insert      → constituent entities (via opencadcodec explode_from_document)
+//     Insert      → constituent entities (via document explode_from_document)
 //     MLine       → Lines (one run per style element, as drawn)
 //     Dimension   → Lines (extension + dimension + arrows) + Text
 //     MText       → Text lines
@@ -19,15 +19,15 @@
 
 use super::geom::normalize_angle as norm_angle;
 
-use codec::entities::EntityCommon;
-use codec::entities::{
+use document::entities::EntityCommon;
+use document::entities::{
     Arc as ArcEnt, Block, BlockEnd, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline,
     MLine,
 };
-use codec::entities::{Polyline, Polyline2D};
-use codec::tables::BlockRecord;
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::entities::{Polyline, Polyline2D};
+use document::tables::BlockRecord;
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::entities::curve::lwpolyline_world_xy;
@@ -86,7 +86,7 @@ fn explode_entity_in_context(
     match entity {
         EntityType::Line(line) => {
             let Some(association) =
-                codec::entities::CenterMarkAssociation::read(&line.common.extended_data)
+                document::entities::CenterMarkAssociation::read(&line.common.extended_data)
             else {
                 return vec![];
             };
@@ -95,7 +95,7 @@ fn explode_entity_in_context(
                 .map(|segment| {
                     let mut common = line.common.clone();
                     common.handle = Handle::NULL;
-                    codec::entities::CenterMarkAssociation::remove(&mut common.extended_data);
+                    document::entities::CenterMarkAssociation::remove(&mut common.extended_data);
                     EntityType::Line(LineEnt {
                         common,
                         start: Vector3::new(segment[0].x, segment[0].y, segment[0].z),
@@ -204,7 +204,7 @@ pub fn apply_explode_replacements(
     exploded
 }
 
-fn explode_leader(leader: &codec::entities::Leader, doc: &Document) -> Vec<EntityType> {
+fn explode_leader(leader: &document::entities::Leader, doc: &Document) -> Vec<EntityType> {
     use crate::entities::{dim_override as dov, leader::LeaderTess};
     let style = doc.dim_styles.iter().find(|s| {
         s.name.eq_ignore_ascii_case(&leader.dimension_style)
@@ -226,7 +226,7 @@ fn explode_leader(leader: &codec::entities::Leader, doc: &Document) -> Vec<Entit
 }
 
 fn explode_multileader(
-    ml: &codec::entities::MultiLeader,
+    ml: &document::entities::MultiLeader,
     doc: &Document,
     anno_scale: f32,
 ) -> Vec<EntityType> {
@@ -234,13 +234,13 @@ fn explode_multileader(
         active_vertical_attachment, block_content_insert, mleader_v_anchor, MultiLeaderTess,
     };
     use crate::entities::text_support::MTextVAnchor;
-    use codec::entities::{
+    use document::entities::{
         mtext::{AttachmentPoint, DrawingDirection},
         multileader::TextAttachmentPointType,
         LeaderContentType,
     };
     // Match color_or_inherit: ByLayer/ByBlock inherit the host's colour.
-    let common_for = |color: codec::types::Color| {
+    let common_for = |color: document::types::Color| {
         let mut common = dim_common(&ml.common, 0, -1);
         common.owner_handle = Handle::NULL;
         common.reactors.clear();
@@ -259,7 +259,7 @@ fn explode_multileader(
         doc,
         ml.line_type_handle.unwrap_or(Handle::NULL),
     );
-    if let codec::types::LineWeight::Value(v) = ml.line_weight {
+    if let document::types::LineWeight::Value(v) = ml.line_weight {
         if v >= 0 {
             common.line_weight = ml.line_weight;
         }
@@ -269,7 +269,7 @@ fn explode_multileader(
     let mut geometry = ml.clone();
     geometry.content_type = LeaderContentType::None;
     geometry.context.arrowhead_size = 0.0;
-    let tessellate = |geometry: &codec::entities::MultiLeader| {
+    let tessellate = |geometry: &document::entities::MultiLeader| {
         geometry.tessellate(
             doc,
             Handle::NULL,
@@ -345,7 +345,7 @@ fn explode_multileader(
         1.0
     };
     if ml.content_type == LeaderContentType::MText && !ctx.text_string.is_empty() {
-        let mut text = codec::entities::MText::with_value(&ctx.text_string, ctx.text_location);
+        let mut text = document::entities::MText::with_value(&ctx.text_string, ctx.text_location);
         if annotative {
             if let Some(root) = ctx.leader_roots.first() {
                 text.insertion_point.x = root.connection_point.x
@@ -380,7 +380,7 @@ fn explode_multileader(
         // Level horizontal contexts store the box's top corner; the renderer
         // anchors those at the landing. Rotated/vertical text uses the stored anchor.
         let row = if ml.text_attachment_direction
-            == codec::entities::TextAttachmentDirectionType::Horizontal
+            == document::entities::TextAttachmentDirectionType::Horizontal
             && text.rotation.abs() < 1e-3
             && !ctx.leader_roots.is_empty()
         {
@@ -417,8 +417,8 @@ fn explode_multileader(
         text.line_spacing_factor = ctx.line_spacing_factor;
         text.line_spacing_style = ctx.line_spacing_style;
         text.drawing_direction = match ctx.text_flow_direction {
-            codec::entities::FlowDirectionType::Vertical => DrawingDirection::TopToBottom,
-            codec::entities::FlowDirectionType::ByStyle => DrawingDirection::ByStyle,
+            document::entities::FlowDirectionType::Vertical => DrawingDirection::TopToBottom,
+            document::entities::FlowDirectionType::ByStyle => DrawingDirection::ByStyle,
             _ => DrawingDirection::LeftToRight,
         };
         // The frame explodes into its own polyline: the text box grown by the landing gap.
@@ -467,8 +467,8 @@ fn explode_multileader(
                     })
                     .map(|a| a.text.clone());
                 let mut attribute =
-                    codec::entities::AttributeEntity::from_definition(definition, value);
-                codec::Entity::apply_transform(&mut attribute, &transform);
+                    document::entities::AttributeEntity::from_definition(definition, value);
+                document::Entity::apply_transform(&mut attribute, &transform);
                 insert.attributes.push(attribute);
             }
             pieces.push(EntityType::Insert(insert));
@@ -479,7 +479,7 @@ fn explode_multileader(
 
 /// Frame `gap` outside an MTEXT's laid-out text: five vertices, last = first.
 fn text_frame_polyline(
-    text: &codec::entities::MText,
+    text: &document::entities::MText,
     doc: &Document,
     h_anchor: f32,
     v_anchor: crate::entities::text_support::MTextVAnchor,
@@ -487,7 +487,7 @@ fn text_frame_polyline(
     common: EntityCommon,
 ) -> Option<EntityType> {
     use crate::entities::text_support::{layout_mtext, resolve_text_style, MTextRenderOpts};
-    use codec::entities::{mtext::DrawingDirection, LineSpacingStyle, LwVertex};
+    use document::entities::{mtext::DrawingDirection, LineSpacingStyle, LwVertex};
     let style = resolve_text_style(&text.style, doc);
     let layout = layout_mtext(&MTextRenderOpts {
         layer_color: None,
@@ -514,7 +514,7 @@ fn text_frame_polyline(
     let (sin, cos) = text.rotation.sin_cos();
     let corner = |x: f32, y: f32| {
         let (x, y) = (x as f64, y as f64);
-        LwVertex::new(codec::types::Vector2::new(
+        LwVertex::new(document::types::Vector2::new(
             text.insertion_point.x + x * cos - y * sin,
             text.insertion_point.y + x * sin + y * cos,
         ))
@@ -571,7 +571,7 @@ fn explode_leader_wire(
         }
     }
     for tri in fill.chunks_exact(3) {
-        let mut solid = codec::entities::Solid::triangle(tri[0], tri[1], tri[2]);
+        let mut solid = document::entities::Solid::triangle(tri[0], tri[1], tri[2]);
         solid.common = common.clone();
         pieces.push(EntityType::Solid(solid));
     }
@@ -601,7 +601,7 @@ fn explode_polyline(p: &Polyline) -> Vec<EntityType> {
     result
 }
 
-fn explode_polyline3d(p: &codec::entities::Polyline3D) -> Vec<EntityType> {
+fn explode_polyline3d(p: &document::entities::Polyline3D) -> Vec<EntityType> {
     let n = p.vertices.len();
     if n < 2 {
         return vec![];
@@ -769,7 +769,7 @@ fn bulge_to_arc(
 ) -> Option<EntityType> {
     let ba = crate::entities::common::BulgeArc::from_bulge(p0, p1, bulge)?;
 
-    // opencadcodec Arc is always CCW from start_angle to end_angle. Negative
+    // document Arc is always CCW from start_angle to end_angle. Negative
     // bulge means the polyline goes p0→p1 the CW way around the centre,
     // which is the same circular arc traversed p1→p0 the CCW way — so
     // swap endpoints when bulge < 0.
@@ -799,7 +799,7 @@ fn bulge_to_arc(
 /// `mline_lines` the renderer uses, so they keep the style's elements and
 /// offsets, the justification, MLEDIT breaks, joints and end caps (#2538).
 fn explode_mline(ml: &MLine, doc: &Document) -> Vec<EntityType> {
-    use codec::types::Color;
+    use document::types::Color;
 
     let mut result = Vec::new();
     for element in crate::entities::mline::mline_lines(ml, doc) {
@@ -847,7 +847,7 @@ fn explode_mline(ml: &MLine, doc: &Document) -> Vec<EntityType> {
 
 // ── Region explode ─────────────────────────────────────────────────────────
 
-fn region_piece_common(region: &codec::entities::Region) -> EntityCommon {
+fn region_piece_common(region: &document::entities::Region) -> EntityCommon {
     let mut common = region.common.clone();
     common.handle = Handle::NULL;
     common.owner_handle = Handle::NULL;
@@ -856,14 +856,14 @@ fn region_piece_common(region: &codec::entities::Region) -> EntityCommon {
     common
 }
 
-fn explode_region(region: &codec::entities::Region) -> Vec<EntityType> {
+fn explode_region(region: &document::entities::Region) -> Vec<EntityType> {
     let common = region_piece_common(region);
     let mut out = Vec::new();
 
     if region.acis_data.has_data() {
         let sat = region.parse_sat().or_else(|| {
             (region.acis_data.is_binary && !region.acis_data.sab_data.is_empty())
-                .then(|| codec::entities::acis::SabReader::read(&region.acis_data.sab_data).ok())
+                .then(|| document::entities::acis::SabReader::read(&region.acis_data.sab_data).ok())
                 .flatten()
         });
         if let Some(sat) = sat {
@@ -1095,7 +1095,7 @@ fn append_region_loops(
             ellipse.centre[0] + ellipse.major_axis[0] * ellipse.major_radius,
             ellipse.centre[1] + ellipse.major_axis[1] * ellipse.major_radius,
         ]);
-        let mut ent = codec::entities::Ellipse::new();
+        let mut ent = document::entities::Ellipse::new();
         ent.common = common.clone();
         ent.center = Vector3::new(wcs_c[0], wcs_c[1], wcs_c[2]);
         ent.major_axis = Vector3::new(tip[0] - wcs_c[0], tip[1] - wcs_c[1], tip[2] - wcs_c[2]);
@@ -1258,7 +1258,7 @@ fn append_region_loops(
                     }
                 }
                 Curve::Nurbs(nurbs) => {
-                    let mut spline = codec::entities::Spline::new();
+                    let mut spline = document::entities::Spline::new();
                     spline.common = common.clone();
                     spline.degree = nurbs.degree() as i32;
                     spline.knots = nurbs.knots().to_vec();
@@ -1289,7 +1289,7 @@ fn append_region_loops(
 
 /// Convert a Dimension entity into Lines (geometry) + Text (label).
 /// A NULL-handle line segment for a baked dimension block.
-fn dim_seg(a: Vector3, b: Vector3, common: &codec::entities::EntityCommon) -> EntityType {
+fn dim_seg(a: Vector3, b: Vector3, common: &document::entities::EntityCommon) -> EntityType {
     let mut c = common.clone();
     c.handle = Handle::NULL;
     EntityType::Line(LineEnt {
@@ -1302,8 +1302,8 @@ fn dim_seg(a: Vector3, b: Vector3, common: &codec::entities::EntityCommon) -> En
 
 fn dim_geom_entities(
     geometry: &crate::scene::convert::tessellate::DimGeom,
-    ext_common: &codec::entities::EntityCommon,
-    dim_common: &codec::entities::EntityCommon,
+    ext_common: &document::entities::EntityCommon,
+    dim_common: &document::entities::EntityCommon,
 ) -> Vec<EntityType> {
     let mut entities = Vec::new();
     let origin = geometry.origin;
@@ -1326,7 +1326,7 @@ fn dim_geom_entities(
         }
     }
     for triangle in geometry.arrow_fill.chunks_exact(3) {
-        let mut solid = codec::entities::Solid::triangle(
+        let mut solid = document::entities::Solid::triangle(
             point(triangle[0]),
             point(triangle[1]),
             point(triangle[2]),
@@ -1348,7 +1348,7 @@ fn dim_terminator(
     dx: f64,
     dy: f64,
     arrow: &crate::scene::convert::tessellate::ArrowKind,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
 ) -> Vec<EntityType> {
     use crate::scene::convert::tessellate::ArrowKind as A;
     let (dx, dy) = norm2(dx, dy, 1.0, 0.0);
@@ -1363,7 +1363,7 @@ fn dim_terminator(
     };
     let mut out: Vec<EntityType> = Vec::new();
     let tri = |a: Vector3, b: Vector3, c: Vector3, out: &mut Vec<EntityType>| {
-        let mut s = codec::entities::Solid::triangle(a, b, c);
+        let mut s = document::entities::Solid::triangle(a, b, c);
         s.common = common.clone();
         s.common.handle = Handle::NULL;
         out.push(EntityType::Solid(s));
@@ -1488,7 +1488,7 @@ fn terminator_circle(
     center: Vector3,
     r: f64,
     filled: bool,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
     out: &mut Vec<EntityType>,
 ) {
     const N: usize = 16;
@@ -1503,7 +1503,7 @@ fn terminator_circle(
     }
     if filled {
         for i in 0..N {
-            let mut s = codec::entities::Solid::triangle(center, ring[i], ring[i + 1]);
+            let mut s = document::entities::Solid::triangle(center, ring[i], ring[i + 1]);
             s.common = common.clone();
             s.common.handle = Handle::NULL;
             out.push(EntityType::Solid(s));
@@ -1516,7 +1516,7 @@ fn dim_center_mark(
     center: Vector3,
     dimcen: f64,
     radius: f64,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
 ) -> Vec<EntityType> {
     let mag = dimcen.abs();
     if mag < 1e-9 {
@@ -1571,7 +1571,7 @@ fn dim_arc_segs(
     radius: f64,
     a1: f64,
     a2: f64,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
 ) -> Vec<EntityType> {
     use std::f64::consts::PI;
     let mut sweep = a2 - a1;
@@ -1591,7 +1591,7 @@ fn dim_arc_segs_with_sweep(
     radius: f64,
     start: f64,
     sweep: f64,
-    common: &codec::entities::EntityCommon,
+    common: &document::entities::EntityCommon,
 ) -> Vec<EntityType> {
     use std::f64::consts::PI;
     let steps = 12usize.max((sweep.abs() / (PI / 36.0)).ceil() as usize);
@@ -1735,10 +1735,10 @@ fn dim_metrics(dim: &Dimension, doc: &Document) -> DimMetrics {
 /// so the block inherits it; a specific ACI overrides. DIMLW* < 0 (ByBlock /
 /// ByLayer) keeps the dimension's lineweight.
 fn dim_common(
-    base: &codec::entities::EntityCommon,
+    base: &document::entities::EntityCommon,
     clr: i16,
     lw: i16,
-) -> codec::entities::EntityCommon {
+) -> document::entities::EntityCommon {
     let mut c = base.clone();
     c.handle = Handle::NULL;
     // A baked child must not claim its dimension's extension dictionary:
@@ -1746,21 +1746,21 @@ fn dim_common(
     // validation with "Extension dictionary <H> Cannot access".
     c.xdictionary_handle = None;
     if clr != 0 && clr != 256 {
-        c.color = codec::types::Color::from_index(clr);
+        c.color = document::types::Color::from_index(clr);
         c.color_name = None;
         c.color_book_handle = None;
     }
     if lw >= 0 {
-        c.line_weight = codec::types::LineWeight::from_value(lw);
+        c.line_weight = document::types::LineWeight::from_value(lw);
     }
     c
 }
 
 fn with_dim_linetype(
-    mut common: codec::entities::EntityCommon,
+    mut common: document::entities::EntityCommon,
     doc: &Document,
     handle: Handle,
-) -> codec::entities::EntityCommon {
+) -> document::entities::EntityCommon {
     common.linetype = doc
         .line_types
         .iter()
@@ -1783,8 +1783,8 @@ fn angular_block_segs(
     p2: Vector3,
     arc_loc: Vector3,
     met: &DimMetrics,
-    ext_c: &codec::entities::EntityCommon,
-    dim_c: &codec::entities::EntityCommon,
+    ext_c: &document::entities::EntityCommon,
+    dim_c: &document::entities::EntityCommon,
     explicit_sweep: Option<(f64, f64)>,
 ) -> Vec<EntityType> {
     use std::f64::consts::PI;
@@ -1910,7 +1910,7 @@ fn outside_box(
 /// The text anchor for a radial leader: the saved text middle point when set,
 /// else the midpoint of `a` and `b` — mirroring the live `dimension_text_position`.
 fn dim_text_anchor(
-    base: &codec::entities::dimension::DimensionBase,
+    base: &document::entities::dimension::DimensionBase,
     a: Vector3,
     b: Vector3,
 ) -> Vector3 {
@@ -2649,15 +2649,15 @@ impl CadCommand for ExplodeCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::DimensionLinear;
+    use document::entities::DimensionLinear;
 
     #[test]
     fn minsert_too_large_to_materialize_is_left_intact() {
         let mut doc = Document::new();
-        let mut block = codec::tables::BlockRecord::new("B1");
+        let mut block = document::tables::BlockRecord::new("B1");
         block.handle = doc.allocate_handle();
         doc.block_records.add(block).unwrap();
-        let mut insert = codec::entities::Insert::new("B1", Vector3::new(0.0, 0.0, 0.0));
+        let mut insert = document::entities::Insert::new("B1", Vector3::new(0.0, 0.0, 0.0));
         insert.row_count = u16::MAX;
         insert.column_count = u16::MAX;
         assert!(explode_entity(&EntityType::Insert(insert), &doc).is_empty());
@@ -2667,8 +2667,8 @@ mod tests {
     /// inside the boundary; a solid fill does not explode.
     #[test]
     fn pattern_hatch_explodes_to_clipped_lines() {
-        use codec::entities::hatch::{BoundaryEdge, BoundaryPath, HatchPatternLine, LineEdge};
-        use codec::types::Vector2;
+        use document::entities::hatch::{BoundaryEdge, BoundaryPath, HatchPatternLine, LineEdge};
+        use document::types::Vector2;
         let mut path = BoundaryPath::new();
         for (s, e) in [((0.0, 0.0), (10.0, 0.0)), ((10.0, 0.0), (10.0, 10.0))]
             .into_iter()
@@ -2679,7 +2679,7 @@ mod tests {
                 end: Vector2::new(e.0, e.1),
             }));
         }
-        let mut hatch = codec::entities::Hatch::new();
+        let mut hatch = document::entities::Hatch::new();
         hatch.paths.push(path);
         hatch.elevation = 3.0;
         hatch.common.layer = "HATCH".into();
@@ -2719,30 +2719,30 @@ mod tests {
         let mut block = BlockRecord::new("BYBLOCK_STYLE");
         block.handle = doc.allocate_handle();
 
-        let mut child = codec::entities::Line::from_points(
+        let mut child = document::entities::Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         );
-        child.common.color = codec::types::Color::ByBlock;
-        child.common.transparency = codec::types::Transparency::ByBlock;
+        child.common.color = document::types::Color::ByBlock;
+        child.common.transparency = document::types::Transparency::ByBlock;
         child.common.linetype = "ByBlock".to_string();
         let child_handle = doc.add_entity(EntityType::Line(child)).unwrap();
         block.entity_handles.push(child_handle);
         doc.block_records.add(block).unwrap();
 
-        let mut insert = codec::entities::Insert::new("BYBLOCK_STYLE", Vector3::new(0.0, 0.0, 0.0));
-        insert.common.color = codec::types::Color::from_index(1);
-        insert.common.transparency = codec::types::Transparency::new(96);
+        let mut insert = document::entities::Insert::new("BYBLOCK_STYLE", Vector3::new(0.0, 0.0, 0.0));
+        insert.common.color = document::types::Color::from_index(1);
+        insert.common.transparency = document::types::Transparency::new(96);
         insert.common.linetype = "DASHED".to_string();
 
         let out = explode_entity(&EntityType::Insert(insert), &doc);
         assert_eq!(out.len(), 1, "the block's one child should come out");
 
         let c = out[0].common();
-        assert_eq!(c.color, codec::types::Color::from_index(1));
+        assert_eq!(c.color, document::types::Color::from_index(1));
         assert_eq!(
             c.transparency,
-            codec::types::Transparency::new(96),
+            document::types::Transparency::new(96),
             "ByBlock transparency should take the insert's value"
         );
         assert_eq!(
@@ -2760,19 +2760,19 @@ mod tests {
         let mut block = BlockRecord::new("EXPLICIT_STYLE");
         block.handle = doc.allocate_handle();
 
-        let mut child = codec::entities::Line::from_points(
+        let mut child = document::entities::Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(10.0, 0.0, 0.0),
         );
-        child.common.transparency = codec::types::Transparency::new(25);
+        child.common.transparency = document::types::Transparency::new(25);
         child.common.linetype = "CONTINUOUS".to_string();
         let child_handle = doc.add_entity(EntityType::Line(child)).unwrap();
         block.entity_handles.push(child_handle);
         doc.block_records.add(block).unwrap();
 
         let mut insert =
-            codec::entities::Insert::new("EXPLICIT_STYLE", Vector3::new(0.0, 0.0, 0.0));
-        insert.common.transparency = codec::types::Transparency::new(96);
+            document::entities::Insert::new("EXPLICIT_STYLE", Vector3::new(0.0, 0.0, 0.0));
+        insert.common.transparency = document::types::Transparency::new(96);
         insert.common.linetype = "DASHED".to_string();
 
         let out = explode_entity(&EntityType::Insert(insert), &doc);
@@ -2781,7 +2781,7 @@ mod tests {
         let c = out[0].common();
         assert_eq!(
             c.transparency,
-            codec::types::Transparency::new(25),
+            document::types::Transparency::new(25),
             "an explicit child transparency must survive"
         );
         assert_eq!(
@@ -2797,11 +2797,11 @@ mod tests {
     fn unexplodable_block_is_not_exploded() {
         fn explode_once(explodable: bool) -> Vec<EntityType> {
             let mut doc = Document::new();
-            let mut block = codec::tables::BlockRecord::new("NO_EXPLODE");
+            let mut block = document::tables::BlockRecord::new("NO_EXPLODE");
             block.handle = doc.allocate_handle();
             block.explodable = explodable;
             let child = doc
-                .add_entity(EntityType::Line(codec::entities::Line::from_points(
+                .add_entity(EntityType::Line(document::entities::Line::from_points(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(10.0, 0.0, 0.0),
                 )))
@@ -2809,7 +2809,7 @@ mod tests {
             block.entity_handles.push(child);
             doc.block_records.add(block).unwrap();
 
-            let insert = codec::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
+            let insert = document::entities::Insert::new("NO_EXPLODE", Vector3::new(0.0, 0.0, 0.0));
             explode_entity(&EntityType::Insert(insert), &doc)
         }
 
@@ -3121,7 +3121,7 @@ mod tests {
     // two extension lines plus many arc chords.
     #[test]
     fn angular_dim_bakes_an_arc() {
-        use codec::entities::DimensionAngular3Pt;
+        use document::entities::DimensionAngular3Pt;
         let mut doc = Document::new();
         let mut d = DimensionAngular3Pt::new(
             Vector3::new(0.0, 0.0, 0.0),
@@ -3151,7 +3151,7 @@ mod tests {
     // Diameter endpoints stay equidistant from the circle center.
     #[test]
     fn diameter_dim_bakes_through_center() {
-        use codec::entities::DimensionDiameter;
+        use document::entities::DimensionDiameter;
         let mut doc = Document::new();
         let center = Vector3::new(3.0, 4.0, 0.0);
         let edge = Vector3::new(8.0, 4.0, 0.0); // radius 5 along +x
@@ -3213,8 +3213,8 @@ mod tests {
     // must carry the source thickness instead of resetting to 0 (#916).
     #[test]
     fn explode_keeps_lwpolyline_thickness() {
-        use codec::entities::LwVertex;
-        use codec::types::Vector2;
+        use document::entities::LwVertex;
+        use document::types::Vector2;
 
         let mut pl = LwPolyline::new();
         // One straight span + one bulged span, so the result holds a Line and
@@ -3249,7 +3249,7 @@ mod tests {
 
     #[test]
     fn explode_keeps_polyline2d_extrusion() {
-        use codec::entities::Vertex2D;
+        use document::entities::Vertex2D;
 
         let mut pl = Polyline2D::new();
         pl.vertices = vec![
@@ -3288,7 +3288,7 @@ mod tests {
 
             let path =
                 std::env::temp_dir().join(format!("ocs_dim_rt_{}.{ext}", std::process::id()));
-            crate::io::save_as_version(&doc, &path, codec::DxfVersion::AC1032).expect("save");
+            crate::io::save_as_version(&doc, &path, document::DxfVersion::AC1032).expect("save");
             let loaded = crate::io::load_file(&path).expect("load");
             let _ = std::fs::remove_file(&path);
 
@@ -3347,7 +3347,7 @@ mod tests {
     /// "Extension dictionary <H> Cannot access".
     fn assert_no_shared_xdicts(doc: &Document) {
         use std::collections::HashMap;
-        let mut owners: HashMap<codec::Handle, usize> = HashMap::new();
+        let mut owners: HashMap<document::Handle, usize> = HashMap::new();
         for entity in doc.entities() {
             if let Some(xd) = entity.common().xdictionary_handle {
                 if !xd.is_null() {
@@ -3378,10 +3378,10 @@ mod tests {
 
         // Made-up dictionary object for the dimension to own.
         let dict_handle = doc.allocate_handle();
-        let mut dict = codec::objects::Dictionary::new();
+        let mut dict = document::objects::Dictionary::new();
         dict.handle = dict_handle;
         doc.objects
-            .insert(dict_handle, codec::objects::ObjectType::Dictionary(dict));
+            .insert(dict_handle, document::objects::ObjectType::Dictionary(dict));
 
         // Blockless dimension carrying that dictionary, as a file-read
         // dimension with an extension dictionary would.
@@ -3432,11 +3432,11 @@ mod tests {
         }
     }
 
-    fn explode_test_leader(arrow_enabled: bool) -> codec::entities::Leader {
-        let mut leader = codec::entities::Leader::new();
+    fn explode_test_leader(arrow_enabled: bool) -> document::entities::Leader {
+        let mut leader = document::entities::Leader::new();
         leader.vertices = vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 5.0, 0.0)];
-        leader.path_type = codec::entities::LeaderPathType::StraightLine;
-        leader.creation_type = codec::entities::LeaderCreationType::NoAnnotation;
+        leader.path_type = document::entities::LeaderPathType::StraightLine;
+        leader.creation_type = document::entities::LeaderCreationType::NoAnnotation;
         leader.hookline_enabled = false;
         leader.arrow_enabled = arrow_enabled;
         leader.text_height = 1.0;
@@ -3468,9 +3468,9 @@ mod tests {
     fn leader_explode_arrow_off_keeps_only_path_and_attributes() {
         let mut leader = explode_test_leader(false);
         leader.common.layer = "LEADERS".into();
-        leader.common.color = codec::types::Color::from_index(3);
+        leader.common.color = document::types::Color::from_index(3);
         leader.common.linetype = "DASHED".into();
-        leader.common.line_weight = codec::types::LineWeight::from_value(35);
+        leader.common.line_weight = document::types::LineWeight::from_value(35);
         let pieces = explode_entity(&EntityType::Leader(leader.clone()), &Document::new());
         assert_eq!(pieces.len(), 1);
         let EntityType::Line(path) = &pieces[0] else {
@@ -3488,7 +3488,7 @@ mod tests {
     #[test]
     fn leader_explode_hookline_and_dimstyle_overrides_match_render() {
         use crate::entities::dim_override as dov;
-        use codec::xdata::XDataValue;
+        use document::xdata::XDataValue;
         let mut leader = explode_test_leader(false);
         leader.hookline_enabled = true;
         for (code, value) in [
@@ -3507,10 +3507,10 @@ mod tests {
         assert_eq!(hook.start, Vector3::new(10.0, 5.0, 0.0));
         assert_eq!(hook.end, Vector3::new(12.0, 5.0, 0.0));
         for piece in pieces {
-            assert_eq!(piece.common().color, codec::types::Color::from_index(1));
+            assert_eq!(piece.common().color, document::types::Color::from_index(1));
             assert_eq!(
                 piece.common().line_weight,
-                codec::types::LineWeight::from_value(50)
+                document::types::LineWeight::from_value(50)
             );
         }
     }
@@ -3520,7 +3520,7 @@ mod tests {
         // A leader of type None draws only its content, so that is all it
         // explodes into: no arrowhead and no landing.
         let mut ml = explode_test_multileader();
-        ml.path_type = codec::entities::MultiLeaderPathType::Invisible;
+        ml.path_type = document::entities::MultiLeaderPathType::Invisible;
         let pieces = explode_entity(&EntityType::MultiLeader(Box::new(ml)), &Document::new());
         assert_eq!(pieces.len(), 1, "{pieces:?}");
         assert!(matches!(pieces[0], EntityType::MText(_)));
@@ -3528,7 +3528,7 @@ mod tests {
 
     #[test]
     fn multileader_explode_mtext_keeps_path_landing_arrow_and_content() {
-        use codec::entities::mtext::AttachmentPoint;
+        use document::entities::mtext::AttachmentPoint;
         let ml = explode_test_multileader();
         let pieces = explode_entity(
             &EntityType::MultiLeader(Box::new(ml.clone())),
@@ -3581,16 +3581,16 @@ mod tests {
         }
     }
 
-    fn explode_test_multileader() -> codec::entities::MultiLeader {
-        use codec::entities::multileader::TextAttachmentPointType;
-        let mut ml = codec::entities::MultiLeader::with_text(
+    fn explode_test_multileader() -> document::entities::MultiLeader {
+        use document::entities::multileader::TextAttachmentPointType;
+        let mut ml = document::entities::MultiLeader::with_text(
             "note",
             Vector3::new(13.0, 6.0, 0.0),
             vec![Vector3::ZERO],
         );
         ml.common.layer = "MLEADERS".into();
-        ml.common.color = codec::types::Color::from_index(3);
-        ml.common.line_weight = codec::types::LineWeight::from_value(35);
+        ml.common.color = document::types::Color::from_index(3);
+        ml.common.line_weight = document::types::LineWeight::from_value(35);
         ml.context.text_height = 2.0;
         ml.context.text_width = 20.0;
         ml.context.text_attachment_point = TextAttachmentPointType::Left;
@@ -3607,8 +3607,8 @@ mod tests {
         let doc = Document::new();
         let mut ml = explode_test_multileader();
         ml.context.arrowhead_size = 0.0;
-        ml.line_color = codec::types::Color::from_rgb(12, 34, 56);
-        ml.line_weight = codec::types::LineWeight::from_value(50);
+        ml.line_color = document::types::Color::from_rgb(12, 34, 56);
+        ml.line_weight = document::types::LineWeight::from_value(50);
         ml.common.linetype = "DASHED".into();
         let style = doc.text_styles.iter().next().expect("default text style");
         ml.context.text_style_handle = Some(style.handle);
@@ -3637,7 +3637,7 @@ mod tests {
                     assert_eq!(text.rotation, std::f64::consts::FRAC_PI_2);
                     assert_eq!(
                         text.attachment_point,
-                        codec::entities::mtext::AttachmentPoint::MiddleLeft
+                        document::entities::mtext::AttachmentPoint::MiddleLeft
                     );
                     assert_eq!(text.style, style_name);
                     assert_eq!(text.common.color, ml.common.color);
@@ -3707,7 +3707,7 @@ mod tests {
 
     #[test]
     fn multileader_explode_followup_block_attributes() {
-        use codec::entities::{multileader::BlockAttribute, AttributeDefinition};
+        use document::entities::{multileader::BlockAttribute, AttributeDefinition};
         let mut doc = Document::new();
         let mut style = doc.text_styles.iter().next().unwrap().clone();
         style.name = "LABEL_STYLE".into();
@@ -3727,11 +3727,11 @@ mod tests {
             record.entity_handles.push(handle);
         }
         let mut ml = explode_test_multileader();
-        ml.content_type = codec::entities::LeaderContentType::Block;
+        ml.content_type = document::entities::LeaderContentType::Block;
         ml.context.has_block_contents = true;
         ml.block_content_handle = Some(record.handle);
         ml.context.block_content_location = Vector3::new(20.0, 10.0, 0.0);
-        ml.block_connection_type = codec::entities::BlockContentConnectionType::BasePoint;
+        ml.block_connection_type = document::entities::BlockContentConnectionType::BasePoint;
         ml.block_scale = Vector3::new(2.0, 2.0, 2.0);
         ml.block_rotation = std::f64::consts::FRAC_PI_2;
         let mut value = BlockAttribute::new("stored ID");
@@ -3852,7 +3852,7 @@ mod tests {
             Box::new(explode_test_multileader()),
         ));
         let untouched = scene.add_entity(EntityType::MText(Box::new(
-            codec::entities::MText::with_value("unselected", Vector3::new(100.0, 100.0, 0.0)),
+            document::entities::MText::with_value("unselected", Vector3::new(100.0, 100.0, 0.0)),
         )));
         let unsupported = scene.add_entity(EntityType::Line(LineEnt::new()));
         let handles = [ml, unsupported];
@@ -3881,14 +3881,14 @@ mod tests {
     fn leader_explode_replacements_preserve_unexploded_linked_entities() {
         for (explode_leader, explode_annotation) in [(true, true), (true, false), (false, true)] {
             let mut scene = crate::scene::Scene::new();
-            let mut mtext = codec::entities::MText::new();
+            let mut mtext = document::entities::MText::new();
             mtext.value = "note".into();
             let annotation = scene.add_entity(EntityType::MText(Box::new(mtext)));
             let mut leader = explode_test_leader(true);
             leader.annotation_handle = annotation;
             let leader_handle = scene.add_entity(EntityType::Leader(leader));
             // This linked leader is also selected but cannot produce any pieces.
-            let mut empty = codec::entities::Leader::new();
+            let mut empty = document::entities::Leader::new();
             empty.vertices.clear();
             empty.annotation_handle = annotation;
             let empty_handle = scene.add_entity(EntityType::Leader(empty));
@@ -3955,9 +3955,9 @@ mod tests {
 #[cfg(test)]
 mod mline_tests {
     use super::*;
-    use codec::entities::{MLineJustification, MLineVertex};
-    use codec::objects::{MLineStyle, MLineStyleElement, ObjectType};
-    use codec::types::Color;
+    use document::entities::{MLineJustification, MLineVertex};
+    use document::objects::{MLineStyle, MLineStyleElement, ObjectType};
+    use document::types::Color;
 
     /// A multiline built the way the MLINE command builds one, with its style
     /// registered in the document.

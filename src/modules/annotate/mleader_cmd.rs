@@ -1,8 +1,8 @@
 // MLEADER: pick the arrow and elbow, then edit the text.
 
-use codec::entities::{LeaderContentType, MultiLeader, MultiLeaderPathType};
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::{LeaderContentType, MultiLeader, MultiLeaderPathType};
+use document::types::Vector3;
+use document::EntityType;
 use glam::{DVec3, Mat4, Vec3};
 
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -35,7 +35,7 @@ pub struct MLeaderCommand {
     /// The Options prompt's default (the option chosen last).
     last_option: MlOption,
     plane: WorkingPlane,
-    style: Option<codec::objects::MultiLeaderStyle>,
+    style: Option<document::objects::MultiLeaderStyle>,
     display_scale: f64,
     order: CreationOrder,
     step: Step,
@@ -52,11 +52,11 @@ pub struct MLeaderCommand {
     layer_set: bool,
     text: String,
     picked_entity: Option<EntityType>,
-    selected_mtext: Option<codec::entities::MText>,
-    block_sources: Vec<(String, codec::Handle)>,
-    block_handle: Option<codec::Handle>,
+    selected_mtext: Option<document::entities::MText>,
+    block_sources: Vec<(String, document::Handle)>,
+    block_handle: Option<document::Handle>,
     layers: Vec<String>,
-    text_styles: Vec<(String, codec::Handle)>,
+    text_styles: Vec<(String, document::Handle)>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -151,7 +151,7 @@ impl MLeaderCommand {
         }
     }
 
-    pub fn with_style(style: codec::objects::MultiLeaderStyle, annotation_multiplier: f64) -> Self {
+    pub fn with_style(style: document::objects::MultiLeaderStyle, annotation_multiplier: f64) -> Self {
         let display_scale = if style.is_annotative {
             annotation_multiplier
         } else {
@@ -189,9 +189,9 @@ impl MLeaderCommand {
 
     pub fn with_drawing_resources(
         mut self,
-        block_sources: Vec<(String, codec::Handle)>,
+        block_sources: Vec<(String, document::Handle)>,
         layers: Vec<String>,
-        text_styles: Vec<(String, codec::Handle)>,
+        text_styles: Vec<(String, document::Handle)>,
     ) -> Self {
         self.block_sources = block_sources;
         self.layers = layers;
@@ -283,7 +283,7 @@ impl MLeaderCommand {
         ml.extend_leader_to_text = true;
         ml.context.text_width = self.box_width.unwrap_or(0.0);
         ml.context.text_flow_direction =
-            codec::entities::multileader::FlowDirectionType::ByStyle;
+            document::entities::multileader::FlowDirectionType::ByStyle;
         ml.enable_landing = self.enable_landing;
         ml.enable_dogleg = self.enable_landing;
         ml.dogleg_length = self.landing_length;
@@ -319,32 +319,32 @@ impl MLeaderCommand {
             ml.context.background_fill_color = source.background_color;
             ml.context.background_transparency = source.background_transparency;
             ml.context.text_flow_direction = match source.drawing_direction {
-                codec::entities::mtext::DrawingDirection::LeftToRight => {
-                    codec::entities::multileader::FlowDirectionType::Horizontal
+                document::entities::mtext::DrawingDirection::LeftToRight => {
+                    document::entities::multileader::FlowDirectionType::Horizontal
                 }
-                codec::entities::mtext::DrawingDirection::TopToBottom => {
-                    codec::entities::multileader::FlowDirectionType::Vertical
+                document::entities::mtext::DrawingDirection::TopToBottom => {
+                    document::entities::multileader::FlowDirectionType::Vertical
                 }
-                codec::entities::mtext::DrawingDirection::ByStyle => {
-                    codec::entities::multileader::FlowDirectionType::ByStyle
+                document::entities::mtext::DrawingDirection::ByStyle => {
+                    document::entities::multileader::FlowDirectionType::ByStyle
                 }
             };
             let (attachment, alignment) = match source.attachment_point {
-                codec::entities::mtext::AttachmentPoint::TopCenter
-                | codec::entities::mtext::AttachmentPoint::MiddleCenter
-                | codec::entities::mtext::AttachmentPoint::BottomCenter => (
-                    codec::entities::multileader::TextAttachmentPointType::Center,
-                    codec::entities::TextAlignmentType::Center,
+                document::entities::mtext::AttachmentPoint::TopCenter
+                | document::entities::mtext::AttachmentPoint::MiddleCenter
+                | document::entities::mtext::AttachmentPoint::BottomCenter => (
+                    document::entities::multileader::TextAttachmentPointType::Center,
+                    document::entities::TextAlignmentType::Center,
                 ),
-                codec::entities::mtext::AttachmentPoint::TopRight
-                | codec::entities::mtext::AttachmentPoint::MiddleRight
-                | codec::entities::mtext::AttachmentPoint::BottomRight => (
-                    codec::entities::multileader::TextAttachmentPointType::Right,
-                    codec::entities::TextAlignmentType::Right,
+                document::entities::mtext::AttachmentPoint::TopRight
+                | document::entities::mtext::AttachmentPoint::MiddleRight
+                | document::entities::mtext::AttachmentPoint::BottomRight => (
+                    document::entities::multileader::TextAttachmentPointType::Right,
+                    document::entities::TextAlignmentType::Right,
                 ),
                 _ => (
-                    codec::entities::multileader::TextAttachmentPointType::Left,
-                    codec::entities::TextAlignmentType::Left,
+                    document::entities::multileader::TextAttachmentPointType::Left,
+                    document::entities::TextAlignmentType::Left,
                 ),
             };
             ml.context.text_attachment_point = attachment;
@@ -916,7 +916,7 @@ impl CadCommand for MLeaderCommand {
         self.picked_entity = Some(entity);
     }
 
-    fn on_entity_pick(&mut self, _handle: codec::Handle, _point: DVec3) -> CmdResult {
+    fn on_entity_pick(&mut self, _handle: document::Handle, _point: DVec3) -> CmdResult {
         if self.step == Step::Layer {
             // A picked object lends its layer.
             if let Some(entity) = self.picked_entity.take() {
@@ -954,7 +954,7 @@ pub(crate) fn build_mleader(
     verts: &[DVec3],
     content_point: Option<DVec3>,
     ucs: Mat4,
-    style: Option<&codec::objects::MultiLeaderStyle>,
+    style: Option<&document::objects::MultiLeaderStyle>,
     display_scale: f64,
 ) -> MultiLeader {
     // First point is the arrow, last point is the elbow. Intermediate points

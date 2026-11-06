@@ -3,10 +3,10 @@
 //! out to it. DIMTMOVE 1 text near its line keeps to it; further away it
 //! hangs on a leader from the line's middle.
 
-use codec::entities::{Dimension, DimensionAligned, DimensionLinear};
-use codec::types::Vector3;
-use codec::xdata::XDataValue;
-use codec::EntityType;
+use document::entities::{Dimension, DimensionAligned, DimensionLinear};
+use document::types::Vector3;
+use document::xdata::XDataValue;
+use document::EntityType;
 use OpenCADStudio::entities::dim_override as ov;
 use OpenCADStudio::scene::Scene;
 

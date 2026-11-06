@@ -7,9 +7,9 @@
 // triangle.
 
 use crate::t;
-use codec::entities::Solid;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::Solid;
+use document::types::Vector3;
+use document::EntityType;
 
 use crate::command::{CadCommand, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};

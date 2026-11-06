@@ -1,9 +1,9 @@
 // WIPEOUT command — draw a polygonal mask or derive one from a closed polyline.
 
 use crate::t;
-use codec::entities::{Wipeout, WipeoutClipType};
-use codec::types::{Vector2, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::entities::{Wipeout, WipeoutClipType};
+use document::types::{Vector2, Vector3};
+use document::{Document, EntityType, Handle};
 use glam::DVec3;
 use kernel::geom2d::{polygon_frame, Tolerance};
 use kernel::space::Plane;
@@ -599,7 +599,7 @@ inventory::submit!(crate::command::CommandRegistration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::LwPolyline;
+    use document::entities::LwPolyline;
 
     #[test]
     fn command_undo_never_removes_the_first_point() {

@@ -14,7 +14,7 @@ pub(crate) mod ops;
 use super::{Message, OpenCADStudio};
 use crate::scene::model::object::PropSection;
 use crate::ui::node_graph::{Drag, GraphMsg, NodeRow, NodeSection, ObjectKind, RowWidget};
-use codec::Handle;
+use document::Handle;
 use graph::{Kind, NodeId, Port};
 use iced::Task;
 use rustc_hash::FxHashMap as HashMap;

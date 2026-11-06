@@ -1,6 +1,6 @@
-use codec::objects::ObjectType;
-use codec::tables::{DimStyle, TextStyle};
-use codec::{Document, EntityType, Handle};
+use document::objects::ObjectType;
+use document::tables::{DimStyle, TextStyle};
+use document::{Document, EntityType, Handle};
 
 #[derive(Debug, Clone)]
 pub struct TextCreationDefaults {
@@ -374,7 +374,7 @@ pub fn apply_drawing_dimdli(doc: &Document, entity: &mut EntityType) {
         crate::entities::dim_override::set_on_entity(
             entity,
             crate::entities::dim_override::DIMDLI,
-            Some(codec::xdata::XDataValue::Real(drawing)),
+            Some(document::xdata::XDataValue::Real(drawing)),
         );
     }
 }
@@ -393,8 +393,8 @@ pub(crate) fn transparency_options() -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn parse_current_transparency(value: &str) -> Option<codec::types::Transparency> {
-    use codec::types::Transparency;
+pub(crate) fn parse_current_transparency(value: &str) -> Option<document::types::Transparency> {
+    use document::types::Transparency;
     match value.trim().to_ascii_uppercase().as_str() {
         "BYLAYER" | "-1" => Some(Transparency::ByLayer),
         "BYBLOCK" | "-2" => Some(Transparency::ByBlock),
@@ -406,8 +406,8 @@ pub(crate) fn parse_current_transparency(value: &str) -> Option<codec::types::Tr
     }
 }
 
-pub(crate) fn current_transparency_label(value: codec::types::Transparency) -> String {
-    use codec::types::Transparency;
+pub(crate) fn current_transparency_label(value: document::types::Transparency) -> String {
+    use document::types::Transparency;
     match value {
         Transparency::ByLayer => "ByLayer".into(),
         Transparency::ByBlock => "ByBlock".into(),
@@ -418,7 +418,7 @@ pub(crate) fn current_transparency_label(value: codec::types::Transparency) -> S
 #[cfg(test)]
 mod transparency_tests {
     use super::*;
-    use codec::types::Transparency;
+    use document::types::Transparency;
 
     #[test]
     fn parses_supported_current_transparency_values() {

@@ -11,9 +11,9 @@
 //   POLY_E — Edge (pick two endpoints of one edge)
 
 use crate::t;
-use codec::entities::LwVertex;
-use codec::types::Vector2;
-use codec::{EntityType, LwPolyline};
+use document::entities::LwVertex;
+use document::types::Vector2;
+use document::{EntityType, LwPolyline};
 use kernel::geom2d::{
     arc_span, fillet_between_rays, Curve as KernelCurve, Frame as KernelFrame,
     Polyline as KernelPolyline, PolylineVertex as KernelVertex, Ray as KernelRay,

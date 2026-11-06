@@ -16,8 +16,8 @@
 // underlay as PDFCLIP, a raster image as IMAGECLIP, a layout viewport as
 // VPCLIP, anything else is "*Invalid selection*".
 
-use codec::types::Handle;
-use codec::EntityType;
+use document::types::Handle;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};

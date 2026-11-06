@@ -26,7 +26,7 @@
 //! `DeltaSnapshot::reference_designations`), the same channel pattern
 //! `parametric_constraints` uses.
 
-use codec::types::Handle;
+use document::types::Handle;
 use rustc_hash::FxHashSet;
 
 /// The in-memory designation set owned by a [`Scene`](crate::Scene).
@@ -81,7 +81,7 @@ impl ReferenceOnlyDesignation {
     /// model the exact designation state, so this is only a defensive sweep
     /// after history replay (an entity the chosen delta side removed must
     /// never stay designated through a stale entry).
-    pub(crate) fn retain_present(&mut self, document: &codec::Document) {
+    pub(crate) fn retain_present(&mut self, document: &document::Document) {
         self.handles
             .retain(|handle| document.get_entity(*handle).is_some());
     }
@@ -90,7 +90,7 @@ impl ReferenceOnlyDesignation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{EntityType, Line};
+    use document::entities::{EntityType, Line};
 
     fn handle(value: u64) -> Handle {
         Handle::new(value)
@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn retain_present_drops_entries_of_absent_entities() {
-        let mut document = codec::Document::new();
+        let mut document = document::Document::new();
         let live = document.add_entity(EntityType::Line(Line::new())).unwrap();
         let mut designation = ReferenceOnlyDesignation::default();
         designation.set(live, true);
@@ -152,7 +152,7 @@ mod tests {
 
     #[test]
     fn tessellated_wires_stamp_from_the_designation_set() {
-        let document = codec::Document::new();
+        let document = document::Document::new();
         let line = EntityType::Line(Line::new());
         let handle = line.common().handle;
         let selected: rustc_hash::FxHashSet<Handle> = Default::default();

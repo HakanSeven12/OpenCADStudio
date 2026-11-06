@@ -6,9 +6,9 @@
 // MLEADERALIGN:  select multileaders → pick base alignment direction
 // MLEADERCOLLECT: select block-content multileaders → pick collection point
 
-use codec::entities::{LeaderLine, MultiLeader};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{LeaderLine, MultiLeader};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::{DVec3, Vec3};
 use kernel::geom2d::{closest_point, Curve, Line};
 
@@ -746,7 +746,7 @@ impl CadCommand for MLeaderCollectCommand {
     fn selection_entity_filter(&self) -> Option<fn(&EntityType) -> bool> {
         Some(|entity| {
             matches!(entity, EntityType::MultiLeader(ml)
-                if ml.content_type == codec::entities::LeaderContentType::Block)
+                if ml.content_type == document::entities::LeaderContentType::Block)
         })
     }
 

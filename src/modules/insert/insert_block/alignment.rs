@@ -18,7 +18,7 @@ impl InsertionAlignment {
         }
         Some(Self {
             grips,
-            targets: Targets::from_scene(scene, codec::Handle::NULL, plane),
+            targets: Targets::from_scene(scene, document::Handle::NULL, plane),
         })
     }
 }

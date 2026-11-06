@@ -6,10 +6,10 @@
 mod rcp;
 mod rcs;
 
-use codec::entities::{PointCloudExCrop, PointCloudExData};
-use codec::objects::{ClassObjectData, ObjectType, PointCloudDefinition};
-use codec::types::{Transform, Vector3};
-use codec::Document;
+use document::entities::{PointCloudExCrop, PointCloudExData};
+use document::objects::{ClassObjectData, ObjectType, PointCloudDefinition};
+use document::types::{Transform, Vector3};
+use document::Document;
 use rustc_hash::FxHashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};

@@ -1,7 +1,7 @@
 //! PURGE's choice of what can go: one pass over a drawing, shared by the
 //! command and the Purge dialog.
 
-use codec::{Document, Handle};
+use document::{Document, Handle};
 
 /// The layers, text styles, linetypes and blocks one PURGE pass removes from
 /// `doc`, for the kinds `wanted` turns on (layers, styles, linetypes,
@@ -22,7 +22,7 @@ pub(crate) fn purge_pass(
         doc
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Insert(ins) => Some(ins.attributes.iter()),
+                document::EntityType::Insert(ins) => Some(ins.attributes.iter()),
                 _ => None,
             })
             .flatten()
@@ -53,10 +53,10 @@ pub(crate) fn purge_pass(
     let used_text_styles: rustc_hash::FxHashSet<String> = doc
         .entities()
         .filter_map(|e| match e {
-            codec::EntityType::Text(t) => Some(t.style.clone()),
-            codec::EntityType::MText(t) => Some(t.style.clone()),
-            codec::EntityType::AttributeDefinition(a) => Some(a.text_style.clone()),
-            codec::EntityType::AttributeEntity(a) => Some(a.text_style.clone()),
+            document::EntityType::Text(t) => Some(t.style.clone()),
+            document::EntityType::MText(t) => Some(t.style.clone()),
+            document::EntityType::AttributeDefinition(a) => Some(a.text_style.clone()),
+            document::EntityType::AttributeEntity(a) => Some(a.text_style.clone()),
             _ => None,
         })
         .chain(insert_attributes().map(|a| a.text_style.clone()))
@@ -76,7 +76,7 @@ pub(crate) fn purge_pass(
         .map(|s| s.to_uppercase())
         .collect();
     // Complex linetypes reach their text and shape styles by handle.
-    let linetype_styles: rustc_hash::FxHashSet<codec::Handle> = doc
+    let linetype_styles: rustc_hash::FxHashSet<document::Handle> = doc
         .line_types
         .iter()
         .flat_map(|lt| lt.elements.iter())
@@ -85,19 +85,19 @@ pub(crate) fn purge_pass(
         .collect();
     // Multileaders and their styles, and table styles, reach
     // their text styles by handle (a table style also by name).
-    let object_text_styles: rustc_hash::FxHashSet<codec::Handle> = {
+    let object_text_styles: rustc_hash::FxHashSet<document::Handle> = {
         let leaders = doc.entities().filter_map(|e| match e {
-            codec::EntityType::MultiLeader(m) => Some(m),
+            document::EntityType::MultiLeader(m) => Some(m),
             _ => None,
         });
         leaders
             .flat_map(|m| [m.text_style_handle, m.context.text_style_handle])
             .chain(doc.objects.values().flat_map(|o| {
                 match o {
-                    codec::objects::ObjectType::MultiLeaderStyle(style) => {
+                    document::objects::ObjectType::MultiLeaderStyle(style) => {
                         vec![style.text_style_handle]
                     }
-                    codec::objects::ObjectType::TableStyle(style) => [
+                    document::objects::ObjectType::TableStyle(style) => [
                         &style.data_row_style,
                         &style.header_row_style,
                         &style.title_row_style,
@@ -116,7 +116,7 @@ pub(crate) fn purge_pass(
         .objects
         .values()
         .filter_map(|o| match o {
-            codec::objects::ObjectType::TableStyle(style) => Some(style),
+            document::objects::ObjectType::TableStyle(style) => Some(style),
             _ => None,
         })
         .flat_map(|style| {
@@ -131,7 +131,7 @@ pub(crate) fn purge_pass(
         .collect();
     // Dimension styles reach their dimension and extension line
     // linetypes by handle.
-    let dimstyle_linetypes: rustc_hash::FxHashSet<codec::Handle> = doc
+    let dimstyle_linetypes: rustc_hash::FxHashSet<document::Handle> = doc
         .dim_styles
         .iter()
         .flat_map(|ds| [ds.dimltex_handle, ds.dimltex1_handle, ds.dimltex2_handle])

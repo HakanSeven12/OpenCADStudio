@@ -4,8 +4,8 @@ use crate::command::{CadCommand, CmdOption, CmdResult, WorkingPlane};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
-use codec::entities::Table;
-use codec::EntityType;
+use document::entities::Table;
+use document::EntityType;
 use glam::DVec3;
 
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../assets/icons/data_link.svg"));
@@ -62,7 +62,7 @@ impl DataLinkPlaceCommand {
     /// Place a table that references a data-link object already stored in the
     /// drawing. Every populated cell is locked and points at the same link so
     /// update and save/reopen keep one stable relationship.
-    pub fn existing(mut table: Table, link: codec::Handle) -> Self {
+    pub fn existing(mut table: Table, link: document::Handle) -> Self {
         link_cells(&mut table, link, 0);
         Self {
             table,
@@ -72,7 +72,7 @@ impl DataLinkPlaceCommand {
     }
 
     /// The same, placed from -TABLE's data Link option.
-    pub fn existing_from_table(table: Table, link: codec::Handle) -> Self {
+    pub fn existing_from_table(table: Table, link: document::Handle) -> Self {
         Self {
             command_name: "-TABLE",
             ..Self::existing(table, link)
@@ -183,8 +183,8 @@ impl DataLinkPlaceCommand {
 /// first cell of the linked range (row `first_row`, column 0) carries the link
 /// and the size of the range; every cell of the range is locked and marked as
 /// linked. Rows above `first_row` (an extraction table's title) stay free.
-pub fn link_cells(table: &mut Table, link: codec::Handle, first_row: usize) {
-    use codec::entities::table::CellStateFlags;
+pub fn link_cells(table: &mut Table, link: document::Handle, first_row: usize) {
+    use document::entities::table::CellStateFlags;
     let rows = table.row_count().saturating_sub(first_row) as i32;
     let columns = table.column_count() as i32;
     for (row_index, row) in table.rows.iter_mut().enumerate() {
@@ -228,7 +228,7 @@ impl CadCommand for DataLinkPlaceCommand {
 
     fn on_point(&mut self, point: DVec3) -> CmdResult {
         let point = self.plane.to_local(point);
-        self.table.insertion_point = codec::types::Vector3::new(point.x, point.y, point.z);
+        self.table.insertion_point = document::types::Vector3::new(point.x, point.y, point.z);
         CmdResult::CommitAndExit(
             self.plane
                 .place_entity(EntityType::Table(Box::new(self.table.clone()))),
@@ -274,7 +274,7 @@ enum UpdateStep {
 pub struct DataLinkUpdateCommand {
     links: Vec<String>,
     step: UpdateStep,
-    selected: Vec<codec::Handle>,
+    selected: Vec<document::Handle>,
 }
 
 impl DataLinkUpdateCommand {
@@ -356,7 +356,7 @@ impl CadCommand for DataLinkUpdateCommand {
         true
     }
 
-    fn on_selection_complete(&mut self, handles: Vec<codec::Handle>) -> CmdResult {
+    fn on_selection_complete(&mut self, handles: Vec<document::Handle>) -> CmdResult {
         self.selected = handles;
         CmdResult::NeedPoint
     }

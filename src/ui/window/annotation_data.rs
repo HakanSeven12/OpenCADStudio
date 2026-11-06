@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::fmt;
 
-use codec::types::Handle;
+use document::types::Handle;
 use iced::widget::{
     button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
 };

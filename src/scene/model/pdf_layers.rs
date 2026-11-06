@@ -264,7 +264,7 @@ pub const LAYER_OVERRIDE_APP: &str = "AdeskUnderlayLayerOverrideData";
 /// The first string of a DGN underlay's layer overrides, before the names.
 pub const DGN_OVERRIDE_PLACEHOLDER: &str = "???DGN_Placeholder???";
 
-pub fn hidden_layers(u: &codec::entities::Underlay) -> Vec<String> {
+pub fn hidden_layers(u: &document::entities::Underlay) -> Vec<String> {
     u.common
         .extended_data
         .records()
@@ -272,14 +272,14 @@ pub fn hidden_layers(u: &codec::entities::Underlay) -> Vec<String> {
         .filter(|r| r.application_name.eq_ignore_ascii_case(LAYER_OVERRIDE_APP))
         .flat_map(|r| r.values.iter())
         .filter_map(|v| match v {
-            codec::xdata::XDataValue::String(s) if s != DGN_OVERRIDE_PLACEHOLDER => Some(s.clone()),
+            document::xdata::XDataValue::String(s) if s != DGN_OVERRIDE_PLACEHOLDER => Some(s.clone()),
             _ => None,
         })
         .collect()
 }
 
 /// The source an underlay's page is read from, with its layer overrides.
-pub fn underlay_source(u: &codec::entities::Underlay, file_path: &str) -> String {
+pub fn underlay_source(u: &document::entities::Underlay, file_path: &str) -> String {
     let hidden = hidden_layers(u);
     if hidden.is_empty() {
         return file_path.to_string();

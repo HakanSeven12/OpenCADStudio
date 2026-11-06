@@ -1,9 +1,9 @@
-use super::document::{
+use super::tab_document::{
     DeltaSnapshot, HistorySnapshot, HistoryState, ParametricConstraintsEntryDelta,
     StructureSnapshot,
 };
 use super::{Message, ModalKind, OpenCADStudio};
-use codec::{Document, EntityType};
+use document::{Document, EntityType};
 use iced::Task;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -16,11 +16,11 @@ pub(super) struct BlockEditCheckpoint {
     parameters: crate::scene::named_parameters::ParameterTable,
     dirty: bool,
     active_layer: String,
-    hatches: FxHashMap<codec::Handle, crate::scene::HatchModel>,
-    images: FxHashMap<codec::Handle, crate::scene::ImageModel>,
-    meshes: FxHashMap<codec::Handle, crate::scene::MeshLodSet>,
-    block_meshes: FxHashMap<codec::Handle, crate::scene::MeshLodSet>,
-    solid_models: FxHashMap<codec::Handle, kernel::brep::Body>,
+    hatches: FxHashMap<document::Handle, crate::scene::HatchModel>,
+    images: FxHashMap<document::Handle, crate::scene::ImageModel>,
+    meshes: FxHashMap<document::Handle, crate::scene::MeshLodSet>,
+    block_meshes: FxHashMap<document::Handle, crate::scene::MeshLodSet>,
+    solid_models: FxHashMap<document::Handle, kernel::brep::Body>,
 }
 
 pub(super) struct BlockEditHistory {
@@ -55,12 +55,12 @@ fn same_constraints(
 /// are left out.
 pub(super) fn block_reference_count(
     scene: &crate::scene::Scene,
-    definition: codec::Handle,
+    definition: document::Handle,
 ) -> usize {
     let document = &scene.document;
     // Model- and paper-space records also list their contents; only records
     // without a layout are definitions whose children are not drawn directly.
-    let inside_definition: FxHashSet<codec::Handle> = document
+    let inside_definition: FxHashSet<document::Handle> = document
         .block_records
         .iter()
         .filter(|record| record.layout.is_null())
@@ -158,7 +158,7 @@ impl OpenCADStudio {
         } else {
             (&checkpoint.document, checkpoint.structure.clone())
         };
-        let mut candidate_handles: FxHashSet<codec::Handle> = FxHashSet::default();
+        let mut candidate_handles: FxHashSet<document::Handle> = FxHashSet::default();
         if let Some(record) = before_doc.block_records.get(&session.block_name) {
             candidate_handles.extend(record.entity_handles.iter().copied());
             if !record.block_entity_handle.is_null() {
@@ -305,7 +305,7 @@ impl OpenCADStudio {
             parametric_constraints,
             reference_designations: Vec::new(),
             named_parameters,
-            label: super::document::HistoryLabel::formatted(format!("Edit block {}", session.block_name), "edit-block", session.block_name.to_owned().into()),
+            label: super::tab_document::HistoryLabel::formatted(format!("Edit block {}", session.block_name), "edit-block", session.block_name.to_owned().into()),
         })
     }
 
@@ -605,7 +605,7 @@ impl OpenCADStudio {
         let mut delta = self
             .block_edit_delta(i, true)
             .expect("a new definition changes the document");
-        delta.label = super::document::HistoryLabel::formatted(format!("Save block as {name}"), "save-block", name.to_owned().into());
+        delta.label = super::tab_document::HistoryLabel::formatted(format!("Save block as {name}"), "save-block", name.to_owned().into());
         let mut history = self.tabs[i].block_edit_history.take().unwrap();
         std::mem::swap(&mut self.tabs[i].history, &mut history.main);
         self.push_undo_entry(i, HistorySnapshot::Delta(Box::new(delta)));

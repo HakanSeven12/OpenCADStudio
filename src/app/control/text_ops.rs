@@ -7,7 +7,7 @@
 
 use super::{failure, OpenCADStudio};
 use crate::app::Message;
-use codec::{Document, EntityType, Handle};
+use document::{Document, EntityType, Handle};
 use iced::Task;
 use serde_json::{json, Value};
 
@@ -388,7 +388,7 @@ pub fn replace_mtext_safe(
     // Convert replacement newlines to \P for MText compatibility
     let raw_replacement = to_raw_mtext_replacement(replacement);
 
-    let mut doc = codec::entities::mtext_format::parse_mtext(raw, true);
+    let mut doc = document::entities::mtext_format::parse_mtext(raw, true);
     let mut total_replaced = 0;
 
     // First attempt: replace within individual parsed spans (preserves fine-grained formatting)
@@ -414,7 +414,7 @@ pub fn replace_mtext_safe(
     if total_replaced > 0 {
         if has_trailing_paragraph_break(raw) {
             doc.paragraphs
-                .push(codec::entities::mtext_format::MTextParagraph::new());
+                .push(document::entities::mtext_format::MTextParagraph::new());
         }
         (doc.to_mtext_string(), total_replaced)
     } else {
@@ -624,7 +624,7 @@ pub fn entity_text_info(
         }
         EntityType::MText(t) => {
             let raw = t.value.clone();
-            let plain_raw = codec::entities::mtext_format::parse_mtext(&raw, true).to_plain_text();
+            let plain_raw = document::entities::mtext_format::parse_mtext(&raw, true).to_plain_text();
             let plain = decode_dxf_escapes(&plain_raw);
             let pos = [
                 t.insertion_point.x,

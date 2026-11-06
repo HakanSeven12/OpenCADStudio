@@ -1,8 +1,8 @@
 use crate::command::{CadCommand, CmdOption, CmdResult, EntityTransform};
 use crate::entities::traits::EntityTypeOps;
 use crate::scene::convert::acad_to_render::RenderObject;
-use codec::nested_copy::{NestedCopyMode, NestedCopySymbolNames};
-use codec::{Document, EntityType, Handle};
+use document::nested_copy::{NestedCopyMode, NestedCopySymbolNames};
+use document::{Document, EntityType, Handle};
 use glam::DVec3;
 use std::collections::{HashMap, HashSet};
 
@@ -344,8 +344,8 @@ impl CadCommand for NcopyCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     #[test]
     fn placement_moves_only_geometry_and_keeps_source_style() {

@@ -3,7 +3,7 @@
 
 use std::io::Write;
 
-use ocs_plugin_api::host::codec::{
+use ocs_plugin_api::host::document::{
     entities::{Line, Text, Viewport},
     Document, DwgWriter, EntityType, Vector3,
 };

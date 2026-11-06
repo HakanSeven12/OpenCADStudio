@@ -3,7 +3,7 @@ use crate::scene::{
     block_distance_parameter as distance, block_orientation_parameter as orientation,
     block_point_parameter as point,
 };
-use codec::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
+use document::{entities::Insert, DwgReader, DwgWriter, DxfReader, DxfWriter};
 use std::io::Cursor;
 
 struct Fixture {
@@ -401,7 +401,7 @@ fn an_evaluated_representation_ends_after_its_members() {
     let changed = instance::evaluate_value(&f.doc, f.first, f.parameter.handle, f.input)
         .unwrap()
         .unwrap();
-    let codec::EntityType::Insert(reference) = changed.get_entity(f.first).unwrap() else {
+    let document::EntityType::Insert(reference) = changed.get_entity(f.first).unwrap() else {
         panic!()
     };
     let record = changed.block_records.get(&reference.block_name).unwrap();
@@ -426,8 +426,8 @@ fn an_evaluated_representation_ends_after_its_members() {
     );
     assert!(
         matches!(
-            changed.get_entity(codec::types::Handle::new(end)),
-            Some(codec::EntityType::BlockEnd(_))
+            changed.get_entity(document::types::Handle::new(end)),
+            Some(document::EntityType::BlockEnd(_))
         ),
         "the record's end handle names an ENDBLK entity"
     );

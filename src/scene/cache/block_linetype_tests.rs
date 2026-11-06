@@ -4,11 +4,11 @@
 
 use std::collections::HashSet;
 
-use codec::entities::{Insert, Line};
-use codec::tables::linetype::LineTypeElement;
-use codec::tables::{BlockRecord, Layer, LineType};
-use codec::types::Vector3;
-use codec::{Document, EntityType, Handle};
+use document::entities::{Insert, Line};
+use document::tables::linetype::LineTypeElement;
+use document::tables::{BlockRecord, Layer, LineType};
+use document::types::Vector3;
+use document::{Document, EntityType, Handle};
 
 /// A 2 dash and 2 gap: a period of 4.
 fn dashed_document() -> Document {

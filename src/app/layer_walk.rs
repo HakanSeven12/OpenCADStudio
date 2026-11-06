@@ -21,7 +21,7 @@ use crate::ui::dock::PanelId;
 use crate::ui::window::layer_walk::{
     self, LayerWalkMenuItem, LayerWalkMsg, LayerWalkRow, LayerWalkSession, LayerWalkSort,
 };
-use codec::Handle;
+use document::Handle;
 
 impl OpenCADStudio {
     // ── Open / close ──────────────────────────────────────────────────────
@@ -178,7 +178,7 @@ impl OpenCADStudio {
         // An INSERT holds its attributes inside itself, so their layers are
         // referenced by the instance and appear nowhere in the entity list.
         for e in doc.entities() {
-            if let codec::EntityType::Insert(ins) = e {
+            if let document::EntityType::Insert(ins) = e {
                 for a in &ins.attributes {
                     note(&a.common.layer);
                 }
@@ -814,7 +814,7 @@ impl OpenCADStudio {
             let layers = doc
                 .layers
                 .iter()
-                .map(|l| codec::LayerStateLayer {
+                .map(|l| document::LayerStateLayer {
                     layer_handle: l.handle,
                     layer_name: l.name.clone(),
                     // The walk's decision replaces the table's for every layer
@@ -841,10 +841,10 @@ impl OpenCADStudio {
                     transparency: Some(l.transparency),
                 })
                 .collect::<Vec<_>>();
-            codec::LayerState {
+            document::LayerState {
                 name: self.layer_state_name_buf.clone(),
                 description: String::new(),
-                mask: codec::LayerStateMask::SUPPORTED,
+                mask: document::LayerStateMask::SUPPORTED,
                 hidden: false,
                 current_layer: doc.header.current_layer_name.clone(),
                 layers,

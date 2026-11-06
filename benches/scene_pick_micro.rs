@@ -35,9 +35,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use codec::entities::{Line, Point};
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::{Line, Point};
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::{DVec3, Mat4};
 use iced::{Point as ScreenPoint, Rectangle};
 use OpenCADStudio::scene::model::wire_model::WireModel;

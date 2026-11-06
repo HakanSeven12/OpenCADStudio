@@ -1,5 +1,5 @@
-use codec::types::aci_table::aci_to_rgb;
-use codec::Document;
+use document::types::aci_table::aci_to_rgb;
+use document::Document;
 
 use crate::scene::convert::acad_to_render::{GlyphRun, TextStroke};
 use crate::scene::text::font_face::Face;
@@ -61,14 +61,14 @@ pub fn resolve_text_style(style_name: &str, document: &Document) -> ResolvedText
 /// such as the style manager's unapplied draft. Its fonts are looked up next
 /// to `document`.
 pub fn resolve_text_style_record(
-    style: &codec::tables::TextStyle,
+    style: &document::tables::TextStyle,
     document: &Document,
 ) -> ResolvedTextStyle {
     resolve_style(Some(style), &style.name, document)
 }
 
 fn resolve_style(
-    style: Option<&codec::tables::TextStyle>,
+    style: Option<&document::tables::TextStyle>,
     style_name: &str,
     document: &Document,
 ) -> ResolvedTextStyle {
@@ -639,24 +639,24 @@ pub fn mtext_visible_count(s: &str) -> usize {
         .sum()
 }
 
-/// Parse an MTEXT string into the layout's `Vec<MTextLine>`, using opencadcodec's
+/// Parse an MTEXT string into the layout's `Vec<MTextLine>`, using document's
 /// structured `mtext_format::parse_mtext` — OCS keeps only the layout engine
 /// (`layout_mtext` and callers read `MTextLine`/`RunState`), not a second MTEXT
 /// inline parser.
 ///
 /// Representation notes:
-///  - DXF `%%d`/`%%p`/`%%c` arrive already resolved to Unicode from opencadcodec;
+///  - DXF `%%d`/`%%p`/`%%c` arrive already resolved to Unicode from document;
 ///    the stroke tokenizer treats those as ordinary glyphs.
 ///  - Stacking (`\S`) is flattened inline to `num<sep>den` (`^` for limit, else
 ///    `/`) since the stroke path has no fraction layout.
 ///  - `\H`: a relative factor (`\Hx`) applies directly; an absolute height is
-///    divided by the entity height. See `codec::…::MTextScalar`.
+///    divided by the entity height. See `document::…::MTextScalar`.
 pub fn adapt_mtext_paragraphs(
     s: &str,
     entity_height: f32,
     trim_blank_edges: bool,
 ) -> Vec<MTextLine> {
-    use codec::entities::mtext_format::{
+    use document::entities::mtext_format::{
         parse_mtext, MTextColor, MTextLineAlignment, MTextLineSpacing, MTextParagraphAlignment,
         MTextScalar, ParagraphProperties, SpanProperties, StackingType,
     };
@@ -773,7 +773,7 @@ pub fn adapt_mtext_paragraphs(
                         .tab_stops
                         .iter()
                         .map(|ts| {
-                            use codec::entities::mtext_format::TabStop as ATab;
+                            use document::entities::mtext_format::TabStop as ATab;
                             let kind = match ts {
                                 ATab::Left(_) => TabKind::Left,
                                 ATab::Center(_) => TabKind::Center,
@@ -906,7 +906,7 @@ pub fn adapt_mtext_paragraphs(
 // `measure_mtext_chars`, `word_wrap`) were removed when every text-bearing
 // entity switched to the run-aware pipeline below. The pipeline now owns
 // per-run width measurement and word-wrap; MTEXT inline parsing now comes from
-// opencadcodec via `adapt_mtext_paragraphs`. The supported surface for callers is
+// document via `adapt_mtext_paragraphs`. The supported surface for callers is
 // `adapt_mtext_paragraphs`, `layout_mtext`, `mtext_line_count`,
 // `text_local_bounds`, and `resolve_dxf_special_chars`.
 
@@ -920,7 +920,7 @@ pub fn adapt_mtext_paragraphs(
 // it carries inline codes).
 //
 // The pipeline mirrors the MTEXT renderer:
-//   1. Parse — via `adapt_mtext_paragraphs` (opencadcodec `parse_mtext`).
+//   1. Parse — via `adapt_mtext_paragraphs` (document `parse_mtext`).
 //   2. Atomise — turn each MTextLine.runs into a flat sequence of atoms
 //      (Word / Space / Tab) so the wrapper operates at break boundaries
 //      while keeping per-character formatting state.
@@ -1891,7 +1891,7 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                                     char_offset: word_start,
                                 });
                             }
-                            // A literal tab (opencadcodec keeps `^I` / `\t` as a tab
+                            // A literal tab (document keeps `^I` / `\t` as a tab
                             // char in the span) advances to the paragraph's next
                             // tab stop, aligning the field that follows it.
                             atoms.push(LayoutAtom {
@@ -3502,7 +3502,7 @@ mod adapter_tests {
     #[test]
     fn relative_height_is_a_factor() {
         // `\H2x;` multiplies the current height → height_mul 2.0, independent of
-        // the entity height. (This is the case that needed opencadcodec's MTextScalar.)
+        // the entity height. (This is the case that needed document's MTextScalar.)
         let (_, st) = first_run(&adapt_mtext_paragraphs("\\H2x;big", 2.5, true));
         assert!((st.height_mul - 2.0).abs() < 1e-4, "got {}", st.height_mul);
     }
@@ -4256,8 +4256,8 @@ mod font_style_tests {
         };
         assert!(width(&bold) > width(family), "the bold face was not used");
 
-        let mut doc = codec::Document::new();
-        let mut style = codec::tables::TextStyle::with_truetype("B", family);
+        let mut doc = document::Document::new();
+        let mut style = document::tables::TextStyle::with_truetype("B", family);
         style.true_type_font_flags |= TTF_FLAG_BOLD;
         style.handle = doc.allocate_handle();
         doc.text_styles.add(style).unwrap();

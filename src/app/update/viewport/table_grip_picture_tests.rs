@@ -1,6 +1,6 @@
 use super::*;
 use crate::entities::traits::Grippable;
-use codec::{entities::Table, types::Vector3, Document, EntityType};
+use document::{entities::Table, types::Vector3, Document, EntityType};
 
 fn table(doc: &Document, handle: Handle) -> &Table {
     let Some(EntityType::Table(table)) = doc.get_entity(handle) else {

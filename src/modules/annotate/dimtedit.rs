@@ -1,7 +1,7 @@
 // DIMTEDIT — reposition, justify, home or rotate existing dimension text.
 
-use codec::entities::{AttachmentPointType, Dimension};
-use codec::{EntityType, Handle};
+use document::entities::{AttachmentPointType, Dimension};
+use document::{EntityType, Handle};
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
@@ -193,7 +193,7 @@ impl CadCommand for DimTeditCommand {
         let EntityType::Dimension(dimension) = &mut entity else {
             return CmdResult::Cancel;
         };
-        let point = codec::types::Vector3::new(point.x, point.y, point.z);
+        let point = document::types::Vector3::new(point.x, point.y, point.z);
         let base = dimension.base_mut();
         base.text_middle_point = point;
         base.insertion_point = point;
@@ -280,8 +280,8 @@ fn dimension_line_endpoints(dimension: &Dimension) -> Option<(DVec3, DVec3)> {
 fn apply_placement(dimension: &mut Dimension, placement: Placement) {
     if matches!(placement, Placement::Home) {
         let base = dimension.base_mut();
-        base.text_middle_point = codec::types::Vector3::ZERO;
-        base.insertion_point = codec::types::Vector3::ZERO;
+        base.text_middle_point = document::types::Vector3::ZERO;
+        base.insertion_point = document::types::Vector3::ZERO;
         base.text_user_positioned = false;
         base.attachment_point = AttachmentPointType::MiddleCenter;
         return;
@@ -295,7 +295,7 @@ fn apply_placement(dimension: &mut Dimension, placement: Placement) {
         Placement::Center => ((left + right) * 0.5, AttachmentPointType::MiddleCenter),
         Placement::Home => unreachable!(),
     };
-    let point = codec::types::Vector3::new(point.x, point.y, point.z);
+    let point = document::types::Vector3::new(point.x, point.y, point.z);
     let base = dimension.base_mut();
     base.text_middle_point = point;
     base.insertion_point = point;

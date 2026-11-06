@@ -5,8 +5,8 @@ mod trim_hatch_tests;
 #[cfg(test)]
 mod command_replacement_tests {
     use super::super::*;
-    use codec::entities::{Circle, Line};
-    use codec::types::Vector3;
+    use document::entities::{Circle, Line};
+    use document::types::Vector3;
 
     #[test]
     fn one_to_one_edits_keep_identity_but_type_changes_do_not() {
@@ -15,7 +15,7 @@ mod command_replacement_tests {
         let tab = app.active_tab;
         let handle = app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )));
@@ -30,7 +30,7 @@ mod command_replacement_tests {
         let kept = app.replace_command_entity(
             tab,
             handle,
-            vec![codec::EntityType::Line(Line::from_points(
+            vec![document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(3.0, 0.0, 0.0),
             ))],
@@ -38,12 +38,12 @@ mod command_replacement_tests {
         assert_eq!(kept, vec![handle]);
         let edited = app.tabs[tab].scene.document.get_entity(handle).unwrap();
         assert_eq!(edited.common().owner_handle, owner);
-        assert!(matches!(edited, codec::EntityType::Line(line) if line.end.x == 3.0));
+        assert!(matches!(edited, document::EntityType::Line(line) if line.end.x == 3.0));
 
         let allocated = app.replace_command_entity(
             tab,
             handle,
-            vec![codec::EntityType::Circle(Circle::from_coords(
+            vec![document::EntityType::Circle(Circle::from_coords(
                 0.0, 0.0, 0.0, 2.0,
             ))],
         );
@@ -59,7 +59,7 @@ mod command_replacement_tests {
         let tab = app.active_tab;
         let handle = app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )));
@@ -73,7 +73,7 @@ mod command_replacement_tests {
 
         let _ = app.apply_cmd_result(CmdResult::UpdateLiveEntity {
             handle,
-            entity: codec::EntityType::Line(Line::from_points(
+            entity: document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(4.0, 0.0, 0.0),
             )),
@@ -86,7 +86,7 @@ mod command_replacement_tests {
         assert_eq!(updated.common().layer, expected.layer);
         assert_eq!(updated.common().invisible, expected.invisible);
         assert_eq!(updated.common().linetype_scale, expected.linetype_scale);
-        assert!(matches!(updated, codec::EntityType::Line(line) if line.end.x == 4.0));
+        assert!(matches!(updated, document::EntityType::Line(line) if line.end.x == 4.0));
     }
 }
 
@@ -94,13 +94,13 @@ mod command_replacement_tests {
 mod trim_extend_history_tests {
     use super::super::*;
     use crate::modules::draw::modify::trim::{ExtendCommand, TrimCommand};
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     fn add_line(app: &mut OpenCADStudio, a: [f64; 2], b: [f64; 2]) -> Handle {
         app.tabs[app.active_tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::new(a[0], a[1], 0.0),
                 Vector3::new(b[0], b[1], 0.0),
             )))
@@ -113,7 +113,7 @@ mod trim_extend_history_tests {
                 .document
                 .entities()
                 .any(|entity| {
-                    matches!(entity, codec::EntityType::Line(line)
+                    matches!(entity, document::EntityType::Line(line)
                 if (line.start.x - a[0]).abs() < 1e-9
                     && (line.start.y - a[1]).abs() < 1e-9
                     && (line.end.x - b[0]).abs() < 1e-9
@@ -125,8 +125,8 @@ mod trim_extend_history_tests {
 
     #[test]
     fn trim_command_dispatch_includes_fill_only_hatch_targets() {
-        use codec::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
-        use codec::types::Vector2;
+        use document::entities::{BoundaryEdge, BoundaryPath, Hatch, PolylineEdge};
+        use document::types::Vector2;
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let mut hatch = Hatch::new();
@@ -143,7 +143,7 @@ mod trim_extend_history_tests {
         let i = app.active_tab;
         let hatch_handle = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Hatch(Box::new(hatch)));
+            .add_entity(document::EntityType::Hatch(Box::new(hatch)));
         let boundary = add_line(&mut app, [5.0, -2.0], [5.0, 12.0]);
         // Pick-first supplies a deterministic Standard-mode cutting edge,
         // regardless of the global TRIMMODE setting from other tests.
@@ -161,7 +161,7 @@ mod trim_extend_history_tests {
         assert_eq!(cmd.name(), "TRIM");
         let result = cmd.on_entity_pick(hatch_handle, glam::DVec3::new(2.0, 5.0, 0.0));
         assert!(matches!(result, CmdResult::ReplaceEntity(h, edited)
-            if h == hatch_handle && matches!(edited.first(), Some(codec::EntityType::Hatch(_)))));
+            if h == hatch_handle && matches!(edited.first(), Some(document::EntityType::Hatch(_)))));
     }
 
     #[test]
@@ -227,24 +227,24 @@ mod parametric_constraint_undo_tests {
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
         app.tabs[app.active_tab]
             .scene
-            .add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
-                codec::types::Vector3::new(x1, y1, 0.0),
-                codec::types::Vector3::new(x2, y2, 0.0),
+            .add_entity(document::EntityType::Line(document::entities::Line::from_points(
+                document::types::Vector3::new(x1, y1, 0.0),
+                document::types::Vector3::new(x2, y2, 0.0),
             )))
     }
 
     fn add_circle(app: &mut OpenCADStudio, cx: f64, cy: f64, radius: f64) -> Handle {
-        let mut circle = codec::entities::Circle::new();
-        circle.center = codec::types::Vector3::new(cx, cy, 0.0);
+        let mut circle = document::entities::Circle::new();
+        circle.center = document::types::Vector3::new(cx, cy, 0.0);
         circle.radius = radius;
         app.tabs[app.active_tab]
             .scene
-            .add_entity(codec::EntityType::Circle(circle))
+            .add_entity(document::EntityType::Circle(circle))
     }
 
     fn circle_center_radius(app: &OpenCADStudio, handle: Handle) -> ([f64; 2], f64) {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Circle(circle)) => {
+            Some(document::EntityType::Circle(circle)) => {
                 ([circle.center.x, circle.center.y], circle.radius)
             }
             other => panic!("expected a Circle, got {other:?}"),
@@ -253,7 +253,7 @@ mod parametric_constraint_undo_tests {
 
     fn line_angle_deg(app: &OpenCADStudio, handle: Handle) -> f64 {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(l)) => (l.end.y - l.start.y)
+            Some(document::EntityType::Line(l)) => (l.end.y - l.start.y)
                 .atan2(l.end.x - l.start.x)
                 .to_degrees(),
             other => panic!("expected a Line, got {other:?}"),
@@ -262,7 +262,7 @@ mod parametric_constraint_undo_tests {
 
     fn line_segment(app: &OpenCADStudio, handle: Handle) -> ([f64; 2], [f64; 2]) {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(l)) => ([l.start.x, l.start.y], [l.end.x, l.end.y]),
+            Some(document::EntityType::Line(l)) => ([l.start.x, l.start.y], [l.end.x, l.end.y]),
             other => panic!("expected a Line, got {other:?}"),
         }
     }
@@ -550,14 +550,14 @@ mod parametric_constraint_undo_tests {
         });
 
         let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(line)) => line.clone(),
+            Some(document::EntityType::Line(line)) => line.clone(),
             other => panic!("expected a Line, got {other:?}"),
         };
         let fixed = line(first);
         let moving = line(second);
-        assert_eq!(fixed.start, codec::types::Vector3::new(0.0, 0.0, 0.0));
-        assert_eq!(fixed.end, codec::types::Vector3::new(10.0, 0.0, 0.0));
-        assert!((moving.start - codec::types::Vector3::new(20.0, 0.0, 0.0)).length() < 1.0e-9);
+        assert_eq!(fixed.start, document::types::Vector3::new(0.0, 0.0, 0.0));
+        assert_eq!(fixed.end, document::types::Vector3::new(10.0, 0.0, 0.0));
+        assert!((moving.start - document::types::Vector3::new(20.0, 0.0, 0.0)).length() < 1.0e-9);
         assert!((moving.length() - 10.0).abs() < 1.0e-7);
         assert!(
             (fixed.end - fixed.start)
@@ -575,18 +575,18 @@ mod parametric_constraint_undo_tests {
     fn a_second_perpendicular_on_one_polyline_squares_its_corner() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let mut polyline = codec::entities::LwPolyline::new();
+        let mut polyline = document::entities::LwPolyline::new();
         polyline.vertices = [(20.0, 0.0), (30.0, 1.0), (30.5, 6.0), (20.0, 6.0)]
             .into_iter()
-            .map(|(x, y)| codec::entities::LwVertex::from_coords(x, y))
+            .map(|(x, y)| document::entities::LwVertex::from_coords(x, y))
             .collect();
         polyline.is_closed = true;
         let i = app.active_tab;
         let handle = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::LwPolyline(polyline));
+            .add_entity(document::EntityType::LwPolyline(polyline));
         let corner = |app: &OpenCADStudio, k: usize| {
-            let Some(codec::EntityType::LwPolyline(p)) =
+            let Some(document::EntityType::LwPolyline(p)) =
                 app.tabs[app.active_tab].scene.document.get_entity(handle)
             else {
                 panic!("expected the polyline");
@@ -615,10 +615,10 @@ mod parametric_constraint_undo_tests {
         let handle = add_line(&mut app, 0.0, 0.0, 5.0, 2.0);
         let (original_start, original_end, original_length) =
             match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-                Some(codec::EntityType::Line(line)) => (line.start, line.end, line.length()),
+                Some(document::EntityType::Line(line)) => (line.start, line.end, line.length()),
                 other => panic!("expected a Line, got {other:?}"),
             };
-        let direction = codec::types::Vector3::new(3.0, 4.0, 0.0).normalize();
+        let direction = document::types::Vector3::new(3.0, 4.0, 0.0).normalize();
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
             kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
@@ -630,7 +630,7 @@ mod parametric_constraint_undo_tests {
         });
 
         let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(line)) => line,
+            Some(document::EntityType::Line(line)) => line,
             other => panic!("expected a Line, got {other:?}"),
         };
         let solved = (line.end - line.start).normalize();
@@ -645,7 +645,7 @@ mod parametric_constraint_undo_tests {
 
         app.undo_steps(1);
         let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(line)) => line,
+            Some(document::EntityType::Line(line)) => line,
             other => panic!("expected a Line after undo, got {other:?}"),
         };
         assert_eq!((line.start, line.end), (original_start, original_end));
@@ -660,7 +660,7 @@ mod parametric_constraint_undo_tests {
 
         app.redo_steps(1);
         let line = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(line)) => line,
+            Some(document::EntityType::Line(line)) => line,
             other => panic!("expected a Line after redo, got {other:?}"),
         };
         assert!(
@@ -690,15 +690,15 @@ mod parametric_constraint_undo_tests {
                 pick(first, glam::DVec3::ZERO),
                 pick(second, glam::DVec3::new(8.0, 3.0, 0.0)),
             ),
-            direction: codec::types::Vector3::UNIT_X,
+            direction: document::types::Vector3::UNIT_X,
             label: "Horizontal constraint",
         });
 
         let line = |handle| match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Line(line)) => line,
+            Some(document::EntityType::Line(line)) => line,
             other => panic!("expected a Line, got {other:?}"),
         };
-        assert_eq!(line(first).start, codec::types::Vector3::ZERO);
+        assert_eq!(line(first).start, document::types::Vector3::ZERO);
         assert!(line(second).start.y.abs() < 1.0e-8);
     }
 
@@ -706,28 +706,28 @@ mod parametric_constraint_undo_tests {
     fn horizontal_minor_axis_rotates_an_ellipse_around_its_center() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let mut ellipse = codec::entities::Ellipse::default();
-        ellipse.center = codec::types::Vector3::new(3.0, 7.0, 0.0);
-        ellipse.major_axis = codec::types::Vector3::new(3.0, 4.0, 0.0);
+        let mut ellipse = document::entities::Ellipse::default();
+        ellipse.center = document::types::Vector3::new(3.0, 7.0, 0.0);
+        ellipse.major_axis = document::types::Vector3::new(3.0, 4.0, 0.0);
         ellipse.minor_axis_ratio = 0.4;
         let handle = app.tabs[app.active_tab]
             .scene
-            .add_entity(codec::EntityType::Ellipse(ellipse));
+            .add_entity(document::EntityType::Ellipse(ellipse));
 
         let _ = app.apply_cmd_result(CmdResult::AddHorizontalConstraint {
             kind: crate::scene::parametric_constraints::ConstraintKind::Horizontal,
             selection: crate::command::HorizontalConstraintSelection::Reference(
                 ParametricRef::ellipse_minor_axis(handle),
             ),
-            direction: codec::types::Vector3::UNIT_X,
+            direction: document::types::Vector3::UNIT_X,
             label: "Horizontal constraint",
         });
 
         let ellipse = match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Ellipse(ellipse)) => ellipse,
+            Some(document::EntityType::Ellipse(ellipse)) => ellipse,
             other => panic!("expected an Ellipse, got {other:?}"),
         };
-        assert!((ellipse.center - codec::types::Vector3::new(3.0, 7.0, 0.0)).length() < 1.0e-9);
+        assert!((ellipse.center - document::types::Vector3::new(3.0, 7.0, 0.0)).length() < 1.0e-9);
         assert!(ellipse.major_axis.x.abs() < 1.0e-7);
         assert!((ellipse.major_axis.length() - 5.0).abs() < 1.0e-7);
         assert!((ellipse.minor_axis_ratio - 0.4).abs() < 1.0e-9);
@@ -740,9 +740,9 @@ mod parametric_constraint_undo_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let _existing = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
 
-        let new_line = codec::EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(5.0, 0.0, 0.0), // exactly on `existing`'s end point
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        let new_line = document::EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(5.0, 0.0, 0.0), // exactly on `existing`'s end point
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         ));
         app.tabs[app.active_tab].active_cmd = Some(Box::new(
             crate::modules::draw::draw::line::LineCommand::new(),
@@ -894,7 +894,7 @@ mod parametric_constraint_undo_tests {
             Ok(8.0)
         );
         let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(codec::EntityType::Line(l)) => (l.start, l.end),
+            Some(document::EntityType::Line(l)) => (l.start, l.end),
             other => panic!("expected a Line, got {other:?}"),
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
@@ -907,7 +907,7 @@ mod parametric_constraint_undo_tests {
         app.named_parameter_editor_rows[0].formula = "3".to_string();
         app.apply_named_parameter_editor_rows();
         let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(codec::EntityType::Line(l)) => (l.start, l.end),
+            Some(document::EntityType::Line(l)) => (l.start, l.end),
             other => panic!("expected a Line, got {other:?}"),
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
@@ -925,7 +925,7 @@ mod parametric_constraint_undo_tests {
             Ok(8.0)
         );
         let length_after_undo = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(codec::EntityType::Line(line)) => line.length(),
+            Some(document::EntityType::Line(line)) => line.length(),
             other => panic!("expected a Line, got {other:?}"),
         };
         assert!((length_after_undo - 8.0).abs() < 1e-6);
@@ -1087,7 +1087,7 @@ mod parametric_constraint_undo_tests {
             Ok(8.0)
         );
         let (start, end) = match app.tabs[app.active_tab].scene.document.get_entity(line) {
-            Some(codec::EntityType::Line(l)) => (l.start, l.end),
+            Some(document::EntityType::Line(l)) => (l.start, l.end),
             other => panic!("expected a Line, got {other:?}"),
         };
         let len = ((end.x - start.x).powi(2) + (end.y - start.y).powi(2)).sqrt();
@@ -1259,17 +1259,17 @@ mod parametric_constraint_undo_tests {
             entities.contains(&a) && entities.contains(&b),
             "the constraint should reference both lines"
         );
-        let Some(codec::EntityType::Line(first)) =
+        let Some(document::EntityType::Line(first)) =
             app.tabs[app.active_tab].scene.document.get_entity(a)
         else {
             panic!("expected first line");
         };
-        let Some(codec::EntityType::Line(second)) =
+        let Some(document::EntityType::Line(second)) =
             app.tabs[app.active_tab].scene.document.get_entity(b)
         else {
             panic!("expected second line");
         };
-        assert!((first.end - codec::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7);
+        assert!((first.end - document::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7);
         assert!((second.start - first.end).length() < 1.0e-7);
         assert!((second.length() - 5.0).abs() < 1.0e-7);
     }
@@ -1313,20 +1313,20 @@ mod parametric_constraint_undo_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod delobj_tests {
     use super::super::*;
-    use codec::types::Vector3;
+    use document::types::Vector3;
 
     fn sweep_source_presence(value: i16, mode: crate::command::ExtrudeMode) -> (bool, bool) {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let mut circle = codec::Circle::new();
+        let mut circle = document::Circle::new();
         circle.radius = 2.0;
         let profile = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Circle(circle));
+            .add_entity(document::EntityType::Circle(circle));
         let path = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(codec::Line::from_points(
+            .add_entity(document::EntityType::Line(document::Line::from_points(
                 Vector3::new(0.0, 0.0, 0.0),
                 Vector3::new(0.0, 0.0, 5.0),
             )));
@@ -1347,10 +1347,10 @@ mod delobj_tests {
             .entities()
             .any(|entity| match mode {
                 crate::command::ExtrudeMode::Solid => {
-                    matches!(entity, codec::EntityType::Solid3D(_))
+                    matches!(entity, document::EntityType::Solid3D(_))
                 }
                 crate::command::ExtrudeMode::Surface => {
-                    matches!(entity, codec::EntityType::Surface(_))
+                    matches!(entity, document::EntityType::Surface(_))
                 }
             });
         assert!(created, "SWEEP must produce the requested result");
@@ -1386,7 +1386,7 @@ mod delobj_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod thicken_tests {
     use super::super::*;
-    use codec::entities::{Surface, SurfaceKind};
+    use document::entities::{Surface, SurfaceKind};
     use kernel::geom2d::{Circle, Curve, NurbsCurve};
     use kernel::space::{Parameterization, Plane};
 
@@ -1403,14 +1403,14 @@ mod thicken_tests {
         )
         .unwrap();
         let source = app.add_surface_model(
-            codec::EntityType::Surface(Box::new(Surface::new(SurfaceKind::Plane))),
+            document::EntityType::Surface(Box::new(Surface::new(SurfaceKind::Plane))),
             body,
         );
         assert!(!source.is_null());
         let i = app.active_tab;
         let invalid = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Surface(Box::new(Surface::new(
+            .add_entity(document::EntityType::Surface(Box::new(Surface::new(
                 SurfaceKind::Generic,
             ))));
         let original =
@@ -1431,7 +1431,7 @@ mod thicken_tests {
             .document
             .entities()
             .find_map(|entity| {
-                matches!(entity, codec::EntityType::Solid3D(_)).then_some(entity.common().handle)
+                matches!(entity, document::EntityType::Solid3D(_)).then_some(entity.common().handle)
             })
             .unwrap();
         assert!(app.tabs[i]
@@ -1498,7 +1498,7 @@ mod thicken_tests {
             kernel::brep::extrude_surface(Plane::XY, &[Curve::Nurbs(profile)], [0.0, 0.0, 2.0])
                 .unwrap();
         let source = app.add_surface_model(
-            codec::EntityType::Surface(Box::new(Surface::new(SurfaceKind::Generic))),
+            document::EntityType::Surface(Box::new(Surface::new(SurfaceKind::Generic))),
             body,
         );
         let i = app.active_tab;
@@ -1513,7 +1513,7 @@ mod thicken_tests {
             .document
             .entities()
             .filter_map(|entity| {
-                matches!(entity, codec::EntityType::Solid3D(_)).then_some(entity.common().handle)
+                matches!(entity, document::EntityType::Solid3D(_)).then_some(entity.common().handle)
             })
             .collect::<Vec<_>>();
         assert_eq!(solids.len(), 1);
@@ -1533,7 +1533,7 @@ mod thicken_tests {
 mod dispatched_command_task_tests {
     use super::super::*;
     use crate::command::CmdResult;
-    use codec::entities::ViewportRenderMode as Mode;
+    use document::entities::ViewportRenderMode as Mode;
 
     /// `CmdResult::Dispatch` and `CmdResult::Relaunch` run the assembled line
     /// through `dispatch_command`, and the Task it returns must reach the
@@ -1573,9 +1573,9 @@ mod dispatched_command_task_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
 
-        let handle = app.tabs[i].scene.add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(10.0, 20.0, 0.0),
-            codec::types::Vector3::new(30.0, 40.0, 0.0),
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(10.0, 20.0, 0.0),
+            document::types::Vector3::new(30.0, 40.0, 0.0),
         )));
 
         // Unselected entity - AutoLISP (command "_MOVE" ss "" "_NONE" pt "_NONE" '(0 0 0)) produces:
@@ -1585,7 +1585,7 @@ mod dispatched_command_task_tests {
         let _ = app.drive_headless_task(task);
 
         let moved = app.tabs[i].scene.document.get_entity(handle).unwrap();
-        if let codec::EntityType::Line(l) = moved {
+        if let document::EntityType::Line(l) = moved {
             assert!((l.start.x - 0.0).abs() < 1e-4, "Expected start.x == 0, got {}", l.start.x);
             assert!((l.start.y - 0.0).abs() < 1e-4, "Expected start.y == 0, got {}", l.start.y);
             assert!((l.end.x - 20.0).abs() < 1e-4, "Expected end.x == 20, got {}", l.end.x);
@@ -1601,9 +1601,9 @@ mod dispatched_command_task_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
 
-        let handle = app.tabs[i].scene.add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(10.0, 20.0, 0.0),
-            codec::types::Vector3::new(30.0, 40.0, 0.0),
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(10.0, 20.0, 0.0),
+            document::types::Vector3::new(30.0, 40.0, 0.0),
         )));
 
         // User pre-selects the entity in the GUI
@@ -1616,7 +1616,7 @@ mod dispatched_command_task_tests {
         let _ = app.drive_headless_task(task);
 
         let moved = app.tabs[i].scene.document.get_entity(handle).unwrap();
-        if let codec::EntityType::Line(l) = moved {
+        if let document::EntityType::Line(l) = moved {
             assert!((l.start.x - 0.0).abs() < 1e-4, "Expected start.x == 0, got {}", l.start.x);
             assert!((l.start.y - 0.0).abs() < 1e-4, "Expected start.y == 0, got {}", l.start.y);
             assert!((l.end.x - 20.0).abs() < 1e-4, "Expected end.x == 20, got {}", l.end.x);
@@ -1637,9 +1637,9 @@ mod dispatched_command_task_tests {
 #[cfg(test)]
 mod bedit_characterization_tests {
     use super::super::*;
-    use codec::entities::{Circle, Insert, Line};
-    use codec::types::Vector3;
-    use codec::EntityType;
+    use document::entities::{Circle, Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
 
     /// Fresh document with one block definition `BLK` (one line) and one
     /// model-space INSERT referencing it. Returns the INSERT handle and the
@@ -1752,7 +1752,7 @@ mod bedit_characterization_tests {
         let line = app.tabs[tab]
             .scene
             .document
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(1.0, 0.0, 0.0),
             )))
@@ -2080,7 +2080,7 @@ mod bedit_characterization_tests {
         // Create line1 on layer "0" (unlocked)
         let h_unlocked = app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(10.0, 0.0, 0.0),
             )));
@@ -2093,7 +2093,7 @@ mod bedit_characterization_tests {
         line2.common.layer = "LOCKED_LAYER".to_string();
         let h_locked = app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(line2));
+            .add_entity(document::EntityType::Line(line2));
 
         app.tabs[tab]
             .scene
@@ -2166,9 +2166,9 @@ mod block_base_point_tests {
     use super::super::*;
     use crate::command::{CadCommand, CmdResult};
     use crate::modules::insert::insert_block::InsertBlockCommand;
-    use codec::entities::AttributeDefinition;
-    use codec::types::Vector3;
-    use codec::EntityType;
+    use document::entities::AttributeDefinition;
+    use document::types::Vector3;
+    use document::EntityType;
 
     /// base-point fix (A), host side: `AttreqNeeded` is where the host resolves the
     /// block's ATTDEFs, so it also injects the definition's base point. Without
@@ -2189,7 +2189,7 @@ mod block_base_point_tests {
             "ATTREQ_BP",
             Vector3::new(10.0, 5.0, 0.0),
             vec![
-                EntityType::Line(codec::entities::Line::from_points(
+                EntityType::Line(document::entities::Line::from_points(
                     Vector3::new(10.0, 5.0, 0.0),
                     Vector3::new(30.0, 5.0, 0.0),
                 )),
@@ -2267,7 +2267,7 @@ mod block_base_point_tests {
             "ATTREQ_ID",
             Vector3::ZERO,
             vec![
-                EntityType::Line(codec::entities::Line::from_points(
+                EntityType::Line(document::entities::Line::from_points(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(20.0, 0.0, 0.0),
                 )),
@@ -2379,7 +2379,7 @@ mod block_base_point_tests {
             "ATTREQ_CONST",
             Vector3::ZERO,
             vec![
-                EntityType::Line(codec::entities::Line::from_points(
+                EntityType::Line(document::entities::Line::from_points(
                     Vector3::new(0.0, 0.0, 0.0),
                     Vector3::new(20.0, 0.0, 0.0),
                 )),
@@ -2437,7 +2437,7 @@ mod block_base_point_tests {
         app.tabs[i].scene.define_block_raw(
             "DEF_BASE",
             Vector3::new(10.0, 5.0, 0.0),
-            vec![EntityType::Line(codec::entities::Line::from_points(
+            vec![EntityType::Line(document::entities::Line::from_points(
                 Vector3::new(10.0, 5.0, 0.0),
                 Vector3::new(30.0, 5.0, 0.0),
             ))],
@@ -2471,19 +2471,19 @@ mod block_base_point_tests {
     /// A block with base (10,5,0) and LINE (10,5)-(30,5), referenced by an
     /// INSERT at (100,100) with 30° rotation and uniform scale 2. Under the
     /// convention the LINE renders at (100,100)-(134.641016,120).
-    fn block_and_instance_with_base(app: &mut OpenCADStudio, name: &str) -> codec::Handle {
+    fn block_and_instance_with_base(app: &mut OpenCADStudio, name: &str) -> document::Handle {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         app.tabs[i].scene.define_block_raw(
             name,
             Vector3::new(10.0, 5.0, 0.0),
-            vec![EntityType::Line(codec::entities::Line::from_points(
+            vec![EntityType::Line(document::entities::Line::from_points(
                 Vector3::new(10.0, 5.0, 0.0),
                 Vector3::new(30.0, 5.0, 0.0),
             ))],
         );
         let mut insert =
-            codec::entities::Insert::new(name.to_string(), Vector3::new(100.0, 100.0, 0.0));
+            document::entities::Insert::new(name.to_string(), Vector3::new(100.0, 100.0, 0.0));
         insert.set_x_scale(2.0);
         insert.set_y_scale(2.0);
         insert.set_z_scale(2.0);
@@ -2507,7 +2507,7 @@ mod block_base_point_tests {
         );
 
         // The working copy is the LINE the session moved into model space.
-        let temp: Vec<codec::Handle> = app.tabs[i]
+        let temp: Vec<document::Handle> = app.tabs[i]
             .refedit_session
             .as_ref()
             .expect("the session")
@@ -2605,7 +2605,7 @@ mod block_base_point_tests {
         );
         assert!(
             matches!(
-                app.tabs[i].scene.document.get_entity(codec::Handle::new(end)),
+                app.tabs[i].scene.document.get_entity(document::Handle::new(end)),
                 Some(EntityType::BlockEnd(_))
             ),
             "the record's end handle names an ENDBLK entity"
@@ -2628,14 +2628,14 @@ mod block_base_point_tests {
             .get("VIS_BP")
             .expect("the block record")
             .handle;
-        let mut param = codec::objects::BlockVisibilityParameter::default();
+        let mut param = document::objects::BlockVisibilityParameter::default();
         param.owner = def_block;
         param.def_point = Vector3::new(12.0, 3.0, 0.0);
         app.tabs[i]
             .scene
             .document
             .block_visibility_params
-            .insert(codec::Handle::new(0x70), param);
+            .insert(document::Handle::new(0x70), param);
         app.tabs[i].selected_handle = Some(handle);
 
         app.refresh_visibility_grip([0.0, 0.0, 0.0]);
@@ -2670,14 +2670,14 @@ mod block_base_point_tests {
             .get("VIS_DOWN")
             .expect("the block record")
             .handle;
-        let mut param = codec::objects::BlockVisibilityParameter::default();
+        let mut param = document::objects::BlockVisibilityParameter::default();
         param.owner = def_block;
         param.def_point = Vector3::new(12.0, 3.0, 0.0);
         app.tabs[i]
             .scene
             .document
             .block_visibility_params
-            .insert(codec::Handle::new(0x70), param);
+            .insert(document::Handle::new(0x70), param);
         app.tabs[i].selected_handle = Some(handle);
 
         app.refresh_visibility_grip([0.0, 0.0, 0.0]);
@@ -2694,8 +2694,8 @@ mod block_base_point_tests {
 mod sweep_path_end_tests {
     use crate::app::OpenCADStudio;
     use crate::command::CmdResult;
-    use codec::entities::{LwPolyline, LwVertex};
-    use codec::types::Vector2;
+    use document::entities::{LwPolyline, LwVertex};
+    use document::types::Vector2;
 
     /// Picked near its far end, a path is swept from that end. A path whose
     /// start lies farther from the world origin than its end used to fail.
@@ -2710,7 +2710,7 @@ mod sweep_path_end_tests {
             hexagon.vertices.push(LwVertex::new(Vector2::new(5.0 * a.cos(), 5.0 * a.sin())));
         }
         hexagon.is_closed = true;
-        let profile = app.tabs[i].scene.add_entity(codec::EntityType::LwPolyline(hexagon));
+        let profile = app.tabs[i].scene.add_entity(document::EntityType::LwPolyline(hexagon));
         let mut path = LwPolyline::new();
         path.vertices.push(LwVertex::new(Vector2::new(20.0, 0.0)));
         path.vertices.push(LwVertex::with_bulge(
@@ -2719,7 +2719,7 @@ mod sweep_path_end_tests {
         ));
         path.vertices.push(LwVertex::new(Vector2::new(80.0, 20.0)));
         path.vertices.push(LwVertex::new(Vector2::new(80.0, 60.0)));
-        let path = app.tabs[i].scene.add_entity(codec::EntityType::LwPolyline(path));
+        let path = app.tabs[i].scene.add_entity(document::EntityType::LwPolyline(path));
         let options = crate::command::SweepOptions {
             path_pick: Some(glam::DVec3::new(80.0, 40.0, 0.0)),
             ..crate::command::SweepOptions::default()
@@ -2736,7 +2736,7 @@ mod sweep_path_end_tests {
             .scene
             .document
             .entities()
-            .any(|entity| matches!(entity, codec::EntityType::Solid3D(_)));
+            .any(|entity| matches!(entity, document::EntityType::Solid3D(_)));
         assert!(swept, "the sweep from the picked end makes a solid");
     }
 }
@@ -2744,8 +2744,8 @@ mod sweep_path_end_tests {
 #[cfg(test)]
 mod copytolayer_tests {
     use super::super::*;
-    use codec::entities::{Circle, Line};
-    use codec::types::Vector3;
+    use document::entities::{Circle, Line};
+    use document::types::Vector3;
     use glam::DVec3;
 
     fn fixture() -> (OpenCADStudio, Handle, Handle) {
@@ -2755,19 +2755,19 @@ mod copytolayer_tests {
         scene
             .document
             .layers
-            .add(codec::tables::Layer::new("RED"))
+            .add(document::tables::Layer::new("RED"))
             .unwrap();
         scene
             .document
             .layers
-            .add(codec::tables::Layer::new("BLUE"))
+            .add(document::tables::Layer::new("BLUE"))
             .unwrap();
         let mut circle = Circle::from_coords(1.0, 2.0, 0.0, 2.0);
         circle.common.layer = "RED".into();
-        let source = scene.add_entity(codec::EntityType::Circle(circle));
+        let source = scene.add_entity(document::EntityType::Circle(circle));
         let mut line = Line::from_points(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0));
         line.common.layer = "BLUE".into();
-        let dest = scene.add_entity(codec::EntityType::Line(line));
+        let dest = scene.add_entity(document::EntityType::Line(line));
         (app, source, dest)
     }
 
@@ -2824,7 +2824,7 @@ mod copytolayer_tests {
             layer,
             "destination layer must come from the phase-2 pick"
         );
-        let codec::EntityType::Circle(c) = e else {
+        let document::EntityType::Circle(c) = e else {
             panic!("expected circle")
         };
         assert_eq!(
@@ -2881,7 +2881,7 @@ mod copytolayer_tests {
             let scene = &mut app.tabs[app.active_tab].scene;
             let extra: Vec<_> = (0..3)
                 .map(|n| {
-                    scene.add_entity(codec::EntityType::Circle(Circle::from_coords(
+                    scene.add_entity(document::EntityType::Circle(Circle::from_coords(
                         20.0 + n as f64,
                         0.0,
                         0.0,
@@ -3065,10 +3065,10 @@ mod selection_history_tests {
     use super::super::*;
     use crate::app::OpenCADStudio;
     use crate::command::StepInput;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
-    fn three_lines() -> (OpenCADStudio, Vec<codec::Handle>) {
+    fn three_lines() -> (OpenCADStudio, Vec<document::Handle>) {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -3076,7 +3076,7 @@ mod selection_history_tests {
             .map(|n| {
                 app.tabs[i]
                     .scene
-                    .add_entity(codec::EntityType::Line(Line::from_points(
+                    .add_entity(document::EntityType::Line(Line::from_points(
                         Vector3::new(n as f64 * 10.0, 0.0, 0.0),
                         Vector3::new(n as f64 * 10.0 + 5.0, 0.0, 0.0),
                     )))
@@ -3085,7 +3085,7 @@ mod selection_history_tests {
         (app, handles)
     }
 
-    fn selected(app: &OpenCADStudio) -> Vec<codec::Handle> {
+    fn selected(app: &OpenCADStudio) -> Vec<document::Handle> {
         app.tabs[app.active_tab]
             .scene
             .selected_entities()
@@ -3094,7 +3094,7 @@ mod selection_history_tests {
             .collect()
     }
 
-    fn pick(app: &mut OpenCADStudio, handle: codec::Handle) {
+    fn pick(app: &mut OpenCADStudio, handle: document::Handle) {
         let i = app.active_tab;
         app.tabs[i].scene.select_entity(handle, false);
         let current = selected(app);
@@ -3159,7 +3159,7 @@ mod dash_layer_properties_tests {
         app
     }
 
-    fn layer(app: &OpenCADStudio) -> &codec::tables::Layer {
+    fn layer(app: &OpenCADStudio) -> &document::tables::Layer {
         app.tabs[app.active_tab]
             .scene
             .document
@@ -3176,7 +3176,7 @@ mod dash_layer_properties_tests {
 
         assert_eq!(
             layer(&app).transparency,
-            codec::types::Transparency::from_percent(0.5)
+            document::types::Transparency::from_percent(0.5)
         );
         assert_eq!(layer(&app).description, "walls");
     }
@@ -3204,10 +3204,10 @@ mod dash_layer_properties_tests {
 mod attedit_dash_tests {
     use super::super::*;
     use crate::app::OpenCADStudio;
-    use codec::entities::{AttributeEntity, Insert};
-    use codec::types::Vector3;
+    use document::entities::{AttributeEntity, Insert};
+    use document::types::Vector3;
 
-    fn inserts_with_title() -> (OpenCADStudio, Vec<codec::Handle>) {
+    fn inserts_with_title() -> (OpenCADStudio, Vec<document::Handle>) {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -3220,19 +3220,19 @@ mod attedit_dash_tests {
                     .push(AttributeEntity::new("TITLE".into(), "old".into()));
                 app.tabs[i]
                     .scene
-                    .add_entity(codec::EntityType::Insert(insert))
+                    .add_entity(document::EntityType::Insert(insert))
             })
             .collect();
         (app, handles)
     }
 
-    fn attribute(app: &OpenCADStudio, handle: codec::Handle) -> (String, String) {
+    fn attribute(app: &OpenCADStudio, handle: document::Handle) -> (String, String) {
         let entity = app.tabs[app.active_tab]
             .scene
             .document
             .get_entity(handle)
             .expect("insert");
-        let codec::EntityType::Insert(insert) = entity else {
+        let document::EntityType::Insert(insert) = entity else {
             panic!("not an insert");
         };
         let attr = insert.attributes.first().expect("attribute");
@@ -3363,16 +3363,16 @@ mod dim_update_regen_tests {
     use super::super::*;
     use crate::app::OpenCADStudio;
     use crate::entities::dimension::as_dimension;
-    use codec::entities::Dimension;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Dimension;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     /// A line with a linear dimension associated to its two ends.
-    fn app_with_associative_dimension() -> (OpenCADStudio, codec::Handle, codec::Handle) {
+    fn app_with_associative_dimension() -> (OpenCADStudio, document::Handle, document::Handle) {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let line = app.tabs[i].scene.add_entity(codec::EntityType::Line(
+        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
             Line::from_points(Vector3::ZERO, Vector3::new(40.0, 0.0, 0.0)),
         ));
         let dimension = app.tabs[i].scene.add_entity(
@@ -3414,7 +3414,7 @@ mod dim_update_regen_tests {
     fn dimregen_solves_the_dimension_after_an_external_geometry_change() {
         let (mut app, line, dimension) = app_with_associative_dimension();
         let i = app.active_tab;
-        if let Some(codec::EntityType::Line(line)) =
+        if let Some(document::EntityType::Line(line)) =
             app.tabs[i].scene.document.get_entity_mut(line)
         {
             line.start = Vector3::new(10.0, 0.0, 0.0);
@@ -3443,7 +3443,7 @@ mod dim_update_regen_tests {
     fn dimupdate_pushes_the_current_style_onto_the_selection() {
         let (mut app, _, dimension) = app_with_associative_dimension();
         let i = app.active_tab;
-        let mut style = codec::tables::DimStyle::new("TALL");
+        let mut style = document::tables::DimStyle::new("TALL");
         style.dimtxt = 5.0;
         let _ = app.tabs[i].scene.document.dim_styles.add(style);
         app.tabs[i].scene.document.header.current_dimstyle_name = "TALL".into();
@@ -3547,8 +3547,8 @@ mod mission_m025_tests {
 #[cfg(test)]
 mod mission_m027_tests {
     use super::super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     fn all_output(app: &OpenCADStudio) -> String {
         app.command_line
@@ -3566,7 +3566,7 @@ mod mission_m027_tests {
         let tab = app.active_tab;
         app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(10.0, 0.0, 0.0),
             )));
@@ -3589,7 +3589,7 @@ mod mission_m027_tests {
         let tab = app.active_tab;
         app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(10.0, 0.0, 0.0),
             )));
@@ -3605,7 +3605,7 @@ mod mission_m027_tests {
         let tab = app.active_tab;
         let line = app.tabs[tab]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(10.0, 0.0, 0.0),
             )));
@@ -3678,8 +3678,8 @@ mod mission_m029_tests {
 #[cfg(test)]
 mod mission_m051_tests {
     use super::super::*;
-    use codec::entities::{Line, Text};
-    use codec::types::Vector3;
+    use document::entities::{Line, Text};
+    use document::types::Vector3;
 
     fn all_output(app: &OpenCADStudio) -> String {
         app.command_line
@@ -3690,33 +3690,33 @@ mod mission_m051_tests {
             .join("\n")
     }
 
-    fn add_note(app: &mut OpenCADStudio) -> (codec::Handle, codec::Handle) {
+    fn add_note(app: &mut OpenCADStudio) -> (document::Handle, document::Handle) {
         let i = app.active_tab;
         let mut text = Text::with_value("NOTE", Vector3::ZERO);
         text.height = 2.0;
         let text = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Text(text));
+            .add_entity(document::EntityType::Text(text));
         let line = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::new(-5.0, 0.5, 0.0),
                 Vector3::new(15.0, 0.5, 0.0),
             )));
         (text, line)
     }
 
-    fn masks(app: &OpenCADStudio) -> Vec<codec::Handle> {
+    fn masks(app: &OpenCADStudio) -> Vec<document::Handle> {
         app.tabs[app.active_tab]
             .scene
             .document
             .entities()
-            .filter(|entity| matches!(entity, codec::EntityType::Wipeout(_)))
+            .filter(|entity| matches!(entity, document::EntityType::Wipeout(_)))
             .map(|entity| entity.common().handle)
             .collect()
     }
 
-    fn bounds(app: &OpenCADStudio, handle: codec::Handle) -> ([f32; 3], [f32; 3]) {
+    fn bounds(app: &OpenCADStudio, handle: document::Handle) -> ([f32; 3], [f32; 3]) {
         let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
         for wire in app.tabs[app.active_tab].scene.wire_models_for(&[handle]) {
             for point in &wire.points {
@@ -3820,8 +3820,8 @@ mod mission_m051_tests {
 #[cfg(test)]
 mod mission_m062_tests {
     use super::super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     fn all_output(app: &OpenCADStudio) -> String {
         app.command_line
@@ -3847,7 +3847,7 @@ mod mission_m062_tests {
         let i = app.active_tab;
         app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(100.0, 100.0, 0.0),
             )));
@@ -3875,7 +3875,7 @@ mod mission_m062_tests {
         let i = app.active_tab;
         app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(50.0, 25.0, 0.0),
             )));
@@ -4016,8 +4016,8 @@ mod mission_m060_tests {
 #[cfg(test)]
 mod mission_m042_tests {
     use super::super::*;
-    use codec::entities::Text;
-    use codec::types::Vector3;
+    use document::entities::Text;
+    use document::types::Vector3;
 
     fn all_output(app: &OpenCADStudio) -> String {
         app.command_line
@@ -4028,21 +4028,21 @@ mod mission_m042_tests {
             .join("\n")
     }
 
-    fn add_text(app: &mut OpenCADStudio) -> codec::Handle {
+    fn add_text(app: &mut OpenCADStudio) -> document::Handle {
         let i = app.active_tab;
         let text = app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Text(Text::with_value(
+            .add_entity(document::EntityType::Text(Text::with_value(
                 "OLD",
                 Vector3::ZERO,
             )));
         text
     }
 
-    fn text_value(app: &OpenCADStudio, handle: codec::Handle) -> String {
+    fn text_value(app: &OpenCADStudio, handle: document::Handle) -> String {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Text(text)) => text.value.clone(),
-            Some(codec::EntityType::MText(text)) => text.value.clone(),
+            Some(document::EntityType::Text(text)) => text.value.clone(),
+            Some(document::EntityType::MText(text)) => text.value.clone(),
             _ => panic!("text host disappeared"),
         }
     }
@@ -4149,7 +4149,7 @@ mod mission_m055_tests {
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(vp)
+                document::EntityType::Viewport(vp)
                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                 {
                     Some((
@@ -4180,12 +4180,12 @@ mod mission_m055_tests {
         assert!(all_output(&app).contains("saved configuration 'FOUR'"));
         let i = app.active_tab;
         let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
-        let two: Vec<codec::Handle> = app.tabs[i]
+        let two: Vec<document::Handle> = app.tabs[i]
             .scene
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(vp)
+                document::EntityType::Viewport(vp)
                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                 {
                     Some(vp.common.handle)
@@ -4268,7 +4268,7 @@ mod mission_m058_tests {
         app.tabs[i].scene.load_current_layout_state();
     }
 
-    fn viewports(app: &OpenCADStudio) -> Vec<codec::Handle> {
+    fn viewports(app: &OpenCADStudio) -> Vec<document::Handle> {
         let i = app.active_tab;
         let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
         app.tabs[i]
@@ -4276,7 +4276,7 @@ mod mission_m058_tests {
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(vp)
+                document::EntityType::Viewport(vp)
                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                 {
                     Some(vp.common.handle)
@@ -4286,13 +4286,13 @@ mod mission_m058_tests {
             .collect()
     }
 
-    fn vp(app: &OpenCADStudio, handle: codec::Handle) -> &codec::entities::Viewport {
+    fn vp(app: &OpenCADStudio, handle: document::Handle) -> &document::entities::Viewport {
         match app.tabs[app.active_tab]
             .scene
             .document
             .get_entity(handle)
         {
-            Some(codec::EntityType::Viewport(vp)) => vp,
+            Some(document::EntityType::Viewport(vp)) => vp,
             _ => panic!("viewport missing"),
         }
     }
@@ -4312,7 +4312,7 @@ mod mission_m058_tests {
             .scene
             .printable_area_limits()
             .unwrap();
-        if let Some(codec::EntityType::Viewport(vp)) =
+        if let Some(document::EntityType::Viewport(vp)) =
             app.tabs[i].scene.document.get_entity_mut(target)
         {
             vp.custom_scale = 0.02; // 1:50
@@ -4504,8 +4504,8 @@ mod mission_m059_tests {
 #[cfg(test)]
 mod mission_m061_tests {
     use super::super::*;
-    use codec::entities::Line;
-    use codec::types::Vector3;
+    use document::entities::Line;
+    use document::types::Vector3;
 
     fn all_output(app: &OpenCADStudio) -> String {
         app.command_line
@@ -4528,7 +4528,7 @@ mod mission_m061_tests {
         let i = app.active_tab;
         app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Line(Line::from_points(
+            .add_entity(document::EntityType::Line(Line::from_points(
                 Vector3::ZERO,
                 Vector3::new(100.0, 60.0, 0.0),
             )));
@@ -4581,7 +4581,7 @@ mod mission_m061_tests {
         ps.paper_size = "ISO_A3_(297.00_x_420.00_MM)".to_string();
         ps.paper_width = 297.0;
         ps.paper_height = 420.0;
-        ps.rotation = codec::objects::PlotRotation::Degrees90;
+        ps.rotation = document::objects::PlotRotation::Degrees90;
         app.tabs[i].scene.set_layout_plot_settings(&layout, &ps);
         let path = temp_svg("a3");
 
@@ -4632,31 +4632,31 @@ mod mission_m070_tests {
     }
 
     fn write_source(dir: &std::path::Path) {
-        let mut source = codec::Document::new();
+        let mut source = document::Document::new();
         source
             .layers
-            .add(codec::tables::Layer::new("WALLS"))
+            .add(document::tables::Layer::new("WALLS"))
             .unwrap();
         source
             .layers
-            .add(codec::tables::Layer::new("HIDDEN"))
+            .add(document::tables::Layer::new("HIDDEN"))
             .unwrap();
         source
             .text_styles
-            .add(codec::tables::TextStyle::new("NOTE"))
+            .add(document::tables::TextStyle::new("NOTE"))
             .unwrap();
-        let mut title = codec::tables::BlockRecord::new("TITLE");
+        let mut title = document::tables::BlockRecord::new("TITLE");
         title.handle = source.allocate_handle();
         let title_handle = title.handle;
         source.block_records.add(title).unwrap();
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.layer = "WALLS".to_string();
         line.common.owner_handle = title_handle;
-        source.add_entity(codec::EntityType::Line(line)).unwrap();
-        let mut text = codec::entities::Text::new();
+        source.add_entity(document::EntityType::Line(line)).unwrap();
+        let mut text = document::entities::Text::new();
         text.style = "NOTE".to_string();
         text.common.owner_handle = title_handle;
-        source.add_entity(codec::EntityType::Text(text)).unwrap();
+        source.add_entity(document::EntityType::Text(text)).unwrap();
         let bytes = crate::io::save_to_bytes(&source, "dwg", source.version).unwrap();
         std::fs::write(dir.join("plan.dwg"), bytes).unwrap();
     }
@@ -4664,7 +4664,7 @@ mod mission_m070_tests {
     fn attach(app: &mut OpenCADStudio, dir: &std::path::Path) -> u64 {
         let i = app.active_tab;
         app.tabs[i].current_path = Some(dir.join("host.dwg"));
-        let mut record = codec::tables::BlockRecord::new("PLAN");
+        let mut record = document::tables::BlockRecord::new("PLAN");
         record.flags.is_xref = true;
         record.xref_path = "plan.dwg".to_string();
         record.handle = app.tabs[i].scene.document.allocate_handle();
@@ -4775,7 +4775,7 @@ mod mission_m076_tests {
     /// real one — exactly what the LAYER command does when it creates a row.
     fn add_layer(app: &mut OpenCADStudio, name: &str) {
         let i = app.active_tab;
-        let mut layer = codec::tables::Layer::new(name);
+        let mut layer = document::tables::Layer::new(name);
         layer.handle = app.tabs[i].scene.document.allocate_handle();
         app.tabs[i]
             .scene
@@ -4816,10 +4816,10 @@ mod mission_m076_tests {
             .layers
             .get_mut(name)
             .expect("layer")
-            .color = codec::types::Color::Index(index);
+            .color = document::types::Color::Index(index);
     }
 
-    fn layer_color(app: &OpenCADStudio, name: &str) -> codec::types::Color {
+    fn layer_color(app: &OpenCADStudio, name: &str) -> document::types::Color {
         app.tabs[app.active_tab]
             .scene
             .document
@@ -4874,10 +4874,10 @@ mod mission_m076_tests {
 
         let _ = app.run_command_line("-LAYERSTATE RESTORE PALETTE ON");
         assert!(!layer_off(&app, "WALLS"));
-        assert_eq!(layer_color(&app, "WALLS"), codec::types::Color::Index(5));
+        assert_eq!(layer_color(&app, "WALLS"), document::types::Color::Index(5));
 
         let _ = app.run_command_line("-LAYERSTATE RESTORE PALETTE COLOR");
-        assert_eq!(layer_color(&app, "WALLS"), codec::types::Color::Index(1));
+        assert_eq!(layer_color(&app, "WALLS"), document::types::Color::Index(1));
         assert!(!layer_off(&app, "WALLS"));
 
         let _ = app.run_command_line("-LAYERSTATE RESTORE PALETTE NONSENSE");
@@ -4961,16 +4961,16 @@ mod mission_m078_tests {
     /// A layer a translation can act on needs a real handle.
     fn add_layer(app: &mut OpenCADStudio, name: &str) {
         let i = app.active_tab;
-        let mut layer = codec::tables::Layer::new(name);
+        let mut layer = document::tables::Layer::new(name);
         layer.handle = app.tabs[i].scene.document.allocate_handle();
         app.tabs[i].scene.document.layers.add(layer).unwrap();
     }
 
     fn add_line(app: &mut OpenCADStudio, layer: &str) {
         let i = app.active_tab;
-        let mut line = codec::entities::Line::new();
+        let mut line = document::entities::Line::new();
         line.common.layer = layer.to_string();
-        app.tabs[i].scene.add_entity(codec::EntityType::Line(line));
+        app.tabs[i].scene.add_entity(document::EntityType::Line(line));
     }
 
     fn line_layers(app: &OpenCADStudio) -> Vec<String> {
@@ -4979,7 +4979,7 @@ mod mission_m078_tests {
             .document
             .entities()
             .filter_map(|entity| match entity {
-                codec::EntityType::Line(_) => Some(entity.common().layer.clone()),
+                document::EntityType::Line(_) => Some(entity.common().layer.clone()),
                 _ => None,
             })
             .collect()
@@ -4987,11 +4987,11 @@ mod mission_m078_tests {
 
     /// A standards drawing holding the office layer names.
     fn write_standards(dir: &std::path::Path, layers: &[&str]) -> std::path::PathBuf {
-        let mut document = codec::Document::new();
+        let mut document = document::Document::new();
         for name in layers {
             document
                 .layers
-                .add(codec::tables::Layer::new(*name))
+                .add(document::tables::Layer::new(*name))
                 .unwrap();
         }
         let bytes = crate::io::save_to_bytes(&document, "dwg", document.version).unwrap();
@@ -5111,31 +5111,31 @@ mod mission_m100_tests {
             .join("\n")
     }
 
-    fn add_mleader(app: &mut OpenCADStudio) -> codec::Handle {
+    fn add_mleader(app: &mut OpenCADStudio) -> document::Handle {
         let i = app.active_tab;
-        let mut leader = codec::entities::MultiLeader::with_text(
+        let mut leader = document::entities::MultiLeader::with_text(
             "office note",
-            codec::types::Vector3::new(20.0, 0.0, 0.0),
+            document::types::Vector3::new(20.0, 0.0, 0.0),
             vec![
-                codec::types::Vector3::ZERO,
-                codec::types::Vector3::new(5.0, 5.0, 0.0),
+                document::types::Vector3::ZERO,
+                document::types::Vector3::new(5.0, 5.0, 0.0),
             ],
         );
         leader.text_height = 0.18;
         leader.context.text_height = 0.18;
         app.tabs[i]
             .scene
-            .add_entity(codec::EntityType::MultiLeader(Box::new(leader)))
+            .add_entity(document::EntityType::MultiLeader(Box::new(leader)))
     }
 
-    fn style(app: &OpenCADStudio, name: &str) -> codec::objects::MultiLeaderStyle {
+    fn style(app: &OpenCADStudio, name: &str) -> document::objects::MultiLeaderStyle {
         app.tabs[app.active_tab]
             .scene
             .document
             .objects
             .values()
             .find_map(|object| match object {
-                codec::objects::ObjectType::MultiLeaderStyle(style)
+                document::objects::ObjectType::MultiLeaderStyle(style)
                     if style.name.eq_ignore_ascii_case(name) =>
                 {
                     Some(style.clone())
@@ -5145,9 +5145,9 @@ mod mission_m100_tests {
             .expect("style")
     }
 
-    fn leader(app: &OpenCADStudio, handle: codec::Handle) -> codec::entities::MultiLeader {
+    fn leader(app: &OpenCADStudio, handle: document::Handle) -> document::entities::MultiLeader {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::MultiLeader(leader)) => (**leader).clone(),
+            Some(document::EntityType::MultiLeader(leader)) => (**leader).clone(),
             _ => panic!("multileader missing"),
         }
     }
@@ -5252,7 +5252,7 @@ mod polygon_flow_tests {
             .document
             .entities()
             .find_map(|entity| match entity {
-                codec::EntityType::LwPolyline(polyline) => Some(
+                document::EntityType::LwPolyline(polyline) => Some(
                     polyline
                         .vertices
                         .iter()

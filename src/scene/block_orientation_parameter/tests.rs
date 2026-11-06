@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::{block_distance_parameter, block_point_parameter, block_visibility, Scene};
-use codec::{entities::Line, EntityType};
+use document::{entities::Line, EntityType};
 
 fn fixture() -> (Scene, Handle) {
     let mut scene = Scene::new();
@@ -37,7 +37,7 @@ fn append_batch(document: &mut Document, definition: Handle) {
         .unwrap();
     }
 }
-fn graph_data(document: &Document, definition: Handle) -> &codec::objects::BlockEvaluationGraph {
+fn graph_data(document: &Document, definition: Handle) -> &document::objects::BlockEvaluationGraph {
     let ObjectType::DynamicBlock(o) =
         &document.objects[&graph_handle(document, definition).unwrap()]
     else {

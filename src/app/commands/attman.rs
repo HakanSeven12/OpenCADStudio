@@ -2,8 +2,8 @@
 //! definitions into the dialog and writing the edited list back to the
 //! block definition and, when asked, to its existing references.
 
-use codec::entities::AttributeDefinition;
-use codec::{EntityType, Handle};
+use document::entities::AttributeDefinition;
+use document::{EntityType, Handle};
 use iced::Task;
 
 use crate::app::{Message, OpenCADStudio};

@@ -1,6 +1,6 @@
 //! Runtime host surface (`host` feature).
 //!
-//! [`HostApi`] is the `opencadcodec`-typed adapter a plugin uses at *dispatch* time
+//! [`HostApi`] is the `document`-typed adapter a plugin uses at *dispatch* time
 //! — document access, entity creation, XDATA, undo, and the command line. It is
 //! the stable counterpart to the dependency-free manifest/ribbon contract: a
 //! plugin's `dispatch` receives `&mut dyn HostApi` rather than the host's
@@ -19,17 +19,17 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::manifest::{EntityClasses, PluginManifest};
 use crate::ribbon::CadModule;
 
-// Re-export the opencadcodec crate and the types that appear in the HostApi trait
-// so out-of-tree plugins can use them without adding their own opencadcodec
+// Re-export the document crate and the types that appear in the HostApi trait
+// so out-of-tree plugins can use them without adding their own document
 // dependency (which would risk an ABI-mismatching version).
-pub use codec;
-pub use codec as acadrust;
-pub use codec::objects::{
+pub use document;
+pub use document as acadrust;
+pub use document::objects::{
     DictionaryCloningFlags, KnownXRecordKind, ProxyObjectReference, ProxyReferenceKind, XRecord,
     XRecordEntry, XRecordSection, XRecordValue, XRecordValueType,
 };
-pub use codec::xdata::{ExtendedDataRecord, XDataValue};
-pub use codec::{Document, EntityType, Handle};
+pub use document::xdata::{ExtendedDataRecord, XDataValue};
+pub use document::{Document, EntityType, Handle};
 
 use crate::ipc::protocol::{PluginRequest, PluginResponse};
 
@@ -2418,14 +2418,14 @@ pub struct XRecordUpdate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct LayerConfig {
     pub name: String,
-    pub color: Option<codec::types::Color>,
+    pub color: Option<document::types::Color>,
     pub linetype: Option<String>,
-    pub lineweight: Option<codec::types::LineWeight>,
+    pub lineweight: Option<document::types::LineWeight>,
     pub off: Option<bool>,
     pub frozen: Option<bool>,
     pub locked: Option<bool>,
     pub plottable: Option<bool>,
-    pub transparency: Option<codec::types::Transparency>,
+    pub transparency: Option<document::types::Transparency>,
     pub description: Option<String>,
 }
 

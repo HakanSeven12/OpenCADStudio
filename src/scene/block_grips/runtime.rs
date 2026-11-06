@@ -1,6 +1,6 @@
 use super::*;
 use crate::scene::block_actions::{self as actions, instance::ParameterFrame, Parameter, Value};
-use codec::types::Transform;
+use document::types::Transform;
 use glam::DVec3;
 
 pub const START: usize = crate::scene::pick::grip::CUSTOM_GRIP_ID_START;
@@ -130,10 +130,10 @@ pub struct Input {
 
 #[derive(Default)]
 pub struct Limits {
-    distance: Option<codec::objects::BlockParameterValueSet>,
-    angle: Option<codec::objects::BlockParameterValueSet>,
-    x: Option<codec::objects::BlockParameterValueSet>,
-    y: Option<codec::objects::BlockParameterValueSet>,
+    distance: Option<document::objects::BlockParameterValueSet>,
+    angle: Option<document::objects::BlockParameterValueSet>,
+    x: Option<document::objects::BlockParameterValueSet>,
+    y: Option<document::objects::BlockParameterValueSet>,
     table: Vec<f64>,
 }
 
@@ -176,7 +176,7 @@ impl Limits {
     }
 
     fn delta(&self, delta: DVec3) -> DVec3 {
-        let scalar = |value, set: &Option<codec::objects::BlockParameterValueSet>| {
+        let scalar = |value, set: &Option<document::objects::BlockParameterValueSet>| {
             set.as_ref()
                 .map_or(value, |set| actions::constrain_value_set(value, set))
         };
@@ -396,7 +396,7 @@ mod tests {
 
     #[test]
     fn block_runtime_xy_corner_constraints_keep_the_opposite_corner_fixed() {
-        let set = codec::objects::BlockParameterValueSet {
+        let set = document::objects::BlockParameterValueSet {
             flags: 8,
             values: vec![5., 10., 15.],
             ..Default::default()

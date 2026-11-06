@@ -6,7 +6,7 @@
 use super::raw_adapter::{EditError, Kind, SourceIndex, Unit};
 use super::raw_operations::{apply_patches, is_character_control as character_control};
 use super::*;
-use codec::entities::mtext_format::SpanProperties;
+use document::entities::mtext_format::SpanProperties;
 use std::ops::Range;
 
 fn legacy_boundary(raw: &str, unit: &Unit) -> bool {

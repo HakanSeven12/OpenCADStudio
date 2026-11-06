@@ -1,8 +1,8 @@
 // Circle creation commands.
 
 use crate::t;
-use codec::types::Vector3;
-use codec::{Circle, EntityType};
+use document::types::Vector3;
+use document::{Circle, EntityType};
 use kernel::geom2d::{
     fillets_between, Circle as KernelCircle, Curve as KernelCurve, Line as KernelLine, Tolerance,
 };

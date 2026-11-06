@@ -45,10 +45,10 @@ impl OpenCADStudio {
             Some(K::RibbonCustomize) => crate::tr!("ribbon-customize", "window-title"),
             Some(K::BlockDefinition) => crate::t!("Block Definition").into_owned(),
             Some(K::PdfAttach) => match self.pdf_attach.as_ref().map(|s| s.kind) {
-                Some(codec::entities::UnderlayType::Dwf) => {
+                Some(document::entities::UnderlayType::Dwf) => {
                     crate::t!("Attach DWF Underlay").into_owned()
                 }
-                Some(codec::entities::UnderlayType::Dgn) => {
+                Some(document::entities::UnderlayType::Dgn) => {
                     crate::t!("Attach DGN Underlay").into_owned()
                 }
                 _ => crate::t!("Attach PDF Underlay").into_owned(),
@@ -882,7 +882,7 @@ impl OpenCADStudio {
                 let tab = &self.tabs[self.active_tab];
                 let entity = self.anno_object_scale_target;
                 // Which scales the object currently has a representation for.
-                let members: Vec<codec::types::Handle> = entity
+                let members: Vec<document::types::Handle> = entity
                     .map(|h| {
                         crate::scene::annotative::object_scale_memberships(&tab.scene.document, h)
                             .into_iter()
@@ -893,10 +893,10 @@ impl OpenCADStudio {
                 let label = entity
                     .and_then(|h| tab.scene.document.get_entity(h))
                     .map(|e| match e {
-                        codec::EntityType::Text(_) => "TEXT",
-                        codec::EntityType::MText(_) => "MTEXT",
-                        codec::EntityType::Insert(_) => "BLOCK",
-                        codec::EntityType::MultiLeader(_) => "MULTILEADER",
+                        document::EntityType::Text(_) => "TEXT",
+                        document::EntityType::MText(_) => "MTEXT",
+                        document::EntityType::Insert(_) => "BLOCK",
+                        document::EntityType::MultiLeader(_) => "MULTILEADER",
                         _ => "OBJECT",
                     })
                     .unwrap_or("—");
@@ -1054,7 +1054,7 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::MlStyle => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
                 let styles: Vec<String> = tab
                     .scene
@@ -1141,7 +1141,7 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::TableStyle => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
                 let styles: Vec<String> = tab
                     .scene
@@ -1270,7 +1270,7 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::MLeaderStyle => {
-                use codec::objects::ObjectType;
+                use document::objects::ObjectType;
                 let tab = &self.tabs[self.active_tab];
                 let styles: Vec<String> = tab
                     .scene
@@ -1306,7 +1306,7 @@ impl OpenCADStudio {
                         .filter(|t| !t.is_shape_file)
                         .map(|t| t.name.clone()),
                 );
-                let opt_block = |h: Option<codec::types::Handle>| -> String {
+                let opt_block = |h: Option<document::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
                             .block_records
@@ -1317,7 +1317,7 @@ impl OpenCADStudio {
                         None => "None".to_string(),
                     }
                 };
-                let opt_lt = |h: Option<codec::types::Handle>| -> String {
+                let opt_lt = |h: Option<document::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
                             .line_types
@@ -1328,7 +1328,7 @@ impl OpenCADStudio {
                         None => "ByBlock".to_string(),
                     }
                 };
-                let opt_ts = |h: Option<codec::types::Handle>| -> String {
+                let opt_ts = |h: Option<document::types::Handle>| -> String {
                     match h {
                         Some(h) => doc
                             .text_styles
@@ -1345,7 +1345,7 @@ impl OpenCADStudio {
                             opt_lt(s.line_type_handle),
                             crate::entities::arrowheads::label(
                                 doc,
-                                s.arrowhead_handle.unwrap_or(codec::types::Handle::NULL),
+                                s.arrowhead_handle.unwrap_or(document::types::Handle::NULL),
                             ),
                             opt_ts(s.text_style_handle),
                             opt_block(s.block_content_handle),
@@ -1584,8 +1584,8 @@ impl OpenCADStudio {
                     .map(|style| style.height)
                     .filter(|height| *height > 0.0);
                 let blk_name =
-                    |h: codec::types::Handle| crate::entities::arrowheads::label(doc, h);
-                let lt_name = |h: codec::types::Handle| -> String {
+                    |h: document::types::Handle| crate::entities::arrowheads::label(doc, h);
+                let lt_name = |h: document::types::Handle| -> String {
                     if h.is_null() {
                         "ByBlock".to_string()
                     } else {
@@ -1600,7 +1600,7 @@ impl OpenCADStudio {
                 let read_only =
                     ds_sel.is_none_or(|style| style.xref_dependent || style.name.contains('|'));
                 let in_use = doc.entities().any(|entity| {
-                    matches!(entity, codec::EntityType::Dimension(dimension)
+                    matches!(entity, document::EntityType::Dimension(dimension)
                     if dimension.base().style_name.eq_ignore_ascii_case(&self.dimstyle_selected))
                 });
                 let compare_opts: Vec<String> = styles

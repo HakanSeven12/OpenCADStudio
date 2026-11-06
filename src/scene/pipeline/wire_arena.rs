@@ -40,7 +40,7 @@ use super::wire_gpu::{
 };
 use crate::scene::model::wire_model::WireModel;
 use crate::scene::ChangeKind;
-use codec::Handle;
+use document::Handle;
 use iced::wgpu;
 use rustc_hash::FxHashMap;
 

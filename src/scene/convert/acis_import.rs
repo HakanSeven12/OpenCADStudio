@@ -3,9 +3,9 @@
 //! Each body of a file becomes one object: a closed solid a 3DSOLID, a sheet
 //! whose faces all lie on planes a REGION, any other sheet a SURFACE.
 
-use codec::entities::acis::{SatDocument, SatFace, Sidedness};
-use codec::entities::{AcisData, Region, Solid3D, Surface, SurfaceKind};
-use codec::EntityType;
+use document::entities::acis::{SatDocument, SatFace, Sidedness};
+use document::entities::{AcisData, Region, Solid3D, Surface, SurfaceKind};
+use document::EntityType;
 
 /// What a body restores as.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,10 +73,10 @@ pub fn sat_entities(text: &str) -> Option<Vec<EntityType>> {
 
 /// The value of an ACIS colour attribute: the index (0 by block), or the
 /// index nearest a true colour.
-fn attribute_index(color: codec::types::Color) -> i64 {
+fn attribute_index(color: document::types::Color) -> i64 {
     match color {
-        codec::types::Color::Index(index) => i64::from(index),
-        codec::types::Color::Rgb { r, g, b } => i64::from(codec::types::nearest_aci(r, g, b)),
+        document::types::Color::Index(index) => i64::from(index),
+        document::types::Color::Rgb { r, g, b } => i64::from(document::types::nearest_aci(r, g, b)),
         _ => 0,
     }
 }
@@ -89,10 +89,10 @@ pub(crate) fn packed_true_colour(r: u8, g: u8, b: u8) -> i32 {
 
 /// Hangs colour attributes on a record: a true colour first, then its
 /// index, as imported models carry them.
-fn paint_record(document: &mut codec::entities::acis::SatDocument, owner: usize, color: codec::types::Color) {
-    use codec::entities::acis::{SatPointer, SatRecord, SatToken};
+fn paint_record(document: &mut document::entities::acis::SatDocument, owner: usize, color: document::types::Color) {
+    use document::entities::acis::{SatPointer, SatRecord, SatToken};
     let mut chain: Vec<(&str, i64)> = Vec::new();
-    if let codec::types::Color::Rgb { r, g, b } = color {
+    if let document::types::Color::Rgb { r, g, b } = color {
         chain.push(("truecolor-adesk-attrib", i64::from(packed_true_colour(r, g, b))));
     }
     chain.push(("color-adesk-attrib", attribute_index(color)));
@@ -125,13 +125,13 @@ fn paint_record(document: &mut codec::entities::acis::SatDocument, owner: usize,
 /// flat it is.
 pub fn painted_body_entity(
     body: &kernel::brep::Body,
-    colour: Option<codec::types::Color>,
-    faces: &[Option<codec::types::Color>],
+    colour: Option<document::types::Color>,
+    faces: &[Option<document::types::Color>],
     sheet: bool,
 ) -> Option<EntityType> {
     let mut document = super::acis_export::solid_to_sat(body)?;
-    let base = colour.unwrap_or(codec::types::Color::ByBlock);
-    let own: std::collections::HashMap<kernel::brep::FaceKey, codec::types::Color> = body
+    let base = colour.unwrap_or(document::types::Color::ByBlock);
+    let own: std::collections::HashMap<kernel::brep::FaceKey, document::types::Color> = body
         .faces
         .keys()
         .zip(faces)

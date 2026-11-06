@@ -199,7 +199,7 @@ impl OpenCADStudio {
             version: if import.v7 { "V7" } else { "V8" },
             // Sheet models are not imported.
             models: crate::ui::window::pdf_dialogs::item_thumbs(
-                codec::entities::UnderlayType::Dgn,
+                document::entities::UnderlayType::Dgn,
                 path,
             )
             .into_iter()
@@ -687,7 +687,7 @@ impl OpenCADStudio {
         let scale = reference.scale * units;
         if request.references == ReferenceMode::Underlay {
             let mut placed = crate::modules::insert::pdf_attach::underlays_for_pages(
-                codec::entities::UnderlayType::Dgn,
+                document::entities::UnderlayType::Dgn,
                 std::slice::from_ref(&model),
                 origin,
                 scale,
@@ -697,11 +697,11 @@ impl OpenCADStudio {
             for (page, mut entity) in placed.drain(..) {
                 let definition = crate::modules::insert::pdf_attach::ensure_underlay_definition(
                     &mut scene.document,
-                    codec::entities::UnderlayType::Dgn,
+                    document::entities::UnderlayType::Dgn,
                     &path,
                     &page,
                 );
-                if let codec::EntityType::Underlay(underlay) = &mut entity {
+                if let document::EntityType::Underlay(underlay) = &mut entity {
                     underlay.definition_handle = definition;
                 }
                 entity.common_mut().layer = layer.to_string();
@@ -753,9 +753,9 @@ impl OpenCADStudio {
         }
         self.command_line
             .push_output(&format!("\"{name}\" loaded: {full}"));
-        let mut insert = codec::entities::Insert::new(
+        let mut insert = document::entities::Insert::new(
             block,
-            codec::types::Vector3::new(origin.x, origin.y, origin.z),
+            document::types::Vector3::new(origin.x, origin.y, origin.z),
         )
         .with_scale(scale, scale, scale)
         .with_rotation(reference.rotation);
@@ -763,7 +763,7 @@ impl OpenCADStudio {
         insert.common.linetype = "Continuous".to_string();
         self.tabs[i]
             .scene
-            .add_entity(codec::EntityType::Insert(insert));
+            .add_entity(document::EntityType::Insert(insert));
         self.refresh_xref_manager();
     }
 }
@@ -821,7 +821,7 @@ fn place_converted(
         let taken = |n: &str| doc.layers.iter().any(|l| l.name.eq_ignore_ascii_case(n));
         let target = naming.name('l', name, &taken);
         if !scene.document.layers.iter().any(|l| l.name.eq_ignore_ascii_case(&target)) {
-            let mut layer = codec::tables::Layer::new(target.as_str());
+            let mut layer = document::tables::Layer::new(target.as_str());
             layer.handle = scene.document.allocate_handle();
             layer.color = *color;
             if converted.layers_off.contains(name) {
@@ -837,7 +837,7 @@ fn place_converted(
         let taken = |n: &str| doc.text_styles.iter().any(|s| s.name.eq_ignore_ascii_case(n));
         let target = naming.name('s', name, &taken);
         if !scene.document.text_styles.iter().any(|s| s.name.eq_ignore_ascii_case(&target)) {
-            let mut style = codec::tables::TextStyle::new(target.as_str());
+            let mut style = document::tables::TextStyle::new(target.as_str());
             style.handle = scene.document.allocate_handle();
             style.font_file = font.clone();
             let _ = scene.document.text_styles.add(style);
@@ -865,7 +865,7 @@ fn place_converted(
                     })
                     .cloned()
             });
-            let mut style = base.unwrap_or_else(|| codec::tables::DimStyle::new(target.as_str()));
+            let mut style = base.unwrap_or_else(|| document::tables::DimStyle::new(target.as_str()));
             if values.is_some() {
                 let text = styles.get(&style.dimtxsty).cloned().unwrap_or_else(|| style.dimtxsty.clone());
                 if let Some(t) = scene.document.text_styles.iter().find(|t| t.name.eq_ignore_ascii_case(&text)) {
@@ -873,10 +873,10 @@ fn place_converted(
                     style.dimtxsty_handle = t.handle;
                 }
                 let arrow = crate::entities::arrowheads::resolve(&mut scene.document, "_Closed");
-                style.dimblk1 = arrow.unwrap_or(codec::Handle::NULL);
+                style.dimblk1 = arrow.unwrap_or(document::Handle::NULL);
                 style.dimblk2 = style.dimblk1;
                 style.dimldrblk = crate::entities::arrowheads::resolve(&mut scene.document, "_None")
-                    .unwrap_or(codec::Handle::NULL);
+                    .unwrap_or(document::Handle::NULL);
             }
             style.name = target.clone();
             style.handle = scene.document.allocate_handle();
@@ -895,33 +895,33 @@ fn place_converted(
         claimed.insert(target.to_ascii_uppercase());
         blocks.insert(name.clone(), target);
     }
-    let fix = |mut entity: codec::EntityType| {
+    let fix = |mut entity: document::EntityType| {
         let common = entity.common_mut();
         if let Some(layer) = layers.get(&common.layer) {
             common.layer = layer.clone();
         }
         match &mut entity {
-            codec::EntityType::Text(t) => {
+            document::EntityType::Text(t) => {
                 if let Some(s) = styles.get(&t.style) {
                     t.style = s.clone();
                 }
             }
-            codec::EntityType::MText(t) => {
+            document::EntityType::MText(t) => {
                 if let Some(s) = styles.get(&t.style) {
                     t.style = s.clone();
                 }
             }
-            codec::EntityType::Insert(insert) => {
+            document::EntityType::Insert(insert) => {
                 if let Some(b) = blocks.get(&insert.block_name) {
                     insert.block_name = b.clone();
                 }
             }
-            codec::EntityType::Dimension(d) => {
+            document::EntityType::Dimension(d) => {
                 if let Some(s) = dim_styles.get(&d.base().style_name) {
                     d.base_mut().style_name = s.clone();
                 }
             }
-            codec::EntityType::Leader(l) => {
+            document::EntityType::Leader(l) => {
                 if let Some(s) = dim_styles.get(&l.dimension_style) {
                     l.dimension_style = s.clone();
                 }
@@ -955,10 +955,10 @@ fn place_converted(
 /// A dimension whose text the user has not placed gets the place its style
 /// lays the text out at in this drawing.
 fn placed_dimension_text(
-    document: &codec::Document,
-    mut entity: codec::EntityType,
-) -> codec::EntityType {
-    if let codec::EntityType::Dimension(d) = &mut entity {
+    document: &document::Document,
+    mut entity: document::EntityType,
+) -> document::EntityType {
+    if let document::EntityType::Dimension(d) = &mut entity {
         if !d.base().text_user_positioned {
             if let Some(p) = crate::entities::dimension::automatic_text_position(document, d) {
                 d.base_mut().text_middle_point = p;

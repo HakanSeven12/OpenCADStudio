@@ -211,7 +211,7 @@ impl OpenCADStudio {
     }
 
     /// Recognise the text in `handles` and replace it with MTEXT.
-    pub(in crate::app) fn convert_pdf_shx_text(&mut self, i: usize, handles: Vec<codec::Handle>) {
+    pub(in crate::app) fn convert_pdf_shx_text(&mut self, i: usize, handles: Vec<document::Handle>) {
         let document = &self.tabs[i].scene.document;
         let mut strokes = Vec::new();
         for handle in handles {
@@ -268,11 +268,11 @@ impl OpenCADStudio {
             }
         };
         let scene = &mut self.tabs[i].scene;
-        let mut erase: Vec<codec::Handle> = Vec::new();
+        let mut erase: Vec<document::Handle> = Vec::new();
         for line in result.lines {
             // A style named after the font, made when the drawing lacks it.
             if !scene.document.text_styles.contains(&line.font) {
-                let mut style = codec::tables::TextStyle::new(line.font.as_str());
+                let mut style = document::tables::TextStyle::new(line.font.as_str());
                 style.handle = scene.document.allocate_handle();
                 style.font_file = if line.font_spec.to_ascii_lowercase().ends_with(".shx") {
                     line.font_spec.clone()
@@ -281,21 +281,21 @@ impl OpenCADStudio {
                 };
                 let _ = scene.document.text_styles.add(style);
             }
-            let mut mtext = codec::entities::MText::new();
+            let mut mtext = document::entities::MText::new();
             mtext.value = line.value;
             mtext.insertion_point =
-                codec::types::Vector3::new(line.insertion[0], line.insertion[1], 0.0);
+                document::types::Vector3::new(line.insertion[0], line.insertion[1], 0.0);
             mtext.height = line.height;
             mtext.rectangle_width = 0.0;
-            mtext.attachment_point = codec::entities::AttachmentPoint::BottomLeft;
-            mtext.drawing_direction = codec::entities::DrawingDirection::ByStyle;
+            mtext.attachment_point = document::entities::AttachmentPoint::BottomLeft;
+            mtext.drawing_direction = document::entities::DrawingDirection::ByStyle;
             mtext.style = line.font;
             mtext.common.layer = if settings.current_layer {
                 current_layer.clone()
             } else {
                 line.layer
             };
-            scene.add_entity(codec::EntityType::MText(Box::new(mtext)));
+            scene.add_entity(document::EntityType::MText(Box::new(mtext)));
             erase.extend(line.handles);
         }
         erase.sort();

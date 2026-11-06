@@ -35,7 +35,7 @@ fn msg(m: RefEditDialogMsg) -> Message {
 pub struct RefEditLevel {
     /// The reference's handle: the picked object for level 0, the
     /// definition-owned reference below it.
-    pub insert: codec::Handle,
+    pub insert: document::Handle,
     pub name: String,
     /// The definition's preview.
     pub wires: Vec<WireModel>,
@@ -47,7 +47,7 @@ pub struct RefEditLevel {
 }
 
 pub struct RefEditDialogState {
-    pub top: codec::Handle,
+    pub top: document::Handle,
     /// The picked chain, outermost first.
     pub chain: Vec<crate::modules::draw::modify::refedit::ChainLevel>,
     pub levels: Vec<RefEditLevel>,

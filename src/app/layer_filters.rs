@@ -35,7 +35,7 @@ pub(in crate::app) struct LayerFilter {
 }
 
 impl LayerFilter {
-    pub(in crate::app) fn matches(&self, layer: &codec::tables::Layer) -> bool {
+    pub(in crate::app) fn matches(&self, layer: &document::tables::Layer) -> bool {
         if !self.pattern.is_empty() && !wildcard_match(&layer.name, &self.pattern) {
             return false;
         }
@@ -365,7 +365,7 @@ impl OpenCADStudio {
 
 /// Expand a `-LAYER` name list that may contain `FILTER:<name>` entries.
 pub(in crate::app) fn expand_layer_list<'a>(
-    layers: impl IntoIterator<Item = &'a codec::tables::Layer>,
+    layers: impl IntoIterator<Item = &'a document::tables::Layer>,
     filters: &[LayerFilter],
     list: &str,
 ) -> Vec<String> {

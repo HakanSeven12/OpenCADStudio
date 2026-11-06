@@ -322,7 +322,7 @@ impl OpenCADStudio {
         if scene.current_layout == "Model" {
             return Task::none();
         }
-        let viewports: Vec<codec::Handle> =
+        let viewports: Vec<document::Handle> =
             scene.viewport_list().into_iter().map(|vp| vp.handle).collect();
         let next = match scene.active_viewport.and_then(|h| viewports.iter().position(|v| *v == h)) {
             Some(index) => viewports.get((index + 1) % viewports.len()),

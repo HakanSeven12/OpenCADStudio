@@ -22,7 +22,7 @@ impl Scene {
 
     /// Create a paper-space layout. Wraps `document.add_layout` so the
     /// cached layout-name list is invalidated on insert.
-    pub fn add_layout(&mut self, name: &str) -> codec::Result<Handle> {
+    pub fn add_layout(&mut self, name: &str) -> document::Result<Handle> {
         let handle = self.document.add_layout(name)?;
         // Opening it fits the sheet the document made for it (placed at the
         // origin) to its page and, with LAYOUTCREATEVIEWPORT, gives it its
@@ -37,7 +37,7 @@ impl Scene {
     /// it does not get the first viewport a new layout gets. The paper-space
     /// objects are copied by the caller.
     pub fn copy_layout_page(&mut self, source: &str, name: &str) {
-        let find = |document: &codec::Document, wanted: &str| {
+        let find = |document: &document::Document, wanted: &str| {
             document.objects.values().find_map(|object| match object {
                 ObjectType::Layout(layout) if layout.name == wanted => Some(layout.clone()),
                 _ => None,
@@ -48,7 +48,7 @@ impl Scene {
             return;
         };
         if let Some(ObjectType::Layout(layout)) = self.document.objects.get_mut(&to.handle) {
-            *layout = codec::objects::Layout {
+            *layout = document::objects::Layout {
                 handle: to.handle,
                 owner: to.owner,
                 name: to.name.clone(),
@@ -84,7 +84,7 @@ impl Scene {
         if let Some(EntityType::Viewport(sheet)) = self.document.get_entity(from.viewport).cloned()
         {
             if let Some(EntityType::Viewport(target)) = self.document.get_entity_mut(to.viewport) {
-                *target = Box::new(codec::entities::Viewport {
+                *target = Box::new(document::entities::Viewport {
                     common: target.common.clone(),
                     ..*sheet
                 });
@@ -290,7 +290,7 @@ impl Scene {
                 .get(active)
                 .map(|t| (t.render_mode, t.grid_on, t.snap_on))
                 .unwrap_or((
-                    codec::entities::ViewportRenderMode::Wireframe2D,
+                    document::entities::ViewportRenderMode::Wireframe2D,
                     false,
                     false,
                 ))
@@ -425,7 +425,7 @@ impl Scene {
                 height: 1.0,
             },
             camera: self.camera.borrow().clone(),
-            render_mode: codec::entities::ViewportRenderMode::Wireframe2D,
+            render_mode: document::entities::ViewportRenderMode::Wireframe2D,
             grid_on: false,
             snap_on: false,
         });
@@ -710,7 +710,7 @@ fn config_from_rects(
 #[cfg(test)]
 mod copy_layout_page_tests {
     use super::*;
-    use codec::objects::{Dictionary, XRecord};
+    use document::objects::{Dictionary, XRecord};
 
     fn layout_xdict(scene: &Scene, name: &str) -> (Handle, Option<Handle>) {
         scene

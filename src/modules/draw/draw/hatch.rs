@@ -5,7 +5,7 @@ use crate::modules::IconKind;
 use crate::scene::model::hatch_model::{HatchModel, HatchPattern, PatFamily};
 use crate::scene::model::wire_model::WireModel;
 use crate::t;
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 use kernel::geom2d::{
     bounded_faces, contains, ring_nesting_depths, signed_area, Circle, Curve, Line, Tolerance,
@@ -218,7 +218,7 @@ pub struct HatchSettings {
     pub scale: f64,
     /// 0 pick internal point, 1 select objects, 2 draw.
     pub method: u8,
-    pub islands: codec::entities::HatchStyleType,
+    pub islands: document::entities::HatchStyleType,
     pub associative: bool,
     pub separate: bool,
     pub keep_boundaries: bool,
@@ -271,8 +271,8 @@ pub struct HatchCommand {
     default_origin: [f64; 2],
     associative: bool,
     separate_hatches: bool,
-    island_style: codec::entities::HatchStyleType,
-    inherited: Option<(HatchModel, codec::types::Color, codec::types::Transparency)>,
+    island_style: document::entities::HatchStyleType,
+    inherited: Option<(HatchModel, document::types::Color, document::types::Transparency)>,
     plane: WorkingPlane,
     /// HPGAPTOL: gaps up to this size count as closed for a picked point.
     gap_tolerance: f64,
@@ -282,7 +282,7 @@ impl HatchCommand {
     pub fn new(
         boundary_sources: rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>,
         selected_objects: Vec<Handle>,
-        inherited: Option<(HatchModel, codec::types::Color, codec::types::Transparency)>,
+        inherited: Option<(HatchModel, document::types::Color, document::types::Transparency)>,
         plane: WorkingPlane,
     ) -> Self {
         let selected_objects: Vec<_> = selected_objects
@@ -317,7 +317,7 @@ impl HatchCommand {
             island_style: inherited
                 .as_ref()
                 .map(|(model, _, _)| model.style)
-                .unwrap_or(codec::entities::HatchStyleType::Normal),
+                .unwrap_or(document::entities::HatchStyleType::Normal),
             inherited,
             plane,
             gap_tolerance: 0.0,
@@ -405,9 +405,9 @@ impl HatchCommand {
 
     fn island_style_label(&self) -> &'static str {
         match self.island_style {
-            codec::entities::HatchStyleType::Normal => "Normal",
-            codec::entities::HatchStyleType::Outer => "Outer",
-            codec::entities::HatchStyleType::Ignore => "Ignore",
+            document::entities::HatchStyleType::Normal => "Normal",
+            document::entities::HatchStyleType::Outer => "Outer",
+            document::entities::HatchStyleType::Ignore => "Ignore",
         }
     }
 
@@ -495,9 +495,9 @@ impl HatchCommand {
     fn settings(&mut self) -> CmdResult {
         self.step = HatchStep::Settings;
         let island = match self.island_style {
-            codec::entities::HatchStyleType::Normal => crate::tr!("hatch-cmd", "island-normal"),
-            codec::entities::HatchStyleType::Outer => crate::tr!("hatch-cmd", "island-outer"),
-            codec::entities::HatchStyleType::Ignore => crate::tr!("hatch-cmd", "island-ignore"),
+            document::entities::HatchStyleType::Normal => crate::tr!("hatch-cmd", "island-normal"),
+            document::entities::HatchStyleType::Outer => crate::tr!("hatch-cmd", "island-outer"),
+            document::entities::HatchStyleType::Ignore => crate::tr!("hatch-cmd", "island-ignore"),
         };
         CmdResult::ReportMeasurement(crate::tr!(
             "hatch-cmd",
@@ -785,9 +785,9 @@ impl HatchCommand {
         }
     }
 
-    fn manual_boundary_path(&self) -> Option<codec::entities::BoundaryPath> {
-        use codec::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
-        use codec::types::Vector3;
+    fn manual_boundary_path(&self) -> Option<document::entities::BoundaryPath> {
+        use document::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
+        use document::types::Vector3;
         if self.manual_pts.len() < 2 {
             return None;
         }
@@ -1244,7 +1244,7 @@ impl CadCommand for HatchCommand {
                         }
                     }
                     "I" | "ISLAND" => {
-                        use codec::entities::HatchStyleType::{Ignore, Normal, Outer};
+                        use document::entities::HatchStyleType::{Ignore, Normal, Outer};
                         self.island_style = match self.island_style {
                             Normal => Outer,
                             Outer => Ignore,
@@ -1498,7 +1498,7 @@ impl GradientCommand {
             boundary_exterior: Some(std::sync::Arc::new(exterior)),
             boundary_sources: Some(std::sync::Arc::new(boundary_sources)),
             boundary_paths: Some(std::sync::Arc::new(boundary_paths)),
-            style: codec::entities::HatchStyleType::Normal,
+            style: document::entities::HatchStyleType::Normal,
             draw_depth: 0.0,
         }
     }
@@ -1817,7 +1817,7 @@ impl BoundaryCommand {
         }
     }
 
-    fn make_entities(&self) -> Vec<codec::EntityType> {
+    fn make_entities(&self) -> Vec<document::EntityType> {
         let sources = if self.restrict_sources {
             &self.active_sources
         } else {
@@ -2142,7 +2142,7 @@ inventory::submit!(crate::command::CommandRegistration { names: &["HATCH"] }); /
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::EntityType;
+    use document::EntityType;
 
     fn rect(x0: f64, y0: f64, x1: f64, y1: f64) -> Vec<[f64; 2]> {
         vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]]

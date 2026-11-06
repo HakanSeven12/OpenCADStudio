@@ -13,7 +13,7 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-use codec::Document;
+use document::Document;
 
 use crate::shm::{DocumentSnapshotStore, DocumentViewDataV4, DocumentViewInfo, SnapshotData};
 

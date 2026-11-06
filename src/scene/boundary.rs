@@ -65,7 +65,7 @@ fn entity_curves_on_plane(entity: &EntityType, plane: WorkingPlane, tolerance: f
         _ => None,
     };
     if let Some((start, end, direction)) = straight {
-        let local = |point: codec::types::Vector3| {
+        let local = |point: document::types::Vector3| {
             plane.to_local(glam::DVec3::new(point.x, point.y, point.z))
         };
         let start = local(start);
@@ -128,17 +128,17 @@ fn entity_curves_on_plane(entity: &EntityType, plane: WorkingPlane, tolerance: f
 fn has_unsupported_polyline_topology(entity: &EntityType) -> bool {
     match entity {
         EntityType::Polyline(polyline) => {
-            let unsupported_flags = codec::entities::PolylineFlags::POLYGON_MESH
-                | codec::entities::PolylineFlags::POLYFACE_MESH
-                | codec::entities::PolylineFlags::CURVE_FIT
-                | codec::entities::PolylineFlags::SPLINE_FIT;
+            let unsupported_flags = document::entities::PolylineFlags::POLYGON_MESH
+                | document::entities::PolylineFlags::POLYFACE_MESH
+                | document::entities::PolylineFlags::CURVE_FIT
+                | document::entities::PolylineFlags::SPLINE_FIT;
             polyline.flags.bits() & unsupported_flags.bits() != 0
         }
         EntityType::Polyline3D(polyline) => {
             polyline.flags.is_3d_mesh
                 || polyline.flags.is_polyface_mesh
                 || polyline.flags.spline_fit
-                || polyline.smooth_type != codec::entities::polyline3d::SmoothSurfaceType::None
+                || polyline.smooth_type != document::entities::polyline3d::SmoothSurfaceType::None
         }
         _ => false,
     }
@@ -254,7 +254,7 @@ pub(crate) fn live_segments_for_curves(
         .collect()
 }
 
-fn hatch_path_seed(path: &codec::entities::BoundaryPath) -> Option<[f64; 2]> {
+fn hatch_path_seed(path: &document::entities::BoundaryPath) -> Option<[f64; 2]> {
     // A clockwise arc edge tessellates counter-clockwise, so the edges are
     // chained tip to tail instead of appended: appended, the reversed arc
     // folds the ring and the seed lands in the neighbouring region.
@@ -325,9 +325,9 @@ fn matching_face(faces: &[Vec<[f64; 2]>], seed: Option<[f64; 2]>) -> Option<&Vec
 /// large drawing took half a minute per picked hatch region. (#1813)
 pub(crate) fn sources_near_rings(
     rings: &[Vec<[f64; 2]>],
-    sources: &rustc_hash::FxHashMap<codec::Handle, BoundarySource>,
+    sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
     pad: f64,
-) -> rustc_hash::FxHashMap<codec::Handle, BoundarySource> {
+) -> rustc_hash::FxHashMap<document::Handle, BoundarySource> {
     let mut lo = [f64::INFINITY; 2];
     let mut hi = [f64::NEG_INFINITY; 2];
     for point in rings.iter().flatten() {
@@ -351,8 +351,8 @@ pub(crate) fn sources_near_rings(
 
 pub(crate) fn ring_source_handles(
     ring: &[[f64; 2]],
-    sources: &rustc_hash::FxHashMap<codec::Handle, BoundarySource>,
-) -> Vec<codec::Handle> {
+    sources: &rustc_hash::FxHashMap<document::Handle, BoundarySource>,
+) -> Vec<document::Handle> {
     let near = sources_near_rings(&[ring.to_vec()], sources, WELD_TOLERANCE);
     let sources = &near;
     let mut handles = rustc_hash::FxHashSet::default();
@@ -440,9 +440,9 @@ fn exact_boundary_edge(
     end: [f64; 2],
     next: [f64; 2],
     whole_curve: bool,
-) -> codec::entities::BoundaryEdge {
-    use codec::entities::{BoundaryEdge, CircularArcEdge, EllipticArcEdge, LineEdge, SplineEdge};
-    use codec::types::{Vector2, Vector3};
+) -> document::entities::BoundaryEdge {
+    use document::entities::{BoundaryEdge, CircularArcEdge, EllipticArcEdge, LineEdge, SplineEdge};
+    use document::types::{Vector2, Vector3};
 
     let Some(curve) = curve else {
         return BoundaryEdge::Line(LineEdge {
@@ -548,8 +548,8 @@ pub(crate) fn exact_hatch_paths(
     exterior: &[bool],
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
-) -> Vec<codec::entities::BoundaryPath> {
-    use codec::entities::{BoundaryPath, BoundaryPathFlags};
+) -> Vec<document::entities::BoundaryPath> {
+    use document::entities::{BoundaryPath, BoundaryPathFlags};
 
     let near = sources_near_rings(rings, sources, tolerance.max(WELD_TOLERANCE));
     let sources = &near;
@@ -618,7 +618,7 @@ pub(crate) fn exact_hatch_paths(
 pub(crate) fn boundary_entities(
     rings: &[Vec<[f64; 2]>],
     plane: WorkingPlane,
-) -> Vec<codec::EntityType> {
+) -> Vec<document::EntityType> {
     rings
         .iter()
         .filter_map(|ring| {
@@ -634,13 +634,13 @@ pub(crate) fn boundary_entities(
             if points.len() < 3 {
                 return None;
             }
-            let mut polyline = codec::entities::LwPolyline::new();
+            let mut polyline = document::entities::LwPolyline::new();
             polyline.is_closed = true;
             polyline.vertices = points
                 .into_iter()
-                .map(|[x, y]| codec::entities::LwVertex::new(codec::types::Vector2::new(x, y)))
+                .map(|[x, y]| document::entities::LwVertex::new(document::types::Vector2::new(x, y)))
                 .collect();
-            Some(plane.place_entity(codec::EntityType::LwPolyline(polyline)))
+            Some(plane.place_entity(document::EntityType::LwPolyline(polyline)))
         })
         .collect()
 }
@@ -771,14 +771,14 @@ fn boundary_polyline(
     if points.len() < 3 {
         return None;
     }
-    let mut polyline = codec::entities::LwPolyline::new();
+    let mut polyline = document::entities::LwPolyline::new();
     polyline.is_closed = true;
     polyline.vertices = points
         .iter()
         .enumerate()
         .map(|(index, point)| {
             let mut vertex =
-                codec::entities::LwVertex::new(codec::types::Vector2::new(point[0], point[1]));
+                document::entities::LwVertex::new(document::types::Vector2::new(point[0], point[1]));
             vertex.bulge = edge_curves
                 .get(index)
                 .and_then(|curve| curve.as_ref())
@@ -826,7 +826,7 @@ pub(crate) fn boundary_entities_from_sources(
 /// duplicated along loses its association. `handle_map` maps source handles
 /// to their duplicates (COPY and paste both build one). (#1370)
 pub(crate) fn remap_hatch_associations(
-    doc: &mut codec::Document,
+    doc: &mut document::Document,
     handle_map: &rustc_hash::FxHashMap<Handle, Handle>,
 ) -> bool {
     let mut touched = false;
@@ -878,7 +878,7 @@ impl Scene {
     pub(crate) fn replace_hatch_association(
         &mut self,
         handle: Handle,
-        paths: Vec<codec::entities::BoundaryPath>,
+        paths: Vec<document::entities::BoundaryPath>,
     ) {
         let Some(EntityType::Hatch(hatch)) = self.document.get_entity_mut(handle) else {
             return;
@@ -1434,7 +1434,7 @@ fn clip_unbounded_to_bounds(
     (length > tolerance).then_some(Line { start, end })
 }
 
-fn hatch_path_geometry(path: &codec::entities::BoundaryPath) -> (Vec<[f64; 2]>, Vec<f64>) {
+fn hatch_path_geometry(path: &document::entities::BoundaryPath) -> (Vec<[f64; 2]>, Vec<f64>) {
     let edges: Vec<_> = path
         .edges
         .iter()
@@ -1444,18 +1444,18 @@ fn hatch_path_geometry(path: &codec::entities::BoundaryPath) -> (Vec<[f64; 2]>, 
     super::entity::chain_path_edges_with_directions(edges)
 }
 
-pub(crate) fn hatch_path_ring(path: &codec::entities::BoundaryPath) -> Option<Vec<[f64; 2]>> {
+pub(crate) fn hatch_path_ring(path: &document::entities::BoundaryPath) -> Option<Vec<[f64; 2]>> {
     let (ring, _) = hatch_path_geometry(path);
     (ring.len() >= 3).then_some(ring)
 }
 
-pub(crate) fn hatch_boundary_rings(hatch: &codec::entities::Hatch) -> Vec<Vec<[f64; 2]>> {
+pub(crate) fn hatch_boundary_rings(hatch: &document::entities::Hatch) -> Vec<Vec<[f64; 2]>> {
     hatch.paths.iter().filter_map(hatch_path_ring).collect()
 }
 
 pub(crate) fn separated_hatch_path_groups(
-    hatch: &codec::entities::Hatch,
-) -> Vec<Vec<codec::entities::BoundaryPath>> {
+    hatch: &document::entities::Hatch,
+) -> Vec<Vec<document::entities::BoundaryPath>> {
     let items: Vec<_> = hatch
         .paths
         .iter()
@@ -1601,17 +1601,17 @@ pub(crate) fn boundary_faces_around(
 mod boundary_xline_tests {
     use super::*;
 
-    fn rect_edge(scene: &mut Scene, start: [f64; 3], end: [f64; 3]) -> codec::Handle {
-        scene.add_entity(EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(start[0], start[1], start[2]),
-            codec::types::Vector3::new(end[0], end[1], end[2]),
+    fn rect_edge(scene: &mut Scene, start: [f64; 3], end: [f64; 3]) -> document::Handle {
+        scene.add_entity(EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(start[0], start[1], start[2]),
+            document::types::Vector3::new(end[0], end[1], end[2]),
         )))
     }
 
     #[test]
     fn hatch_seed_stays_in_a_region_bounded_by_a_clockwise_arc() {
-        use codec::entities::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
-        use codec::types::Vector2;
+        use document::entities::{BoundaryEdge, BoundaryPath, CircularArcEdge, LineEdge};
+        use document::types::Vector2;
         // The part of a 50 x 30 rectangle right of a radius-20 circle at
         // (25, 15), as HATCH stores it: three lines and a clockwise arc.
         let x = 25.0 + 175f64.sqrt();
@@ -1648,9 +1648,9 @@ mod boundary_xline_tests {
         rect_edge(&mut scene, [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]);
         rect_edge(&mut scene, [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]);
         // Infinite vertical construction line through x=5.
-        scene.add_entity(EntityType::XLine(codec::entities::XLine::new(
-            codec::types::Vector3::new(5.0, 0.0, 0.0),
-            codec::types::Vector3::new(0.0, 1.0, 0.0),
+        scene.add_entity(EntityType::XLine(document::entities::XLine::new(
+            document::types::Vector3::new(5.0, 0.0, 0.0),
+            document::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
         let sources =
@@ -1671,9 +1671,9 @@ mod boundary_xline_tests {
         rect_edge(&mut scene, [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]);
         rect_edge(&mut scene, [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]);
         // Ray starting below the rectangle, pointing up through x=5.
-        scene.add_entity(EntityType::Ray(codec::entities::Ray::new(
-            codec::types::Vector3::new(5.0, -5.0, 0.0),
-            codec::types::Vector3::new(0.0, 1.0, 0.0),
+        scene.add_entity(EntityType::Ray(document::entities::Ray::new(
+            document::types::Vector3::new(5.0, -5.0, 0.0),
+            document::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
         let sources =
@@ -1688,9 +1688,9 @@ mod boundary_xline_tests {
 
     #[test]
     fn xline_source_clips_to_given_bounds() {
-        let xline = EntityType::XLine(codec::entities::XLine::new(
-            codec::types::Vector3::new(5.0, 0.0, 0.0),
-            codec::types::Vector3::new(0.0, 1.0, 0.0),
+        let xline = EntityType::XLine(document::entities::XLine::new(
+            document::types::Vector3::new(5.0, 0.0, 0.0),
+            document::types::Vector3::new(0.0, 1.0, 0.0),
         ));
         let source = entity_boundary_source_on_plane(
             &xline,
@@ -1722,13 +1722,13 @@ mod boundary_xline_tests {
     #[test]
     fn finite_boundary_curves_skip_scene_scan_but_xlines_require_it() {
         let plane = crate::command::WorkingPlane::default();
-        let line = EntityType::Line(codec::entities::Line::from_points(
-            codec::types::Vector3::new(0.0, 0.0, 0.0),
-            codec::types::Vector3::new(10.0, 0.0, 0.0),
+        let line = EntityType::Line(document::entities::Line::from_points(
+            document::types::Vector3::new(0.0, 0.0, 0.0),
+            document::types::Vector3::new(10.0, 0.0, 0.0),
         ));
-        let xline = EntityType::XLine(codec::entities::XLine::new(
-            codec::types::Vector3::new(5.0, 0.0, 0.0),
-            codec::types::Vector3::new(0.0, 1.0, 0.0),
+        let xline = EntityType::XLine(document::entities::XLine::new(
+            document::types::Vector3::new(5.0, 0.0, 0.0),
+            document::types::Vector3::new(0.0, 1.0, 0.0),
         ));
 
         assert!(!needs_scene_boundary_sources(&line, plane, WELD_TOLERANCE));
@@ -1743,9 +1743,9 @@ mod boundary_xline_tests {
         rect_edge(&mut scene, [10.0, 10.0, 0.0], [0.0, 10.0, 0.0]);
         rect_edge(&mut scene, [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]);
         // Far-away vertical construction line: never touches the rectangle.
-        scene.add_entity(EntityType::XLine(codec::entities::XLine::new(
-            codec::types::Vector3::new(50.0, 0.0, 0.0),
-            codec::types::Vector3::new(0.0, 1.0, 0.0),
+        scene.add_entity(EntityType::XLine(document::entities::XLine::new(
+            document::types::Vector3::new(50.0, 0.0, 0.0),
+            document::types::Vector3::new(0.0, 1.0, 0.0),
         )));
 
         let sources =

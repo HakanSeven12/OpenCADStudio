@@ -1,6 +1,6 @@
 //! Arrow grips of a selected associative array (counts and spacings).
 
-use codec::Handle;
+use document::Handle;
 
 use crate::command::CadCommand;
 use crate::scene::assoc_array;
@@ -81,8 +81,8 @@ mod tests {
     use crate::app::{Message, OpenCADStudio};
     use crate::scene::assoc_array::{self, AssocArraySpec};
     use crate::scene::assoc_array_grips::Kind;
-    use codec::entities::Circle;
-    use codec::EntityType;
+    use document::entities::Circle;
+    use document::EntityType;
     use glam::DVec3;
 
     #[test]

@@ -245,11 +245,11 @@ pub struct HatchModel {
     /// Per-ring DXF role, aligned with the NaN-separated boundary paths.
     pub boundary_exterior: Option<Arc<Vec<bool>>>,
     /// Source entity handles for each boundary ring.
-    pub boundary_sources: Option<Arc<Vec<Vec<codec::Handle>>>>,
+    pub boundary_sources: Option<Arc<Vec<Vec<document::Handle>>>>,
     /// Exact boundary paths retained for persistence and editing.
-    pub boundary_paths: Option<Arc<Vec<codec::entities::BoundaryPath>>>,
+    pub boundary_paths: Option<Arc<Vec<document::entities::BoundaryPath>>>,
     /// Island handling used by the persisted hatch entity.
-    pub style: codec::entities::HatchStyleType,
+    pub style: document::entities::HatchStyleType,
     /// Fill pattern.
     pub pattern: HatchPattern,
     /// Catalog name for this pattern (e.g. "ANSI31", "SOLID", "LINEAR").

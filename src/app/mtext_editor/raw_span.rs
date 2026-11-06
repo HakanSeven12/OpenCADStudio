@@ -188,8 +188,8 @@ impl crate::app::OpenCADStudio {
 
     /// The colour of the selection: an index, a true colour, ByLayer or
     /// ByBlock, as the MTEXT colour codes store them.
-    pub(in crate::app) fn raw_selection_color(&mut self, color: codec::types::Color) {
-        use codec::types::Color as C;
+    pub(in crate::app) fn raw_selection_color(&mut self, color: document::types::Color) {
+        use document::types::Color as C;
         let code = match color {
             C::Index(i) => format!("\\C{i};"),
             C::Rgb { r, g, b } => format!(
@@ -322,13 +322,13 @@ impl crate::app::OpenCADStudio {
 mod tests {
     use crate::app::mtext_editor::{Cell, ParaAlign, ParaNumber};
     use crate::app::OpenCADStudio;
-    use codec::entities::mtext_format::{MTextColor, MTextParagraphAlignment, SpanProperties};
+    use document::entities::mtext_format::{MTextColor, MTextParagraphAlignment, SpanProperties};
     use glam::DVec3;
 
     fn app(raw: &str) -> OpenCADStudio {
         let mut app = OpenCADStudio::new_for_test();
         app.tabs
-            .push(crate::app::document::DocumentTab::new_drawing(1));
+            .push(crate::app::tab_document::DocumentTab::new_drawing(1));
         app.active_tab = 1;
         app.open_mtext_editor(DVec3::ZERO, None, raw, 2.5, None);
         app
@@ -388,9 +388,9 @@ mod tests {
     fn a_selection_colour_is_an_index_a_true_colour_or_by_layer() {
         let mut app = app("abc");
         select(&mut app, 0, 1);
-        app.mtext_apply_color(codec::types::Color::Index(3));
+        app.mtext_apply_color(document::types::Color::Index(3));
         select(&mut app, 1, 2);
-        app.mtext_apply_color(codec::types::Color::Rgb {
+        app.mtext_apply_color(document::types::Color::Rgb {
             r: 10,
             g: 20,
             b: 30,
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(props(&app, 0).color, Some(MTextColor::Index(3)));
         assert_eq!(props(&app, 1).color_rgb, Some((10, 20, 30)));
         select(&mut app, 0, 1);
-        app.mtext_apply_color(codec::types::Color::ByLayer);
+        app.mtext_apply_color(document::types::Color::ByLayer);
         assert_eq!(props(&app, 0).color, Some(MTextColor::ByLayer));
         // The object colour was not touched by any of them.
         assert_eq!(app.mtext_editor.as_ref().unwrap().object_color, None);
@@ -438,7 +438,7 @@ mod tests {
         let mut app = app(r"ab\Zopaque");
         select(&mut app, 0, 2);
         app.mtext_apply_span_number("height", "5".into());
-        app.mtext_apply_color(codec::types::Color::Index(1));
+        app.mtext_apply_color(document::types::Color::Index(1));
         app.mtext_apply_align(ParaAlign::Right);
         assert_eq!(raw(&app), r"ab\Zopaque");
     }

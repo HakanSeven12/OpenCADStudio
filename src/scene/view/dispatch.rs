@@ -1,7 +1,7 @@
 // Dispatch entry points for entity editing.
 
-use codec::types::{Color as AcadColor, LineWeight, Transparency};
-use codec::{EntityType, Handle};
+use document::types::{Color as AcadColor, LineWeight, Transparency};
+use document::{EntityType, Handle};
 
 use crate::command::EntityTransform;
 use crate::entities::traits::EntityTypeOps;
@@ -249,13 +249,13 @@ pub fn apply_common_prop(entity: &mut EntityType, field: &str, value: &str) {
 ///     stale verbatim block (matched by APPID handle) so the new value wins.
 /// Other applications' verbatim blocks are preserved for round-trip fidelity.
 pub fn set_entity_xdata(
-    doc: &mut codec::Document,
-    handle: codec::Handle,
+    doc: &mut document::Document,
+    handle: document::Handle,
     app: &str,
-    values: Option<Vec<codec::xdata::XDataValue>>,
+    values: Option<Vec<document::xdata::XDataValue>>,
 ) {
     if values.is_some() && !doc.app_ids.contains(app) {
-        let mut a = codec::tables::AppId::new(app);
+        let mut a = document::tables::AppId::new(app);
         a.handle = doc.allocate_handle();
         let _ = doc.app_ids.add(a);
     }
@@ -264,14 +264,14 @@ pub fn set_entity_xdata(
         return;
     };
     let common = entity.common_mut();
-    let mut rebuilt = codec::xdata::ExtendedData::new();
+    let mut rebuilt = document::xdata::ExtendedData::new();
     for r in common.extended_data.records() {
         if r.application_name != app {
             rebuilt.add_record(r.clone());
         }
     }
     if let Some(vals) = values {
-        let mut rec = codec::xdata::ExtendedDataRecord::new(app);
+        let mut rec = document::xdata::ExtendedDataRecord::new(app);
         for v in vals {
             rec.add_value(v);
         }
@@ -429,11 +429,11 @@ pub fn apply_transform(entity: &mut EntityType, t: &EntityTransform) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::types::Vector3;
+    use document::types::Vector3;
 
     #[test]
     fn line_thickness_is_the_last_general_row() {
-        let mut line = codec::entities::Line::from_points(Vector3::ZERO, Vector3::UNIT_X);
+        let mut line = document::entities::Line::from_points(Vector3::ZERO, Vector3::UNIT_X);
         line.thickness = 2.5;
         let sections = properties_sectioned(Handle::NULL, &EntityType::Line(line), &[]);
 

@@ -3,12 +3,12 @@
 
 use super::{Message, ModalKind, OpenCADStudio};
 use crate::ui::window::rename::{RenameMsg, State, KINDS};
-use codec::TableEntry;
+use document::TableEntry;
 use iced::Task;
 
 /// The renamable items of `kind` in `doc`: no standard, anonymous or
 /// externally referenced names.
-fn items(doc: &codec::Document, kind: &str) -> Vec<String> {
+fn items(doc: &document::Document, kind: &str) -> Vec<String> {
     let names: Vec<String> = match kind {
         "BLOCK" => doc
             .block_records

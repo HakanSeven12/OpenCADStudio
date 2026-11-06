@@ -7,13 +7,13 @@
 
 use std::sync::Mutex;
 
-use codec::entities::attribute_definition::{
+use document::entities::attribute_definition::{
     HorizontalAlignment as HA, MTextFlag, VerticalAlignment as VA,
 };
-use codec::entities::{AttributeDefinition, MText};
-use codec::tables::TextStyle;
-use codec::types::Vector3;
-use codec::EntityType;
+use document::entities::{AttributeDefinition, MText};
+use document::tables::TextStyle;
+use document::types::Vector3;
+use document::EntityType;
 use glam::DVec3;
 
 use crate::command::{CadCommand, CmdResult, InputKind, WorkingPlane};
@@ -245,7 +245,7 @@ pub struct AttdefSpec {
     pub boundary_width: f64,
     pub line_spacing: f64,
     /// A field the default value comes from: its code and referenced objects.
-    pub field: Option<(String, Vec<codec::Handle>)>,
+    pub field: Option<(String, Vec<document::Handle>)>,
 }
 
 impl AttdefSpec {
@@ -1076,7 +1076,7 @@ impl CadCommand for AttdefPlaceCommand {
         Some(cross_preview(pt, self.plane))
     }
 
-    fn text_field(&self) -> Option<(String, Vec<codec::Handle>)> {
+    fn text_field(&self) -> Option<(String, Vec<document::Handle>)> {
         self.spec.field.clone()
     }
 }

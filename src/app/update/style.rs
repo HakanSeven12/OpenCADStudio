@@ -15,8 +15,8 @@ use crate::scene::{
 };
 use crate::ui::window::graphic_attributes::GraphicAttributesMsg;
 use crate::ui::PropertiesPanel;
-use codec::types::Color as AcadColor;
-use codec::{EntityType as AcadEntityType, Handle};
+use document::types::Color as AcadColor;
+use document::{EntityType as AcadEntityType, Handle};
 use iced::time::Instant;
 use iced::{mouse, Point, Task};
 
@@ -36,8 +36,8 @@ impl OpenCADStudio {
     pub(in crate::app) fn mlstyle_mut(
         &mut self,
         tab: usize,
-    ) -> Option<&mut codec::objects::MLineStyle> {
-        use codec::objects::ObjectType;
+    ) -> Option<&mut document::objects::MLineStyle> {
+        use document::objects::ObjectType;
         let name = self.mlstyle_selected.clone();
         self.tabs[tab]
             .scene
@@ -51,7 +51,7 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn load_mlstyle_bufs(&mut self, tab: usize) {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let name = self.mlstyle_selected.clone();
         let Some((description, start_angle, end_angle, fill_color, elements)) = self.tabs[tab]
             .scene
@@ -104,14 +104,14 @@ impl OpenCADStudio {
                 style.end_angle = value.to_radians();
             }
             if let Some(value) = fill_color {
-                style.fill_color = codec::types::Color::from_index(value);
+                style.fill_color = document::types::Color::from_index(value);
             }
             for (element, values) in style.elements.iter_mut().zip(elements) {
                 if let Ok(value) = values[0].trim().parse::<f64>() {
                     element.offset = value;
                 }
                 if let Ok(value) = values[1].trim().parse::<i16>() {
-                    element.color = codec::types::Color::from_index(value);
+                    element.color = document::types::Color::from_index(value);
                 }
                 element.linetype = values[2].clone();
             }
@@ -121,8 +121,8 @@ impl OpenCADStudio {
     pub(in crate::app) fn tablestyle_mut(
         &mut self,
         tab: usize,
-    ) -> Option<&mut codec::objects::TableStyle> {
-        use codec::objects::ObjectType;
+    ) -> Option<&mut document::objects::TableStyle> {
+        use document::objects::ObjectType;
         let name = self.tablestyle_selected.clone();
         self.tabs[tab]
             .scene
@@ -139,7 +139,7 @@ impl OpenCADStudio {
     /// here or read from an older file only has its three rows) and fills
     /// the editor buffers from the edited cell style.
     pub(in crate::app) fn load_tablestyle_bufs(&mut self, tab: usize) {
-        let text_styles: Vec<(String, codec::Handle)> = self.tabs[tab]
+        let text_styles: Vec<(String, document::Handle)> = self.tabs[tab]
             .scene
             .document
             .text_styles
@@ -159,13 +159,13 @@ impl OpenCADStudio {
                         .or_else(|| text_styles.iter().find(|(name, _)| name == "Standard"))
                         .map(|(_, handle)| *handle)
                 })
-                .unwrap_or(codec::Handle::NULL)
+                .unwrap_or(document::Handle::NULL)
         });
         let description = style.description.clone();
         let margins = (style.horizontal_margin, style.vertical_margin);
         let cell = style
             .cell_style(&wanted)
-            .or_else(|| style.cell_style(codec::objects::DATA_CELL_STYLE))
+            .or_else(|| style.cell_style(document::objects::DATA_CELL_STYLE))
             .cloned();
         self.ts_description = description;
         let Some(cell) = cell else {
@@ -182,7 +182,7 @@ impl OpenCADStudio {
         self.ts_cell_hmargin = crate::entities::common::format_length(horizontal);
         self.ts_cell_vmargin = crate::entities::common::format_length(vertical);
         self.ts_cell_format = format.value_format_string.clone();
-        for (slot, edge) in codec::objects::TABLE_GRID_EDGES.iter().enumerate() {
+        for (slot, edge) in document::objects::TABLE_GRID_EDGES.iter().enumerate() {
             let spacing = data.grid(*edge).map_or(
                 0.25 * format.text_height,
                 |grid| grid.border.double_line_spacing,
@@ -195,7 +195,7 @@ impl OpenCADStudio {
     /// the style's row projection (DXF groups, older files).
     pub(in crate::app) fn edit_table_cell_style(
         &mut self,
-        edit: impl FnOnce(&mut codec::objects::NamedTableCellStyle),
+        edit: impl FnOnce(&mut document::objects::NamedTableCellStyle),
     ) {
         let i = self.active_tab;
         let name = self.ts_cell.clone();
@@ -212,8 +212,8 @@ impl OpenCADStudio {
     pub(in crate::app) fn mleaderstyle_mut(
         &mut self,
         tab: usize,
-    ) -> Option<&mut codec::objects::MultiLeaderStyle> {
-        use codec::objects::ObjectType;
+    ) -> Option<&mut document::objects::MultiLeaderStyle> {
+        use document::objects::ObjectType;
         let name = self.mleaderstyle_selected.clone();
         self.tabs[tab]
             .scene
@@ -229,7 +229,7 @@ impl OpenCADStudio {
     /// Populate all edit buffers from the currently selected multileader style.
 
     pub(in crate::app) fn load_mleaderstyle_bufs(&mut self, tab: usize) {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let name = self.mleaderstyle_selected.clone();
         let Some(s) = self.tabs[tab]
             .scene
@@ -375,7 +375,7 @@ impl OpenCADStudio {
             .text_styles
             .get(&self.ds_dimtxsty)
             .map(|style| style.handle)
-            .unwrap_or(codec::types::Handle::NULL);
+            .unwrap_or(document::types::Handle::NULL);
         let Some(ds) = doc.dim_styles.get_mut(&self.dimstyle_selected) else {
             return;
         };
@@ -477,12 +477,12 @@ impl OpenCADStudio {
         // pictures are stale. Drop them and let each be drawn again. Without
         // this an edit here would move the numbers and leave the drawing alone.
         let edited = self.dimstyle_selected.clone();
-        let stale: Vec<codec::Handle> = self.tabs[tab]
+        let stale: Vec<document::Handle> = self.tabs[tab]
             .scene
             .document
             .entities()
             .filter_map(|entity| match entity {
-                codec::EntityType::Dimension(dim)
+                document::EntityType::Dimension(dim)
                     if dim.base().style_name.eq_ignore_ascii_case(&edited) =>
                 {
                     Some(entity.common().handle)
@@ -491,7 +491,7 @@ impl OpenCADStudio {
             })
             .collect();
         for handle in stale {
-            if let Some(codec::EntityType::Dimension(dimension)) =
+            if let Some(document::EntityType::Dimension(dimension)) =
                 self.tabs[tab].scene.document.get_entity_mut(handle)
             {
                 crate::entities::dimension::reset_automatic_text_position(dimension.base_mut());
@@ -762,7 +762,7 @@ impl OpenCADStudio {
     /// TrueType face of the bold and italic flags).
     pub(in crate::app) fn textstyle_preview(
         &self,
-        edited: &codec::tables::TextStyle,
+        edited: &document::tables::TextStyle,
     ) -> crate::ui::style::textstyle::Preview {
         let doc = &self.tabs[self.active_tab].scene.document;
         let resolved = crate::entities::text_support::resolve_text_style_record(edited, doc);
@@ -850,7 +850,7 @@ impl OpenCADStudio {
             style.sync_rows_from_cell_styles();
             self.ts_cell = new_name;
             self.load_tablestyle_bufs(i);
-        } else if !new_name.is_empty() && !codec::objects::is_row_cell_style(&name) {
+        } else if !new_name.is_empty() && !document::objects::is_row_cell_style(&name) {
             self.command_line
                 .push_error(crate::t!("A cell style with this name already exists.").as_ref());
         }
@@ -869,7 +869,7 @@ impl OpenCADStudio {
         if let Some(style) = self.tablestyle_mut(i) {
             if style.delete_cell_style(&name) {
                 style.sync_rows_from_cell_styles();
-                self.ts_cell = codec::objects::DATA_CELL_STYLE.to_string();
+                self.ts_cell = document::objects::DATA_CELL_STYLE.to_string();
                 self.load_tablestyle_bufs(i);
             }
         }
@@ -878,7 +878,7 @@ impl OpenCADStudio {
 
     /// Whether a table of the selected style uses the named cell style.
     fn table_cell_style_in_use(&self, tab: usize, name: &str) -> bool {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let document = &self.tabs[tab].scene.document;
         let found = document.objects.iter().find_map(|(handle, object)| match object {
             ObjectType::TableStyle(style) if style.name == self.tablestyle_selected => style
@@ -889,7 +889,7 @@ impl OpenCADStudio {
         let Some((handle, id, template)) = found else {
             return false;
         };
-        let uses = |table: &codec::entities::Table| {
+        let uses = |table: &document::entities::Table| {
             table.rows.iter().any(|row| {
                 row.style_id == id || row.cells.iter().any(|cell| cell.style_id == id)
             }) || table.columns.iter().any(|column| column.style_id == id)
@@ -903,7 +903,7 @@ impl OpenCADStudio {
             .unwrap_or(false);
         template_uses
             || document.entities().any(|entity| match entity {
-                codec::EntityType::Table(table) if table.table_style_handle == Some(handle) => {
+                document::EntityType::Table(table) if table.table_style_handle == Some(handle) => {
                     uses(table)
                 }
                 _ => false,
@@ -981,16 +981,16 @@ impl OpenCADStudio {
             "textstyle" => {
                 if let Ok(handle) = u64::from_str_radix(value.trim(), 16) {
                     self.edit_table_cell_style(|cell| {
-                        cell.cell_style.content_format.text_style = codec::Handle::new(handle);
+                        cell.cell_style.content_format.text_style = document::Handle::new(handle);
                     });
                 }
             }
             "textcolor" | "fillcolor" => {
                 let color = match value.trim().parse::<i16>() {
-                    Ok(0) => codec::types::Color::ByBlock,
-                    Ok(256) => codec::types::Color::ByLayer,
-                    Ok(257) => codec::types::Color::None,
-                    Ok(index @ 1..=255) => codec::types::Color::Index(index as u8),
+                    Ok(0) => document::types::Color::ByBlock,
+                    Ok(256) => document::types::Color::ByLayer,
+                    Ok(257) => document::types::Color::None,
+                    Ok(index @ 1..=255) => document::types::Color::Index(index as u8),
                     _ => return Task::none(),
                 };
                 self.edit_table_cell_style(|cell| {
@@ -1016,8 +1016,8 @@ impl OpenCADStudio {
         field: &'static str,
         value: String,
     ) -> Task<Message> {
-        use codec::objects::TableBorderType;
-        let Some(mask) = codec::objects::TABLE_GRID_EDGES.get(edge as usize).copied() else {
+        use document::objects::TableBorderType;
+        let Some(mask) = document::objects::TABLE_GRID_EDGES.get(edge as usize).copied() else {
             return Task::none();
         };
         match field {
@@ -1029,21 +1029,21 @@ impl OpenCADStudio {
                 if let Ok(weight) = value.parse::<i16>() {
                     self.edit_table_cell_style(|cell| {
                         cell.cell_style.grid_mut(mask).border.line_weight =
-                            codec::types::LineWeight::from_value(weight);
+                            document::types::LineWeight::from_value(weight);
                     });
                 }
             }
             "linetype" => {
                 let handle = u64::from_str_radix(value.trim(), 16)
-                    .map(codec::Handle::new)
-                    .unwrap_or(codec::Handle::NULL);
+                    .map(document::Handle::new)
+                    .unwrap_or(document::Handle::NULL);
                 self.edit_table_cell_style(|cell| cell.cell_style.grid_mut(mask).line_type = handle);
             }
             "color" => {
                 let color = match value.trim().parse::<i16>() {
-                    Ok(0) => codec::types::Color::ByBlock,
-                    Ok(256) => codec::types::Color::ByLayer,
-                    Ok(index @ 1..=255) => codec::types::Color::Index(index as u8),
+                    Ok(0) => document::types::Color::ByBlock,
+                    Ok(256) => document::types::Color::ByLayer,
+                    Ok(index @ 1..=255) => document::types::Color::Index(index as u8),
                     _ => return Task::none(),
                 };
                 self.edit_table_cell_style(|cell| cell.cell_style.grid_mut(mask).border.color = color);
@@ -1086,7 +1086,7 @@ impl OpenCADStudio {
 
     /// The pick ended: a table becomes the starting table and the window
     /// comes back; another object is refused and asked again.
-    pub(in crate::app) fn table_template_pick_done(&mut self, handle: Option<codec::Handle>) {
+    pub(in crate::app) fn table_template_pick_done(&mut self, handle: Option<document::Handle>) {
         let i = self.active_tab;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
@@ -1094,7 +1094,7 @@ impl OpenCADStudio {
         let is_table = handle.is_some_and(|handle| {
             matches!(
                 self.tabs[i].scene.document.get_entity(handle),
-                Some(codec::EntityType::Table(_))
+                Some(document::EntityType::Table(_))
             )
         });
         if handle.is_some() && !is_table {
@@ -1107,11 +1107,11 @@ impl OpenCADStudio {
     }
 
     /// Back from the pick: the picked table becomes the starting table.
-    fn table_style_template_picked(&mut self, table: Option<codec::Handle>) {
-        use codec::objects::ObjectType;
+    fn table_style_template_picked(&mut self, table: Option<document::Handle>) {
+        use document::objects::ObjectType;
         let i = self.active_tab;
         let picked = table.and_then(|handle| match self.tabs[i].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Table(table)) => Some(table.as_ref().clone()),
+            Some(document::EntityType::Table(table)) => Some(table.as_ref().clone()),
             _ => None,
         });
         let selected = self.tablestyle_selected.clone();
@@ -1124,14 +1124,14 @@ impl OpenCADStudio {
             if let Some(style_handle) = style_handle {
                 let handle = document.allocate_handle();
                 crate::entities::table::detach_fields(&mut template);
-                template.common = codec::entities::EntityCommon::default();
+                template.common = document::entities::EntityCommon::default();
                 template.common.handle = handle;
                 template.common.owner_handle = style_handle;
                 template.common.reactors = vec![style_handle];
                 template.table_style_handle = Some(style_handle);
                 template.block_record_handle = None;
                 template.block_name.clear();
-                template.insertion_point = codec::types::Vector3::ZERO;
+                template.insertion_point = document::types::Vector3::ZERO;
                 document
                     .objects
                     .insert(handle, ObjectType::TableTemplate(template));
@@ -1157,7 +1157,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         let old = self.tablestyle_mut(i).and_then(|style| {
             let old = style.template();
-            style.modern_cell_style_handle = codec::Handle::NULL;
+            style.modern_cell_style_handle = document::Handle::NULL;
             style.raw_dxf_codes = None;
             old
         });
@@ -1168,7 +1168,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_ml_style_dialog_open(&mut self) -> Task<Message> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let i = self.active_tab;
         let cur = self.tabs[i].scene.document.header.multiline_style.clone();
         let exists = self.tabs[i]
@@ -1201,7 +1201,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_mleader_style_dialog_open(&mut self) -> Task<Message> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let i = self.active_tab;
         let cur = self.tabs[i].active_mleader_style.clone();
         let exists = self.tabs[i]
@@ -1234,7 +1234,7 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_mleader_style_dialog_set_current(&mut self) -> Task<Message> {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let i = self.active_tab;
         let name = self.mleaderstyle_selected.clone();
         let exists = self.tabs[i]
@@ -1295,7 +1295,7 @@ impl OpenCADStudio {
         field: &'static str,
         value: String,
     ) -> Task<Message> {
-        use codec::objects::{
+        use document::objects::{
             BlockContentConnectionType, LeaderContentType, LeaderDrawOrderType,
             MultiLeaderDrawOrderType, MultiLeaderPathType, TextAlignmentType, TextAngleType,
             TextAttachmentDirectionType, TextAttachmentType,
@@ -1404,7 +1404,7 @@ impl OpenCADStudio {
             return Task::none();
         }
         let doc = &self.tabs[i].scene.document;
-        let handle: Option<codec::types::Handle> =
+        let handle: Option<document::types::Handle> =
             if value == "None" || value == "ByBlock" || value == "Closed filled" {
                 None
             } else {
@@ -1494,17 +1494,17 @@ impl OpenCADStudio {
             }
             s.default_text = dt;
             if let Some(v) = lc {
-                s.line_color = codec::types::Color::from_index(v);
+                s.line_color = document::types::Color::from_index(v);
             }
             if let Some(v) = tc {
-                s.text_color = codec::types::Color::from_index(v);
+                s.text_color = document::types::Color::from_index(v);
             }
             s.description = desc;
             if let Some(v) = align {
                 s.align_space = v;
             }
             if let Some(v) = bclr {
-                s.block_content_color = codec::types::Color::from_index(v);
+                s.block_content_color = document::types::Color::from_index(v);
             }
             if let Some(v) = brot {
                 s.block_content_rotation = v.to_radians();
@@ -1566,7 +1566,7 @@ impl OpenCADStudio {
 
     pub(super) fn on_color_window_pick(
         &mut self,
-        color: codec::types::Color,
+        color: document::types::Color,
         name: Option<String>,
     ) -> Task<Message> {
         if let Some(crate::app::ColorPickTarget::Interface(target)) = self
@@ -1703,16 +1703,16 @@ impl OpenCADStudio {
         );
         let doc = &mut self.tabs[i].scene.document;
         let handle = if value == "Default" || value == "ByBlock" {
-            codec::types::Handle::NULL
+            document::types::Handle::NULL
         } else if is_lt {
             doc.line_types
                 .iter()
                 .find(|lt| lt.name == value)
                 .map(|lt| lt.handle)
-                .unwrap_or(codec::types::Handle::NULL)
+                .unwrap_or(document::types::Handle::NULL)
         } else {
             // A standard arrowhead's block is created on first use.
-            crate::entities::arrowheads::resolve(doc, &value).unwrap_or(codec::types::Handle::NULL)
+            crate::entities::arrowheads::resolve(doc, &value).unwrap_or(document::types::Handle::NULL)
         };
         // Staged: persists on Apply.
         if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {
@@ -1741,7 +1741,7 @@ mod ds_set_handle_tests {
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         for name in ["ARROW_A", "ARROW_B"] {
-            let mut br = codec::tables::BlockRecord::new(name);
+            let mut br = document::tables::BlockRecord::new(name);
             br.handle = app.tabs[i].scene.document.allocate_handle();
             app.tabs[i].scene.document.block_records.add(br).unwrap();
         }
@@ -1837,7 +1837,7 @@ mod ds_set_handle_tests {
                 .get(&name)
                 .unwrap()
                 .dimblk1,
-            codec::types::Handle::NULL
+            document::types::Handle::NULL
         );
     }
 

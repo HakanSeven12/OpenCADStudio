@@ -118,9 +118,9 @@ fn check_copy_after(start: Option<Message>, typed: &str, expected: usize) {
     let handles = app.tabs[i].scene.add_entities(
         (0..2)
             .map(|y| {
-                codec::EntityType::Line(codec::entities::Line::from_points(
-                    codec::types::Vector3::new(0.0, y as f64, 0.0),
-                    codec::types::Vector3::new(10.0, y as f64, 0.0),
+                document::EntityType::Line(document::entities::Line::from_points(
+                    document::types::Vector3::new(0.0, y as f64, 0.0),
+                    document::types::Vector3::new(10.0, y as f64, 0.0),
                 ))
             })
             .collect(),
@@ -210,9 +210,9 @@ fn canvas_selection_copies_via_iced_keyboard() {
 
 #[test]
 fn copied_blocks_follow_cursor_when_pasted_via_iced_keyboard() {
-    use codec::entities::{Insert, Line};
-    use codec::types::Vector3;
-    use codec::EntityType;
+    use document::entities::{Insert, Line};
+    use document::types::Vector3;
+    use document::EntityType;
     use glam::DVec3;
 
     let _guard = crate::headless_ui_lock();

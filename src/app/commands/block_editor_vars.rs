@@ -142,7 +142,7 @@ impl OpenCADStudio {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::{entities::Insert, types::Vector3, EntityType, Handle};
+    use document::{entities::Insert, types::Vector3, EntityType, Handle};
 
     fn fixture() -> (OpenCADStudio, Handle, Handle) {
         let mut app = OpenCADStudio::new_for_test();

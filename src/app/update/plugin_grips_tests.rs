@@ -25,9 +25,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use codec::entities::{Arc, Circle, Line, Spline};
-use codec::types::{Handle, Vector3};
-use codec::EntityType;
+use document::entities::{Arc, Circle, Line, Spline};
+use document::types::{Handle, Vector3};
+use document::EntityType;
 use ocs_plugin_api::host::{
     CustomGripEvent, CustomGripPhase, CustomGripResponse, PluginGrip, PluginGripShape, PreviewWire,
 };
@@ -328,12 +328,12 @@ fn entity_grips_are_generic_over_entity_types_including_boxed_variants() {
 
     // Helix: a recently-BOXED wide variant (`Box<Helix>`); the read must
     // match through the box.
-    let helix = codec::entities::Helix {
+    let helix = document::entities::Helix {
         radius: 5.0,
         turns: 3.0,
         axis_base_point: Vector3::new(0.0, 0.0, 0.0),
         start_point: Vector3::new(5.0, 0.0, 0.0),
-        ..codec::entities::Helix::default()
+        ..document::entities::Helix::default()
     };
     let helix_handle = add(&mut app, EntityType::Helix(Box::new(helix)));
     let grips = entity_grips(&mut app, helix_handle);
@@ -994,7 +994,7 @@ fn hover_hits_through_two_thousand_declared_grips() {
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }
 
-fn live_arc(anchor: Handle, radius: f64, app: &OpenCADStudio) -> codec::EntityType {
+fn live_arc(anchor: Handle, radius: f64, app: &OpenCADStudio) -> document::EntityType {
     match app.tabs[tab(app)]
         .scene
         .document
@@ -1111,7 +1111,7 @@ fn live_geometry_caps_are_refused_with_an_honest_headline() {
     let state = install_sink(TEST_PLUGIN);
     declare(&mut app, TEST_PLUGIN, vec![declared(1, [3.0, 0.0, 0.0])]);
     let overflow = ocs_plugin_api::host::MAX_PLUGIN_LIVE_ENTITIES + 1;
-    let way_too_big: Vec<(codec::Handle, codec::EntityType)> = (0..overflow)
+    let way_too_big: Vec<(document::Handle, document::EntityType)> = (0..overflow)
         .map(|k| (anchor, live_arc(anchor, 5.0 + k as f64, &app)))
         .collect();
     *state.live_geom.borrow_mut() = way_too_big;
@@ -1313,9 +1313,9 @@ mod notification_attach {
             // (deferred until the runner acks ChannelReady, then flushed â€”
             // the deferral is what makes this deterministic).
             let handle =
-                host.add_entity(codec::EntityType::Line(codec::entities::Line::from_points(
-                    codec::types::Vector3::new(0.0, 0.0, 0.0),
-                    codec::types::Vector3::new(3.0, 0.0, 0.0),
+                host.add_entity(document::EntityType::Line(document::entities::Line::from_points(
+                    document::types::Vector3::new(0.0, 0.0, 0.0),
+                    document::types::Vector3::new(3.0, 0.0, 0.0),
                 )));
             assert!(!handle.is_null());
             drop(host);
@@ -1521,9 +1521,9 @@ fn dirty_regions_ride_the_boundary_notification() {
         let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
         assert!(host.write_record(
             handle,
-            codec::xdata::ExtendedDataRecord {
+            document::xdata::ExtendedDataRecord {
                 application_name: "PLUGIN".to_string(),
-                values: vec![codec::xdata::XDataValue::String("pi-grip".to_string())],
+                values: vec![document::xdata::XDataValue::String("pi-grip".to_string())],
             },
         ));
     }
@@ -1575,7 +1575,7 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
     let moved_a = match app.tabs[i].scene.document.get_entity(a).cloned() {
         Some(EntityType::Line(line)) => {
             let mut moved = line.clone();
-            moved.start = codec::types::Vector3::new(2.0, 0.0, 0.0);
+            moved.start = document::types::Vector3::new(2.0, 0.0, 0.0);
             EntityType::Line(moved)
         }
         other => panic!("not a line: {other:?}"),
@@ -1957,10 +1957,10 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
         &["PLUGIN"],
         "PLUGIN_ALIGN_DISPLAY",
         vec![
-            codec::objects::XRecordEntry::string(1, "peak_gradient"),
-            codec::objects::XRecordEntry::new(
+            document::objects::XRecordEntry::string(1, "peak_gradient"),
+            document::objects::XRecordEntry::new(
                 140,
-                codec::objects::XRecordValue::Double(0.06),
+                document::objects::XRecordValue::Double(0.06),
             ),
         ],
     )

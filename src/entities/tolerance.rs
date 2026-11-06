@@ -1,4 +1,4 @@
-use codec::entities::Tolerance;
+use document::entities::Tolerance;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{edit_prop as edit, ro_prop as ro, square_grip};
@@ -155,8 +155,8 @@ pub(crate) fn symbol_font_switch(inner: &str) -> Option<char> {
 /// every DWG-read tolerance to "Standard" and pick the wrong metrics.
 pub(crate) fn resolve_dim_style<'a>(
     tol: &Tolerance,
-    doc: &'a codec::Document,
-) -> Option<&'a codec::tables::DimStyle> {
+    doc: &'a document::Document,
+) -> Option<&'a document::tables::DimStyle> {
     if let Some(h) = tol.dimension_style_handle {
         if !h.is_null() {
             if let Some(s) = doc.dim_styles.iter().find(|s| s.handle == h) {
@@ -255,7 +255,7 @@ struct TolCell {
 ///     `GlyphRun` so the cell renders as SDF text (frame stays geometry).
 fn tessellate_tolerance(
     tol: &Tolerance,
-    doc: &codec::Document,
+    doc: &document::Document,
 ) -> (Vec<Vec<[f32; 2]>>, Vec<TolCell>) {
     if tol.text.is_empty() {
         return (vec![], vec![]);
@@ -418,7 +418,7 @@ fn tessellate_tolerance(
     (box_out, cells)
 }
 
-pub(crate) fn preview_strokes(tol: &Tolerance, doc: &codec::Document) -> Vec<Vec<[f32; 2]>> {
+pub(crate) fn preview_strokes(tol: &Tolerance, doc: &document::Document) -> Vec<Vec<[f32; 2]>> {
     tessellate_tolerance(tol, doc).0
 }
 
@@ -436,7 +436,7 @@ fn frame_basis(tol: &Tolerance) -> (glam::DVec3, glam::DVec3) {
 // ── RenderConvertible ──────────────────────────────────────────────────────────
 
 impl RenderConvertible for Tolerance {
-    fn to_render(&self, document: &codec::Document) -> Option<RenderEntity> {
+    fn to_render(&self, document: &document::Document) -> Option<RenderEntity> {
         if self.text.is_empty() {
             return None;
         }
@@ -468,12 +468,12 @@ impl RenderConvertible for Tolerance {
                 .filter(|value| !matches!(value, 0 | 256))
                 .map(|value| {
                     let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(
-                        &codec::types::Color::from_index(value),
+                        &document::types::Color::from_index(value),
                     );
                     [red, green, blue]
                 })
         };
-        let color_value = |color: &codec::types::Color| {
+        let color_value = |color: &document::types::Color| {
             let [red, green, blue, _] = crate::scene::convert::tess_util::aci_to_rgba(color);
             [red, green, blue]
         };
@@ -755,9 +755,9 @@ mod tests {
     /// non-zero default, so trusting that field drew the frame ~10x too small.
     #[test]
     fn the_frame_is_sized_from_the_dimension_style_not_the_entity_default() {
-        use codec::tables::DimStyle;
-        let mut doc = codec::Document::new();
-        let handle = codec::Handle::from(0x27_u64);
+        use document::tables::DimStyle;
+        let mut doc = document::Document::new();
+        let handle = document::Handle::from(0x27_u64);
         let mut style = DimStyle::new("ISO-25");
         style.handle = handle;
         style.dimtxt = 2.5;
@@ -788,11 +788,11 @@ mod tests {
     /// 0.42; reading the style alone drew the frame several times too large.
     #[test]
     fn an_entity_override_beats_its_dimension_style() {
-        use codec::tables::DimStyle;
-        use codec::xdata::XDataValue;
+        use document::tables::DimStyle;
+        use document::xdata::XDataValue;
 
-        let mut doc = codec::Document::new();
-        let handle = codec::Handle::from(0x27_u64);
+        let mut doc = document::Document::new();
+        let handle = document::Handle::from(0x27_u64);
         let mut style = DimStyle::new("ISO-25");
         style.handle = handle;
         style.dimtxt = 2.5;
@@ -815,7 +815,7 @@ mod tests {
         // The entity's own overrides, shaped exactly as the file carries them:
         // application "ACAD", naming itself "DSTYLE" in its first string value,
         // then (variable code, value) pairs. Variable 140 = text height.
-        let mut rec = codec::xdata::ExtendedDataRecord::new("ACAD");
+        let mut rec = document::xdata::ExtendedDataRecord::new("ACAD");
         rec.add_value(XDataValue::String("DSTYLE".into()));
         rec.add_value(XDataValue::ControlString("{".into()));
         rec.add_value(XDataValue::Integer16(140));
@@ -840,7 +840,7 @@ mod tests {
     /// Rows read downward and start at the left edge.
     #[test]
     fn rows_stack_downward_and_left_align() {
-        let doc = codec::Document::new();
+        let doc = document::Document::new();
         let mut tol = Tolerance::new();
         tol.text = BENCH.to_string();
         let (boxes, _) = tessellate_tolerance(&tol, &doc);
@@ -896,7 +896,7 @@ mod tests {
     /// together inside correctly-sized boxes.
     #[test]
     fn cells_are_drawn_with_the_spacing_they_were_measured_with() {
-        let doc = codec::Document::new();
+        let doc = document::Document::new();
         let mut tol = Tolerance::new();
         tol.text = "ABC".into();
 
@@ -979,7 +979,7 @@ mod tests {
     fn compartments_are_measured_by_their_ink_not_the_trailing_pen_gap() {
         // Cap height, so glyph units and world units line up.
         let h = 9.0_f32;
-        let document = codec::Document::new();
+        let document = document::Document::new();
         let text_style = crate::entities::text_support::resolve_text_style("Standard", &document);
         for src in ["{\\Fgdt;r}", "{\\Fgdt;n}tol{\\Fgdt;m}", "1{\\Fgdt;m}", "A"] {
             let cell = parse_cell(src);

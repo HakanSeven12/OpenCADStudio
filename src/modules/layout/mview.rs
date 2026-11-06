@@ -15,10 +15,10 @@
 // as the reference words them; CLose in arc mode closes with a tangent arc.
 
 use crate::t;
-use codec::entities::{LwPolyline, LwVertex, Viewport};
-use codec::tables::View;
-use codec::types::{Vector2, Vector3};
-use codec::{EntityType, Handle};
+use document::entities::{LwPolyline, LwVertex, Viewport};
+use document::tables::View;
+use document::types::{Vector2, Vector3};
+use document::{EntityType, Handle};
 
 use crate::command::{CadCommand, CmdOption, CmdResult, InputKind};
 use crate::modules::draw::draw::polyline::{

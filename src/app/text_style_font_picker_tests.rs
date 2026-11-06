@@ -7,7 +7,7 @@ use crate::entities::text_support::{TTF_FLAG_BOLD, TTF_FLAG_ITALIC};
 use crate::ui::font_picker::{
     catalogue, FaceStyle, FontChoice, FontPickerEvent, FontPickerState, Section,
 };
-use codec::tables::TextStyle;
+use document::tables::TextStyle;
 
 fn style(name: &str, font_file: &str, family: &str) -> TextStyle {
     let mut style = TextStyle::new(name);

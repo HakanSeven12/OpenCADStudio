@@ -9,14 +9,14 @@
 //! The definition itself shows the first state, so a reference to it needs
 //! no copy until another state is picked for it.
 
-use codec::objects::{
+use document::objects::{
     BlockElement, BlockEvalExpression, BlockEvalValue, BlockGrip, BlockGripExpression,
     BlockParameterPropertyInfo, BlockRepresentationData, BlockVisibilityParameter,
     BlockVisibilityState, DynamicBlockData, ObjectType,
 };
-use codec::types::Vector3;
-use codec::xdata::{ExtendedDataRecord, XDataValue};
-use codec::{Document, EntityType, Handle};
+use document::types::Vector3;
+use document::xdata::{ExtendedDataRecord, XDataValue};
+use document::{Document, EntityType, Handle};
 
 use super::Scene;
 
@@ -58,7 +58,7 @@ impl Scene {
         handles
     }
 
-    pub(crate) fn display_entity_invisible(&self, common: &codec::entities::EntityCommon) -> bool {
+    pub(crate) fn display_entity_invisible(&self, common: &document::entities::EntityCommon) -> bool {
         if super::block_construction::is_construction(common) { return !self.construction_revealed(common.handle); }
         common.invisible && !self.visibility_revealed(common.handle)
     }
@@ -252,7 +252,7 @@ pub fn create(document: &mut Document, definition: Handle, location: Vector3) ->
 pub fn reframe(
     document: &mut Document,
     definition: Handle,
-    transform: &codec::types::Transform,
+    transform: &document::types::Transform,
 ) -> usize {
     let Some(mut parameter) = parameter(document, definition).cloned() else {
         return 0;
@@ -696,7 +696,7 @@ impl Scene {
         let representation = existing.unwrap_or_else(|| self.document.allocate_handle());
         let data = self.document.allocate_handle();
         if existing.is_none() {
-            let mut dictionary = codec::objects::Dictionary::new();
+            let mut dictionary = document::objects::Dictionary::new();
             dictionary.handle = representation;
             dictionary.owner = holder;
             dictionary.reactors.push(holder);
@@ -761,7 +761,7 @@ impl Scene {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::{Circle, Insert, Line};
+    use document::entities::{Circle, Insert, Line};
 
     #[test]
     fn visibility_ribbon_reveal_respects_layers_uncontrolled_flags_and_nested_states() {
@@ -1057,7 +1057,7 @@ mod placement_fixtures {
             scene.define_block_raw(
                 "PALETTE_VISIBILITY_TEST",
                 Vector3::ZERO,
-                vec![EntityType::Line(codec::entities::Line::from_points(
+                vec![EntityType::Line(document::entities::Line::from_points(
                     Vector3::ZERO,
                     Vector3::UNIT_X,
                 ))],
@@ -1107,8 +1107,8 @@ mod placement_fixtures {
 #[cfg(test)]
 mod representation_xdict_tests {
     use super::*;
-    use codec::entities::{Insert, Line};
-    use codec::objects::{XRecord, XRecordValue};
+    use document::entities::{Insert, Line};
+    use document::objects::{XRecord, XRecordValue};
 
     #[test]
     fn visibility_representation_deep_clones_member_xdict() {

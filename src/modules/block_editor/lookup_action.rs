@@ -1,6 +1,6 @@
 //! Select a Lookup parameter, then open its property table.
 use crate::command::{CadCommand, CmdResult, InputKind, PointPickContext};
-use codec::Handle;
+use document::Handle;
 use glam::DVec3;
 
 #[derive(Clone, Debug)]

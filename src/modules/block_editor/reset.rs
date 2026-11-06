@@ -1,5 +1,5 @@
 use crate::command::{CadCommand, CmdResult};
-use codec::Handle;
+use document::Handle;
 
 inventory::submit!(crate::command::CommandRegistration {
     names: &["RESETBLOCK"]

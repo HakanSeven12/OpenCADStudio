@@ -25,9 +25,9 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::classes::DxfClass;
-use codec::entities::{EntityType, Insert, Line, Viewport};
-use codec::types::{Handle, Vector3};
+use document::classes::DxfClass;
+use document::entities::{EntityType, Insert, Line, Viewport};
+use document::types::{Handle, Vector3};
 use OpenCADStudio::scene::Scene;
 
 const ENTITIES: usize = 100_000;
@@ -42,7 +42,7 @@ fn fixture() -> (Scene, Handle) {
 
     // A frozen layer keeps the 100k model lines out of every viewport's wire
     // set, so a frame's cost is the hidden-handle lookup, not tessellation.
-    let mut frozen = codec::tables::layer::Layer::new("HIDDEN");
+    let mut frozen = document::tables::layer::Layer::new("HIDDEN");
     frozen.flags.frozen = true;
     scene.document.layers.add_or_replace(frozen);
 
@@ -108,7 +108,7 @@ fn fixture() -> (Scene, Handle) {
         dxf_name: "ACIDBLOCKREFERENCE".to_string(),
         cpp_class_name: "AcDbBlockRepresentationContext".to_string(),
         application_name: "ObjectDBX Classes".to_string(),
-        proxy_flags: codec::classes::ProxyFlags(1153),
+        proxy_flags: document::classes::ProxyFlags(1153),
         instance_count: 0,
         was_zombie: false,
         is_an_entity: false,
@@ -150,7 +150,7 @@ fn main() {
     let frame = |scene: &Scene| {
         scene.build_viewports(
             bounds,
-            codec::entities::ViewportRenderMode::Wireframe2D,
+            document::entities::ViewportRenderMode::Wireframe2D,
             None,
             false,
             false,

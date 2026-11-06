@@ -9,9 +9,9 @@
 
 use crate::modules::draw::modify::spline_ops::{spline_cut, spline_to_nurbs};
 use crate::t;
-use codec::entities::Spline as SplineEnt;
-use codec::types::Vector3;
-use codec::{EntityType, Handle};
+use document::entities::Spline as SplineEnt;
+use document::types::Vector3;
+use document::{EntityType, Handle};
 use glam::{DVec3, Vec3};
 use kernel::geom2d::Curve;
 
@@ -523,7 +523,7 @@ mod tests {
     use super::*;
 
     fn spatial_line() -> EntityType {
-        EntityType::Line(codec::entities::Line::from_points(
+        EntityType::Line(document::entities::Line::from_points(
             Vector3::new(0.0, 0.0, 0.0),
             Vector3::new(0.0, 0.0, 4.0),
         ))
@@ -595,7 +595,7 @@ mod tests {
 
     #[test]
     fn circular_arc_accepts_total_angle_in_radians() {
-        let arc = codec::entities::Arc::from_center_radius_angles(
+        let arc = document::entities::Arc::from_center_radius_angles(
             Vector3::ZERO,
             2.0,
             0.0,
@@ -619,13 +619,13 @@ mod tests {
 
     #[test]
     fn polyline_lengthening_preserves_plane_and_interpolates_widths() {
-        let mut polyline = codec::entities::LwPolyline::new();
+        let mut polyline = document::entities::LwPolyline::new();
         polyline.normal = Vector3::new(0.0, 1.0, 0.0);
         polyline.elevation = 5.0;
-        let mut start = codec::entities::LwVertex::from_coords(0.0, 0.0);
+        let mut start = document::entities::LwVertex::from_coords(0.0, 0.0);
         start.start_width = 2.0;
         start.end_width = 4.0;
-        polyline.vertices = vec![start, codec::entities::LwVertex::from_coords(10.0, 0.0)];
+        polyline.vertices = vec![start, document::entities::LwVertex::from_coords(10.0, 0.0)];
         let entity = EntityType::LwPolyline(polyline.clone());
         let pick = DVec3::from_array(
             crate::entities::curve::lwpolyline_curve(&polyline)

@@ -33,8 +33,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use codec::entities::{EntityType, Line};
-use codec::types::{Handle, Vector3};
+use document::entities::{EntityType, Line};
+use document::types::{Handle, Vector3};
 use OpenCADStudio::scene::parametric_constraints::{
     ConstraintKind, ParametricRef, ParametricScope,
 };

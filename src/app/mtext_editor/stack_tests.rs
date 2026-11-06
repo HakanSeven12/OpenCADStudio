@@ -6,7 +6,7 @@ use crate::app::{Message, OpenCADStudio};
 fn app(raw: &str) -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.tabs
-        .push(crate::app::document::DocumentTab::new_drawing(1));
+        .push(crate::app::tab_document::DocumentTab::new_drawing(1));
     app.active_tab = 1;
     app.open_mtext_editor(DVec3::ZERO, None, raw, 2.5, None);
     app
@@ -98,7 +98,7 @@ fn an_index_keeps_the_formatting_of_its_characters_and_the_text_around_it() {
     assert!(props.stroke.underline());
     assert_eq!(
         props.color,
-        Some(codec::entities::mtext_format::MTextColor::Index(1))
+        Some(document::entities::mtext_format::MTextColor::Index(1))
     );
 }
 

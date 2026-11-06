@@ -13,7 +13,7 @@ use crate::io::xref_model::{
 use crate::ui::style::common::muted_style;
 use crate::ui::style::row_button::cell_button_style;
 use crate::ui::ROW_H;
-use codec::Document;
+use document::Document;
 use iced::widget::{button, column, container, mouse_area, row, scrollable, text, tooltip};
 use iced::Padding;
 use iced::{Background, Border, Element, Fill, Length, Theme};
@@ -1129,7 +1129,7 @@ impl XrefManagerPanel {
 /// directly — mirrors the three [`collect_entries`] scans so nested entries
 /// (foreign handles) classify correctly even on handle collisions.
 fn direct_identities(doc: &Document) -> HashSet<(u64, String)> {
-    use codec::objects::ObjectType;
+    use document::objects::ObjectType;
 
     let mut ids: HashSet<(u64, String)> = HashSet::new();
     for br in doc.block_records.iter() {
@@ -1146,7 +1146,7 @@ fn direct_identities(doc: &Document) -> HashSet<(u64, String)> {
                 ids.insert((handle.value(), def.file_path.clone()));
             }
             ObjectType::ClassObject(object) => {
-                if let codec::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data {
+                if let document::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data {
                     ids.insert((handle.value(), def.source_filename.clone()));
                 }
             }
@@ -2200,19 +2200,19 @@ fn reference_preview(entry: &ReferenceEntry) -> Option<image::RgbaImage> {
 
 /// Image definition backing a [`RefKind::Image`] entry, looked up by the
 /// entry key (definition-object handle) for the Details pane extras.
-fn find_image_def(doc: &Document, key: u64) -> Option<&codec::objects::ImageDefinition> {
+fn find_image_def(doc: &Document, key: u64) -> Option<&document::objects::ImageDefinition> {
     doc.objects
-        .get(&codec::types::Handle::from(key))
+        .get(&document::types::Handle::from(key))
         .and_then(|o| match o {
-            codec::objects::ObjectType::ImageDefinition(def) => Some(def),
+            document::objects::ObjectType::ImageDefinition(def) => Some(def),
             _ => None,
         })
 }
 
 fn find_image_display_size(doc: &Document, key: u64) -> Option<(f64, f64)> {
-    let handle = codec::types::Handle::from(key);
+    let handle = document::types::Handle::from(key);
     for entity in doc.entities() {
-        if let codec::EntityType::RasterImage(img) = entity {
+        if let document::EntityType::RasterImage(img) = entity {
             if img.definition_handle == Some(handle) {
                 let w = (img.u_vector.x.powi(2) + img.u_vector.y.powi(2) + img.u_vector.z.powi(2))
                     .sqrt();
@@ -2477,10 +2477,10 @@ mod tests {
         assert!(!panel.display_rows().iter().any(|r| r.is_nested));
     }
 
-    fn preview_doc2(dir: &std::path::Path) -> codec::Document {
+    fn preview_doc2(dir: &std::path::Path) -> document::Document {
         // Two referenced images → genuine multi-select.
-        use codec::objects::{ImageDefinition, ObjectType};
-        let mut doc = codec::Document::new();
+        use document::objects::{ImageDefinition, ObjectType};
+        let mut doc = document::Document::new();
         for (i, name) in ["a.png", "b.png"].iter().enumerate() {
             let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([9, 9, 9, 255]));
             img.save(dir.join(name)).unwrap();
@@ -2489,33 +2489,33 @@ mod tests {
             let mut def = ImageDefinition::with_dimensions(path.clone(), 8, 8);
             def.handle = h;
             doc.objects.insert(h, ObjectType::ImageDefinition(def));
-            let mut ent = codec::entities::RasterImage::new(
+            let mut ent = document::entities::RasterImage::new(
                 &path,
-                codec::types::Vector3::ZERO,
+                document::types::Vector3::ZERO,
                 8.0 + i as f64,
                 8.0,
             );
             ent.definition_handle = Some(h);
-            doc.add_entity(codec::EntityType::RasterImage(ent)).unwrap();
+            doc.add_entity(document::EntityType::RasterImage(ent)).unwrap();
         }
         doc
     }
 
-    fn preview_doc(dir: &std::path::Path, name: &str) -> codec::Document {
+    fn preview_doc(dir: &std::path::Path, name: &str) -> document::Document {
         // Referenced 8x8 PNG under `dir`; the entry resolves Loaded.
-        use codec::objects::{ImageDefinition, ObjectType};
+        use document::objects::{ImageDefinition, ObjectType};
         let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([9, 9, 9, 255]));
         img.save(dir.join(name)).unwrap();
         let img_path = dir.join(name).to_string_lossy().into_owned();
-        let mut doc = codec::Document::new();
+        let mut doc = document::Document::new();
         let h = doc.allocate_handle();
         let mut def = ImageDefinition::with_dimensions(img_path.clone(), 8, 8);
         def.handle = h;
         doc.objects.insert(h, ObjectType::ImageDefinition(def));
         let mut ent =
-            codec::entities::RasterImage::new(&img_path, codec::types::Vector3::ZERO, 8.0, 8.0);
+            document::entities::RasterImage::new(&img_path, document::types::Vector3::ZERO, 8.0, 8.0);
         ent.definition_handle = Some(h);
-        doc.add_entity(codec::EntityType::RasterImage(ent)).unwrap();
+        doc.add_entity(document::EntityType::RasterImage(ent)).unwrap();
         doc
     }
 
@@ -2589,8 +2589,8 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("plan.dwg"), b"not-a-real-dwg").unwrap();
-        let mut doc = codec::Document::new();
-        let mut br = codec::tables::BlockRecord::new("PLAN");
+        let mut doc = document::Document::new();
+        let mut br = document::tables::BlockRecord::new("PLAN");
         br.flags.is_xref = true;
         br.xref_path = dir.join("plan.dwg").to_string_lossy().into_owned();
         br.handle = doc.allocate_handle();
@@ -2627,7 +2627,7 @@ mod tests {
             .objects
             .iter()
             .find_map(|(h, o)| match o {
-                codec::objects::ObjectType::ImageDefinition(_) => Some(h.value()),
+                document::objects::ObjectType::ImageDefinition(_) => Some(h.value()),
                 _ => None,
             })
             .unwrap();

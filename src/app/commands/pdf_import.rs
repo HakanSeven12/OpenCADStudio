@@ -14,11 +14,11 @@ pub(crate) enum PdfImportSource {
 
 impl OpenCADStudio {
     pub(crate) fn run_pdf_import(&mut self, i: usize, source: PdfImportSource) {
-        use codec::objects::ObjectType;
+        use document::objects::ObjectType;
         let document = &self.tabs[i].scene.document;
         let (underlay, path, page, area, mode, handle) = match &source {
             PdfImportSource::Underlay(request) => {
-                let Some(codec::EntityType::Underlay(underlay)) =
+                let Some(document::EntityType::Underlay(underlay)) =
                     document.get_entity(request.underlay)
                 else {
                     return;
@@ -103,10 +103,10 @@ impl OpenCADStudio {
                 .line_types
                 .contains(pdf_import::DASH_LINETYPE)
         {
-            let mut lt = codec::tables::LineType::new(pdf_import::DASH_LINETYPE);
+            let mut lt = document::tables::LineType::new(pdf_import::DASH_LINETYPE);
             lt.handle = scene.document.allocate_handle();
-            lt.add_element(codec::tables::LineTypeElement::dash(0.8));
-            lt.add_element(codec::tables::LineTypeElement::space(0.2));
+            lt.add_element(document::tables::LineTypeElement::dash(0.8));
+            lt.add_element(document::tables::LineTypeElement::space(0.2));
             lt.pattern_length = 1.0;
             let _ = scene.document.line_types.add(lt);
         }
@@ -139,7 +139,7 @@ impl OpenCADStudio {
                 .collect::<std::path::PathBuf>()
                 .to_string_lossy()
                 .into_owned();
-            let mut raster = codec::entities::RasterImage::with_size(
+            let mut raster = document::entities::RasterImage::with_size(
                 &stored,
                 image.insertion,
                 image.width as f64,
@@ -149,16 +149,16 @@ impl OpenCADStudio {
             );
             raster.u_vector = image.u;
             raster.v_vector = image.v;
-            raster.flags = codec::entities::ImageDisplayFlags::SHOW_IMAGE
-                | codec::entities::ImageDisplayFlags::SHOW_NOT_ALIGNED
-                | codec::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY
-                | codec::entities::ImageDisplayFlags::TRANSPARENCY_ON;
+            raster.flags = document::entities::ImageDisplayFlags::SHOW_IMAGE
+                | document::entities::ImageDisplayFlags::SHOW_NOT_ALIGNED
+                | document::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY
+                | document::entities::ImageDisplayFlags::TRANSPARENCY_ON;
             raster.common.layer = image.layer.clone();
-            result.entities.push(codec::EntityType::RasterImage(raster));
+            result.entities.push(document::EntityType::RasterImage(raster));
         }
         for (name, color) in &result.layers {
             if !scene.document.layers.contains(name) {
-                let mut layer = codec::tables::Layer::new(name.as_str());
+                let mut layer = document::tables::Layer::new(name.as_str());
                 layer.handle = scene.document.allocate_handle();
                 layer.color = *color;
                 let _ = scene.document.layers.add(layer);
@@ -166,7 +166,7 @@ impl OpenCADStudio {
         }
         for (name, font) in &result.text_styles {
             if !scene.document.text_styles.contains(name) {
-                let mut style = codec::tables::TextStyle::new(name.as_str());
+                let mut style = document::tables::TextStyle::new(name.as_str());
                 style.handle = scene.document.allocate_handle();
                 style.font_file = font.clone();
                 let _ = scene.document.text_styles.add(style);
@@ -186,9 +186,9 @@ impl OpenCADStudio {
                 .is_ok()
             {
                 let mut insert =
-                    codec::entities::Insert::new(name, codec::types::Vector3::new(0.0, 0.0, 0.0));
+                    document::entities::Insert::new(name, document::types::Vector3::new(0.0, 0.0, 0.0));
                 insert.common.layer = current_layer;
-                scene.add_entity(codec::EntityType::Insert(insert));
+                scene.add_entity(document::EntityType::Insert(insert));
             }
         } else {
             for entity in result.entities {
@@ -211,7 +211,7 @@ impl OpenCADStudio {
                     // Drop the definition once nothing references it.
                     let definition = underlay.definition_handle;
                     let referenced = scene.document.entities().any(|entity| {
-                        matches!(entity, codec::EntityType::Underlay(other)
+                        matches!(entity, document::EntityType::Underlay(other)
                             if other.definition_handle == definition)
                     });
                     if !referenced {
@@ -240,9 +240,9 @@ impl OpenCADStudio {
         &mut self,
         i: usize,
         label: String,
-        kind: codec::entities::UnderlayType,
+        kind: document::entities::UnderlayType,
         path: &str,
-        pages: Vec<(String, codec::EntityType)>,
+        pages: Vec<(String, document::EntityType)>,
     ) {
         let pending = self.begin_undo(i, label, pages.len(), false);
 
@@ -253,7 +253,7 @@ impl OpenCADStudio {
                 path,
                 &page,
             );
-            if let codec::EntityType::Underlay(underlay) = &mut entity {
+            if let document::EntityType::Underlay(underlay) = &mut entity {
                 underlay.definition_handle = definition;
             }
             self.commit_entity_handle(entity);

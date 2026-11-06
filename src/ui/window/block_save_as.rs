@@ -5,7 +5,7 @@ use iced::{Element, Fill};
 
 pub(crate) struct State {
     pub document_id: u64,
-    pub source: codec::Handle,
+    pub source: document::Handle,
     pub name: String,
     pub existing_names: Vec<String>,
     pub preview: Vec<WireModel>,

@@ -112,8 +112,8 @@ impl Doc {
 
     /// An entry's colour: a numbered one, or a definition's RGB percentages
     /// — as the nearest standard index colour when it is one exactly.
-    fn color(&self, number: i64) -> codec::types::Color {
-        use codec::types::Color;
+    fn color(&self, number: i64) -> document::types::Color {
+        use document::types::Color;
         let rgb = match number {
             // Black becomes the dark grey 250.
             1 => return Color::Index(250),
@@ -1072,12 +1072,12 @@ impl Assembly<'_> {
 /// What an IGES file holds.
 pub struct IgesModel {
     /// Each solid, scaled to the drawing, with its colour and layer.
-    pub bodies: Vec<(kernel::brep::Body, codec::types::Color, String)>,
+    pub bodies: Vec<(kernel::brep::Body, document::types::Color, String)>,
     /// Each trimmed or bounded surface, a one-face sheet, with its colour
     /// and layer.
-    pub sheets: Vec<(kernel::brep::Body, codec::types::Color, String)>,
+    pub sheets: Vec<(kernel::brep::Body, document::types::Color, String)>,
     /// Each spline curve no other entity uses, with its colour and layer.
-    pub curves: Vec<(NurbsCurve3, codec::types::Color, String)>,
+    pub curves: Vec<(NurbsCurve3, document::types::Color, String)>,
 }
 
 /// `drawing_mm`: millimetres per drawing unit, `None` for a unitless drawing.

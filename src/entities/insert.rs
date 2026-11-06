@@ -1,6 +1,6 @@
-use codec::entities::Insert;
-use codec::types::{Matrix3, Transform, Vector3};
-use codec::{Document, EntityType, Handle};
+use document::entities::Insert;
+use document::types::{Matrix3, Transform, Vector3};
+use document::{Document, EntityType, Handle};
 use glam::Vec3;
 
 use crate::command::EntityTransform;
@@ -23,7 +23,7 @@ const ATTRIBUTE_GRIP_BASE: usize = 1;
 /// attribute belongs to the block definition rather than this insert, and a
 /// locked position cannot be dragged. Visibility is a separate question: an
 /// invisible attribute that ATTMODE 2 displays is grippable while it shows.
-fn attribute_is_movable(att: &codec::entities::AttributeEntity) -> bool {
+fn attribute_is_movable(att: &document::entities::AttributeEntity) -> bool {
     !att.flags.constant && !att.lock_position && !att.flags.locked_position
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn unscale_attribute_grip(
 fn attribute_is_render_visible(
     document: &Document,
     visibility: i16,
-    attribute: &codec::entities::AttributeEntity,
+    attribute: &document::entities::AttributeEntity,
 ) -> bool {
     let layer_visible = document
         .layers
@@ -98,7 +98,7 @@ fn insert_attribute_block_scale(
 
 fn scale_attribute_for_insert(
     insert: &Insert,
-    attribute: &mut codec::entities::AttributeEntity,
+    attribute: &mut document::entities::AttributeEntity,
     block_scale: f64,
 ) {
     if (block_scale - 1.0).abs() <= 1.0e-6 {
@@ -253,7 +253,7 @@ fn apply_geom_prop(ins: &mut Insert, field: &str, value: &str) {
             }
             let delta = ocs * ins.insert_point - old_world;
             for att in &mut ins.attributes {
-                codec::Entity::translate(att, delta);
+                document::Entity::translate(att, delta);
             }
         }
         // Single Scale row shown while "Uniform scale" is checked (#427).
@@ -297,7 +297,7 @@ fn apply_grip(ins: &mut Insert, grip_id: usize, apply: GripApply) {
     // world delta — otherwise a grip-drag leaves the attribute text behind (#255).
     let delta = world - old_world;
     for att in &mut ins.attributes {
-        codec::Entity::translate(att, delta);
+        document::Entity::translate(att, delta);
     }
 }
 
@@ -312,7 +312,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
 
         let ux = dx / len;
         let uy = dy / len;
-        let mirror = codec::types::Matrix4 {
+        let mirror = document::types::Matrix4 {
             m: [
                 [2.0 * ux * ux - 1.0, 2.0 * ux * uy, 0.0, 0.0],
                 [2.0 * ux * uy, 2.0 * uy * uy - 1.0, 0.0, 0.0],
@@ -327,7 +327,7 @@ fn apply_transform(ins: &mut Insert, t: &EntityTransform) {
                 p1.y as f64,
                 0.0,
             )));
-        codec::Entity::apply_transform(entity, &t);
+        document::Entity::apply_transform(entity, &t);
     });
 }
 
@@ -355,8 +355,8 @@ impl crate::entities::traits::FallbackTess for Insert {
     }
 }
 pub(crate) fn insert_attribute_entities(
-    document: &codec::Document,
-    insert: &codec::entities::Insert,
+    document: &document::Document,
+    insert: &document::entities::Insert,
     annotation_scale: f32,
     annotation_scale_handle: Option<Handle>,
     scale_policy: crate::scene::BlockScalePolicy,
@@ -390,8 +390,8 @@ pub(crate) fn insert_attribute_entities(
 
 pub(crate) fn append_insert_attribute_wires(
     wires: &mut Vec<WireModel>,
-    document: &codec::Document,
-    ins: &codec::entities::Insert,
+    document: &document::Document,
+    ins: &document::entities::Insert,
     insert_handle: Handle,
     sel: bool,
     ins_color: [f32; 4],
@@ -483,9 +483,9 @@ pub(crate) fn append_insert_attribute_wires(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use codec::entities::AttributeEntity;
-    use codec::tables::Layer;
-    use codec::xdata::ExtendedDataRecord;
+    use document::entities::AttributeEntity;
+    use document::tables::Layer;
+    use document::xdata::ExtendedDataRecord;
 
     fn attribute(tag: &str, x: f64, y: f64) -> AttributeEntity {
         let mut att = AttributeEntity::new(tag.to_string(), format!("{tag}-value"));
@@ -626,8 +626,8 @@ mod tests {
     /// part of its INSERT, not a document entity.
     fn annotative_attribute() -> (Document, Insert, Handle, Handle, Handle) {
         use crate::scene::annotative::{create_annotation_context, ensure_scale_object};
-        use codec::objects::{ObjectContextKind, ObjectType, Scale};
-        use codec::types::Vector2;
+        use document::objects::{ObjectContextKind, ObjectType, Scale};
+        use document::types::Vector2;
 
         let mut document = Document::new();
         let at_50 = ensure_scale_object(&mut document, &Scale::new("1:50", 1.0, 50.0));
@@ -687,7 +687,7 @@ mod tests {
 
     #[test]
     fn a_nested_insert_places_its_annotative_attribute_for_the_current_scale() {
-        use codec::tables::BlockRecord;
+        use document::tables::BlockRecord;
 
         let (mut document, mut nested, at_50, at_100, _) = annotative_attribute();
         nested.block_name = "INNER".to_string();
@@ -774,7 +774,7 @@ mod tests {
 
     #[test]
     fn a_constant_attribute_is_painted_by_the_definition_only() {
-        use codec::EntityType;
+        use document::EntityType;
         let mut document = document_with_layers(Vec::new());
         document.header.attribute_visibility = 1;
         let mut constant = attribute("TAG_CONST", 1.0, 1.0);
@@ -960,8 +960,8 @@ mod attribute_width_tests {
     #[test]
     fn annotative_attribute_scales_its_wrap_width_with_its_height() {
         let insert = Insert::new("TITLE", Vector3::ZERO);
-        let mut attribute = codec::entities::AttributeEntity::new("TITLE".into(), "A B".into());
-        let mut mtext = codec::entities::MText::new();
+        let mut attribute = document::entities::AttributeEntity::new("TITLE".into(), "A B".into());
+        let mut mtext = document::entities::MText::new();
         mtext.rectangle_width = 15.0;
         attribute.embedded_mtext = Some(Box::new(mtext));
         let ratio = 15.0 / attribute.height;

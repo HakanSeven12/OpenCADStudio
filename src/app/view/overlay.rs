@@ -2254,7 +2254,20 @@ fn qselect_content<'a>(
         can_select.then_some(Message::QSelectApply),
         button::primary,
     );
+    // The same conditions in FILTER, with groups and NOT (#2611).
+    let advanced = button(
+        row![
+            crate::ui::icons::themed(crate::ui::icons::ST_FILTER, 13.0),
+            text(t!("Advanced…")).size(12),
+        ]
+        .spacing(5)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press_maybe(state.sample.is_none().then_some(Message::QSelectAdvanced))
+    .style(button::secondary)
+    .padding([6, 12]);
     let footer = row![
+        advanced,
         Space::new().width(flex_width),
         dialog_button(t!("Cancel"), Message::QSelectClose, false),
         Space::new().width(8),

@@ -343,7 +343,7 @@ impl OpenCADStudio {
         }
         // A dialog owns the keyboard: typing while one is open (an open list
         // in it included) must not land in the command line behind it.
-        if self.active_modal.is_some() || self.qselect.is_some() {
+        if self.active_modal.is_some() || self.qselect.is_some() || self.filter_dialog.is_some() {
             return Task::none();
         }
         // Filter out control characters — only push the typed

@@ -9,6 +9,7 @@
 //! layers.
 
 pub mod compare;
+pub mod describe;
 pub mod qselect;
 
 /// How a root or a group combines its items.

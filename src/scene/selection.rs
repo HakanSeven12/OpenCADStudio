@@ -539,22 +539,37 @@ impl Scene {
             .collect()
     }
 
-    /// Evaluate all conditions against the same candidate set, then apply the
-    /// result once: the matches become, join or leave the selection.
-    pub fn qselect_conditions(
-        &mut self,
+    /// The scope's objects a whole filter finds (or, with `invert`, the
+    /// ones it doesn't), without touching the selection.
+    pub fn filter_matches(
+        &self,
         scope: crate::app::QSelectScope,
-        conditions: &[crate::app::QSelectCondition],
-        mode: crate::app::QSelectMode,
+        filter: &crate::filter::Filter,
+        invert: bool,
+    ) -> Vec<Handle> {
+        let source = EntityProperties(self);
+        self.qselect_candidate_handles(scope)
+            .into_iter()
+            .filter(|h| {
+                self.document
+                    .get_entity(*h)
+                    .is_some_and(|e| filter.matches(&source, e) != invert)
+            })
+            .collect()
+    }
+
+    /// `handles` become, join or leave the selection.
+    pub fn apply_found(
+        &mut self,
+        handles: Vec<Handle>,
         result: crate::app::QSelectResult,
     ) -> usize {
         use crate::app::QSelectResult;
-        let matches = self.qselect_matches(scope, conditions, mode);
         let selection: HashSet<Handle> = match result {
-            QSelectResult::New => matches.into_iter().collect(),
-            QSelectResult::Add => self.selected.iter().copied().chain(matches).collect(),
+            QSelectResult::New => handles.into_iter().collect(),
+            QSelectResult::Add => self.selected.iter().copied().chain(handles).collect(),
             QSelectResult::Remove => {
-                let found: HashSet<Handle> = matches.into_iter().collect();
+                let found: HashSet<Handle> = handles.into_iter().collect();
                 self.selected
                     .iter()
                     .copied()
@@ -564,6 +579,19 @@ impl Scene {
         };
         self.replace_selection(selection);
         self.selected.len()
+    }
+
+    /// Evaluate all conditions against the same candidate set, then apply the
+    /// result once: the matches become, join or leave the selection.
+    pub fn qselect_conditions(
+        &mut self,
+        scope: crate::app::QSelectScope,
+        conditions: &[crate::app::QSelectCondition],
+        mode: crate::app::QSelectMode,
+        result: crate::app::QSelectResult,
+    ) -> usize {
+        let matches = self.qselect_matches(scope, conditions, mode);
+        self.apply_found(matches, result)
     }
 
     /// Entity type names in the current layout for the selection-filter menu.

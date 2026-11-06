@@ -53,6 +53,7 @@ mod dock;
 mod tab_document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
+mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
@@ -1448,6 +1449,8 @@ pub(super) struct OpenCADStudio {
     /// applied via `Message::QSelectApply`; the panel is dismissed on
     /// Apply / Cancel / Esc / outside-click.
     qselect: Option<QSelectState>,
+    /// The FILTER dialog while it is open.
+    filter_dialog: Option<filter_dialog::FilterDialogState>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -5405,6 +5408,10 @@ pub enum Message {
     QSelectClearConditions,
     QSelectCancelEdit,
     QSelectApply,
+    /// Quick Select's conditions, scope and result, carried over to FILTER.
+    QSelectAdvanced,
+    /// The FILTER dialog.
+    FilterDialog(filter_dialog::FilterMsg),
     /// The user clicked the title-bar ✕ (fires before the window closes).
     WindowCloseRequested(window::Id),
     /// A window was fully closed (fires after `window::close()` is called).
@@ -6285,6 +6292,7 @@ impl OpenCADStudio {
             grip_text_verts: Vec::new(),
             grip_text_slide: false,
             qselect: None,
+            filter_dialog: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

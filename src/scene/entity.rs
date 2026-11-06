@@ -3007,18 +3007,23 @@ impl Scene {
         }
 
         let depths = kernel::geom2d::ring_nesting_depths(&rings);
-        // The island style picks loops by their path flags: Outer keeps the
-        // loops flagged external (bit 0) or outermost (bit 4), Ignore only
+        // The island style picks loops by their path flags: Normal keeps the
+        // loops flagged external (bit 0), derived (bit 2) or outermost
+        // (bit 4) — a selected island of island the reference flags 0 is not
+        // filled — Outer those flagged external or outermost, Ignore only
         // those flagged external. A counter stored as an external loop is a
         // hole even with Ignore. When no loop carries the flag the style
         // needs, nesting depth picks them instead.
         let style_keeps = |path: &document::entities::BoundaryPath| {
             use document::entities::hatch::BoundaryPathFlags;
             let external = BoundaryPathFlags::EXTERNAL.bits();
+            let derived = BoundaryPathFlags::DERIVED.bits();
             let outermost = BoundaryPathFlags::OUTERMOST.bits();
             let bits = path.flags.bits();
             match dxf.style {
-                document::entities::HatchStyleType::Normal => true,
+                document::entities::HatchStyleType::Normal => {
+                    bits & (external | derived | outermost) != 0
+                }
                 document::entities::HatchStyleType::Outer => bits & (external | outermost) != 0,
                 document::entities::HatchStyleType::Ignore => bits & external != 0,
             }

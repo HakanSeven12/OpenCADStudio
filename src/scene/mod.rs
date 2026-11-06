@@ -138,7 +138,7 @@ pub(crate) fn tessellate_entity(
     block_cache: Option<&cache::block_cache::BlockCache>,
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
-    paper_space: bool,
+    viewport_lt: Option<f32>,
     reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = convert::tess::tessellate_entity(
@@ -152,7 +152,7 @@ pub(crate) fn tessellate_entity(
         block_cache,
         view_aabb,
         world_per_pixel,
-        paper_space,
+        viewport_lt,
         reference_only,
     );
     if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
@@ -204,7 +204,7 @@ pub(crate) fn tessellate_entity(
                     block_cache,
                     view_aabb,
                     world_per_pixel,
-                    paper_space,
+                    viewport_lt,
                     reference_only,
                 )
             };
@@ -3205,6 +3205,12 @@ pub struct Scene {
     /// Set while `resident_wires_for` assembles a set that will become the
     /// memo's backing; new runs then go straight into it (`Pending`).
     building_resident_set: std::cell::Cell<bool>,
+    /// The factor on complex linetypes in the viewport whose resident set is
+    /// being read or built. `None` outside one, or where nothing depends on it.
+    viewport_complex_lt: std::cell::Cell<Option<f32>>,
+    /// The factor each viewport's complex linetypes are baked at. It stays put
+    /// while the view moves, so a wheel tick doesn't rebuild the resident set.
+    viewport_complex_lt_baked: RefCell<HashMap<Handle, f32>>,
     /// Annotation, background and viewport signature.
     resident_tess_guard: std::cell::Cell<u64>,
     /// The SDF atlas generation the resident memo's text was built under.
@@ -3517,6 +3523,8 @@ impl Scene {
             resident_tess_memo: RefCell::new(HashMap::default()),
             resident_memo_backing: RefCell::new(MemoBacking::default()),
             building_resident_set: std::cell::Cell::new(false),
+            viewport_complex_lt: std::cell::Cell::new(None),
+            viewport_complex_lt_baked: RefCell::new(HashMap::default()),
             resident_tess_guard: std::cell::Cell::new(0),
             resident_tess_atlas: std::cell::Cell::new(0),
             tess_memo_atlas: std::cell::Cell::new(0),
@@ -3653,6 +3661,10 @@ impl Scene {
         }
         key = key.rotate_left(13) ^ all_visible as u64;
         key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
+        // Loading a linetype does not move the block epoch, and a cache built
+        // before the drawing had a complex one kept no path for its children.
+        key = key.rotate_left(13)
+            ^ cache::block_cache::document_has_complex_linetype(&self.document) as u64;
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {
@@ -8489,6 +8501,10 @@ impl Scene {
             .unwrap_or(0));
         mix(all_visible as u64);
         mix(self.viewport_style_key(style_viewport));
+        mix(self
+            .viewport_complex_lt
+            .get()
+            .map_or(u64::MAX, |factor| factor.to_bits() as u64));
         // quantized_wpp removed: GPU analytical rendering for circles/arcs/
         // ellipses makes tessellation zoom-independent, so the resident set is
         // shared across all zoom levels.
@@ -8818,6 +8834,7 @@ impl Scene {
         let avp = style_viewport.or(self.active_viewport);
         let memo_ok = self.resident_tess_guard.get()
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
+                ^ self.viewport_complex_lt_guard()
             && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation();
         for (h, kind) in &deltas {
             if matches!(kind, ChangeKind::Removed) {
@@ -8867,7 +8884,7 @@ impl Scene {
                 Some(&blk),
                 None,
                 None,
-                anno_scale_override.is_some(),
+                self.viewport_lt_for(anno_scale_override),
                 self.reference_only.handles(),
             );
             // Solid B-rep corners snap via the mesh edge list (their wire
@@ -14122,9 +14139,10 @@ impl Scene {
         } else {
             1.0
         };
-        // Content shown inside a paper-space viewport carries a scale override;
-        // only there does PSLTSCALE resize linetypes by the viewport scale.
-        let paper = anno_scale_override.is_some();
+        // Content shown inside a paper-space viewport carries a scale override
+        // or the PSLTSCALE factor; only there do complex linetypes ignore the
+        // annotation scale.
+        let paper = self.viewport_lt_for(anno_scale_override);
         let t_blk = perf.then(iced::time::Instant::now);
         let blk_cache =
             self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
@@ -14173,7 +14191,11 @@ impl Scene {
                 all_visible,
                 bg,
                 avp,
-            ) ^ if self.constraint_shading_active() { 0xC057_A705_0000_0001 } else { 0 };
+            ) ^ if self.constraint_shading_active() {
+                0xC057_A705_0000_0001
+            } else {
+                0
+            } ^ self.viewport_complex_lt_guard();
             let (memo_cell, guard_cell, atlas_cell) = if resident {
                 (&self.resident_tess_memo, &self.resident_tess_guard, &self.resident_tess_atlas)
             } else {
@@ -14844,7 +14866,24 @@ vis_index={:.1} visible_probe={:.1}",
             let complex_linetype = *complex_linetypes.entry(lt_name).or_insert_with(|| {
                 crate::io::linetypes::resolve_complex_lt(&self.document, lt_name).is_some()
             });
+            let complex_mline = matches!(
+                entity,
+                EntityType::MLine(mline) if crate::entities::mline::mline_lines(mline, &self.document)
+                    .iter()
+                    .any(|line| {
+                        crate::io::linetypes::resolve_complex_lt(
+                            &self.document,
+                            crate::entities::mline::element_linetype_name(
+                                &self.document,
+                                &mline.common.layer,
+                                &line.linetype,
+                            ),
+                        )
+                        .is_some()
+                    })
+            );
             if complex_linetype
+                || complex_mline
                 || matches!(entity, EntityType::Hatch(_))
                 || crate::scene::annotative::is_annotative(&self.document, entity)
             {
@@ -15390,7 +15429,7 @@ vis_index={:.1} visible_probe={:.1}",
             Some(&blk_cache),
             None,
             None,
-            paper,
+            paper.then_some(1.0),
             self.reference_only.handles(),
         );
         // Same solid-corner snaps as the resident paths, so one-off consumers

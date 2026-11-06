@@ -283,6 +283,7 @@ fn explode_multileader(
             None,
             None,
             [0.0; 4],
+            1.0,
         )
     };
     let models = tessellate(&geometry);

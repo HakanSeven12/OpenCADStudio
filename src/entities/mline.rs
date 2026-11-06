@@ -492,6 +492,20 @@ pub fn resolved_mline_style<'a>(
         })
 }
 
+/// The linetype an element draws with: a ByLayer element follows the layer of its
+/// multiline, whose own linetype plays no part.
+pub(crate) fn element_linetype_name<'a>(
+    document: &'a document::Document,
+    layer: &str,
+    element: &'a str,
+) -> &'a str {
+    if element.is_empty() || element.eq_ignore_ascii_case("bylayer") {
+        crate::scene::view::render::layer_linetype_name_for_viewport(document, layer, None)
+    } else {
+        element
+    }
+}
+
 pub fn mline_lines(m: &MLine, document: &document::Document) -> Vec<MLineLine> {
     mline_lines_resolved(m, resolved_mline_style(m, document))
 }

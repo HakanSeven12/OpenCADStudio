@@ -34,7 +34,7 @@ impl Scene {
             Some(&cache),
             None,
             None,
-            paper,
+            paper.then_some(1.0),
             self.reference_only.handles(),
         );
         let frozen: rustc_hash::FxHashSet<Handle> = self

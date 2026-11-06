@@ -1768,7 +1768,7 @@ fn hash_preview_wires(wires: &[WireModel], h: &mut impl std::hash::Hasher) {
             value.to_bits().hash(h);
         }
         w.depth_override.map(f32::to_bits).hash(h);
-        w.dash_align_end.map(f32::to_bits).hash(h);
+        w.dash_closure.hash(h);
         w.plinegen.hash(h);
         w.dash_from_start.hash(h);
         w.display_visible.hash(h);
@@ -3808,32 +3808,41 @@ pub(crate) fn linetype_name_for_common_viewport<'a>(
 ) -> &'a str {
     let elt = &common.linetype;
     if elt.is_empty() || elt.eq_ignore_ascii_case("bylayer") {
-        if viewport.is_some() {
-            if let Some(handle) = viewport_override(
-                document,
-                &common.layer,
-                viewport,
-                document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
-            )
-            .and_then(|value| value.as_handle())
-            {
-                if let Some(line_type) = document
-                    .line_types
-                    .iter()
-                    .find(|line_type| line_type.handle == handle)
-                {
-                    return line_type.name.as_str();
-                }
-            }
-        }
-        document
-            .layers
-            .get(&common.layer)
-            .map(|l| l.line_type.as_str())
-            .unwrap_or("Continuous")
+        layer_linetype_name_for_viewport(document, &common.layer, viewport)
     } else {
         elt.as_str()
     }
+}
+
+/// A layer's linetype name, with its viewport override when it has one.
+pub(crate) fn layer_linetype_name_for_viewport<'a>(
+    document: &'a Document,
+    layer: &str,
+    viewport: Option<Handle>,
+) -> &'a str {
+    if viewport.is_some() {
+        if let Some(handle) = viewport_override(
+            document,
+            layer,
+            viewport,
+            document::objects::KnownXRecordKind::LayerViewportLinetypeOverride,
+        )
+        .and_then(|value| value.as_handle())
+        {
+            if let Some(line_type) = document
+                .line_types
+                .iter()
+                .find(|line_type| line_type.handle == handle)
+            {
+                return line_type.name.as_str();
+            }
+        }
+    }
+    document
+        .layers
+        .get(layer)
+        .map(|l| l.line_type.as_str())
+        .unwrap_or("Continuous")
 }
 
 pub(in crate::scene) fn linetype_name_for_viewport<'a>(
@@ -4638,7 +4647,7 @@ impl Scene {
                     Some(&block_cache),
                     None,
                     None,
-                    content_viewport,
+                    content_viewport.then_some(1.0),
                     self.reference_only.handles(),
                 );
                 for wire in &mut context_wires {
@@ -5122,16 +5131,9 @@ impl Scene {
             if let Some(ratio) = model_linetype_ratio(&self.document) {
                 uniforms.linetype_scale = ratio;
             }
-        } else if self.document.header.paper_space_linetype_scaling
-            && !inst.paper_sheet
-            && inst.handle != Handle::NULL
-        {
-            if let Some(EntityType::Viewport(vp)) = self.document.get_entity(inst.handle) {
-                let viewport_scale = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
-
-                if viewport_scale.is_finite() && viewport_scale > 1e-9 {
-                    uniforms.linetype_scale = (1.0 / viewport_scale) as f32;
-                }
+        } else if !inst.paper_sheet && inst.handle != Handle::NULL {
+            if let Some(factor) = self.viewport_psltscale_factor(inst.handle) {
+                uniforms.linetype_scale = factor;
             }
         }
         if preview_wires.iter().any(|wire| wire.name == "from_guide") {

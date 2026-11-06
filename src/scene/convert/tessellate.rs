@@ -19,7 +19,7 @@ use document::{Document, EntityType, Handle};
 use glam::Vec3;
 
 use crate::scene::convert::acad_to_render::{convert, RenderObject};
-use crate::scene::model::wire_model::{SnapHint, TangentGeom, WireModel};
+use crate::scene::model::wire_model::{DashClosure, SnapHint, TangentGeom, WireModel};
 
 /// Split an f64 offset-relative coordinate into the double-single (high, low)
 /// f32 pair the renderer consumes. `high + low ≈ value` to ~f64 precision; the
@@ -424,6 +424,53 @@ fn polyline_segment_widths(entity: &EntityType) -> Vec<(f32, f32)> {
     }
 }
 
+/// A dashed polyline with arcs stays one wire, so its pattern runs along the
+/// whole path instead of restarting at each arc. A wide one keeps the bands the
+/// arc pipeline draws for it.
+fn polyline_walks_one_dash_path(
+    entity: &EntityType,
+    document: &Document,
+    pattern_length: f32,
+) -> bool {
+    pattern_length > 1e-6
+        && polyline_band_width(entity, document.header.fill_mode) <= 0.0
+        && polyline_max_width(entity) <= 1e-9
+}
+
+/// How a dash pattern closes around this entity's wire `points`.
+pub(crate) fn dash_closure_of(
+    entity: &EntityType,
+    key_vertices: &[[f64; 3]],
+    points: impl Iterator<Item = [f64; 3]>,
+) -> DashClosure {
+    let closed_polyline = match entity {
+        EntityType::Circle(_) => return DashClosure::Curve,
+        EntityType::Ellipse(ellipse) if ellipse.is_full() => return DashClosure::Curve,
+        EntityType::LwPolyline(polyline) => polyline.is_closed && polyline.plinegen,
+        EntityType::Polyline2D(polyline) => {
+            polyline.is_closed()
+                && polyline.flags.bits()
+                    & document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+                    != 0
+        }
+        _ => false,
+    };
+    let Some(second) = key_vertices.get(1).filter(|_| closed_polyline) else {
+        return DashClosure::Open;
+    };
+    points
+        .enumerate()
+        .skip(1)
+        .find(|(_, p)| {
+            (p[0] - second[0]).abs() < 1e-4
+                && (p[1] - second[1]).abs() < 1e-4
+                && (p[2] - second[2]).abs() < 1e-4
+        })
+        .map_or(DashClosure::Open, |(index, _)| DashClosure::Polyline {
+            start: index as u32,
+        })
+}
+
 fn split_mixed_polyline(
     tangent_geoms: &[TangentGeom],
     key_vertices: &[[f64; 3]],
@@ -552,7 +599,6 @@ fn split_mixed_polyline(
                 pick_tris: arc_pt,
                 pick_tris_low: arc_ptl,
                 dash_from_start: false,
-                dash_align_end: None,
                 text_verts: Vec::new(),
                 name: name.to_string(),
                 points,
@@ -694,7 +740,6 @@ fn split_mixed_polyline(
             pick_tris: pt,
             pick_tris_low: ptl,
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: name.to_string(),
             points: line_pts,
@@ -889,7 +934,6 @@ fn point_cloud_wires(
         pick_tris,
         pick_tris_low,
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name: handle.value().to_string(),
         points,
@@ -998,6 +1042,54 @@ pub fn tessellate(
     // other caller passes false and gets the normal SDF-only text.
     force_text_strokes: bool,
 ) -> Vec<WireModel> {
+    let mut wires = tessellate_wires(
+        document,
+        handle,
+        entity,
+        selected,
+        entity_color,
+        pattern_length,
+        pattern,
+        line_weight_px,
+        anno_scale,
+        annotation_scale_handle,
+        world_per_pixel,
+        bg_color,
+        force_text_strokes,
+    );
+    // A path split over several wires has no one pattern to close.
+    let mut drawn = wires.iter_mut().filter(|wire| !wire.points.is_empty());
+    if let (Some(wire), None) = (drawn.next(), drawn.next()) {
+        let points = wire.points.iter().enumerate().map(|(index, p)| {
+            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            [
+                p[0] as f64 + low[0] as f64,
+                p[1] as f64 + low[1] as f64,
+                p[2] as f64 + low[2] as f64,
+            ]
+        });
+        let closure = dash_closure_of(entity, &wire.key_vertices, points);
+        wire.dash_closure = closure;
+    }
+    wires
+}
+
+#[allow(clippy::too_many_arguments)]
+fn tessellate_wires(
+    document: &Document,
+    handle: Handle,
+    entity: &EntityType,
+    selected: bool,
+    entity_color: [f32; 4],
+    pattern_length: f32,
+    pattern: [f32; 8],
+    line_weight_px: f32,
+    anno_scale: f32,
+    annotation_scale_handle: Option<Handle>,
+    world_per_pixel: Option<f32>,
+    bg_color: [f32; 4],
+    force_text_strokes: bool,
+) -> Vec<WireModel> {
     let color = if selected {
         WireModel::SELECTED
     } else {
@@ -1069,41 +1161,6 @@ pub fn tessellate(
             .map(|v| [v.position.x, v.position.y, v.position.z])
             .collect();
 
-        // Local-frame origin (mline start) for the CPU-dashed / glyph-laid
-        // elements. `apply_along` walks positions in f32, which quantises fine
-        // spacing — dash gaps AND inter-glyph advance — at UTM coordinates
-        // (the low half of the double-single is dropped). Subtracting this f64
-        // origin first keeps the walk near zero and precise; the result is
-        // shifted back to absolute double-single afterwards. Mirrors the
-        // Tolerance frame, which also builds geometry locally and applies its
-        // f64 origin later.
-        let origin = [
-            m.vertices[0].position.x,
-            m.vertices[0].position.y,
-            m.vertices[0].position.z,
-        ];
-        // Centre-line (vertex path) length — the shared "A"-type reference so
-        // every parallel element uses the same end-dash length and thus the same
-        // interior phase (perpendicular dashes line up). f64 deltas so it stays
-        // precise at UTM coordinates.
-        let ref_total: f32 = {
-            let mut acc = 0.0_f64;
-            for w in m.vertices.windows(2) {
-                let dx = w[1].position.x - w[0].position.x;
-                let dy = w[1].position.y - w[0].position.y;
-                let dz = w[1].position.z - w[0].position.z;
-                acc += (dx * dx + dy * dy + dz * dz).sqrt();
-            }
-            if m.is_closed() && m.vertices.len() > 1 {
-                let first = &m.vertices[0].position;
-                let last = &m.vertices[m.vertices.len() - 1].position;
-                let dx = first.x - last.x;
-                let dy = first.y - last.y;
-                let dz = first.z - last.z;
-                acc += (dx * dx + dy * dy + dz * dz).sqrt();
-            }
-            acc as f32
-        };
         let mut out: Vec<WireModel> = Vec::with_capacity(lines.len());
         if let Some(style) = crate::entities::mline::resolved_mline_style(m, document) {
             let triangles = crate::entities::mline::mline_fill_triangles_with_style(m, style);
@@ -1137,7 +1194,6 @@ pub fn tessellate(
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name: name.clone(),
                     points: Vec::new(),
@@ -1183,111 +1239,30 @@ pub fn tessellate(
                 _ => 0,
             };
 
-            // Every dashed element is CPU-dashed by `apply_along` (not the GPU
-            // pattern) so all parallel lines walk the polyline with the *same*
-            // arithmetic and stay in phase — otherwise a shader-dashed line and an
-            // apply_along-dashed sibling drift apart at large (UTM) coordinates and
-            // one line's dash lands in the other's gap, striking through embedded
-            // text. Document definition wins over the bundled catalog; a
-            // continuous element yields `None` and falls to the solid path below.
-            // Selection forces a plain solid highlight, so skip dashing then.
-            let clt = if selected {
-                None
-            } else if let Some(doc_seg) =
-                crate::io::linetypes::document_lt_segments(document, &l.linetype)
+            // A complex element is walked where its scale and path on the sheet
+            // are known (`walk_mline_element`, `emit_complex_walk`), which reads
+            // the element's linetype off the wire. Each element aligns on its own
+            // length. Selection forces a plain solid highlight.
+            let drawn_linetype = crate::entities::mline::element_linetype_name(
+                document,
+                &m.common.layer,
+                &l.linetype,
+            );
+            let is_complex = !selected
+                && crate::io::linetypes::resolve_complex_lt(document, drawn_linetype).is_some();
+            let (pattern_length, pattern) = if selected || is_complex {
+                (0.0, [0.0; 8])
+            } else {
+                crate::scene::view::render::resolve_pattern(
+                    &document.line_types,
+                    drawn_linetype,
+                    lt_scale,
+                )
+            };
+            let mut elem_wires: Vec<WireModel> = Vec::new();
             {
-                // In-document linetype: CPU-expand (apply_along) only when it
-                // embeds TEXT glyphs that must be laid out along the curve. Pure
-                // dash / space / dot (and undrawn shape) elements fall through to
-                // the GPU dash shader below — cheaper (one WireModel + pattern
-                // instead of N CPU segments) and now UTM-precise, so they stay in
-                // phase with any glyph-bearing sibling element.
-                if doc_seg
-                    .segments
-                    .iter()
-                    .any(|s| matches!(s, crate::io::linetypes::LtSegment::Text { .. }))
-                {
-                    Some(doc_seg)
-                } else {
-                    None
-                }
-            } else {
-                // Not in the document: bundled-catalog linetype (may embed
-                // text / shape) → keep the CPU path; `resolve_pattern` below can't
-                // see it, so GPU-dashing would drop the pattern to solid.
-                crate::io::linetypes::complex_lt(&l.linetype).cloned()
-            };
-
-            let mut elem_wires: Vec<WireModel> = if let Some(clt) = clt {
-                // Walk the dash / glyph layout in a local frame so the f32 math
-                // stays precise, then lift each wire back to world DS.
-                let local: Vec<[f32; 3]> = l
-                    .points
-                    .iter()
-                    .map(|p| {
-                        [
-                            (p[0] - origin[0]) as f32,
-                            (p[1] - origin[1]) as f32,
-                            (p[2] - origin[2]) as f32,
-                        ]
-                    })
-                    .collect();
-                let mut w = crate::scene::text::complex_lt::apply_along(
-                    &name,
-                    &local,
-                    &clt,
-                    lt_scale.max(1e-4),
-                    wcolor,
-                    selected,
-                    line_weight_px,
-                    // Shared "A"-type reference: this text-bearing element aligns
-                    // with the GPU-dashed sibling elements (same centre-line
-                    // reference) instead of tiling independently from the start.
-                    Some(ref_total),
-                );
-                for wm in &mut w {
-                    wm.aci = aci;
-                    shift_wire_to_world(wm, origin);
-                }
-                w
-            } else {
-                Vec::new()
-            };
-
-            // Simple path: the linetype isn't complex, or `apply_along` bailed
-            // (pattern blow-up guard) and returned nothing — draw the element as a
-            // dashed / solid polyline so it is never lost.
-            if elem_wires.is_empty() {
+                let element_linetype = Some(l.linetype.clone());
                 let (pts, pts_low) = points_to_ds(l.points);
-                let (pattern_length, pattern) = if selected {
-                    (0.0, [0.0; 8])
-                } else {
-                    crate::scene::view::render::resolve_pattern(
-                        &document.line_types,
-                        &l.linetype,
-                        lt_scale,
-                    )
-                };
-                // Shared "A"-type: derive the begin/end solid-dash length ONCE
-                // from the multiline centre-line (`ref_total`) so every parallel
-                // element runs the same interior phase and its dashes line up
-                // perpendicular; `align_total` stays each element's own length in
-                // the shader so each still ends on a dash. Dash-first patterns
-                // only (`+dash, -gap, …`); shorter-than-a-period lines fall back
-                // to the per-wire path (solid).
-                let dash_align_end = if pattern_length > 1e-6
-                    && pattern[0] > 0.0
-                    && pattern[1] < 0.0
-                    && ref_total > pattern_length
-                {
-                    let a = pattern[0];
-                    let p = pattern_length;
-                    // Every whole period the centre line holds.
-                    let k = (ref_total / p).floor().max(1.0);
-                    Some(((ref_total - k * p + a) * 0.5).max(1e-4))
-                } else {
-                    None
-                };
                 elem_wires.push(WireModel {
                     bg_adapt: None,
                     point_marker: None,
@@ -1303,12 +1278,8 @@ pub fn tessellate(
                     render_instance: None,
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
-                    // MLINE dashes: A-type aligned, but the end-dash length is
-                    // shared across all parallel elements (`dash_align_end`) so
-                    // their interiors stay in phase (perpendicular dashes line up)
-                    // while each still ends on a dash at its own endpoint.
                     dash_from_start: false,
-                    dash_align_end,
+                    element_linetype,
                     text_verts: Vec::new(),
                     name: name.clone(),
                     points: pts,
@@ -1771,7 +1742,6 @@ pub fn tessellate(
                                         pick_tris: Vec::new(),
                                         pick_tris_low: Vec::new(),
                                         dash_from_start: false,
-                                        dash_align_end: None,
                                         text_verts: Vec::new(),
                                         name: name.clone(),
                                         points: vec![],
@@ -1828,7 +1798,6 @@ pub fn tessellate(
                                         pick_tris: Vec::new(),
                                         pick_tris_low: Vec::new(),
                                         dash_from_start: false,
-                                        dash_align_end: None,
                                         text_verts: Vec::new(),
                                         name: name.clone(),
                                         points: fp,
@@ -1893,7 +1862,6 @@ pub fn tessellate(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: pts,
@@ -1934,7 +1902,8 @@ pub fn tessellate(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
+                        element_linetype: None,
+                        dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name,
@@ -2003,7 +1972,6 @@ pub fn tessellate(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: bin.pts,
@@ -2053,7 +2021,6 @@ pub fn tessellate(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: Vec::new(),
@@ -2103,7 +2070,8 @@ pub fn tessellate(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
+                        element_linetype: None,
+                        dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name: name.clone(),
@@ -2142,7 +2110,6 @@ pub fn tessellate(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name,
                         points: Vec::new(),
@@ -2211,7 +2178,6 @@ pub fn tessellate(
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name,
                             points: vec![
@@ -2308,6 +2274,7 @@ pub fn tessellate(
                         | EntityType::Ellipse(_)
                         | EntityType::Spline(_)
                         | EntityType::LwPolyline(_)
+                        | EntityType::Polyline2D(_)
                 ) {
                     (pattern_length, pattern)
                 } else {
@@ -2338,7 +2305,10 @@ pub fn tessellate(
                             EntityType::LwPolyline(_) | EntityType::Polyline2D(_)
                         );
 
-                    if has_arc && can_split {
+                    if has_arc
+                        && can_split
+                        && !polyline_walks_one_dash_path(entity, document, edge_pattern_length)
+                    {
                         let seg_widths = polyline_segment_widths(entity);
                         let ww = polyline_band_width(entity, document.header.fill_mode);
                         out.extend(split_mixed_polyline(
@@ -2375,7 +2345,6 @@ pub fn tessellate(
                             pick_tris,
                             pick_tris_low,
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: name.clone(),
                             points: local_pts,
@@ -2418,7 +2387,6 @@ pub fn tessellate(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name: name.clone(),
                         points: Vec::new(),
@@ -2465,7 +2433,6 @@ pub fn tessellate(
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name,
                         points: Vec::new(),
@@ -2529,7 +2496,6 @@ pub fn tessellate(
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name,
                     points: local_pts,
@@ -2630,7 +2596,10 @@ pub fn tessellate(
                     .iter()
                     .any(|tg| matches!(tg, TangentGeom::Arc { .. }));
 
-                if has_arc && can_split {
+                if has_arc
+                    && can_split
+                    && !polyline_walks_one_dash_path(entity, document, pattern_length)
+                {
                     let edge_color = color;
                     let point_marker =
                         crate::entities::point::relative_marker_spec(entity, document);
@@ -2670,7 +2639,6 @@ pub fn tessellate(
                     pick_tris,
                     pick_tris_low,
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name,
                     points: local_pts,
@@ -2754,7 +2722,6 @@ pub fn tessellate(
                     pick_tris,
                     pick_tris_low,
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name,
                     points: local_pts,
@@ -2860,7 +2827,6 @@ pub fn tessellate(
         pick_tris,
         pick_tris_low,
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         points,
@@ -3435,7 +3401,7 @@ pub(crate) fn entity_z(entity: &EntityType) -> f32 {
 }
 
 /// Shader band width, or zero while FILLMODE draws the kernel boundary.
-fn polyline_band_width(entity: &EntityType, fill_mode: bool) -> f32 {
+pub(crate) fn polyline_band_width(entity: &EntityType, fill_mode: bool) -> f32 {
     let thick = match entity {
         EntityType::LwPolyline(p) => p.thickness.abs() > 1e-10,
         EntityType::Polyline2D(p) => p.thickness.abs() > 1e-10,

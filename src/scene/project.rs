@@ -86,6 +86,10 @@ impl Scene {
             // Pass 0.0 for screen height — the CPU-projection / hit-test
             // path wants the full-fidelity (no-LOD-stub) wire list,
             // regardless of paper zoom.
+            // A plot has no later frame to catch up on a zoom that just ended.
+            if plot {
+                self.viewport_complex_lt_factor(vp_handle, true);
+            }
             let model_wires = self.model_wires_for_viewport_arc(vp_handle, 0.0);
             let mut model_wires = crate::scene::model::instance_model::expand_stubs(&model_wires);
             if plot {
@@ -379,6 +383,9 @@ impl Scene {
                         // widths no longer line up; fall back to a constant band.
                         out.taper_widths.clear();
                     }
+                }
+                if out.points.len() != wire.points.len() {
+                    out.dash_closure = crate::scene::model::wire_model::DashClosure::Open;
                 }
                 if let Some(source_length) = source_length {
                     for station in &mut clipped_stations {

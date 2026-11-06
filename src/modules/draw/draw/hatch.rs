@@ -150,6 +150,23 @@ pub(crate) fn resolve_hatch_rings(outlines: &[Vec<[f64; 2]>], p: [f64; 2]) -> Op
     Some(rings)
 }
 
+/// HATCH's picked region: [`resolve_hatch_rings`] plus every outline nested
+/// deeper inside it. The reference keeps all of them, whatever the island
+/// style; the style picks the drawn loops from their path flags.
+fn picked_hatch_rings(outlines: &[Vec<[f64; 2]>], p: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
+    let mut rings = resolve_hatch_rings(outlines, p)?;
+    let outer = rings[0].clone();
+    for outline in outlines {
+        if !rings.contains(outline)
+            && polygon_contains_polygon(&outer, outline)
+            && !point_in_polygon(p, outline)
+        {
+            rings.push(outline.clone());
+        }
+    }
+    Some(rings)
+}
+
 /// Pack one or more rings (outer boundary + optional holes) into the Hatch
 /// model storage: the `boundary` f32 ring list (NaN-separated) plus the exact
 /// `boundary_wcs` (NaN-separated) used for persistence. The first vertex of the
@@ -1583,7 +1600,7 @@ impl CadCommand for HatchCommand {
                     xy,
                     self.gap_tolerance,
                 );
-                match resolve_hatch_rings(&faces, xy) {
+                match picked_hatch_rings(&faces, xy) {
                     Some(rings) => {
                         self.add_point_region(rings);
                         let islands = crate::tr!("hatch-cmd", "analyzing-islands");

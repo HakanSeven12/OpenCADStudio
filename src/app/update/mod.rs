@@ -5454,6 +5454,8 @@ impl OpenCADStudio {
 
             Message::LayerNew => self.on_layer_new(),
 
+            Message::LayerImport(msg) => self.on_layer_import(msg),
+
             Message::LayerNewVpFrozen => self.on_layer_new_with(true),
 
             Message::LayerMenu(name, action) => self.on_layer_menu(name, action),

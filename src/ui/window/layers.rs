@@ -783,6 +783,13 @@ impl LayerPanel {
                     compact,
                 ),
                 iced::widget::Space::new().width(Length::Fill),
+                // Layers from another drawing (#2610).
+                toolbar_btn(
+                    crate::ui::icons::IMPORT,
+                    t!("Import..."),
+                    Message::LayerImport(crate::app::layer_import::LayerImportMsg::Pick),
+                    compact,
+                ),
                 // Search box: filters rows by name as the user types (#343).
                 text_input(t!("Search…").as_ref(), &self.filter)
                     .on_input(Message::LayerManagerFilterChanged)

@@ -2028,8 +2028,10 @@ impl CadCommand for HatchCommand {
             HatchMode::PickInside | HatchMode::SelectObjects => {
                 let picking = self.mode == HatchMode::PickInside;
                 match upper.as_str() {
-                    "S" | "SELECT" if picking => Some(self.choose(HatchMode::SelectObjects)),
-                    "K" | "PICK" if !picking => Some(self.choose(HatchMode::PickInside)),
+                    // The method already running is accepted too, as the
+                    // reference takes picK at its own pick prompt.
+                    "S" | "SELECT" => Some(self.choose(HatchMode::SelectObjects)),
+                    "K" | "PICK" => Some(self.choose(HatchMode::PickInside)),
                     "D" | "DRAW" => Some(self.choose(HatchMode::Manual)),
                     "T" | "SETTINGS" => Some(CmdResult::ShowHatchPanel),
                     "U" | "UNDO" if picking => {

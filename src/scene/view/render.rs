@@ -1714,6 +1714,17 @@ fn render_signature(
     h.finish()
 }
 
+/// The multiplier model-space linetypes take from the annotation scale, or
+/// `None` when they keep their drawing-unit lengths (MSLTSCALE off, or no usable
+/// CANNOSCALEVALUE).
+pub(in crate::scene) fn model_linetype_ratio(document: &Document) -> Option<f32> {
+    if !crate::scene::annotative::model_linetypes_follow_annotation(document) {
+        return None;
+    }
+    let ratio = 1.0 / document.header.annotation_scale_value;
+    (ratio.is_finite() && ratio > 1e-9).then_some(ratio as f32)
+}
+
 /// FROM uses the overlay tracking cadence in pixels, independent of zoom and
 /// annotation / paper-space linetype scaling. GPU wire patterns are world units.
 fn scale_from_guide_dashes(wires: &mut [WireModel], world_per_pixel: f32, linetype_scale: f32) {
@@ -5094,9 +5105,8 @@ impl Scene {
         // `annotation_scale` carries shrank a metre drawing's dashes 1000
         // times, below a pixel, and they drew solid (#2036).
         if self.current_layout == "Model" {
-            let ratio = 1.0 / self.document.header.annotation_scale_value;
-            if ratio.is_finite() && ratio > 1e-9 {
-                uniforms.linetype_scale = ratio as f32;
+            if let Some(ratio) = model_linetype_ratio(&self.document) {
+                uniforms.linetype_scale = ratio;
             }
         } else if self.document.header.paper_space_linetype_scaling
             && !inst.paper_sheet

@@ -4247,6 +4247,29 @@ mod tests {
     }
 
     #[test]
+    fn msltscale_command_reads_and_writes_the_drawing_variable() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        assert!(app.tabs[i].scene.model_linetype_scaling());
+
+        app.automation_op(r#"{"op":"run","cmd":"MSLTSCALE 0"}"#);
+        assert!(!app.tabs[i].scene.model_linetype_scaling());
+        assert_eq!(
+            app.tabs[i].scene.document.drawing_variable("MSLTSCALE"),
+            Some("0")
+        );
+
+        app.automation_op(r#"{"op":"run","cmd":"SETVAR MSLTSCALE 1"}"#);
+        assert!(app.tabs[i].scene.model_linetype_scaling());
+
+        // Anything else leaves it alone.
+        app.automation_op(r#"{"op":"run","cmd":"MSLTSCALE 2"}"#);
+        assert!(app.tabs[i].scene.model_linetype_scaling());
+        assert!(app.tabs[i].active_cmd.is_none(), "command must have finished");
+    }
+
+    #[test]
     fn value_prompt_commands_inline_args() {
         // A single-value setting command entered with its value on one line
         // drives the interactive front-end (start + value step) and applies via

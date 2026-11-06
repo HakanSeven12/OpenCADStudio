@@ -857,6 +857,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "MENUBAR",
     "MIRRTEXT",
     "MLEADERLAYER",
+    "MSLTSCALE",
     "MSOLESCALE",
     "OLEFRAME",
     "OLEHIDE",

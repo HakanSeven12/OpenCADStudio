@@ -945,6 +945,7 @@ impl OpenCADStudio {
                     | "SHOWHIST"
                     | "PLINEGEN"
                     | "PSLTSCALE"
+                    | "MSLTSCALE"
                     | "DISPSILH"
                     | "WORLDVIEW"
                     | "LIMCHECK"
@@ -1122,7 +1123,7 @@ impl OpenCADStudio {
                     // the variables that have their own commands (#M025).
                     if matches!(
                         name.as_str(),
-                        "CANNOSCALE" | "ANNOALLVISIBLE" | "ANNOAUTOSCALE" | "HPLAYER"
+                        "CANNOSCALE" | "ANNOALLVISIBLE" | "ANNOAUTOSCALE" | "HPLAYER" | "MSLTSCALE"
                     ) {
                         return Some(self.annotation_setvar(i, &name, value.as_deref()));
                     }
@@ -4336,6 +4337,21 @@ impl OpenCADStudio {
                         }
                     }
                 }
+            },
+            "MSLTSCALE" => match value.map(str::trim).filter(|value| !value.is_empty()) {
+                None => {
+                    let current = u8::from(self.tabs[i].scene.model_linetype_scaling());
+                    self.command_line
+                        .push_output(&format!("MSLTSCALE = {current}"));
+                }
+                Some("0") | Some("1") => {
+                    let on = value.map(str::trim) == Some("1");
+                    self.tabs[i].scene.set_model_linetype_scaling(on);
+                    self.tabs[i].dirty = true;
+                    self.command_line
+                        .push_output(&format!("MSLTSCALE = {}", u8::from(on)));
+                }
+                Some(_) => self.command_line.push_error("SETVAR: 0 or 1 required."),
             },
             "ANNOAUTOSCALE" => {
                 let current = self.annotation_auto_scale;

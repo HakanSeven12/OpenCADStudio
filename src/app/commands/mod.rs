@@ -1165,6 +1165,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "DELOBJ",
         "PLINEGEN",
         "PSLTSCALE",
+        "MSLTSCALE",
         // Plot preferences and the current-layout variables (commands/plotvars.rs).
         "PLOTOFFSET",
         "PAPERUPDATE",

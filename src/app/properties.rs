@@ -3106,10 +3106,23 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                     }
                 }
             }
+            let new_handles: Vec<codec::Handle> = selected.iter().map(|(h, _)| *h).collect();
+            let same_target =
+                prev_handles == new_handles && previous_definition == panel.block_definition;
+            let generation = self.tabs[i].properties.block_batch_generation;
+            panel.block_batch_generation = if same_target {
+                generation
+            } else {
+                generation.wrapping_add(1)
+            };
+            if panel.selected_handles() == new_handles {
+                if let Some(section) = self.batch_block_property_section(i, &new_handles, panel.block_batch_generation) {
+                    panel.sections.push(section);
+                }
+            }
             // Precompute the focused-id → field-key map for O(1) lookups on
             // `PropSyncActive`; derived from `sections`, so rebuild it here.
             panel.field_key_by_id = crate::ui::properties::build_field_key_map(&panel.sections);
-            let new_handles: Vec<codec::Handle> = selected.iter().map(|(h, _)| *h).collect();
             // The plugin class parameter surface (API v14): one stamped
             // selection rides its class's declared rows. Only the native build
             // carries plugin classes (the wasm build has no plugin registry the
@@ -3125,8 +3138,6 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
             // Carry the in-progress edits only when the selection is unchanged
             // (a commit-triggered rebuild); a genuine selection change starts
             // with a clean buffer so no stale value leaks onto the new entity.
-            let same_target =
-                prev_handles == new_handles && previous_definition == panel.block_definition;
             panel.edit_buf = if same_target {
                 edit_buf
             } else {

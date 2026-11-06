@@ -260,6 +260,7 @@ pub(crate) fn properties(
                 document,
                 definition,
                 insert,
+                batch_generation: None,
                 parameter: p.handle,
                 component: field.component,
             };

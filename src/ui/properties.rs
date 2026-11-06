@@ -424,7 +424,7 @@ impl FieldKey {
     pub fn widget_id(&self) -> iced::widget::Id {
         match self {
             FieldKey::Geom(field) => prop_geom_field_id(field),
-            FieldKey::BlockParameter(key) => iced::widget::Id::from(format!("props-block-{}-{}-{}-{}-{:?}", key.document, key.definition, key.insert, key.parameter, key.component)),
+            FieldKey::BlockParameter(key) => iced::widget::Id::from(format!("props-block-{}-{}-{}-{}-{:?}-{:?}", key.document, key.definition, key.insert, key.parameter, key.component, key.batch_generation)),
             FieldKey::Attr(tag) => prop_attr_field_id(tag),
             FieldKey::PluginParam(name) => prop_plugin_param_field_id(name),
             FieldKey::Param(index, field) => prop_param_field_id(*index, *field),
@@ -622,6 +622,8 @@ pub struct PropertiesPanel {
     /// commit onto a different entity (e.g. two title blocks sharing a `REV1`
     /// tag).
     pub source_handles: Vec<Handle>,
+    /// Identifies the reference selection used to build batch property rows.
+    pub block_batch_generation: u64,
     /// Definition shown by the no-selection Block section, separate from entity targets.
     pub block_definition: Option<Handle>,
     /// Whether the quick color picker dropdown is open.
@@ -695,6 +697,7 @@ impl Default for PropertiesPanel {
             hatch_pattern_focus: 0,
             edit_buf: HashMap::default(),
             source_handles: vec![],
+            block_batch_generation: 0,
             block_definition: None,
             color_picker_open: false,
             bg_color_picker_open: false,
@@ -994,13 +997,15 @@ impl PropertiesPanel {
                 description,
             } => {
                 let field = FieldKey::BlockParameter(*key);
+                let varies = crate::tr!("common", "varies");
+                let mixed = key.batch_generation.is_some() && value == &varies;
                 let display = self
                     .edit_buf
                     .get(&field)
                     .map(String::as_str)
-                    .unwrap_or(value);
+                    .unwrap_or(if mixed { "" } else { value });
                 let key = *key;
-                let input = text_input("", display)
+                let input = text_input(if mixed { &varies } else { "" }, display)
                     .id(field.widget_id())
                     .on_input(move |value| Message::PropBlockInput { key, value })
                     .on_submit(Message::PropBlockCommit(key))
@@ -1065,7 +1070,7 @@ impl PropertiesPanel {
                     rows.push(DropdownRow::item(btn, option.clone(), msg));
                 }
                 let list = DropdownList::new(rows)
-                    .selected(Some(*selected))
+                    .selected((*selected < options.len()).then_some(*selected))
                     .on_escape(Message::PropBlockPickerDismiss { key, quick });
                 let popup = container(list)
                     .style(container::bordered_box)
@@ -2527,8 +2532,14 @@ pub fn acad_color_display(c: AcadColor) -> (Color, &'static str) {
 
 /// What a choice cell shows. A choice with nothing selected shows nothing:
 /// the cell must not fall back to a value the table keeps for itself.
+pub(crate) const MIXED_BLOCK_CHOICE: usize = usize::MAX - 1;
+
 pub(crate) fn choice_cell_text(options: &[String], selected: usize) -> String {
-    options.get(selected).cloned().unwrap_or_default()
+    if selected == MIXED_BLOCK_CHOICE {
+        crate::tr!("common", "varies")
+    } else {
+        options.get(selected).cloned().unwrap_or_default()
+    }
 }
 
 fn aci_label(idx: u8) -> &'static str {

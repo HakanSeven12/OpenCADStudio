@@ -105,6 +105,7 @@ pub(super) fn property(
                 document,
                 definition,
                 insert,
+                batch_generation: None,
                 parameter: view.handle,
                 component: Component::TableRow(revision(&view)),
             },

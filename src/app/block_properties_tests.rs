@@ -753,6 +753,7 @@ fn block_parameter_key() -> crate::scene::model::object::BlockParameterKey {
         document: 0,
         definition: codec::Handle::new(1),
         insert: codec::Handle::new(2),
+        batch_generation: None,
         parameter: codec::Handle::new(3),
         component: BlockParameterComponent::Distance,
     }

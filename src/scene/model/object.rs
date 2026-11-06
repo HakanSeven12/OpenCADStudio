@@ -9,6 +9,7 @@ pub struct BlockParameterKey {
     pub document: u64,
     pub definition: Handle,
     pub insert: Handle,
+    pub batch_generation: Option<u64>,
     pub parameter: Handle,
     pub component: BlockParameterComponent,
 }

@@ -964,6 +964,7 @@ impl OpenCADStudio {
                         let i = self.active_tab;
                         self.tabs[i].scene.clear();
                         self.tabs[i].scene.document = doc;
+                        self.tabs[i].scene.sync_annotation_scale_from_header();
                         self.tabs[i].scene.bump_layout_epoch();
                         self.tabs[i].scene.bump_scale_epoch();
                         self.tabs[i].scene.bump_ucs_epoch();
@@ -2003,6 +2004,31 @@ impl OpenCADStudio {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn opening_a_dxf_draws_at_its_saved_annotation_scale() {
+        let mut document = codec::Document::new();
+        let scale = codec::objects::Scale::new("1:100", 1.0, 100.0);
+        crate::scene::annotative::ensure_scale_object(&mut document, &scale);
+        document.header.current_annotation_scale = "1:100".to_string();
+        let bytes =
+            crate::io::save_to_bytes(&document, "dxf", codec::DxfVersion::AC1027).expect("save");
+        let path = std::env::temp_dir().join(format!(
+            "ocs_saved_annotation_scale_{}.dxf",
+            std::process::id()
+        ));
+        std::fs::write(&path, bytes).expect("write");
+
+        let mut app = OpenCADStudio::new_for_test();
+        let request = serde_json::json!({"op": "open", "path": path}).to_string();
+        let opened = app.automation_op(&request);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(opened["ok"], true, "{opened}");
+
+        let scene = &app.tabs[app.active_tab].scene;
+        assert_eq!(scene.document.header.current_annotation_scale, "1:100");
+        assert!((scene.annotation_scale - 100.0).abs() < 1e-3);
+    }
+
     #[test]
     fn clayer_command_sets_layer_used_by_new_geometry() {
         let mut app = super::OpenCADStudio::new_for_test();

@@ -2773,7 +2773,29 @@ fn fix_current_style_names(doc: &mut Document) {
     if let Some(name) = record_name(doc, false, &doc.header.current_mleader_style_name) {
         doc.header.current_mleader_style_name = name;
     }
+    reflect_current_annotation_scale(doc);
     reflect_sketch_settings(doc);
+}
+
+/// The current annotation scale lives in the variable dictionary as the name of
+/// a scale record. The DWG reader brings it to the header; a DXF has no header
+/// variable for it, so without this it opens at 1:1 and saves as 1:1. A name
+/// the scale list does not hold leaves the header as it is.
+fn reflect_current_annotation_scale(doc: &mut Document) {
+    use codec::objects::ObjectType;
+
+    let Some(name) = drawing_variable(doc, "CANNOSCALE") else {
+        return;
+    };
+    let Some(handle) = crate::scene::annotative::scale_handle_by_name(doc, name.trim()) else {
+        return;
+    };
+    let Some(ObjectType::Scale(scale)) = doc.objects.get(&handle) else {
+        return;
+    };
+    let (name, value) = (scale.name.clone(), scale.factor());
+    doc.header.current_annotation_scale = name;
+    doc.header.annotation_scale_value = value;
 }
 
 /// A system variable stored in the drawing's variable dictionary.
@@ -3686,5 +3708,70 @@ mod prepare_save_tests {
                 "inline and shared serialize diverge for {ext}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod dxf_annotation_scale_tests {
+    use super::*;
+    use codec::objects::Scale;
+
+    /// A drawing saved to DXF at this annotation scale, and opened again. A DXF
+    /// holds the current scale only in its variable dictionary.
+    fn reopened_at(name: &str, scale: Option<Scale>) -> Document {
+        let mut doc = Document::new();
+        if let Some(scale) = scale {
+            crate::scene::annotative::ensure_scale_object(&mut doc, &scale);
+        }
+        doc.header.current_annotation_scale = name.to_string();
+        let bytes = save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1027).expect("save");
+        load_bytes("drawing.dxf", bytes).expect("open")
+    }
+
+    #[test]
+    fn a_dxf_opens_at_its_saved_annotation_scale() {
+        let doc = reopened_at("1:100", Some(Scale::new("1:100", 1.0, 100.0)));
+        assert_eq!(doc.header.current_annotation_scale, "1:100");
+        assert!((doc.header.annotation_scale_value - 0.01).abs() < 1e-12);
+        assert_eq!(doc.drawing_variable("CANNOSCALE"), Some("1:100"));
+    }
+
+    #[test]
+    fn a_dxf_keeps_its_annotation_scale_through_another_save() {
+        let doc = reopened_at("1:100", Some(Scale::new("1:100", 1.0, 100.0)));
+        let bytes = save_to_bytes(&doc, "dxf", codec::DxfVersion::AC1027).expect("save");
+        let again = load_bytes("drawing.dxf", bytes).expect("open");
+        assert_eq!(again.header.current_annotation_scale, "1:100");
+        assert_eq!(again.drawing_variable("CANNOSCALE"), Some("1:100"));
+    }
+
+    #[test]
+    fn a_metre_scale_opens_with_its_own_paper_to_drawing_ratio() {
+        let doc = reopened_at("1:50", Some(Scale::new("1:50", 1.0, 0.05)));
+        assert_eq!(doc.header.current_annotation_scale, "1:50");
+        let mut scene = crate::scene::Scene::new();
+        scene.document = doc;
+        scene.sync_annotation_scale_from_header();
+        assert!((scene.annotation_scale - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_dxf_annotation_scale_takes_the_spelling_of_its_record() {
+        let doc = reopened_at("detail", Some(Scale::new("DETAIL", 1.0, 20.0)));
+        assert_eq!(doc.header.current_annotation_scale, "DETAIL");
+    }
+
+    #[test]
+    fn a_dxf_annotation_scale_missing_from_the_list_stays_at_the_default() {
+        let default = Document::new();
+        let doc = reopened_at("no such scale", None);
+        assert_eq!(
+            doc.header.current_annotation_scale,
+            default.header.current_annotation_scale
+        );
+        assert_eq!(
+            doc.header.annotation_scale_value,
+            default.header.annotation_scale_value
+        );
     }
 }

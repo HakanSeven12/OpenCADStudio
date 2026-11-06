@@ -66,6 +66,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "skrifa 0.42.1",
+ "svgtypes",
  "tiny-skia",
  "ttf-parser",
  "unicode-bidi",

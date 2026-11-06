@@ -177,12 +177,40 @@ pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
 
 // ── Sharp rendering of pixel-grid art ─────────────────────────────────────
 
-/// The handle of `bytes`, sharpened when it is pixel-grid art.
-fn grid_handle(bytes: &'static [u8]) -> svg::Handle {
-    match sharpen_grid_svg(bytes) {
+mod grid;
+
+/// How many physical px wide an icon `size` logical px wide is drawn.
+fn physical_pixels(size: f32) -> u32 {
+    (size * scale_factor()).round().max(1.0) as u32
+}
+
+/// The handle of `bytes` drawn `pixels` physical px wide (`None`: at the
+/// art's own size), fitted and sharpened when it is pixel-grid art.
+fn grid_handle(bytes: &'static [u8], pixels: Option<u32>) -> svg::Handle {
+    match grid_svg(bytes, pixels) {
         Some(sharp) => svg::Handle::from_memory(sharp),
         None => svg::Handle::from_memory(bytes),
     }
+}
+
+/// Pixel-grid art fitted to `pixels` physical px (see [`grid::fit`]) when
+/// that is not its own size, then sharpened (see [`sharpen_grid_svg`]).
+/// `None` for any other SVG.
+fn grid_svg(source: &[u8], pixels: Option<u32>) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(source).ok()?;
+    let art = grid::art_size(text)?;
+    let fitted = match pixels {
+        Some(pixels) if pixels != art => grid::fit(text, art, pixels).or_else(|| {
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                log::warn!("icon art could not be fitted to {pixels} px; drawing it scaled");
+            }
+            None
+        }),
+        _ => None,
+    };
+    Some(sharpen_text(fitted.as_deref().unwrap_or(text)).into_bytes())
 }
 
 /// Pixel-grid icon art (`viewBox` `0 0 16 16` or `0 0 32 32`) rewritten so
@@ -201,10 +229,12 @@ fn grid_handle(bytes: &'static [u8]) -> svg::Handle {
 /// own opacity. Returns `None` for any other SVG.
 fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(source).ok()?;
-    let root = &text[..text.find('>')?];
-    if !(root.contains(r#"viewBox="0 0 16 16""#) || root.contains(r#"viewBox="0 0 32 32""#)) {
-        return None;
-    }
+    grid::art_size(text)?;
+    Some(sharpen_text(text).into_bytes())
+}
+
+/// [`sharpen_grid_svg`] on art already known to be on a pixel grid.
+fn sharpen_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len() * 3 / 2);
     // Inside a <mask> or <clipPath>.
     let mut hidden = 0usize;
@@ -212,7 +242,11 @@ fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
     while let Some(open) = rest.find('<') {
         out.push_str(&rest[..open]);
         let after = &rest[open..];
-        let close = after.find('>')? + 1;
+        let Some(close) = after.find('>').map(|i| i + 1) else {
+            out.push_str(after);
+            rest = "";
+            break;
+        };
         let tag = &after[..close];
         let self_closing = tag.ends_with("/>");
         if tag.starts_with("<mask") || tag.starts_with("<clipPath") {
@@ -229,7 +263,7 @@ fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
         rest = &after[close..];
     }
     out.push_str(rest);
-    Some(out.into_bytes())
+    out
 }
 
 /// One self-closing `<path …/>` of [`sharpen_grid_svg`].
@@ -269,6 +303,8 @@ struct SemanticCacheKey {
     address: usize,
     length: usize,
     palette: [[u8; 4]; 6],
+    /// Physical px the art is fitted to.
+    pixels: u32,
 }
 
 thread_local! {
@@ -359,7 +395,7 @@ pub fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
     }
 
     // Miss: build the handle with no cache borrow held, then insert.
-    let handle = grid_handle(bytes);
+    let handle = grid_handle(bytes, None);
     THEMED_CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.mru[1] = c.mru[0].take();
@@ -367,6 +403,36 @@ pub fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
         c.map.insert(key, handle.clone());
     });
     handle
+}
+
+thread_local! {
+    /// `(address, length, pixels)` → the handle fitted to `pixels`, or
+    /// `None` when the art is drawn at its own size (or is not pixel-grid
+    /// art) and shares the [`themed_handle`] entry.
+    static THEMED_SIZED_CACHE: RefCell<FxHashMap<(usize, usize, u32), Option<svg::Handle>>> =
+        RefCell::new(FxHashMap::default());
+}
+
+/// [`themed_handle`] for art drawn `size` logical px wide: pixel-grid art
+/// is fitted to the physical size it lands on.
+fn themed_sized_handle(bytes: &'static [u8], size: f32) -> svg::Handle {
+    let pixels = physical_pixels(size);
+    let key = (bytes.as_ptr() as usize, bytes.len(), pixels);
+    let hit = THEMED_SIZED_CACHE.with(|cache| cache.borrow().get(&key).cloned());
+    let fitted = match hit {
+        Some(fitted) => fitted,
+        None => {
+            let fitted = std::str::from_utf8(bytes)
+                .ok()
+                .and_then(grid::art_size)
+                .filter(|&art| art != pixels)
+                .and_then(|_| grid_svg(bytes, Some(pixels)))
+                .map(svg::Handle::from_memory);
+            THEMED_SIZED_CACHE.with(|cache| cache.borrow_mut().insert(key, fitted.clone()));
+            fitted
+        }
+    };
+    fitted.unwrap_or_else(|| themed_handle(bytes))
 }
 
 #[derive(Clone, Copy)]
@@ -441,9 +507,10 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         _cursor: iced::advanced::mouse::Cursor,
         _viewport: &Rectangle,
     ) {
+        let pixels = physical_pixels(self.size);
         let handle = match self.tint {
-            Some(_) => tinted_handle(self.bytes),
-            None => semantic_handle(self.bytes, theme),
+            Some(_) => tinted_handle(self.bytes, pixels),
+            None => semantic_handle(self.bytes, theme, pixels),
         };
         let measured = renderer.measure_svg(&handle);
         if measured.width == 0 || measured.height == 0 {
@@ -699,26 +766,27 @@ fn size_key(size: f32) -> u16 {
 }
 
 thread_local! {
-    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize), svg::Handle>> =
+    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize, u32), svg::Handle>> =
         RefCell::new(FxHashMap::default());
 }
 
-/// The handle of a one-colour icon.
-fn tinted_handle(bytes: &'static [u8]) -> svg::Handle {
-    let key = (bytes.as_ptr() as usize, bytes.len());
+/// The handle of a one-colour icon drawn `pixels` physical px wide.
+fn tinted_handle(bytes: &'static [u8], pixels: u32) -> svg::Handle {
+    let key = (bytes.as_ptr() as usize, bytes.len(), pixels);
     if let Some(handle) = TINTED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
         return handle;
     }
-    let handle = grid_handle(bytes);
+    let handle = grid_handle(bytes, Some(pixels));
     TINTED_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
     handle
 }
 
-fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
+fn semantic_handle(bytes: &'static [u8], theme: &Theme, pixels: u32) -> svg::Handle {
     let key = SemanticCacheKey {
         address: bytes.as_ptr() as usize,
         length: bytes.len(),
         palette: palette_key(theme),
+        pixels,
     };
 
     SEMANTIC_CACHE.with(|cache| {
@@ -728,7 +796,7 @@ fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
         }
 
         let themed = recolor_semantic_svg(bytes, theme);
-        let handle = svg::Handle::from_memory(sharpen_grid_svg(&themed).unwrap_or(themed));
+        let handle = svg::Handle::from_memory(grid_svg(&themed, Some(pixels)).unwrap_or(themed));
         if cache.len() >= SEMANTIC_CACHE_LIMIT {
             cache.clear();
         }
@@ -872,7 +940,7 @@ fn color_hex(color: Color) -> [u8; 7] {
 
 /// Render a chrome icon with the active Iced theme's normal text color.
 pub fn themed<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -883,7 +951,7 @@ pub fn themed<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 
 /// Render secondary chrome with the active Iced theme's text color.
 pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -896,7 +964,7 @@ pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'
 /// like disabled text. The fade goes through the widget's opacity: an SVG
 /// tint only replaces RGB, so alpha on the style colour would be ignored.
 pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .opacity(0.42_f32)
@@ -908,7 +976,7 @@ pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a
 
 /// Render an emphasized chrome icon with the active Iced theme's primary color.
 pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -919,7 +987,7 @@ pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 
 /// Render an icon with the foreground chosen for a weak primary surface.
 pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -930,7 +998,7 @@ pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> E
 
 /// Render a positive-state chrome icon with the active Iced theme's success color.
 pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -941,7 +1009,7 @@ pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 
 /// Render an icon with the foreground chosen for a success-coloured surface.
 pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -952,7 +1020,7 @@ pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Elemen
 
 /// Render a warning-state chrome icon from the active Iced theme.
 pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -963,7 +1031,7 @@ pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 
 /// Render a destructive-state chrome icon from the active Iced theme.
 pub fn themed_danger<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -974,7 +1042,7 @@ pub fn themed_danger<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, 
 
 /// Render an icon with the foreground chosen for a danger-coloured surface.
 pub fn themed_danger_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(art_for(bytes, size)))
+    svg(themed_sized_handle(art_for(bytes, size), size))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -1550,6 +1618,57 @@ mod tests {
         // Bytes without a 32 px drawing are drawn as they are.
         let plain: &'static [u8] = b"<svg/>";
         assert_eq!(art_for(plain, metrics::LARGE_ICON), plain);
+    }
+
+    /// Writes icons as they are drawn at 100–200 % (scaled, and fitted to
+    /// the grid) to `$OCS_ICON_DUMP`, with a `manifest.txt` of one row per
+    /// icon and size: `pixels:path` cells. For looking at the result.
+    #[test]
+    #[ignore = "writes files; set OCS_ICON_DUMP and run with --ignored"]
+    fn dump_fitted_icons() {
+        let Some(dir) = std::env::var_os("OCS_ICON_DUMP").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let icons = [
+            "line.svg",
+            "polyline.svg",
+            "circle/circle_cr.svg",
+            "arc/arc_3p.svg",
+            "rotate.svg",
+            "mirror.svg",
+            "fillet.svg",
+            "dim_linear.svg",
+            "area.svg",
+            "explode.svg",
+            "array_rect.svg",
+            "paste.svg",
+            "match_prop.svg",
+            "ui/undo.svg",
+            "text.svg",
+            "helix.svg",
+        ];
+        let mut manifest = String::new();
+        for (art, sub) in [(16u32, ""), (32, "32/")] {
+            for name in icons {
+                let Ok(source) = std::fs::read(icons_dir().join(format!("{sub}{name}"))) else {
+                    continue;
+                };
+                for percent in [100u32, 125, 150, 175, 200] {
+                    let n = art * percent / 100;
+                    let flat = name.replace('/', "_");
+                    for (kind, svg) in [
+                        ("scaled", sharpen_grid_svg(&source).unwrap()),
+                        ("fitted", grid_svg(&source, Some(n)).unwrap()),
+                    ] {
+                        let path = dir.join(format!("{kind}_{art}_{percent}_{flat}"));
+                        std::fs::write(&path, svg).unwrap();
+                        manifest.push_str(&format!("{n}:{} ", path.display()));
+                    }
+                }
+                manifest.push('\n');
+            }
+        }
+        std::fs::write(dir.join("manifest.txt"), manifest).unwrap();
     }
 
     /// The pair lookup on a warm cache, next to a `themed_handle` hit.

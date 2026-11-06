@@ -3442,7 +3442,7 @@ fn alignment_visibility_and_lookup_name_their_labels_without_asking() {
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
         "Enter number of grips [0/1] <1>:",
-        "a lookup never asks for a label"
+        "the location is followed by the grip count"
     );
     feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
@@ -3499,6 +3499,35 @@ fn a_lookup_takes_its_name_description_and_palette_switch_at_the_placement_promp
     assert_eq!(lookups[0].1.lookup_name, "Grip9");
     assert_eq!(lookups[0].1.lookup_description, "shows the grip");
     assert!(!lookups[0].1.parameter.parameter.show_properties);
+    assert_eq!(
+        lookups[0].1.parameter.definition_point,
+        Vector3::new(6.0, 6.0, 0.0)
+    );
+}
+
+#[test]
+fn a_lookup_takes_its_property_label_at_the_placement_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter lookup property label <Lookup1>:",
+        "the label question offers the next free label"
+    );
+    feed(&mut app, "Size");
+    feed(&mut app, "6,6");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let lookups = crate::scene::block_lookup::parameters(doc, definition);
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].1.lookup_name, "Size");
     assert_eq!(
         lookups[0].1.parameter.definition_point,
         Vector3::new(6.0, 6.0, 0.0)

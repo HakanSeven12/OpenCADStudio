@@ -5,6 +5,7 @@ use glam::DVec3;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Asking {
     Name,
+    Label,
     Description,
     Palette,
 }
@@ -13,6 +14,7 @@ enum Asking {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Options {
     pub name: Option<String>,
+    pub label: Option<String>,
     pub description: Option<String>,
     pub palette: Option<bool>,
 }
@@ -98,6 +100,10 @@ impl CadCommand for SingleParameterCommand {
             Some(Asking::Name) => {
                 return crate::tf!("Enter parameter name <{}>:", self.default_name).into_owned()
             }
+            Some(Asking::Label) => {
+                return crate::tf!("Enter lookup property label <{}>:", self.default_name)
+                    .into_owned()
+            }
             Some(Asking::Description) => {
                 return crate::t!("Enter property description:").into_owned()
             }
@@ -112,7 +118,7 @@ impl CadCommand for SingleParameterCommand {
         }
         if self.kind == Kind::Lookup {
             return crate::tf!(
-                "BPARAMETER {}  Specify parameter location or [Name/Description/Palette]:",
+                "BPARAMETER {}  Specify parameter location or [Name/Label/Description/Palette]:",
                 crate::t!(self.kind.name())
             )
             .into_owned();
@@ -125,7 +131,7 @@ impl CadCommand for SingleParameterCommand {
     }
     fn input_kind(&self) -> InputKind {
         match self.asking {
-            Some(Asking::Name | Asking::Description) => InputKind::FreeText,
+            Some(Asking::Name | Asking::Label | Asking::Description) => InputKind::FreeText,
             Some(Asking::Palette) => InputKind::SingleToken,
             None if self.asking_grips() => InputKind::SingleToken,
             None => InputKind::Point,
@@ -141,6 +147,12 @@ impl CadCommand for SingleParameterCommand {
                     let name = text.trim();
                     if !name.is_empty() {
                         self.options.name = Some(name.to_owned());
+                    }
+                }
+                Asking::Label => {
+                    let label = text.trim();
+                    if !label.is_empty() {
+                        self.options.label = Some(label.to_owned());
                     }
                 }
                 Asking::Description => {
@@ -180,6 +192,10 @@ impl CadCommand for SingleParameterCommand {
                 "N" | "NAME" => {
                     self.options.name = None;
                     Some(Asking::Name)
+                }
+                "L" | "LABEL" => {
+                    self.options.label = None;
+                    Some(Asking::Label)
                 }
                 "D" | "DESCRIPTION" => {
                     self.options.description = None;
@@ -269,8 +285,38 @@ mod tests {
     fn a_lookup_location_prompt_lists_the_options_it_accepts() {
         assert_eq!(
             lookup().prompt(),
-            "BPARAMETER Lookup  Specify parameter location or [Name/Description/Palette]:"
+            "BPARAMETER Lookup  Specify parameter location or [Name/Label/Description/Palette]:"
         );
+    }
+
+    #[test]
+    fn a_lookup_label_answer_sets_the_property_label() {
+        let mut command = lookup();
+        assert!(matches!(
+            command.on_text_input("L"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "Enter lookup property label <Lookup1>:",
+            "the label question offers the next free label"
+        );
+        assert!(matches!(
+            command.on_text_input("Size"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            command.prompt(),
+            "BPARAMETER Lookup  Specify parameter location or [Name/Label/Description/Palette]:",
+            "the answer returns to the location prompt"
+        );
+        assert!(matches!(
+            place(&mut command),
+            CmdResult::PlaceBlockSingleParameter {
+                options: Options { label: Some(ref label), .. },
+                ..
+            } if label == "Size"
+        ));
     }
 
     #[test]
@@ -287,7 +333,7 @@ mod tests {
         ));
         assert_eq!(
             command.prompt(),
-            "BPARAMETER Lookup  Specify parameter location or [Name/Description/Palette]:"
+            "BPARAMETER Lookup  Specify parameter location or [Name/Label/Description/Palette]:"
         );
         assert!(matches!(
             place(&mut command),

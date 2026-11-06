@@ -104,6 +104,12 @@ impl OpenCADStudio {
                     ),
                 );
             }
+            if let Some(label) = options.label.as_deref() {
+                record(
+                    &mut option_error,
+                    metadata::set_text(document, definition, parameter, Field::Name, label),
+                );
+            }
             if let Some(palette) = options.palette {
                 record(
                     &mut option_error,

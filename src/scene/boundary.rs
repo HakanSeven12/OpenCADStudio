@@ -573,6 +573,7 @@ pub(crate) enum HatchLoopSource {
 pub(crate) fn new_hatch_paths(
     rings: &[Vec<[f64; 2]>],
     source_of: impl Fn(usize) -> HatchLoopSource,
+    selection_order: &[Handle],
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
 ) -> Vec<document::entities::BoundaryPath> {
@@ -597,13 +598,18 @@ pub(crate) fn new_hatch_paths(
         [Curve::Circle(circle)] => Some(circle.centre),
         _ => None,
     };
-    // Where the loop's object starts: a circle at angle 0, an ellipse at its
-    // start parameter, a polyline at its first vertex. Splines are left out:
-    // the reference never shows the shift below for them.
+    // Where the loop starts: the start of its first selected object — a
+    // circle at angle 0, an ellipse or spline at its start, a polyline at
+    // its first vertex, a line or arc at its start point.
     let start_point = |index: usize| {
-        let curves = sole_curves(index)?;
-        let first = curves.first()?;
-        (!matches!(first, Curve::Nurbs(_))).then(|| first.point_at(0.0))
+        let handles = &paths[index].as_ref()?.boundary_handles;
+        let first = handles.iter().min_by_key(|handle| {
+            selection_order
+                .iter()
+                .position(|selected| selected == *handle)
+                .unwrap_or(usize::MAX)
+        })?;
+        Some(sources.get(first)?.curves.first()?.point_at(0.0))
     };
     let bounds = |ring: &Vec<[f64; 2]>| {
         ring.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {

@@ -214,6 +214,10 @@ pub struct SnapDwell {
     pub preview_dirty: bool,
     /// Whether the current settled pointer position already has a full snap.
     pub snap_resolved: bool,
+    /// When a moving pointer may next run the full snap, so Nearest, Tangent
+    /// and the other continuous modes follow the cursor instead of waiting
+    /// for it to stop.
+    pub full_snap_due: iced::time::Instant,
 }
 
 impl SnapDwell {
@@ -227,6 +231,9 @@ impl SnapDwell {
 pub const HOVER_DWELL_MS: u128 = 500;
 /// How long the cursor must sit still before the active-command object-snap pass runs.
 pub const SNAP_DWELL_MS: u128 = 60;
+/// Shortest gap between full snap passes while the pointer keeps moving. A
+/// pass that takes longer stretches the gap to four times its cost.
+pub const SNAP_MOVING_MS: u64 = 50;
 /// Maximum live discrete-snap preview rate while a drawing command is active.
 pub const SNAP_PREVIEW_INTERVAL_MS: u128 = 16;
 /// Dense resident sets also retain the previous rollover while moving; this

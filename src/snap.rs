@@ -384,6 +384,10 @@ pub struct Snapper {
     /// normal: the current UCS at the current elevation) instead of keeping
     /// the snapped object's height. `None` keeps the object's point.
     pub osnap_z_plane: Option<(DVec3, DVec3)>,
+    /// Whether Tangent also lands on straight lines. Only the tangent object
+    /// pick (TTR, TTT) wants a line; a running Tangent snap does not, since a
+    /// line has no tangent point from a base point.
+    tangent_lines: bool,
 }
 
 impl Default for Snapper {
@@ -428,6 +432,7 @@ impl Default for Snapper {
             parallel_dwell: None,
             override_saved: None,
             osnap_z_plane: None,
+            tangent_lines: false,
         }
     }
 }
@@ -1390,6 +1395,7 @@ impl Snapper {
             parallel_dwell: None,
             override_saved: None,
             osnap_z_plane: None,
+            tangent_lines: true,
         };
         // Tangent-only: Grid is disabled here, so the grid basis is irrelevant.
         tmp.snap(
@@ -2652,6 +2658,9 @@ impl Snapper {
                         TangentGeom::Line { p1, p2 } => {
                             let (lp1, lp2) =
                                 tangent_line_endpoints(wire, *p1, *p2, &mut line_cursor);
+                            if !self.tangent_lines {
+                                continue;
+                            }
                             let sp0 = world_to_screen(lp1, view_rot, eye, bounds);
                             let sp1 = world_to_screen(lp2, view_rot, eye, bounds);
                             let d2 = dist2_to_segment(cursor_screen, sp0, sp1);
@@ -2999,7 +3008,9 @@ impl Snapper {
         // the cursor is to the curve. Runs here, after `try_pt`'s borrow ends,
         // so it can update the candidate state directly. (#152)
         // 2D master applies (this direct-evaluation pass bypasses `try_pt`).
-        if self.snap_enabled && self.is_on(SnapType::Center) {
+        // With Nearest on, the point under the cursor on the curve wins, as the
+        // nearer snap; the centre is then taken at the centre itself.
+        if self.snap_enabled && self.is_on(SnapType::Center) && !self.is_on(SnapType::Nearest) {
             // A polyline drawn piece by piece keeps its arc centres on one of
             // its wires: the one with the same name that carries them.
             let carries = |w: &WireModel| {

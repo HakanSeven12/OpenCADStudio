@@ -4300,6 +4300,8 @@ impl OpenCADStudio {
                 snap_resolved: !(self.snapper.tracking_active()
                     && self.snapper.last_snap_world.is_some()
                     && !self.snapper.dwell_acquired),
+                full_snap_due: Instant::now()
+                    + std::time::Duration::from_millis(crate::app::SNAP_MOVING_MS),
             });
         } else if !self.client_pick_pending(i) {
             // Idle (no command, no pending client pick): the snap marker is
@@ -8102,6 +8104,8 @@ properties={:.1}ms picked={}",
                 tab: i,
                 preview_dirty: false,
                 snap_resolved: true,
+                full_snap_due: Instant::now()
+                    + std::time::Duration::from_millis(crate::app::SNAP_MOVING_MS),
             });
         }
     }
@@ -8892,10 +8896,9 @@ properties={:.1}ms picked={}",
             self.snap_dwell = None;
             return Task::none();
         }
-        if Instant::now()
-            .duration_since(dwell.last_move_at)
-            .as_millis()
-            < crate::app::SNAP_DWELL_MS
+        let now = Instant::now();
+        if now.duration_since(dwell.last_move_at).as_millis() < crate::app::SNAP_DWELL_MS
+            && now < dwell.full_snap_due
         {
             if dwell.preview_dirty {
                 self.refresh_active_cmd_preview(i);
@@ -8911,7 +8914,13 @@ properties={:.1}ms picked={}",
         // on_viewport_move re-arms the throttle. Pending stationary tracking
         // acquisition keeps it unresolved until the candidate is acquired.
         // Other resolved snaps stop requesting ticks until the next move.
-        self.on_viewport_move(dwell.point)
+        let task = self.on_viewport_move(dwell.point);
+        let cost = now.elapsed();
+        if let Some(armed) = self.snap_dwell.as_mut() {
+            let gap = std::time::Duration::from_millis(crate::app::SNAP_MOVING_MS).max(cost * 4);
+            armed.full_snap_due = Instant::now() + gap;
+        }
+        task
     }
     pub(in crate::app) fn prepare_interaction_index_task(
         &mut self,
@@ -9897,6 +9906,7 @@ mod rapid_drawing_tests {
             tab: 0,
             preview_dirty: false,
             snap_resolved: false,
+            full_snap_due: last,
         };
         assert!(!dwell.discrete_preview_due_at(last + std::time::Duration::from_millis(15)));
         assert!(dwell.discrete_preview_due_at(last + std::time::Duration::from_millis(16)));

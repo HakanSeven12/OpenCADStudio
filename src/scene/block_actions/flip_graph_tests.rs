@@ -72,6 +72,10 @@ fn authored_flip_links_require_complete_ordered_selections() {
 #[test]
 fn reciprocal_native_flips_preserve_perpendicular_axes_and_compose() {
     let (mut doc, def, geometry) = super::tests::fixture();
+    let anchor = Vector3::new(1., 2., 0.);
+    let basepoint = block_basepoint::create(&mut doc, def, anchor).unwrap();
+    let (_, base) = block_basepoint::parameter(&doc, def).unwrap();
+    let base_id = base.parameter.parameter.element.eval.node_id;
     let first = orientation::create(
         &mut doc,
         def,
@@ -105,6 +109,8 @@ fn reciprocal_native_flips_preserve_perpendicular_axes_and_compose() {
         let DynamicBlockData::FlipAction(action) = &mut object.data else {
             panic!()
         };
+        action.action.dependencies.push(basepoint);
+        action.action.action_ids.push(base_id);
         for parameter in [target, linear] {
             action.action.dependencies.push(parameter);
             action.action.action_ids.push(parameters.iter().find(|p| p.handle == parameter).unwrap().id);
@@ -136,6 +142,7 @@ fn reciprocal_native_flips_preserve_perpendicular_axes_and_compose() {
         let EntityType::Insert(reference) = evaluated.get_entity(insert).unwrap() else {
             panic!()
         };
+        assert_eq!(reference.insert_point, -anchor * 2.);
         let circle_handle = evaluated
             .block_records
             .get(&reference.block_name)

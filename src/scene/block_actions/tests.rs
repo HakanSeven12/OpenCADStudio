@@ -1259,7 +1259,7 @@ fn block_actions_stretch_legacy_polyline_vertices_and_solid_corners() {
 }
 
 #[test]
-fn block_actions_stretch_native_basepoint_binding_updates_only_the_reference_anchor() {
+fn block_actions_stretch_native_basepoint_binding_moves_the_reference_insertion_point() {
     let (mut doc, def, _, parameter, action) = stretch_fixture();
     let basepoint = crate::scene::block_basepoint::create(&mut doc, def, Vector3::ZERO).unwrap();
     let (_, native) = crate::scene::block_basepoint::parameter(&doc, def).unwrap();
@@ -1283,7 +1283,7 @@ fn block_actions_stretch_native_basepoint_binding_updates_only_the_reference_anc
         doc = instance::evaluate(&doc, insert, parameter, DVec3::new(length, 0., 0.))
             .unwrap().unwrap();
         let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
-        assert_eq!(reference.insert_point, Vector3::new(40., 0., 0.));
+        assert_eq!(reference.insert_point, Vector3::new(40. + length - 10., 0., 0.));
         assert_eq!(
             crate::scene::render_graph::block_base_point(&doc, &reference.block_name),
             Vector3::new(length - 10., 0., 0.),
@@ -1291,6 +1291,10 @@ fn block_actions_stretch_native_basepoint_binding_updates_only_the_reference_anc
         assert_eq!(
             crate::scene::render_graph::block_base_point(&doc, "STRETCH"),
             Vector3::ZERO,
+        );
+        assert_eq!(
+            crate::scene::render_graph::insert_transform(&doc, reference).apply(Vector3::ZERO),
+            Vector3::new(40., 0., 0.),
         );
         doc = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
             .read().unwrap();

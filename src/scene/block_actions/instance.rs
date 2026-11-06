@@ -1380,12 +1380,33 @@ pub(crate) fn materialize(
     }
     super::representation::reconcile(&mut scene, def, &name, evaluated)?;
     if let Some((_, basepoint)) = crate::scene::block_basepoint::parameter(evaluated, def)
-        .filter(|(handle, _)| {
+        .filter(|(handle, basepoint)| {
+            let id = basepoint.parameter.parameter.element.eval.node_id;
             super::actions(evaluated, def).iter().any(|(_, action, kind, _)| {
-                *kind == Kind::Stretch && action.dependencies.contains(handle)
+                matches!(kind, Kind::Stretch | Kind::Flip)
+                    && action.dependencies.contains(handle)
+                    && action.action_ids.contains(&id)
             })
         })
     {
+        let Some(EntityType::Insert(original)) = doc.get_entity(insert) else {
+            unreachable!()
+        };
+        let old = crate::scene::render_graph::block_base_point(doc, &original.block_name);
+        let location = basepoint.point;
+        let delta = v(location - old);
+        let scale = DVec3::new(original.x_scale(), original.y_scale(), original.z_scale());
+        // The INSERT point is stored in its own OCS. Moving it with the
+        // evaluated origin keeps the transformed block geometry in place.
+        let position = v(original.insert_point)
+            + glam::DQuat::from_rotation_z(original.rotation) * (scale * delta);
+        if !position.is_finite() {
+            return Err("The parameter value produces non-finite geometry.");
+        }
+        let Some(EntityType::Insert(reference)) = scene.document.get_entity_mut(insert) else {
+            unreachable!()
+        };
+        reference.insert_point = native(position);
         let id = basepoint.parameter.parameter.element.eval.node_id;
         if let Some(handle) = cache(&scene.document, insert, id)? {
             let Some(ObjectType::XRecord(record)) = scene.document.objects.get_mut(&handle) else {
@@ -1395,7 +1416,6 @@ pub(crate) fn materialize(
                 .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)));
             let point = points.next().filter(|_| record.entries_complete && points.next().is_none())
                 .ok_or("The reference parameter cache has no finite endpoint.")?;
-            let location = basepoint.point;
             let value = XRecordValue::Point3D(location.x, location.y, location.z);
             if point.value != value {
                 point.value = value;

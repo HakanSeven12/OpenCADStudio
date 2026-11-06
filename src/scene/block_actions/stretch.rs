@@ -261,7 +261,7 @@ pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchActio
     Ok(())
 }
 
-pub(super) fn basepoint_target(
+fn basepoint_target(
     doc: &Document,
     definition: Handle,
     action: &BlockStretchAction,

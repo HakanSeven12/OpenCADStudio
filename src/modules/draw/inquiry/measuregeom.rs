@@ -349,6 +349,10 @@ impl MeasureGeomCommand {
     }
 
     fn undo_point(&mut self) -> CmdResult {
+        // Undo goes back to the mode of the segment it removes: undoing an
+        // arc stays in arc mode, undoing a line returns to line mode.
+        let n = self.segs.len();
+        self.arc = n >= 2 && self.segs[n - 2] != 0.0;
         self.points.pop();
         self.segs.pop();
         if let Some(last) = self.segs.last_mut() {
@@ -745,7 +749,15 @@ impl MeasureGeomCommand {
         // The first point stays: Undo there has nothing left to undo.
         let can_undo = self.points.len() > 1;
         if matches!(input, "U" | "UNDO") && !can_undo {
-            return Some(CmdResult::ReportMessage(crate::tr!("measurement", "all-undone")));
+            let message = crate::tr!("measurement", "all-undone");
+            // A Distance chain prints only the first line; an area boundary
+            // adds "Command has been completely undone.".
+            let message = if distance {
+                message.lines().next().unwrap_or_default().to_string()
+            } else {
+                message
+            };
+            return Some(CmdResult::ReportMessage(message));
         }
         if self.arc {
             self.arc_sub = match input {

@@ -219,6 +219,7 @@ pub(crate) fn validate_options(a: &BlockStretchAction) -> Result<(), &'static st
 
 pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchAction) -> Result<(), &'static str> {
     validate_options(a)?;
+    basepoint_target(doc, definition, a)?;
     if a.points.len() < 2
         || a.points
             .iter()
@@ -258,6 +259,27 @@ pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchActio
         )?;
     }
     Ok(())
+}
+
+pub(super) fn basepoint_target(
+    doc: &Document,
+    definition: Handle,
+    action: &BlockStretchAction,
+) -> Result<Option<Handle>, &'static str> {
+    let Some((handle, basepoint)) = super::super::block_basepoint::parameter(doc, definition)
+        .filter(|(handle, _)| action.action.dependencies.contains(handle))
+    else {
+        return Ok(None);
+    };
+    let node = basepoint.parameter.parameter.element.eval.node_id;
+    let mut bindings = action.codes.iter().filter(|binding| binding.code == node);
+    if !action.action.action_ids.contains(&node)
+        || !bindings.next().is_some_and(|binding| binding.indexes == [0])
+        || bindings.next().is_some()
+    {
+        return Err("The Stretch action has an invalid Base Point binding.");
+    }
+    Ok(Some(handle))
 }
 
 pub(crate) fn polar_key_point(a: &BlockPolarStretchAction) -> Result<XyKeyPoint, &'static str> {

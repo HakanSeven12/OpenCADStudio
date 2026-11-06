@@ -1379,6 +1379,31 @@ pub(crate) fn materialize(
         return Err("Could not isolate the dynamic block reference.");
     }
     super::representation::reconcile(&mut scene, def, &name, evaluated)?;
+    if let Some((_, basepoint)) = crate::scene::block_basepoint::parameter(evaluated, def)
+        .filter(|(handle, _)| {
+            super::actions(evaluated, def).iter().any(|(_, action, kind, _)| {
+                *kind == Kind::Stretch && action.dependencies.contains(handle)
+            })
+        })
+    {
+        let id = basepoint.parameter.parameter.element.eval.node_id;
+        if let Some(handle) = cache(&scene.document, insert, id)? {
+            let Some(ObjectType::XRecord(record)) = scene.document.objects.get_mut(&handle) else {
+                return Err("The reference contains an invalid parameter record.");
+            };
+            let mut points = record.entries.iter_mut()
+                .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)));
+            let point = points.next().filter(|_| record.entries_complete && points.next().is_none())
+                .ok_or("The reference parameter cache has no finite endpoint.")?;
+            let location = basepoint.point;
+            let value = XRecordValue::Point3D(location.x, location.y, location.z);
+            if point.value != value {
+                point.value = value;
+                record.raw_data.clear();
+                record.raw_dwg_data = None;
+            }
+        }
+    }
     Ok(scene.document)
 }
 

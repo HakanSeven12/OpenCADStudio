@@ -254,16 +254,15 @@ pub(super) fn reconcile(
     scene
         .reterminate_block_definition(name)
         .map_err(|_| "Could not re-terminate the representation.")?;
-    // Keep the anonymous block's native base point in step with its definition.
-    let source_name = scene
-        .document
+    // A Stretch action can move the evaluated Base Point for this reference.
+    let source_name = evaluated
         .block_records
         .iter()
         .find(|b| b.handle == def)
         .unwrap()
         .name
-        .clone();
-    let base = crate::scene::render_graph::block_base_point(&scene.document, &source_name);
+        .as_str();
+    let base = crate::scene::render_graph::block_base_point(evaluated, source_name);
     let marker = scene
         .document
         .block_records

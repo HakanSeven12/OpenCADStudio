@@ -1259,6 +1259,45 @@ fn block_actions_stretch_legacy_polyline_vertices_and_solid_corners() {
 }
 
 #[test]
+fn block_actions_stretch_native_basepoint_binding_updates_only_the_reference_anchor() {
+    let (mut doc, def, _, parameter, action) = stretch_fixture();
+    let basepoint = crate::scene::block_basepoint::create(&mut doc, def, Vector3::ZERO).unwrap();
+    let (_, native) = crate::scene::block_basepoint::parameter(&doc, def).unwrap();
+    let node = native.parameter.parameter.element.eval.node_id;
+    let Some(ObjectType::DynamicBlock(object)) = doc.objects.get_mut(&action) else {
+        panic!()
+    };
+    let DynamicBlockData::StretchAction(action) = &mut object.data else {
+        panic!()
+    };
+    action.action.dependencies.push(basepoint);
+    action.action.action_ids.push(node);
+    action.codes.push(document::objects::BlockStretchCode {
+        code: node,
+        indexes: vec![0],
+    });
+    let insert = doc.add_entity(EntityType::Insert(document::entities::Insert::new(
+        "STRETCH", Vector3::new(40., 0., 0.),
+    ))).unwrap();
+    for length in [18., 22., 10.] {
+        doc = instance::evaluate(&doc, insert, parameter, DVec3::new(length, 0., 0.))
+            .unwrap().unwrap();
+        let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
+        assert_eq!(reference.insert_point, Vector3::new(40., 0., 0.));
+        assert_eq!(
+            crate::scene::render_graph::block_base_point(&doc, &reference.block_name),
+            Vector3::new(length - 10., 0., 0.),
+        );
+        assert_eq!(
+            crate::scene::render_graph::block_base_point(&doc, "STRETCH"),
+            Vector3::ZERO,
+        );
+        doc = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read().unwrap();
+    }
+}
+
+#[test]
 fn block_actions_stretch_saved_reference_independence_copy_and_reopen() {
     let (mut doc, def, handles, p, _) = stretch_fixture();
     let a = doc

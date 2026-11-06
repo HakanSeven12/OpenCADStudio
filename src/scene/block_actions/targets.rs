@@ -21,6 +21,12 @@ pub(super) fn geometry(
         if !doc.objects.contains_key(handle) {
             return Err("An action target is unavailable.");
         }
+        if kind == Kind::Stretch
+            && super::super::block_basepoint::parameter(doc, definition)
+                .is_some_and(|(basepoint, _)| basepoint == *handle)
+        {
+            continue;
+        }
         if grips.is_none() {
             let parameter = parameters(doc, definition, kind)
                 .into_iter()

@@ -1726,6 +1726,7 @@ fn evaluate_impl(
     let mut prepared = std::collections::BTreeMap::new();
     let mut array_plans = std::collections::BTreeMap::new();
     let mut remaining_array_entities = array::MAX_GENERATED_ENTITIES;
+    let mut basepoint_delta = DVec3::ZERO;
     for (action_handle, a, kind, id) in &all {
         if *kind == Kind::Stretch {
             let ObjectType::DynamicBlock(o) = &baseline.objects[action_handle] else {
@@ -1885,7 +1886,27 @@ fn evaluate_impl(
                 return Err("The Polar parameter needs a nonzero distance.");
             }
         }
+        if let (DynamicBlockData::StretchAction(action), crate::command::EntityTransform::Translate(delta)) =
+            (&o.data, &transform)
+        {
+            if stretch::basepoint_target(baseline, definition, action)?.is_some() {
+                basepoint_delta += *delta;
+            }
+        }
         prepared.insert(*action_handle, (q, base, end, transform));
+    }
+    if let Some((handle, baseline_point)) = super::block_basepoint::parameter(baseline, definition) {
+        let Some(ObjectType::DynamicBlock(object)) = staged.objects.get_mut(&handle) else {
+            unreachable!()
+        };
+        let DynamicBlockData::BasePointParameter(basepoint) = &mut object.data else {
+            unreachable!()
+        };
+        let point = v(baseline_point.point) + basepoint_delta;
+        if !point.is_finite() {
+            return Err("The parameter value produces non-finite geometry.");
+        }
+        basepoint.point = native(point);
     }
     ordered_arrays.reserve_nested(
         &all, &order, &geometric_targets, &array_plans, &mut remaining_array_entities,

@@ -1213,7 +1213,7 @@ mod tests {
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
-                None,
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
             ),
         )
         .expect("headless renderer");

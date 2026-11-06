@@ -29,8 +29,8 @@ impl OpenCADStudio {
             Some(name) => set_hpname(&name),
             None => {
                 self.command_line
-                    .push_error(crate::t!("Cannot set HPNAME to that value.").as_ref());
-                self.command_line.push_error("*Invalid*");
+                    .push_output(crate::t!("Cannot set HPNAME to that value.").as_ref());
+                self.command_line.push_output("*Invalid*");
             }
         }
         Some(Task::none())

@@ -6544,6 +6544,15 @@ ui =
     .qselect-clear-conditions = शर्तें साफ़ करें
     .qselect-no-conditions = कोई शर्त नहीं जोड़ी गई।
     .qselect-conditions-heading = शर्तें (ऑब्जेक्ट के प्रकार की सभी शर्तें मेल खानी चाहिए)
+    .qselect-search-in = इसमें खोजें
+    .qselect-new-selection = नया चयन
+    .qselect-live-count = __ocs_fmt_1__ में से __ocs_fmt_0__ ऑब्जेक्ट मेल खाते हैं
+    .qselect-select-count = __ocs_fmt_0__ चुनें
+    .qselect-greater-or-equal = >= से बड़ा या बराबर
+    .qselect-less-or-equal = <= से छोटा या बराबर
+    .qselect-invert = मेल न खाने वाले ऑब्जेक्ट चुनें
+    .qselect-sample-heading = चुने गए __ocs_fmt_0__ के गुण
+    .qselect-sample-add = चिह्नित शर्तें जोड़ें
     .qselect-list-note = सूची खाली न होने पर केवल सूचीबद्ध शर्तें लागू होती हैं।
     .quick-select-menu-period-title-case = त्वरित चयन...
     .reading-file = फ़ाइल पढ़ना...

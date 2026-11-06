@@ -6568,6 +6568,15 @@ ui =
     .qselect-clear-conditions = مسح الشروط
     .qselect-no-conditions = لم تتم إضافة شروط.
     .qselect-conditions-heading = الشروط (يجب أن تتطابق كل شروط نوع الكائن)
+    .qselect-search-in = البحث في
+    .qselect-new-selection = تحديد جديد
+    .qselect-live-count = __ocs_fmt_0__ من __ocs_fmt_1__ كائن مطابق
+    .qselect-select-count = تحديد __ocs_fmt_0__
+    .qselect-greater-or-equal = >= أكبر من أو يساوي
+    .qselect-less-or-equal = <= أصغر من أو يساوي
+    .qselect-invert = تحديد الكائنات غير المطابقة
+    .qselect-sample-heading = خصائص __ocs_fmt_0__ المختار
+    .qselect-sample-add = إضافة الشروط المحددة
     .qselect-list-note = عندما لا تكون القائمة فارغة، تُطبّق الشروط المدرجة فقط.
     .quick-select-menu-period-title-case = تحديد سريع...
     .reading-file = يجري قراءة الملف…

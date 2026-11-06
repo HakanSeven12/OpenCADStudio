@@ -6556,6 +6556,15 @@ ui =
     .qselect-clear-conditions = Изчисти условията
     .qselect-no-conditions = Няма добавени условия.
     .qselect-conditions-heading = Условия (всички за типа на обекта трябва да съвпадат)
+    .qselect-search-in = Търсене в
+    .qselect-new-selection = Нова селекция
+    .qselect-live-count = __ocs_fmt_0__ от __ocs_fmt_1__ обекта отговарят
+    .qselect-select-count = Избери __ocs_fmt_0__
+    .qselect-greater-or-equal = >= По-голямо или равно
+    .qselect-less-or-equal = <= По-малко или равно
+    .qselect-invert = Избери обектите, които не отговарят
+    .qselect-sample-heading = Свойства на избрания __ocs_fmt_0__
+    .qselect-sample-add = Добави отметнатите условия
     .qselect-list-note = Когато списъкът не е празен, се прилагат само изброените условия.
     .quick-select-menu-period-title-case = Бърз избор...
     .reading-file = Четене на файл…

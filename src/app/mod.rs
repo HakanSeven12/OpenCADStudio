@@ -300,7 +300,16 @@ pub enum QSelectOp {
     Eq,
     Neq,
     Gt,
+    Ge,
     Lt,
+    Le,
+}
+
+impl QSelectOp {
+    /// Operators that order numbers, only offered for numeric properties.
+    pub fn needs_number(self) -> bool {
+        matches!(self, Self::Gt | Self::Ge | Self::Lt | Self::Le)
+    }
 }
 
 /// Candidate set searched by Quick Select.
@@ -327,6 +336,25 @@ pub enum QSelectMode {
     Exclude,
 }
 
+/// What Quick Select does with the objects it finds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QSelectResult {
+    /// They become the selection.
+    #[default]
+    New,
+    /// They join the selection.
+    Add,
+    /// They leave the selection.
+    Remove,
+}
+
+/// The properties of a picked object, each ticked to become a condition.
+#[derive(Clone, Debug)]
+pub struct QSelectSample {
+    pub type_name: String,
+    pub rows: Vec<(QSelectCondition, bool)>,
+}
+
 /// Editor used by the Quick Select value field.
 #[derive(Clone, Debug)]
 pub enum QSelectValueEditor {
@@ -342,7 +370,9 @@ impl std::fmt::Display for QSelectOp {
             QSelectOp::Eq => "= Equals",
             QSelectOp::Neq => "!= Not equal",
             QSelectOp::Gt => "> Greater than",
+            QSelectOp::Ge => ">= Greater or equal",
             QSelectOp::Lt => "< Less than",
+            QSelectOp::Le => "<= Less or equal",
         };
         f.write_str(crate::t!(s).as_ref())
     }
@@ -402,9 +432,7 @@ impl QSelectCondition {
         if matches!(operator, QSelectOp::Any) {
             return None;
         }
-        if matches!(operator, QSelectOp::Gt | QSelectOp::Lt)
-            && !matches!(property.editor, QSelectValueEditor::Number)
-        {
+        if operator.needs_number() && !matches!(property.editor, QSelectValueEditor::Number) {
             return Some(crate::t!("This operator requires a numeric property.").into_owned());
         }
         match &property.editor {
@@ -437,7 +465,8 @@ pub struct QSelectState {
     pub conditions: Vec<QSelectCondition>,
     pub editing_condition: Option<usize>,
     pub scope: QSelectScope,
-    pub available_types: Vec<String>,
+    /// Object types in the scope with how many of each.
+    pub available_types: Vec<(String, usize)>,
     pub available_properties: Vec<QSelectPropertyChoice>,
     pub candidate_count: usize,
     /// `None` = "(Any type)".
@@ -447,13 +476,33 @@ pub struct QSelectState {
     pub operator: QSelectOp,
     pub value: String,
     pub mode: QSelectMode,
-    pub append: bool,
+    pub result: QSelectResult,
     pub error: Option<String>,
+    /// Objects the conditions find right now.
+    pub live_count: usize,
+    /// The matches are highlighted in the drawing.
+    pub show: bool,
+    /// Values of the chosen property in the scope, most frequent first.
+    pub value_counts: Vec<(String, usize)>,
+    /// A picked object's properties waiting to be ticked.
+    pub sample: Option<QSelectSample>,
 }
 
 impl QSelectState {
+    /// The conditions Select would apply: the list, or the draft while the
+    /// list is empty and the draft is complete.
+    pub fn effective_conditions(&self) -> Option<Vec<QSelectCondition>> {
+        if !self.conditions.is_empty() {
+            return Some(self.conditions.clone());
+        }
+        let draft = self.draft_condition();
+        ((draft.type_filter.is_some() || draft.property.is_some())
+            && draft.validation_error().is_none())
+        .then(|| vec![draft])
+    }
+
     pub fn normalize_operator(&mut self) {
-        if matches!(self.operator, QSelectOp::Gt | QSelectOp::Lt)
+        if self.operator.needs_number()
             && !self
                 .property
                 .as_ref()
@@ -502,7 +551,8 @@ struct QSelectSettings {
     operator: QSelectOp,
     value: String,
     mode: QSelectMode,
-    append: bool,
+    result: QSelectResult,
+    show: bool,
 }
 
 impl From<&QSelectState> for QSelectSettings {
@@ -518,7 +568,8 @@ impl From<&QSelectState> for QSelectSettings {
             operator: state.operator,
             value: state.value.clone(),
             mode: state.mode,
-            append: state.append,
+            result: state.result,
+            show: state.show,
         }
     }
 }
@@ -5337,8 +5388,14 @@ pub enum Message {
     QSelectSetValue(String),
     /// Include or exclude objects matching the filter.
     QSelectSetMode(QSelectMode),
-    /// Append-to-current-selection toggle.
-    QSelectSetAppend(bool),
+    QSelectSetResult(QSelectResult),
+    /// Highlight the matches in the drawing.
+    QSelectSetShow(bool),
+    /// Tick or untick a picked object's property.
+    QSelectSampleToggle(usize),
+    /// Add the ticked properties as conditions.
+    QSelectSampleAdd,
+    QSelectSampleCancel,
     /// Apply the current filter and close the panel.
     QSelectAddCondition,
     /// Hide the filter and sample an object's filterable properties.

@@ -2652,12 +2652,12 @@ impl OpenCADStudio {
             .map_or(crate::app::QSelectScope::CurrentSpace, |settings| {
                 settings.scope
             });
-        let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
+        let available_types = self.tabs[i].scene.qselect_type_counts(scope);
         let type_filter = if let Some(settings) = remembered.as_ref() {
             settings
                 .type_filter
                 .as_ref()
-                .filter(|selected| available_types.iter().any(|item| item == *selected))
+                .filter(|selected| available_types.iter().any(|(item, _)| item == *selected))
                 .cloned()
         } else {
             self.tabs[i]
@@ -2685,12 +2685,11 @@ impl OpenCADStudio {
         let mut operator = remembered
             .as_ref()
             .map_or(crate::app::QSelectOp::Eq, |settings| settings.operator);
-        if matches!(
-            operator,
-            crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
-        ) && !property.as_ref().is_some_and(|property| {
-            matches!(property.editor, crate::app::QSelectValueEditor::Number)
-        }) {
+        if operator.needs_number()
+            && !property.as_ref().is_some_and(|property| {
+                matches!(property.editor, crate::app::QSelectValueEditor::Number)
+            })
+        {
             operator = crate::app::QSelectOp::Eq;
         }
         let value = remembered.as_ref().map_or_else(String::new, |settings| {
@@ -2703,8 +2702,12 @@ impl OpenCADStudio {
         let mode = remembered
             .as_ref()
             .map_or(crate::app::QSelectMode::Include, |settings| settings.mode);
-        let append = matches!(scope, crate::app::QSelectScope::CurrentSpace)
-            && remembered.as_ref().is_some_and(|settings| settings.append);
+        let result = remembered
+            .as_ref()
+            .map_or_else(Default::default, |settings| settings.result);
+        // Highlighting the matches starts off until it is turned on, then
+        // stays as it was left (#2611).
+        let show = remembered.as_ref().is_some_and(|settings| settings.show);
         self.qselect = Some(crate::app::QSelectState {
             conditions: remembered
                 .as_ref()
@@ -2719,10 +2722,16 @@ impl OpenCADStudio {
             operator,
             value,
             mode,
-            append,
+            result,
             error: None,
+            live_count: 0,
+            show,
+            value_counts: Vec::new(),
+            sample: None,
         });
         self.reset_modal_geometry();
+        self.qselect_refresh_values();
+        self.qselect_refresh_live();
         Task::none()
     }
 

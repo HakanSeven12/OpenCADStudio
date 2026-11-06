@@ -6556,6 +6556,15 @@ ui =
     .qselect-clear-conditions = Εκκαθάριση συνθηκών
     .qselect-no-conditions = Δεν έχουν προστεθεί συνθήκες.
     .qselect-conditions-heading = Συνθήκες (πρέπει να ισχύουν όλες για τον τύπο του αντικειμένου)
+    .qselect-search-in = Αναζήτηση σε
+    .qselect-new-selection = Νέα επιλογή
+    .qselect-live-count = __ocs_fmt_0__ από __ocs_fmt_1__ αντικείμενα ταιριάζουν
+    .qselect-select-count = Επιλογή __ocs_fmt_0__
+    .qselect-greater-or-equal = >= Μεγαλύτερο ή ίσο
+    .qselect-less-or-equal = <= Μικρότερο ή ίσο
+    .qselect-invert = Επιλογή των αντικειμένων που δεν ταιριάζουν
+    .qselect-sample-heading = Ιδιότητες του επιλεγμένου __ocs_fmt_0__
+    .qselect-sample-add = Προσθήκη των επιλεγμένων συνθηκών
     .qselect-list-note = Όταν η λίστα δεν είναι κενή, εφαρμόζονται μόνο οι συνθήκες της.
     .quick-select-menu-period-title-case = Γρήγορη επιλογή...
     .reading-file = Ανάγνωση αρχείου…

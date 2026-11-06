@@ -6557,6 +6557,15 @@ ui =
     .qselect-clear-conditions = ລ້າງເງື່ອນໄຂ
     .qselect-no-conditions = ບໍ່ມີເງື່ອນໄຂທີ່ເພີ່ມ.
     .qselect-conditions-heading = ເງື່ອນໄຂ (ທຸກເງື່ອນໄຂຂອງປະເພດວັດຖຸຕ້ອງກົງກັນ)
+    .qselect-search-in = ຄົ້ນຫາໃນ
+    .qselect-new-selection = ການເລືອກໃໝ່
+    .qselect-live-count = __ocs_fmt_0__ ຈາກ __ocs_fmt_1__ ວັດຖຸກົງກັນ
+    .qselect-select-count = ເລືອກ __ocs_fmt_0__
+    .qselect-greater-or-equal = >= ໃຫຍ່ກວ່າ ຫຼື ເທົ່າກັບ
+    .qselect-less-or-equal = <= ນ້ອຍກວ່າ ຫຼື ເທົ່າກັບ
+    .qselect-invert = ເລືອກວັດຖຸທີ່ບໍ່ກົງກັນ
+    .qselect-sample-heading = ຄຸນສົມບັດຂອງ __ocs_fmt_0__ ທີ່ເລືອກ
+    .qselect-sample-add = ເພີ່ມເງື່ອນໄຂທີ່ໝາຍໄວ້
     .qselect-list-note = ເມື່ອລາຍການບໍ່ຫວ່າງ, ຈະໃຊ້ສະເພາະເງື່ອນໄຂໃນລາຍການເທົ່ານັ້ນ.
     .quick-select-menu-period-title-case = ການເລືອກດ່ວນ...
     .reading-file = ກຳລັງອ່ານໄຟລ໌…

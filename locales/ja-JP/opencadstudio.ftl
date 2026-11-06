@@ -6544,6 +6544,15 @@ ui =
     .qselect-clear-conditions = 条件をクリア
     .qselect-no-conditions = 条件が追加されていません。
     .qselect-conditions-heading = 条件 (オブジェクトの種類の条件をすべて満たす必要があります)
+    .qselect-search-in = 検索範囲
+    .qselect-new-selection = 新しい選択
+    .qselect-live-count = __ocs_fmt_1__ 個中 __ocs_fmt_0__ 個のオブジェクトが一致
+    .qselect-select-count = __ocs_fmt_0__ 個を選択
+    .qselect-greater-or-equal = >= 以上
+    .qselect-less-or-equal = <= 以下
+    .qselect-invert = 一致しないオブジェクトを選択
+    .qselect-sample-heading = 選択した __ocs_fmt_0__ のプロパティ
+    .qselect-sample-add = チェックした条件を追加
     .qselect-list-note = リストが空でない場合は、リストの条件だけが適用されます。
     .quick-select-menu-period-title-case = クイック選択...
     .reading-file = ファイルを読み込み中…

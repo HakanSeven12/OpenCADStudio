@@ -6575,6 +6575,15 @@ ui =
     .qselect-clear-conditions = Feltételek törlése
     .qselect-no-conditions = Nincs hozzáadott feltétel.
     .qselect-conditions-heading = Feltételek (az objektum típusára vonatkozó összesnek teljesülnie kell)
+    .qselect-search-in = Keresés itt
+    .qselect-new-selection = Új kijelölés
+    .qselect-live-count = __ocs_fmt_1__ objektumból __ocs_fmt_0__ felel meg
+    .qselect-select-count = __ocs_fmt_0__ kijelölése
+    .qselect-greater-or-equal = >= Nagyobb vagy egyenlő
+    .qselect-less-or-equal = <= Kisebb vagy egyenlő
+    .qselect-invert = A nem megfelelő objektumok kijelölése
+    .qselect-sample-heading = A kiválasztott __ocs_fmt_0__ tulajdonságai
+    .qselect-sample-add = Bejelölt feltételek hozzáadása
     .qselect-list-note = Ha a lista nem üres, csak a felsorolt feltételek érvényesek.
     .quick-select-menu-period-title-case = Gyors kiválasztás...
     .reading-file = Fájl olvasása…

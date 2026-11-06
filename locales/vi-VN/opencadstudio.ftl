@@ -6563,6 +6563,15 @@ ui =
     .qselect-clear-conditions = Xóa các điều kiện
     .qselect-no-conditions = Chưa thêm điều kiện nào.
     .qselect-conditions-heading = Điều kiện (mọi điều kiện của loại đối tượng phải khớp)
+    .qselect-search-in = Tìm trong
+    .qselect-new-selection = Lựa chọn mới
+    .qselect-live-count = __ocs_fmt_0__ trên __ocs_fmt_1__ đối tượng khớp
+    .qselect-select-count = Chọn __ocs_fmt_0__
+    .qselect-greater-or-equal = >= Lớn hơn hoặc bằng
+    .qselect-less-or-equal = <= Nhỏ hơn hoặc bằng
+    .qselect-invert = Chọn các đối tượng không khớp
+    .qselect-sample-heading = Thuộc tính của __ocs_fmt_0__ đã chọn
+    .qselect-sample-add = Thêm các điều kiện đã đánh dấu
     .qselect-list-note = Khi danh sách không trống, chỉ các điều kiện trong danh sách được áp dụng.
     .quick-select-menu-period-title-case = Chọn nhanh...
     .reading-file = Đang đọc tệp…

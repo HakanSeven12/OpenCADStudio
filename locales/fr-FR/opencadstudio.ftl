@@ -6556,6 +6556,15 @@ ui =
     .qselect-clear-conditions = Effacer les conditions
     .qselect-no-conditions = Aucune condition ajoutée.
     .qselect-conditions-heading = Conditions (toutes celles du type de l'objet doivent correspondre)
+    .qselect-search-in = Rechercher dans
+    .qselect-new-selection = Nouvelle sélection
+    .qselect-live-count = __ocs_fmt_0__ objets sur __ocs_fmt_1__ correspondent
+    .qselect-select-count = Sélectionner __ocs_fmt_0__
+    .qselect-greater-or-equal = >= Supérieur ou égal à
+    .qselect-less-or-equal = <= Inférieur ou égal à
+    .qselect-invert = Sélectionner les objets qui ne correspondent pas
+    .qselect-sample-heading = Propriétés du __ocs_fmt_0__ choisi
+    .qselect-sample-add = Ajouter les conditions cochées
     .qselect-list-note = Quand la liste n'est pas vide, seules les conditions listées s'appliquent.
     .quick-select-menu-period-title-case = Sélection rapide...
     .reading-file = Lecture du fichier...

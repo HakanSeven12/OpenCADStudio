@@ -6539,6 +6539,15 @@ ui =
     .qselect-clear-conditions = 清除条件
     .qselect-no-conditions = 未添加条件。
     .qselect-conditions-heading = 条件（对象类型的所有条件都须匹配）
+    .qselect-search-in = 搜索范围
+    .qselect-new-selection = 新选择
+    .qselect-live-count = __ocs_fmt_1__ 个对象中有 __ocs_fmt_0__ 个匹配
+    .qselect-select-count = 选择 __ocs_fmt_0__ 个
+    .qselect-greater-or-equal = >= 大于或等于
+    .qselect-less-or-equal = <= 小于或等于
+    .qselect-invert = 选择不匹配的对象
+    .qselect-sample-heading = 所选__ocs_fmt_0__的特性
+    .qselect-sample-add = 添加勾选的条件
     .qselect-list-note = 列表不为空时，仅应用列出的条件。
     .quick-select-menu-period-title-case = 快速选择...
     .reading-file = 正在读取文件…

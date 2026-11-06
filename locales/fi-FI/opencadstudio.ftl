@@ -6553,6 +6553,15 @@ ui =
     .qselect-clear-conditions = Tyhjennä ehdot
     .qselect-no-conditions = Ehtoja ei ole lisätty.
     .qselect-conditions-heading = Ehdot (kaikkien objektin tyypin ehtojen on täytyttävä)
+    .qselect-search-in = Hae kohteesta
+    .qselect-new-selection = Uusi valinta
+    .qselect-live-count = __ocs_fmt_0__/__ocs_fmt_1__ objektia täsmää
+    .qselect-select-count = Valitse __ocs_fmt_0__
+    .qselect-greater-or-equal = >= Suurempi tai yhtä suuri
+    .qselect-less-or-equal = <= Pienempi tai yhtä suuri
+    .qselect-invert = Valitse objektit, jotka eivät täsmää
+    .qselect-sample-heading = Valitun kohteen __ocs_fmt_0__ ominaisuudet
+    .qselect-sample-add = Lisää valitut ehdot
     .qselect-list-note = Kun luettelo ei ole tyhjä, vain luetellut ehdot otetaan käyttöön.
     .quick-select-menu-period-title-case = Pikavalinta...
     .reading-file = Luetaan tiedostoa…

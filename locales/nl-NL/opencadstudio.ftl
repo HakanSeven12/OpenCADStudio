@@ -6554,6 +6554,15 @@ ui =
     .qselect-clear-conditions = Voorwaarden wissen
     .qselect-no-conditions = Geen voorwaarden toegevoegd.
     .qselect-conditions-heading = Voorwaarden (alle voor het objecttype moeten kloppen)
+    .qselect-search-in = Zoeken in
+    .qselect-new-selection = Nieuwe selectie
+    .qselect-live-count = __ocs_fmt_0__ van __ocs_fmt_1__ objecten komen overeen
+    .qselect-select-count = __ocs_fmt_0__ selecteren
+    .qselect-greater-or-equal = >= Groter dan of gelijk aan
+    .qselect-less-or-equal = <= Kleiner dan of gelijk aan
+    .qselect-invert = De objecten selecteren die niet overeenkomen
+    .qselect-sample-heading = Eigenschappen van de gekozen __ocs_fmt_0__
+    .qselect-sample-add = Aangevinkte voorwaarden toevoegen
     .qselect-list-note = Als de lijst niet leeg is, gelden alleen de vermelde voorwaarden.
     .quick-select-menu-period-title-case = Snel selecteren...
     .reading-file = Bestand wordt gelezen...

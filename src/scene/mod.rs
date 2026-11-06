@@ -2650,6 +2650,8 @@ pub struct Scene {
     /// Entities a selection box still being drawn would catch on release
     /// (SELECTIONPREVIEW), expanded to their selectable groups.
     box_hover_highlights: HashSet<Handle>,
+    /// Objects a selection filter would find, shown before it is applied.
+    filter_preview_highlights: HashSet<Handle>,
     /// Sub-entity references related to that indicator. Polyline segments are
     /// drawn separately so hovering one constraint does not light the whole chain.
     constraint_hover_refs: Vec<crate::scene::parametric_constraints::ParametricRef>,
@@ -3370,6 +3372,7 @@ impl Scene {
             hover_highlight: None,
             constraint_hover_highlights: HashSet::default(),
             box_hover_highlights: HashSet::default(),
+            filter_preview_highlights: HashSet::default(),
             constraint_hover_refs: Vec::new(),
             constraint_hover_wires: Vec::new(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
@@ -7526,6 +7529,7 @@ impl Scene {
             .unwrap_or_default();
         handles.extend(self.constraint_hover_highlights.iter().copied());
         handles.extend(self.box_hover_highlights.iter().copied());
+        handles.extend(self.filter_preview_highlights.iter().copied());
         handles
     }
 
@@ -7539,6 +7543,16 @@ impl Scene {
         };
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
+            self.bump_selection();
+        }
+    }
+
+    /// Highlight what a selection filter would find (#2611). Unlike the box
+    /// preview, pointer moves don't clear it; an empty slice does.
+    pub fn set_filter_preview_highlights(&mut self, handles: &[Handle]) {
+        let handles: HashSet<Handle> = handles.iter().copied().collect();
+        if handles != self.filter_preview_highlights {
+            self.filter_preview_highlights = handles;
             self.bump_selection();
         }
     }

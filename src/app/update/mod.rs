@@ -8923,6 +8923,7 @@ impl OpenCADStudio {
             Message::QSelectOpen => self.on_qselect_open(),
 
             Message::QSelectClose => {
+                self.qselect_clear_preview();
                 if let Some(state) = self.qselect.take() {
                     self.qselect_settings = Some((&state).into());
                 }
@@ -8937,12 +8938,14 @@ impl OpenCADStudio {
 
             Message::QSelectSetScope(scope) => {
                 let i = self.active_tab;
-                let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
+                let available_types = self.tabs[i].scene.qselect_type_counts(scope);
                 let type_filter = self.qselect.as_ref().and_then(|state| {
                     state
                         .type_filter
                         .as_ref()
-                        .filter(|selected| available_types.iter().any(|item| item == *selected))
+                        .filter(|selected| {
+                            available_types.iter().any(|(item, _)| item == *selected)
+                        })
                         .cloned()
                 });
                 let available_properties = self.tabs[i]
@@ -8964,11 +8967,10 @@ impl OpenCADStudio {
                     });
                     state.value.clear();
                     state.error = None;
-                    if matches!(scope, crate::app::QSelectScope::CurrentSelection) {
-                        state.append = false;
-                    }
                     state.normalize_operator();
                 }
+                self.qselect_refresh_values();
+                self.qselect_refresh_live();
                 Task::none()
             }
 
@@ -8993,6 +8995,8 @@ impl OpenCADStudio {
                     state.error = None;
                     state.normalize_operator();
                 }
+                self.qselect_refresh_values();
+                self.qselect_refresh_live();
                 Task::none()
             }
 
@@ -9003,6 +9007,8 @@ impl OpenCADStudio {
                     state.error = None;
                     state.normalize_operator();
                 }
+                self.qselect_refresh_values();
+                self.qselect_refresh_live();
                 Task::none()
             }
 
@@ -9011,6 +9017,7 @@ impl OpenCADStudio {
                     state.operator = op;
                     state.error = None;
                 }
+                self.qselect_refresh_live();
                 Task::none()
             }
 
@@ -9019,6 +9026,7 @@ impl OpenCADStudio {
                     state.value = v;
                     state.error = None;
                 }
+                self.qselect_refresh_live();
                 Task::none()
             }
 
@@ -9027,15 +9035,45 @@ impl OpenCADStudio {
                     state.mode = mode;
                     state.error = None;
                 }
+                self.qselect_refresh_live();
                 Task::none()
             }
 
-            Message::QSelectSetAppend(b) => {
+            Message::QSelectSetResult(result) => {
                 if let Some(state) = self.qselect.as_mut() {
-                    if matches!(state.scope, crate::app::QSelectScope::CurrentSpace) {
-                        state.append = b;
-                    }
-                    state.error = None;
+                    state.result = result;
+                }
+                Task::none()
+            }
+
+            Message::QSelectSetShow(show) => {
+                if let Some(state) = self.qselect.as_mut() {
+                    state.show = show;
+                }
+                self.qselect_refresh_live();
+                Task::none()
+            }
+
+            Message::QSelectSampleToggle(index) => {
+                if let Some(row) = self
+                    .qselect
+                    .as_mut()
+                    .and_then(|state| state.sample.as_mut())
+                    .and_then(|sample| sample.rows.get_mut(index))
+                {
+                    row.1 = !row.1;
+                }
+                Task::none()
+            }
+
+            Message::QSelectSampleAdd => {
+                self.on_qselect_sample_add();
+                Task::none()
+            }
+
+            Message::QSelectSampleCancel => {
+                if let Some(state) = self.qselect.as_mut() {
+                    state.sample = None;
                 }
                 Task::none()
             }
@@ -9057,6 +9095,7 @@ impl OpenCADStudio {
                     }
                     state.error = None;
                 }
+                self.qselect_refresh_live();
                 Task::none()
             }
             Message::QSelectEditCondition(index) => {
@@ -9078,6 +9117,7 @@ impl OpenCADStudio {
                         state.editing_condition = Some(index);
                         state.error = None;
                     }
+                    self.qselect_refresh_values();
                 }
                 Task::none()
             }
@@ -9093,6 +9133,7 @@ impl OpenCADStudio {
                     }
                     state.error = None;
                 }
+                self.qselect_refresh_live();
                 Task::none()
             }
             Message::QSelectClearConditions => {
@@ -9101,6 +9142,7 @@ impl OpenCADStudio {
                     state.editing_condition = None;
                     state.error = None;
                 }
+                self.qselect_refresh_live();
                 Task::none()
             }
             Message::QSelectCancelEdit => {
@@ -9123,6 +9165,7 @@ impl OpenCADStudio {
                     }
                     return Task::none();
                 }
+                self.qselect_clear_preview();
                 let Some(state) = self.qselect.take() else {
                     return Task::none();
                 };
@@ -9138,7 +9181,7 @@ impl OpenCADStudio {
                     state.scope,
                     &conditions,
                     state.mode,
-                    state.append && matches!(state.scope, crate::app::QSelectScope::CurrentSpace),
+                    state.result,
                 );
                 self.command_line
                     .push_output(crate::tf!("QSELECT: {} object(s) selected.", matched).as_ref());

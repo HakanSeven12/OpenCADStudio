@@ -6558,6 +6558,15 @@ ui =
     .qselect-clear-conditions = Vymazat podmínky
     .qselect-no-conditions = Nebyly přidány žádné podmínky.
     .qselect-conditions-heading = Podmínky (musí platit všechny pro typ objektu)
+    .qselect-search-in = Hledat v
+    .qselect-new-selection = Nový výběr
+    .qselect-live-count = Vyhovuje __ocs_fmt_0__ z __ocs_fmt_1__ objektů
+    .qselect-select-count = Vybrat __ocs_fmt_0__
+    .qselect-greater-or-equal = >= Větší nebo rovno
+    .qselect-less-or-equal = <= Menší nebo rovno
+    .qselect-invert = Vybrat objekty, které nevyhovují
+    .qselect-sample-heading = Vlastnosti vybraného objektu __ocs_fmt_0__
+    .qselect-sample-add = Přidat zaškrtnuté podmínky
     .qselect-list-note = Pokud seznam není prázdný, použijí se jen uvedené podmínky.
     .quick-select-menu-period-title-case = Rychlý výběr…
     .reading-file = Čtení souboru…

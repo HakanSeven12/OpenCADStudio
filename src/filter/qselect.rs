@@ -24,7 +24,9 @@ impl From<&QSelectCondition> for Condition {
                 QSelectOp::Eq => Op::Eq,
                 QSelectOp::Neq => Op::Ne,
                 QSelectOp::Gt => Op::Gt,
+                QSelectOp::Ge => Op::Ge,
                 QSelectOp::Lt => Op::Lt,
+                QSelectOp::Le => Op::Le,
             },
             value: condition.value.clone(),
         }

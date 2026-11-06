@@ -363,15 +363,48 @@ impl Scene {
         self.qselect_candidate_handles(scope).len()
     }
 
-    pub fn qselect_entity_type_names(&self, scope: crate::app::QSelectScope) -> Vec<String> {
+    /// The object types in the scope, by name, with how many of each.
+    pub fn qselect_type_counts(&self, scope: crate::app::QSelectScope) -> Vec<(String, usize)> {
         use crate::entities::traits::entity_type_name;
-        let mut names = std::collections::BTreeSet::new();
+        let mut counts = std::collections::BTreeMap::<String, usize>::new();
         for h in self.qselect_candidate_handles(scope) {
             if let Some(entity) = self.document.get_entity(h) {
-                names.insert(entity_type_name(entity).to_string());
+                *counts
+                    .entry(entity_type_name(entity).to_string())
+                    .or_default() += 1;
             }
         }
-        names.into_iter().collect()
+        counts.into_iter().collect()
+    }
+
+    /// The values `field` takes on the scope's objects (of `type_name`, when
+    /// given), most frequent first, at most `limit` of them.
+    pub fn qselect_value_counts(
+        &self,
+        scope: crate::app::QSelectScope,
+        type_name: Option<&str>,
+        field: &str,
+        limit: usize,
+    ) -> Vec<(String, usize)> {
+        use crate::entities::traits::entity_type_name;
+        let mut counts = rustc_hash::FxHashMap::<String, usize>::default();
+        for h in self.qselect_candidate_handles(scope) {
+            let Some(entity) = self.document.get_entity(h) else {
+                continue;
+            };
+            if type_name.is_some_and(|wanted| entity_type_name(entity) != wanted) {
+                continue;
+            }
+            if let Some(value) = self.entity_property_value(entity, field) {
+                if !value.trim().is_empty() {
+                    *counts.entry(value).or_default() += 1;
+                }
+            }
+        }
+        let mut counts: Vec<(String, usize)> = counts.into_iter().collect();
+        counts.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        counts.truncate(limit);
+        counts
     }
 
     /// Extends the current selection with every entity in the active
@@ -477,40 +510,59 @@ impl Scene {
             operator: op,
             value: value.to_owned(),
         };
-        self.qselect_conditions(scope, &[condition], mode, append)
+        let result = if append {
+            crate::app::QSelectResult::Add
+        } else {
+            crate::app::QSelectResult::New
+        };
+        self.qselect_conditions(scope, &[condition], mode, result)
     }
 
-    /// Evaluate all conditions against the same candidate set, then apply result behavior once.
+    /// The scope's objects the conditions find (or, in Exclude mode, don't),
+    /// without touching the selection.
+    pub fn qselect_matches(
+        &self,
+        scope: crate::app::QSelectScope,
+        conditions: &[crate::app::QSelectCondition],
+        mode: crate::app::QSelectMode,
+    ) -> Vec<Handle> {
+        let filter = crate::filter::qselect::filter_from_conditions(conditions);
+        let source = EntityProperties(self);
+        let include = matches!(mode, crate::app::QSelectMode::Include);
+        self.qselect_candidate_handles(scope)
+            .into_iter()
+            .filter(|h| {
+                self.document
+                    .get_entity(*h)
+                    .is_some_and(|e| filter.matches(&source, e) == include)
+            })
+            .collect()
+    }
+
+    /// Evaluate all conditions against the same candidate set, then apply the
+    /// result once: the matches become, join or leave the selection.
     pub fn qselect_conditions(
         &mut self,
         scope: crate::app::QSelectScope,
         conditions: &[crate::app::QSelectCondition],
         mode: crate::app::QSelectMode,
-        append: bool,
+        result: crate::app::QSelectResult,
     ) -> usize {
-        use crate::app::QSelectMode;
-        let previous = self.selected.clone();
-        let handles = self.qselect_candidate_handles(scope);
-        let filter = crate::filter::qselect::filter_from_conditions(conditions);
-        let source = EntityProperties(self);
-        let mut result = HashSet::default();
-        for h in handles {
-            let Some(e) = self.document.get_entity(h) else {
-                continue;
-            };
-            let matches_filter = filter.matches(&source, e);
-            let keep = match mode {
-                QSelectMode::Include => matches_filter,
-                QSelectMode::Exclude => !matches_filter,
-            };
-            if keep {
-                result.insert(h);
+        use crate::app::QSelectResult;
+        let matches = self.qselect_matches(scope, conditions, mode);
+        let selection: HashSet<Handle> = match result {
+            QSelectResult::New => matches.into_iter().collect(),
+            QSelectResult::Add => self.selected.iter().copied().chain(matches).collect(),
+            QSelectResult::Remove => {
+                let found: HashSet<Handle> = matches.into_iter().collect();
+                self.selected
+                    .iter()
+                    .copied()
+                    .filter(|h| !found.contains(h))
+                    .collect()
             }
-        }
-        if append {
-            result.extend(previous);
-        }
-        self.replace_selection(result);
+        };
+        self.replace_selection(selection);
         self.selected.len()
     }
 
@@ -1398,7 +1450,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &conditions,
                 QSelectMode::Include,
-                false,
+                crate::app::QSelectResult::New,
             ),
             2
         );
@@ -1426,7 +1478,7 @@ mod tests {
             QSelectScope::CurrentSpace,
             &conditions,
             QSelectMode::Include,
-            false,
+            crate::app::QSelectResult::New,
         );
         assert_eq!(found, 2, "a Line and a Circle sample find both");
 
@@ -1485,7 +1537,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &[layer_fal.clone()],
                 QSelectMode::Include,
-                false
+                crate::app::QSelectResult::New
             ),
             2
         );
@@ -1501,7 +1553,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &typed,
                 QSelectMode::Include,
-                false
+                crate::app::QSelectResult::New
             ),
             2
         );
@@ -1510,7 +1562,7 @@ mod tests {
                 QSelectScope::CurrentSpace,
                 &typed,
                 QSelectMode::Exclude,
-                false
+                crate::app::QSelectResult::New
             ),
             1
         );

@@ -6555,6 +6555,15 @@ ui =
     .qselect-clear-conditions = 조건 지우기
     .qselect-no-conditions = 추가된 조건이 없습니다.
     .qselect-conditions-heading = 조건 (객체 유형의 조건을 모두 만족해야 함)
+    .qselect-search-in = 검색 위치
+    .qselect-new-selection = 새 선택
+    .qselect-live-count = __ocs_fmt_1__개 중 __ocs_fmt_0__개 객체 일치
+    .qselect-select-count = __ocs_fmt_0__개 선택
+    .qselect-greater-or-equal = >= 크거나 같음
+    .qselect-less-or-equal = <= 작거나 같음
+    .qselect-invert = 일치하지 않는 객체 선택
+    .qselect-sample-heading = 선택한 __ocs_fmt_0__의 특성
+    .qselect-sample-add = 체크한 조건 추가
     .qselect-list-note = 목록이 비어 있지 않으면 목록의 조건만 적용됩니다.
     .quick-select-menu-period-title-case = 빠른 선택...
     .reading-file = 파일을 읽는 중…

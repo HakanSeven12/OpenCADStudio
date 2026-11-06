@@ -6483,6 +6483,15 @@ ui =
     .qselect-clear-conditions = Koşulları temizle
     .qselect-no-conditions = Koşul eklenmedi.
     .qselect-conditions-heading = Koşullar (nesne türünün tüm koşulları sağlanmalı)
+    .qselect-search-in = Arama yeri
+    .qselect-new-selection = Yeni seçim
+    .qselect-live-count = __ocs_fmt_1__ nesneden __ocs_fmt_0__ tanesi eşleşiyor
+    .qselect-select-count = __ocs_fmt_0__ nesneyi seç
+    .qselect-greater-or-equal = >= Büyük veya eşit
+    .qselect-less-or-equal = <= Küçük veya eşit
+    .qselect-invert = Eşleşmeyen nesneleri seç
+    .qselect-sample-heading = Seçilen __ocs_fmt_0__ özellikleri
+    .qselect-sample-add = İşaretli koşulları ekle
     .qselect-list-note = Liste boş değilse yalnızca listelenen koşullar uygulanır.
     .quick-select-menu-period-title-case = Hızlı Seçim...
     .reading-file = Dosya okunuyor…

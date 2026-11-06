@@ -3474,6 +3474,8 @@ modify =
     .boundary-edges = Határélek
     .break-gap-size = Megszakítási rés:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER  Adja meg az első letörési távolságot <__ocs_arg_d1__>:
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER  Adja meg a második letörési távolságot <__ocs_arg_d2__>:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Válassza az első vonalat [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Válassza a második vonalat [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:

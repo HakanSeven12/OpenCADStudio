@@ -3466,6 +3466,8 @@ modify =
     .boundary-edges = सीमावर्ती किनारों
     .break-gap-size = ब्रेक अंतर आकार:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER प्रथम चैमर दूरी __ocs_arg_d1__ दर्ज करें:
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER दूसरे चैमर दूरी __ocs_arg_d2__ दर्ज करें:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER पहली लाइन चुनें [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER दूसरी लाइन चुनें [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:

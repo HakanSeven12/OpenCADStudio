@@ -3481,6 +3481,8 @@ modify =
     .boundary-edges = Граничные края
     .break-gap-size = Размер разрыва:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER Введите первое расстояние чаевых <__ocs_arg_d1__>:
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER Введите второе расстояние чамфера <__ocs_arg_d2__>:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER Выберите первую строку [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER Выберите вторую строку [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__:

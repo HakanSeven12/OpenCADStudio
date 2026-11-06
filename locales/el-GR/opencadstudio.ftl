@@ -3478,6 +3478,8 @@ modify =
     .boundary-edges = Ακμές ορίου
     .break-gap-size = Μέγεθος κενού διακοπής:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER  Δώστε πρώτη απόσταση λοξότμησης <__ocs_arg_d1__>:
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER  Δώστε δεύτερη απόσταση λοξότμησης <__ocs_arg_d2__>:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Επιλέξτε πρώτη γραμμή  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Επιλέξτε δεύτερη γραμμή  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:

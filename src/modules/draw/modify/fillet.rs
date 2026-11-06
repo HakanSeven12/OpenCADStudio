@@ -282,6 +282,16 @@ fn trim_to_xy(orig: &LineEnt, tangent: [f64; 2], dir: [f64; 2], unit: [f64; 2]) 
     // dir negative: keep from -∞ to t_tan (i.e. set end to tangent point)
     let dot = dir[0] * unit[0] + dir[1] * unit[1]; // +1 or -1
 
+    // The kept part runs from the tangent point on along `dir` to the far
+    // end. A tangent point past that end means the radius or distance is
+    // larger than the line; moving the end there would flip the line.
+    let far = if dot > 0.0 { orig.end } else { orig.start };
+    let room = (far.x - tangent[0]) * dir[0] + (far.y - tangent[1]) * dir[1];
+    let length = (orig.end.x - orig.start.x).hypot(orig.end.y - orig.start.y);
+    if room < -1e-9 * (1.0 + length) {
+        return None;
+    }
+
     if dot > 0.0 {
         // keep from tangent to end → move start to tangent point
         l.start = Vector3::new(tangent[0], tangent[1], z);
@@ -1636,6 +1646,12 @@ fn trim_line_to_point(line: &LineEnt, isect: [f64; 2], click: [f64; 2]) -> Optio
 
 // ── Chamfer ────────────────────────────────────────────────────────────────
 
+fn lines_parallel(l1: &LineEnt, l2: &LineEnt) -> bool {
+    let (_, _, u1, _) = line_geom(l1);
+    let (_, _, u2, _) = line_geom(l2);
+    (u1[0] * u2[1] - u1[1] * u2[0]).abs() <= 1.0e-6
+}
+
 /// Compute chamfer: trim l1 by dist1 from intersection, l2 by dist2, add chamfer line.
 /// The chamfer line is `None` when both distances are zero: the lines then
 /// simply meet at their corner and a zero-length line would be left behind.
@@ -2199,7 +2215,7 @@ impl CadCommand for FilletCommand {
                             };
                             self.continue_after_fillet(replacements)
                         }
-                        None => CmdResult::NeedPoint,
+                        None => CmdResult::ReportError(t!("Radius is too large.").into_owned()),
                     }
                 } else {
                     CmdResult::NeedPoint
@@ -2367,6 +2383,10 @@ impl CadCommand for FilletCommand {
         self.entity_index = ModifyEntityIndex::build(&self.all_entities);
     }
     fn on_enter(&mut self) -> CmdResult {
+        // Enter at the radius or trim prompt accepts its default.
+        if self.wants_text_input() {
+            return self.on_text_input("").unwrap_or(CmdResult::NeedPoint);
+        }
         CmdResult::Cancel
     }
     fn on_escape(&mut self) -> CmdResult {
@@ -2699,6 +2719,8 @@ impl CadCommand for ChamferCommand {
                 if let Some(v) = crate::entities::common::parse_typed_length(t) {
                     self.dist1 = v.max(0.0);
                     defaults::set_chamfer_dist1(self.dist1);
+                    // The second distance offers the first as its default.
+                    self.dist2 = self.dist1;
                     self.step = ChamferStep::WaitingForDist2;
                     return Some(CmdResult::NeedPoint);
                 }
@@ -2921,6 +2943,9 @@ impl CadCommand for ChamferCommand {
                                 )
                             }
                         }
+                        None if !lines_parallel(&l1, &l2) => {
+                            CmdResult::ReportError(t!("Distance is too large.").into_owned())
+                        }
                         None => CmdResult::NeedPoint,
                     }
                 } else if !self.trim {
@@ -3036,6 +3061,10 @@ impl CadCommand for ChamferCommand {
         CmdResult::NeedPoint
     }
     fn on_enter(&mut self) -> CmdResult {
+        // Enter at the distance prompts accepts its default.
+        if self.wants_text_input() {
+            return self.on_text_input("").unwrap_or(CmdResult::NeedPoint);
+        }
         CmdResult::Cancel
     }
     fn on_escape(&mut self) -> CmdResult {

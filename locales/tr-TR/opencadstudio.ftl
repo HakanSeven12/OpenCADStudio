@@ -3460,6 +3460,8 @@ modify =
     .boundary-edges = Sınır kenarları
     .break-gap-size = Koparma boşluğu boyutu:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER  Birinci pah mesafesini girin <__ocs_arg_d1__>:
+    .distance-is-too-large = Mesafe çok büyük.
+    .radius-is-too-large = Yarıçap çok büyük.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER  İkinci pah mesafesini girin <__ocs_arg_d2__>:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Birinci çizgiyi seçin [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  İkinci çizgiyi seçin [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:

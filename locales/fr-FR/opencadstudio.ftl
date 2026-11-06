@@ -3478,6 +3478,8 @@ modify =
     .boundary-edges = Limites
     .break-gap-size = Taille de l'écart de rupture:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER Saisissez la première distance de chanfrein <__ocs_arg_d1__>:
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER Saisissez la deuxième distance de chanfrein <__ocs_arg_d2__>:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER Sélectionner la première ligne [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER Sélectionner la deuxième ligne [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:

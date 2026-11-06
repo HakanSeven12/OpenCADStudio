@@ -3479,6 +3479,8 @@ modify =
     .boundary-edges = Boundary edges
     .break-gap-size = Break gap size:
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER  Enter first chamfer distance <__ocs_arg_d1__>:
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER  Enter second chamfer distance <__ocs_arg_d2__>:
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  Select first line  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  Select second line  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]:

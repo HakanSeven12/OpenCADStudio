@@ -1419,6 +1419,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "CENTERLINE  Select first line:" => Some(("draw", "centerline-select-first-line")),
         "CENTERLINE  Select second line:" => Some(("draw", "centerline-select-second-line")),
         "CHAMFER  Enter first chamfer distance <%{d1}>:" => Some(("modify", "chamfer-enter-first-chamfer-distance-d1")),
+        "Distance is too large." => Some(("modify", "distance-is-too-large")),
+        "Radius is too large." => Some(("modify", "radius-is-too-large")),
         "CHAMFER  Enter second chamfer distance <%{d2}>:" => Some(("modify", "chamfer-enter-second-chamfer-distance-d2")),
         "CHAMFER  Select first line  [D1=%{d1} D2=%{d2}]:" => Some(("modify", "chamfer-select-first-line-d1-d1-d2-d2")),
         "CHAMFER  Select second line  [D1=%{d1} D2=%{d2}]:" => Some(("modify", "chamfer-select-second-line-d1-d1-d2-d2")),

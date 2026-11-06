@@ -3477,6 +3477,8 @@ modify =
     .boundary-edges = 邊界邊緣
     .break-gap-size = 斷裂間隙大小：
     .chamfer-enter-first-chamfer-distance-d1 = CHAMFER  輸入第一個倒角距離 <__ocs_arg_d1__>：
+    .distance-is-too-large = Distance is too large.
+    .radius-is-too-large = Radius is too large.
     .chamfer-enter-second-chamfer-distance-d2 = CHAMFER  輸入第二個倒角距離 <__ocs_arg_d2__>：
     .chamfer-select-first-line-d1-d1-d2-d2 = CHAMFER  選擇第一條直線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：
     .chamfer-select-second-line-d1-d1-d2-d2 = CHAMFER  選擇第二條直線  [D1=__ocs_arg_d1__ D2=__ocs_arg_d2__]：

@@ -179,13 +179,21 @@ impl OpenCADStudio {
     }
     pub(super) fn apply_action_document(&mut self, i: usize, mut staged: document::Document) {
         let doc = &mut self.tabs[i].scene.document;
+        // Drawable entity iteration omits BLOCK and ENDBLK. Their records
+        // still carry evaluated origins and delimit the published body.
+        let markers = doc.block_records.iter().chain(staged.block_records.iter())
+            .flat_map(|record| [record.block_entity_handle, record.block_end_handle])
+            .filter(|handle| !handle.is_null())
+            .collect::<rustc_hash::FxHashSet<_>>();
         let changes = staged
             .entities()
+            .chain(markers.iter().filter_map(|&handle| staged.get_entity(handle)))
             .filter(|e| doc.get_entity(e.common().handle) != Some(*e))
             .cloned()
             .collect::<Vec<_>>();
         let removed = doc
             .entities()
+            .chain(markers.iter().filter_map(|&handle| doc.get_entity(handle)))
             .map(|e| e.common().handle)
             .filter(|h| staged.get_entity(*h).is_none())
             .collect::<Vec<_>>();

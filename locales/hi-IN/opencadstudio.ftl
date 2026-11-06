@@ -6132,6 +6132,7 @@ styles =
     .enable-dogleg = कुत्ते के लिए सक्षम
     .enable-landing = लैंडिंग सक्षम करें
     .enter-new-value-for-name-current = __ocs_fmt_0__ के लिए नया मान दर्ज करें <__ocs_fmt_1__>:
+    .invalid-value = Invalid value.
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
     .dimension-variable = dimension variable

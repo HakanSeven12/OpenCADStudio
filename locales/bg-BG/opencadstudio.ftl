@@ -6144,6 +6144,7 @@ styles =
     .enable-dogleg = Активирай прекъсване
     .enable-landing = Активирай кацане
     .enter-new-value-for-name-current = Въведи нова стойност за __ocs_fmt_0__ <__ocs_fmt_1__>:
+    .invalid-value = Invalid value.
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
     .dimension-variable = dimension variable

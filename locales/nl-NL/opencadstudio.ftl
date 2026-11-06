@@ -6142,6 +6142,7 @@ styles =
     .enable-dogleg = Hondenpoot inschakelen
     .enable-landing = Landing inschakelen
     .enter-new-value-for-name-current = Voer nieuwe waarde in voor __ocs_fmt_0__ <__ocs_fmt_1__>:
+    .invalid-value = Invalid value.
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
     .dimension-variable = dimension variable

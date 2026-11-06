@@ -6132,6 +6132,7 @@ styles =
     .enable-dogleg = 折り曲げを有効化
     .enable-landing = ランディングを有効化
     .enter-new-value-for-name-current = __ocs_fmt_0__ の新しい値を入力 <__ocs_fmt_1__>:
+    .invalid-value = Invalid value.
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
     .dimension-variable = dimension variable

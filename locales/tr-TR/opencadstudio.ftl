@@ -6084,6 +6084,7 @@ styles =
     .enable-dogleg = Kılavuz dirseğini etkinleştir
     .enable-landing = Yatay bağlantıyı etkinleştir
     .enter-new-value-for-name-current = __ocs_fmt_0__ için yeni değer girin <__ocs_fmt_1__>:
+    .invalid-value = Geçersiz değer.
     .enter-new-value-for-name-or-none = __ocs_fmt_0__ için yeni değer girin veya hiçbiri için . <"__ocs_fmt_1__">:
     .enter-new-value-for-name = __ocs_fmt_0__ için yeni değer girin:
     .dimension-variable = ölçü değişkeni

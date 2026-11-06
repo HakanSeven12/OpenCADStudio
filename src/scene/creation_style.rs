@@ -379,6 +379,26 @@ pub fn apply_drawing_dimdli(doc: &Document, entity: &mut EntityType) {
     }
 }
 
+/// The command-line dimension variables of `overrides` go on a new dimension
+/// or leader as its overrides, while their style is still the current one.
+pub fn apply_dim_overrides(
+    doc: &Document,
+    overrides: Option<&(String, Vec<(i16, document::xdata::XDataValue)>)>,
+    entity: &mut EntityType,
+) {
+    let Some((style, values)) = overrides else {
+        return;
+    };
+    if !matches!(entity, EntityType::Dimension(_) | EntityType::Leader(_))
+        || !style.eq_ignore_ascii_case(&doc.header.current_dimstyle_name)
+    {
+        return;
+    }
+    for (code, value) in values {
+        crate::entities::dim_override::set_on_entity(entity, *code, Some(value.clone()));
+    }
+}
+
 pub fn apply_current_creation_styles(doc: &Document, entity: &mut EntityType) {
     entity.common_mut().transparency = doc.current_entity_transparency();
     apply_text_defaults(doc, entity);

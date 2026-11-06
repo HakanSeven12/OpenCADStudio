@@ -1,8 +1,89 @@
 use super::*;
 
 impl OpenCADStudio {
+    /// Read or set the dimension variable `name` for new dimensions. The
+    /// value goes in as an override of the current dimension style; the
+    /// style's own value clears it.
+    fn dim_var_setvar(&mut self, i: usize, name: &str, value: Option<&str>) {
+        use crate::entities::dim_override as ov;
+        let Some((code, kind)) = ov::named_var(name) else {
+            return;
+        };
+        let scene = &mut self.tabs[i].scene;
+        let style_name = scene.document.header.current_dimstyle_name.clone();
+        let style = scene
+            .document
+            .dim_styles
+            .iter()
+            .find(|style| style.name.eq_ignore_ascii_case(&style_name))
+            .cloned();
+        if scene
+            .dim_overrides
+            .as_ref()
+            .is_some_and(|(owner, _)| !owner.eq_ignore_ascii_case(&style_name))
+        {
+            scene.dim_overrides = None;
+        }
+        let overridden = scene
+            .dim_overrides
+            .as_ref()
+            .and_then(|(_, values)| values.iter().find(|(c, _)| *c == code))
+            .map(|(_, value)| value.clone());
+        let current = match overridden {
+            Some(document::xdata::XDataValue::Real(v)) => format!("{v:.4}"),
+            Some(document::xdata::XDataValue::Integer16(v)) => v.to_string(),
+            Some(document::xdata::XDataValue::String(v)) => v,
+            _ => style
+                .as_ref()
+                .and_then(|style| ov::style_value_text(style, code))
+                .unwrap_or_default(),
+        };
+        let name = name.to_ascii_uppercase();
+        let ask = |app: &mut Self| {
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some(name.clone());
+        };
+        let Some(text) = value else {
+            return ask(self);
+        };
+        let Some(new) = ov::parse_var_value(kind, text) else {
+            self.command_line.push_error(&crate::t!("Invalid value."));
+            return ask(self);
+        };
+        let scene = &mut self.tabs[i].scene;
+        let (_, values) = scene
+            .dim_overrides
+            .get_or_insert_with(|| (style_name, Vec::new()));
+        values.retain(|(c, _)| *c != code);
+        let style_value = style
+            .as_ref()
+            .and_then(|style| ov::style_value_text(style, code))
+            .and_then(|text| ov::parse_var_value(kind, &text));
+        if style_value.as_ref() != Some(&new) {
+            values.push((code, new));
+        }
+    }
+
     pub(super) fn dispatch_styleprops(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         match cmd {
+            // Dimension variables typed bare or through SETVAR: overrides of
+            // the current dimension style for the dimensions drawn next.
+            cmd if crate::entities::dim_override::named_var(
+                cmd.strip_prefix("SETVAR ")
+                    .unwrap_or(cmd)
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default(),
+            )
+            .is_some() =>
+            {
+                let mut words = cmd.strip_prefix("SETVAR ").unwrap_or(cmd).splitn(2, ' ');
+                let name = words.next().unwrap_or_default().to_string();
+                let value = words.next().map(str::trim).filter(|v| !v.is_empty());
+                self.dim_var_setvar(i, &name, value);
+                return Some(self.finish_dispatch(cmd));
+            }
             // View / grid variables held by the app rather than the header,
             // typed bare or through SETVAR (#1524, #1618).
             cmd if matches!(

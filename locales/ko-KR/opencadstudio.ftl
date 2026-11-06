@@ -6143,6 +6143,7 @@ styles =
     .enable-dogleg = 도그레그 활성화
     .enable-landing = 착륙 활성화
     .enter-new-value-for-name-current = Enter __ocs_fmt_0__ <__ocs_fmt_1__>의 새 값:
+    .invalid-value = Invalid value.
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
     .dimension-variable = dimension variable

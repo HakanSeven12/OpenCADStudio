@@ -1961,6 +1961,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Engineering" => Some(("common", "engineering")),
         "Enter" => Some(("common", "enter")),
         "Enter new value for {name} <{current}>:" => Some(("styles", "enter-new-value-for-name-current")),
+        "Invalid value." => Some(("styles", "invalid-value")),
         "Enter new value for {name}, or . for none <\"{current}\">:" => Some(("styles", "enter-new-value-for-name-or-none")),
         "Enter new value for {name}:" => Some(("styles", "enter-new-value-for-name")),
         "dimension variable" => Some(("styles", "dimension-variable")),

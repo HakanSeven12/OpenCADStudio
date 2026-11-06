@@ -6139,6 +6139,7 @@ styles =
     .enable-dogleg = 啟用折彎
     .enable-landing = 啟用著陸線
     .enter-new-value-for-name-current = 輸入 __ocs_fmt_0__ <__ocs_fmt_1__> 的新值 :
+    .invalid-value = Invalid value.
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
     .dimension-variable = dimension variable

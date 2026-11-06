@@ -2932,6 +2932,10 @@ pub struct Scene {
     /// Multiplier applied to Text/MText/Dimension sizes during tessellation.
     /// 1.0 = no scaling. 50.0 = "1:50" drawing scale.
     pub annotation_scale: f32,
+    /// Dimension variables typed at the command line (DIMSCALE, DIMDEC, …):
+    /// overrides of the named current dimension style that new dimensions
+    /// take. Dropped once another style is current.
+    pub dim_overrides: Option<(String, Vec<(i16, document::xdata::XDataValue)>)>,
     /// Cached per-epoch: does annotation scale actually change wire geometry?
     /// PSLTSCALE is handled by a per-viewport GPU uniform, so only real
     /// annotative entities require a scale-specific resident set.
@@ -3447,6 +3451,7 @@ impl Scene {
             local_extent_max: 1e9,
             local_center: [0.0, 0.0],
             annotation_scale: 1.0,
+            dim_overrides: None,
             annotation_affects_wires: std::cell::Cell::new(None),
             model_extents_cache: RefCell::new(None),
             model_space_block_cache: std::cell::Cell::new(None),

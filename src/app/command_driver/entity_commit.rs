@@ -411,6 +411,11 @@ impl OpenCADStudio {
                         &self.tabs[i].scene.document,
                         &mut entity,
                     );
+                    crate::scene::creation_style::apply_dim_overrides(
+                        &self.tabs[i].scene.document,
+                        self.tabs[i].scene.dim_overrides.as_ref(),
+                        &mut entity,
+                    );
                 }
                 let delta_safe = self.delta_add_safe(i, &entity);
                 let pending = self.begin_undo(i, label, 1, delta_safe);

@@ -9239,6 +9239,14 @@ impl Scene {
                 &mut wires,
                 render_mode_override.unwrap_or_else(|| self.active_model_tile_render_mode()),
             );
+            // On screen the wire shader multiplies dash patterns by this ratio;
+            // a plot has no shader, so apply it to the patterns themselves.
+            if let Some(ratio) = view::render::model_linetype_ratio(&self.document) {
+                for wire in wires.iter_mut().filter(|wire| wire.pattern_length > 0.0) {
+                    wire.pattern_length *= ratio;
+                    wire.pattern = wire.pattern.map(|value| value * ratio);
+                }
+            }
             return (wires, Vec::new());
         }
         let paper_block = self.current_layout_block_handle();

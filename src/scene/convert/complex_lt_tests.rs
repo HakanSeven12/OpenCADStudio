@@ -430,6 +430,43 @@ fn msltscale_drives_the_model_space_shader_ratio() {
 }
 
 #[test]
+fn plotting_model_space_applies_the_annotation_scale_to_plain_dashes() {
+    let mut scene = crate::scene::Scene::new();
+    let mut dashed = LineType::new("DASHED-T");
+    dashed.handle = scene.document.allocate_handle();
+    dashed.add_element(LineTypeElement::dash(2.0));
+    dashed.add_element(LineTypeElement::space(2.0));
+    dashed.pattern_length = 4.0;
+    scene.document.line_types.add(dashed).unwrap();
+    let mut line = EntityType::Line(Line::from_points(
+        Vector3::new(0.0, 0.0, 0.0),
+        Vector3::new(400.0, 0.0, 0.0),
+    ));
+    line.common_mut().linetype = "DASHED-T".to_string();
+    scene.add_entity(line);
+
+    let plotted = |scene: &crate::scene::Scene| {
+        let (wires, viewports) = scene.plot_wire_groups(None);
+        assert!(viewports.is_empty());
+        let wire = wires
+            .into_iter()
+            .find(|wire| wire.pattern_length > 0.0)
+            .expect("a dashed wire");
+        (wire.pattern_length, wire.pattern[0])
+    };
+
+    scene.set_annotation_scale_named("1:10").expect("1:10");
+    let (length, dash) = plotted(&scene);
+    assert!((length - 40.0).abs() < 1e-3, "{length}");
+    assert!((dash - 20.0).abs() < 1e-3, "{dash}");
+
+    scene.set_model_linetype_scaling(false);
+    let (length, dash) = plotted(&scene);
+    assert!((length - 4.0).abs() < 1e-3, "{length}");
+    assert!((dash - 2.0).abs() < 1e-3, "{dash}");
+}
+
+#[test]
 fn msltscale_toggle_relays_a_complex_linetype() {
     let mut scene = crate::scene::Scene::new();
     scene.document = fence_document();

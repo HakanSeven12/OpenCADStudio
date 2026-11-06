@@ -3322,6 +3322,25 @@ draw =
     .pline-specify-length-of-chord = PLINE  Especifique o comprimento da corda:
     .pline-specify-tangent-direction-for-the-start-point-of-arc = PLINE  Especifique a direção tangente no ponto inicial do arco:
     .pline-specify-second-point-on-arc = PLINE  Especifique o segundo ponto do arco:
+    .arc-sub-chord-direction = Specify direction of chord for arc (hold Ctrl to switch direction) <__ocs_arg_default__>:
+    .arc-sub-included-angle-ctrl = Specify included angle (hold Ctrl to switch direction):
+    .arc-sub-included-angle = Specify included angle:
+    .arc-sub-endpoint-center-radius = Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:
+    .arc-sub-center-point = Specify center point of arc:
+    .arc-sub-endpoint-angle-length = Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:
+    .arc-sub-chord-length = Specify length of chord (hold Ctrl to switch direction):
+    .arc-sub-endpoint-ctrl = Specify endpoint of the arc (hold Ctrl to switch direction):
+    .arc-sub-radius = Specify radius of arc:
+    .arc-sub-endpoint-angle = Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:
+    .arc-sub-boundary-option =
+        Enter an arc boundary option
+        {"["}Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo/Endpoint of arc] <Endpoint>:
+    .arc-sub-start-point = Specify start point:
+    .arc-sub-line-length = Specify length of line:
+    .arc-sub-next-point-arc-length-undo = Specify next point or [Arc/Length/Undo]:
+    .arc-sub-next-point-arc-close-length-undo = Specify next point or [Arc/Close/Length/Undo]:
+    .vpclip-select-viewport = Select viewport to clip:
+    .vpclip-select-clipping-object = Select clipping object or [Polygonal] <Polygonal>:
     .halfwidth = Meia largura
     .center-keyword = Centro
     .close-keyword = Fechar

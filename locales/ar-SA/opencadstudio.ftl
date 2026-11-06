@@ -2768,6 +2768,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" ليس اسم طبقة صالحًا (بدون < > / \ " : ; ? * | , = `).
     .layer-name-taken = توجد طبقة باسم "__ocs_fmt_0__" بالفعل.
     .layer-transparency-range = الشفافية عدد صحيح من 0 إلى 90.
+    .layer-new-vp-frozen = جديد، مجمّد في كل منفذ عرض
+    .layer-objects-selected = تم تحديد __ocs_fmt_0__ كائن على الطبقات المحددة.
     .viewport-scale-needs-viewport = حدد إطار عرض أو انقر نقرًا مزدوجًا داخله لتعيين مقياسه.
     .viewport-scale-locked = عرض إطار العرض مقفل؛ ألغِ قفله لتغيير مقياسه.
     .no-drawing-open-use-new-or-open-to-start-a-dra = لا يوجد رسم مفتوح. استخدم NEW أو OPEN لبدء رسم.

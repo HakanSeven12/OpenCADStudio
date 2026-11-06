@@ -2740,6 +2740,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" geçerli bir katman adı değil (< > / \ " : ; ? * | , = ` olmadan).
     .layer-name-taken = "__ocs_fmt_0__" adlı bir katman zaten var.
     .layer-transparency-range = Saydamlık 0 ile 90 arasında bir tam sayıdır.
+    .layer-new-vp-frozen = Yeni, her görünüm penceresinde dondurulmuş
+    .layer-objects-selected = Seçili katmanlardaki __ocs_fmt_0__ nesne seçildi.
     .viewport-scale-needs-viewport = Ölçeğini ayarlamak için bir görünüm penceresi seçin veya içine çift tıklayın.
     .viewport-scale-locked = Görünüm penceresinin görüntüsü kilitli; ölçeğini değiştirmek için kilidi açın.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Açık çizim yok. Bir çizim başlatmak için NEW veya OPEN komutunu kullanın.

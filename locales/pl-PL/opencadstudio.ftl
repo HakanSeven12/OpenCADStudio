@@ -2755,6 +2755,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" nie jest prawidłową nazwą warstwy (bez < > / \ " : ; ? * | , = `).
     .layer-name-taken = Warstwa o nazwie "__ocs_fmt_0__" już istnieje.
     .layer-transparency-range = Przezroczystość to liczba całkowita od 0 do 90.
+    .layer-new-vp-frozen = Nowa, zamrożona w każdej rzutni
+    .layer-objects-selected = Wybrano __ocs_fmt_0__ obiektów z zaznaczonych warstw.
     .viewport-scale-needs-viewport = Wybierz rzutnię lub kliknij w niej dwukrotnie, aby ustawić jej skalę.
     .viewport-scale-locked = Widok rzutni jest zablokowany; odblokuj go, aby zmienić skalę.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Żaden rysunek nie jest otwarty. Aby rozpocząć rysowanie, użyj NEW lub OPEN.

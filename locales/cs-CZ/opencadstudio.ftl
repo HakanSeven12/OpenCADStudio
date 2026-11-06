@@ -2760,6 +2760,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" není platný název hladiny (bez < > / \ " : ; ? * | , = `).
     .layer-name-taken = Hladina s názvem "__ocs_fmt_0__" již existuje.
     .layer-transparency-range = Průhlednost je celé číslo od 0 do 90.
+    .layer-new-vp-frozen = Nová, zmrazená ve všech výřezech
+    .layer-objects-selected = Vybráno __ocs_fmt_0__ objektů ve vybraných hladinách.
     .viewport-scale-needs-viewport = Vyberte výřez nebo do něj dvakrát klikněte, abyste nastavili jeho měřítko.
     .viewport-scale-locked = Zobrazení výřezu je zamčené; odemkněte jej, chcete-li změnit měřítko.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Žádný výkres není otevřený. Pro začátek použijte NEW nebo OPEN.

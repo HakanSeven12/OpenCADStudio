@@ -529,6 +529,21 @@ impl OpenCADStudio {
             &msg,
             Message::ViewportMove(_) | Message::PaneMove(_, _) | Message::CursorMoved(..)
         );
+        // A click in the drawing or typing a command hands the keys back
+        // from the Layer manager's table.
+        if matches!(
+            &msg,
+            Message::ViewportLeftPressAt(_)
+                | Message::ViewportLeftPress
+                | Message::PanePress(_)
+                | Message::PanePressAt(..)
+                | Message::CommandInput(_)
+                | Message::CommandAppendChar(_)
+        ) {
+            if let Some(tab) = self.tabs.get_mut(self.active_tab) {
+                tab.layers.keys_active = false;
+            }
+        }
         // Pickers offer the catalog linetypes the drawing lacks; the one
         // picked is loaded before it is assigned.
         if let Message::LayerLinetypeSet(name)
@@ -825,6 +840,19 @@ impl OpenCADStudio {
         if self.snap_override_popup.is_some() {
             if let Some(task) = self.intercept_snap_override_key(&msg) {
                 return task;
+            }
+        }
+        // After a click in the Layer manager's table, ↑/↓ move through its
+        // rows (#2610).
+        if let Message::ArrowKeyPressed {
+            direction: direction @ (crate::app::ArrowKey::Up | crate::app::ArrowKey::Down),
+            extend_selection,
+            ..
+        } = &msg
+        {
+            let down = matches!(direction, crate::app::ArrowKey::Down);
+            if self.layer_manager_arrow(down, *extend_selection) {
+                return Task::none();
             }
         }
         // With Dynamic Input on, Down opens the running command's options at
@@ -5425,6 +5453,10 @@ impl OpenCADStudio {
 
             Message::LayerNew => self.on_layer_new(),
 
+            Message::LayerNewVpFrozen => self.on_layer_new_with(true),
+
+            Message::LayerMenu(name, action) => self.on_layer_menu(name, action),
+
             Message::LayerDelete => self.on_layer_delete(),
 
             Message::LayerDeleteConfirm => self.on_layer_delete_confirm(),
@@ -5465,6 +5497,7 @@ impl OpenCADStudio {
                     panel.selected_multi = vec![idx];
                 }
                 panel.selected = Some(idx);
+                panel.keys_active = true;
                 Task::none()
             }
 
@@ -10502,6 +10535,9 @@ impl OpenCADStudio {
             Message::ShortcutPressed(key) => {
                 if key == "ESCAPE" && self.cancel_layer_manager_edit() {
                     return Task::none();
+                }
+                if let Some(task) = self.layer_manager_key(&key) {
+                    return task;
                 }
                 if let Some(task) = self.quick_calc_shortcut(&key) {
                     return task;

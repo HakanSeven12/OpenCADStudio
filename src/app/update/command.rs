@@ -1614,7 +1614,21 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_layer_new(&mut self) -> Task<Message> {
+        self.on_layer_new_with(false)
+    }
+
+    /// A new layer, taking its look from the selected layer (colour,
+    /// linetype, lineweight, transparency, plot) or the defaults without one
+    /// (#2610); `frozen_in_viewports` also freezes it in every layout
+    /// viewport. One undo step either way.
+    pub(super) fn on_layer_new_with(&mut self, frozen_in_viewports: bool) -> Task<Message> {
         let i = self.active_tab;
+        let template = self.tabs[i]
+            .layers
+            .selected
+            .and_then(|row| self.tabs[i].layers.layers.get(row))
+            .and_then(|row| self.tabs[i].scene.document.layers.get(&row.name))
+            .cloned();
         let mut n = 1;
         let new_name = loop {
             let candidate = format!("Layer{}", n);
@@ -1628,11 +1642,33 @@ impl OpenCADStudio {
         // A layer needs a real handle or it is dropped on a DWG save
         // (the format is handle-based; issue #67).
         let mut dl = DocLayer::new(&new_name);
+        if let Some(template) = template {
+            dl.color = template.color;
+            dl.color_name = template.color_name.clone();
+            dl.book_name = template.book_name.clone();
+            dl.line_type = template.line_type.clone();
+            dl.line_weight = template.line_weight;
+            dl.transparency = template.transparency;
+            dl.is_plottable = template.is_plottable;
+        }
         // `allocate_handle` advances the seed so the layer gets a
         // unique handle; the non-advancing `next_handle` getter hands
         // out the same value twice and the later object overwrites it.
         dl.handle = self.tabs[i].scene.document.allocate_handle();
+        let layer_handle = dl.handle;
         let _ = self.tabs[i].scene.document.layers.add(dl);
+        if frozen_in_viewports {
+            for entity in self.tabs[i].scene.document.entities_mut() {
+                if let document::EntityType::Viewport(vp) = entity {
+                    if !vp.frozen_layers.contains(&layer_handle) {
+                        vp.frozen_layers.push(layer_handle);
+                    }
+                }
+            }
+            self.tabs[i]
+                .scene
+                .invalidate_layer_visibility(&[new_name.clone()]);
+        }
         self.tabs[i].dirty = true;
         let doc_layers = self.tabs[i].scene.document.layers.clone();
         let vp_info = self.tabs[i].scene.viewport_list();
@@ -1887,6 +1923,131 @@ impl OpenCADStudio {
         self.tabs[i].layers.edit_buf.clear();
         self.refresh_layer_panel();
         Task::none()
+    }
+
+    /// A layer row's right-click menu. A row outside the selection becomes
+    /// the selection first, as a click would.
+    pub(super) fn on_layer_menu(
+        &mut self,
+        name: String,
+        action: crate::ui::window::layers::LayerMenuAction,
+    ) -> Task<Message> {
+        use crate::ui::window::layers::LayerMenuAction as A;
+        let i = self.active_tab;
+        let Some(idx) = self.layer_panel_index(i, &name) else {
+            return Task::none();
+        };
+        let panel = &mut self.tabs[i].layers;
+        panel.keys_active = true;
+        if !panel.selected_multi.contains(&idx) {
+            panel.selected_multi = vec![idx];
+        }
+        panel.selected = Some(idx);
+        match action {
+            A::SetCurrent => self.on_layer_set_current(),
+            A::New => self.on_layer_new(),
+            A::Rename => self.update(Message::LayerRenameStart(name)),
+            A::Delete => self.on_layer_delete(),
+            A::SelectAll => {
+                let panel = &mut self.tabs[i].layers;
+                panel.selected_multi = panel.visible_indices();
+                Task::none()
+            }
+            A::DeselectAll => {
+                let panel = &mut self.tabs[i].layers;
+                panel.selected = None;
+                panel.selected_multi.clear();
+                Task::none()
+            }
+            A::SelectObjects => {
+                let layers = self.tabs[i].layers.selected_names();
+                let count = self.tabs[i].scene.select_objects_on_layers(&layers);
+                self.command_line.push_output(
+                    crate::tf!("{} object(s) on the selected layers are selected.", count).as_ref(),
+                );
+                self.refresh_properties();
+                Task::none()
+            }
+            A::NewGroup => self.update(Message::LayerGroupNew),
+            A::AddToGroup(group) => self.update(Message::LayerGroupAdd(group)),
+            A::RemoveFromGroup => self.update(Message::LayerGroupRemove),
+        }
+    }
+
+    /// Keys for the Layer manager's table after a click in it: ↑/↓ move
+    /// (Shift extends), Ctrl+A selects all, Del deletes, F2 renames and Esc
+    /// clears the selection. `None` leaves the key to the rest of the app.
+    pub(super) fn layer_manager_key(&mut self, key: &str) -> Option<Task<Message>> {
+        let i = self.active_tab;
+        let panel = &self.tabs[i].layers;
+        if !panel.keys_active
+            || panel.editing.is_some()
+            || panel.transparency_edit.is_some()
+            || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
+        {
+            return None;
+        }
+        match key {
+            "CTRL+A" => {
+                let panel = &mut self.tabs[i].layers;
+                panel.selected_multi = panel.visible_indices();
+                Some(Task::none())
+            }
+            "DELETE" => Some(self.on_layer_delete()),
+            "F2" => {
+                let name = panel
+                    .selected
+                    .and_then(|row| panel.layers.get(row))?
+                    .name
+                    .clone();
+                Some(self.update(Message::LayerRenameStart(name)))
+            }
+            "ESCAPE" => {
+                let panel = &mut self.tabs[i].layers;
+                panel.selected = None;
+                panel.selected_multi.clear();
+                panel.keys_active = false;
+                Some(Task::none())
+            }
+            _ => None,
+        }
+    }
+
+    /// ↑/↓ in the Layer manager's table: the row above or below the anchor
+    /// among the rows shown; Shift extends the selection to it.
+    pub(super) fn layer_manager_arrow(&mut self, down: bool, extend: bool) -> bool {
+        let i = self.active_tab;
+        let panel = &self.tabs[i].layers;
+        if !panel.keys_active
+            || panel.editing.is_some()
+            || panel.transparency_edit.is_some()
+            || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
+        {
+            return false;
+        }
+        let rows = panel.visible_indices();
+        if rows.is_empty() {
+            return true;
+        }
+        let at = panel
+            .selected
+            .and_then(|row| rows.iter().position(|r| *r == row));
+        let next = match at {
+            Some(at) if down => rows[(at + 1).min(rows.len() - 1)],
+            Some(at) => rows[at.saturating_sub(1)],
+            None if down => rows[0],
+            None => rows[rows.len() - 1],
+        };
+        let panel = &mut self.tabs[i].layers;
+        if extend {
+            if !panel.selected_multi.contains(&next) {
+                panel.selected_multi.push(next);
+            }
+        } else {
+            panel.selected_multi = vec![next];
+        }
+        panel.selected = Some(next);
+        true
     }
 
     /// Esc while the Layer manager is typing a name or a transparency drops
@@ -6325,6 +6486,151 @@ mod layer_name_target_tests {
         assert!(selected.contains(&"ALPHA".to_string()) && selected.contains(&"ZULU".to_string()));
     }
 
+    fn selected(app: &OpenCADStudio) -> Vec<String> {
+        let mut names = app.tabs[app.active_tab].layers.selected_names();
+        names.sort();
+        names
+    }
+
+    /// #2610: a click on a name selects; the keys then work the table until a
+    /// click in the drawing.
+    #[test]
+    fn layer_table_keys_after_a_click() {
+        use crate::app::ArrowKey;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        // Name order, ascending (the default): 0, ALPHA, ZULU.
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.update(Message::LayerSelect("0".into()));
+        assert!(app.tabs[i].layers.keys_active);
+        assert!(
+            app.tabs[i].layers.editing.is_none(),
+            "a click doesn't rename"
+        );
+        let arrow = |direction, extend_selection| Message::ArrowKeyPressed {
+            direction,
+            shortcut: String::new(),
+            extend_selection,
+        };
+        let _ = app.update(arrow(ArrowKey::Down, false));
+        assert_eq!(selected(&app), ["ALPHA"]);
+        let _ = app.update(arrow(ArrowKey::Down, true));
+        assert_eq!(selected(&app), ["ALPHA", "ZULU"]);
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(selected(&app).is_empty());
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::ShortcutPressed("CTRL+A".into()));
+        assert_eq!(selected(&app).len(), 3);
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::ShortcutPressed("F2".into()));
+        assert_eq!(app.tabs[i].layers.editing.as_deref(), Some("ZULU"));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        // A click in the drawing hands the keys back.
+        let _ = app.update(Message::ViewportLeftPress);
+        assert!(!app.tabs[i].layers.keys_active);
+        let _ = app.update(arrow(ArrowKey::Up, false));
+        assert_eq!(
+            selected(&app),
+            ["ZULU"],
+            "the arrow no longer moves the rows"
+        );
+    }
+
+    #[test]
+    fn layer_row_menu_acts_on_the_row_or_the_selection_it_is_in() {
+        use crate::ui::window::layers::LayerMenuAction;
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.layer = "ZULU".into();
+        let on_zulu = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        let _ = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(2.0, 0.0, 0.0),
+            )));
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        // A row outside the selection becomes the selection first.
+        let _ = app.update(Message::LayerMenu(
+            "ZULU".into(),
+            LayerMenuAction::SelectObjects,
+        ));
+        assert_eq!(selected(&app), ["ZULU"]);
+        assert_eq!(app.tabs[i].scene.selected.len(), 1);
+        assert!(app.tabs[i].scene.selected.contains(&on_zulu));
+        let _ = app.update(Message::LayerMenu(
+            "ZULU".into(),
+            LayerMenuAction::SelectAll,
+        ));
+        assert_eq!(selected(&app).len(), 3);
+        let _ = app.update(Message::LayerMenu(
+            "ZULU".into(),
+            LayerMenuAction::DeselectAll,
+        ));
+        assert!(selected(&app).is_empty());
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::SetCurrent,
+        ));
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_layer_name,
+            "ALPHA"
+        );
+    }
+
+    #[test]
+    fn a_new_layer_takes_the_selected_layers_look() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        {
+            let zulu = app.tabs[i].scene.document.layers.get_mut("ZULU").unwrap();
+            zulu.color = document::types::Color::Index(3);
+            zulu.line_type = "HIDDEN".into();
+            zulu.is_plottable = false;
+        }
+        app.sync_layer_panel(i);
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.on_layer_new();
+        let name = app.tabs[i].layers.edit_buf.clone();
+        let layer = app.tabs[i].scene.document.layers.get(&name).unwrap();
+        assert_eq!(layer.color, document::types::Color::Index(3));
+        assert_eq!(layer.line_type, "HIDDEN");
+        assert!(!layer.is_plottable);
+    }
+
+    #[test]
+    fn a_new_layer_can_start_frozen_in_every_viewport() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let viewport = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Viewport(Box::new(
+                document::entities::Viewport::new(),
+            )));
+        app.tabs[i].layers.selected = None;
+        app.tabs[i].layers.selected_multi.clear();
+        let _ = app.update(Message::LayerNewVpFrozen);
+        let name = app.tabs[i].layers.edit_buf.clone();
+        let handle = app.tabs[i].scene.document.layers.get(&name).unwrap().handle;
+        let Some(document::EntityType::Viewport(vp)) =
+            app.tabs[i].scene.document.get_entity(viewport)
+        else {
+            panic!("the viewport stays");
+        };
+        assert!(vp.frozen_layers.contains(&handle));
+        app.undo_active_tab();
+        assert!(
+            !app.tabs[i].scene.document.layers.contains(&name),
+            "one undo step"
+        );
+    }
+
     #[test]
     fn plot_toggle_keeps_the_row_order_like_the_other_toggles() {
         let mut app = app_with_zulu_alpha();
@@ -6918,11 +7224,7 @@ pub(super) fn layer_rename_problem(
     None
 }
 
-/// Layers the Layer manager never deletes: "0", Defpoints, the current layer
-/// and a layer that belongs to an xref (`XREF|name`).
+/// Layers the Layer manager never deletes; the rule lives with the table.
 pub(super) fn layer_is_protected(name: &str, current: &str) -> bool {
-    name == "0"
-        || name.eq_ignore_ascii_case("Defpoints")
-        || name.eq_ignore_ascii_case(current)
-        || name.contains('|')
+    crate::ui::window::layers::layer_is_protected(name, current)
 }

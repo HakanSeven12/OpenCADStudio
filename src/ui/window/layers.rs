@@ -166,6 +166,32 @@ pub fn move_column(col: LayerSortCol, step: i8) {
     });
 }
 
+/// What a layer row's right-click menu does. The menu has one level: a
+/// choice with options lists them under it, inside the menu (#2610).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LayerMenuAction {
+    SetCurrent,
+    New,
+    Rename,
+    Delete,
+    SelectAll,
+    DeselectAll,
+    /// Select the drawing's objects on the selected layers.
+    SelectObjects,
+    NewGroup,
+    AddToGroup(String),
+    RemoveFromGroup,
+}
+
+/// Layers the Layer manager never deletes: "0", Defpoints, the current layer
+/// and a layer that belongs to an xref (`XREF|name`).
+pub fn layer_is_protected(name: &str, current: &str) -> bool {
+    name == "0"
+        || name.eq_ignore_ascii_case("Defpoints")
+        || name.eq_ignore_ascii_case(current)
+        || name.contains('|')
+}
+
 // ── Row-height-derived constants ─────────────────────────────────────────
 /// SVG icon size inside a layer-table cell.
 const ICON_SZ: f32 = ROW_H * 0.62; // ≈16 px at ROW_H=26
@@ -238,6 +264,9 @@ pub struct LayerPanel {
     /// Transparency being typed: (layer name, text). Enter or leaving the
     /// field applies it as one undo step; Esc drops it.
     pub transparency_edit: Option<(String, String)>,
+    /// The last click was in the table, so ↑/↓, Ctrl+A, Del, F2 and Esc act
+    /// on its rows. A click in the drawing or typing a command ends it.
+    pub keys_active: bool,
     pub current_layer: String,
     pub linetype_items: Vec<LinetypeItem>,
     /// Row whose color swatch is open. Name-keyed for the same reason (#44).
@@ -271,6 +300,7 @@ impl Default for LayerPanel {
             editing: None,
             edit_buf: String::new(),
             transparency_edit: None,
+            keys_active: false,
             current_layer: "0".to_string(),
             linetype_items: vec![LinetypeItem {
                 name: "Continuous".into(),
@@ -595,25 +625,39 @@ impl LayerPanel {
     ) -> Element<'_, Message> {
         // A viewport the columns do not list yet shows them all.
         let active_vp = active_vp.filter(|h| self.vp_cols.iter().any(|vp| vp.handle == *h));
-        let has_sel = self.selected.is_some();
-        let sel_is_zero = self
-            .selected
-            .map(|i| self.layers.get(i).map(|l| l.name == "0").unwrap_or(false))
-            .unwrap_or(false);
+        // Delete is off when every selected layer is one that can't go;
+        // Set Current is off for the current layer and a frozen one (#2610).
+        let can_delete = self
+            .selected_names()
+            .iter()
+            .any(|name| !layer_is_protected(name, &self.current_layer));
         let can_set_current = self
             .selected
             .and_then(|i| self.layers.get(i))
-            .is_some_and(|layer| layer.name != self.current_layer);
+            .is_some_and(|layer| layer.name != self.current_layer && !layer.frozen);
+
+        // In a layout with viewports, a new layer can start frozen in all of
+        // them, so it shows only in the viewports that thaw it.
+        let new_vp_frozen: Element<'_, Message> = if self.vp_cols.is_empty() {
+            iced::widget::Space::new().width(0).into()
+        } else {
+            toolbar_btn(
+                crate::ui::icons::PLUS,
+                t!("New, frozen in every viewport"),
+                Message::LayerNewVpFrozen,
+            )
+        };
 
         // ── Toolbar ───────────────────────────────────────────────────────
         let toolbar = container(
             row![
                 toolbar_btn(crate::ui::icons::PLUS, t!("New"), Message::LayerNew),
+                new_vp_frozen,
                 toolbar_btn_cond(
                     crate::ui::icons::TRASH,
                     t!("Delete"),
                     Message::LayerDelete,
-                    has_sel && !sel_is_zero,
+                    can_delete,
                 ),
                 toolbar_btn_cond(
                     crate::ui::icons::CHECK,
@@ -731,7 +775,7 @@ impl LayerPanel {
                 (None, None)
             };
 
-            rows_col = rows_col.push(layer_row(
+            let row = layer_row(
                 i,
                 layer,
                 is_sel,
@@ -745,7 +789,18 @@ impl LayerPanel {
                 &self.vp_cols,
                 active_vp,
                 name_col_w,
-            ));
+            );
+            let (name, groups, in_group) = (
+                layer.name.clone(),
+                self.groups
+                    .iter()
+                    .map(|(g, _)| g.clone())
+                    .collect::<Vec<_>>(),
+                self.group.is_some(),
+            );
+            rows_col = rows_col.push(iced_aw::ContextMenu::new(row, move || {
+                row_menu(&name, &groups, in_group)
+            }));
         }
 
         let table = scrollable(rows_col)
@@ -1077,22 +1132,26 @@ fn layer_row<'a>(
         let name_budget = ((name_col_w / 6.0) as usize).max(8);
         // One line, cut at the cell: the glyph estimate can run over a narrow
         // column, and a wrapped name spilled into the rows below (#2251).
-        let name_btn = button(
-            text(crate::ui::text_util::elide(&layer.name, name_budget))
-                .size(FONT_SZ)
-                .wrapping(iced::widget::text::Wrapping::None),
+        // A click selects the row like the rest of it (Ctrl/Shift extend);
+        // a double click or F2 renames (#2610).
+        let name_btn = mouse_area(
+            container(
+                text(crate::ui::text_util::elide(&layer.name, name_budget))
+                    .size(FONT_SZ)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .clip(true)
+            .padding(Padding {
+                top: COMBO_PAD_V,
+                bottom: COMBO_PAD_V,
+                left: 4.0,
+                right: 4.0,
+            })
+            .height(Length::Fixed(ROW_H))
+            .width(Length::Fixed(name_col_w)),
         )
-        .clip(true)
-        .on_press(Message::LayerRenameStart(lname.clone()))
-        .style(cell_button_style(is_selected, index))
-        .padding(Padding {
-            top: COMBO_PAD_V,
-            bottom: COMBO_PAD_V,
-            left: 4.0,
-            right: 4.0,
-        })
-        .height(Length::Fixed(ROW_H))
-        .width(Length::Fixed(name_col_w));
+        .on_press(Message::LayerSelect(lname.clone()))
+        .on_double_click(Message::LayerRenameStart(lname.clone()));
         // When the name is truncated, reveal the full text on hover so the
         // user can still read it without widening the column.
         if layer.name.chars().count() > name_budget {
@@ -1214,10 +1273,15 @@ fn layer_row<'a>(
     }
 
     let mut row_content = row![
-        container(status_dot)
-            .width(50)
-            .align_x(iced::Center)
-            .align_y(iced::Center),
+        // A double click on the status makes the layer current.
+        mouse_area(
+            container(status_dot)
+                .width(50)
+                .height(Length::Fixed(ROW_H))
+                .align_x(iced::Center)
+                .align_y(iced::Center),
+        )
+        .on_double_click(Message::LayerSetCurrent),
         name_cell,
         iced::widget::Space::new().width(2),
     ]
@@ -1328,6 +1392,95 @@ fn layer_row<'a>(
             .width(Fill),
     )
     .on_press(Message::LayerSelect(lname))
+    .into()
+}
+
+/// A layer row's right-click menu. One level: the groups to add to are listed
+/// under their heading, inside the menu.
+fn row_menu(name: &str, groups: &[String], in_group: bool) -> Element<'static, Message> {
+    let entry = |label: Cow<'static, str>, action: LayerMenuAction, indent: f32| {
+        button(text(label).size(FONT_SZ))
+            .width(Fill)
+            .padding(Padding {
+                top: 4.0,
+                bottom: 4.0,
+                left: 12.0 + indent,
+                right: 12.0,
+            })
+            .on_press(Message::LayerMenu(name.to_string(), action))
+            .style(|theme: &Theme, status| {
+                let mut style = button::text(theme, status);
+                if matches!(status, button::Status::Hovered) {
+                    style.background = Some(Background::Color(theme.palette().primary.base.color));
+                    style.text_color = theme.palette().primary.base.text;
+                }
+                style
+            })
+            .into()
+    };
+    let separator = || {
+        container(iced::widget::Space::new())
+            .height(1)
+            .width(Fill)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.neutral.color)),
+                ..Default::default()
+            })
+            .into()
+    };
+    let mut items: Vec<Element<'static, Message>> = vec![
+        entry(t!("Set Current"), LayerMenuAction::SetCurrent, 0.0),
+        entry(t!("New"), LayerMenuAction::New, 0.0),
+        entry(t!("Rename"), LayerMenuAction::Rename, 0.0),
+        entry(t!("Delete"), LayerMenuAction::Delete, 0.0),
+        separator(),
+        entry(t!("Select All"), LayerMenuAction::SelectAll, 0.0),
+        entry(t!("Deselect All"), LayerMenuAction::DeselectAll, 0.0),
+        entry(t!("Select Objects"), LayerMenuAction::SelectObjects, 0.0),
+        separator(),
+        entry(
+            crate::tr!("layer-groups", "new-group").into(),
+            LayerMenuAction::NewGroup,
+            0.0,
+        ),
+    ];
+    if !groups.is_empty() {
+        items.push(
+            text(crate::tr!("layer-groups", "add-to"))
+                .size(FONT_SZ)
+                .style(muted_style)
+                .into(),
+        );
+        for group in groups {
+            items.push(entry(
+                Cow::Owned(group.clone()),
+                LayerMenuAction::AddToGroup(group.clone()),
+                12.0,
+            ));
+        }
+    }
+    if in_group {
+        items.push(entry(
+            crate::tr!("layer-groups", "remove").into(),
+            LayerMenuAction::RemoveFromGroup,
+            0.0,
+        ));
+    }
+    container(
+        iced::widget::Column::with_children(items)
+            .spacing(1)
+            .width(Length::Fixed(220.0)),
+    )
+    .padding(4)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        border: Border {
+            color: theme.palette().background.neutral.color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    })
     .into()
 }
 

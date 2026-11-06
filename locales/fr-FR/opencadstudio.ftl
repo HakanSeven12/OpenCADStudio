@@ -2756,6 +2756,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" n'est pas un nom de calque valide (sans < > / \ " : ; ? * | , = `).
     .layer-name-taken = Un calque nommé "__ocs_fmt_0__" existe déjà.
     .layer-transparency-range = La transparence est un nombre entier de 0 à 90.
+    .layer-new-vp-frozen = Nouveau, gelé dans toutes les fenêtres
+    .layer-objects-selected = __ocs_fmt_0__ objet(s) des calques sélectionnés sont sélectionnés.
     .viewport-scale-needs-viewport = Sélectionnez une fenêtre ou double-cliquez dedans pour définir son échelle.
     .viewport-scale-locked = L'affichage de la fenêtre est verrouillé ; déverrouillez-le pour changer son échelle.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Aucun dessin ouvert. Utilisez NEW ou OPEN pour commencer un dessin.

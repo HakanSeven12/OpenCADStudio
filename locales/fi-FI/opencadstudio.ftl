@@ -2755,6 +2755,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" ei ole kelvollinen tason nimi (ei merkkejä < > / \ " : ; ? * | , = `).
     .layer-name-taken = Taso nimeltä "__ocs_fmt_0__" on jo olemassa.
     .layer-transparency-range = Läpinäkyvyys on kokonaisluku väliltä 0–90.
+    .layer-new-vp-frozen = Uusi, jäädytetty kaikissa näkymäikkunoissa
+    .layer-objects-selected = Valituilta tasoilta valittiin __ocs_fmt_0__ objektia.
     .viewport-scale-needs-viewport = Valitse näkymäikkuna tai kaksoisnapsauta sen sisään asettaaksesi sen mittakaavan.
     .viewport-scale-locked = Näkymäikkunan näyttö on lukittu; avaa lukitus muuttaaksesi mittakaavaa.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Piirustus ei ole auki. Käytä NEW tai OPEN piirtämisen aloittamiseen.

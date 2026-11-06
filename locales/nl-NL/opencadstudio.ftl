@@ -2756,6 +2756,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" is geen geldige laagnaam (zonder < > / \ " : ; ? * | , = `).
     .layer-name-taken = Er bestaat al een laag met de naam "__ocs_fmt_0__".
     .layer-transparency-range = Transparantie is een geheel getal van 0 tot 90.
+    .layer-new-vp-frozen = Nieuw, bevroren in elke viewport
+    .layer-objects-selected = __ocs_fmt_0__ object(en) op de geselecteerde lagen zijn geselecteerd.
     .viewport-scale-needs-viewport = Selecteer een viewport of dubbelklik erin om de schaal in te stellen.
     .viewport-scale-locked = De weergave van de viewport is vergrendeld; ontgrendel deze om de schaal te wijzigen.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Geen tekening geopend. Gebruik NEW of OPEN om een tekening te starten.

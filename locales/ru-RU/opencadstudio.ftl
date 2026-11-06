@@ -2759,6 +2759,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" — недопустимое имя слоя (без < > / \ " : ; ? * | , = `).
     .layer-name-taken = Слой с именем "__ocs_fmt_0__" уже существует.
     .layer-transparency-range = Прозрачность — целое число от 0 до 90.
+    .layer-new-vp-frozen = Новый, заморожен во всех видовых экранах
+    .layer-objects-selected = Выбрано объектов на выбранных слоях: __ocs_fmt_0__.
     .viewport-scale-needs-viewport = Выберите видовой экран или дважды щёлкните внутри него, чтобы задать масштаб.
     .viewport-scale-locked = Отображение видового экрана заблокировано; разблокируйте его, чтобы изменить масштаб.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Нет открытого чертежа. Выполните NEW или OPEN, чтобы начать работу.

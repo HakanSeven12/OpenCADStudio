@@ -2744,6 +2744,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" मान्य लेयर नाम नहीं है (< > / \ " : ; ? * | , = ` के बिना)।
     .layer-name-taken = "__ocs_fmt_0__" नाम की लेयर पहले से मौजूद है।
     .layer-transparency-range = पारदर्शिता 0 से 90 तक की पूर्ण संख्या है।
+    .layer-new-vp-frozen = नई, हर व्यूपोर्ट में फ़्रीज़
+    .layer-objects-selected = चुनी गई लेयरों के __ocs_fmt_0__ ऑब्जेक्ट चुने गए।
     .viewport-scale-needs-viewport = स्केल सेट करने के लिए व्यूपोर्ट चुनें या उसमें डबल-क्लिक करें।
     .viewport-scale-locked = व्यूपोर्ट का डिस्प्ले लॉक है; स्केल बदलने के लिए इसे अनलॉक करें।
     .no-drawing-open-use-new-or-open-to-start-a-dra = कोई ड्रॉइंग खुली नहीं है। ड्रॉइंग शुरू करने के लिए NEW या OPEN का उपयोग करें।

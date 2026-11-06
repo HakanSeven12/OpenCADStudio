@@ -4260,6 +4260,10 @@ pub enum Message {
     /// Toggle per-viewport freeze: (layer_name, vp_col_index)
     LayerToggleVpFreeze(String, usize),
     LayerNew,
+    /// A new layer, frozen in every layout viewport.
+    LayerNewVpFrozen,
+    /// A layer row's right-click menu: (the row's layer, what to do).
+    LayerMenu(String, crate::ui::window::layers::LayerMenuAction),
     LayerDelete,
     /// Confirm deleting a non-empty layer (erases its objects too).
     LayerDeleteConfirm,

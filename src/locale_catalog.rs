@@ -18,6 +18,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "\"{new}\" isn't a valid layer name (no < > / \\ \" : ; ? * | , = `)." => Some(("command", "layer-name-invalid")),
         "A layer named \"{new}\" already exists." => Some(("command", "layer-name-taken")),
         "Transparency is a whole number from 0 to 90." => Some(("command", "layer-transparency-range")),
+        "New, frozen in every viewport" => Some(("command", "layer-new-vp-frozen")),
+        "{} object(s) on the selected layers are selected." => Some(("command", "layer-objects-selected")),
         "An action needs at least one target." => Some(("block-action-targets", "empty")),
         "Select supported targets belonging to this block." => Some(("block-action-targets", "invalid")),
         "Select all objects driven by the linked parameters and ensure their actions precede the Flip." => Some(("block-action-targets", "flip-invalid")),

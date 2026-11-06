@@ -2756,6 +2756,8 @@ command =
     .layer-name-invalid = "__ocs_fmt_0__" ບໍ່ແມ່ນຊື່ຊັ້ນງານທີ່ຖືກຕ້ອງ (ຫ້າມໃຊ້ < > / \ " : ; ? * | , = `).
     .layer-name-taken = ມີຊັ້ນງານຊື່ "__ocs_fmt_0__" ແລ້ວ.
     .layer-transparency-range = ຄວາມໂປ່ງໃສແມ່ນຈຳນວນເຕັມແຕ່ 0 ຫາ 90.
+    .layer-new-vp-frozen = ໃໝ່, ແຊ່ແຂງໃນທຸກວິວພອດ
+    .layer-objects-selected = ເລືອກ __ocs_fmt_0__ ວັດຖຸໃນຊັ້ນງານທີ່ເລືອກແລ້ວ.
     .viewport-scale-needs-viewport = ເລືອກວິວພອດ ຫຼື ຄລິກສອງເທື່ອເຂົ້າໄປເພື່ອຕັ້ງມາດຕາສ່ວນ.
     .viewport-scale-locked = ການສະແດງຜົນຂອງວິວພອດຖືກລັອກ; ປົດລັອກເພື່ອປ່ຽນມາດຕາສ່ວນ.
     .no-drawing-open-use-new-or-open-to-start-a-dra = ບໍ່ມີແບບແຕ້ມເປີດຢູ່. ໃຊ້ NEW ຫຼື OPEN ເພື່ອເລີ່ມຕົ້ນແບບແຕ້ມ.

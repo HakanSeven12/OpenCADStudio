@@ -2746,6 +2746,8 @@ command =
     .layer-name-invalid = 「__ocs_fmt_0__」は有効なレイヤー名ではありません（< > / \ " : ; ? * | , = ` は使用できません）。
     .layer-name-taken = 「__ocs_fmt_0__」という名前のレイヤーは既に存在します。
     .layer-transparency-range = 透過性は 0～90 の整数です。
+    .layer-new-vp-frozen = 新規 (すべてのビューポートでフリーズ)
+    .layer-objects-selected = 選択したレイヤー上の __ocs_fmt_0__ 個のオブジェクトを選択しました。
     .viewport-scale-needs-viewport = 尺度を設定するにはビューポートを選択するか、ビューポート内をダブルクリックしてください。
     .viewport-scale-locked = ビューポートの表示はロックされています。尺度を変更するにはロックを解除してください。
     .no-drawing-open-use-new-or-open-to-start-a-dra = 図面が開いていません。NEW または OPEN で開始してください。

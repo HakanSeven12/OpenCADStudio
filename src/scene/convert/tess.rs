@@ -763,9 +763,9 @@ fn tessellate_entity_inner(
     // World units per screen pixel for LOD culling. `None` = no LOD.
     world_per_pixel: Option<f32>,
     // True only when tessellating content shown inside a paper-space viewport.
-    // Retained through recursive INSERT expansion; PSLTSCALE itself is applied
-    // by the viewport's GPU uniform so it never changes resident wire content.
-    _paper_space: bool,
+    // PSLTSCALE itself is applied by the viewport's GPU uniform so it never
+    // changes resident wire content.
+    paper_space: bool,
     // The scene's reference-only designation set (API v9): drives the
     // `WireModel::reference_only` stamp for dimensions' synthesis paths that
     // bypass the wrapper's post-stamp.
@@ -1458,6 +1458,20 @@ fn tessellate_entity_inner(
     // wire per arc plus one wire of its straight segments, so it walks its own
     // ordered path (`polyline_lt_path`); every other entity is one wire.
     if let Some(clt) = crate::io::linetypes::resolve_complex_lt(document, lt_name) {
+        // A complex linetype is walked here on the CPU, so it never sees the
+        // wire shader's model-space `linetype_scale` uniform. Bake the same
+        // ratio in: outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the
+        // Model layout and 1.0 on a paper sheet, exactly when the shader
+        // applies it, and MSLTSCALE turns it off in both.
+        let complex_lt_anno = if !paper_space
+            && anno_scale.is_finite()
+            && anno_scale > 1e-9
+            && crate::scene::annotative::model_linetypes_follow_annotation(document)
+        {
+            anno_scale
+        } else {
+            1.0
+        };
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex
@@ -1515,7 +1529,7 @@ fn tessellate_entity_inner(
                     &base.name,
                     &local,
                     &clt,
-                    (lt_scale * pslt_factor).max(1e-4),
+                    (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
                     entity_color,
                     sel,
                     base.line_weight_px,

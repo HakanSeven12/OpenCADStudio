@@ -8,6 +8,7 @@ use super::{Message, OpenCADStudio, QSelectPropertyChoice, QSelectResult, QSelec
 use crate::filter::{Condition, Filter, Group, Item, Match, Op};
 use document::Handle;
 use iced::Task;
+use std::borrow::Cow;
 
 /// A row of the editor: one at the root, or one inside a group.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,6 +62,10 @@ pub enum FilterMsg {
     SaveAsCommit,
     /// Delete the loaded saved filter from the drawing.
     DeleteSaved,
+    /// Layer mode: the name the layer filter is saved under.
+    LayerName(String),
+    /// Layer mode: keep the filter as a LAYERFILTER filter.
+    SaveLayerFilter,
 }
 
 /// What Quick Select hands over to FILTER.
@@ -95,6 +100,9 @@ pub struct FilterDialogState {
     pub saved_name: Option<String>,
     /// A new name being typed for Save as.
     pub save_as: Option<String>,
+    /// Editing a layer filter for the Layer manager (#2610): the name it is
+    /// saved under. Rows read layer properties, and there is no type.
+    pub layer_filter: Option<String>,
 }
 
 impl FilterDialogState {
@@ -179,6 +187,10 @@ impl OpenCADStudio {
                 return Task::none();
             }
             FilterMsg::Apply => return self.filter_apply(),
+            FilterMsg::SaveLayerFilter => {
+                self.save_layer_filter();
+                return Task::none();
+            }
             FilterMsg::Saved(name) => {
                 let i = self.active_tab;
                 if let Some((saved, filter)) =
@@ -324,13 +336,15 @@ impl OpenCADStudio {
                 state.focus = if state.focus == bucket { None } else { bucket };
             }
             FilterMsg::SaveAs(name) => state.save_as = name,
+            FilterMsg::LayerName(name) => state.layer_filter = Some(name),
             FilterMsg::Open(_)
             | FilterMsg::Close
             | FilterMsg::Apply
             | FilterMsg::Saved(_)
             | FilterMsg::Save
             | FilterMsg::SaveAsCommit
-            | FilterMsg::DeleteSaved => {}
+            | FilterMsg::DeleteSaved
+            | FilterMsg::SaveLayerFilter => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);
@@ -369,10 +383,103 @@ impl OpenCADStudio {
             saved: self.saved_filter_names(i),
             saved_name: None,
             save_as: None,
+            layer_filter: None,
         });
         self.reset_modal_geometry();
         self.filter_refresh_scope();
         self.filter_refresh_live();
+    }
+
+    /// FILTER over the layers, for a Layer manager filter named `name`.
+    pub(super) fn filter_open_layers(&mut self, name: String, filter: Filter) {
+        self.filter_open(Some(FilterSeed {
+            filter,
+            scope: QSelectScope::CurrentSpace,
+            result: QSelectResult::New,
+            invert: false,
+            show: false,
+        }));
+        if let Some(state) = self.filter_dialog.as_mut() {
+            state.layer_filter = Some(name);
+        }
+        self.filter_refresh_scope();
+        self.filter_refresh_live();
+    }
+
+    /// The layer properties the editor offers, for the layer mode.
+    fn layer_filter_properties(&self) -> Vec<QSelectPropertyChoice> {
+        use super::QSelectValueEditor as Editor;
+        let i = self.active_tab;
+        let mut linetypes = vec!["Continuous".to_string()];
+        linetypes.extend(
+            self.tabs[i]
+                .scene
+                .document
+                .line_types
+                .iter()
+                .map(|lt| lt.name.clone())
+                .filter(|name| !name.eq_ignore_ascii_case("Continuous")),
+        );
+        let yes_no = || Editor::Choice(vec!["1".into(), "0".into()]);
+        let choice = |field: &str, label: Cow<'static, str>, editor| QSelectPropertyChoice {
+            field: field.into(),
+            label: label.into_owned(),
+            editor,
+        };
+        vec![
+            choice("name", crate::t!("Name"), Editor::Text),
+            choice("description", crate::t!("Description"), Editor::Text),
+            choice("color", crate::t!("Color"), Editor::Number),
+            choice("linetype", crate::t!("Linetype"), Editor::Choice(linetypes)),
+            choice("on", crate::t!("On"), yes_no()),
+            choice("frozen", crate::t!("Freeze"), yes_no()),
+            choice("locked", crate::t!("Lock"), yes_no()),
+            choice("plot", crate::t!("Plot"), yes_no()),
+        ]
+    }
+
+    /// Keep the edited filter as a LAYERFILTER filter and show it in the
+    /// Layer manager's tree.
+    fn save_layer_filter(&mut self) {
+        let i = self.active_tab;
+        let Some(state) = self.filter_dialog.as_ref() else {
+            return;
+        };
+        let Some(name) = state
+            .layer_filter
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let filter = super::layer_filters::LayerFilter {
+            name: name.clone(),
+            conditions: Some(state.filter.clone()),
+            ..Default::default()
+        };
+        let matches = state.live_count;
+        match self
+            .layer_filters
+            .iter()
+            .position(|f| f.name.eq_ignore_ascii_case(&name))
+        {
+            Some(at) => self.layer_filters[at] = filter,
+            None => self.layer_filters.push(filter),
+        }
+        self.filter_dialog = None;
+        self.reset_modal_geometry();
+        self.command_line.push_output(
+            crate::tf!(
+                "LAYERFILTER: '{}' saved ({} layer(s) match).",
+                name,
+                matches
+            )
+            .as_ref(),
+        );
+        self.refresh_layer_counts();
+        self.tabs[i].layers.view = crate::ui::window::layers::TreeNode::Filter(name);
     }
 
     /// The scope's types and counts, and the properties of every type a row
@@ -382,6 +489,16 @@ impl OpenCADStudio {
         let Some(state) = self.filter_dialog.as_ref() else {
             return;
         };
+        if state.layer_filter.is_some() {
+            let properties = self.layer_filter_properties();
+            let count = self.tabs[i].scene.document.layers.iter().count();
+            if let Some(state) = self.filter_dialog.as_mut() {
+                state.types.clear();
+                state.properties = vec![(None, properties)];
+                state.candidate_count = count;
+            }
+            return;
+        }
         let scope = state.scope;
         let mut wanted: Vec<Option<String>> = vec![None];
         for item in &state.filter.items {
@@ -411,6 +528,13 @@ impl OpenCADStudio {
     }
 
     fn filter_load_properties(&mut self, type_name: Option<String>) {
+        if self
+            .filter_dialog
+            .as_ref()
+            .is_some_and(|state| state.layer_filter.is_some())
+        {
+            return;
+        }
         let i = self.active_tab;
         let Some(scope) = self.filter_dialog.as_ref().map(|s| s.scope) else {
             return;
@@ -435,6 +559,32 @@ impl OpenCADStudio {
             self.tabs[i].scene.set_filter_preview_highlights(&[]);
             return;
         };
+        if state.layer_filter.is_some() {
+            // The layers the filter takes, with their object counts.
+            let source = super::layer_filters::LayerProperties;
+            let counts = &self.tabs[i].layers.counts;
+            let layers: Vec<(String, usize)> = self.tabs[i]
+                .scene
+                .document
+                .layers
+                .iter()
+                .filter(|layer| !layer.name.starts_with('*'))
+                .filter(|layer| state.filter.matches(&source, *layer) != state.invert)
+                .map(|layer| {
+                    let objects = counts
+                        .get(&layer.name.to_lowercase())
+                        .map_or(0, |(n, _)| *n);
+                    (layer.name.clone(), objects)
+                })
+                .collect();
+            self.tabs[i].scene.set_filter_preview_highlights(&[]);
+            if let Some(state) = self.filter_dialog.as_mut() {
+                state.live_count = layers.len();
+                state.by_type.clear();
+                state.by_layer = layers;
+            }
+            return;
+        }
         let matches = self.tabs[i]
             .scene
             .filter_matches(state.scope, &state.filter, state.invert);
@@ -891,7 +1041,30 @@ mod view {
         } else {
             Space::new().width(Length::Fixed(140.0)).into()
         };
-        let value_cell: Element<'a, Message> = if has_property && condition.op != Op::Any {
+        let choices = condition.property.as_deref().and_then(|id| {
+            properties.iter().find_map(|p| match &p.editor {
+                super::super::QSelectValueEditor::Choice(options) if p.field == id => {
+                    Some(options.clone())
+                }
+                _ => None,
+            })
+        });
+        let value_cell: Element<'a, Message> = if !has_property || condition.op == Op::Any {
+            Space::new().width(Fill).into()
+        } else if let Some(options) = choices {
+            let selected = (!condition.value.is_empty()).then(|| condition.value.clone());
+            crate::ui::dropdown_list::pick_list(selected, options, |value: &String| {
+                match value.as_str() {
+                    "1" => t!("Yes").into_owned(),
+                    "0" => t!("No").into_owned(),
+                    other => other.to_string(),
+                }
+            })
+            .on_select(move |v| edit(FilterRowEdit::Value(v)))
+            .text_size(12)
+            .width(Fill)
+            .into()
+        } else if has_property {
             text_input("", &condition.value)
                 .on_input(move |v| edit(FilterRowEdit::Value(v)))
                 .size(12)
@@ -904,17 +1077,16 @@ mod view {
             .on_press(edit(FilterRowEdit::Remove))
             .style(button::text)
             .padding([4, 6]);
-        row![
-            not,
-            type_picker,
-            property_picker,
-            op_cell,
-            value_cell,
-            remove
-        ]
-        .spacing(6)
-        .align_y(iced::Alignment::Center)
-        .into()
+        let mut cells = row![not].spacing(6).align_y(iced::Alignment::Center);
+        if state.layer_filter.is_none() {
+            cells = cells.push(type_picker);
+        }
+        cells
+            .push(property_picker)
+            .push(op_cell)
+            .push(value_cell)
+            .push(remove)
+            .into()
     }
 
     pub(in crate::app) fn content<'a>(
@@ -1007,8 +1179,14 @@ mod view {
             .push(muted(t!("Saved in this drawing")));
 
         // ── Rows ──────────────────────────────────────────────────────────
+        let layers_mode = state.layer_filter.is_some();
+        let intro = if layers_mode {
+            t!("Layers that match")
+        } else {
+            t!("Select objects that match")
+        };
         let mut rows = column![row![
-            text(t!("Select objects that match")).size(12),
+            text(intro).size(12),
             match_picker(state.filter.root, |m| msg(FilterMsg::Root(m))),
         ]
         .spacing(8)
@@ -1128,16 +1306,26 @@ mod view {
                 .padding([3, 8]),
             ]
             .align_y(iced::Alignment::Center),
-            text(crate::tf!(
-                "{} of {} objects match",
-                state.live_count,
-                state.candidate_count
-            ))
+            text(if layers_mode {
+                crate::tf!(
+                    "{} of {} layers shown",
+                    state.live_count,
+                    state.candidate_count
+                )
+            } else {
+                crate::tf!(
+                    "{} of {} objects match",
+                    state.live_count,
+                    state.candidate_count
+                )
+            })
             .size(13),
-            muted(t!("By type")),
         ]
         .spacing(6)
         .width(Length::Fixed(240.0));
+        if !layers_mode {
+            live = live.push(muted(t!("By type")));
+        }
         for (t, n) in &state.by_type {
             live = live.push(bucket_line(
                 type_label(t),
@@ -1145,9 +1333,20 @@ mod view {
                 FilterBucket::Type(t.clone()),
             ));
         }
-        live = live.push(muted(t!("By layer")));
-        for (l, n) in &state.by_layer {
-            live = live.push(bucket_line(l.clone(), *n, FilterBucket::Layer(l.clone())));
+        if layers_mode {
+            // The layers themselves, with their object counts.
+            let mut names = column![].spacing(2);
+            for (l, n) in &state.by_layer {
+                names = names.push(
+                    row![text(l.clone()).size(11).width(Fill), muted(n.to_string())].spacing(6),
+                );
+            }
+            live = live.push(scrollable(names).height(Length::Fixed(260.0)));
+        } else {
+            live = live.push(muted(t!("By layer")));
+            for (l, n) in &state.by_layer {
+                live = live.push(bucket_line(l.clone(), *n, FilterBucket::Layer(l.clone())));
+            }
         }
         let live = container(live).padding(10).style(panel_style);
 
@@ -1185,24 +1384,51 @@ mod view {
         .spacing(10)
         .align_y(iced::Alignment::Center);
 
-        let body = column![
-            saved_row,
-            scope_row,
-            row![editor, live].spacing(12),
-            match problem {
-                Some(problem) =>
-                    text(problem)
-                        .size(11)
-                        .style(|theme: &Theme| iced::widget::text::Style {
-                            color: Some(theme.palette().danger.base.color),
-                        }),
-                None => text("").size(11),
-            },
-            footer,
-        ]
-        .spacing(10)
-        .width(sizing.width)
-        .height(sizing.height);
+        // Layer mode: the filter's name and Save filter instead.
+        let footer: Element<'a, Message> = match &state.layer_filter {
+            Some(name) => row![
+                text(t!("Filter name")).size(12),
+                text_input("", name)
+                    .on_input(|v| msg(FilterMsg::LayerName(v)))
+                    .on_submit(msg(FilterMsg::SaveLayerFilter))
+                    .size(12)
+                    .width(Length::Fixed(220.0)),
+                Space::new().width(Fill),
+                dialog_button(t!("Cancel"), msg(FilterMsg::Close), false),
+                dialog_button_styled_opt(
+                    t!("Save filter"),
+                    (!name.trim().is_empty() && problem.is_none())
+                        .then_some(msg(FilterMsg::SaveLayerFilter)),
+                    button::primary,
+                ),
+            ]
+            .spacing(10)
+            .align_y(iced::Alignment::Center)
+            .into(),
+            None => footer.into(),
+        };
+        let mut body = column![].spacing(10);
+        if !layers_mode {
+            body = body.push(saved_row).push(scope_row);
+        }
+        let body = body
+            .extend([
+                row![editor, live].spacing(12).into(),
+                match problem {
+                    Some(problem) => {
+                        text(problem)
+                            .size(11)
+                            .style(|theme: &Theme| iced::widget::text::Style {
+                                color: Some(theme.palette().danger.base.color),
+                            })
+                    }
+                    None => text("").size(11),
+                }
+                .into(),
+                footer,
+            ])
+            .width(sizing.width)
+            .height(sizing.height);
         container(body)
             .padding(16)
             .width(sizing.width)

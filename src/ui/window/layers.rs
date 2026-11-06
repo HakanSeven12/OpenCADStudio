@@ -252,6 +252,21 @@ impl TreeNode {
     }
 }
 
+/// What a filter tree node's right-click menu does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TreeAction {
+    On,
+    Off,
+    Freeze,
+    Thaw,
+    Lock,
+    Unlock,
+    /// A LAYERFILTER filter: open it in FILTER's editor.
+    Edit,
+    /// A LAYERFILTER filter: delete it; its layers stay.
+    Delete,
+}
+
 /// What a layer row's right-click menu does. The menu has one level: a
 /// choice with options lists them under it, inside the menu (#2610).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -504,13 +519,26 @@ impl LayerPanel {
         nodes
     }
 
+    /// The layers `node` holds, by name.
+    pub fn node_layers(&self, node: &TreeNode) -> Vec<String> {
+        self.layers
+            .iter()
+            .filter(|layer| self.in_node(node, layer))
+            .map(|layer| layer.name.clone())
+            .collect()
+    }
+
     /// Whether `layer` belongs to the node shown.
     fn in_view(&self, layer: &Layer) -> bool {
+        self.in_node(&self.view, layer)
+    }
+
+    fn in_node(&self, node: &TreeNode, layer: &Layer) -> bool {
         let named = |list: &[String]| {
             list.iter()
                 .any(|name| name.eq_ignore_ascii_case(&layer.name))
         };
-        match &self.view {
+        match node {
             TreeNode::All => true,
             TreeNode::Used => layer.objects > 0,
             TreeNode::Unused => layer.objects == 0,
@@ -567,22 +595,21 @@ impl LayerPanel {
             }
             let chosen = self.view == node;
             let label = node.label();
-            list = list.push(
-                button(
-                    text(label)
-                        .size(FONT_SZ)
-                        .wrapping(iced::widget::text::Wrapping::None),
-                )
-                .on_press(Message::LayerShow(node))
-                .style(crate::ui::style::form::button_style(chosen))
-                .padding(Padding {
-                    top: 3.0,
-                    bottom: 3.0,
-                    left: 6.0 + f32::from(depth) * 10.0,
-                    right: 6.0,
-                })
-                .width(Fill),
-            );
+            let entry = button(
+                text(label)
+                    .size(FONT_SZ)
+                    .wrapping(iced::widget::text::Wrapping::None),
+            )
+            .on_press(Message::LayerShow(node.clone()))
+            .style(crate::ui::style::form::button_style(chosen))
+            .padding(Padding {
+                top: 3.0,
+                bottom: 3.0,
+                left: 6.0 + f32::from(depth) * 10.0,
+                right: 6.0,
+            })
+            .width(Fill);
+            list = list.push(iced_aw::ContextMenu::new(entry, move || tree_menu(&node)));
         }
         container(scrollable(list).height(Length::Fill))
             .width(Length::Fixed(TREE_W))
@@ -999,6 +1026,13 @@ impl LayerPanel {
                     compact,
                 ),
                 iced::widget::Space::new().width(Length::Fill),
+                // The search text as a filter, edited with FILTER's rows.
+                toolbar_btn(
+                    crate::ui::icons::ST_FILTER,
+                    t!("Advanced…"),
+                    Message::LayerFilterEdit(None),
+                    compact,
+                ),
                 // Search box: filters rows by name as the user types (#343).
                 text_input(t!("Search…").as_ref(), &self.filter)
                     .on_input(Message::LayerManagerFilterChanged)
@@ -1830,6 +1864,54 @@ fn layer_row<'a>(
             .width(Fill),
     )
     .on_press(Message::LayerSelect(lname))
+    .into()
+}
+
+/// A filter tree node's right-click menu: one level (#2610).
+fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
+    let entry = |label: Cow<'static, str>, action: TreeAction| -> Element<'static, Message> {
+        button(text(label).size(FONT_SZ))
+            .width(Fill)
+            .padding([4, 12])
+            .on_press(Message::LayerTreeAction(node.clone(), action))
+            .style(|theme: &Theme, status| {
+                let mut style = button::text(theme, status);
+                if matches!(status, button::Status::Hovered) {
+                    style.background = Some(Background::Color(theme.palette().primary.base.color));
+                    style.text_color = theme.palette().primary.base.text;
+                }
+                style
+            })
+            .into()
+    };
+    let mut items: Vec<Element<'static, Message>> = Vec::new();
+    if matches!(node, TreeNode::Filter(_)) {
+        items.push(entry(t!("Edit..."), TreeAction::Edit));
+        items.push(entry(t!("Delete"), TreeAction::Delete));
+    }
+    items.extend([
+        entry(t!("Turn All Layers On"), TreeAction::On),
+        entry(t!("Turn all off"), TreeAction::Off),
+        entry(t!("Freeze all"), TreeAction::Freeze),
+        entry(t!("Thaw All Layers"), TreeAction::Thaw),
+        entry(t!("Lock all"), TreeAction::Lock),
+        entry(t!("Unlock all"), TreeAction::Unlock),
+    ]);
+    container(
+        iced::widget::Column::with_children(items)
+            .spacing(1)
+            .width(Length::Fixed(200.0)),
+    )
+    .padding(4)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        border: Border {
+            color: theme.palette().background.neutral.color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    })
     .into()
 }
 

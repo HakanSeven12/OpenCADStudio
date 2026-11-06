@@ -32,6 +32,10 @@ pub(in crate::app) struct LayerFilter {
     pub predicates: Vec<LayerPredicate>,
     /// Nested filters: when present, a layer must match one of them too.
     pub children: Vec<LayerFilter>,
+    /// Conditions made in the Layer manager's editor (FILTER's condition
+    /// editor over layer properties); used instead of the pattern and the
+    /// predicates when present.
+    pub conditions: Option<crate::filter::Filter>,
 }
 
 /// A layer as the shared filter engine reads it (#2610, #2611): the same
@@ -65,6 +69,9 @@ impl LayerFilter {
     /// The name pattern and the predicates as one all-filter.
     pub(in crate::app) fn to_filter(&self) -> crate::filter::Filter {
         use crate::filter::{Condition, Filter, Item, Match, Op};
+        if let Some(conditions) = &self.conditions {
+            return conditions.clone();
+        }
         let condition = |property: &str, value: String| {
             Item::Condition(Condition {
                 property: Some(property.to_string()),
@@ -195,6 +202,7 @@ impl OpenCADStudio {
             pattern,
             predicates: Vec::new(),
             children: Vec::new(),
+            conditions: None,
         };
         let matches = self.matching_layers(i, &filter).len();
         match self.find_layer_filter(name) {

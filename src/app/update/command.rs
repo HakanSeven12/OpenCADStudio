@@ -2135,6 +2135,99 @@ impl OpenCADStudio {
         self.tabs[i].layers.set_counts(counts, key);
     }
 
+    /// FILTER over the layers: the LAYERFILTER filter `name`, or a new one
+    /// starting from what the search box holds (#2610).
+    pub(super) fn on_layer_filter_edit(&mut self, name: Option<String>) -> Task<Message> {
+        use crate::filter::{Condition, Filter, Item, Match, Op};
+        let i = self.active_tab;
+        let (name, filter) = match name.and_then(|name| {
+            self.layer_filters
+                .iter()
+                .find(|f| f.name.eq_ignore_ascii_case(&name))
+                .map(|f| (f.name.clone(), f.to_filter()))
+        }) {
+            Some(found) => found,
+            None => {
+                let search = self.tabs[i].layers.filter.trim().to_string();
+                let condition = if search.is_empty() {
+                    Condition::default()
+                } else {
+                    // The search box finds names containing the text.
+                    let value = if search.contains(['*', '?', ',']) {
+                        search
+                    } else {
+                        format!("*{search}*")
+                    };
+                    Condition {
+                        property: Some("name".into()),
+                        op: Op::Eq,
+                        value,
+                        ..Default::default()
+                    }
+                };
+                (
+                    String::new(),
+                    Filter {
+                        root: Match::All,
+                        items: vec![Item::Condition(condition)],
+                    },
+                )
+            }
+        };
+        self.filter_open_layers(name, filter);
+        Task::none()
+    }
+
+    /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
+    /// filter, or switch all of a node's layers at once (one undo step; the
+    /// current layer is never frozen).
+    pub(super) fn on_layer_tree_action(
+        &mut self,
+        node: crate::ui::window::layers::TreeNode,
+        action: crate::ui::window::layers::TreeAction,
+    ) -> Task<Message> {
+        use crate::ui::window::layers::{TreeAction as A, TreeNode};
+        let i = self.active_tab;
+        match (&node, action) {
+            (TreeNode::Filter(name), A::Edit) => {
+                return self.on_layer_filter_edit(Some(name.clone()));
+            }
+            (TreeNode::Filter(name), A::Delete) => {
+                self.layer_filters
+                    .retain(|f| !f.name.eq_ignore_ascii_case(name));
+                if self.tabs[i].layers.view == node {
+                    self.tabs[i].layers.view = TreeNode::All;
+                }
+                self.refresh_layer_counts();
+                return Task::none();
+            }
+            (_, A::Edit | A::Delete) => return Task::none(),
+            _ => {}
+        }
+        let mut names = self.tabs[i].layers.node_layers(&node);
+        let current = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_layer_name
+            .clone();
+        if action == A::Freeze {
+            names.retain(|name| !name.eq_ignore_ascii_case(&current));
+        }
+        let label = format!("LAYER {action:?}").to_uppercase();
+        match action {
+            A::On => self.edit_layers(i, &label, &names, |layer| layer.turn_on()),
+            A::Off => self.edit_layers(i, &label, &names, |layer| layer.turn_off()),
+            A::Freeze => self.edit_layers(i, &label, &names, |layer| layer.freeze()),
+            A::Thaw => self.edit_layers(i, &label, &names, |layer| layer.thaw()),
+            A::Lock => self.edit_layers(i, &label, &names, |layer| layer.lock()),
+            A::Unlock => self.edit_layers(i, &label, &names, |layer| layer.unlock()),
+            A::Edit | A::Delete => {}
+        }
+        self.refresh_layer_panel();
+        Task::none()
+    }
+
     /// The filter tree's live parts: the layers of the selected objects and
     /// what each LAYERFILTER filter matches. Set only when they changed.
     fn refresh_layer_tree(&mut self, i: usize) {
@@ -6861,6 +6954,75 @@ mod layer_name_target_tests {
         assert_eq!(shown(&app), ["ALPHA", "ZULU"]);
         let _ = app.update(Message::LayerShow(TreeNode::All));
         assert_eq!(shown(&app).len(), 4);
+    }
+
+    /// #2610: a layer filter made with FILTER's rows over layer properties,
+    /// then switched as a whole from its tree node.
+    #[test]
+    fn layer_filter_from_the_editor_and_the_node_menu() {
+        use crate::app::filter_dialog::{FilterMsg, FilterRow, FilterRowEdit};
+        use crate::ui::window::layers::{TreeAction, TreeNode};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        // The search text becomes the first row.
+        app.tabs[i].layers.filter = "LU".into();
+        let _ = app.update(Message::LayerFilterEdit(None));
+        let state = app.filter_dialog.as_ref().expect("FILTER over the layers");
+        assert_eq!(state.layer_filter.as_deref(), Some(""));
+        assert_eq!(state.live_count, 1, "*LU* finds ZULU");
+        assert!(state
+            .properties_for(None)
+            .iter()
+            .any(|p| p.field == "frozen"));
+        // Or: not frozen and named A* or Z*.
+        let edit = |app: &mut OpenCADStudio, row, e| {
+            let _ = app.update(Message::FilterDialog(FilterMsg::Edit(row, e)));
+        };
+        edit(
+            &mut app,
+            FilterRow::Root(0),
+            FilterRowEdit::Value("A*,Z*".into()),
+        );
+        assert_eq!(app.filter_dialog.as_ref().unwrap().live_count, 2);
+        let _ = app.update(Message::FilterDialog(FilterMsg::LayerName(
+            "Letters".into(),
+        )));
+        let _ = app.update(Message::FilterDialog(FilterMsg::SaveLayerFilter));
+        assert!(app.filter_dialog.is_none());
+        let node = TreeNode::Filter("Letters".into());
+        assert_eq!(app.tabs[i].layers.view, node);
+        assert_eq!(app.tabs[i].layers.node_layers(&node).len(), 2);
+        // The node's menu freezes both at once, one undo step.
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerTreeAction(node.clone(), TreeAction::Freeze));
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ALPHA")
+            .unwrap()
+            .is_frozen());
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        // Edit opens it again; Delete removes it, the layers stay.
+        let _ = app.update(Message::LayerTreeAction(node.clone(), TreeAction::Edit));
+        assert_eq!(
+            app.filter_dialog.as_ref().unwrap().layer_filter.as_deref(),
+            Some("Letters")
+        );
+        let _ = app.update(Message::FilterDialog(FilterMsg::Close));
+        let _ = app.update(Message::LayerTreeAction(node, TreeAction::Delete));
+        assert!(app.layer_filters.is_empty());
+        assert_eq!(app.tabs[i].layers.view, TreeNode::All);
     }
 
     #[test]

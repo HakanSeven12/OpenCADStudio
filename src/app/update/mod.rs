@@ -12323,6 +12323,8 @@ impl OpenCADStudio {
                 self.tabs[i].layers.invert = on;
                 Task::none()
             }
+            Message::LayerFilterEdit(name) => self.on_layer_filter_edit(name),
+            Message::LayerTreeAction(node, action) => self.on_layer_tree_action(node, action),
             Message::LayerGroupNew => {
                 let i = self.active_tab;
                 let name = self.next_layer_group_name(i);

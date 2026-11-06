@@ -4326,6 +4326,14 @@ pub enum Message {
     LayerShow(crate::ui::window::layers::TreeNode),
     /// Show the layers the node leaves out instead.
     LayerInvert(bool),
+    /// Open FILTER over the layers: a new filter from the search text
+    /// (`None`), or the LAYERFILTER filter named.
+    LayerFilterEdit(Option<String>),
+    /// A filter tree node's right-click menu.
+    LayerTreeAction(
+        crate::ui::window::layers::TreeNode,
+        crate::ui::window::layers::TreeAction,
+    ),
     /// A new layer, frozen in every layout viewport.
     LayerNewVpFrozen,
     /// A layer row's right-click menu: (the row's layer, what to do).

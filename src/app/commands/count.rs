@@ -248,7 +248,7 @@ impl OpenCADStudio {
                 self.apply_count_display(i);
             }
             _ => {
-                self.command_line.push_error(&if max == 1 {
+                self.command_line.push_rejection(&if max == 1 {
                     crate::t!("Requires 0 or 1 only.")
                 } else {
                     crate::tf!("Requires an integer between {min} and {max}.")

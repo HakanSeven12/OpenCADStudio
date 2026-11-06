@@ -38,7 +38,7 @@ impl OpenCADStudio {
             }
             _ => {
                 self.command_line
-                    .push_error(crate::t!("Requires an integer between 0 and 2.").as_ref());
+                    .push_rejection(crate::t!("Requires an integer between 0 and 2.").as_ref());
                 ask(self);
             }
         }
@@ -70,7 +70,7 @@ impl OpenCADStudio {
             _ => {
                 let (min, max) = (0, MatchOpts::ALL_BITS);
                 self.command_line
-                    .push_error(crate::tf!("Requires an integer between {min} and {max}.").as_ref());
+                    .push_rejection(crate::tf!("Requires an integer between {min} and {max}.").as_ref());
                 ask(self);
             }
         }
@@ -100,7 +100,7 @@ impl OpenCADStudio {
             }
             _ => {
                 self.command_line
-                    .push_error(crate::t!("Requires an integer between 0 and 2.").as_ref());
+                    .push_rejection(crate::t!("Requires an integer between 0 and 2.").as_ref());
                 ask(self);
             }
         }

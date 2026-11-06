@@ -75,7 +75,7 @@ impl OpenCADStudio {
                 Task::none()
             }
             Err(error) => {
-                self.command_line.push_error(&error);
+                self.command_line.push_rejection(&error);
                 Task::none()
             }
         };

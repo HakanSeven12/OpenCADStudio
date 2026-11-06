@@ -8084,7 +8084,7 @@ impl OpenCADStudio {
                             self.tabs[i].dirty = true;
                         }
                     }
-                    _ => self.command_line.push_error(
+                    _ => self.command_line.push_rejection(
                         crate::t!("Cannot set TEXTSIZE to that value.").as_ref(),
                     ),
                 }

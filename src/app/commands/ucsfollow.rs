@@ -62,7 +62,7 @@ impl OpenCADStudio {
             }
             Some(_) => {
                 self.command_line
-                    .push_error(crate::t!("UCSFOLLOW: only 0 or 1 is allowed.").as_ref());
+                    .push_rejection(crate::t!("UCSFOLLOW: only 0 or 1 is allowed.").as_ref());
             }
         }
         Some(Task::none())

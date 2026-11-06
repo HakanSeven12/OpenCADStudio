@@ -1144,9 +1144,18 @@ impl OpenCADStudio {
                 return task;
             }
 
-            self.command_line.push_error(crate::tf!(
-                        "Expected Cartesian, polar, cylindrical or spherical coordinates, or a number; got: \"{text}\""
-                    ).as_ref());
+            // A point prompt refuses other text as the reference does, with
+            // a plain line before asking again.
+            let has_options = self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| !command.options().is_empty());
+            self.command_line.push_rejection(if has_options {
+                crate::t!("Point or option keyword required.")
+            } else {
+                crate::t!("Invalid point.")
+            }
+            .as_ref());
             return self.focus_cmd_input();
         }
         if let Some(cmd) = self.command_line.submit() {

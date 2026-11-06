@@ -114,12 +114,12 @@ impl OpenCADStudio {
                 }
                 Ok(_) => {
                     self.command_line
-                        .push_error("Cannot set MSOLESCALE to that value.");
+                        .push_rejection("Cannot set MSOLESCALE to that value.");
                     self.command_line.push_output("*Invalid*");
                 }
                 Err(_) => {
                     self.command_line
-                        .push_error("Requires numeric distance or two points.");
+                        .push_rejection("Requires numeric distance or two points.");
                     ask(self);
                 }
             }
@@ -129,7 +129,7 @@ impl OpenCADStudio {
             return Task::none();
         };
         let Some(v) = value.parse::<i16>().ok().filter(|v| (min..=max).contains(v)) else {
-            self.command_line.push_error(message);
+            self.command_line.push_rejection(message);
             ask(self);
             return Task::none();
         };

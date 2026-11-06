@@ -100,11 +100,11 @@ impl OpenCADStudio {
                     None => ask(self, name),
                     Some(v) => match v.parse::<i32>() {
                         Err(_) => {
-                            self.command_line.push_error("Requires an integer value.");
+                            self.command_line.push_rejection("Requires an integer value.");
                             ask(self, name);
                         }
                         Ok(n) if !(0..=max).contains(&n) => {
-                            self.command_line.push_error(&if max == 1 {
+                            self.command_line.push_rejection(&if max == 1 {
                                 "Requires 0 or 1 only.".to_string()
                             } else {
                                 format!("Requires an integer between 0 and {max}.")

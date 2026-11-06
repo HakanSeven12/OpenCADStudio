@@ -234,7 +234,7 @@ impl OpenCADStudio {
             ) {
                 (Some(x), Some(y), Some(z)) => Some(glam::DVec3::new(x, y, z)),
                 _ => {
-                    self.command_line.push_error("Requires numeric value.");
+                    self.command_line.push_rejection("Requires numeric value.");
                     return Task::none();
                 }
             }
@@ -246,7 +246,7 @@ impl OpenCADStudio {
                 Some(v) => Some(v),
                 None => {
                     self.command_line
-                        .push_error("Value must be positive and nonzero.");
+                        .push_rejection("Value must be positive and nonzero.");
                     return Task::none();
                 }
             }
@@ -257,7 +257,7 @@ impl OpenCADStudio {
             match number(&state.rotation) {
                 Some(v) => Some(v),
                 None => {
-                    self.command_line.push_error("Requires numeric value.");
+                    self.command_line.push_rejection("Requires numeric value.");
                     return Task::none();
                 }
             }
@@ -912,7 +912,7 @@ impl OpenCADStudio {
                 let Some(scale) = state.scale.trim().parse::<f64>().ok().filter(|v| *v > 0.0)
                 else {
                     self.command_line
-                        .push_error("Value must be positive and nonzero.");
+                        .push_rejection("Value must be positive and nonzero.");
                     return Task::none();
                 };
                 let state = self.pdf_import_file.take().expect("checked above");
@@ -957,7 +957,7 @@ impl OpenCADStudio {
             ) {
                 (Some(x), Some(y), Some(z)) => Some(glam::DVec3::new(x, y, z)),
                 _ => {
-                    self.command_line.push_error("Requires numeric value.");
+                    self.command_line.push_rejection("Requires numeric value.");
                     return Task::none();
                 }
             }
@@ -969,7 +969,7 @@ impl OpenCADStudio {
                 Some(v) => Some(v),
                 None => {
                     self.command_line
-                        .push_error("Value must be positive and nonzero.");
+                        .push_rejection("Value must be positive and nonzero.");
                     return Task::none();
                 }
             }
@@ -980,7 +980,7 @@ impl OpenCADStudio {
             match number(&state.rotation) {
                 Some(v) => Some(v),
                 None => {
-                    self.command_line.push_error("Requires numeric value.");
+                    self.command_line.push_rejection("Requires numeric value.");
                     return Task::none();
                 }
             }

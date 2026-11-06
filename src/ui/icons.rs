@@ -1467,6 +1467,31 @@ mod tests {
         assert_eq!(art_for(plain, metrics::LARGE_ICON), plain);
     }
 
+    /// The pair lookup on a warm cache, next to a `themed_handle` hit.
+    /// Release-profile wall-clock numbers; run with `--ignored`.
+    #[test]
+    #[ignore = "wall-clock benchmark; run with --ignored"]
+    fn art_for_costs_less_than_a_handle_lookup() {
+        const N: u32 = 200_000;
+        let _ = art_for(UNDO, metrics::LARGE_ICON);
+        let _ = themed_handle(UNDO);
+        let start = std::time::Instant::now();
+        for _ in 0..N {
+            std::hint::black_box(art_for(
+                std::hint::black_box(UNDO),
+                std::hint::black_box(metrics::LARGE_ICON),
+            ));
+        }
+        let art_ns = start.elapsed().as_nanos() as f64 / f64::from(N);
+        let start = std::time::Instant::now();
+        for _ in 0..N {
+            std::hint::black_box(themed_handle(std::hint::black_box(UNDO)));
+        }
+        let handle_ns = start.elapsed().as_nanos() as f64 / f64::from(N);
+        println!("art_for warm: {art_ns:.1} ns, themed_handle warm: {handle_ns:.1} ns");
+        assert!(art_ns < 100.0, "art_for takes {art_ns:.1} ns");
+    }
+
     #[test]
     fn recolouring_keeps_masks_intact() {
         let source = include_bytes!("../../assets/icons/32/add_scale.svg");

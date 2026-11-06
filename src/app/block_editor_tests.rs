@@ -12,6 +12,7 @@ mod visibility_properties;
 mod nested_properties;
 mod grip_descriptions;
 mod imported_flip_workflow;
+mod imported_reference_audit;
 mod flip_frame_grips;
 mod flip_state_labels;
 mod properties_internal_rows;

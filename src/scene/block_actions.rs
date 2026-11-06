@@ -1719,7 +1719,8 @@ fn evaluate_impl(
         });
     }
     let all = actions(baseline, definition);
-    let (order, successors) = action_schedule(baseline, definition, &all)?;
+    let (mut order, successors) = action_schedule(baseline, definition, &all)?;
+    flip_graph::order_linked_scales(baseline, definition, &all, evaluation.managed_flips, &mut order);
     let ordered_arrays = array::Sequence::new(&all, &successors);
     let mut affected = std::collections::BTreeSet::new();
     let mut geometric_targets = std::collections::BTreeMap::new();

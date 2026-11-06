@@ -110,6 +110,53 @@ struct Step {
     axis: Handle,
     targets: BTreeSet<Handle>,
 }
+
+fn perpendicular(first: ParameterFrame, second: ParameterFrame) -> bool {
+    (first.end - first.base)
+        .try_normalize()
+        .zip((second.end - second.base).try_normalize())
+        .is_some_and(|(a, b)| a.dot(b).abs() <= 1e-8)
+}
+
+/// A linked dependent Scale uses the reflected pivot. Evaluating it just
+/// before the reflecting actions is equivalent and keeps the pivot canonical.
+pub(super) fn order_linked_scales(
+    doc: &Document,
+    definition: Handle,
+    actions: &[(Handle, &BlockAction, Kind, i32)],
+    managed_flips: &[Handle],
+    order: &mut [usize],
+) {
+    if managed_flips.is_empty() {
+        return;
+    }
+    let parameters = all_parameters(doc, definition);
+    for index in 1..order.len() {
+        let (handle, scale, kind, owner) = actions[order[index]];
+        if kind != Kind::Scale || !options::base(doc, handle).is_some_and(|base| base.dependent) {
+            continue;
+        }
+        let Some(parameter) = parameters.iter().find(|p| p.id == owner) else {
+            continue;
+        };
+        let mut position = index;
+        while position > 0 {
+            let (handle, flip, _, _) = actions[order[position - 1]];
+            if !managed_flips.contains(&handle)
+                || !flip.action_ids.contains(&owner)
+                || !flip.dependencies.contains(&parameter.handle)
+                || scale.dependencies.iter().any(|target| {
+                    doc.get_entity(*target).is_some() && !flip.dependencies.contains(target)
+                })
+            {
+                break;
+            }
+            order.swap(position - 1, position);
+            position -= 1;
+        }
+    }
+}
+
 pub(in crate::scene) struct Plan {
     steps: Vec<Step>,
     parameters: Vec<Parameter>,
@@ -143,7 +190,9 @@ impl Plan {
         {
             return None;
         }
-        let order = chain_order(doc, def, &all).ok()?;
+        let mut order = chain_order(doc, def, &all).ok()?;
+        let flips: Vec<_> = all.iter().filter(|entry| entry.2 == Kind::Flip).map(|entry| entry.0).collect();
+        order_linked_scales(doc, def, &all, &flips, &mut order);
         let mut steps = Vec::new();
         for index in order.iter().copied() {
             let (handle, action, kind, owner) = &all[index];
@@ -221,8 +270,21 @@ impl Plan {
                 if geometry.is_empty() {
                     continue;
                 }
-                if matches!(k, Kind::Array | Kind::Flip)
-                    || !action.dependencies.contains(h)
+                if *k == Kind::Flip {
+                    // Native reciprocal Flips may name each other's parameters.
+                    // With perpendicular axes each reflection preserves the
+                    // other axis as a line, so geometry order stays valid.
+                    if action.action_ids.contains(id)
+                        && linked.action_ids.contains(owner)
+                        && linked.dependencies.contains(&axis.handle)
+                        && geometry.iter().all(|d| action.dependencies.contains(d))
+                    {
+                        continue;
+                    }
+                    return None;
+                }
+                if *k == Kind::Array
+                    || !(action.dependencies.contains(h) || action.action_ids.contains(id))
                     || order.iter().position(|i| *i == other_index)?
                         >= order.iter().position(|i| *i == index)?
                     || geometry.iter().any(|d| !action.dependencies.contains(d))
@@ -236,18 +298,7 @@ impl Plan {
                 targets,
             });
         }
-        // An axis may be selected by a later Flip. Selecting a future axis
-        // requires another ordering model and is refused here.
-        for (index, step) in steps.iter().enumerate() {
-            if steps
-                .iter()
-                .skip(index + 1)
-                .any(|later| step.targets.contains(&later.axis))
-            {
-                return None;
-            }
-        }
-        steps
+        let plan = steps
             .iter()
             .any(|step| !step.targets.is_empty())
             .then_some(Self {
@@ -255,7 +306,37 @@ impl Plan {
                 parameters,
                 legacy: None,
                 keep_cache: true,
-            })
+            })?;
+        plan.validate_axes(|handle| {
+            plan.parameters
+                .iter()
+                .find(|p| p.handle == handle)
+                .map(|p| ParameterFrame {
+                    base: p.base,
+                    end: p.end,
+                })
+        })
+        .ok()?;
+        Some(plan)
+    }
+
+    fn validate_axes(
+        &self,
+        frame: impl Fn(Handle) -> Option<ParameterFrame>,
+    ) -> Result<(), &'static str> {
+        for (index, step) in self.steps.iter().enumerate() {
+            for later in &self.steps[index + 1..] {
+                if step.targets.contains(&later.axis)
+                    && !perpendicular(
+                        frame(step.axis).ok_or(FRAME_ERROR)?,
+                        frame(later.axis).ok_or(FRAME_ERROR)?,
+                    )
+                {
+                    return Err(FRAME_ERROR);
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn for_rebuild(doc: &Document, def: Handle) -> Option<Self> {
@@ -343,6 +424,7 @@ impl Plan {
         states: &[bool],
         axes: &BTreeMap<Handle, ParameterFrame>,
     ) -> Result<Value, &'static str> {
+        self.validate_axes(|axis| axes.get(&axis).copied())?;
         for (step, active) in self.steps.iter().zip(states).rev() {
             if *active && step.targets.contains(&parameter) {
                 let axis = *axes.get(&step.axis).ok_or(FRAME_ERROR)?;
@@ -425,6 +507,7 @@ impl Plan {
         canonical: &BTreeMap<Handle, ParameterFrame>,
         active: &BTreeMap<Handle, ParameterFrame>,
     ) -> Result<BTreeMap<Handle, ParameterFrame>, &'static str> {
+        self.validate_axes(|axis| active.get(&axis).or_else(|| canonical.get(&axis)).copied())?;
         let mut frames = canonical.clone();
         for (step, enabled) in self.steps.iter().zip(states) {
             if !*enabled {

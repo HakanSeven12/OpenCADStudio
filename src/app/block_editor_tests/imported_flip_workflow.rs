@@ -38,15 +38,15 @@ fn imported_coupled_flip_reference_workflow() {
             let def = actions::instance::definition(&doc, reference.common.handle)?;
             (actions::all_parameters(&doc, def)
                 .iter()
-                .filter(|p| p.flip)
+                .filter(|p| p.flip && actions::has_action(&doc, def, p.handle))
                 .count()
                 >= 2)
                 .then_some((reference.common.handle, def))
         })
-        .expect("fixture must contain a reference with at least two Flip parameters");
+        .expect("fixture must contain a reference with at least two actionable Flip parameters");
     let flips: Vec<_> = actions::all_parameters(&doc, def)
         .into_iter()
-        .filter(|p| p.flip)
+        .filter(|p| p.flip && actions::has_action(&doc, def, p.handle))
         .collect();
     for mask in 1..4 {
         for reverse in [false, true] {

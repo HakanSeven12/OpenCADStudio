@@ -1537,14 +1537,34 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
 
-        let add: Vec<Handle> = match kw.as_str() {
-            // Every selectable object of the current space.
-            "ALL" => self.tabs[i]
-                .scene
+        // The selectable objects of the current space: those drawn with wires,
+        // and fills (hatches have no wire of their own).
+        let space_objects = || -> Vec<Handle> {
+            let scene = &self.tabs[i].scene;
+            let space = scene.interaction_block_handle();
+            let mut handles: Vec<Handle> = scene
                 .entity_wires()
                 .iter()
                 .filter_map(|w| crate::scene::Scene::handle_from_wire_name(&w.name))
-                .collect(),
+                .collect();
+            let fills: Vec<Handle> = scene
+                .hatches
+                .keys()
+                .copied()
+                .filter(|h| {
+                    !handles.contains(h)
+                        && scene.document.get_entity(*h).is_some_and(|e| {
+                            let owner = e.common().owner_handle;
+                            owner == space || owner.is_null()
+                        })
+                })
+                .collect();
+            handles.extend(fills);
+            handles
+        };
+        let add: Vec<Handle> = match kw.as_str() {
+            // Every selectable object of the current space.
+            "ALL" => space_objects(),
             "P" | "PREVIOUS" => self.tabs[i]
                 .prev_selection
                 .iter()
@@ -1554,11 +1574,8 @@ impl OpenCADStudio {
             // Highest handle among the selectable wires of the current space —
             // handles are handed out monotonically, so that is the most
             // recently created object.
-            "L" | "LAST" => self.tabs[i]
-                .scene
-                .entity_wires()
-                .iter()
-                .filter_map(|w| crate::scene::Scene::handle_from_wire_name(&w.name))
+            "L" | "LAST" => space_objects()
+                .into_iter()
                 .max_by_key(|h| h.value())
                 .into_iter()
                 .collect(),

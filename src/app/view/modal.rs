@@ -85,6 +85,7 @@ impl OpenCADStudio {
             Some(K::TdsImport) => crate::tr!("import-3ds", "title"),
             Some(K::TdsMaterial) => crate::tr!("import-3ds-alert", "title"),
             Some(K::TdsMissingMap) => crate::tr!("import-3ds", "title"),
+            Some(K::HatchBoundaryWarning) => crate::tr!("hatch-warning", "title"),
             Some(K::ExtractionOutdated) => crate::tr!("extraction-outdated", "title"),
             Some(K::XrefAttach) => crate::t!("Attach External Reference").into_owned(),
             Some(K::WriteBlock) => crate::t!("Write Block").into_owned(),
@@ -681,6 +682,13 @@ impl OpenCADStudio {
                         prompt.count,
                         flow,
                     )
+                })
+            }
+            super::super::ModalKind::HatchBoundaryWarning => {
+                let state = self.hatch_boundary_warning.as_ref()?;
+                let height = if state.details { 300 } else { 230 };
+                sized_flow(ex, 480, height, |flow| {
+                    crate::ui::window::hatch_dialogs::view_warning(state, flow)
                 })
             }
             super::super::ModalKind::TdsMissingMap => {

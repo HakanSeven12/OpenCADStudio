@@ -28,6 +28,8 @@ pub(crate) mod display;
 mod draw;
 mod field;
 mod group_display;
+mod hatch_dialogs;
+mod hatch_vars;
 mod fileops;
 mod log_file;
 pub(crate) use log_file::write_line as write_log_line;
@@ -704,6 +706,9 @@ impl OpenCADStudio {
         if let Some(t) = self.dispatch_table_style_var(cmd, i) {
             return Some(t);
         }
+        if let Some(t) = self.dispatch_hatch_var(cmd) {
+            return Some(t);
+        }
         if let Some(t) = self.dispatch_layer_variable(cmd, i) {
             return Some(t);
         }
@@ -942,6 +947,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "ALIASEDIT",
         // Dispatched commands that the alias file names (#2452).
         "CTABLESTYLE",
+        "HPNAME",
         "SELHANDLES",
         "SELH",
         // Implemented command-line block forms must also validate in ALIASEDIT.

@@ -175,12 +175,12 @@ impl OpenCADStudio {
                 self.persist_settings_if_changed();
             }
         }
-        let hatch_method = self.tabs[self.active_tab]
+        let hatch_prefs = self.tabs[self.active_tab]
             .active_cmd
             .as_ref()
-            .and_then(|command| command.hatch_start_method());
-        if let Some(method) = hatch_method.filter(|method| *method != self.hatch_start_method) {
-            self.hatch_start_method = method;
+            .and_then(|command| command.hatch_prefs());
+        if let Some(prefs) = hatch_prefs.filter(|prefs| *prefs != self.hatch_prefs) {
+            self.hatch_prefs = prefs;
             self.persist_settings_if_changed();
         }
         let variable = self.tabs[self.active_tab]
@@ -794,6 +794,11 @@ impl OpenCADStudio {
             } => {
                 self.handle_commit_hatch_with_boundaries(hatch, boundaries, entity_style);
             }
+            CmdResult::ShowHatchPanel => {
+                self.hatch_panel_shown = true;
+                self.hatch_reprompt();
+            }
+            CmdResult::HatchBoundaryMissed(lead) => self.hatch_boundary_missed(lead),
             CmdResult::CommitHatchContinue {
                 hatch,
                 entity_style,

@@ -1341,7 +1341,6 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(c));
             }
             cmd if cmd.starts_with("DRAWORDER ") => {
-                use document::objects::ObjectType;
                 let parts: Vec<&str> = cmd.split_whitespace().collect();
                 let option = parts.get(1).unwrap_or(&"").to_uppercase();
                 let i = self.active_tab;
@@ -1374,118 +1373,34 @@ impl OpenCADStudio {
                         })
                         .filter(|handle| !selected.contains(handle))
                         .collect();
-                    let relative_assignments = relative_above.and_then(|above| {
-                        assign_relative_group_keys(
-                            &self.tabs[i].scene.document,
-                            self.tabs[i].scene.interaction_block_handle(),
-                            &selected,
-                            &references,
-                            above,
-                        )
-                    });
                     let to_front_opt = match option.as_str() {
                         "F" | "FRONT" => Some(true),
                         "B" | "BACK" => Some(false),
                         _ => None,
                     };
 
-                    if relative_assignments.is_some() || to_front_opt.is_some() {
+                    let relative = relative_above.map(|above| (above, references.as_slice()));
+                    let applicable = to_front_opt.is_some()
+                        || relative.is_some_and(|(above, references)| {
+                            assign_relative_group_keys(
+                                &self.tabs[i].scene.document,
+                                self.tabs[i].scene.interaction_block_handle(),
+                                &selected,
+                                references,
+                                above,
+                            )
+                            .is_some()
+                        });
+                    if applicable {
                         self.push_undo_snapshot(i, "DRAWORDER");
-                        let block_handle = self.tabs[i].scene.interaction_block_handle();
-
-                        // For FRONT/BACK, anchor the new sort handle to the
-                        // block's current effective draw-order range so the moved
-                        // entities land strictly above/below every sibling —
-                        // including ones not yet in the table, which sort by
-                        // their own handle. (min_eff, max_eff) over siblings.
-                        let mut back_assigns: Option<Vec<(document::Handle, u64)>> = None;
-                        let fb_baseline: Option<(u64, u64)> = if to_front_opt.is_some() {
-                            let selected_set: rustc_hash::FxHashSet<u64> =
-                                selected.iter().map(|h| h.value()).collect();
-                            let doc_ref = &self.tabs[i].scene.document;
-                            let overrides: rustc_hash::FxHashMap<u64, u64> = doc_ref
-                                .objects
-                                .values()
-                                .find_map(|obj| {
-                                    if let ObjectType::SortEntitiesTable(t) = obj {
-                                        if t.block_owner_handle == block_handle {
-                                            return Some(
-                                                t.entries()
-                                                    .map(|e| {
-                                                        (
-                                                            e.entity_handle.value(),
-                                                            e.sort_handle.value(),
-                                                        )
-                                                    })
-                                                    .collect(),
-                                            );
-                                        }
-                                    }
-                                    None
-                                })
-                                .unwrap_or_default();
-                            let mut max_eff = 0u64;
-                            let mut min_eff = u64::MAX;
-                            for e in doc_ref.entities() {
-                                let c = e.common();
-                                let hv = c.handle.value();
-                                if selected_set.contains(&hv) {
-                                    continue;
-                                }
-                                if c.owner_handle != block_handle && !c.owner_handle.is_null() {
-                                    continue;
-                                }
-                                let eff = overrides.get(&hv).copied().unwrap_or(hv);
-                                max_eff = max_eff.max(eff);
-                                min_eff = min_eff.min(eff);
-                            }
-                            if min_eff == u64::MAX {
-                                min_eff = 1;
-                            }
-                            if to_front_opt == Some(false) {
-                                // Same exhausted-floor handling as HATCHTOBACK:
-                                // never clamp the group onto tied keys.
-                                let locked_layers: rustc_hash::FxHashSet<&str> = doc_ref
-                                    .layers
-                                    .iter()
-                                    .filter(|l| l.is_locked())
-                                    .map(|l| l.name.as_str())
-                                    .collect();
-                                back_assigns = Some(assign_back_group_keys(
-                                    doc_ref,
-                                    block_handle,
-                                    &selected,
-                                    min_eff,
-                                    Some(&overrides),
-                                    &locked_layers,
-                                ));
-                            }
-                            Some((min_eff, max_eff))
-                        } else {
-                            None
-                        };
-
-                        let doc = &mut self.tabs[i].scene.document;
-                        let th = ensure_draw_order_table(doc, block_handle);
-                        if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
-                        {
-                            if let Some(assignments) = &relative_assignments {
-                                for (handle, sort) in assignments {
-                                    table.add_entry(*handle, document::Handle::new(*sort));
-                                }
-                                self.command_line.push_info(crate::t!("DRAWORDER: selection reordered relative to reference objects.").as_ref());
-                            } else if let Some(to_front) = to_front_opt {
-                                if to_front {
-                                    let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
-                                    for (k, h) in selected.iter().enumerate() {
-                                        let sort = max_eff.saturating_add(1 + k as u64);
-                                        table.add_entry(*h, document::Handle::new(sort));
-                                    }
-                                } else if let Some(assigns) = &back_assigns {
-                                    for (h, sort) in assigns {
-                                        table.add_entry(*h, document::Handle::new(*sort));
-                                    }
-                                }
+                        match self.apply_draw_order(i, &selected, to_front_opt, relative) {
+                            Some(None) => self.command_line.push_info(
+                                crate::t!(
+                                    "DRAWORDER: selection reordered relative to reference objects."
+                                )
+                                .as_ref(),
+                            ),
+                            Some(Some(to_front)) => {
                                 let dir = if to_front { "front" } else { "back" };
                                 self.command_line.push_info(
                                     crate::tf!(
@@ -1496,15 +1411,8 @@ impl OpenCADStudio {
                                     .as_ref(),
                                 );
                             }
+                            None => {}
                         }
-                        // Sort order lives in SortEntitiesTable, which the
-                        // render-side `sort_cache` rebuilds per geometry epoch.
-                        // Bump it so the new draw order shows immediately
-                        // instead of waiting for an unrelated geometry change.
-                        // Draw order changes submission order only; all
-                        // per-entity tessellation remains valid.
-                        self.tabs[i].scene.bump_geometry_no_blocks();
-                        self.tabs[i].dirty = true;
                     } else {
                         self.command_line.push_info(
                             crate::t!("Usage: DRAWORDER F|FRONT | B|BACK | A|ABOVE <handle> | U|UNDER <handle>").as_ref()
@@ -1952,6 +1860,146 @@ impl CadCommand for DrawOrderCommand {
     }
     fn on_point(&mut self, _pt: glam::DVec3) -> crate::command::CmdResult {
         crate::command::CmdResult::NeedPoint
+    }
+}
+
+impl OpenCADStudio {
+    /// Put `selected` in front of or behind everything in its space
+    /// (`to_front`), or above / under `relative`'s reference objects. The
+    /// order is written to the space's sort table. `Some(None)`: reordered
+    /// relative to the references; `Some(Some(front))`: moved to the front
+    /// or back; `None`: nothing changed.
+    pub(in crate::app) fn apply_draw_order(
+        &mut self,
+        i: usize,
+        selected: &[document::Handle],
+        to_front_opt: Option<bool>,
+        relative: Option<(bool, &[document::Handle])>,
+    ) -> Option<Option<bool>> {
+        use document::objects::ObjectType;
+        let selected: Vec<document::Handle> = selected.to_vec();
+        let relative_assignments = relative.and_then(|(above, references)| {
+            assign_relative_group_keys(
+                &self.tabs[i].scene.document,
+                self.tabs[i].scene.interaction_block_handle(),
+                &selected,
+                references,
+                above,
+            )
+        });
+        let to_front_opt = if relative_assignments.is_some() { None } else { to_front_opt };
+        if relative_assignments.is_none() && to_front_opt.is_none() {
+            return None;
+        }
+        let mut reordered = None;
+
+        let block_handle = self.tabs[i].scene.interaction_block_handle();
+
+        // For FRONT/BACK, anchor the new sort handle to the
+        // block's current effective draw-order range so the moved
+        // entities land strictly above/below every sibling —
+        // including ones not yet in the table, which sort by
+        // their own handle. (min_eff, max_eff) over siblings.
+        let mut back_assigns: Option<Vec<(document::Handle, u64)>> = None;
+        let fb_baseline: Option<(u64, u64)> = if to_front_opt.is_some() {
+            let selected_set: rustc_hash::FxHashSet<u64> =
+                selected.iter().map(|h| h.value()).collect();
+            let doc_ref = &self.tabs[i].scene.document;
+            let overrides: rustc_hash::FxHashMap<u64, u64> = doc_ref
+                .objects
+                .values()
+                .find_map(|obj| {
+                    if let ObjectType::SortEntitiesTable(t) = obj {
+                        if t.block_owner_handle == block_handle {
+                            return Some(
+                                t.entries()
+                                    .map(|e| {
+                                        (
+                                            e.entity_handle.value(),
+                                            e.sort_handle.value(),
+                                        )
+                                    })
+                                    .collect(),
+                            );
+                        }
+                    }
+                    None
+                })
+                .unwrap_or_default();
+            let mut max_eff = 0u64;
+            let mut min_eff = u64::MAX;
+            for e in doc_ref.entities() {
+                let c = e.common();
+                let hv = c.handle.value();
+                if selected_set.contains(&hv) {
+                    continue;
+                }
+                if c.owner_handle != block_handle && !c.owner_handle.is_null() {
+                    continue;
+                }
+                let eff = overrides.get(&hv).copied().unwrap_or(hv);
+                max_eff = max_eff.max(eff);
+                min_eff = min_eff.min(eff);
+            }
+            if min_eff == u64::MAX {
+                min_eff = 1;
+            }
+            if to_front_opt == Some(false) {
+                // Same exhausted-floor handling as HATCHTOBACK:
+                // never clamp the group onto tied keys.
+                let locked_layers: rustc_hash::FxHashSet<&str> = doc_ref
+                    .layers
+                    .iter()
+                    .filter(|l| l.is_locked())
+                    .map(|l| l.name.as_str())
+                    .collect();
+                back_assigns = Some(assign_back_group_keys(
+                    doc_ref,
+                    block_handle,
+                    &selected,
+                    min_eff,
+                    Some(&overrides),
+                    &locked_layers,
+                ));
+            }
+            Some((min_eff, max_eff))
+        } else {
+            None
+        };
+
+        let doc = &mut self.tabs[i].scene.document;
+        let th = ensure_draw_order_table(doc, block_handle);
+        if let Some(ObjectType::SortEntitiesTable(table)) = doc.objects.get_mut(&th)
+        {
+            if let Some(assignments) = &relative_assignments {
+                for (handle, sort) in assignments {
+                    table.add_entry(*handle, document::Handle::new(*sort));
+                }
+                reordered = Some(None);
+            } else if let Some(to_front) = to_front_opt {
+                if to_front {
+                    let (_, max_eff) = fb_baseline.unwrap_or((1, 0));
+                    for (k, h) in selected.iter().enumerate() {
+                        let sort = max_eff.saturating_add(1 + k as u64);
+                        table.add_entry(*h, document::Handle::new(sort));
+                    }
+                } else if let Some(assigns) = &back_assigns {
+                    for (h, sort) in assigns {
+                        table.add_entry(*h, document::Handle::new(*sort));
+                    }
+                }
+                reordered = Some(Some(to_front));
+            }
+        }
+        // Sort order lives in SortEntitiesTable, which the
+        // render-side `sort_cache` rebuilds per geometry epoch.
+        // Bump it so the new draw order shows immediately
+        // instead of waiting for an unrelated geometry change.
+        // Draw order changes submission order only; all
+        // per-entity tessellation remains valid.
+        self.tabs[i].scene.bump_geometry_no_blocks();
+        self.tabs[i].dirty = true;
+        reordered
     }
 }
 

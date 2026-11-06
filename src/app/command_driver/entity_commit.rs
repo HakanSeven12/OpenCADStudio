@@ -846,14 +846,131 @@ impl OpenCADStudio {
         None
     }
 
+    /// A hatch whose settings reorder it is undone with its sort table: the
+    /// draw order lives in an object, outside the entity delta.
+    fn hatch_undo_delta_safe(&self, i: usize) -> bool {
+        !self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.hatch_settings())
+            .is_some_and(|settings| settings.draw_order != 0)
+    }
+
+    /// The layer a hatch of the running command goes on (the Hatch panel's,
+    /// else the current one), and the panel's settings.
+    fn hatch_commit_layer(
+        &self,
+        i: usize,
+    ) -> (String, Option<crate::modules::draw::draw::hatch::HatchSettings>) {
+        let settings = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .and_then(|command| command.hatch_settings());
+        let layer = settings
+            .as_ref()
+            .and_then(|settings| settings.layer.clone())
+            .filter(|layer| self.tabs[i].scene.document.layers.get(layer).is_some())
+            .unwrap_or_else(|| self.tabs[i].active_layer.clone());
+        (layer, settings)
+    }
+
+    /// What the Hatch panel sets on a new hatch entity once it exists:
+    /// annotative, draw order, colour, transparency, background and a
+    /// user-defined pattern. The GRADIENT command prints that its boundary
+    /// associativity was removed.
+    fn apply_hatch_commit_options(
+        &mut self,
+        i: usize,
+        handle: document::Handle,
+        settings: Option<&crate::modules::draw::draw::hatch::HatchSettings>,
+    ) {
+        use crate::modules::draw::draw::hatch::HatchFill;
+        let Some(settings) = settings else {
+            return;
+        };
+        let Some(document::EntityType::Hatch(mut hatch)) =
+            self.tabs[i].scene.document.get_entity(handle).cloned()
+        else {
+            return;
+        };
+        // The GRADIENT command prints this; HATCH switched to a gradient
+        // (on the panel or by -HATCH's Gradient option) does not.
+        let gradient_command = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.name() == "GRADIENT");
+        if gradient_command {
+            self.command_line
+                .push_output(&crate::tr!("hatch-cmd", "associativity-removed"));
+        }
+        if settings.annotative {
+            crate::scene::annotative::set_entity_annotative(
+                &mut self.tabs[i].scene.document,
+                handle,
+                true,
+            );
+            if let Some(scale) = self.tabs[i].scene.creation_annotation_scale_handle() {
+                crate::scene::annotative::create_annotation_context(
+                    &mut self.tabs[i].scene.document,
+                    handle,
+                    scale,
+                );
+            }
+        }
+        // HPDRAWORDER: back, front, behind or in front of the boundary.
+        let boundary: Vec<document::Handle> = hatch
+            .paths
+            .iter()
+            .flat_map(|path| path.boundary_handles.iter().copied())
+            .filter(|h| *h != handle)
+            .collect();
+        let _ = match settings.draw_order {
+            1 => self.apply_draw_order(i, &[handle], Some(false), None),
+            2 => self.apply_draw_order(i, &[handle], Some(true), None),
+            3 if !boundary.is_empty() => {
+                self.apply_draw_order(i, &[handle], None, Some((false, &boundary)))
+            }
+            4 if !boundary.is_empty() => {
+                self.apply_draw_order(i, &[handle], None, Some((true, &boundary)))
+            }
+            _ => None,
+        };
+        let user_double = match settings.fill {
+            HatchFill::User { double, .. } => Some(double),
+            _ => None,
+        };
+        if settings.color.is_none()
+            && settings.transparency.is_none()
+            && settings.background.is_none()
+            && user_double.is_none()
+        {
+            return;
+        }
+        if let Some(color) = &settings.color {
+            hatch.common.color = color.clone();
+        }
+        if let Some(percent) = settings.transparency {
+            hatch.common.transparency = document::types::Transparency::from_percent(percent as f64);
+        }
+        if let Some(background) = &settings.background {
+            crate::entities::hatch::set_background_color(&mut hatch, background);
+        }
+        if let Some(double) = user_double {
+            hatch.pattern_type = document::entities::HatchPatternType::UserDefined;
+            hatch.is_double = double;
+        }
+        self.tabs[i].scene.update_entity(document::EntityType::Hatch(hatch));
+    }
+
     pub(super) fn handle_commit_hatch(&mut self, hatch: crate::scene::HatchModel) {
         let perf_started = crate::perf::enabled().then(iced::time::Instant::now);
         let boundary_vertices = hatch.boundary.len();
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
-        let pending = self.begin_undo(i, label, 1, true);
-        let layer = self.tabs[i].active_layer.clone();
+        let pending = self.begin_undo(i, label, 1, self.hatch_undo_delta_safe(i));
+        let (layer, hatch_options) = self.hatch_commit_layer(i);
         let new_handle = self.tabs[i].scene.add_hatch(hatch, Some(&layer), None);
+        self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
         if !new_handle.is_null() {
             self.tabs[i].scene.select_entity(new_handle, true);
         }
@@ -884,12 +1001,13 @@ impl OpenCADStudio {
         let boundary_vertices = hatch.boundary.len();
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
-        let pending = self.begin_undo(i, label, 1, true);
-        let layer = self.tabs[i].active_layer.clone();
+        let pending = self.begin_undo(i, label, 1, self.hatch_undo_delta_safe(i));
+        let (layer, hatch_options) = self.hatch_commit_layer(i);
         let new_handle =
             self.tabs[i]
                 .scene
                 .add_hatch(hatch, Some(&layer), Some((color, transparency)));
+        self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
         if !new_handle.is_null() {
             self.tabs[i].scene.select_entity(new_handle, true);
         }
@@ -921,7 +1039,8 @@ impl OpenCADStudio {
         let boundary_count = boundaries.len();
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
-        let pending = self.begin_undo(i, label, boundaries.len() + 1, true);
+        let delta_safe = self.hatch_undo_delta_safe(i);
+        let pending = self.begin_undo(i, label, boundaries.len() + 1, delta_safe);
         let mut sources = Vec::with_capacity(boundaries.len());
         for boundary in boundaries {
             let handles = self
@@ -937,10 +1056,11 @@ impl OpenCADStudio {
             }
         }
         hatch.boundary_sources = Some(std::sync::Arc::new(sources));
-        let layer = self.tabs[i].active_layer.clone();
+        let (layer, hatch_options) = self.hatch_commit_layer(i);
         let new_handle = self.tabs[i]
             .scene
             .add_hatch(hatch, Some(&layer), entity_style);
+        self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
         if !new_handle.is_null() {
             self.tabs[i].scene.select_entity(new_handle, true);
         }
@@ -970,9 +1090,10 @@ impl OpenCADStudio {
     ) {
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
-        let pending = self.begin_undo(i, label, 1, true);
-        let layer = self.tabs[i].active_layer.clone();
-        self.tabs[i].scene.add_hatch(hatch, Some(&layer), entity_style);
+        let pending = self.begin_undo(i, label, 1, self.hatch_undo_delta_safe(i));
+        let (layer, hatch_options) = self.hatch_commit_layer(i);
+        let new_handle = self.tabs[i].scene.add_hatch(hatch, Some(&layer), entity_style);
+        self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
         self.tabs[i].dirty = true;
         if let Some(pd) = pending {
             self.commit_undo_delta(i, pd);
@@ -997,13 +1118,14 @@ impl OpenCADStudio {
         };
         let i = self.active_tab;
         let label = self.history_label_from_active_cmd(i, "HATCH");
-        let pending = self.begin_undo(i, label, hatches.len(), true);
-        let layer = self.tabs[i].active_layer.clone();
+        let pending = self.begin_undo(i, label, hatches.len(), self.hatch_undo_delta_safe(i));
+        let (layer, hatch_options) = self.hatch_commit_layer(i);
         for hatch in hatches {
             let new_handle =
                 self.tabs[i]
                     .scene
                     .add_hatch(hatch, Some(&layer), entity_style.clone());
+            self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
             if !new_handle.is_null() {
                 self.tabs[i].scene.select_entity(new_handle, true);
             }

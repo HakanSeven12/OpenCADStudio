@@ -2559,14 +2559,18 @@ bg={bg_ms:.1}ms n={view_count}"
                 }
             }
 
-            // HATCH's settings float at the drawing's top left (HPDLGMODE).
-            if self.model_space.hatch_dialog_mode != 0 {
+            // HATCH's settings float at the drawing's top left (HPDLGMODE,
+            // or seTtings).
+            if self.model_space.hatch_dialog_mode != 0 || self.hatch_panel_shown {
                 if let Some(settings) =
                     tab.active_cmd.as_ref().and_then(|command| command.hatch_settings())
                 {
+                    let mut layers: Vec<String> =
+                        tab.scene.document.layers.iter().map(|layer| layer.name.clone()).collect();
+                    layers.sort_by_key(|name| name.to_lowercase());
                     viewport_stack = viewport_stack.push(position_canvas_overlay(
                         iced::Point::new(12.0, 40.0),
-                        crate::ui::window::hatch_panel::view(settings, &self.hatch_drafts),
+                        crate::ui::window::hatch_panel::view(settings, &self.hatch_drafts, layers),
                     ));
                 }
             }

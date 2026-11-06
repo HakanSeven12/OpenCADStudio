@@ -839,6 +839,14 @@ pub struct UserSettings {
     /// HATCH starts with the boundary method used last (0 pick internal
     /// point, 1 select objects, 2 draw).
     pub hatch_start_method: u8,
+    /// HATCH's draw mode is Path (else Area).
+    pub hatch_draw_path: bool,
+    /// HATCH's Path width.
+    pub hatch_path_width: f64,
+    /// HATCH's Path alignment (0 center, 1 inside, 2 outside).
+    pub hatch_path_alignment: u8,
+    /// "Do not show this message again" on the hatch boundary warning.
+    pub hatch_boundary_warning_off: bool,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     pub show_menu_bar: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
@@ -1444,6 +1452,10 @@ impl Default for UserSettings {
             hatch_associative: true,
             hatch_gap_tolerance: 0.0,
             hatch_start_method: 0,
+            hatch_draw_path: false,
+            hatch_path_width: 0.25,
+            hatch_path_alignment: 0,
+            hatch_boundary_warning_off: false,
             show_menu_bar: false,
             ribbon_closed: false,
             command_line_hidden: false,

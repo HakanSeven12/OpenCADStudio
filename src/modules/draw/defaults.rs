@@ -29,6 +29,9 @@ thread_local! {
     static RECT_CHAMFER1:   Cell<f64> = Cell::new(0.0);
     static RECT_CHAMFER2:   Cell<f64> = Cell::new(0.0);
     static RECT_FILLET:     Cell<f64> = Cell::new(0.0);
+    static RECT_AREA:       Cell<f64> = Cell::new(100.0);
+    static RECT_LENGTH:     Cell<f64> = Cell::new(10.0);
+    static RECT_SIDE:       Cell<f64> = Cell::new(10.0);
     static DONUT_INNER_DIAMETER: Cell<f64> = Cell::new(0.5);
     static DONUT_OUTER_DIAMETER: Cell<f64> = Cell::new(1.0);
     static HELIX_BASE_RADIUS: Cell<f64> = Cell::new(1.0);
@@ -83,6 +86,9 @@ accessors!(get_rect_rotation, set_rect_rotation, RECT_ROTATION);
 accessors!(get_rect_chamfer1, set_rect_chamfer1, RECT_CHAMFER1);
 accessors!(get_rect_chamfer2, set_rect_chamfer2, RECT_CHAMFER2);
 accessors!(get_rect_fillet, set_rect_fillet, RECT_FILLET);
+accessors!(get_rect_area, set_rect_area, RECT_AREA);
+accessors!(get_rect_length, set_rect_length, RECT_LENGTH);
+accessors!(get_rect_side, set_rect_side, RECT_SIDE);
 accessors!(
     get_helix_base_radius,
     set_helix_base_radius,

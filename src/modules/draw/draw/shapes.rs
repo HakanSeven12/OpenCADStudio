@@ -367,6 +367,8 @@ enum RectStep {
     Thickness,
     Width,
     Rotation,
+    /// Rotation's Pick points: the first point, then the second.
+    RotationPick(Option<DVec3>),
     AreaValue,
     AreaBasis(f64),
     AreaDimension { area: f64, by_length: bool },
@@ -386,9 +388,132 @@ pub struct RectCommand {
     thickness: f64,
     width: f64,
     rotation_deg: f64,
+    /// HATCH's Rectangle: its prompts, and no Thickness or Width.
+    hatch: bool,
 }
 
 impl RectCommand {
+    /// The rectangle HATCH draws as a boundary, with the same modes.
+    pub fn for_hatch() -> Self {
+        Self {
+            hatch: true,
+            ..Self::new()
+        }
+    }
+
+    /// `Current rectangle modes:` while a chamfer, fillet or elevation is set.
+    pub(crate) fn modes_line(&self) -> Option<String> {
+        // The prompts show four decimals, as the reference does.
+        let format_length = |value: f64| format!("{value:.4}");
+        let mut modes = Vec::new();
+        if self.fillet_radius > 0.0 {
+            modes.push(format!("Fillet={}", format_length(self.fillet_radius)));
+        } else if self.chamfer_first > 0.0 || self.chamfer_second > 0.0 {
+            modes.push(format!(
+                "Chamfer={} x {}",
+                format_length(self.chamfer_first),
+                format_length(self.chamfer_second)
+            ));
+        }
+        if self.elevation != 0.0 {
+            modes.push(format!("Elevation={}", format_length(self.elevation)));
+        }
+        (!modes.is_empty()).then(|| {
+            crate::tr!("hatch-cmd", "rect-modes", modes = format!("{}  ", modes.join("  ")))
+        })
+    }
+
+    /// The prompt of the current step as HATCH asks it.
+    pub(crate) fn hatch_prompt(&self) -> String {
+        let format_length = |value: f64| format!("{value:.4}");
+        match self.step {
+            RectStep::FirstCorner => crate::tr!("hatch-cmd", "rect-first"),
+            RectStep::Opposite | RectStep::PlaceSized { .. } => {
+                crate::tr!("hatch-cmd", "rect-other")
+            }
+            RectStep::ChamferFirst => crate::tr!(
+                "hatch-cmd",
+                "rect-chamfer-first",
+                value = format_length(self.chamfer_first)
+            ),
+            RectStep::ChamferSecond => crate::tr!(
+                "hatch-cmd",
+                "rect-chamfer-second",
+                value = format_length(self.chamfer_second)
+            ),
+            RectStep::Elevation => crate::tr!(
+                "hatch-cmd",
+                "rect-elevation",
+                value = format_length(self.elevation)
+            ),
+            RectStep::Fillet => crate::tr!(
+                "hatch-cmd",
+                "rect-fillet",
+                value = format_length(self.fillet_radius)
+            ),
+            RectStep::Thickness | RectStep::Width => self.prompt(),
+            RectStep::Rotation => crate::tr!(
+                "hatch-cmd",
+                "rect-rotation",
+                value = crate::entities::common::format_direction(self.rotation_deg.to_radians())
+            ),
+            RectStep::RotationPick(None) => crate::tr!("hatch-cmd", "first-point"),
+            RectStep::RotationPick(Some(_)) => crate::tr!("hatch-cmd", "second-point"),
+            RectStep::AreaValue => crate::tr!(
+                "hatch-cmd",
+                "rect-area",
+                value = format_length(defaults::get_rect_area())
+            ),
+            RectStep::AreaBasis(_) => crate::tr!("hatch-cmd", "rect-area-basis"),
+            RectStep::AreaDimension { by_length: true, .. } => crate::tr!(
+                "hatch-cmd",
+                "rect-area-length",
+                value = format_length(defaults::get_rect_length())
+            ),
+            RectStep::AreaDimension { by_length: false, .. } => crate::tr!(
+                "hatch-cmd",
+                "rect-area-width",
+                value = format_length(defaults::get_rect_side())
+            ),
+            RectStep::DimensionsLength => crate::tr!(
+                "hatch-cmd",
+                "rect-length",
+                value = format_length(defaults::get_rect_length())
+            ),
+            RectStep::DimensionsWidth(_) => crate::tr!(
+                "hatch-cmd",
+                "rect-width",
+                value = format_length(defaults::get_rect_side())
+            ),
+        }
+    }
+
+    /// The rectangle of `area` (plus what its chamfers or fillets cut off)
+    /// that is `value` long or wide, drawn from the first corner along the
+    /// rotated axes.
+    fn area_dimension(&mut self, area: f64, by_length: bool, value: f64) -> Option<CmdResult> {
+        let cut = if self.fillet_radius > 0.0 {
+            (4.0 - PI) * self.fillet_radius * self.fillet_radius
+        } else {
+            2.0 * self.chamfer_first * self.chamfer_second
+        };
+        let other = (area + cut) / value;
+        let (width, height) = if by_length { (value, other) } else { (other, value) };
+        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        defaults::set_rect_length(width);
+        defaults::set_rect_side(height);
+        let first = self.first?;
+        let rotation = KernelTransform::rotation(self.rotation_deg.to_radians());
+        let [ax, ay] = rotation.apply_vector([width, 0.0]);
+        let [bx, by] = rotation.apply_vector([0.0, height]);
+        let mut local = self.plane.to_local(first);
+        local.x += ax + bx;
+        local.y += ay + by;
+        Some(self.finish(self.plane.to_world(local), Some((width, height))))
+    }
+
     pub fn new() -> Self {
         Self {
             step: RectStep::FirstCorner,
@@ -401,6 +526,7 @@ impl RectCommand {
             thickness: defaults::get_rect_thickness(),
             width: defaults::get_rect_width().max(0.0),
             rotation_deg: defaults::get_rect_rotation(),
+            hatch: false,
         }
     }
 
@@ -479,6 +605,10 @@ impl CadCommand for RectCommand {
                 crate::entities::common::format_direction(self.rotation_deg.to_radians())
             )
             .into_owned(),
+            RectStep::RotationPick(None) => crate::t!("RECT  Specify first point:").into_owned(),
+            RectStep::RotationPick(Some(_)) => {
+                crate::t!("RECT  Specify second point:").into_owned()
+            }
             RectStep::AreaValue => crate::t!("RECT  Specify rectangle area:").into_owned(),
             RectStep::AreaBasis(_) => {
                 crate::t!("RECT  Calculate dimensions based on [Length / Width] <Length>:")
@@ -503,6 +633,12 @@ impl CadCommand for RectCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match self.step {
+            RectStep::FirstCorner if self.hatch => vec![
+                CmdOption::new("Chamfer", "CHAMFER"),
+                CmdOption::new("Elevation", "ELEVATION"),
+                CmdOption::new("Fillet", "FILLET"),
+            ],
+            RectStep::Rotation => vec![CmdOption::new("Pick points", "P")],
             RectStep::FirstCorner => vec![
                 CmdOption::new("Chamfer", "CHAMFER"),
                 CmdOption::new("Elevation", "ELEVATION"),
@@ -534,6 +670,7 @@ impl CadCommand for RectCommand {
     fn dyn_field(&self) -> crate::command::DynField {
         match self.step {
             RectStep::Rotation => crate::command::DynField::Angle,
+            RectStep::RotationPick(_) => crate::command::DynField::Point,
             RectStep::ChamferFirst
             | RectStep::ChamferSecond
             | RectStep::Elevation
@@ -566,6 +703,7 @@ impl CadCommand for RectCommand {
                         self.step = RectStep::Fillet;
                         Some(CmdResult::NeedPoint)
                     }
+                    "T" | "THICKNESS" | "W" | "WIDTH" if self.hatch => None,
                     "T" | "THICKNESS" => {
                         self.step = RectStep::Thickness;
                         Some(CmdResult::NeedPoint)
@@ -616,7 +754,14 @@ impl CadCommand for RectCommand {
             _ => {}
         }
 
+        if matches!(self.step, RectStep::RotationPick(_)) {
+            return None;
+        }
         if matches!(self.step, RectStep::Rotation) {
+            if matches!(upper.as_str(), "P" | "PICK") {
+                self.step = RectStep::RotationPick(None);
+                return Some(CmdResult::NeedPoint);
+            }
             let angle = crate::entities::common::parse_typed_direction(text)?;
             if !angle.is_finite() {
                 return None;
@@ -672,23 +817,18 @@ impl CadCommand for RectCommand {
                 self.step = RectStep::FirstCorner;
             }
             RectStep::AreaValue if value > 0.0 => {
+                defaults::set_rect_area(value);
                 self.step = RectStep::AreaBasis(value);
             }
             RectStep::AreaDimension { area, by_length } if value > 0.0 => {
-                let (width, height) = if by_length {
-                    (value, area / value)
-                } else {
-                    (area / value, value)
-                };
-                if !width.is_finite() || !height.is_finite() {
-                    return None;
-                }
-                self.step = RectStep::PlaceSized { width, height };
+                return self.area_dimension(area, by_length, value);
             }
             RectStep::DimensionsLength if value > 0.0 => {
+                defaults::set_rect_length(value);
                 self.step = RectStep::DimensionsWidth(value);
             }
             RectStep::DimensionsWidth(length) if value > 0.0 => {
+                defaults::set_rect_side(value);
                 self.step = RectStep::PlaceSized {
                     width: length,
                     height: value,
@@ -714,6 +854,20 @@ impl CadCommand for RectCommand {
                     return CmdResult::NeedPoint;
                 };
                 let delta = self.plane.vector_to_local(pt - first);
+                if delta.x.hypot(delta.y) <= 1.0e-9 {
+                    return CmdResult::NeedPoint;
+                }
+                self.rotation_deg = delta.y.atan2(delta.x).to_degrees();
+                defaults::set_rect_rotation(self.rotation_deg);
+                self.step = RectStep::Opposite;
+                CmdResult::NeedPoint
+            }
+            RectStep::RotationPick(None) => {
+                self.step = RectStep::RotationPick(Some(pt));
+                CmdResult::NeedPoint
+            }
+            RectStep::RotationPick(Some(from)) => {
+                let delta = self.plane.vector_to_local(pt - from);
                 if delta.x.hypot(delta.y) <= 1.0e-9 {
                     return CmdResult::NeedPoint;
                 }
@@ -750,6 +904,31 @@ impl CadCommand for RectCommand {
                 self.step = RectStep::AreaDimension {
                     area,
                     by_length: true,
+                };
+                CmdResult::NeedPoint
+            }
+            // Enter takes the value shown in angle brackets.
+            RectStep::AreaValue => {
+                self.step = RectStep::AreaBasis(defaults::get_rect_area());
+                CmdResult::NeedPoint
+            }
+            RectStep::AreaDimension { area, by_length } => {
+                let value = if by_length {
+                    defaults::get_rect_length()
+                } else {
+                    defaults::get_rect_side()
+                };
+                self.area_dimension(area, by_length, value)
+                    .unwrap_or(CmdResult::NeedPoint)
+            }
+            RectStep::DimensionsLength => {
+                self.step = RectStep::DimensionsWidth(defaults::get_rect_length());
+                CmdResult::NeedPoint
+            }
+            RectStep::DimensionsWidth(length) => {
+                self.step = RectStep::PlaceSized {
+                    width: length,
+                    height: defaults::get_rect_side(),
                 };
                 CmdResult::NeedPoint
             }

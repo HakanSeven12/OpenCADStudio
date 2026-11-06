@@ -5140,9 +5140,9 @@ fn update_row_color(
 /// An object's named plot style as the drawing calls it: ByLayer, ByBlock,
 /// Normal, or the name its handle has in the plot style dictionary.
 pub(crate) fn plot_style_name(
-    doc: &codec::Document,
+    doc: &document::Document,
     flags: u8,
-    handle: Option<codec::Handle>,
+    handle: Option<document::Handle>,
 ) -> String {
     match flags {
         0 => "ByLayer".to_string(),

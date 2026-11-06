@@ -578,7 +578,7 @@ impl MatchOpts {
 
     /// The MATCHMODE in force for `document`: a plot style only crosses
     /// between named plot styles, never under colour-dependent ones.
-    pub fn for_document(document: &codec::Document) -> Self {
+    pub fn for_document(document: &document::Document) -> Self {
         let mut opts = Self::current();
         if document.header.plotstyle_mode {
             opts.0 &= !Self::PLOTSTYLE;

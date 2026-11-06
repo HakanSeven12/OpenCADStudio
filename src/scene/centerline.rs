@@ -523,8 +523,8 @@ impl Scene {
     pub(crate) fn centerline_with_extensions_of(
         &self,
         source: &EntityType,
-        line: &codec::Line,
-    ) -> Option<codec::Line> {
+        line: &document::Line,
+    ) -> Option<document::Line> {
         let EntityType::Line(source) = source else {
             return None;
         };

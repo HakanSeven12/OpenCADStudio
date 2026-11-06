@@ -152,12 +152,14 @@ fn glyph_spacer() -> Element<'static, Message> {
         .into()
 }
 
-/// The two numeric cells of a row. They print the same quantity at two
-/// precisions, so typing into either writes the same number.
+/// The cells of a row that open a field. The two numeric cells print the same
+/// quantity at two precisions, so typing into either writes the same number;
+/// the description cell edits the text the row prints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cell {
     Expression,
     Value,
+    Description,
 }
 
 /// The cell a manager edit is open on, and the parameter it writes. The panel is
@@ -183,6 +185,7 @@ pub struct Edit {
 pub struct Panel {
     pub editing: Option<Edit>,
     pub edit_buf: String,
+    pub edit_original: String,
     pub filter: String,
     pub search: String,
 }
@@ -192,6 +195,7 @@ impl Default for Panel {
         Self {
             editing: None,
             edit_buf: String::new(),
+            edit_original: String::new(),
             filter: "*".to_owned(),
             search: String::new(),
         }
@@ -252,6 +256,45 @@ fn number_cell(
             .on_press(Message::ParametersManagerEdit(name.to_owned(), which)),
     )
     .width(Length::Fixed(width))
+    .into()
+}
+
+/// A description cell: a row that names parameter text opens an in-place field
+/// carrying the text it will replace; a row that names none keeps the printed
+/// cell. The writable cell fills the flexible Description column, so the click
+/// target stays the whole cell as the pane grows.
+fn description_cell(
+    definition: codec::Handle,
+    name: &str,
+    value: &str,
+    writable: bool,
+    panel: &Panel,
+    width: f32,
+) -> Element<'static, Message> {
+    if !writable {
+        return cell(value, width);
+    }
+    if panel.is_open(definition, name, Cell::Description) {
+        return container(
+            text_input(" ", &panel.edit_buf)
+                .id(edit_input_id())
+                .on_input(Message::ParametersManagerInput)
+                .on_submit(Message::ParametersManagerCommit)
+                .size(11),
+        )
+        .width(Fill)
+        .into();
+    }
+    container(
+        button(text(if value.is_empty() { " " } else { value }.to_owned()).size(11))
+            .width(Fill)
+            .clip(true)
+            .on_press(Message::ParametersManagerEdit(
+                name.to_owned(),
+                Cell::Description,
+            )),
+    )
+    .width(Fill)
     .into()
 }
 
@@ -364,7 +407,14 @@ fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element
         }, COLUMNS[3].0),
         show_cell(name, entry.show, COLUMNS[4].0),
         cell(&entry.order, COLUMNS[5].0),
-        cell(&entry.description, COLUMNS[6].0),
+        description_cell(
+            definition,
+            name,
+            &entry.description,
+            entry.description_writable,
+            panel,
+            COLUMNS[6].0,
+        ),
     ])
     .spacing(SPACING)
     .into()
@@ -443,7 +493,8 @@ mod tests {
                 numeric: true,
                 show: true,
                 order: String::new(),
-                description: String::new(),
+                description: "Left edge".into(),
+                description_writable: true,
             },
             Row {
                 group: Group::ActionParameters,
@@ -455,6 +506,7 @@ mod tests {
                 show: true,
                 order: String::new(),
                 description: String::new(),
+                description_writable: true,
             },
             Row {
                 group: Group::Attributes,
@@ -466,6 +518,7 @@ mod tests {
                 show: true,
                 order: String::new(),
                 description: String::new(),
+                description_writable: false,
             },
         ]
     }
@@ -650,6 +703,7 @@ mod tests {
             show: true,
             order: String::new(),
             description: String::new(),
+            description_writable: true,
         });
         let width = PanelId::ParametersManager.default_width();
         let mut ui = iced_test::simulator::Simulator::with_size(
@@ -679,6 +733,50 @@ mod tests {
             ui.find(iced::widget::Id::new("parameters-manager-glyph-Point1"))
                 .is_err(),
             "a row kind that was never read keeps no glyph"
+        );
+    }
+
+    #[test]
+    fn the_description_field_opens_only_on_a_row_that_can_write_one() {
+        // `locate` draws the pane on this definition, so the open cell names it.
+        let definition = codec::Handle::new(1);
+        let width = PanelId::ParametersManager.default_width();
+        let open = |name: &str| Panel {
+            editing: Some(Edit {
+                definition,
+                parameter: codec::Handle::new(9),
+                component: crate::scene::model::object::BlockParameterComponent::Distance,
+                name: name.to_owned(),
+                cell: Cell::Description,
+            }),
+            edit_buf: "typed note".to_owned(),
+            ..Panel::default()
+        };
+        let mut parameter = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), &open("Angle1"), definition, width, chrome()),
+        );
+        assert!(
+            parameter.find(edit_input_id()).is_ok(),
+            "the description cell of a parameter opens its own field"
+        );
+        assert!(
+            locate(&Panel::default(), "Left edge").is_some(),
+            "a closed description cell prints the stored text"
+        );
+        assert!(
+            locate(&open("Angle1"), "Left edge").is_none(),
+            "and the open field replaces the text it is editing"
+        );
+        let mut attribute = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), &open("TAG1"), definition, width, chrome()),
+        );
+        assert!(
+            attribute.find(edit_input_id()).is_err(),
+            "an attribute row has no parameter text to edit"
         );
     }
 

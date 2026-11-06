@@ -13007,7 +13007,14 @@ impl OpenCADStudio {
                 );
                 let Some(row) = rows
                     .iter()
-                    .find(|row| row.numeric && row.name.eq_ignore_ascii_case(&name))
+                    .find(|row| row.name.eq_ignore_ascii_case(&name))
+                    .filter(|row| {
+                        if cell == crate::ui::window::parameters_manager::Cell::Description {
+                            row.description_writable
+                        } else {
+                            row.numeric
+                        }
+                    })
                 else {
                     // Nothing to open here, so nothing stays open: a cell left on
                     // another row would take whatever is typed next.
@@ -13024,6 +13031,7 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let name = row.name.clone();
+                let description = row.description.clone();
                 let panel = &mut self.tabs[i].parameters_panel;
                 panel.editing = Some(crate::ui::window::parameters_manager::Edit {
                     definition,
@@ -13032,7 +13040,16 @@ impl OpenCADStudio {
                     name,
                     cell,
                 });
-                panel.edit_buf.clear();
+                // A description field opens on the text it replaces, as an
+                // in-place edit does; a numeric field starts empty so a typed
+                // number replaces the printed one without first deleting it.
+                if cell == crate::ui::window::parameters_manager::Cell::Description {
+                    panel.edit_buf = description.clone();
+                    panel.edit_original = description;
+                } else {
+                    panel.edit_buf.clear();
+                    panel.edit_original.clear();
+                }
                 iced::widget::operation::focus(
                     crate::ui::window::parameters_manager::edit_input_id(),
                 )
@@ -13060,13 +13077,23 @@ impl OpenCADStudio {
                 self.toggle_parameters_manager_show(&name)
             }
             // A click moved focus off the open cell: keep what was typed, as
-            // Enter would. An untouched field stays open.
+            // Enter would. An untouched numeric field stays open, an untouched
+            // description keeps the text it opened on, and an emptied
+            // description is a text to write.
             Message::ParametersManagerFocus(focused) => {
                 let commit = {
                     let panel = &self.tabs[self.active_tab].parameters_panel;
-                    !panel.edit_buf.trim().is_empty()
-                        && focused
-                            != Some(crate::ui::window::parameters_manager::edit_input_id())
+                    let Some(edit) = panel.editing.as_ref() else {
+                        return Task::none();
+                    };
+                    let description =
+                        edit.cell == crate::ui::window::parameters_manager::Cell::Description;
+                    let typed = if description {
+                        panel.edit_buf != panel.edit_original
+                    } else {
+                        !panel.edit_buf.trim().is_empty()
+                    };
+                    typed && focused != Some(crate::ui::window::parameters_manager::edit_input_id())
                 };
                 if commit {
                     return self.commit_parameters_manager(false);

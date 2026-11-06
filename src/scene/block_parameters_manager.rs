@@ -43,6 +43,10 @@ pub struct Row {
     pub show: bool,
     pub order: String,
     pub description: String,
+    /// Whether the row's `Description` cell names parameter text the manager
+    /// writes back. A lookup, a visibility parameter and an attribute name no
+    /// parameter component, so their description cell stays as printed.
+    pub description_writable: bool,
 }
 
 fn writable(parameter: &actions::Parameter, component: Component) -> bool {
@@ -112,6 +116,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
                 show: field.show,
                 order: String::new(),
                 description: field.description.to_owned(),
+                description_writable: description_field(p.polar, p.xy, field.component).is_some(),
             });
         }
     }
@@ -155,6 +160,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             show,
             order: String::new(),
             description: String::new(),
+            description_writable: false,
         });
     }
     rows
@@ -178,6 +184,7 @@ fn attribute_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             show: true,
             order: String::new(),
             description: String::new(),
+            description_writable: false,
         })
         .collect()
 }
@@ -340,6 +347,46 @@ pub fn write_number(
         Part::End,
         document::types::Vector3::new(at.x, at.y, at.z),
     )
+}
+
+const NO_DESCRIPTION: &str = "This row has no description to edit.";
+
+/// The text field a component prints, or `None` when the component has no
+/// description of its own. The manager's writable flag and the writer both read
+/// this mapping, so a row that offers a field is a row that can write it.
+fn description_field(
+    polar: bool,
+    xy: bool,
+    component: Component,
+) -> Option<super::block_authoring::metadata::Field> {
+    use super::block_authoring::metadata::Field;
+    match component {
+        Component::Angle if polar => Some(Field::SecondaryDescription),
+        Component::Y if xy => Some(Field::SecondaryDescription),
+        Component::X | Component::Y | Component::Distance | Component::Angle | Component::Flip => {
+            Some(Field::Description)
+        }
+        _ => None,
+    }
+}
+
+/// Write a row's description into the parameter text it prints. A polar
+/// parameter keeps its angle text apart from its distance text, and an XY
+/// parameter keeps each axis label apart, so the component selects the field.
+pub fn write_description(
+    doc: &mut Document,
+    definition: Handle,
+    parameter: Handle,
+    component: Component,
+    text: &str,
+) -> Result<bool, &'static str> {
+    use super::block_authoring::metadata;
+    let authored = actions::all_parameters(doc, definition)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+        .ok_or(NO_DESCRIPTION)?;
+    let field = description_field(authored.polar, authored.xy, component).ok_or(NO_DESCRIPTION)?;
+    metadata::set_text(doc, definition, parameter, field, text)
 }
 
 /// Flip whether the parameter shows its own values, as the row's `Show` cell

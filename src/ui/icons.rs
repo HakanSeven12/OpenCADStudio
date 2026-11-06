@@ -24,7 +24,7 @@ static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
 static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
 static TRI_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/tri_left.svg");
 static HOME: &[u8] = include_bytes!("../../assets/icons/ui/home.svg");
-static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
+pub static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
 static REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 
 // OSNAP marker symbols. Rendered as SVG (not Unicode glyphs) so the snap menu

@@ -12323,6 +12323,16 @@ impl OpenCADStudio {
                 self.tabs[i].layers.invert = on;
                 Task::none()
             }
+            Message::LayerShowInDrawing(on) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.show_in_drawing = on;
+                self.tabs[i].layers.highlight_key = None;
+                if !on {
+                    self.tabs[i].scene.set_filter_preview_highlights(&[]);
+                }
+                self.refresh_layer_counts();
+                Task::none()
+            }
             Message::LayerFilterEdit(name) => self.on_layer_filter_edit(name),
             Message::LayerTreeAction(node, action) => self.on_layer_tree_action(node, action),
             Message::LayerGroupNew => {

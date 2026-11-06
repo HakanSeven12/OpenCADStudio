@@ -62,6 +62,8 @@ pub enum FilterMsg {
     SaveAsCommit,
     /// Delete the loaded saved filter from the drawing.
     DeleteSaved,
+    /// Show the result's layers in the Layer manager.
+    ShowLayers,
     /// Layer mode: the name the layer filter is saved under.
     LayerName(String),
     /// Layer mode: keep the filter as a LAYERFILTER filter.
@@ -189,6 +191,10 @@ impl OpenCADStudio {
             FilterMsg::Apply => return self.filter_apply(),
             FilterMsg::SaveLayerFilter => {
                 self.save_layer_filter();
+                return Task::none();
+            }
+            FilterMsg::ShowLayers => {
+                self.filter_show_layers();
                 return Task::none();
             }
             FilterMsg::Saved(name) => {
@@ -344,7 +350,8 @@ impl OpenCADStudio {
             | FilterMsg::Save
             | FilterMsg::SaveAsCommit
             | FilterMsg::DeleteSaved
-            | FilterMsg::SaveLayerFilter => {}
+            | FilterMsg::SaveLayerFilter
+            | FilterMsg::ShowLayers => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);
@@ -388,6 +395,53 @@ impl OpenCADStudio {
         self.reset_modal_geometry();
         self.filter_refresh_scope();
         self.filter_refresh_live();
+    }
+
+    /// FILTER over the objects with `layers` (a comma list) as its first row:
+    /// the Layer manager's "Filter objects..." (#2610).
+    pub(super) fn filter_open_for_layers(&mut self, layers: String) {
+        self.filter_open(Some(FilterSeed {
+            filter: Filter {
+                root: Match::All,
+                items: vec![Item::Condition(Condition {
+                    property: Some("layer".into()),
+                    op: Op::Eq,
+                    value: layers,
+                    ..Default::default()
+                })],
+            },
+            scope: QSelectScope::CurrentSpace,
+            result: QSelectResult::New,
+            invert: false,
+            show: false,
+        }));
+    }
+
+    /// The layers of every object the filter finds, as the Layer manager's
+    /// "Layers of the filter result" node.
+    fn filter_show_layers(&mut self) {
+        let i = self.active_tab;
+        let Some(state) = self.filter_dialog.take() else {
+            return;
+        };
+        self.reset_modal_geometry();
+        self.tabs[i].scene.set_filter_preview_highlights(&[]);
+        let found = self.tabs[i]
+            .scene
+            .filter_matches(state.scope, &state.filter, state.invert);
+        let mut layers: Vec<String> = found
+            .iter()
+            .filter_map(|h| self.tabs[i].scene.document.get_entity(*h))
+            .map(|e| e.common().layer.clone())
+            .collect();
+        layers.sort_by_key(|name| name.to_lowercase());
+        layers.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let panel = &mut self.tabs[i].layers;
+        panel.found_layers = layers;
+        panel.view = crate::ui::window::layers::TreeNode::Found;
+        panel.invert = false;
+        self.show_layers = true;
+        self.dock_open_at_default(crate::ui::dock::PanelId::Layers);
     }
 
     /// FILTER over the layers, for a Layer manager filter named `name`.
@@ -1347,6 +1401,13 @@ mod view {
             for (l, n) in &state.by_layer {
                 live = live.push(bucket_line(l.clone(), *n, FilterBucket::Layer(l.clone())));
             }
+            // The result's layers in the Layer manager (#2610).
+            live = live.push(
+                button(text(t!("Open in Layer manager")).size(11))
+                    .on_press_maybe((state.live_count > 0).then_some(msg(FilterMsg::ShowLayers)))
+                    .style(button::secondary)
+                    .padding([3, 8]),
+            );
         }
         let live = container(live).padding(10).style(panel_style);
 

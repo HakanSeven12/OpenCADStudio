@@ -1937,9 +1937,13 @@ impl OpenCADStudio {
         let Some(idx) = self.layer_panel_index(i, &name) else {
             return Task::none();
         };
+        // Merging into this row keeps the selection it merges.
+        let merge_sources = self.tabs[i].layers.selected_names();
         let panel = &mut self.tabs[i].layers;
         panel.keys_active = true;
-        if !panel.selected_multi.contains(&idx) {
+        if action == A::MergeHere {
+            // The selection stays as it is.
+        } else if !panel.selected_multi.contains(&idx) {
             panel.selected_multi = vec![idx];
         }
         panel.selected = Some(idx);
@@ -1971,6 +1975,28 @@ impl OpenCADStudio {
             A::NewGroup => self.update(Message::LayerGroupNew),
             A::AddToGroup(group) => self.update(Message::LayerGroupAdd(group)),
             A::RemoveFromGroup => self.update(Message::LayerGroupRemove),
+            A::FilterObjects => {
+                let layers = self.tabs[i].layers.selected_names().join(",");
+                self.filter_open_for_layers(layers);
+                Task::none()
+            }
+            A::MergeHere => {
+                let sources: Vec<String> = merge_sources
+                    .into_iter()
+                    .filter(|source| !source.eq_ignore_ascii_case(&name))
+                    .collect();
+                if sources.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!(
+                            "Select the layers to merge, then right-click the one they go into."
+                        )
+                        .as_ref(),
+                    );
+                } else {
+                    self.merge_layers(i, sources, name);
+                }
+                Task::none()
+            }
         }
     }
 
@@ -2101,13 +2127,21 @@ impl OpenCADStudio {
     /// manager is open. Objects inside block definitions count too, apart.
     pub(in crate::app) fn refresh_layer_counts(&mut self) {
         use std::hash::{Hash, Hasher};
-        if self.tabs.get(self.active_tab).is_none()
-            || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
-        {
+        if self.tabs.get(self.active_tab).is_none() {
+            return;
+        }
+        if !self.dock_panel_visible(crate::ui::dock::PanelId::Layers) {
+            let i = self.active_tab;
+            if self.tabs[i].layers.show_in_drawing {
+                self.tabs[i].layers.show_in_drawing = false;
+                self.tabs[i].layers.highlight_key = None;
+                self.tabs[i].scene.set_filter_preview_highlights(&[]);
+            }
             return;
         }
         let i = self.active_tab;
         self.refresh_layer_tree(i);
+        self.refresh_layer_highlight(i);
         let scene = &self.tabs[i].scene;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for layer in scene.document.layers.iter() {
@@ -2226,6 +2260,26 @@ impl OpenCADStudio {
         }
         self.refresh_layer_panel();
         Task::none()
+    }
+
+    /// With Show on and no selection dialog open, light the selected layers'
+    /// objects in the drawing; again only when the layers or the drawing
+    /// changed.
+    fn refresh_layer_highlight(&mut self, i: usize) {
+        if !self.tabs[i].layers.show_in_drawing
+            || self.filter_dialog.is_some()
+            || self.qselect.is_some()
+        {
+            return;
+        }
+        let names = self.tabs[i].layers.selected_names();
+        let key = (self.tabs[i].scene.geometry_epoch, names.clone());
+        if self.tabs[i].layers.highlight_key.as_ref() == Some(&key) {
+            return;
+        }
+        let handles = self.tabs[i].scene.objects_on_layers(&names);
+        self.tabs[i].scene.set_filter_preview_highlights(&handles);
+        self.tabs[i].layers.highlight_key = Some(key);
     }
 
     /// The filter tree's live parts: the layers of the selected objects and
@@ -7023,6 +7077,139 @@ mod layer_name_target_tests {
         let _ = app.update(Message::LayerTreeAction(node, TreeAction::Delete));
         assert!(app.layer_filters.is_empty());
         assert_eq!(app.tabs[i].layers.view, TreeNode::All);
+    }
+
+    /// #2610: LAYERP undoes layer-property changes only, newest first, and
+    /// says so when there is nothing left.
+    #[test]
+    fn layerp_steps_back_through_layer_changes() {
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerToggleFreeze("ZULU".into()));
+        let _ = app.update(Message::LayerToggleLock("ALPHA".into()));
+        // A drawing change in between is not LAYERP's.
+        let line = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(1.0, 0.0, 0.0),
+            )));
+        let _ = app.run_command_line("LAYERP");
+        assert!(!app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ALPHA")
+            .unwrap()
+            .is_locked());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+        let _ = app.run_command_line("LAYERP");
+        assert!(!app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+        assert!(app.tabs[i].scene.document.get_entity(line).is_some());
+        app.command_line.last_error = None;
+        let before = app.command_line.history.len();
+        let _ = app.run_command_line("LAYERP");
+        assert!(
+            app.command_line.history.len() > before,
+            "it says there is nothing left"
+        );
+        // LAYERP itself is one ordinary undo step.
+        app.undo_active_tab();
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+    }
+
+    /// #2610: Show lights the selected layers' objects; FILTER's result can
+    /// open in the manager; a row can start FILTER and take merges.
+    #[test]
+    fn layer_manager_and_drawing_work_together() {
+        use crate::app::filter_dialog::{FilterMsg, FilterRow, FilterRowEdit};
+        use crate::ui::window::layers::{LayerMenuAction, TreeNode};
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.layer = "ZULU".into();
+        let on_zulu = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        let mut circle = Circle::new();
+        circle.common.layer = "ALPHA".into();
+        let on_alpha = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Circle(circle));
+        app.tabs[i].scene.bump_geometry();
+
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::LayerShowInDrawing(true));
+        let lit = app.tabs[i].scene.hover_highlight_handles();
+        assert!(lit.contains(&on_zulu) && !lit.contains(&on_alpha));
+        assert!(
+            app.tabs[i].scene.selected.is_empty(),
+            "showing doesn't select"
+        );
+        let _ = app.update(Message::LayerShowInDrawing(false));
+        assert!(app.tabs[i].scene.hover_highlight_handles().is_empty());
+
+        // A row's "Filter objects..." starts FILTER on its layer.
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::FilterObjects,
+        ));
+        assert_eq!(app.filter_dialog.as_ref().unwrap().live_count, 1);
+        // FILTER's result opens in the manager as its own node.
+        let _ = app.update(Message::FilterDialog(FilterMsg::Edit(
+            FilterRow::Root(0),
+            FilterRowEdit::Value("*".into()),
+        )));
+        let _ = app.update(Message::FilterDialog(FilterMsg::ShowLayers));
+        assert!(app.filter_dialog.is_none());
+        assert_eq!(app.tabs[i].layers.view, TreeNode::Found);
+        assert_eq!(
+            app.tabs[i].layers.node_layers(&TreeNode::Found),
+            ["ALPHA", "ZULU"]
+        );
+
+        // Merge: ZULU selected, right-click ALPHA.
+        let _ = app.update(Message::LayerShow(TreeNode::All));
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::MergeHere,
+        ));
+        assert!(!app.tabs[i].scene.document.layers.contains("ZULU"));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(on_zulu)
+                .unwrap()
+                .common()
+                .layer,
+            "ALPHA"
+        );
     }
 
     #[test]

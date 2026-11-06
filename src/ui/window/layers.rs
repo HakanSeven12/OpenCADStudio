@@ -237,6 +237,8 @@ pub enum TreeNode {
     Group(String),
     /// A LAYERFILTER filter.
     Filter(String),
+    /// The layers of what FILTER found, sent over from its result.
+    Found,
 }
 
 impl TreeNode {
@@ -248,6 +250,7 @@ impl TreeNode {
             Self::Selected => t!("Layers of selected objects").into_owned(),
             Self::Xref(name) | Self::Group(name) | Self::Filter(name) => name.clone(),
             Self::ViewportOverrides => t!("Viewport overrides").into_owned(),
+            Self::Found => t!("Layers of the filter result").into_owned(),
         }
     }
 }
@@ -282,6 +285,10 @@ pub enum LayerMenuAction {
     NewGroup,
     AddToGroup(String),
     RemoveFromGroup,
+    /// FILTER with this layer (the selected ones) as its condition.
+    FilterObjects,
+    /// Merge the other selected layers into this one (LAYMRG).
+    MergeHere,
 }
 
 /// Layers the Layer manager never deletes: "0", Defpoints, the current layer
@@ -410,6 +417,12 @@ pub struct LayerPanel {
     pub selected_object_layers: Vec<String>,
     /// LAYERFILTER filters with the layers each one matches.
     pub filters: Vec<(String, Vec<String>)>,
+    /// The layers of FILTER's last result sent here (the Found node).
+    pub found_layers: Vec<String>,
+    /// The selected layers' objects are highlighted in the drawing.
+    pub show_in_drawing: bool,
+    /// What the highlight was made for: geometry epoch and layer names.
+    pub highlight_key: Option<(u64, Vec<String>)>,
 }
 
 impl Default for LayerPanel {
@@ -450,6 +463,9 @@ impl Default for LayerPanel {
             invert: false,
             selected_object_layers: Vec::new(),
             filters: Vec::new(),
+            found_layers: Vec::new(),
+            show_in_drawing: false,
+            highlight_key: None,
         }
     }
 }
@@ -516,6 +532,9 @@ impl LayerPanel {
                 .iter()
                 .map(|(f, _)| (TreeNode::Filter(f.clone()), 1)),
         );
+        if !self.found_layers.is_empty() {
+            nodes.push((TreeNode::Found, 1));
+        }
         nodes
     }
 
@@ -558,6 +577,7 @@ impl LayerPanel {
                 .iter()
                 .find(|(name, _)| name == group)
                 .is_some_and(|(_, members)| named(members)),
+            TreeNode::Found => named(&self.found_layers),
             TreeNode::Filter(filter) => self
                 .filters
                 .iter()
@@ -988,6 +1008,32 @@ impl LayerPanel {
             .and_then(|i| self.layers.get(i))
             .is_some_and(|layer| layer.name != self.current_layer && !layer.frozen);
 
+        // The selected layers' objects lit in the drawing, the selection kept.
+        let show_in_drawing = with_tip(
+            button(
+                row![crate::ui::icons::themed(
+                    if self.show_in_drawing {
+                        crate::ui::icons::EYE
+                    } else {
+                        crate::ui::icons::EYE_OFF
+                    },
+                    12.0,
+                )]
+                .push(if compact {
+                    iced::Element::from(iced::widget::Space::new().width(0))
+                } else {
+                    text(t!("Show")).size(11).into()
+                })
+                .spacing(5)
+                .align_y(iced::Center),
+            )
+            .on_press(Message::LayerShowInDrawing(!self.show_in_drawing))
+            .style(crate::ui::style::form::button_style(self.show_in_drawing))
+            .padding(if compact { [4, 6] } else { [4, 10] }),
+            t!("Show"),
+            compact,
+        );
+
         // In a layout with viewports, a new layer can start frozen in all of
         // them, so it shows only in the viewports that thaw it.
         let new_vp_frozen: Element<'_, Message> = if self.vp_cols.is_empty() {
@@ -1011,6 +1057,14 @@ impl LayerPanel {
                     compact
                 ),
                 new_vp_frozen,
+                // LAYERP: the last layer-property change undone (#2610).
+                toolbar_btn(
+                    crate::ui::icons::UNDO,
+                    t!("Layer Previous"),
+                    Message::Command("LAYERP".into()),
+                    compact,
+                ),
+                show_in_drawing,
                 toolbar_btn_cond(
                     crate::ui::icons::TRASH,
                     t!("Delete"),
@@ -1986,6 +2040,17 @@ fn row_menu(name: &str, groups: &[String], in_group: bool) -> Element<'static, M
             0.0,
         ));
     }
+    items.push(separator());
+    items.push(entry(
+        t!("Filter objects..."),
+        LayerMenuAction::FilterObjects,
+        0.0,
+    ));
+    items.push(entry(
+        t!("Merge selected layers here"),
+        LayerMenuAction::MergeHere,
+        0.0,
+    ));
     container(
         iced::widget::Column::with_children(items)
             .spacing(1)

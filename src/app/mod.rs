@@ -1452,6 +1452,8 @@ pub(super) struct OpenCADStudio {
     qselect: Option<QSelectState>,
     /// The FILTER dialog while it is open.
     filter_dialog: Option<filter_dialog::FilterDialogState>,
+    /// LAYERP is putting layers back; that change is not one to return to.
+    restoring_layer_previous: bool,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -4326,6 +4328,8 @@ pub enum Message {
     LayerShow(crate::ui::window::layers::TreeNode),
     /// Show the layers the node leaves out instead.
     LayerInvert(bool),
+    /// Highlight the selected layers' objects in the drawing.
+    LayerShowInDrawing(bool),
     /// Open FILTER over the layers: a new filter from the search text
     /// (`None`), or the LAYERFILTER filter named.
     LayerFilterEdit(Option<String>),
@@ -6320,6 +6324,7 @@ impl OpenCADStudio {
             grip_text_slide: false,
             qselect: None,
             filter_dialog: None,
+            restoring_layer_previous: false,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

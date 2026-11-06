@@ -175,6 +175,89 @@ pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
     }
 }
 
+// ── Sharp rendering of pixel-grid art ─────────────────────────────────────
+
+/// The handle of `bytes`, sharpened when it is pixel-grid art.
+fn grid_handle(bytes: &'static [u8]) -> svg::Handle {
+    match sharpen_grid_svg(bytes) {
+        Some(sharp) => svg::Handle::from_memory(sharp),
+        None => svg::Handle::from_memory(bytes),
+    }
+}
+
+/// Pixel-grid icon art (`viewBox` `0 0 16 16` or `0 0 32 32`) rewritten so
+/// it reads sharp at small sizes, without touching its geometry:
+///
+/// - Straight stroked lines are drawn without anti-aliasing
+///   (`shape-rendering="crispEdges"`): a 1 px diagonal becomes a solid
+///   staircase of whole pixels instead of a row of faint grey dots.
+/// - Curves and filled shapes stay anti-aliased but are drawn twice, which
+///   turns a pixel's coverage `a` into `1 - (1 - a)²`: their edge pixels are
+///   as bright as the straight lines instead of fading out. Drawing curves
+///   without anti-aliasing instead leaves gaps in them, and tiny filled
+///   arrowheads disappear.
+///
+/// Masks and clip paths are left as they are, and so is any path with its
+/// own opacity. Returns `None` for any other SVG.
+fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(source).ok()?;
+    let root = &text[..text.find('>')?];
+    if !(root.contains(r#"viewBox="0 0 16 16""#) || root.contains(r#"viewBox="0 0 32 32""#)) {
+        return None;
+    }
+    let mut out = String::with_capacity(text.len() * 3 / 2);
+    // Inside a <mask> or <clipPath>.
+    let mut hidden = 0usize;
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open..];
+        let close = after.find('>')? + 1;
+        let tag = &after[..close];
+        let self_closing = tag.ends_with("/>");
+        if tag.starts_with("<mask") || tag.starts_with("<clipPath") {
+            hidden += usize::from(!self_closing);
+            out.push_str(tag);
+        } else if tag.starts_with("</mask") || tag.starts_with("</clipPath") {
+            hidden = hidden.saturating_sub(1);
+            out.push_str(tag);
+        } else if hidden == 0 && self_closing && tag.starts_with("<path") {
+            sharpen_path(tag, &mut out);
+        } else {
+            out.push_str(tag);
+        }
+        rest = &after[close..];
+    }
+    out.push_str(rest);
+    Some(out.into_bytes())
+}
+
+/// One self-closing `<path …/>` of [`sharpen_grid_svg`].
+fn sharpen_path(tag: &str, out: &mut String) {
+    let attr = |name: &str| {
+        let start = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+        Some(&tag[start..start + tag[start..].find('"')?])
+    };
+    if attr("opacity").is_some()
+        || attr("fill-opacity").is_some()
+        || attr("stroke-opacity").is_some()
+        || attr("shape-rendering").is_some()
+    {
+        out.push_str(tag);
+        return;
+    }
+    let stroked =
+        attr("stroke").is_some_and(|stroke| stroke != "none") && attr("fill") == Some("none");
+    let curved = attr("d").is_some_and(|d| d.bytes().any(|b| b"AaCcQqSsTt".contains(&b)));
+    if stroked && !curved {
+        out.push_str(r#"<path shape-rendering="crispEdges""#);
+        out.push_str(&tag["<path".len()..]);
+    } else {
+        out.push_str(tag);
+        out.push_str(tag);
+    }
+}
+
 // Tool SVGs share a small source palette. These colours are semantic rather
 // than literal: cyan is the accent, pale grey is foreground, yellow is warning,
 // and so on. `SemanticIcon` resolves those roles from Iced's active extended
@@ -276,7 +359,7 @@ pub fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
     }
 
     // Miss: build the handle with no cache borrow held, then insert.
-    let handle = svg::Handle::from_memory(bytes);
+    let handle = grid_handle(bytes);
     THEMED_CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.mru[1] = c.mru[0].take();
@@ -626,7 +709,7 @@ fn tinted_handle(bytes: &'static [u8]) -> svg::Handle {
     if let Some(handle) = TINTED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
         return handle;
     }
-    let handle = svg::Handle::from_memory(bytes);
+    let handle = grid_handle(bytes);
     TINTED_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
     handle
 }
@@ -644,7 +727,8 @@ fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
             return handle.clone();
         }
 
-        let handle = svg::Handle::from_memory(recolor_semantic_svg(bytes, theme));
+        let themed = recolor_semantic_svg(bytes, theme);
+        let handle = svg::Handle::from_memory(sharpen_grid_svg(&themed).unwrap_or(themed));
         if cache.len() >= SEMANTIC_CACHE_LIMIT {
             cache.clear();
         }
@@ -1491,6 +1575,48 @@ mod tests {
         let handle_ns = start.elapsed().as_nanos() as f64 / f64::from(N);
         println!("art_for warm: {art_ns:.1} ns, themed_handle warm: {handle_ns:.1} ns");
         assert!(art_ns < 100.0, "art_for takes {art_ns:.1} ns");
+    }
+
+    #[test]
+    fn sharpening_makes_straight_lines_crisp_and_doubles_curves() {
+        let source = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><defs><mask id="m1"><path d="M0 0H16V16H0Z" fill="#fff"/></mask></defs><g mask="url(#m1)"><path d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/></g><path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/><path d="M2 12H4V14H2Z" fill="#4a9eff"/><path d="M1 1L5 5" fill="none" stroke="#ffffff" stroke-opacity="0.5"/></svg>"##;
+        let sharp = String::from_utf8(sharpen_grid_svg(source).unwrap()).unwrap();
+        assert!(sharp.contains(
+            r##"<path shape-rendering="crispEdges" d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/>"##
+        ));
+        let arc = r##"<path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/>"##;
+        assert_eq!(sharp.matches(arc).count(), 2);
+        assert_eq!(sharp.matches(r##"<path d="M2 12H4V14H2Z""##).count(), 2);
+        // Masks and paths with their own opacity are left alone.
+        assert_eq!(
+            sharp
+                .matches(r##"<path d="M0 0H16V16H0Z" fill="#fff"/>"##)
+                .count(),
+            1
+        );
+        assert_eq!(sharp.matches("M1 1L5 5").count(), 1);
+        assert!(!sharp.contains(r#"crispEdges" d="M1 1"#));
+        // Anything not drawn on a 16 or 32 px grid is not touched.
+        assert!(
+            sharpen_grid_svg(br#"<svg viewBox="0 0 24 24"><path d="M1 1L2 2"/></svg>"#).is_none()
+        );
+    }
+
+    #[test]
+    fn every_icon_still_parses_once_sharpened() {
+        let mut files = Vec::new();
+        icon_files(&icons_dir(), &mut files);
+        let mut sharpened = 0;
+        for path in files {
+            let bytes = std::fs::read(&path).unwrap();
+            let Some(sharp) = sharpen_grid_svg(&bytes) else {
+                continue;
+            };
+            sharpened += 1;
+            resvg::usvg::Tree::from_data(&sharp, &resvg::usvg::Options::default())
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+        assert!(sharpened > 800, "only {sharpened} icons sharpened");
     }
 
     #[test]

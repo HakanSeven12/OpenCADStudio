@@ -46,7 +46,7 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `set_properties` lists its `name` selector and takes a colour as a
 /// number or `{"rgb":[r,g,b]}`, which its example shows on a layer.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "1905d2a2aec5fd0c4054794404ed797ba107a7558ccc3392eea9a327dd0c2f34";
+const TOOL_SCHEMA_DIGEST: &str = "e14ffa99803b6accae026e588ea9b2678fd4ae901b8103b53469d6de3996b392";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

@@ -1,5 +1,5 @@
 ;;
-;; H7CAD metric hatch pattern library (from QCAD)
+;; OpenCADStudio metric hatch pattern library
 ;;
 
 *ANGLE,ANGLE
@@ -125,7 +125,7 @@
 
 *BARBWIRE,BARBWIRE
 ;By John Hyslop
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 315,7.62,14.224,17.960512212,17.960512212,0.359210356,-35.561814322
 288.434949,6.604,17.272,56.225296744,8.032185358,3.212874194,-77.10897837
 158.198591,7.874,16.764,80.18324705,4.716661636,1.36783191,-135.415354264
@@ -171,7 +171,7 @@
 
 *BLOCKS-01,BLOCKS-01
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 270,7.874,16.764,25.4,25.4,5.588,-19.812
 180,2.032,2.286,0,25.4,14.478,-10.922
 270,2.032,2.286,25.4,25.4,5.334,-20.066
@@ -215,7 +215,7 @@
 
 *BLOCKS-02,BLOCKS-02
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,8.128,4.572,0,25.4,12.446,-12.954
 270,8.128,13.97,25.4,25.4,9.398,-16.002
 0,9.398,24.384,0,25.4,10.668,-14.732
@@ -261,7 +261,7 @@
 
 *BOX-OVERLAP,BOX-OVERLAP
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,5.08,17.78,0,25.4,10.16,-15.24
 90,5.08,5.08,25.4,25.4,15.24,-10.16
 270,7.62,5.08,25.4,25.4,10.16,-15.24
@@ -273,7 +273,7 @@
 
 *BOXJOIN-01,BOXJOIN-01
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 90,3.810000254,3.81,25.4,25.4,17.78,-7.62
 0,3.810000254,21.59,0,25.4,17.78,-7.62
 270,11.430000254,3.81,25.4,25.4,7.62,-17.78
@@ -285,7 +285,7 @@
 
 *BOXJOIN-02,BOXJOIN-02
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 90,3.810000254,13.97,25.4,25.4,7.62,-17.78
 270,21.590000254,21.59,25.4,25.4,7.62,-17.78
 0,13.970000254,21.59,0,25.4,7.62,-17.78
@@ -320,7 +320,7 @@
 
 *CELTIC-01,CELTIC PATTERN 01
 ;By John Hyslop
-;Developed in mm as Metric QCAD3 pattern
+;Developed in mm as a metric pattern
 135,9.144,10.72444439,17.96051221,17.96051221,2.235085954,-33.68593847
 135,10.72444439,9.934222194,17.96051221,17.96051221,6.565564974,-29.35545945
 315,9.934222194,14.67555561,17.96051221,17.96051221,2.235085954,-33.68593847
@@ -412,7 +412,7 @@
 
 *CELTIC-02,CELTIC PATTERN 02
 ;By John Hyslop
-;Developed in mm as Metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,11.1371634,0.392662664,0,25.4,3.125672946,-22.27432705
 270,25.00733734,11.1371634,0,25.4,3.125672946,-22.27432705
 270,0.392662664,17.38850955,0,25.4,3.125672946,-22.27432705
@@ -471,8 +471,8 @@
 180,13.4814183,21.88166439,0,25.4,9.96308269,-15.43691731
 
 *CELTIC-03,CELTIC-03
-;By John Hyslop,    Using AutoCAD Lisp Tool
-;Developed in mm as metric QCAD3 pattern
+;By John Hyslop
+;Developed in mm as a metric pattern
 90,6.35,13.97,0,25.4,5.08,-20.32
 90,19.05,6.35,0,25.4,5.08,-20.32
 0,6.35,6.35,0,25.4,12.7,-12.7
@@ -493,8 +493,8 @@
 0,-11.43,13.97,0,25.4,22.86,-2.54
 
 *CELTIC-04,CELTIC-04
-;By John Hyslop,    Using AutoCAD Lisp Tool
-;Developed in mm as metric QCAD3 pattern
+;By John Hyslop
+;Developed in mm as a metric pattern
 45,3.81,13.97,17.960512212,17.960512212,12.57235865,-23.348666028
 135,21.59,13.97,17.960512212,17.960512212,12.57235865,-23.348666028
 45,12.7,2.54,17.960512212,17.960512212,12.57235865,-23.348666028
@@ -601,7 +601,7 @@
 
 *HATCH-DOTS,HATCH-DOTS
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 225,14.364914374,2.934914374,17.960512212,17.960512212,11.492295278,-24.428729146
 225,6.359242552,5.089242552,17.960512212,17.960512212,16.19060262,-19.730421804
 225,3.281299762,9.631299762,17.960512212,17.960512212,18.261173282,-17.659851142
@@ -617,7 +617,7 @@
 
 *HATCH-SQRS,HATCH-SQRS
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 225,2.794,9.144,17.960512212,17.960512212,7.902625292,-28.018399132
 225,2.794,21.844,17.960512212,17.960512212,7.902625292,-28.018399132
 225,2.794,6.604,17.960512212,17.960512212,13.290779108,-22.630245316
@@ -642,7 +642,7 @@
 
 *HEXAGONS,HEXAGONS
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 239.931417,5.587999746,25.399999492,204.778078632,1.15693825,5.576441984,-552.067817376
 239.931417,22.606,4.826,204.778078632,1.15693825,5.576441984,-552.067817376
 300.068583,19.812000254,25.399999492,352.866180728,1.15693825,5.576441984,-552.067817376
@@ -658,7 +658,7 @@
 
 *HEXJOIN-01,HEXJOIN-01
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 45,3.81,16.51,17.960512212,17.960512212,7.184204834,-28.73681959
 270,21.59,16.51,25.4,25.4,7.62,-17.78
 315,16.51,21.59,17.960512212,17.960512212,7.184204834,-28.73681959
@@ -674,7 +674,7 @@
 
 *HEXJOIN-02,HEXJOIN-02
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 270,21.59,11.43,25.4,25.4,2.54,-22.86
 315,16.51,21.59,17.960512212,17.960512212,7.184204834,-28.73681959
 270,13.97,3.81,25.4,25.4,7.62,-17.78
@@ -801,7 +801,7 @@
 
 *LATTICE-01,LATTICE-01
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,2.162738626,10.16,0,25.4,4.325477252,-21.074522748
 270,15.24,2.162738626,25.4,25.4,4.325477252,-21.074522748
 270,10.16,2.162738626,25.4,25.4,4.325477252,-21.074522748
@@ -817,7 +817,7 @@
 
 *LATTICE-02,LATTICE-02
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,9.736666582,9.736666582,0,25.4,19.473333164,-5.926666836
 270,15.663333418,25.4,25.4,25.4,25.4,0
 180,9.736666582,15.663333418,0,25.4,19.473333164,-5.926666836
@@ -825,7 +825,7 @@
 
 *LATTICE-03,LATTICE-03
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,9.736666582,9.736666582,0,25.4,19.473333164,-5.926666836
 180,9.736666582,15.663333418,0,25.4,19.473333164,-5.926666836
 270,15.663333418,9.736666582,25.4,25.4,19.473333164,-5.926666836
@@ -833,7 +833,7 @@
 
 *LATTICE-04,LATTICE-04
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 296.565051,3.894666582,11.684,34.077676066,11.35922544,28.776704194,-28.019422498
 296.565051,8.636000254,14.054666582,34.077676066,11.35922544,28.776704194,-28.019422498
 206.565051,11.684,21.505333418,34.077676066,11.35922544,28.776704194,-28.019422498
@@ -841,7 +841,7 @@
 
 *LATTICE-05,LATTICE-05
 ;By John Hyslop
-;Developed in mm as Metric QCAD3 pattern
+;Developed in mm as a metric pattern
 0,19.685,1.905,0,25.4,3.81,-21.59
 180,5.715,23.495,0,25.4,3.81,-21.59
 180,15.875,5.715,0,25.4,10.16,-15.24
@@ -857,7 +857,7 @@
 
 *LATTICE-06,LATTICE-06
 ;By John Hyslop
-;Developed in mm as Metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,15.875,9.525,0,25.4,6.35,-19.05
 270,15.875,15.875,0,25.4,6.35,-19.05
 0,9.525,15.875,0,25.4,6.35,-19.05
@@ -877,7 +877,7 @@
 
 *LATTICE-07,LATTICE-07
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 270,17.568333418,17.568333164,25.4,25.4,22.436666582,-2.963333418
 270,20.531666836,17.568333164,25.4,25.4,22.436666582,-2.963333418
 270,4.868333164,4.868333418,25.4,25.4,22.436666582,-2.963333418
@@ -892,7 +892,7 @@
 
 *MAZE-01,MAZE-01
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 180,24.13,23.368,0,25.4,6.35,-19.05
 90,24.13,13.97,25.4,25.4,9.398,-16.002
 90,21.082,13.97,25.4,25.4,6.35,-19.05
@@ -922,7 +922,7 @@
 
 *MAZE-02,MAZE-02
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 270,22.859999746,2.54,25.4,25.4,2.54,-22.86
 0,17.779999746,2.54,0,25.4,5.08,-20.32
 90,0,7.62,25.4,25.4,12.7,-12.7
@@ -987,7 +987,7 @@
 
 *SCAFFOLD,SCAFFOLD
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 270,19.304,21.336,25.4,25.4,0.508,-24.892
 326.3099325,6.604,4.064,56.357539812,7.04469254,14.652960026,-76.928042486
 90,6.096,12.446,25.4,25.4,0.508,-24.892
@@ -1064,7 +1064,7 @@
 
 *TRI-OVERLAP,TRI-OVERLAP
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 59.641885,2.286000254,3.81,1206.700468992,0.313103514,20.605334202,-2039.928082188
 300.358115,12.7,21.590000254,853.832947398,0.313103514,20.605334202,-2039.928082188
 180,9.129485678,15.494,0,25.4,18.258981262,-7.141018738
@@ -1080,8 +1080,8 @@
 0, -2.38125,4.12445, 4.7625,8.24889, 4.7625,-4.7625
 
 *WEATHERBOARD,WEATHERBOARD
-; By John Hyslop,    Manually Entered QCAD3 pattern
-; Developed in mm as metric QCAD3 pattern
+; By John Hyslop, manually entered pattern
+; Developed in mm as a metric pattern
 ; Metric Hatch Scale 1 Makes 152mm horizontally placed boards
 ; with a 13mm offset line to simulate a rounded edge
 0,0,0,0,152
@@ -1089,7 +1089,7 @@
 
 *WIRE-FENCE,WIRE-FENCE
 ;By John Hyslop,    Tile2Hatch tool CVH 2020
-;Developed in mm as metric QCAD3 pattern
+;Developed in mm as a metric pattern
 315,11.684,12.7,17.960512212,17.960512212,1.186955462,-34.734068962
 315,13.353142966,14.332857034,17.960512212,17.960512212,1.231577928,-34.689446496
 3.731397,12.767918076,14.294690232,381.845330542,0.55100347,0.586467966,-1170.2956782

@@ -1176,6 +1176,19 @@ impl OpenCADStudio {
             CmdResult::ReportError(msg) => {
                 self.handle_report_error(msg);
             }
+            CmdResult::ReportMessage(msg) => {
+                self.command_line.push_output(&msg);
+                let _ = self.handle_need_point();
+            }
+            CmdResult::NeedPointQuiet => {
+                if let Some(task) = self.handle_need_point_quietly(true) {
+                    return task;
+                }
+            }
+            CmdResult::ReportErrorAndMeasurement(error, msg) => {
+                self.command_line.push_error(&error);
+                self.handle_report_measurement(msg);
+            }
             CmdResult::ReportMeasurementAndDeselect(msg) => {
                 self.handle_report_measurement_and_deselect(msg);
             }
@@ -1385,6 +1398,11 @@ impl OpenCADStudio {
     // --- C2a handlers: flow / lifecycle (thin-router targets, bodies moved verbatim) ---
 
     fn handle_need_point(&mut self) -> Option<Task<Message>> {
+        self.handle_need_point_quietly(false)
+    }
+
+    /// [`Self::handle_need_point`], leaving the prompt unprinted when `quiet`.
+    fn handle_need_point_quietly(&mut self, quiet: bool) -> Option<Task<Message>> {
         let i = self.active_tab;
         // ATTEDIT finished its entity pick: hand the chosen block off to
         // the attribute editor dialog and end the command (open_attribute
@@ -1400,7 +1418,7 @@ impl OpenCADStudio {
             return Some(Task::none());
         }
         let prompt = self.tabs[i].active_cmd.as_ref().map(|c| c.prompt());
-        if let Some(p) = prompt {
+        if let Some(p) = prompt.filter(|_| !quiet) {
             self.command_line.push_info(&p);
         }
         let opts = self.tabs[i]

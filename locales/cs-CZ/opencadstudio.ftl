@@ -7145,7 +7145,7 @@ measurement =
     .quick-options = { $command }  Move cursor or [Distance/Radius/Angle/ARea/Volume/Quick/Mode/eXit] <eXit>:
     .first-point = Specify first point:
     .second-point = Specify second point or [Multiple points]:
-    .next-point-multiple = Specify next point or [Undo/Total] <Total>:
+    .next-point-multiple = Specify next point or [Arc/Length/Undo/Total] <Total>:
     .distance-result = Distance = { $distance },  Angle in XY Plane = { $in_plane },  Angle from XY Plane = { $from_plane }
     .distance-deltas = Delta X = { $dx },  Delta Y = { $dy },   Delta Z = { $dz }
     .option-multiple-points = Multiple points
@@ -7172,11 +7172,34 @@ measurement =
     .total-area = Total area = { $total }
     .total-volume = Total Volume = { $total }
     .volume-result = Volume = { $volume }
-    .not-measurable = The selected object has no measurable area.
+    .not-measurable = Selected object does not have an area
     .option-add-area = Add area
     .option-subtract-area = Subtract area
     .option-add-volume = Add volume
     .option-subtract-volume = Subtract volume
+    .next-point-multiple-close = Specify next point or [Arc/Close/Length/Undo/Total] <Total>:
+    .arc-endpoint-close =
+        Specify endpoint of arc (hold Ctrl to switch direction) or
+        {"["}Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo]:
+    .invalid-selection =
+        {"*"}Invalid selection*
+        Expects a point or Last
+    .all-undone =
+        All segments already undone.
+        Command has been completely undone.
+    .arc-chord-direction = Specify direction of chord for arc (hold Ctrl to switch direction) <{ $default }>:
+    .arc-included-angle-ctrl = Specify included angle (hold Ctrl to switch direction):
+    .arc-included-angle = Specify included angle:
+    .arc-end-center-radius = Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:
+    .arc-center = Specify center point of arc:
+    .arc-end-angle-length = Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:
+    .arc-chord-length = Specify length of chord (hold Ctrl to switch direction):
+    .arc-tangent-direction = Specify the tangent direction for the start point of arc:
+    .arc-end-direction = Specify endpoint of the arc (hold Ctrl to switch direction):
+    .arc-radius = Specify radius of arc:
+    .arc-end-angle = Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:
+    .arc-second = Specify second point on arc:
+    .arc-end = Specify end point of arc:
 pgp-import =
     .button = Importovat PGP…
     .filter = Aliasy příkazů (*.pgp)

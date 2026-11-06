@@ -2508,6 +2508,14 @@ pub enum CmdResult {
     ReportMeasurement(String),
     /// Print an input error and keep the command active.
     ReportError(String),
+    /// Print an input error, then a measurement result again, and keep the
+    /// command active.
+    ReportErrorAndMeasurement(String, String),
+    /// Print a plain message line and keep the command active.
+    ReportMessage(String),
+    /// Keep the command active at its updated step without printing its
+    /// prompt again.
+    NeedPointQuiet,
     /// Reports an error and ends the command (`Lines are parallel.`).
     CancelWithMessage(String),
     /// Explode this block reference and commit its pieces; end the command
@@ -3267,6 +3275,12 @@ pub trait CadCommand: Send {
     /// as a click there would; a step that reads points itself keeps them.
     fn typed_point_picks_entity(&self) -> bool {
         !self.entity_pick_accepts_points()
+    }
+
+    /// Take `L` / `LAST` at an object prompt as a pick of the most recently
+    /// created object.
+    fn entity_pick_accepts_last(&self) -> bool {
+        false
     }
 
     /// A constraint point the host resolved for a `CheckConstraintPoint`

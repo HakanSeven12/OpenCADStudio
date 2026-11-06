@@ -1716,6 +1716,25 @@ impl OpenCADStudio {
         if !gathering && !picks_entity {
             return None;
         }
+        let last = picks_entity
+            && matches!(token.trim().to_ascii_uppercase().as_str(), "L" | "LAST")
+            && self.tabs[i]
+                .active_cmd
+                .as_ref()
+                .is_some_and(|command| command.entity_pick_accepts_last());
+        if last {
+            // Highest handle among the selectable wires of the current space:
+            // the most recently created object, as the selection's Last.
+            let handle = self.tabs[i]
+                .scene
+                .entity_wires()
+                .iter()
+                .filter_map(|w| crate::scene::Scene::handle_from_wire_name(&w.name))
+                .max_by_key(|h| h.value())
+                .unwrap_or(Handle::NULL);
+            self.push_ucs_to_cmd(i);
+            return Some(self.feed_command(StepInput::EntityPick(handle, glam::DVec3::ZERO)));
+        }
         let wcs = self.typed_wcs(i, token)?;
         let owner = self.tabs[i]
             .current_parametric_scope()

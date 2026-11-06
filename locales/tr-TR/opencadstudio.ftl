@@ -7041,7 +7041,7 @@ block-def =
 
 # Transient geometry inquiry readouts.
 measurement =
-    .distance = Distance = { $value }
+    .distance = Mesafe = { $value }
     .angle-start = { $command }  Specify vertex point or [Lines]:
     .first-line = { $command }  Select first line or [Points] (smaller angle):
     .second-line = { $command }  Select second line (smaller angle):
@@ -7066,7 +7066,7 @@ measurement =
     .quick-options = { $command }  İmleci hareket ettirin veya [Distance/Radius/Angle/ARea/Volume/Quick/Mode/eXit] <eXit>:
     .first-point = İlk noktayı belirtin:
     .second-point = İkinci noktayı belirtin veya [Multiple points]:
-    .next-point-multiple = Sonraki noktayı belirtin veya [Undo/Total] <Total>:
+    .next-point-multiple = Sonraki noktayı belirtin veya [Arc/Length/Undo/Total] <Total>:
     .distance-result = Mesafe = { $distance },  XY düzlemindeki açı = { $in_plane },  XY düzleminden açı = { $from_plane }
     .distance-deltas = Delta X = { $dx },  Delta Y = { $dy },   Delta Z = { $dz }
     .option-multiple-points = Birden çok nokta
@@ -7093,11 +7093,34 @@ measurement =
     .total-area = Toplam alan = { $total }
     .total-volume = Toplam hacim = { $total }
     .volume-result = Hacim = { $volume }
-    .not-measurable = Seçilen nesnenin ölçülebilir bir alanı yok.
+    .not-measurable = Seçilen nesnenin alanı yok
     .option-add-area = Alan ekle
     .option-subtract-area = Alan çıkar
     .option-add-volume = Hacim ekle
     .option-subtract-volume = Hacim çıkar
+    .next-point-multiple-close = Sonraki noktayı belirtin veya [Arc/Close/Length/Undo/Total] <Total>:
+    .arc-endpoint-close =
+        Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya
+        {"["}Angle/CEnter/CLose/Direction/Line/Radius/Second pt/Undo]:
+    .invalid-selection =
+        {"*"}Geçersiz seçim*
+        Bir nokta veya Last bekleniyor
+    .all-undone =
+        Tüm parçalar zaten geri alındı.
+        Komut tamamen geri alındı.
+    .arc-chord-direction = Yayın kiriş yönünü belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) <{ $default }>:
+    .arc-included-angle-ctrl = Kapsanan açıyı belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-included-angle = Kapsanan açıyı belirtin:
+    .arc-end-center-radius = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya [CEnter/Radius]:
+    .arc-center = Yayın merkez noktasını belirtin:
+    .arc-end-angle-length = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya [Angle/Length]:
+    .arc-chord-length = Kiriş uzunluğunu belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-tangent-direction = Yayın başlangıç noktasındaki teğet yönünü belirtin:
+    .arc-end-direction = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
+    .arc-radius = Yayın yarıçapını belirtin:
+    .arc-end-angle = Yayın bitiş noktasını belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) veya [Angle]:
+    .arc-second = Yay üzerindeki ikinci noktayı belirtin:
+    .arc-end = Yayın bitiş noktasını belirtin:
 pgp-import =
     .button = Import PGP…
     .filter = Command aliases (*.pgp)

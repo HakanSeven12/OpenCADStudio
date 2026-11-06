@@ -302,14 +302,23 @@ impl MeasureGeomCommand {
 
     // ── ARea / Volume boundary ─────────────────────────────────────────────
 
-    /// Total is offered once the closed boundary encloses an area.
+    /// Total is offered once the boundary has an arc segment or two
+    /// segments of non-zero length, even when they are collinear (the
+    /// closed boundary may then enclose no area); a repeated point adds a
+    /// zero-length segment that does not count.
     fn total_offered(&self) -> bool {
         if self.points.len() < 2 {
             return false;
         }
-        let measurement = self.boundary_measurement(None);
-        let perimeter = measurement.perimeter.unwrap_or(0.0);
-        measurement.area > perimeter * perimeter * 1e-12
+        let segments = self.points.len() - 1;
+        if self.segs.iter().take(segments).any(|bulge| *bulge != 0.0) {
+            return true;
+        }
+        self.points
+            .windows(2)
+            .filter(|pair| (pair[1] - pair[0]).length() > 1e-9)
+            .count()
+            >= 2
     }
 
     fn local(&self, point: DVec3) -> DVec3 {

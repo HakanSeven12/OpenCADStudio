@@ -1697,7 +1697,7 @@ impl OpenCADStudio {
                 };
                 let scale_label: &str = explicit_scale.as_deref().unwrap_or("the current annotation scale");
 
-                let selected: Vec<codec::Handle> = self.tabs[i]
+                let selected: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()

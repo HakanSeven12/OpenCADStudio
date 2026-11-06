@@ -5534,7 +5534,7 @@ mod batch4_tests {
         app.tabs[i].scene.load_current_layout_state();
     }
 
-    fn layout_viewport_handles(app: &OpenCADStudio) -> Vec<codec::Handle> {
+    fn layout_viewport_handles(app: &OpenCADStudio) -> Vec<document::Handle> {
         let i = app.active_tab;
         let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
         app.tabs[i]
@@ -5542,7 +5542,7 @@ mod batch4_tests {
             .document
             .entities()
             .filter_map(|e| match e {
-                codec::EntityType::Viewport(vp)
+                document::EntityType::Viewport(vp)
                     if vp.id > 1 && vp.common.owner_handle == layout_block =>
                 {
                     Some(vp.common.handle)
@@ -5552,14 +5552,14 @@ mod batch4_tests {
             .collect()
     }
 
-    fn vp(app: &OpenCADStudio, handle: codec::Handle) -> &codec::entities::Viewport {
+    fn vp(app: &OpenCADStudio, handle: document::Handle) -> &document::entities::Viewport {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
-            Some(codec::EntityType::Viewport(vp)) => vp,
+            Some(document::EntityType::Viewport(vp)) => vp,
             _ => panic!("viewport missing"),
         }
     }
 
-    fn effective_scale(app: &OpenCADStudio, handle: codec::Handle) -> f64 {
+    fn effective_scale(app: &OpenCADStudio, handle: document::Handle) -> f64 {
         let vp = vp(app, handle);
         crate::scene::vp_effective_scale(vp.custom_scale, vp.view_height, vp.height)
     }

@@ -264,7 +264,7 @@ fn number_cell(
 /// cell. The writable cell fills the flexible Description column, so the click
 /// target stays the whole cell as the pane grows.
 fn description_cell(
-    definition: codec::Handle,
+    definition: document::Handle,
     name: &str,
     value: &str,
     writable: bool,
@@ -739,12 +739,12 @@ mod tests {
     #[test]
     fn the_description_field_opens_only_on_a_row_that_can_write_one() {
         // `locate` draws the pane on this definition, so the open cell names it.
-        let definition = codec::Handle::new(1);
+        let definition = document::Handle::new(1);
         let width = PanelId::ParametersManager.default_width();
         let open = |name: &str| Panel {
             editing: Some(Edit {
                 definition,
-                parameter: codec::Handle::new(9),
+                parameter: document::Handle::new(9),
                 component: crate::scene::model::object::BlockParameterComponent::Distance,
                 name: name.to_owned(),
                 cell: Cell::Description,

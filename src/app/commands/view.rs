@@ -561,7 +561,7 @@ impl OpenCADStudio {
                         .find(|handle| {
                             matches!(
                                 scene.document.get_entity(*handle),
-                                Some(codec::EntityType::Viewport(vp)) if vp.id > 1
+                                Some(document::EntityType::Viewport(vp)) if vp.id > 1
                             )
                         })
                         .or_else(|| scene.layout_viewport_handles().into_iter().next());
@@ -634,7 +634,7 @@ impl OpenCADStudio {
                         .find(|handle| {
                             matches!(
                                 scene.document.get_entity(*handle),
-                                Some(codec::EntityType::Viewport(vp)) if vp.id > 1
+                                Some(document::EntityType::Viewport(vp)) if vp.id > 1
                             )
                         })
                         .or_else(|| scene.layout_viewport_handles().into_iter().next());
@@ -646,7 +646,7 @@ impl OpenCADStudio {
                     };
                     let current = matches!(
                         scene.document.get_entity(target),
-                        Some(codec::EntityType::Viewport(vp)) if vp.status.locked
+                        Some(document::EntityType::Viewport(vp)) if vp.status.locked
                     );
                     let next = match value.as_str() {
                         "" | "TOGGLE" => Some(!current),
@@ -662,7 +662,7 @@ impl OpenCADStudio {
                     };
                     if let Some(next) = next {
                         self.push_undo_snapshot(i, "VPLOCK");
-                        if let Some(codec::EntityType::Viewport(vp)) =
+                        if let Some(document::EntityType::Viewport(vp)) =
                             self.tabs[i].scene.document.get_entity_mut(target)
                         {
                             vp.status.locked = next;
@@ -1823,7 +1823,7 @@ fn parse_viewport_scale(value: &str) -> Option<f64> {
 }
 
 /// Human-facing report of the scale a viewport is currently displaying at.
-fn describe_viewport_scale(scene: &crate::scene::Scene, handle: codec::Handle) -> String {
+fn describe_viewport_scale(scene: &crate::scene::Scene, handle: document::Handle) -> String {
     let Some(factor) = scene.viewport_effective_scale(handle) else {
         return crate::t!("VPSCALE: the viewport is gone.").to_string();
     };

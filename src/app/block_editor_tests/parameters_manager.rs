@@ -858,6 +858,32 @@ fn bparameters_opens_the_manager_panel_inside_the_block_editor() {
 }
 
 #[test]
+fn a_renamed_lookup_row_shows_the_parameter_name() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LOOKUP 3,3"], &[]);
+    let lookup = crate::scene::block_lookup::parameters(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .next()
+        .map(|(handle, _)| handle)
+        .expect("one lookup parameter");
+    crate::scene::block_authoring::metadata::set_parameter_name(
+        &mut app.tabs[tab].scene.document,
+        definition,
+        lookup,
+        "Grip9",
+    )
+    .expect("the lookup takes a name");
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    let row = rows
+        .iter()
+        .find(|row| row.type_name == "Lookup")
+        .expect("the lookup still lists a row");
+    assert_eq!(
+        row.name, "Grip9",
+        "the row shows the parameter's own name, not its lookup label"
+    );
+}
+
+#[test]
 fn a_lookup_parameter_lists_one_row_typed_lookup() {
     let rows = edited(
         &["BPARAMETER POLAR 0,0 10,0 5,2", "BPARAMETER LOOKUP 3,3"],

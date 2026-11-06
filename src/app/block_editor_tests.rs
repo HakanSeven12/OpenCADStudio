@@ -3496,7 +3496,14 @@ fn a_lookup_takes_its_name_description_and_palette_switch_at_the_placement_promp
     let doc = &app.tabs[i].scene.document;
     let lookups = crate::scene::block_lookup::parameters(doc, definition);
     assert_eq!(lookups.len(), 1);
-    assert_eq!(lookups[0].1.lookup_name, "Grip9");
+    assert_eq!(
+        lookups[0].1.parameter.parameter.element.name, "Grip9",
+        "the name answer names the parameter itself"
+    );
+    assert_eq!(
+        lookups[0].1.lookup_name, "Lookup1",
+        "and leaves the lookup property label at its default"
+    );
     assert_eq!(lookups[0].1.lookup_description, "shows the grip");
     assert!(!lookups[0].1.parameter.parameter.show_properties);
     assert_eq!(

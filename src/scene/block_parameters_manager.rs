@@ -129,7 +129,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
                 Data::LookupParameter(p) => Some((
                     "Lookup",
                     p.parameter.parameter.show_properties,
-                    p.lookup_name.clone(),
+                    p.parameter.parameter.element.name.clone(),
                 )),
                 _ => None,
             },

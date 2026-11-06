@@ -8776,7 +8776,7 @@ context-menu =
     .customize = Προσαρμογή…
     .editor-title = Αποεπιλέξτε μια γραμμή για απόκρυψη
     .my-commands = Οι εντολές μου
-    .command-placeholder = Εντολή ή ψευδώνυμο
+    .command-placeholder = Εντολή ή ψευδώνυμο, -- για διαχωριστικό
     .add = Προσθήκη
     .done = Τέλος
 

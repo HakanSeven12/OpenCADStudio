@@ -8774,7 +8774,7 @@ context-menu =
     .customize = Anpassen…
     .editor-title = Häkchen entfernen, um eine Zeile auszublenden
     .my-commands = Meine Befehle
-    .command-placeholder = Befehl oder Alias
+    .command-placeholder = Befehl oder Alias, -- für eine Trennlinie
     .add = Hinzufügen
     .done = Fertig
 

@@ -8773,7 +8773,7 @@ context-menu =
     .customize = Tùy biến…
     .editor-title = Bỏ chọn một dòng để ẩn nó
     .my-commands = Lệnh của tôi
-    .command-placeholder = Lệnh hoặc bí danh
+    .command-placeholder = Lệnh hoặc bí danh, -- cho đường phân cách
     .add = Thêm
     .done = Xong
 

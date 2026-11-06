@@ -8778,7 +8778,7 @@ context-menu =
     .customize = Dostosuj…
     .editor-title = Odznacz wiersz, aby go ukryć
     .my-commands = Moje polecenia
-    .command-placeholder = Polecenie lub alias
+    .command-placeholder = Polecenie lub alias, -- dla separatora
     .add = Dodaj
     .done = Gotowe
 

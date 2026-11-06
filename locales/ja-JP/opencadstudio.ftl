@@ -8754,7 +8754,7 @@ context-menu =
     .customize = カスタマイズ…
     .editor-title = チェックを外すと行を非表示にします
     .my-commands = マイ コマンド
-    .command-placeholder = コマンドまたはエイリアス
+    .command-placeholder = コマンドまたはエイリアス、区切り線は --
     .add = 追加
     .done = 完了
 

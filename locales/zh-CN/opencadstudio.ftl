@@ -8749,7 +8749,7 @@ context-menu =
     .customize = 自定义…
     .editor-title = 取消勾选以隐藏该行
     .my-commands = 我的命令
-    .command-placeholder = 命令或别名
+    .command-placeholder = 命令或别名，-- 表示分隔线
     .add = 添加
     .done = 完成
 

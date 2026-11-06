@@ -8695,7 +8695,7 @@ context-menu =
     .customize = Özelleştir…
     .editor-title = Gizlemek için satırın işaretini kaldırın
     .my-commands = Komutlarım
-    .command-placeholder = Komut veya kısayol
+    .command-placeholder = Komut veya kısayol, ayırıcı için --
     .add = Ekle
     .done = Bitti
 

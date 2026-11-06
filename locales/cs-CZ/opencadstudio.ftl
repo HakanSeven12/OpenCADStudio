@@ -8782,7 +8782,7 @@ context-menu =
     .customize = Přizpůsobit…
     .editor-title = Zrušením zaškrtnutí řádek skryjete
     .my-commands = Moje příkazy
-    .command-placeholder = Příkaz nebo alias
+    .command-placeholder = Příkaz nebo alias, -- pro oddělovač
     .add = Přidat
     .done = Hotovo
 

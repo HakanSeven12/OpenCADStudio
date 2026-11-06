@@ -8776,7 +8776,7 @@ context-menu =
     .customize = Персонализиране…
     .editor-title = Махнете отметката, за да скриете ред
     .my-commands = Моите команди
-    .command-placeholder = Команда или псевдоним
+    .command-placeholder = Команда или псевдоним, -- за разделител
     .add = Добави
     .done = Готово
 

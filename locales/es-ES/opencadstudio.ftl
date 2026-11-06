@@ -8776,7 +8776,7 @@ context-menu =
     .customize = Personalizar…
     .editor-title = Desmarque una fila para ocultarla
     .my-commands = Mis comandos
-    .command-placeholder = Comando o alias
+    .command-placeholder = Comando o alias, -- para un separador
     .add = Añadir
     .done = Hecho
 

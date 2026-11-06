@@ -167,7 +167,10 @@ impl OpenCADStudio {
                 return Task::none();
             }
             M::Add => {
-                if !typed.is_empty() {
+                // "--" adds a separator line between the user's commands.
+                if typed == crate::ui::popup::context_menu::MENU_SEPARATOR {
+                    custom.custom.push(("──────".into(), typed));
+                } else if !typed.is_empty() {
                     custom.custom.push((label, typed));
                 }
                 self.context_menu_editing = Some(String::new());

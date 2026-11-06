@@ -8773,7 +8773,7 @@ context-menu =
     .customize = Mukauta…
     .editor-title = Piilota rivi poistamalla valinta
     .my-commands = Omat komennot
-    .command-placeholder = Komento tai alias
+    .command-placeholder = Komento tai alias, -- erotinviivalle
     .add = Lisää
     .done = Valmis
 

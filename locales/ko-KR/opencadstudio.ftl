@@ -8765,7 +8765,7 @@ context-menu =
     .customize = 사용자화…
     .editor-title = 행을 숨기려면 체크를 해제하세요
     .my-commands = 내 명령
-    .command-placeholder = 명령 또는 별칭
+    .command-placeholder = 명령 또는 별칭, 구분선은 --
     .add = 추가
     .done = 완료
 

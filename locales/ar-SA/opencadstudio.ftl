@@ -8779,7 +8779,7 @@ context-menu =
     .customize = تخصيص…
     .editor-title = ألغِ تحديد صف لإخفائه
     .my-commands = أوامري
-    .command-placeholder = أمر أو اسم مستعار
+    .command-placeholder = أمر أو اسم مستعار، -- لخط فاصل
     .add = إضافة
     .done = تم
 

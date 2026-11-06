@@ -8754,7 +8754,7 @@ context-menu =
     .customize = Testreszabás…
     .editor-title = Egy sor elrejtéséhez vegye ki a pipát
     .my-commands = Saját parancsok
-    .command-placeholder = Parancs vagy álnév
+    .command-placeholder = Parancs vagy álnév, -- elválasztóhoz
     .add = Hozzáadás
     .done = Kész
 

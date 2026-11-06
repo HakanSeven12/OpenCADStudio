@@ -8775,7 +8775,7 @@ context-menu =
     .customize = Customize…
     .editor-title = Untick a row to hide it
     .my-commands = My commands
-    .command-placeholder = Command or alias
+    .command-placeholder = Command or alias, -- for a line
     .add = Add
     .done = Done
 

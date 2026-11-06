@@ -8764,7 +8764,7 @@ context-menu =
     .customize = अनुकूलित करें…
     .editor-title = पंक्ति छिपाने के लिए उसका चिह्न हटाएँ
     .my-commands = मेरे कमांड
-    .command-placeholder = कमांड या उपनाम
+    .command-placeholder = कमांड या उपनाम, विभाजक के लिए --
     .add = जोड़ें
     .done = हो गया
 

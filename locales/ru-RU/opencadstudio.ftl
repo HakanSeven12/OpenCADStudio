@@ -8780,7 +8780,7 @@ context-menu =
     .customize = Настроить…
     .editor-title = Снимите флажок, чтобы скрыть строку
     .my-commands = Мои команды
-    .command-placeholder = Команда или псевдоним
+    .command-placeholder = Команда или псевдоним, -- для разделителя
     .add = Добавить
     .done = Готово
 

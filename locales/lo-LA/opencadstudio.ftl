@@ -8767,7 +8767,7 @@ context-menu =
     .customize = ປັບແຕ່ງ…
     .editor-title = ຍົກເລີກເຄື່ອງໝາຍເພື່ອເຊື່ອງແຖວ
     .my-commands = ຄຳສັ່ງຂອງຂ້ອຍ
-    .command-placeholder = ຄຳສັ່ງ ຫຼື ຊື່ຫຍໍ້
+    .command-placeholder = ຄຳສັ່ງ ຫຼື ຊື່ຫຍໍ້, -- ສຳລັບເສັ້ນແບ່ງ
     .add = ເພີ່ມ
     .done = ແລ້ວໆ
 

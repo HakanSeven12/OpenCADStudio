@@ -8774,7 +8774,7 @@ context-menu =
     .customize = Aanpassen…
     .editor-title = Vink een regel uit om die te verbergen
     .my-commands = Mijn opdrachten
-    .command-placeholder = Opdracht of alias
+    .command-placeholder = Opdracht of alias, -- voor een scheidingslijn
     .add = Toevoegen
     .done = Klaar
 

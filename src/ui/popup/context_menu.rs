@@ -1322,6 +1322,9 @@ fn item_key(item: &MenuItem) -> String {
 
 /// The idle menu as the user arranged it: hidden rows gone, their own
 /// commands after Recent Input, and Customize at the end.
+/// The command a user's entry carries when it is a separator line.
+pub const MENU_SEPARATOR: &str = "--";
+
 pub fn customize_rows(rows: Vec<MenuRow>, custom: &MenuCustomization) -> Vec<MenuRow> {
     // The default row (Repeat) always stays.
     let hidden = |key: &str| custom.hidden.iter().any(|h| h == key);
@@ -1348,6 +1351,10 @@ pub fn customize_rows(rows: Vec<MenuRow>, custom: &MenuCustomization) -> Vec<Men
         if separator && !inserted {
             inserted = true;
             for (label, command) in &custom.custom {
+                if command == MENU_SEPARATOR {
+                    out.push(MenuRow::Separator);
+                    continue;
+                }
                 out.push(MenuRow::Item(
                     MenuItem::new(label.clone(), MenuAction::Command(command.clone()))
                         .command_icon(command.split_whitespace().next().unwrap_or("")),
@@ -1419,5 +1426,26 @@ mod customization_tests {
         assert!(matches!(&rows[3], MenuRow::Item(item) if item.action == MenuAction::Command("OFFSET".into())));
         assert!(matches!(rows.last(), Some(MenuRow::Item(item)) if item.action == MenuAction::Customize));
         assert!(!rows.windows(2).any(|pair| matches!(pair, [MenuRow::Separator, MenuRow::Separator])));
+    }
+
+    /// #2619: a "--" entry draws a separator between the user's commands.
+    #[test]
+    fn a_separator_entry_splits_the_users_commands() {
+        let rows = build_context_menu(&idle(), None).rows;
+        let custom = MenuCustomization {
+            hidden: Vec::new(),
+            custom: vec![
+                ("Offset".into(), "OFFSET".into()),
+                ("──────".into(), MENU_SEPARATOR.into()),
+                ("Trim".into(), "TRIM".into()),
+            ],
+        };
+        let rows = customize_rows(rows, &custom);
+        let at = rows
+            .iter()
+            .position(|row| matches!(row, MenuRow::Item(item) if item.action == MenuAction::Command("OFFSET".into())))
+            .unwrap();
+        assert!(matches!(rows[at + 1], MenuRow::Separator));
+        assert!(matches!(&rows[at + 2], MenuRow::Item(item) if item.action == MenuAction::Command("TRIM".into())));
     }
 }

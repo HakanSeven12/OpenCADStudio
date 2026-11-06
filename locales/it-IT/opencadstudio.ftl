@@ -8775,7 +8775,7 @@ context-menu =
     .customize = Personalizza…
     .editor-title = Deseleziona una riga per nasconderla
     .my-commands = I miei comandi
-    .command-placeholder = Comando o alias
+    .command-placeholder = Comando o alias, -- per un separatore
     .add = Aggiungi
     .done = Fine
 

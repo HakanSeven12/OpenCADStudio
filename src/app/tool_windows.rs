@@ -113,8 +113,10 @@ pub(crate) struct ToolDrag {
     pub last: Option<Point>,
 }
 
-/// Where a window of its own last was, in screen logical pixels. A NaN
-/// position (not placed yet) is written as `null` and read back as NaN.
+/// Where a window of its own last was: its position in physical screen
+/// pixels, which mean the same on every screen whatever its scale, and its
+/// size in logical pixels. A NaN position (not placed yet) is written as
+/// `null` and read back as NaN.
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WindowPlacement {
     #[serde(deserialize_with = "nan_when_null")]
@@ -145,6 +147,23 @@ pub(crate) struct OsWindow {
     pub id: iced::window::Id,
     pub content: Detached,
     pub placement: WindowPlacement,
+    /// The scale of the screen the window is on.
+    pub scale: f32,
+    /// Opened at a guessed scale; moved to its place once its own is known.
+    pub placing: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl OsWindow {
+    fn new(id: iced::window::Id, content: Detached, placement: WindowPlacement) -> Self {
+        Self {
+            id,
+            content,
+            placement,
+            scale: crate::ui::icons::scale_factor(),
+            placing: placement.x.is_finite() && placement.y.is_finite(),
+        }
+    }
 }
 
 /// The key a tool dialog's placement is remembered under.
@@ -722,11 +741,34 @@ impl OpenCADStudio {
 
     pub(crate) fn os_window_moved(&mut self, id: iced::window::Id, at: Point) {
         if let Some(window) = self.os_windows.iter_mut().find(|window| window.id == id) {
-            window.placement.x = at.x;
-            window.placement.y = at.y;
+            if window.placing {
+                // The window's own move to its place is still to come.
+                return;
+            }
+            window.placement.x = at.x * window.scale;
+            window.placement.y = at.y * window.scale;
             let placement = window.placement;
             self.remember_placement(window_content(&self.os_windows, id), placement);
         }
+    }
+
+    /// A window of its own learned the scale of its screen. A window opened at
+    /// a remembered place is moved there now: the place is in physical pixels,
+    /// and only the window's own scale turns it into the logical position
+    /// the system expects (#2621).
+    pub(crate) fn os_window_scale(&mut self, id: iced::window::Id, scale: f32) -> Task<Message> {
+        let Some(window) = self.os_windows.iter_mut().find(|window| window.id == id) else {
+            return Task::none();
+        };
+        if !(scale.is_finite() && scale > 0.0) {
+            return Task::none();
+        }
+        window.scale = scale;
+        if !std::mem::take(&mut window.placing) {
+            return Task::none();
+        }
+        let at = Point::new(window.placement.x / scale, window.placement.y / scale);
+        iced::window::move_to(id, at)
     }
 
     fn remember_placement(&mut self, content: Option<Detached>, placement: WindowPlacement) {
@@ -800,11 +842,8 @@ impl OpenCADStudio {
             if let Some(tool) = self.tool_windows.iter_mut().find(|tool| tool.kind == kind) {
                 tool.window = Some(id);
             }
-            self.os_windows.push(OsWindow {
-                id,
-                content: Detached::Tool(kind),
-                placement,
-            });
+            self.os_windows
+                .push(OsWindow::new(id, Detached::Tool(kind), placement));
             tasks.push(open);
         }
         let panels: Vec<(crate::ui::dock::PanelId, WindowPlacement)> = self
@@ -822,11 +861,8 @@ impl OpenCADStudio {
             .collect();
         for (panel, placement) in panels {
             let (id, open) = open_window(placement, panel.title().to_string());
-            self.os_windows.push(OsWindow {
-                id,
-                content: Detached::Panel(panel),
-                placement,
-            });
+            self.os_windows
+                .push(OsWindow::new(id, Detached::Panel(panel), placement));
             tasks.push(open);
         }
         Task::batch(tasks)
@@ -946,8 +982,11 @@ fn window_content(windows: &[OsWindow], id: iced::window::Id) -> Option<Detached
 /// Open a window of its own at `placement` (centred when it has no place).
 #[cfg(not(target_arch = "wasm32"))]
 fn open_window(placement: WindowPlacement, _title: String) -> (iced::window::Id, Task<Message>) {
+    // The main window's scale is the best guess before the window exists;
+    // `os_window_scale` puts it right once it knows its own.
     let position = if placement.x.is_finite() && placement.y.is_finite() {
-        iced::window::Position::Specific(Point::new(placement.x, placement.y))
+        let scale = crate::ui::icons::scale_factor();
+        iced::window::Position::Specific(Point::new(placement.x / scale, placement.y / scale))
     } else {
         iced::window::Position::Centered
     };
@@ -1192,6 +1231,15 @@ mod tests {
             (placement.x, placement.y, placement.w, placement.h),
             (2400.0, 120.0, 700.0, 500.0)
         );
+        // #2621: on a 150 % screen the same place is 1600 logical pixels in;
+        // it is kept in physical pixels, so a screen of another scale reads
+        // it the same way.
+        let window = app.os_windows[0];
+        let _ = app.update_root(Message::OsWindowScale(window.id, 1.5));
+        assert!(!app.os_windows[0].placing, "moved to its place once");
+        let _ = app.update_root(Message::OsWindowMoved(window.id, Point::new(1600.0, 80.0)));
+        let placement = app.os_windows[0].placement;
+        assert_eq!((placement.x, placement.y), (2400.0, 120.0));
     }
 
     /// The web's "window" for a manager: it floats over the drawing; the

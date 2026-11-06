@@ -5364,6 +5364,9 @@ pub enum Message {
     OsWindowResized(window::Id, f32, f32),
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     OsWindowMoved(window::Id, iced::Point),
+    /// A window of its own opened on, or moved to, a screen of this scale.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    OsWindowScale(window::Id, f32),
     /// Suppress menu-root tooltips between clicking the root and leaving it.
     StatusMenuTooltipHidden(bool),
     /// GitHub releases API returned a result. `Some(version)` means a

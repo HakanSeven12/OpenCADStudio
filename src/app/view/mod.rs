@@ -430,6 +430,18 @@ pub(crate) fn main_window_event(
         iced::Event::Window(window::Event::Resized(sz)) => {
             Some(Message::WindowResized(sz.width as f32, sz.height as f32))
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Window(window::Event::Opened { scale_factor, .. })
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            Some(Message::OsWindowScale(win_id, scale_factor))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        iced::Event::Window(window::Event::Rescaled(scale_factor))
+            if !crate::app::tool_windows::is_main_window(win_id) =>
+        {
+            Some(Message::OsWindowScale(win_id, scale_factor))
+        }
         // The ribbon's arrows sit on whole physical pixels.
         iced::Event::Window(window::Event::Opened {
             scale_factor, size, ..

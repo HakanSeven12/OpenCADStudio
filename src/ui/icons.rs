@@ -1103,7 +1103,7 @@ pub fn set_scale_factor(scale: f32) {
     );
 }
 
-fn scale_factor() -> f32 {
+pub fn scale_factor() -> f32 {
     SCALE_FACTOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
 }
 

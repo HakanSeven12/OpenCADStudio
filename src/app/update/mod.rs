@@ -12133,11 +12133,14 @@ impl OpenCADStudio {
                 self.os_window_moved(id, at);
                 Task::none()
             }
+            #[cfg(not(target_arch = "wasm32"))]
+            Message::OsWindowScale(id, scale) => self.os_window_scale(id, scale),
             #[cfg(target_arch = "wasm32")]
             Message::OsWindowReturn(_)
             | Message::OsWindowKey(..)
             | Message::OsWindowResized(..)
-            | Message::OsWindowMoved(..) => Task::none(),
+            | Message::OsWindowMoved(..)
+            | Message::OsWindowScale(..) => Task::none(),
             Message::ModalGrab => {
                 // Start a drag; the first ModalDragMove seeds the reference.
                 self.modal_dragging = true;

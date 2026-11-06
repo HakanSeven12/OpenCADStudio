@@ -1158,7 +1158,9 @@ impl OpenCADStudio {
             // the reference pick instead.
             || tokens[0].eq_ignore_ascii_case("-ATTEDIT")
             || tokens[0].eq_ignore_ascii_case("ATTEDIT")
-            // LAYERFILTER takes its whole argument list on one line.
+            // LAYERFILTER takes its whole argument list on one line, and
+            // FILTER the name of a saved filter.
+            || tokens[0].eq_ignore_ascii_case("FILTER")
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("LAYERGROUP")

@@ -9000,11 +9000,7 @@ impl OpenCADStudio {
                     self.qselect_settings = Some((&state).into());
                 }
                 self.reset_modal_geometry();
-                if self.block_definition.is_some() {
-                    self.active_modal = Some(super::ModalKind::BlockDefinition);
-                } else if self.wblock.is_some() {
-                    self.active_modal = Some(super::ModalKind::WriteBlock);
-                }
+                self.return_to_block_dialog(false);
                 Task::none()
             }
 
@@ -9261,32 +9257,13 @@ impl OpenCADStudio {
                 self.command_line
                     .push_output(crate::tf!("QSELECT: {} object(s) selected.", matched).as_ref());
                 self.refresh_properties();
-                if let Some(ref mut block_def) = self.block_definition {
-                    block_def.selected_handles = self.tabs[i]
-                        .scene
-                        .selected_entities()
-                        .into_iter()
-                        .map(|(h, _)| h)
-                        .collect();
-                    block_def.error_message = None;
-                    self.active_modal = Some(super::ModalKind::BlockDefinition);
-                    self.refresh_block_definition_preview();
-                } else if let Some(ref mut wblock) = self.wblock {
-                    wblock.selected_handles = self.tabs[i]
-                        .scene
-                        .selected_entities()
-                        .into_iter()
-                        .map(|(h, _)| h)
-                        .collect();
-                    wblock.error_message = None;
-                    self.active_modal = Some(super::ModalKind::WriteBlock);
-                } else {
-                    // FILTER may be opened from a still-focused command input.
-                    // Release text focus so Delete and clipboard shortcuts act
-                    // on the resulting pick-first selection, not on that input.
-                    return self.unfocus_widgets();
+                if self.return_to_block_dialog(true) {
+                    return Task::none();
                 }
-                Task::none()
+                // FILTER may be opened from a still-focused command input.
+                // Release text focus so Delete and clipboard shortcuts act
+                // on the resulting pick-first selection, not on that input.
+                self.unfocus_widgets()
             }
 
             // ── Properties panel messages ─────────────────────────────────
@@ -12320,11 +12297,6 @@ impl OpenCADStudio {
                 self.ribbon.layer_filter = f;
                 Task::none()
             }
-            Message::LayerGroupShow(group) => {
-                let i = self.active_tab;
-                self.tabs[i].layers.set_group(group);
-                Task::none()
-            }
             Message::LayerShow(node) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.view = node;
@@ -15330,7 +15302,6 @@ mod free_text_entry_tests {
     }
 }
 
-/// Set or clear one bit of `SELECTIONPREVIEW`.
 /// Focus the layer-name field with its whole text selected, so typing
 /// replaces the name instead of reaching the command line (#2610).
 fn focus_layer_name_field() -> Task<Message> {
@@ -15341,6 +15312,7 @@ fn focus_layer_name_field() -> Task<Message> {
     ])
 }
 
+/// Set or clear one bit of `SELECTIONPREVIEW`.
 fn set_preview_bit(current: u8, bit: u8, enabled: bool) -> u8 {
     if enabled {
         current | bit

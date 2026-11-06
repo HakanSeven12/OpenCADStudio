@@ -493,16 +493,68 @@ pub fn resolved_mline_style<'a>(
 }
 
 /// The linetype an element draws with: a ByLayer element follows the layer of its
-/// multiline, whose own linetype plays no part.
+/// multiline (with that layer's override in `viewport`), whose own linetype plays
+/// no part.
 pub(crate) fn element_linetype_name<'a>(
     document: &'a document::Document,
     layer: &str,
     element: &'a str,
+    viewport: Option<document::Handle>,
 ) -> &'a str {
     if element.is_empty() || element.eq_ignore_ascii_case("bylayer") {
-        crate::scene::view::render::layer_linetype_name_for_viewport(document, layer, None)
+        crate::scene::view::render::layer_linetype_name_for_viewport(document, layer, viewport)
     } else {
         element
+    }
+}
+
+/// The line an element becomes: the multiline's own common with the element's
+/// colour and linetype as they are, ByLayer and ByBlock included. EXPLODE makes
+/// these lines, and the renderer draws each element as one of them.
+pub(crate) fn element_common(
+    m: &MLine,
+    color: document::types::Color,
+    linetype: &str,
+    document: &document::Document,
+) -> document::entities::EntityCommon {
+    let mut common = m.common.clone();
+    common.handle = document::Handle::NULL;
+    common.color = color;
+    common.color_name = None;
+    common.color_book_handle = None;
+    common.linetype = if linetype.is_empty() || linetype.eq_ignore_ascii_case("ByLayer") {
+        "ByLayer".to_string()
+    } else if linetype.eq_ignore_ascii_case("ByBlock") {
+        "ByBlock".to_string()
+    } else {
+        linetype.to_string()
+    };
+    common.linetype_handle = document
+        .line_types
+        .iter()
+        .find(|line_type| line_type.name.eq_ignore_ascii_case(&common.linetype))
+        .map(|line_type| line_type.handle);
+    common
+}
+
+/// How an element draws in `viewport`: its [`element_common`] line styled like
+/// any other entity, as `(colour, pattern length, pattern, ACI)`. A complex
+/// linetype is walked along the element rather than dashed, so it has no pattern.
+pub(crate) fn element_style(
+    document: &document::Document,
+    m: &MLine,
+    color: document::types::Color,
+    linetype: &str,
+    viewport: Option<document::Handle>,
+) -> ([f32; 4], f32, [f32; 8], u8) {
+    let common = element_common(m, color, linetype, document);
+    let (color, pattern_length, pattern, _, aci) =
+        crate::scene::view::render::render_style_for_common_viewport(document, &common, viewport);
+    let drawn = element_linetype_name(document, &m.common.layer, linetype, viewport);
+    if crate::io::linetypes::resolve_complex_lt(document, drawn).is_some() {
+        (color, 0.0, [0.0; 8], aci)
+    } else {
+        (color, pattern_length, pattern, aci)
     }
 }
 

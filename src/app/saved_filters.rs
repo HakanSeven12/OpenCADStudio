@@ -71,7 +71,7 @@ pub(crate) fn saved_filters(document: &Document) -> Vec<(String, Filter)> {
 pub(crate) fn find_saved_filter(document: &Document, name: &str) -> Option<(String, Filter)> {
     saved_filters(document)
         .into_iter()
-        .find(|(saved, _)| saved.eq_ignore_ascii_case(name))
+        .find(|(saved, _)| same_name(saved, name))
 }
 
 fn entries(name: &str, filter: &Filter) -> Vec<XRecordEntry> {
@@ -81,13 +81,33 @@ fn entries(name: &str, filter: &Filter) -> Vec<XRecordEntry> {
         XRecordEntry::new(90, XRecordValue::Int32(VERSION)),
         XRecordEntry::string(300, name),
     ];
-    let chars: Vec<char> = json.chars().collect();
-    entries.extend(
-        chars
-            .chunks(CHUNK)
-            .map(|part| XRecordEntry::string(3, &part.iter().collect::<String>())),
-    );
+    // Chunks are measured as an older DXF writes them, where a non-ASCII
+    // character becomes a `\U+XXXX` escape.
+    let mut part = String::new();
+    let mut length = 0;
+    for c in json.chars() {
+        let width = match c as u32 {
+            0..=0x7F => 1,
+            0x80..=0xFFFF => 7,
+            _ => 14,
+        };
+        if length + width > CHUNK {
+            entries.push(XRecordEntry::string(3, &part));
+            part.clear();
+            length = 0;
+        }
+        part.push(c);
+        length += width;
+    }
+    if !part.is_empty() {
+        entries.push(XRecordEntry::string(3, &part));
+    }
     entries
+}
+
+/// Saved filter names compare without case, in any script.
+fn same_name(a: &str, b: &str) -> bool {
+    a.to_lowercase() == b.to_lowercase()
 }
 
 fn ensure_dictionary(document: &mut Document) -> Handle {
@@ -116,7 +136,7 @@ pub(crate) fn store_saved_filter(document: &mut Document, name: &str, filter: &F
         Some(ObjectType::Dictionary(d)) => d
             .entries
             .iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .find(|(key, _)| same_name(key, name))
             .map(|(_, handle)| *handle),
         _ => None,
     };
@@ -156,7 +176,7 @@ pub(crate) fn delete_saved_filter(document: &mut Document, name: &str) -> bool {
     let Some(at) = d
         .entries
         .iter()
-        .position(|(key, _)| key.eq_ignore_ascii_case(name))
+        .position(|(key, _)| same_name(key, name))
     else {
         return false;
     };

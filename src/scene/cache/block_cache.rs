@@ -60,14 +60,6 @@ fn named_complex_linetype(doc: &Document, name: &str) -> Option<Arc<NamedComplex
     })
 }
 
-/// Any linetype in the drawing carrying text or a shape. Drawings with none pay
-/// nothing for the walk: no path is kept and no linetype is looked up.
-pub(crate) fn document_has_complex_linetype(doc: &Document) -> bool {
-    doc.line_types
-        .iter()
-        .any(|line_type| line_type.elements.iter().any(|e| e.complex.is_some()))
-}
-
 /// How a block child walks a complex linetype. The walk runs at expand time on
 /// the drawing-space path: it needs the linetype the child inherits there, and
 /// a block's scale must not reach the pattern.
@@ -204,7 +196,7 @@ impl NestedComplexStyle {
             layer0: crate::scene::view::render::is_effective_layer_zero(&common.layer),
             ..Self::default()
         };
-        if document_has_complex_linetype(doc) {
+        if crate::io::linetypes::defines_complex_lt(doc) {
             style.own = named_complex_linetype(
                 doc,
                 crate::scene::view::render::linetype_name_for_common_viewport(
@@ -313,7 +305,8 @@ pub struct BlockCache {
     >,
     clip_prototypes: std::sync::Mutex<HashMap<(u64, Vec<u64>), u64>>,
     cycle_warnings: std::sync::Mutex<HashSet<String>>,
-    /// See [`document_has_complex_linetype`], at build time.
+    /// [`crate::io::linetypes::defines_complex_lt`] at build time. Drawings with
+    /// none pay nothing for the walk: no path is kept and no linetype is looked up.
     complex_possible: bool,
     /// The viewport whose layer overrides this cache was built with.
     viewport: Option<Handle>,
@@ -430,7 +423,7 @@ impl BlockCache {
         use crate::par::prelude::*;
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
-        cache.complex_possible = document_has_complex_linetype(doc);
+        cache.complex_possible = crate::io::linetypes::defines_complex_lt(doc);
         cache.viewport = viewport;
         let referenced = collect_referenced_blocks(doc, anno_scale);
         let mut reference_counts: HashMap<String, usize> = HashMap::default();
@@ -489,7 +482,7 @@ impl BlockCache {
         use crate::par::prelude::*;
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
-        cache.complex_possible = document_has_complex_linetype(doc);
+        cache.complex_possible = crate::io::linetypes::defines_complex_lt(doc);
         cache.viewport = viewport;
         let referenced = referenced_block_tree(doc, block_name, anno_scale);
         cache.defns = referenced
@@ -707,7 +700,7 @@ fn build_defn(
     depth_map: &HashMap<u64, [f32; 2]>,
     solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
 ) -> BlockDefn {
-    let complex_possible = document_has_complex_linetype(doc);
+    let complex_possible = crate::io::linetypes::defines_complex_lt(doc);
     let br = match crate::scene::render_graph::block_record_by_name(doc, block_name) {
         Some(br) => br,
         None => return BlockDefn::default(),
@@ -1138,7 +1131,32 @@ fn tessellate_sub_local(
             ComplexWalk::Points
         };
 
-        let is_element = wire.element_linetype.is_some();
+        // An MLINE element is the line it explodes to, resolved in this
+        // viewport: its colour (like its linetype) inherits from the INSERT when
+        // ByBlock, and from the INSERT's layer when ByLayer on layer 0.
+        let element = match (sub, wire.element_color, wire.element_linetype.as_deref()) {
+            (EntityType::MLine(mline), Some(color), Some(linetype)) => Some((
+                color,
+                crate::entities::mline::element_style(doc, mline, color, linetype, viewport),
+            )),
+            _ => None,
+        };
+        let (wire_color, wire_aci, wire_pattern_length, wire_pattern) = match element {
+            Some((_, (color, pattern_length, pattern, aci))) => {
+                (color, aci, pattern_length, pattern)
+            }
+            None => (wire.color, aci, pat_len, pat),
+        };
+        let (wire_color_is_byblock, wire_color_l0) = match element {
+            Some((color, _)) => (
+                color == AcadColor::ByBlock,
+                on_l0 && color == AcadColor::ByLayer,
+            ),
+            None => (
+                color_is_byblock && wire_on_base_color,
+                color_l0 && wire_on_base_color,
+            ),
+        };
         // An MLINE's linetypes are its elements': ByBlock and a layer-0 ByLayer
         // inherit from the INSERT, anything else is the element's own.
         let (lt_is_byblock, lt_l0, own_complex, complex_walk) =
@@ -1155,6 +1173,7 @@ fn tessellate_sub_local(
                                 doc,
                                 &sub.common().layer,
                                 element,
+                                viewport,
                             ),
                         )
                     };
@@ -1190,18 +1209,14 @@ fn tessellate_sub_local(
             fill_is_2d_solid: wire.fill_is_2d_solid,
             pick_tris: wire.pick_tris,
             pick_tris_low: wire.pick_tris_low,
-            color: wire.color,
+            color: wire_color,
             layer_locked,
             contrast_bg,
             preserve_color,
             canvas_color,
-            aci,
-            pattern_length: if is_element {
-                wire.pattern_length
-            } else {
-                pat_len
-            },
-            pattern: if is_element { wire.pattern } else { pat },
+            aci: wire_aci,
+            pattern_length: wire_pattern_length,
+            pattern: wire_pattern,
             line_weight_px: lw_px,
             pattern_stations: wire.pattern_stations,
             world_width: wire.world_width,
@@ -1215,7 +1230,7 @@ fn tessellate_sub_local(
             plot_l0: on_l0,
             hide_unselected: frame_mode == Some(0),
             is_fill_only,
-            color_is_byblock: color_is_byblock && wire_on_base_color,
+            color_is_byblock: wire_color_is_byblock,
             transparency_is_byblock,
             lt_is_byblock,
             entity_lt_scale: sub.common().linetype_scale as f32,
@@ -1224,7 +1239,7 @@ fn tessellate_sub_local(
             complex_lt_scale,
             dash_closure: wire.dash_closure,
             lw_is_byblock,
-            color_l0: color_l0 && wire_on_base_color,
+            color_l0: wire_color_l0,
             transparency_l0,
             lt_l0,
             lw_l0,
@@ -2247,6 +2262,7 @@ impl Batches {
                     pick_tris_low: b.pick_tris_low,
                     dash_from_start: false,
                     element_linetype: None,
+                    element_color: None,
                     dash_closure: b.dash_closure,
                     text_verts: b.text_verts,
                     searchable_text: b.searchable_text,

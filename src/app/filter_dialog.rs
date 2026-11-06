@@ -103,6 +103,9 @@ pub struct FilterDialogState {
     /// Editing a layer filter for the Layer manager (#2610): the name it is
     /// saved under. Rows read layer properties, and there is no type.
     pub layer_filter: Option<String>,
+    /// The layer filter's name when the editor opened, so a renamed filter
+    /// replaces the one it was.
+    pub layer_filter_from: Option<String>,
     /// Opened with 'FILTER inside this command's "Select objects:".
     pub for_command: Option<String>,
 }
@@ -183,12 +186,19 @@ impl OpenCADStudio {
                 return Task::none();
             }
             FilterMsg::Close => {
-                self.filter_dialog = None;
+                let layers = self
+                    .filter_dialog
+                    .take()
+                    .is_some_and(|state| state.layer_filter.is_some());
                 self.reset_modal_geometry();
                 self.filter_refresh_live();
+                if layers {
+                    return Task::none();
+                }
                 if self.transparent_select.is_some() {
                     return self.finish_transparent_select(None);
                 }
+                self.return_to_block_dialog(false);
                 return Task::none();
             }
             FilterMsg::Apply => return self.filter_apply(),
@@ -334,14 +344,24 @@ impl OpenCADStudio {
                 state.scope = scope;
                 state.properties.clear();
             }
-            FilterMsg::Result(result) => state.result = result,
+            // Neither changes what matches: nothing to count again.
+            FilterMsg::Result(result) => {
+                state.result = result;
+                return Task::none();
+            }
             FilterMsg::Invert(on) => state.invert = on,
             FilterMsg::Show(on) => state.show = on,
             FilterMsg::Focus(bucket) => {
                 state.focus = if state.focus == bucket { None } else { bucket };
             }
-            FilterMsg::SaveAs(name) => state.save_as = name,
-            FilterMsg::LayerName(name) => state.layer_filter = Some(name),
+            FilterMsg::SaveAs(name) => {
+                state.save_as = name;
+                return Task::none();
+            }
+            FilterMsg::LayerName(name) => {
+                state.layer_filter = Some(name);
+                return Task::none();
+            }
             FilterMsg::Open(_)
             | FilterMsg::Close
             | FilterMsg::Apply
@@ -389,6 +409,7 @@ impl OpenCADStudio {
             saved_name: None,
             save_as: None,
             layer_filter: None,
+            layer_filter_from: None,
             for_command: self.transparent_select.clone(),
         });
         self.reset_modal_geometry();
@@ -406,7 +427,10 @@ impl OpenCADStudio {
             show: false,
         }));
         if let Some(state) = self.filter_dialog.as_mut() {
+            state.layer_filter_from = Some(name.clone()).filter(|name| !name.is_empty());
             state.layer_filter = Some(name);
+            // Layers, not the objects a parked command asks for.
+            state.for_command = None;
         }
         self.filter_refresh_scope();
         self.filter_refresh_live();
@@ -460,19 +484,36 @@ impl OpenCADStudio {
         else {
             return;
         };
-        let filter = super::layer_filters::LayerFilter {
-            name: name.clone(),
-            conditions: Some(state.filter.clone()),
-            ..Default::default()
-        };
+        let conditions = Some(state.filter.clone());
+        let from = state.layer_filter_from.clone();
         let matches = state.live_count;
-        match self
-            .layer_filters
-            .iter()
-            .position(|f| f.name.eq_ignore_ascii_case(&name))
-        {
-            Some(at) => self.layer_filters[at] = filter,
-            None => self.layer_filters.push(filter),
+        let position = |filters: &[super::layer_filters::LayerFilter], name: &str| {
+            filters
+                .iter()
+                .position(|f| f.name.eq_ignore_ascii_case(name))
+        };
+        // A renamed filter replaces the one it was, keeping its nested
+        // filters; another filter of the new name gives way.
+        let at = from
+            .as_deref()
+            .and_then(|from| position(&self.layer_filters, from))
+            .or_else(|| position(&self.layer_filters, &name));
+        match at {
+            Some(at) => {
+                let filter = &mut self.layer_filters[at];
+                filter.name = name.clone();
+                filter.conditions = conditions;
+                let mut index = 0;
+                self.layer_filters.retain(|f| {
+                    index += 1;
+                    index - 1 == at || !f.name.eq_ignore_ascii_case(&name)
+                });
+            }
+            None => self.layer_filters.push(super::layer_filters::LayerFilter {
+                name: name.clone(),
+                conditions,
+                ..Default::default()
+            }),
         }
         self.filter_dialog = None;
         self.reset_modal_geometry();
@@ -679,7 +720,49 @@ impl OpenCADStudio {
         self.command_line
             .push_output(crate::tf!("FILTER: {} object(s) selected.", selected).as_ref());
         self.refresh_properties();
+        if self.return_to_block_dialog(true) {
+            return Task::none();
+        }
         self.unfocus_widgets()
+    }
+
+    /// The Block Definition or Write Block dialog Quick Select or FILTER
+    /// was opened from comes back; with `take_selection` it takes the
+    /// selection they made. False when neither waits.
+    pub(super) fn return_to_block_dialog(&mut self, take_selection: bool) -> bool {
+        let i = self.active_tab;
+        let selected = || -> Vec<Handle> {
+            self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect()
+        };
+        if self.block_definition.is_some() {
+            if take_selection {
+                let handles = selected();
+                if let Some(block_def) = self.block_definition.as_mut() {
+                    block_def.selected_handles = handles;
+                    block_def.error_message = None;
+                }
+                self.refresh_block_definition_preview();
+            }
+            self.active_modal = Some(super::ModalKind::BlockDefinition);
+            return true;
+        }
+        if self.wblock.is_some() {
+            if take_selection {
+                let handles = selected();
+                if let Some(wblock) = self.wblock.as_mut() {
+                    wblock.selected_handles = handles;
+                    wblock.error_message = None;
+                }
+            }
+            self.active_modal = Some(super::ModalKind::WriteBlock);
+            return true;
+        }
+        false
     }
 
     /// 'FILTER / 'QSELECT: open the dialog for the command asking for

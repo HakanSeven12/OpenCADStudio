@@ -32,6 +32,8 @@ pub struct LayerImportState {
     pub rows: Vec<ImportRow>,
     /// The source drawing's linetypes, for the layers that use them.
     pub linetypes: Vec<LineType>,
+    /// The styles their shape and text segments point to.
+    pub linetype_styles: Vec<document::tables::TextStyle>,
     pub on_conflict: OnConflict,
     pub search: String,
 }
@@ -66,31 +68,54 @@ fn offered_layers(document: &Document) -> Vec<DocLayer> {
 }
 
 /// What an import did.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ImportReport {
     pub imported: usize,
     pub overwritten: usize,
     pub skipped: usize,
+    /// The drawing's layers that took the imported properties.
+    pub overwritten_names: Vec<String>,
 }
 
 /// Bring the ticked layers of `state` into `document`.
 pub fn import_layers(document: &mut Document, state: &LayerImportState) -> ImportReport {
     let mut report = ImportReport::default();
-    for row in state.rows.iter().filter(|row| row.ticked) {
-        let source = &row.layer;
-        // The linetype comes along when the drawing lacks it.
-        if !document.line_types.contains(&source.line_type) {
-            if let Some(linetype) = state
-                .linetypes
+    // The linetypes the imported layers use come along when the drawing
+    // lacks them, with the styles their segments point to, as a paste
+    // brings them.
+    let mut deps = crate::app::ClipboardDeps::default();
+    let bring_linetype = |document: &Document, deps: &mut crate::app::ClipboardDeps, name: &str| {
+        if document.line_types.contains(name)
+            || deps.linetypes.iter().any(|lt| lt.name.eq_ignore_ascii_case(name))
+        {
+            return;
+        }
+        let Some(linetype) = state
+            .linetypes
+            .iter()
+            .find(|lt| lt.name.eq_ignore_ascii_case(name))
+        else {
+            return;
+        };
+        for complex in linetype.elements.iter().filter_map(|e| e.complex.as_ref()) {
+            if let Some(style) = state
+                .linetype_styles
                 .iter()
-                .find(|lt| lt.name.eq_ignore_ascii_case(&source.line_type))
+                .find(|style| style.handle == complex.style_handle)
             {
-                let mut linetype = linetype.clone();
-                linetype.handle = document.allocate_handle();
-                let _ = document.line_types.add(linetype);
+                if !deps.linetype_styles.iter().any(|s| s.handle == style.handle) {
+                    deps.linetype_styles.push(style.clone());
+                }
             }
         }
+        deps.linetypes.push(linetype.clone());
+    };
+    for row in state.rows.iter().filter(|row| row.ticked) {
+        let source = &row.layer;
         let exists = document.layers.contains(&source.name);
+        if !(exists && state.on_conflict == OnConflict::Skip) {
+            bring_linetype(document, &mut deps, &source.line_type);
+        }
         let name = match (exists, state.on_conflict) {
             (false, _) => source.name.clone(),
             (true, OnConflict::Skip) => {
@@ -109,6 +134,7 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
                     layer.description = source.description.clone();
                 }
                 report.overwritten += 1;
+                report.overwritten_names.push(source.name.clone());
                 continue;
             }
             (true, OnConflict::Rename) => (2..)
@@ -126,6 +152,7 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
             report.imported += 1;
         }
     }
+    crate::app::command_driver::clipboard::merge_table_records(document, &deps);
     report
 }
 
@@ -208,6 +235,7 @@ impl OpenCADStudio {
             source,
             rows,
             linetypes: document.line_types.iter().cloned().collect(),
+            linetype_styles: document.text_styles.iter().cloned().collect(),
             on_conflict: OnConflict::Skip,
             search: String::new(),
         });
@@ -228,6 +256,9 @@ impl OpenCADStudio {
         if report.imported + report.overwritten == 0 {
             self.discard_last_undo_entry(i);
         } else {
+            let names = &report.overwritten_names;
+            self.tabs[i].scene.invalidate_layer_visibility(names);
+            self.tabs[i].scene.invalidate_layer_dependencies(names);
             self.tabs[i].dirty = true;
             self.refresh_layer_panel();
         }
@@ -466,6 +497,7 @@ mod tests {
                 })
                 .collect(),
             linetypes: from.line_types.iter().cloned().collect(),
+            linetype_styles: from.text_styles.iter().cloned().collect(),
             on_conflict,
             search: String::new(),
         }
@@ -489,7 +521,8 @@ mod tests {
             ImportReport {
                 imported: 1,
                 overwritten: 0,
-                skipped: 1
+                skipped: 1,
+                ..Default::default()
             }
         );
         assert!(skip.layers.contains("Doors"));

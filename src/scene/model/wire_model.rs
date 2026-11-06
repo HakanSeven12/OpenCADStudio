@@ -775,6 +775,9 @@ pub struct WireModel {
     /// An MLINE element's linetype as its style names it, for whoever walks a
     /// complex one or inherits a ByBlock one. `None` on any other wire.
     pub element_linetype: Option<String>,
+    /// An MLINE element's colour as its style names it, for whoever resolves it
+    /// in a viewport or block context. `None` on any other wire.
+    pub element_color: Option<document::types::Color>,
     /// How the pattern closes around a closed path.
     pub dash_closure: DashClosure,
     /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
@@ -959,6 +962,7 @@ impl WireModel {
             plinegen: true,
             dash_from_start: false,
             element_linetype: None,
+            element_color: None,
             dash_closure: DashClosure::Open,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
@@ -1399,6 +1403,7 @@ impl Default for WireModel {
             plinegen: true,
             dash_from_start: false,
             element_linetype: None,
+            element_color: None,
             dash_closure: DashClosure::Open,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),

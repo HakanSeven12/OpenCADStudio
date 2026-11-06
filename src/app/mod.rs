@@ -4801,8 +4801,6 @@ pub enum Message {
     RibbonLayerFilterChanged(String),
     /// Live text of the Layer Manager's search box (#343).
     LayerManagerFilterChanged(String),
-    /// Show only this layer group's layers (`None`: every layer).
-    LayerGroupShow(Option<String>),
     /// A new layer group from the selected layers.
     LayerGroupNew,
     /// Add the selected layers to this group.

@@ -247,11 +247,12 @@ fn walk_mline_element(
     layer: &str,
     wire: WireModel,
     scale: f32,
+    viewport: Option<Handle>,
 ) -> Vec<WireModel> {
     let linetype = wire.element_linetype.as_deref().and_then(|element| {
         crate::io::linetypes::resolve_complex_lt(
             document,
-            crate::entities::mline::element_linetype_name(document, layer, element),
+            crate::entities::mline::element_linetype_name(document, layer, element, viewport),
         )
     });
     let Some(linetype) = linetype else {
@@ -1692,6 +1693,33 @@ fn tessellate_entity_inner(
             b.set_fixed_screen_width(2.0);
         }
     }
+    // An MLINE element draws in this viewport as the line it explodes to, on
+    // the background and locked layer the entity's own colour adapts to.
+    if let (EntityType::MLine(mline), false) = (e, sel) {
+        for b in &mut bases {
+            let (Some(color), Some(linetype)) = (b.element_color, b.element_linetype.as_deref())
+            else {
+                continue;
+            };
+            let (color, pattern_length, pattern, element_aci) =
+                crate::entities::mline::element_style(
+                    document,
+                    mline,
+                    color,
+                    linetype,
+                    active_viewport,
+                );
+            b.color = fade_if_locked(
+                document,
+                e,
+                view::render::adapt_to_bg(color, bg_color),
+                bg_color,
+            );
+            b.pattern_length = pattern_length;
+            b.pattern = pattern;
+            b.aci = element_aci;
+        }
+    }
     // PDF underlay geometry: hidden, unplotted wires that object snaps
     // (nearest, intersection, perpendicular, centre) find, beside the page
     // frame — one per segment or circle, so they intersect each other.
@@ -1742,7 +1770,13 @@ fn tessellate_entity_inner(
             .max(1e-4);
             let mut walked = Vec::with_capacity(bases.len());
             for wire in bases {
-                walked.extend(walk_mline_element(document, &mline.common.layer, wire, scale));
+                walked.extend(walk_mline_element(
+                    document,
+                    &mline.common.layer,
+                    wire,
+                    scale,
+                    active_viewport,
+                ));
             }
             bases = walked;
             for wire in &mut bases {

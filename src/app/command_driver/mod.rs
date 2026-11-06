@@ -388,7 +388,8 @@ impl OpenCADStudio {
     /// Bring back the command a transparent zoom parked, once the zoom is
     /// over (no command active any more). No-op otherwise.
     pub(in crate::app) fn resume_transparent_parent(&mut self, i: usize) {
-        if !self.tabs[i].transparent_resume {
+        // 'QSELECT / 'FILTER hand the command back when their dialog closes.
+        if !self.tabs[i].transparent_resume || self.transparent_select.is_some() {
             return;
         }
         if self.tabs[i].active_cmd.is_some() {

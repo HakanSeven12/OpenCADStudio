@@ -802,26 +802,10 @@ fn bulge_to_arc(
 fn explode_mline(ml: &MLine, doc: &Document) -> Vec<EntityType> {
     let mut result = Vec::new();
     for element in crate::entities::mline::mline_lines(ml, doc) {
-        let mut common = ml.common.clone();
-        common.handle = Handle::NULL;
         // Each line takes its element's colour and linetype as they are,
         // ByLayer and ByBlock included: the multiline's own are not part of it.
-        common.color = element.color;
-        common.color_name = None;
-        common.color_book_handle = None;
-        let linetype = element.linetype.as_str();
-        common.linetype = if linetype.is_empty() || linetype.eq_ignore_ascii_case("ByLayer") {
-            "ByLayer".to_string()
-        } else if linetype.eq_ignore_ascii_case("ByBlock") {
-            "ByBlock".to_string()
-        } else {
-            element.linetype.clone()
-        };
-        common.linetype_handle = doc
-            .line_types
-            .iter()
-            .find(|line_type| line_type.name.eq_ignore_ascii_case(&common.linetype))
-            .map(|line_type| line_type.handle);
+        let common =
+            crate::entities::mline::element_common(ml, element.color, &element.linetype, doc);
         // A NaN point separates the drawn runs of one element (MLEDIT cuts).
         for pair in element.points.windows(2) {
             let (a, b) = (pair[0], pair[1]);

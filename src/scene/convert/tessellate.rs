@@ -1144,7 +1144,6 @@ fn tessellate_wires(
         if lines.is_empty() {
             return vec![];
         }
-        let lt_scale = document.header.linetype_scale as f32 * m.common.linetype_scale as f32;
         let snap_pts: Vec<(glam::DVec3, SnapHint)> = m
             .vertices
             .iter()
@@ -1221,43 +1220,25 @@ fn tessellate_wires(
             if l.points.is_empty() {
                 continue;
             }
-            // Element colour: ByLayer / ByBlock inherit the entity's resolved
-            // colour; an explicit ACI / true-colour is used as-is.
+            // Each element draws as the line EXPLODE makes of it: its colour
+            // and linetype resolved like any entity's, ByLayer through the
+            // multiline's layer, ByBlock as a ByBlock entity's. A complex
+            // element is walked where its scale and path on the sheet are known
+            // (`walk_mline_element`, `emit_complex_walk`), which reads the
+            // element's linetype off the wire; each aligns on its own length.
+            // The viewport and block context re-resolve both off the wire.
+            // Selection forces a plain solid highlight.
+            let (element_color, element_pattern_length, element_pattern, aci) =
+                crate::entities::mline::element_style(document, m, l.color, &l.linetype, None);
             let wcolor = if selected {
                 WireModel::SELECTED
             } else {
-                match l.color {
-                    AcadColor::ByLayer | AcadColor::ByBlock => entity_color,
-                    other => {
-                        let [r, g, b, _] = crate::scene::convert::tess_util::aci_to_rgba(&other);
-                        [r, g, b, entity_color[3]]
-                    }
-                }
+                element_color
             };
-            let aci = match l.color {
-                AcadColor::Index(i) => i,
-                _ => 0,
-            };
-
-            // A complex element is walked where its scale and path on the sheet
-            // are known (`walk_mline_element`, `emit_complex_walk`), which reads
-            // the element's linetype off the wire. Each element aligns on its own
-            // length. Selection forces a plain solid highlight.
-            let drawn_linetype = crate::entities::mline::element_linetype_name(
-                document,
-                &m.common.layer,
-                &l.linetype,
-            );
-            let is_complex = !selected
-                && crate::io::linetypes::resolve_complex_lt(document, drawn_linetype).is_some();
-            let (pattern_length, pattern) = if selected || is_complex {
+            let (pattern_length, pattern) = if selected {
                 (0.0, [0.0; 8])
             } else {
-                crate::scene::view::render::resolve_pattern(
-                    &document.line_types,
-                    drawn_linetype,
-                    lt_scale,
-                )
+                (element_pattern_length, element_pattern)
             };
             let mut elem_wires: Vec<WireModel> = Vec::new();
             {
@@ -1280,6 +1261,7 @@ fn tessellate_wires(
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
                     element_linetype,
+                    element_color: Some(l.color),
                     text_verts: Vec::new(),
                     name: name.clone(),
                     points: pts,
@@ -1903,6 +1885,7 @@ fn tessellate_wires(
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         element_linetype: None,
+                        element_color: None,
                         dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
@@ -2071,6 +2054,7 @@ fn tessellate_wires(
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
                         element_linetype: None,
+                        element_color: None,
                         dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,

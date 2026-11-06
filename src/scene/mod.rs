@@ -628,6 +628,33 @@ fn drop_stale_text(
     }
 }
 
+/// A complex linetype bakes the viewport's PSLTSCALE factor into its wires, so
+/// a new factor stales the memoized runs the dependency index files under
+/// annotation geometry (complex-linetype users among them), not every entity.
+fn drop_stale_complex_lt(
+    scene: &Scene,
+    memo: &mut HashMap<Handle, MemoRun>,
+    cell: &std::cell::Cell<u64>,
+) {
+    let now = scene.viewport_complex_lt_guard();
+    if cell.get() == now {
+        return;
+    }
+    cell.set(now);
+    if memo.is_empty() {
+        return;
+    }
+    if scene.dependency_index_cache.borrow().is_none() {
+        let index = scene.rebuild_dependency_index();
+        *scene.dependency_index_cache.borrow_mut() = Some(index);
+    }
+    if let Some(index) = scene.dependency_index_cache.borrow().as_ref() {
+        for handle in &index.annotation_geometry.render_handles {
+            memo.remove(handle);
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct DependencyTargets {
     render_handles: HashSet<Handle>,
@@ -3219,6 +3246,11 @@ pub struct Scene {
     resident_tess_atlas: std::cell::Cell<u64>,
     /// The same for `tess_memo`.
     tess_memo_atlas: std::cell::Cell<u64>,
+    /// The complex-linetype factor ([`Scene::viewport_complex_lt_guard`]) the
+    /// resident memo's complex-linetype runs were built under.
+    resident_tess_complex_lt: std::cell::Cell<u64>,
+    /// The same for `tess_memo`.
+    tess_memo_complex_lt: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
     /// bump. Bounded ring ([`GEOMETRY_JOURNAL_CAP`]); a derived cache replays the
     /// entries past its last-synced epoch and patches per-handle instead of
@@ -3531,6 +3563,8 @@ impl Scene {
             resident_tess_guard: std::cell::Cell::new(0),
             resident_tess_atlas: std::cell::Cell::new(0),
             tess_memo_atlas: std::cell::Cell::new(0),
+            resident_tess_complex_lt: std::cell::Cell::new(0),
+            tess_memo_complex_lt: std::cell::Cell::new(0),
             geometry_deltas: RefCell::new(std::collections::VecDeque::new()),
             pending_removed_categories: RefCell::new(HashMap::default()),
             geometry_journal_floor: std::cell::Cell::new(0),
@@ -3667,7 +3701,7 @@ impl Scene {
         // Loading a linetype does not move the block epoch, and a cache built
         // before the drawing had a complex one kept no path for its children.
         key = key.rotate_left(13)
-            ^ cache::block_cache::document_has_complex_linetype(&self.document) as u64;
+            ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {
@@ -3747,6 +3781,8 @@ impl Scene {
             *self.resident_memo_backing.borrow_mut() = prepared.tess_memo_backing;
             self.resident_tess_guard.set(prepared.tess_guard);
             self.resident_tess_atlas.set(prepared.tess_atlas);
+            // The loader tessellates model space, outside any viewport.
+            self.resident_tess_complex_lt.set(0);
         }
         // Reuse the loader's draw-order map with this scene's epoch.
         if let Some(mut depths) = prepared.draw_depths {
@@ -8848,8 +8884,8 @@ impl Scene {
         let avp = style_viewport.or(self.active_viewport);
         let memo_ok = self.resident_tess_guard.get()
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
-                ^ self.viewport_complex_lt_guard()
-            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation();
+            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation()
+            && self.resident_tess_complex_lt.get() == self.viewport_complex_lt_guard();
         for (h, kind) in &deltas {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
@@ -14209,11 +14245,21 @@ impl Scene {
                 0xC057_A705_0000_0001
             } else {
                 0
-            } ^ self.viewport_complex_lt_guard();
-            let (memo_cell, guard_cell, atlas_cell) = if resident {
-                (&self.resident_tess_memo, &self.resident_tess_guard, &self.resident_tess_atlas)
+            };
+            let (memo_cell, guard_cell, atlas_cell, complex_lt_cell) = if resident {
+                (
+                    &self.resident_tess_memo,
+                    &self.resident_tess_guard,
+                    &self.resident_tess_atlas,
+                    &self.resident_tess_complex_lt,
+                )
             } else {
-                (&self.tess_memo, &self.tess_memo_guard, &self.tess_memo_atlas)
+                (
+                    &self.tess_memo,
+                    &self.tess_memo_guard,
+                    &self.tess_memo_atlas,
+                    &self.tess_memo_complex_lt,
+                )
             };
             guard_dbg = guard;
             guard_was_stale = guard_cell.get() != guard;
@@ -14222,6 +14268,7 @@ impl Scene {
                 guard_cell.set(guard);
             }
             drop_stale_text(self, &mut memo_cell.borrow_mut(), atlas_cell);
+            drop_stale_complex_lt(self, &mut memo_cell.borrow_mut(), complex_lt_cell);
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
             let t_classify = perf.then(iced::time::Instant::now);
             let mut hit_arcs: Vec<MemoHit> = Vec::new();
@@ -14826,6 +14873,7 @@ vis_index={:.1} visible_probe={:.1}",
         index.signatures.reserve(self.document.entity_count());
         let mut normalized_layers: HashMap<&str, String> = HashMap::default();
         let mut complex_linetypes: HashMap<&str, bool> = HashMap::default();
+        let defines_complex = crate::io::linetypes::defines_complex_lt(&self.document);
         for entity in self.document.entities() {
             let common = entity.common();
             let owner = if common.owner_handle.is_null() {
@@ -14876,26 +14924,40 @@ vis_index={:.1} visible_probe={:.1}",
             }
             // A complex linetype bakes the annotation scale into its wires, so
             // changing the scale has to re-tessellate it like annotative content.
+            let mut is_complex = |name| {
+                *complex_linetypes.entry(name).or_insert_with(|| {
+                    crate::io::linetypes::resolve_complex_lt(&self.document, name).is_some()
+                })
+            };
             let lt_name = view::render::linetype_name_for_viewport(&self.document, entity, None);
-            let complex_linetype = *complex_linetypes.entry(lt_name).or_insert_with(|| {
-                crate::io::linetypes::resolve_complex_lt(&self.document, lt_name).is_some()
-            });
-            let complex_mline = matches!(
-                entity,
-                EntityType::MLine(mline) if crate::entities::mline::mline_lines(mline, &self.document)
-                    .iter()
-                    .any(|line| {
-                        crate::io::linetypes::resolve_complex_lt(
-                            &self.document,
-                            crate::entities::mline::element_linetype_name(
+            let complex_linetype = is_complex(lt_name);
+            // An MLINE draws its elements' linetypes, read off its style; a style
+            // without elements draws two ByLayer lines.
+            let complex_mline = defines_complex
+                && match entity {
+                    EntityType::MLine(mline) => {
+                        let layer = mline.common.layer.as_str();
+                        match crate::entities::mline::resolved_mline_style(mline, &self.document)
+                            .filter(|style| !style.elements.is_empty())
+                        {
+                            Some(style) => style.elements.iter().any(|element| {
+                                is_complex(crate::entities::mline::element_linetype_name(
+                                    &self.document,
+                                    layer,
+                                    &element.linetype,
+                                    None,
+                                ))
+                            }),
+                            None => is_complex(crate::entities::mline::element_linetype_name(
                                 &self.document,
-                                &mline.common.layer,
-                                &line.linetype,
-                            ),
-                        )
-                        .is_some()
-                    })
-            );
+                                layer,
+                                "ByLayer",
+                                None,
+                            )),
+                        }
+                    }
+                    _ => false,
+                };
             if complex_linetype
                 || complex_mline
                 || matches!(entity, EntityType::Hatch(_))

@@ -544,6 +544,7 @@ fn apply_stretched(
             pick_tris_low: Vec::new(),
             dash_from_start: false,
             element_linetype: None,
+            element_color: None,
             dash_closure: Default::default(),
             text_verts,
             searchable_text: searchable,

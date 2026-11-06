@@ -1,7 +1,9 @@
 # Experimental IFCCAD drawings in IFCX
 
 OCS's **IFCCAD** format choice reads and writes CAD drawings in the experimental
-IFCCAD profile of IFCX. Files keep the `.ifcx` extension. The choice does not
+IFCCAD profile of IFCX. New files use `.ifccad`; existing `.ifcx` drawings remain
+readable through the same converter. The underlying IFCX JSON structure is
+unchanged. The choice does not
 mean that OCS can open every IFCX document or BIM geometry representation.
 
 buildingSMART's IFCX examples, such as Hello Wall, contain building-model
@@ -15,7 +17,7 @@ example is broken or has no geometry.
 2. Keep the original and a separate DWG/DXF copy.
 3. Choose **Save As → IFCCAD** and acknowledge the experimental-format warning.
 4. Review any conversion losses listed below the alpha warning before proceeding.
-5. Reopen the `.ifcx` file with the same OCS version and inspect the result.
+5. Reopen the `.ifccad` file with the same OCS version and inspect the result.
 
 The [IFCCAD Explorer](https://ifccad-explorer.open-aec.com/) provides drawing
 examples and conversion inspection. Its current reader and examples may use a
@@ -29,7 +31,7 @@ and versioned source releases.
 
 **For testing only.** The profile is under active development. A later OCS release
 may not open a file saved today. Backward compatibility and automatic or manual
-migration tools are not guaranteed. Do not use an experimental `.ifcx` drawing as
+migration tools are not guaranteed. Do not use an experimental `.ifccad` drawing as
 the only retained copy or for long-term archiving.
 
 OCS asks for acknowledgement before the first interactive IFCCAD save in each

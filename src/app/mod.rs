@@ -2327,7 +2327,7 @@ impl PendingConversionSave {
     pub(super) fn format_name(&self) -> String {
         let (ext, version) = match self {
             #[cfg(target_arch = "wasm32")]
-            Self::WebSaveAll { .. } => ("ifcx".to_string(), document::DxfVersion::AC1032),
+            Self::WebSaveAll { .. } => ("ifccad".to_string(), document::DxfVersion::AC1032),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Native(save) => (
                 save.path

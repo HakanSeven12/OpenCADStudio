@@ -57,7 +57,8 @@
 Open CAD Studio is a cross-platform application for technical drawing, layout work, and solid modeling. It reads and writes DWG and DXF drawings natively, with a shared editing core across the desktop and browser versions.
 
 The experimental **IFCCAD** format choice exchanges supported CAD drawings in
-`.ifcx` files. General IFCX BIM models are not supported by this drawing route.
+`.ifccad` files. Existing `.ifcx` drawings remain readable. General IFCX BIM
+models are not supported by this drawing route.
 This alpha functionality is for testing only: later versions may not reopen
 these files, and backward compatibility or migration is not guaranteed. Keep
 original drawings and separate DWG/DXF copies. See the

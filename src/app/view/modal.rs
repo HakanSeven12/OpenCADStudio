@@ -2327,7 +2327,7 @@ fn save_as_dialog_window<'a>(
         field_width,
     ));
     items.push(Space::new().height(16).into());
-    if crate::io::parse_save_format(format).0 == "ifcx" {
+    if crate::io::parse_save_format(format).0 == "ifccad" {
         items.push(text(crate::tr!("ifccad-ui", "alpha-note"))
             .size(11).style(dialog_muted_text_style).into());
         items.push(Space::new().height(12).into());

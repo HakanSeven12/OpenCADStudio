@@ -4731,7 +4731,7 @@ impl OpenCADStudio {
 
     fn needs_ifccad_alpha_consent(&self, i: usize, ext: &str) -> bool {
         (cfg!(target_arch = "wasm32") || self.main_window.is_some())
-            && ext.eq_ignore_ascii_case("ifcx")
+            && (ext.eq_ignore_ascii_case("ifccad") || ext.eq_ignore_ascii_case("ifcx"))
             && !self.tabs[i].ifccad_alpha_acknowledged
     }
 

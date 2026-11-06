@@ -192,17 +192,14 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
         objects: Vec::new(),
     };
     // Window → viewport maps straight onto the canvas; the device→canvas
-    // stage stays identity.
+    // stage stays identity. The window's origin goes to the canvas's top
+    // left whatever the signs of its extent, as the system plays it: a
+    // negative height is a picture drawn with y up, and it shows upright
+    // (#2625).
     p.dc.win_org = (wx, wy);
     p.dc.win_ext = (we, he);
     p.dc.vp_org = (0.0, 0.0);
-    p.dc.vp_ext = (canvas.w as f32 * we.signum(), canvas.h as f32 * he.signum());
-    if we < 0.0 {
-        p.dc.vp_org.0 = canvas.w as f32;
-    }
-    if he < 0.0 {
-        p.dc.vp_org.1 = canvas.h as f32;
-    }
+    p.dc.vp_ext = (canvas.w as f32, canvas.h as f32);
 
     for (func, prm) in (Records {
         d: data,
@@ -498,4 +495,55 @@ pub fn render(data: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
 
     let (px, w, h) = canvas.downsample(super::SS);
     Some((px, w, h))
+}
+
+#[cfg(test)]
+mod tests {
+    /// A standard WMF holding `records` (function, 16-bit params).
+    fn wmf(records: &[(u16, Vec<i16>)]) -> Vec<u8> {
+        let mut body = Vec::new();
+        for (func, params) in records {
+            body.extend_from_slice(&(3 + params.len() as u32).to_le_bytes());
+            body.extend_from_slice(&func.to_le_bytes());
+            for p in params {
+                body.extend_from_slice(&p.to_le_bytes());
+            }
+        }
+        body.extend_from_slice(&3u32.to_le_bytes());
+        body.extend_from_slice(&0u16.to_le_bytes());
+        let mut out = Vec::new();
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&9u16.to_le_bytes());
+        out.extend_from_slice(&0x0300u16.to_le_bytes());
+        out.extend_from_slice(&((9 + body.len() / 2) as u32).to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&body);
+        out
+    }
+
+    /// #2625: a metafile drawn with y up (a negative window height) shows
+    /// upright, as the system draws it: what is high in its coordinates is
+    /// at the top of the picture.
+    #[test]
+    fn a_y_up_metafile_draws_upright() {
+        let data = wmf(&[
+            (0x020B, vec![100, 0]),  // SetWindowOrg(0, 100)
+            (0x020C, vec![-100, 100]), // SetWindowExt(100, -100)
+            // CreateBrushIndirect: solid red; SelectObject(0).
+            (0x02FC, vec![0, 0x00FF, 0x0000, 0]),
+            (0x012D, vec![0]),
+            // Rectangle(left 0, top 100, right 100, bottom 60): the upper
+            // part in y-up coordinates.
+            (0x041B, vec![60, 100, 100, 0]),
+        ]);
+        let (px, w, h) = super::render(&data).expect("renders");
+        let red = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            px[i] > 200 && px[i + 1] < 60 && px[i + 2] < 60
+        };
+        assert!(red(w / 2, h / 10), "the top of the picture is red");
+        assert!(!red(w / 2, h * 9 / 10), "the bottom is not");
+    }
 }

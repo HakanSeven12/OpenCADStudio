@@ -1638,13 +1638,16 @@ mod tests {
     /// Writes icons as they are drawn at 100–200 % (scaled, and fitted to
     /// the grid) to `$OCS_ICON_DUMP`, with a `manifest.txt` of one row per
     /// icon and size: `pixels:path` cells. For looking at the result.
+    /// `$OCS_ICON_DUMP_NAMES` (comma-separated asset paths) picks the icons.
     #[test]
     #[ignore = "writes files; set OCS_ICON_DUMP and run with --ignored"]
     fn dump_fitted_icons() {
         let Some(dir) = std::env::var_os("OCS_ICON_DUMP").map(std::path::PathBuf::from) else {
             return;
         };
-        let icons = [
+        let named = std::env::var("OCS_ICON_DUMP_NAMES").unwrap_or_default();
+        let named: Vec<&str> = named.split(',').filter(|name| !name.is_empty()).collect();
+        let default = [
             "line.svg",
             "polyline.svg",
             "circle/circle_cr.svg",
@@ -1662,9 +1665,10 @@ mod tests {
             "text.svg",
             "helix.svg",
         ];
+        let icons: &[&str] = if named.is_empty() { &default } else { &named };
         let mut manifest = String::new();
         for (art, sub) in [(16u32, ""), (32, "32/")] {
-            for name in icons {
+            for &name in icons {
                 let Ok(source) = std::fs::read(icons_dir().join(format!("{sub}{name}"))) else {
                     continue;
                 };

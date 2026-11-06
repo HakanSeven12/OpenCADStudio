@@ -300,6 +300,7 @@ fn path_tag(tag: &str, role: Role, grid: &Grid, grips: &[Grip]) -> Option<String
                 });
                 write_rect(&mut fitted, fit);
             }
+            _ if is_closed_curve(&sub) => write_closed_curve(&mut fitted, &sub, role, grid),
             _ => write_fitted(&mut fitted, &sub, role, grid),
         }
     }
@@ -402,6 +403,106 @@ fn write_rect(out: &mut String, r: Rect) {
         num(r.y0 + r.h),
         num(r.x0)
     );
+}
+
+/// Whether the subpath is closed and holds a curve: a circle, an ellipse or
+/// a closed rounded shape.
+fn is_closed_curve(sub: &[Seg]) -> bool {
+    let curved = sub
+        .iter()
+        .any(|s| matches!(s, Seg::CurveTo { .. } | Seg::Quadratic { .. }));
+    let first = sub.iter().find_map(|s| match *s {
+        Seg::MoveTo { x, y } => Some((x, y)),
+        _ => None,
+    });
+    let last = sub.iter().rev().find_map(|s| match *s {
+        Seg::MoveTo { x, y }
+        | Seg::LineTo { x, y }
+        | Seg::CurveTo { x, y, .. }
+        | Seg::Quadratic { x, y, .. } => Some((x, y)),
+        Seg::ClosePath => None,
+    });
+    let closed = matches!(sub.last(), Some(Seg::ClosePath))
+        || first
+            .zip(last)
+            .is_some_and(|(a, b)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6);
+    curved && closed
+}
+
+/// A closed curve fitted as one shape: scaled uniformly, so a circle stays
+/// a circle, to a whole number of pixels across, with its outer edge on the
+/// pixel grid (pixel centres for a stroke of odd weight, pixel edges for a
+/// fill). Snapping each point on its own instead would bend a small circle
+/// out of round by up to half a pixel.
+fn write_closed_curve(out: &mut String, sub: &[Seg], role: Role, grid: &Grid) {
+    let points = sub.iter().filter_map(|s| match *s {
+        Seg::MoveTo { x, y }
+        | Seg::LineTo { x, y }
+        | Seg::CurveTo { x, y, .. }
+        | Seg::Quadratic { x, y, .. } => Some((x, y)),
+        Seg::ClosePath => None,
+    });
+    let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+    for (x, y) in points {
+        lo = (lo.0.min(x), lo.1.min(y));
+        hi = (hi.0.max(x), hi.1.max(y));
+    }
+    let across = (hi.0 - lo.0).max(hi.1 - lo.1);
+    if across <= 0.0 {
+        return write_fitted(out, sub, role, grid);
+    }
+    // One scale for both axes, from the wider one.
+    let k = (across * grid.s).round().max(1.0) / across;
+    // The lowest edge, at the scaled centre, moved onto the grid.
+    let on_grid = |v: f64| {
+        if role == Role::Stroke && grid.odd() {
+            (v - 0.5).round() + 0.5
+        } else {
+            v.round()
+        }
+    };
+    let origin = (
+        on_grid((lo.0 + hi.0) / 2.0 * grid.s - (hi.0 - lo.0) * k / 2.0),
+        on_grid((lo.1 + hi.1) / 2.0 * grid.s - (hi.1 - lo.1) * k / 2.0),
+    );
+    let map = |x: f64, y: f64| (origin.0 + (x - lo.0) * k, origin.1 + (y - lo.1) * k);
+    for segment in sub {
+        match *segment {
+            Seg::MoveTo { x, y } => {
+                let p = map(x, y);
+                let _ = write!(out, "M{} {}", num(p.0), num(p.1));
+            }
+            Seg::LineTo { x, y } => {
+                let p = map(x, y);
+                let _ = write!(out, "L{} {}", num(p.0), num(p.1));
+            }
+            Seg::CurveTo {
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
+                let (a, b, p) = (map(x1, y1), map(x2, y2), map(x, y));
+                let _ = write!(
+                    out,
+                    "C{} {} {} {} {} {}",
+                    num(a.0),
+                    num(a.1),
+                    num(b.0),
+                    num(b.1),
+                    num(p.0),
+                    num(p.1)
+                );
+            }
+            Seg::Quadratic { x1, y1, x, y } => {
+                let (a, p) = (map(x1, y1), map(x, y));
+                let _ = write!(out, "Q{} {} {} {}", num(a.0), num(a.1), num(p.0), num(p.1));
+            }
+            Seg::ClosePath => out.push('Z'),
+        }
+    }
 }
 
 /// A subpath with its points fitted to the grid; curve control points move
@@ -632,6 +733,43 @@ mod tests {
             }
         }
         assert!(fitted > 800 * 6, "only {fitted} fitted");
+    }
+
+    #[test]
+    fn small_circles_stay_round() {
+        // A ring 6 px across, as in the array icons.
+        let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" stroke-width="1"><path d="M18.5 5.5A3 3 0 1 1 12.5 5.5A3 3 0 1 1 18.5 5.5Z" fill="none" stroke="#ffffff"/></svg>"##;
+        for n in [24, 28, 40, 48, 56, 64] {
+            let fitted = fit(source, 32, n).unwrap();
+            let d = attr(paths_with(&fitted, "stroke=")[0], "d").unwrap();
+            let mut on_curve = Vec::new();
+            for segment in SimplifyingPathParser::from(d) {
+                match segment.unwrap() {
+                    Seg::MoveTo { x, y } | Seg::LineTo { x, y } | Seg::CurveTo { x, y, .. } => {
+                        on_curve.push((x, y))
+                    }
+                    _ => {}
+                }
+            }
+            let (min_x, max_x) = on_curve.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+                (lo.min(p.0), hi.max(p.0))
+            });
+            let (min_y, max_y) = on_curve.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| {
+                (lo.min(p.1), hi.max(p.1))
+            });
+            assert!(
+                ((max_x - min_x) - (max_y - min_y)).abs() < 1e-3,
+                "{n} px: {d}"
+            );
+            if Grid::new(32, n).odd() {
+                for edge in [min_x, max_x, min_y, max_y] {
+                    assert!(
+                        ((edge - 0.5).fract()).abs() < 1e-3,
+                        "{n} px: edge {edge} in {d}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

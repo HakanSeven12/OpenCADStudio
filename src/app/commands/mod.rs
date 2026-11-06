@@ -880,6 +880,9 @@ pub fn is_transparent(cmd: &str) -> bool {
                 | "BPARAMETERS"
                 | "BPARAMETERSCLOSE"
                 | "PARAMETERSCLOSE"
+                | "TOOLPALETTES"
+                | "TOOLPALETTESCLOSE"
+                | "TP"
         )
 }
 
@@ -970,6 +973,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "DSETTINGS",
         "PARAMETERS",
         "PARAMETERSCLOSE",
+        "TOOLPALETTES",
+        "TOOLPALETTESCLOSE",
         "BTABLE",
         "GRID",
         "GRAPHICATTRIBUTES",
@@ -1500,6 +1505,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "BPARAMETERS",
         "BPARAMETERSCLOSE",
         "TOOLPALETTES",
+        "TOOLPALETTESCLOSE",
         "TP",
         "TS",
         "U",

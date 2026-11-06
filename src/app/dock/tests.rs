@@ -2525,3 +2525,77 @@ fn authoring_clean_screen(open: &str, close: &str, manager: bool) {
         assert!(!app.block_edit_dirty(i));
     }
 }
+
+#[test]
+fn toolpalettes_commands_transparency_and_distinct_from_authoring_palettes() {
+    let mut app = authoring_app();
+    let i = app.active_tab;
+    let before_doc = app.tabs[i].scene.document.clone();
+    let before_history = app.tabs[i].history.undo_stack.len();
+
+    // Start an active command (e.g. LINE)
+    let _ = app.dispatch_command("LINE");
+    assert_eq!(app.tabs[i].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+
+    // Verify commands are transparent and do not cancel running command
+    assert!(crate::app::commands::is_transparent("TOOLPALETTES"));
+    assert!(crate::app::commands::is_transparent("TOOLPALETTESCLOSE"));
+    assert!(crate::app::commands::is_transparent("TP"));
+
+    // Dispatch TOOLPALETTES, TOOLPALETTESCLOSE and alias TP
+    for cmd in ["TOOLPALETTES", "TOOLPALETTESCLOSE", "TP"] {
+        let history_len_before = app.command_line.history.len();
+        let _ = app.dispatch_command(cmd);
+        // Active command must remain LINE
+        assert_eq!(
+            app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+            Some("LINE"),
+            "{cmd} must be transparent and preserve running command"
+        );
+        // An info message must have been output reporting that it is not yet implemented
+        let last_msg = app.command_line.history[history_len_before..]
+            .iter()
+            .map(|l| &l.text)
+            .find(|text| text.contains("TOOLPALETTES: Tool Palettes not yet implemented."));
+        assert!(
+            last_msg.is_some(),
+            "{cmd} must output placeholder message"
+        );
+    }
+
+    // Cancel LINE command
+    let _ = app.update(Message::CommandEscape);
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    // Verify general Tool Palettes commands do NOT alter Authoring Palettes dock state
+    assert!(!app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes));
+    let _ = app.dispatch_command("TOOLPALETTES");
+    assert!(
+        !app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes),
+        "TOOLPALETTES must remain distinct from Authoring Palettes"
+    );
+    let _ = app.dispatch_command("TOOLPALETTESCLOSE");
+    assert!(
+        !app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes),
+        "TOOLPALETTESCLOSE must remain distinct from Authoring Palettes"
+    );
+
+    // Open Authoring Palettes with BAUTHORPALETTE
+    let _ = app.dispatch_command("BAUTHORPALETTE");
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes));
+
+    // TOOLPALETTES / TOOLPALETTESCLOSE must not close or displace Authoring Palettes
+    let _ = app.dispatch_command("TOOLPALETTES");
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes));
+    let _ = app.dispatch_command("TOOLPALETTESCLOSE");
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes));
+
+    // BAUTHORPALETTECLOSE closes Authoring Palettes
+    let _ = app.dispatch_command("BAUTHORPALETTECLOSE");
+    assert!(!app.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes));
+
+    // Document, undo stack, and dirty state must be pristine
+    assert_eq!(app.tabs[i].scene.document, before_doc);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), before_history);
+    assert!(!app.block_edit_dirty(i));
+}

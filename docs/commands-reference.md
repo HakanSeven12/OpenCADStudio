@@ -719,6 +719,7 @@ Generated from the command registry of OpenCADStudio `main` (commit f664c42, 202
 | `SYNCPVIEWPORTS` | — | Copy the first selected viewport's display settings (view direction/target, scale, snap/grid, frozen layers) to the rest. |
 | `TILEMODE` | — | 1: model space; 0: the paper layout that was last current (the drawing's own `CTAB`), else the first one. |
 | `TOOLPALETTES` | `TP` | Menu: Tool Palettes. |
+| `TOOLPALETTESCLOSE` | — | Close Tool Palettes. † |
 | `UCS` | — | Bare UCS → interactive front-end (option then value as steps), so `UCS Z 90` is typable in the command line and works headlessly. The front-end delegates back to the inline handler below. (#169) |
 | `UCSFOLLOW` | — | Toggles UCS follow: the view follows the UCS. † |
 | `VERTICAL` | — | Ribbon: Tile\nVert.. |

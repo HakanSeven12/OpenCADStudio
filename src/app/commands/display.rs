@@ -736,8 +736,8 @@ impl OpenCADStudio {
                 return Some(self.dock_set_open(id, open));
             }
 
-            // ── TOOLPALETTES — not yet implemented ───────────────────────────────
-            "TOOLPALETTES" => {
+            // ── TOOLPALETTES / TOOLPALETTESCLOSE — not yet implemented ───────────
+            "TOOLPALETTES" | "TOOLPALETTESCLOSE" => {
                 self.command_line.push_info(
                     crate::t!("TOOLPALETTES: Tool Palettes not yet implemented.").as_ref(),
                 );

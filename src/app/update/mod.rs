@@ -5917,6 +5917,9 @@ impl OpenCADStudio {
             Message::ViewportMiddlePress => {
                 self.graphic_attributes.open_menu = None;
                 let i = self.active_tab;
+                // A menu closed by a click elsewhere left its editor behind:
+                // a new right-click opens the menu itself (#2619).
+                self.context_menu_editing = None;
                 self.nav_resync_held();
                 self.nav_held.middle = true;
                 self.nav_drag_by_button = false;

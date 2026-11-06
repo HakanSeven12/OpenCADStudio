@@ -202,6 +202,7 @@ impl OpenCADStudio {
         }
         let (index, x) = crate::ui::menu_bar::menu_for_letter(letter, self.tabs[i].is_start)?;
         self.menu_bar_popup = Some(index);
+        self.context_menu_editing = None;
         let mut sel = self.tabs[i].scene.selection.borrow_mut();
         sel.menu.open(iced::Point::new(x, 2.0));
         sel.menu.ui.highlighted = Some(0);
@@ -421,6 +422,7 @@ impl OpenCADStudio {
             return None;
         }
         self.menu_bar_popup = None;
+        self.context_menu_editing = None;
         let first = {
             let mut sel = self.tabs[i].scene.selection.borrow_mut();
             // Beside the cursor; before the pointer has moved, the corner.
@@ -1454,6 +1456,22 @@ mod tests {
             .into_iter()
             .map(|s| s.action)
             .collect()
+    }
+
+    #[test]
+    fn a_menu_closed_while_customizing_reopens_as_the_menu() {
+        with_stack(|| {
+            let mut app = app();
+            right_click(&mut app);
+            assert!(menu_open(&app));
+            let _ = app.on_context_menu_pick(MenuAction::Customize);
+            assert!(app.context_menu_editing.is_some());
+            // A click elsewhere closes the menu without leaving the editor.
+            app.tabs[0].scene.selection.borrow_mut().menu.close();
+            right_click(&mut app);
+            assert!(menu_open(&app));
+            assert!(app.context_menu_editing.is_none(), "#2619");
+        });
     }
 
     #[test]

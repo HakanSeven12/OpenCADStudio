@@ -2001,6 +2001,7 @@ pub trait MultiLeaderTess {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> Vec<crate::scene::model::wire_model::WireModel>;
 }
 
@@ -2019,6 +2020,7 @@ impl MultiLeaderTess for MultiLeader {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> Vec<crate::scene::model::wire_model::WireModel> {
         // The leader, text and mask are laid out in f32. At large absolute
         // coordinates (survey drawings far from the origin) f32 steps grow to
@@ -2044,6 +2046,7 @@ impl MultiLeaderTess for MultiLeader {
             view_aabb,
             world_per_pixel,
             bg_color,
+            complex_lt_anno,
         );
         for (i, wire) in wires.iter_mut().enumerate() {
             if !world_wires.contains(&i) {
@@ -2126,6 +2129,7 @@ trait MultiLeaderFrameTess {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> (
         Vec<crate::scene::model::wire_model::WireModel>,
         std::ops::Range<usize>,
@@ -2148,6 +2152,7 @@ impl MultiLeaderFrameTess for MultiLeader {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> (
         Vec<crate::scene::model::wire_model::WireModel>,
         std::ops::Range<usize>,
@@ -2499,6 +2504,7 @@ impl MultiLeaderFrameTess for MultiLeader {
                     1.0,
                     crate::scene::convert::tess::BlockObjectOptions {
                         scale_policy: block_use.scale_policy,
+                        complex_lt_anno: Some(complex_lt_anno),
                         ..crate::scene::convert::tess::BlockObjectOptions::default()
                     },
                 )
@@ -3050,6 +3056,7 @@ mod tests {
             None,
             None,
             [0.0, 0.0, 0.0, 1.0],
+            1.0,
         );
 
         // Find the text wire model:
@@ -3100,6 +3107,7 @@ mod tests {
             None,
             None,
             bg_color,
+            1.0,
         );
         let mask = wires
             .iter()
@@ -3136,6 +3144,7 @@ mod tests {
                 None,
                 None,
                 [0.1, 0.2, 0.3, 1.0],
+                1.0,
             );
             wires
                 .iter()
@@ -3220,6 +3229,7 @@ mod tests {
                 None,
                 None,
                 [0.0, 0.0, 0.0, 1.0],
+                1.0,
             ))
         };
 
@@ -3293,6 +3303,7 @@ mod tests {
             None,
             None,
             [0.0, 0.0, 0.0, 1.0],
+            1.0,
         );
         let leader_top = wires[0]
             .points
@@ -3357,6 +3368,7 @@ mod tests {
             None,
             None,
             [0.0, 0.0, 0.0, 1.0],
+            1.0,
         )
     }
 

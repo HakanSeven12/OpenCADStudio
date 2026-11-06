@@ -1291,3 +1291,58 @@ fn a_drawing_without_complex_linetypes_keeps_one_viewport_set_across_zooms() {
     let _ = scene.model_wires_for_viewport_arc(viewport, 0.0);
     assert_eq!(scene.last_model_wire_gen.get(), generation);
 }
+
+/// A multileader showing block `name` at the origin, with no leaders or text.
+fn block_multileader(document: &Document, name: &str) -> document::entities::MultiLeader {
+    use document::entities::{BlockContentConnectionType, LeaderContentType, MultiLeader};
+    let mut leader = MultiLeader::new();
+    leader.content_type = LeaderContentType::Block;
+    leader.block_connection_type = BlockContentConnectionType::BasePoint;
+    leader.block_content_handle = Some(document.block_records.get(name).unwrap().handle);
+    leader.context.has_block_contents = true;
+    leader.context.block_content_location = Vector3::ZERO;
+    leader.context.block_content_scale = Vector3::new(1.0, 1.0, 1.0);
+    leader.block_scale = Vector3::new(1.0, 1.0, 1.0);
+    leader
+}
+
+#[test]
+fn a_multileader_block_follows_the_annotation_scale() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let leader = block_multileader(&document, "B");
+    let handle = add(&mut document, EntityType::MultiLeader(Box::new(leader)));
+    assert_fence_at_15(&glyph_stations(
+        &wires_at(&document, handle, 15.0, false),
+        [0.0, 0.0],
+        8.0,
+    ));
+}
+
+#[test]
+fn a_dimension_picture_block_follows_the_annotation_scale() {
+    use document::entities::{Dimension, DimensionLinear};
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let mut dimension = DimensionLinear::new(Vector3::ZERO, Vector3::new(10.0, 0.0, 0.0));
+    dimension.base.block_name = "B".to_string();
+    let handle = add(
+        &mut document,
+        EntityType::Dimension(Box::new(Dimension::Linear(dimension))),
+    );
+    assert_fence_at_15(&glyph_stations(
+        &wires_at(&document, handle, 15.0, false),
+        [0.0, 0.0],
+        8.0,
+    ));
+}
+
+#[test]
+fn psltscale_reaches_a_multileader_block() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let leader = block_multileader(&document, "B");
+    add(&mut document, EntityType::MultiLeader(Box::new(leader)));
+    let (scene, viewport) = scene_with_viewport(document, 15.0);
+    assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
+}

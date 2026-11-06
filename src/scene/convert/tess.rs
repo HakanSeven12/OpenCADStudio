@@ -963,6 +963,9 @@ fn tessellate_entity_inner(
     let e = contextual.as_ref();
     let h = e.common().handle;
     let sel = selected.contains(&h);
+    // A linetype follows the annotation scale whether or not its object is
+    // annotative, so it reads the scale as it came in.
+    let linetype_anno = anno_scale;
     // Per-object annotation contexts store each representation relative to the
     // native/default scale. Resolve that ratio once before TEXT/MTEXT,
     // DIMENSION, and MULTILEADER reach their independent tessellation paths.
@@ -1290,7 +1293,11 @@ fn tessellate_entity_inner(
                 BlockObjectOptions {
                     suppress_root_points: block_use.suppress_root_points,
                     scale_policy: block_use.scale_policy,
-                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, viewport_lt)),
+                    complex_lt_anno: Some(complex_linetype_anno(
+                        document,
+                        linetype_anno,
+                        viewport_lt,
+                    )),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1354,6 +1361,7 @@ fn tessellate_entity_inner(
             view_aabb,
             world_per_pixel,
             bg_color,
+            complex_linetype_anno(document, linetype_anno, viewport_lt),
         );
         for w in &mut wires {
             w.aci = aci;
@@ -1399,7 +1407,11 @@ fn tessellate_entity_inner(
                 pslt_factor,
                 BlockObjectOptions {
                     scale_policy: block_use.scale_policy,
-                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, viewport_lt)),
+                    complex_lt_anno: Some(complex_linetype_anno(
+                        document,
+                        linetype_anno,
+                        viewport_lt,
+                    )),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1449,7 +1461,7 @@ fn tessellate_entity_inner(
                         scale_policy: block_use.scale_policy,
                         complex_lt_anno: Some(complex_linetype_anno(
                             document,
-                            anno_scale,
+                            linetype_anno,
                             viewport_lt,
                         )),
                         ..BlockObjectOptions::default()
@@ -1526,7 +1538,7 @@ fn tessellate_entity_inner(
             pslt_factor,
             BlockObjectOptions {
                 apply_xclip: true,
-                complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, viewport_lt)),
+                complex_lt_anno: Some(complex_linetype_anno(document, linetype_anno, viewport_lt)),
                 ..BlockObjectOptions::default()
             },
         );
@@ -1644,9 +1656,10 @@ fn tessellate_entity_inner(
     // An MLINE's linetypes are its elements': its own plays no part.
     if let EntityType::MLine(mline) = e {
         if bases.iter().any(|wire| wire.element_linetype.is_some()) && !sel {
-            let scale =
-                (lt_scale * pslt_factor * complex_linetype_anno(document, anno_scale, viewport_lt))
-                    .max(1e-4);
+            let scale = (lt_scale
+                * pslt_factor
+                * complex_linetype_anno(document, linetype_anno, viewport_lt))
+            .max(1e-4);
             let mut walked = Vec::with_capacity(bases.len());
             for wire in bases {
                 walked.extend(walk_mline_element(document, &mline.common.layer, wire, scale));
@@ -1669,7 +1682,7 @@ fn tessellate_entity_inner(
         .then(|| crate::io::linetypes::resolve_complex_lt(document, lt_name))
         .flatten();
     if let Some(clt) = own_complex {
-        let complex_lt_anno = complex_linetype_anno(document, anno_scale, viewport_lt);
+        let complex_lt_anno = complex_linetype_anno(document, linetype_anno, viewport_lt);
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex

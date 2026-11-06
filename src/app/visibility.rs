@@ -438,7 +438,7 @@ impl OpenCADStudio {
     }
 
     /// Indexed Visibility choices for the shared dynamic property editor.
-    pub(super) fn batch_visibility_property(
+    pub(super) fn indexed_visibility_property(
         doc: &document::Document,
         document: u64,
         insert: Handle,
@@ -462,6 +462,7 @@ impl OpenCADStudio {
                     definition,
                     insert,
                     batch_generation: None,
+                    editor_session: None,
                     parameter: parameter.handle,
                     component: BlockParameterComponent::Visibility(visibility_revision(parameter)),
                 },

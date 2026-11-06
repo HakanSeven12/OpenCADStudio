@@ -439,7 +439,7 @@ fn block_table_properties_wrap_angles_and_display_degrees_without_actions() {
 }
 
 #[test]
-fn block_table_properties_reject_shared_scratch_references_and_nested_editor_edits() {
+fn block_table_properties_reject_shared_scratch_references_and_edit_nested_rows() {
     let (mut app, _, _, insert, _, _) = table_fixture(true);
     let i = app.active_tab;
     let key = row(&app).0;
@@ -459,7 +459,7 @@ fn block_table_properties_reject_shared_scratch_references_and_nested_editor_edi
     assert_eq!(app.tabs[i].scene.document, before);
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
 
-    let (mut app, _, _, _, _, _) = table_fixture(false);
+    let (mut app, _, _, other, _, _) = table_fixture(false);
     let i = app.active_tab;
     app.tabs[i].scene.define_block_raw(
         "OUTER",
@@ -483,16 +483,20 @@ fn block_table_properties_reject_shared_scratch_references_and_nested_editor_edi
     app.tabs[i].scene.select_entity(nested, true);
     app.tabs[i].selected_handle = Some(nested);
     app.refresh_properties();
-    let property = app.tabs[i]
-        .properties
-        .sections
-        .iter()
-        .flat_map(|section| &section.props)
-        .find(|property| property.field == "dyn_table")
-        .unwrap();
-    assert!(
-        matches!(&property.value,PropValue::ReadOnlyWithTooltip { value,.. } if value.starts_with("1:"))
+    let (key, selected, _) = row(&app);
+    assert_eq!(key.insert, nested);
+    assert!(key.editor_session.is_some());
+    assert_eq!(selected, 0);
+    let _ = app.update(Message::PropBlockChoice { key, index: 2 });
+    assert_eq!(row(&app).1, 2);
+    assert_eq!(
+        crate::scene::block_parameter_properties::current_table_row(
+            &app.tabs[i].scene.document, None, other,
+        ),
+        Some(0),
     );
+    app.undo_steps(1);
+    assert_eq!(row(&app).1, 0);
 }
 
 #[test]

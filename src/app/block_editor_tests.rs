@@ -9,6 +9,7 @@ mod retained_save_as;
 mod table_properties;
 mod lookup_properties;
 mod visibility_properties;
+mod nested_properties;
 mod grip_descriptions;
 mod imported_flip_workflow;
 mod flip_frame_grips;

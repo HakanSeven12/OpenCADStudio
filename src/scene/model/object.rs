@@ -10,6 +10,7 @@ pub struct BlockParameterKey {
     pub definition: Handle,
     pub insert: Handle,
     pub batch_generation: Option<u64>,
+    pub editor_session: Option<u64>,
     pub parameter: Handle,
     pub component: BlockParameterComponent,
 }

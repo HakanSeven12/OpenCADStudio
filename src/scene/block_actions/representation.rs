@@ -3,6 +3,47 @@ use super::*;
 use crate::scene::Scene;
 use rustc_hash::FxHashMap;
 
+fn sync_nested_cache(
+    doc: &mut Document,
+    source: Handle,
+    target: Handle,
+    mapping: &FxHashMap<Handle, Handle>,
+) -> Result<(), &'static str> {
+    const KEY: &str = "AcDbBlockRepresentation";
+    let Some(source_root) = doc.extension_dictionary_handle(source) else {
+        return Ok(());
+    };
+    let Some(source_cache) = instance::entry(doc, source_root, KEY)? else {
+        return Ok(());
+    };
+    let target_root = doc.ensure_extension_dictionary(target);
+    if doc.object_owner(source_root) != Some(source)
+        || doc.object_owner(source_cache) != Some(source_root)
+        || doc.object_owner(target_root) != Some(target)
+    {
+        return Err("The reference parameter dictionary has an invalid owner.");
+    }
+    let old = instance::entry(doc, target_root, KEY)?;
+    let cache = Scene::clone_xdict_tree(
+        doc,
+        source_root,
+        source_cache,
+        target_root,
+        mapping,
+        &FxHashMap::default(),
+        &mut vec![],
+    )
+    .ok_or("Could not copy the new member's extension dictionary.")?;
+    let Some(ObjectType::Dictionary(dictionary)) = doc.objects.get_mut(&target_root) else {
+        return Err("The reference contains an invalid parameter dictionary.");
+    };
+    dictionary.insert(KEY, cache);
+    if let Some(old) = old.filter(|&old| doc.object_owner(old) == Some(target_root)) {
+        instance::remove_owned_cache(doc, old);
+    }
+    Ok(())
+}
+
 pub(super) fn reconcile(
     scene: &mut Scene,
     def: Handle,
@@ -63,6 +104,7 @@ pub(super) fn reconcile(
             .cloned()
             .ok_or("Missing evaluated member.")?;
         let source_xdict = entity.common().xdictionary_handle;
+        let mut changed_insert = None;
         if existing {
             let previous = scene
                 .document
@@ -72,6 +114,9 @@ pub(super) fn reconcile(
             let current = previous.common();
             match (&mut entity, &previous) {
                 (EntityType::Insert(insert), EntityType::Insert(old)) => {
+                    if insert.block_name != old.block_name {
+                        changed_insert = Some((old.block_name.clone(), insert.block_name.clone()));
+                    }
                     let mut used = std::collections::BTreeSet::new();
                     for attribute in &mut insert.attributes {
                         let retained = old.attributes.iter().find(|a| {
@@ -136,6 +181,15 @@ pub(super) fn reconcile(
         entity.common_mut().raw_record = None;
         if existing {
             *scene.document.get_entity_mut(to).unwrap() = entity;
+            if let Some((old, name)) = changed_insert {
+                let old = scene.document.block_records.get(&old).map_or(Handle::NULL, |b| b.handle);
+                if let Some(new) = scene.document.block_records.get(&name).map(|b| b.handle) {
+                    scene.repoint_representation(to, old, new, &name);
+                    if scene.document.dynamic_definition_for_insert(from).is_some_and(|def| def != new) {
+                        sync_nested_cache(&mut scene.document, from, to, &mapping)?;
+                    }
+                }
+            }
         } else {
             scene
                 .document

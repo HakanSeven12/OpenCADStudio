@@ -262,6 +262,7 @@ pub(crate) fn properties(
                 definition,
                 insert,
                 batch_generation: None,
+                editor_session: None,
                 parameter: p.handle,
                 component: field.component,
             };

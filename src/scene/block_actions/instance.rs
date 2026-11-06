@@ -3,7 +3,7 @@
 use super::*;
 use document::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
 
-fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
+pub(super) fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
     let Some(ObjectType::Dictionary(d)) = doc.objects.get(&owner) else {
         return Err("The reference contains an invalid parameter dictionary.");
     };
@@ -1049,43 +1049,47 @@ fn clear_table_history(
         if let Some(ObjectType::Dictionary(dictionary)) = result.objects.get_mut(&owner) {
             dictionary.entries.retain(|(_, h)| *h != history);
         }
-        let mut owned = std::collections::BTreeSet::from([history]);
-        loop {
-            let children = result
-                .objects
-                .keys()
-                .copied()
-                .filter(|h| {
-                    !owned.contains(h)
-                        && result
-                            .object_owner(*h)
-                            .is_some_and(|owner| owned.contains(&owner))
-                })
-                .collect::<Vec<_>>();
-            if children.is_empty() {
-                break;
-            }
-            owned.extend(children);
-        }
-        for handle in owned {
-            let applications = result
-                .object_xdata(handle)
-                .map(|data| {
-                    data.records()
-                        .iter()
-                        .map(|record| record.application_name.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            for application in applications {
-                result.remove_object_xdata_record(handle, &application);
-            }
-            result.block_representations.remove(&handle);
-            result.block_visibility_params.remove(&handle);
-            result.objects.remove(&handle);
-        }
+        remove_owned_cache(result, history);
     }
     Ok(())
+}
+
+pub(super) fn remove_owned_cache(result: &mut Document, root: Handle) {
+    let mut owned = std::collections::BTreeSet::from([root]);
+    loop {
+        let children = result
+            .objects
+            .keys()
+            .copied()
+            .filter(|h| {
+                !owned.contains(h)
+                    && result
+                        .object_owner(*h)
+                        .is_some_and(|owner| owned.contains(&owner))
+            })
+            .collect::<Vec<_>>();
+        if children.is_empty() {
+            break;
+        }
+        owned.extend(children);
+    }
+    for handle in owned {
+        let applications = result
+            .object_xdata(handle)
+            .map(|data| {
+                data.records()
+                    .iter()
+                    .map(|record| record.application_name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for application in applications {
+            result.remove_object_xdata_record(handle, &application);
+        }
+        result.block_representations.remove(&handle);
+        result.block_visibility_params.remove(&handle);
+        result.objects.remove(&handle);
+    }
 }
 
 fn table_history_owner(doc: &Document, insert: Handle) -> Result<Option<Handle>, &'static str> {

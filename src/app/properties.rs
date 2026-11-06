@@ -984,7 +984,17 @@ impl OpenCADStudio {
                 // A dynamic block's visibility states, picked like its grip.
                 let baseline = self.tabs[i].block_test.as_ref().filter(|test| test.insert == handle).map(|test| test.baseline.as_ref());
                 let mut custom_properties = crate::scene::block_parameter_properties::properties(doc, baseline, self.tabs[i].id, handle);
-                if self.tabs[i].active_block_edit_session().is_some() {
+                if let Some(session) = self.nested_block_property_session(i, handle) {
+                    custom_properties.extend(Self::indexed_visibility_property(doc, self.tabs[i].id, handle));
+                    for property in &mut custom_properties {
+                        match &mut property.value {
+                            PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => {
+                                key.editor_session = Some(session);
+                            }
+                            _ => {}
+                        }
+                    }
+                } else if self.tabs[i].active_block_edit_session().is_some() {
                     for property in &mut custom_properties {
                         property.value = match &property.value {
                             crate::scene::model::object::PropValue::BlockNumber { value, description, .. } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip { value: value.clone(), tooltip: description.clone() },
@@ -992,8 +1002,15 @@ impl OpenCADStudio {
                             value => value.clone(),
                         };
                     }
+                    if let Some(mut visibility) = Self::visibility_property(doc, handle) {
+                        if let PropValue::ChoiceWithTooltip { selected, tooltip, .. } = visibility.value {
+                            visibility.value = PropValue::ReadOnlyWithTooltip { value: selected, tooltip };
+                            custom_properties.push(visibility);
+                        }
+                    }
+                } else {
+                    custom_properties.extend(Self::visibility_property(doc, handle));
                 }
-                custom_properties.extend(Self::visibility_property(doc, handle));
                 custom_properties.extend(Self::visible_blocks_property(doc, handle));
                 if !custom_properties.is_empty() {
                     sections.push(crate::scene::model::object::PropSection {

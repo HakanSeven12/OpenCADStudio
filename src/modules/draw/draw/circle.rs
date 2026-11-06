@@ -145,6 +145,22 @@ impl CircleCommand {
             plane: WorkingPlane::default(),
         }
     }
+
+    /// The prompt of the current step as HATCH's Circle asks it.
+    pub(crate) fn hatch_prompt(&self) -> String {
+        let format = |value: f64| format!("{value:.4}");
+        match self.step {
+            StepCR::Center => crate::tr!("hatch-cmd", "circle-center"),
+            StepCR::Radius(_) => {
+                crate::tr!("hatch-cmd", "circle-radius", radius = format(self.default_r))
+            }
+            StepCR::Diameter(_) => crate::tr!(
+                "hatch-cmd",
+                "circle-diameter",
+                diameter = format(self.default_r * 2.0)
+            ),
+        }
+    }
 }
 
 impl CadCommand for CircleCommand {
@@ -433,6 +449,15 @@ impl Circle2PCommand {
             plane: WorkingPlane::default(),
         }
     }
+
+    /// The prompt of the current step as HATCH's Circle asks it.
+    pub(crate) fn hatch_prompt(&self) -> String {
+        if self.p1.is_none() {
+            crate::tr!("hatch-cmd", "circle-2p-first")
+        } else {
+            crate::tr!("hatch-cmd", "circle-2p-second")
+        }
+    }
 }
 
 impl CadCommand for Circle2PCommand {
@@ -493,6 +518,15 @@ impl Circle3PCommand {
         Self {
             pts: Vec::new(),
             plane: WorkingPlane::default(),
+        }
+    }
+
+    /// The prompt of the current step as HATCH's Circle asks it.
+    pub(crate) fn hatch_prompt(&self) -> String {
+        match self.pts.len() {
+            0 => crate::tr!("hatch-cmd", "circle-3p-first"),
+            1 => crate::tr!("hatch-cmd", "circle-3p-second"),
+            _ => crate::tr!("hatch-cmd", "circle-3p-third"),
         }
     }
 }
@@ -1304,6 +1338,19 @@ impl CircleTTRCommand {
         };
         defaults::set_circle_radius(radius);
         CmdResult::CommitAndExit(make_circle(self.plane.to_world(center), radius, self.plane))
+    }
+
+    /// The prompt of the current step as HATCH's Circle asks it.
+    pub(crate) fn hatch_prompt(&self) -> String {
+        match self.step {
+            StepTTR::First => crate::tr!("hatch-cmd", "circle-tan-first"),
+            StepTTR::Second { .. } => crate::tr!("hatch-cmd", "circle-tan-second"),
+            StepTTR::Radius { .. } => crate::tr!(
+                "hatch-cmd",
+                "circle-ttr-radius",
+                radius = format!("{:.4}", self.default_r)
+            ),
+        }
     }
 
     fn radius_from_point(&self, point: DVec3) -> Option<f64> {

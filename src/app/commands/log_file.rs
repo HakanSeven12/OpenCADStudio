@@ -6,35 +6,66 @@
 use crate::app::OpenCADStudio;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
 
-static MODE: AtomicBool = AtomicBool::new(false);
-/// The folder chosen with LOGFILEPATH; empty is the default one.
-static FOLDER: Mutex<String> = Mutex::new(String::new());
-/// This session's file, opened by its first line.
-static FILE: Mutex<Option<(PathBuf, std::fs::File, std::time::Instant)>> = Mutex::new(None);
+struct State {
+    mode: bool,
+    /// The folder chosen with LOGFILEPATH; empty is the default one.
+    folder: String,
+    /// This session's file, opened by its first line.
+    file: Option<(PathBuf, std::fs::File, std::time::Instant)>,
+}
+
+const START: State = State {
+    mode: false,
+    folder: String::new(),
+    file: None,
+};
+
+#[cfg(not(test))]
+static STATE: std::sync::Mutex<State> = std::sync::Mutex::new(START);
+
+// Tests run side by side and every app they make applies the profile
+// settings, which reset the log file; each test thread keeps its own.
+#[cfg(test)]
+thread_local! {
+    static STATE: std::cell::RefCell<State> = const { std::cell::RefCell::new(START) };
+}
+
+fn with_state<R>(f: impl FnOnce(&mut State) -> R) -> R {
+    #[cfg(not(test))]
+    {
+        f(&mut STATE.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+    #[cfg(test)]
+    {
+        STATE.with(|state| f(&mut state.borrow_mut()))
+    }
+}
 
 pub(crate) fn log_file_mode() -> bool {
-    MODE.load(Ordering::Relaxed)
+    with_state(|state| state.mode)
 }
 
 pub(crate) fn set_log_file_mode(on: bool) {
-    MODE.store(on, Ordering::Relaxed);
-    if !on {
-        *FILE.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    }
+    with_state(|state| {
+        state.mode = on;
+        if !on {
+            state.file = None;
+        }
+    });
 }
 
 /// The folder as set; empty when it is the default.
 pub(crate) fn log_file_folder_setting() -> String {
-    FOLDER.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    with_state(|state| state.folder.clone())
 }
 
 pub(crate) fn set_log_file_folder(folder: &str) {
-    *FOLDER.lock().unwrap_or_else(|e| e.into_inner()) = folder.trim().to_string();
-    // The next line starts a file in the new folder.
-    *FILE.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    with_state(|state| {
+        state.folder = folder.trim().to_string();
+        // The next line starts a file in the new folder.
+        state.file = None;
+    });
 }
 
 /// Where log files go: the folder set with LOGFILEPATH, else `logs` in the
@@ -56,10 +87,7 @@ pub(crate) fn log_file_folder() -> Option<PathBuf> {
 
 /// This session's log file, once something was written to it.
 pub(crate) fn log_file_path() -> Option<PathBuf> {
-    FILE.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|(path, _, _)| path.clone())
+    with_state(|state| state.file.as_ref().map(|(path, _, _)| path.clone()))
 }
 
 /// Append one command-line line, stamped with the seconds since the file
@@ -68,35 +96,40 @@ pub(crate) fn write_line(text: &str) {
     if cfg!(target_arch = "wasm32") || !log_file_mode() {
         return;
     }
-    let mut file = FILE.lock().unwrap_or_else(|e| e.into_inner());
-    if file.is_none() {
-        let Some(folder) = log_file_folder() else {
-            return;
-        };
-        if std::fs::create_dir_all(&folder).is_err() {
-            return;
+    let folder = log_file_folder();
+    with_state(|state| {
+        if state.file.is_none() {
+            let Some(folder) = folder else {
+                return;
+            };
+            if std::fs::create_dir_all(&folder).is_err() {
+                return;
+            }
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let path = folder.join(format!("opencadstudio-{stamp}-{}.log", std::process::id()));
+            let Ok(mut opened) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+            else {
+                return;
+            };
+            let _ = writeln!(
+                opened,
+                "Open CAD Studio {} ({} {}), started at Unix time {stamp}",
+                env!("CARGO_PKG_VERSION"),
+                std::env::consts::OS,
+                std::env::consts::ARCH,
+            );
+            state.file = Some((path, opened, std::time::Instant::now()));
         }
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let path = folder.join(format!("opencadstudio-{stamp}-{}.log", std::process::id()));
-        let Ok(mut opened) = std::fs::OpenOptions::new().create(true).append(true).open(&path)
-        else {
-            return;
-        };
-        let _ = writeln!(
-            opened,
-            "Open CAD Studio {} ({} {}), started at Unix time {stamp}",
-            env!("CARGO_PKG_VERSION"),
-            std::env::consts::OS,
-            std::env::consts::ARCH,
-        );
-        *file = Some((path, opened, std::time::Instant::now()));
-    }
-    if let Some((_, out, started)) = file.as_mut() {
-        let _ = writeln!(out, "[{:>9.2}s] {text}", started.elapsed().as_secs_f32());
-    }
+        if let Some((_, out, started)) = state.file.as_mut() {
+            let _ = writeln!(out, "[{:>9.2}s] {text}", started.elapsed().as_secs_f32());
+        }
+    });
 }
 
 impl OpenCADStudio {

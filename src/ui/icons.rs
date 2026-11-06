@@ -124,6 +124,56 @@ pub static ST_FILTER: &[u8] = include_bytes!("../../assets/icons/status/filter.s
 pub static ST_SELCYCLE: &[u8] = include_bytes!("../../assets/icons/status/selcycle.svg");
 pub static ST_CLEANSCREEN: &[u8] = include_bytes!("../../assets/icons/status/cleanscreen.svg");
 
+// ── 16 px / 32 px artwork ──────────────────────────────────────────────────
+
+// `ICON_PAIRS`: every `(assets/icons/<p>, assets/icons/32/<p>)`, written by
+// build.rs.
+include!(concat!(env!("OUT_DIR"), "/icon_pairs.rs"));
+
+/// The 32 px drawing of the icon whose 16 px drawing is `bytes`, if it has
+/// one.
+///
+/// The pairs are keyed by content, not by address: the same file included
+/// from two places need not have one address. A per-thread cache on
+/// `(address, length)` sits in front so a frame never hashes file contents.
+fn large_art(bytes: &'static [u8]) -> Option<&'static [u8]> {
+    static BY_CONTENT: std::sync::OnceLock<FxHashMap<&'static [u8], &'static [u8]>> =
+        std::sync::OnceLock::new();
+    thread_local! {
+        static BY_ADDRESS: RefCell<FxHashMap<(usize, usize), Option<&'static [u8]>>> =
+            RefCell::new(FxHashMap::default());
+    }
+    let key = (bytes.as_ptr() as usize, bytes.len());
+    if let Some(hit) = BY_ADDRESS.with(|cache| cache.borrow().get(&key).copied()) {
+        return hit;
+    }
+    let found = BY_CONTENT
+        .get_or_init(|| {
+            let mut map = FxHashMap::default();
+            // Identical 16 px files keep the first partner in path order.
+            for &(small, large) in ICON_PAIRS {
+                map.entry(small).or_insert(large);
+            }
+            map
+        })
+        .get(bytes)
+        .copied();
+    BY_ADDRESS.with(|cache| cache.borrow_mut().insert(key, found));
+    found
+}
+
+/// The artwork to draw an icon from at `size` logical px: the 32 px drawing
+/// from [`metrics::LARGE_ART_MIN`] up when there is one, otherwise `bytes`.
+/// The choice is made on the logical size, so small slots use the 16 px art
+/// and large slots the 32 px art at every screen scale.
+pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
+    if size >= metrics::LARGE_ART_MIN {
+        large_art(bytes).unwrap_or(bytes)
+    } else {
+        bytes
+    }
+}
+
 // Tool SVGs share a small source palette. These colours are semantic rather
 // than literal: cyan is the accent, pale grey is foreground, yellow is warning,
 // and so on. `SemanticIcon` resolves those roles from Iced's active extended

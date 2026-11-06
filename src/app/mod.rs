@@ -7034,7 +7034,14 @@ pub fn run() -> iced::Result {
         ..iced::Settings::default()
     })
     .subscription(OpenCADStudio::subscription)
-    .scale_factor(|state: &OpenCADStudio, _| f32::from(state.ui_scale_percent) / 100.0)
+    .scale_factor(|state: &OpenCADStudio, _| {
+        let scale = f32::from(state.ui_scale_percent) / 100.0;
+        // Icons fit their art to the physical pixels iced draws at: the
+        // window's scale times this one. Noted where iced reads it, so the
+        // two never disagree.
+        crate::ui::icons::set_ui_scale(scale);
+        scale
+    })
     .title(|state: &OpenCADStudio, window_id: window::Id| {
         // A tool dialog or pallet in a window of its own carries its name.
         if let Some(title) = state.os_window_title(window_id) {

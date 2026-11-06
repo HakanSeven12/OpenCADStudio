@@ -3,7 +3,7 @@
 //! address is stored. Used by HYPERLINK, the Properties Hyperlink row and
 //! the block definition windows.
 
-use iced::widget::{button, column, container, row, scrollable, svg, text, text_input, Space};
+use iced::widget::{button, column, container, row, scrollable, text, text_input, Space};
 use iced::{Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -73,14 +73,9 @@ pub fn resolved_path(address: &str, base: &str) -> String {
 }
 
 fn icon<'a>(bytes: &'static [u8], size: f32) -> Element<'a, Message> {
-    let art = crate::ui::icons::art_for(bytes, size);
-    svg(crate::ui::icons::themed_handle(art))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().primary.base.color),
-        })
-        .into()
+    crate::ui::icons::tinted(bytes, size, |theme: &Theme| {
+        theme.palette().primary.base.color
+    })
 }
 
 /// File or web page / view of this drawing, as joined buttons.

@@ -181,7 +181,7 @@ mod grid;
 
 /// How many physical px wide an icon `size` logical px wide is drawn.
 fn physical_pixels(size: f32) -> u32 {
-    (size * scale_factor()).round().max(1.0) as u32
+    (size * pixel_scale()).round().max(1.0) as u32
 }
 
 /// The handle of `bytes` drawn `pixels` physical px wide (`None`: at the
@@ -194,7 +194,7 @@ fn grid_handle(bytes: &'static [u8], pixels: Option<u32>) -> svg::Handle {
 }
 
 /// Pixel-grid art fitted to `pixels` physical px (see [`grid::fit`]) when
-/// that is not its own size, then sharpened (see [`sharpen_grid_svg`]).
+/// that is not its own size, then sharpened (see [`sharpen_text`]).
 /// `None` for any other SVG.
 fn grid_svg(source: &[u8], pixels: Option<u32>) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(source).ok()?;
@@ -213,8 +213,16 @@ fn grid_svg(source: &[u8], pixels: Option<u32>) -> Option<Vec<u8>> {
     Some(sharpen_text(fitted.as_deref().unwrap_or(text)).into_bytes())
 }
 
-/// Pixel-grid icon art (`viewBox` `0 0 16 16` or `0 0 32 32`) rewritten so
-/// it reads sharp at small sizes, without touching its geometry:
+/// [`sharpen_text`] on any SVG: `None` unless it is pixel-grid art.
+#[cfg(test)]
+fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(source).ok()?;
+    grid::art_size(text)?;
+    Some(sharpen_text(text).into_bytes())
+}
+
+/// Pixel-grid icon art rewritten so it reads sharp at small sizes, without
+/// touching its geometry:
 ///
 /// - Straight stroked lines are drawn without anti-aliasing
 ///   (`shape-rendering="crispEdges"`): a 1 px diagonal becomes a solid
@@ -226,14 +234,7 @@ fn grid_svg(source: &[u8], pixels: Option<u32>) -> Option<Vec<u8>> {
 ///   arrowheads disappear.
 ///
 /// Masks and clip paths are left as they are, and so is any path with its
-/// own opacity. Returns `None` for any other SVG.
-fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
-    let text = std::str::from_utf8(source).ok()?;
-    grid::art_size(text)?;
-    Some(sharpen_text(text).into_bytes())
-}
-
-/// [`sharpen_grid_svg`] on art already known to be on a pixel grid.
+/// own opacity.
 fn sharpen_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len() * 3 / 2);
     // Inside a <mask> or <clipPath>.
@@ -266,7 +267,7 @@ fn sharpen_text(text: &str) -> String {
     out
 }
 
-/// One self-closing `<path …/>` of [`sharpen_grid_svg`].
+/// One self-closing `<path …/>` of [`sharpen_text`].
 fn sharpen_path(tag: &str, out: &mut String) {
     let attr = |name: &str| {
         let start = tag.find(&format!(" {name}=\""))? + name.len() + 3;
@@ -405,36 +406,6 @@ pub fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
     handle
 }
 
-thread_local! {
-    /// `(address, length, pixels)` → the handle fitted to `pixels`, or
-    /// `None` when the art is drawn at its own size (or is not pixel-grid
-    /// art) and shares the [`themed_handle`] entry.
-    static THEMED_SIZED_CACHE: RefCell<FxHashMap<(usize, usize, u32), Option<svg::Handle>>> =
-        RefCell::new(FxHashMap::default());
-}
-
-/// [`themed_handle`] for art drawn `size` logical px wide: pixel-grid art
-/// is fitted to the physical size it lands on.
-fn themed_sized_handle(bytes: &'static [u8], size: f32) -> svg::Handle {
-    let pixels = physical_pixels(size);
-    let key = (bytes.as_ptr() as usize, bytes.len(), pixels);
-    let hit = THEMED_SIZED_CACHE.with(|cache| cache.borrow().get(&key).cloned());
-    let fitted = match hit {
-        Some(fitted) => fitted,
-        None => {
-            let fitted = std::str::from_utf8(bytes)
-                .ok()
-                .and_then(grid::art_size)
-                .filter(|&art| art != pixels)
-                .and_then(|_| grid_svg(bytes, Some(pixels)))
-                .map(svg::Handle::from_memory);
-            THEMED_SIZED_CACHE.with(|cache| cache.borrow_mut().insert(key, fitted.clone()));
-            fitted
-        }
-    };
-    fitted.unwrap_or_else(|| themed_handle(bytes))
-}
-
 #[derive(Clone, Copy)]
 struct SemanticColors {
     background: [u8; 7],
@@ -475,15 +446,18 @@ impl SemanticColors {
     }
 }
 
-struct SemanticIcon {
+/// Picks one colour from the theme for a whole icon.
+type Tint<'a> = Box<dyn Fn(&Theme) -> Color + 'a>;
+
+struct SemanticIcon<'a> {
     bytes: &'static [u8],
     size: f32,
     opacity: f32,
     /// One colour for the whole icon instead of its semantic colours.
-    tint: Option<fn(&Theme) -> Color>,
+    tint: Option<Tint<'a>>,
 }
 
-impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
+impl<M> Widget<M, Theme, Renderer> for SemanticIcon<'_> {
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fixed(self.size), Length::Fixed(self.size))
     }
@@ -525,7 +499,7 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         let bounds = physical_square(laid.center_x(), laid.center_y(), self.size);
         let svg = core_svg::Svg {
             handle,
-            color: self.tint.map(|tint| tint(theme)),
+            color: self.tint.as_ref().map(|tint| tint(theme)),
             rotation: Radians(0.0),
             opacity: self.opacity,
         };
@@ -746,7 +720,9 @@ pub fn chrome<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
         bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
-        tint: Some(|theme| theme.palette().background.base.text),
+        tint: Some(Box::new(|theme: &Theme| {
+            theme.palette().background.base.text
+        })),
     })
 }
 
@@ -756,7 +732,36 @@ pub fn chrome_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a
         bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
-        tint: Some(|theme| theme.palette().background.base.text),
+        tint: Some(Box::new(|theme: &Theme| {
+            theme.palette().background.base.text
+        })),
+    })
+}
+
+/// A one-colour icon `size` × `size` in the colour `color` picks from the
+/// theme, drawn like [`chrome`]: its art chosen and fitted for the physical
+/// size, on whole physical pixels.
+pub fn tinted<'a, M: 'a>(
+    bytes: &'static [u8],
+    size: f32,
+    color: impl Fn(&Theme) -> Color + 'a,
+) -> Element<'a, M> {
+    tinted_faded(bytes, size, 1.0, color)
+}
+
+/// [`tinted`] at `opacity`. The fade goes through the opacity: a tint only
+/// replaces RGB, so alpha on the colour would be ignored.
+pub fn tinted_faded<'a, M: 'a>(
+    bytes: &'static [u8],
+    size: f32,
+    opacity: f32,
+    color: impl Fn(&Theme) -> Color + 'a,
+) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes: art_for(bytes, size),
+        size,
+        opacity,
+        tint: Some(Box::new(color)),
     })
 }
 
@@ -940,115 +945,74 @@ fn color_hex(color: Color) -> [u8; 7] {
 
 /// Render a chrome icon with the active Iced theme's normal text color.
 pub fn themed<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().background.base.text
+    })
 }
 
 /// Render secondary chrome with the active Iced theme's text color.
 pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text.scale_alpha(0.72)),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().background.base.text.scale_alpha(0.72)
+    })
 }
 
 /// Render disabled chrome with the active Iced theme's text color, faded
 /// like disabled text. The fade goes through the widget's opacity: an SVG
 /// tint only replaces RGB, so alpha on the style colour would be ignored.
 pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .opacity(0.42_f32)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text),
-        })
-        .into()
+    tinted_faded(bytes, size, 0.42, |theme: &Theme| {
+        theme.palette().background.base.text
+    })
 }
 
 /// Render an emphasized chrome icon with the active Iced theme's primary color.
 pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().primary.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().primary.base.color
+    })
 }
 
 /// Render an icon with the foreground chosen for a weak primary surface.
 pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().primary.weak.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().primary.weak.text
+    })
 }
 
 /// Render a positive-state chrome icon with the active Iced theme's success color.
 pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().success.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().success.base.color
+    })
 }
 
 /// Render an icon with the foreground chosen for a success-coloured surface.
 pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().success.base.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().success.base.text
+    })
 }
 
 /// Render a warning-state chrome icon from the active Iced theme.
 pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().warning.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().warning.base.color
+    })
 }
 
 /// Render a destructive-state chrome icon from the active Iced theme.
 pub fn themed_danger<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().danger.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().danger.base.color
+    })
 }
 
 /// Render an icon with the foreground chosen for a danger-coloured surface.
 pub fn themed_danger_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_sized_handle(art_for(bytes, size), size))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().danger.base.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().danger.base.text
+    })
 }
 
 /// Fixed-width check column colored from the active Iced theme.
@@ -1311,20 +1275,39 @@ pub fn set_scale_factor(scale: f32) {
     );
 }
 
+/// The window's own scale factor, as the system sets it (without the
+/// application's UI scale).
 pub fn scale_factor() -> f32 {
     SCALE_FACTOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
 }
 
+/// The application's UI scale (Options), in thousandths.
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
+
+/// Note the application's UI scale, as handed to iced's `scale_factor`.
+pub fn set_ui_scale(scale: f32) {
+    UI_SCALE.store(
+        (scale * 1000.0).round() as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Physical pixels per logical pixel, as iced draws: the window's scale
+/// times the application's UI scale.
+pub fn pixel_scale() -> f32 {
+    scale_factor() * UI_SCALE.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
+}
+
 /// The width of a line one physical pixel wide, in logical pixels: a 1 px
-/// line at a fractional window scale (125 %, 150 %) would cover one or two
+/// line at a fractional scale (125 %, 150 %) would cover one or two
 /// pixels depending on where it falls.
 pub fn hairline() -> f32 {
-    1.0 / scale_factor()
+    1.0 / pixel_scale()
 }
 
 /// `value` moved onto the nearest whole physical pixel.
 fn on_physical_pixel(value: f32) -> f32 {
-    let scale = scale_factor();
+    let scale = pixel_scale();
     (value * scale).round() / scale
 }
 
@@ -1332,7 +1315,7 @@ fn on_physical_pixel(value: f32) -> f32 {
 /// `round(size × scale)` physical px wide, with its corner on a whole
 /// physical pixel.
 fn physical_square(center_x: f32, center_y: f32, size: f32) -> Rectangle {
-    let scale = scale_factor();
+    let scale = pixel_scale();
     let side = (size * scale).round().max(1.0) / scale;
     Rectangle::new(
         Point::new(
@@ -1805,7 +1788,7 @@ mod themed_cache_tests {
         })
     }
 
-    /// Two calls to the public `themed` function with the same
+    /// Two calls to `themed_handle` with the same
     /// `&'static [u8]` must share a single cache entry: the second
     /// call is a cache hit, not a fresh `Handle::from_memory`.
     #[test]
@@ -1816,8 +1799,8 @@ mod themed_cache_tests {
             "precondition: TRI_DOWN must not be cached before the test"
         );
         let size_before = themed_cache_size_for_test();
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
+        let _ = themed_handle(TRI_DOWN);
         assert_eq!(
             themed_cache_size_for_test(),
             size_before + 1,
@@ -1844,8 +1827,8 @@ mod themed_cache_tests {
             TRI_UP.len()
         ));
         let size_before = themed_cache_size_for_test();
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
-        let _: Element<'static, ()> = themed(TRI_UP, 16.0);
+        let _ = themed_handle(TRI_DOWN);
+        let _ = themed_handle(TRI_UP);
         assert_eq!(
             themed_cache_size_for_test(),
             size_before + 2,
@@ -1886,7 +1869,7 @@ mod themed_cache_tests {
         );
         let size_before = themed_cache_size_for_test();
         // Warm the cache with the first call (miss → build → insert).
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
         let cached_after_first =
             themed_cache_get_handle_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len())
                 .expect("cache must hold the handle after the first call");
@@ -1897,7 +1880,7 @@ mod themed_cache_tests {
             "first call must insert exactly one entry"
         );
         // Second call: must be a cache hit, not a fresh build.
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
         let cached_after_second =
             themed_cache_get_handle_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len())
                 .expect("cache must still hold the handle after the second call");
@@ -1909,32 +1892,16 @@ mod themed_cache_tests {
         let _ = (cached_after_first, cached_after_second);
     }
 
-    /// Wrapper functions (e.g. `themed_arrow_down`) delegate to
-    /// the 9 `themed*` byte-taking functions and therefore inherit
-    /// the cache transparently. This end-to-end test confirms the
-    /// delegation: a wrapper call populates the cache for its
-    /// underlying static bytes. The cache entry is cleared first so
-    /// the assertion is independent of test execution order (tests
-    /// share the `thread_local!` when run on the same thread).
+    /// The `themed*` functions draw through `SemanticIcon`'s one-colour
+    /// mode: its handle is built once per art and physical size and then
+    /// shared, and a different physical size gets its own fitted art.
     #[test]
-    fn themed_wrapper_populates_cache_for_underlying_bytes() {
-        themed_cache_remove_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len());
-        assert!(
-            !themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()),
-            "precondition: TRI_DOWN must not be cached before the call"
-        );
-        let size_before = themed_cache_size_for_test();
-        // `themed_arrow_down` delegates to `themed(TRI_DOWN, size)`.
-        let _: Element<'static, ()> = themed_arrow_down(16.0);
-        assert_eq!(
-            themed_cache_size_for_test(),
-            size_before + 1,
-            "one wrapper call must populate exactly one cache entry (delta +1)"
-        );
-        assert!(
-            themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()),
-            "the cache must hold an entry for the wrapper's underlying bytes (TRI_DOWN)"
-        );
+    fn tinted_handles_are_cached_per_physical_size() {
+        let first = super::tinted_handle(TRI_DOWN, 16);
+        let again = super::tinted_handle(TRI_DOWN, 16);
+        let larger = super::tinted_handle(TRI_DOWN, 20);
+        assert_eq!(first.id(), again.id());
+        assert_ne!(first.id(), larger.id());
     }
 
     /// Cache key includes length: a sub-slice of a static must not
@@ -1956,7 +1923,7 @@ mod themed_cache_tests {
         assert!(!themed_cache_contains_for_test(sub.as_ptr(), sub.len()));
         let size_before = themed_cache_size_for_test();
         // Populate full static.
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
         assert!(themed_cache_contains_for_test(
             TRI_DOWN.as_ptr(),
             TRI_DOWN.len()

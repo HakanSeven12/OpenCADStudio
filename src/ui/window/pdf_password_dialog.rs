@@ -3,7 +3,7 @@
 //! step bar, a wrong-password band inside the window and a session switch
 //! that offers the password to the other PDFs opened later.
 
-use iced::widget::{button, column, container, row, svg, text, text_input, Space};
+use iced::widget::{button, column, container, row, text, text_input, Space};
 use iced::{Element, Fill, Length, Theme};
 
 use crate::app::Message;
@@ -70,18 +70,13 @@ impl PdfPasswordState {
 }
 
 fn icon<'a>(bytes: &'static [u8], size: f32, accent: bool) -> Element<'a, Message> {
-    let art = crate::ui::icons::art_for(bytes, size);
-    svg(crate::ui::icons::themed_handle(art))
-        .width(size)
-        .height(size)
-        .style(move |theme: &Theme, _| svg::Style {
-            color: Some(if accent {
-                theme.palette().primary.base.color
-            } else {
-                theme.palette().background.base.text
-            }),
-        })
-        .into()
+    crate::ui::icons::tinted(bytes, size, move |theme: &Theme| {
+        if accent {
+            theme.palette().primary.base.color
+        } else {
+            theme.palette().background.base.text
+        }
+    })
 }
 
 /// The file the window is about: lock badge, name and the end of its path.
@@ -178,12 +173,9 @@ fn steps<'a>(stage: Stage) -> Element<'a, Message> {
 fn wrong_band<'a>() -> Element<'a, Message> {
     container(
         row![
-            svg(crate::ui::icons::themed_handle(crate::ui::icons::ALERT))
-                .width(14.0)
-                .height(14.0)
-                .style(|theme: &Theme, _| svg::Style {
-                    color: Some(theme.palette().danger.base.color),
-                }),
+            crate::ui::icons::tinted(crate::ui::icons::ALERT, 14.0, |theme: &Theme| {
+                theme.palette().danger.base.color
+            }),
             text(crate::tr!("pdf-password", "wrong")).size(11),
         ]
         .spacing(8)

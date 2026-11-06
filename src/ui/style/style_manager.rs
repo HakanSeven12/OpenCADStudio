@@ -429,19 +429,20 @@ fn tool_button(
     compact: bool,
 ) -> Element<'static, Message> {
     let enabled = message.is_some();
-    let glyph = iced::widget::svg(crate::ui::icons::themed_handle(icon))
-        .width(14)
-        .height(14)
-        .opacity(if enabled { 1.0_f32 } else { 0.42 })
-        .style(move |theme: &Theme, _| iced::widget::svg::Style {
-            color: Some(if accent && enabled {
+    let glyph: Element<'static, Message> = crate::ui::icons::tinted_faded(
+        icon,
+        14.0,
+        if enabled { 1.0 } else { 0.42 },
+        move |theme: &Theme| {
+            if accent && enabled {
                 theme.palette().primary.base.text
             } else {
                 theme.palette().background.base.text
-            }),
-        });
+            }
+        },
+    );
     let content: Element<'static, Message> = if compact {
-        glyph.into()
+        glyph
     } else {
         row![glyph, text(label.clone()).size(11)]
             .spacing(5)

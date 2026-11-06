@@ -168,14 +168,7 @@ pub(super) fn icon<'a>(
     size: f32,
     color: fn(&Tokens) -> Color,
 ) -> Element<'a, Message> {
-    let art = crate::ui::icons::art_for(bytes, size);
-    svg(crate::ui::icons::themed_handle(art))
-        .width(size)
-        .height(size)
-        .style(move |theme: &Theme, _| svg::Style {
-            color: Some(color(&tokens(theme))),
-        })
-        .into()
+    crate::ui::icons::tinted(bytes, size, move |theme: &Theme| color(&tokens(theme)))
 }
 
 /// A tooltip as the ribbon shows them: after a short delay, on a panel.

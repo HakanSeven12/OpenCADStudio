@@ -876,12 +876,11 @@ pub fn view_tds_material<'a>(
 
 /// The round amber warning mark the warning windows lead with.
 pub(crate) fn warning_badge<'a>() -> Element<'a, Message> {
-    container(
-        iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::WARNING))
-            .width(18.0)
-            .height(18.0)
-            .style(|_: &Theme, _| iced::widget::svg::Style { color: Some(AMBER) }),
-    )
+    container(crate::ui::icons::tinted(
+        crate::ui::icons::WARNING,
+        18.0,
+        |_: &Theme| AMBER,
+    ))
     .width(34)
     .height(34)
     .center_x(34)

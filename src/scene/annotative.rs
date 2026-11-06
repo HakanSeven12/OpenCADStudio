@@ -513,6 +513,11 @@ pub fn annotative_offscale_for(
     if scales.is_empty() {
         return false;
     }
+    // The filter is about what a viewport shows of the model. An object drawn
+    // directly on a sheet stays, whichever scales it has.
+    if owned_by_paper_layout(doc, common) {
+        return false;
+    }
     match scale_handle {
         Some(handle) => !scales.iter().any(|(_, member)| *member == handle),
         None => !scales
@@ -520,6 +525,13 @@ pub fn annotative_offscale_for(
             .any(|(name, _)| name.eq_ignore_ascii_case(&doc.header.current_annotation_scale)),
     }
 }
+fn owned_by_paper_layout(doc: &Document, common: &EntityCommon) -> bool {
+    doc.block_records
+        .iter()
+        .find(|record| record.handle == common.owner_handle)
+        .is_some_and(|record| record.name.to_ascii_uppercase().starts_with("*PAPER_SPACE"))
+}
+
 pub(crate) fn annotation_scale_handles_for_entity(
     doc: &Document,
     entity_handle: Handle,

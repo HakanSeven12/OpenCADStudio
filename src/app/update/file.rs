@@ -1075,8 +1075,12 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::app::commands::set_group_display_mode(s.group_display_mode);
-        crate::app::commands::set_log_file_folder(&s.log_file_path);
-        crate::app::commands::set_log_file_mode(s.log_file_mode);
+        // The log's folder and mode are process-wide, and every test that builds
+        // an app comes through here beside the one test that turns the log on.
+        if !cfg!(test) {
+            crate::app::commands::set_log_file_folder(&s.log_file_path);
+            crate::app::commands::set_log_file_mode(s.log_file_mode);
+        }
         crate::modules::draw::modify::offset::set_gap_type(s.offset_gap_type);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
         crate::entities::match_props::set_match_mode(s.match_mode);

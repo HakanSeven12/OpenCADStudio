@@ -97,7 +97,7 @@ fn ifccad_consent_belongs_to_the_saved_tab_and_includes_conversion_losses() {
         }
     }
     let path = std::env::temp_dir().join(format!(
-        "ocs-ifccad-alpha-{}-{}.ifcx",
+        "ocs-ifccad-alpha-{}-{}.ifccad",
         std::process::id(),
         app.tabs[0].id
     ));

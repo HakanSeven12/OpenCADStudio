@@ -5917,6 +5917,9 @@ impl OpenCADStudio {
                 }
                 sel.input.right_click_entered = false;
                 self.menu_bar_popup = None;
+                // A menu closed by a click elsewhere left its editor behind:
+                // a new right-click opens the menu itself (#2619).
+                self.context_menu_editing = None;
                 sel.menu.open(click_pos);
                 drop(sel);
                 // Take the keyboard away from the command-line field so keys
@@ -5928,9 +5931,6 @@ impl OpenCADStudio {
             Message::ViewportMiddlePress => {
                 self.graphic_attributes.open_menu = None;
                 let i = self.active_tab;
-                // A menu closed by a click elsewhere left its editor behind:
-                // a new right-click opens the menu itself (#2619).
-                self.context_menu_editing = None;
                 self.nav_resync_held();
                 self.nav_held.middle = true;
                 self.nav_drag_by_button = false;
@@ -6390,11 +6390,13 @@ impl OpenCADStudio {
             Message::ToggleFileTabs => {
                 self.show_file_tabs ^= true;
                 self.ribbon.set_file_tabs(self.show_file_tabs);
+                self.save_config();
                 Task::none()
             }
             Message::ToggleLayoutTabs => {
                 self.show_layout_tabs ^= true;
                 self.ribbon.set_layout_tabs(self.show_layout_tabs);
+                self.save_config();
                 Task::none()
             }
             Message::ToggleOTrack => {
@@ -8640,6 +8642,16 @@ impl OpenCADStudio {
             // A focused text input pastes text natively: another field keeps
             // Ctrl+V to itself, and the command line must not get the text a
             // second time. Copied objects still paste over the command line.
+            // The paste shortcut already places the drawing's own copy; only
+            // markup from another program is read back to come in as a picture.
+            Message::CommandPasteMarkup => {
+                if self.clipboard.is_empty() {
+                    self.read_system_clipboard_for_paste()
+                } else {
+                    Task::none()
+                }
+            }
+
             Message::PasteShortcutResolved(focus) => {
                 use super::PasteFocus;
                 if focus == PasteFocus::Field {
@@ -8656,16 +8668,6 @@ impl OpenCADStudio {
                     // text is read here and typed in as rows. (#1883)
                     Task::none()
                 } else {
-            // The paste shortcut already places the drawing's own copy; only
-            // markup from another program is read back to come in as a picture.
-            Message::CommandPasteMarkup => {
-                if self.clipboard.is_empty() {
-                    self.read_system_clipboard_for_paste()
-                } else {
-                    Task::none()
-                }
-            }
-
                     self.read_system_clipboard_for_paste()
                 }
             }

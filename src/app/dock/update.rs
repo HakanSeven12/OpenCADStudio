@@ -575,6 +575,7 @@ impl OpenCADStudio {
                     PanelId::Layers => {
                         self.sync_ribbon_layers();
                         self.show_layers = true;
+                        self.save_config();
                     }
                     // The walk session is the pallet's state, so opening from
                     // a collapsed tab starts a walk exactly like LAYWALK does.
@@ -663,6 +664,7 @@ impl OpenCADStudio {
             PanelId::Layers => {
                 self.show_layers = false;
                 self.ribbon.deactivate_tool_if("LAYERS");
+                self.save_config();
             }
             PanelId::Laywalk => self.close_layer_walk(false),
             PanelId::QuickCalc => self.quick_calc.show = false,
@@ -733,6 +735,7 @@ impl OpenCADStudio {
         }
         self.dock.raise_float(PanelId::Layers);
         self.dock_reveal(PanelId::Layers);
+        self.save_config();
     }
 
     /// Stop revealing `id` (it closed).
@@ -1169,5 +1172,27 @@ impl OpenCADStudio {
             _ => bar,
         };
         crate::ui::dock::DropTarget::Float { x, y, bar }
+    }
+}
+
+#[cfg(test)]
+mod ui_state_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    /// #2616: the Layer Manager and the file tabs come back as they were left.
+    #[test]
+    fn layers_pallet_and_file_tabs_survive_a_restart() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        app.open_layers_pallet();
+        let _ = app.update(Message::ToggleFileTabs);
+        let saved = app.current_config();
+        assert!(saved.show_layers);
+        assert!(!saved.show_file_tabs);
+
+        let mut again = OpenCADStudio::new_for_test();
+        again.apply_config(saved);
+        assert!(again.show_layers);
+        assert!(!again.show_file_tabs);
     }
 }

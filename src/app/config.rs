@@ -34,6 +34,12 @@ pub struct AppConfig {
     pub show_graphic_attributes: bool,
     /// Whether the Command History pallet is open.
     pub show_command_history: bool,
+    /// Whether the Layer Manager pallet is open.
+    pub show_layers: bool,
+    /// Whether the document file tabs are shown (FILETAB).
+    pub show_file_tabs: bool,
+    /// Whether the layout tabs are shown (LAYOUTTAB).
+    pub show_layout_tabs: bool,
     /// Graphic Attributes creates fills on the current layer instead of the
     /// layer of the filled object.
     pub graphic_fills_on_current_layer: bool,
@@ -63,6 +69,9 @@ impl Default for AppConfig {
             dock: crate::ui::dock::DockState::default(),
             show_graphic_attributes: false,
             show_command_history: false,
+            show_layers: false,
+            show_file_tabs: true,
+            show_layout_tabs: true,
             graphic_fills_on_current_layer: false,
             annotation_auto_scale: -4,
             ribbon: RibbonConfig::default(),

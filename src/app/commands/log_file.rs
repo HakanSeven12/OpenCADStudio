@@ -44,7 +44,14 @@ pub(crate) fn log_file_folder() -> Option<PathBuf> {
     if !set.is_empty() {
         return Some(PathBuf::from(set));
     }
-    crate::config::config_dir().map(|dir| dir.join("logs"))
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::config::config_dir().map(|dir| dir.join("logs"))
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        None
+    }
 }
 
 /// This session's log file, once something was written to it.

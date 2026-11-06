@@ -1455,6 +1455,9 @@ pub(super) struct OpenCADStudio {
     filter_dialog: Option<filter_dialog::FilterDialogState>,
     /// The Layer manager's import dialog while it is open.
     layer_import: Option<layer_import::LayerImportState>,
+    /// 'FILTER or 'QSELECT opened inside this command's "Select objects:";
+    /// the dialogs hand their result to it (#2611).
+    transparent_select: Option<String>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -6326,6 +6329,7 @@ impl OpenCADStudio {
             qselect: None,
             filter_dialog: None,
             layer_import: None,
+            transparent_select: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

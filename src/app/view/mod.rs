@@ -3481,6 +3481,7 @@ bg={bg_ms:.1}ms n={view_count}"
         let qselect_layer: Element<'_, Message> = if let Some(state) = &self.qselect {
             qselect_overlay(
                 state,
+                self.transparent_select.as_deref(),
                 &state.available_types,
                 &state.available_properties,
                 state.candidate_count,

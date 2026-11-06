@@ -1815,6 +1815,7 @@ const QSELECT_ANY_PROP: &str = "(Any property)";
 /// field and button styles as the other workspace dialogs.
 pub(super) fn qselect_overlay<'a>(
     state: &'a crate::app::QSelectState,
+    transparent_for: Option<&'a str>,
     types: &[(String, usize)],
     properties: &[crate::app::QSelectPropertyChoice],
     candidate_count: usize,
@@ -1823,6 +1824,7 @@ pub(super) fn qselect_overlay<'a>(
 ) -> Element<'a, Message> {
     let measurement = qselect_content(
         state,
+        transparent_for,
         types,
         properties,
         candidate_count,
@@ -1830,6 +1832,7 @@ pub(super) fn qselect_overlay<'a>(
     );
     let content = qselect_content(
         state,
+        transparent_for,
         types,
         properties,
         candidate_count,
@@ -1864,6 +1867,7 @@ fn qselect_type_label(name: &str) -> String {
 
 fn qselect_content<'a>(
     state: &'a crate::app::QSelectState,
+    transparent_for: Option<&'a str>,
     types: &[(String, usize)],
     properties: &[crate::app::QSelectPropertyChoice],
     candidate_count: usize,
@@ -2250,7 +2254,10 @@ fn qselect_content<'a>(
     let can_select =
         state.sample.is_none() && state.editing_condition.is_none() && state.live_count > 0;
     let select = dialog_button_styled_opt(
-        crate::tf!("Select {}", state.live_count),
+        match transparent_for {
+            Some(command) => crate::tf!("Use {} in {}", state.live_count, command),
+            None => crate::tf!("Select {}", state.live_count),
+        },
         can_select.then_some(Message::QSelectApply),
         button::primary,
     );

@@ -1255,6 +1255,8 @@ pub(super) struct OpenCADStudio {
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
+    /// SAVEFILEPATH: the folder recovery copies go to; empty for the default.
+    pub save_file_path: String,
     /// SCRIPTCOMMANDS: scripts may run OCS commands (see `UserSettings`).
     pub script_commands: bool,
     /// Persisted default viewport background, restored from settings and applied
@@ -6261,6 +6263,7 @@ impl OpenCADStudio {
             plugin_request_active: false,
             constraint_bar_mode: 4095,
             savetime_min: 10,
+            save_file_path: String::new(),
             script_commands: true,
             default_bg_color: None,
             default_paper_bg_color: None,

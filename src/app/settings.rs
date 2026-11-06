@@ -938,6 +938,9 @@ pub struct UserSettings {
     pub log_file_mode: bool,
     /// LOGFILEPATH: the folder log files go to; empty for the default.
     pub log_file_path: String,
+    /// SAVEFILEPATH: the folder recovery copies (`.sv$`) go to; empty for
+    /// the default.
+    pub save_file_path: String,
     /// OFFSETGAPTYPE: how a polyline offset outward closes its corners
     /// (0 extend, 1 fillet, 2 chamfer).
     pub offset_gap_type: u8,
@@ -1501,6 +1504,7 @@ impl Default for UserSettings {
             group_display_mode: 2,
             log_file_mode: false,
             log_file_path: String::new(),
+            save_file_path: String::new(),
             offset_gap_type: 0,
             trim_extend_quick: true,
             match_mode: crate::entities::match_props::MatchOpts::DEFAULT_MODE,

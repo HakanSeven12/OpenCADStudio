@@ -1191,6 +1191,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "LOGFILEON",
         "LOGFILEOFF",
         "LOGFILEPATH",
+        "SAVEFILEPATH",
         // Plot preferences and the current-layout variables (commands/plotvars.rs).
         "PLOTOFFSET",
         "PAPERUPDATE",

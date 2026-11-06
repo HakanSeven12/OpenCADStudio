@@ -178,6 +178,30 @@ impl OpenCADStudio {
         }
     }
 
+    /// SAVEFILEPATH [folder]: where autosave recovery copies go; `.` puts
+    /// them back in the default folder (#2671).
+    pub(super) fn save_file_path_setvar(&mut self, value: Option<&str>) {
+        match value.map(str::trim).filter(|value| !value.is_empty()) {
+            None => {
+                #[cfg(not(target_arch = "wasm32"))]
+                let shown = self.save_file_folder().display().to_string();
+                #[cfg(target_arch = "wasm32")]
+                let shown = String::new();
+                self.command_line
+                    .push_output(&crate::ui::command_line::value_prompt("SAVEFILEPATH", &shown));
+                self.pending_setvar = Some("SAVEFILEPATH".to_string());
+            }
+            Some(".") => {
+                self.save_file_path.clear();
+                self.save_config();
+            }
+            Some(folder) => {
+                self.save_file_path = folder.trim_matches('"').to_string();
+                self.save_config();
+            }
+        }
+    }
+
     /// LOGFILEPATH [folder]: `.` puts the files back in the default folder.
     pub(super) fn log_file_path_setvar(&mut self, value: Option<&str>) {
         match value.map(str::trim).filter(|value| !value.is_empty()) {

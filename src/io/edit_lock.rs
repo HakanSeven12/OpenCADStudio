@@ -142,10 +142,16 @@ impl EditLease {
     pub fn acquire(path: &Path) -> Result<Self, EditLeaseError> {
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         let lock_path = sidecar_path(&canonical);
-        let mut sidecar = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        // Its name starts with a dot, which hides it on Linux and macOS;
+        // Windows hides it by attribute (#2671).
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            options.attributes(windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN);
+        }
+        let mut sidecar = options
             .open(&lock_path)
             .map_err(|error| {
                 EditLeaseError::Unavailable(format!(

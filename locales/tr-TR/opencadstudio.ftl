@@ -8569,6 +8569,9 @@ block-action-targets =
     .invalid = Bu bloğa ait desteklenen hedefleri seçin.
     .stale = Eylem veya blok düzenleyici oturumu değişti; BACTIONSET komutunu yeniden başlatın.
     .create-stale = Eylem veya blok düzenleyici oturumu değişti; BACTION komutunu yeniden başlatın.
+    .flip-prompt = BACTIONSET  Nesneleri seçin veya Parameter ve ardından parametre adını yazıp Enter tuşuna basın (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Nesneleri seçin veya Parameter ve ardından parametre adını yazıp Enter tuşuna basın (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Bağlı parametrelerin denetlediği tüm nesneleri seçin ve eylemlerinin çevirme işleminden önce yürütüldüğünden emin olun.
 
 quad-menu =
     .label = QUAD

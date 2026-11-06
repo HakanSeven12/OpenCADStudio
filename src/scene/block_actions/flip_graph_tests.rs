@@ -61,6 +61,10 @@ fn authored_flip_links_require_complete_ordered_selections() {
     };
     assert!(dependencies(&doc).contains(&movement));
     assert!(!retarget(&mut doc, def, linked, &selection, None).unwrap());
+    let before = doc.clone();
+    assert!(retarget(&mut doc, def, movement, &geometry[..1], None).is_err());
+    assert!(create(&mut doc, def, Kind::Move, linear, &geometry[1..], DVec3::ZERO).is_err());
+    assert_eq!(doc, before);
     assert!(retarget(&mut doc, def, linked, &geometry[1..], None).unwrap());
     assert_eq!(dependencies(&doc), geometry[1..]);
 }

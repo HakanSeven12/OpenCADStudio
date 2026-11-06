@@ -8584,6 +8584,9 @@ block-action-targets =
     .invalid = このブロックに属するサポート対象を選択してください。
     .stale = アクションまたはブロックエディターのセッションが変更されました。BACTIONSET を再実行してください。
     .create-stale = アクションまたはブロックエディターのセッションが変更されました。BACTION を再実行してください。
+    .flip-prompt = BACTIONSET  オブジェクトを選択するか、Parameter に続けてパラメータ名を入力し、Enter キーを押します (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  オブジェクトを選択するか、Parameter に続けてパラメータ名を入力し、Enter キーを押します (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = リンクされたパラメータで制御されるオブジェクトをすべて選択し、そのアクションが反転より先に実行されるようにしてください。
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

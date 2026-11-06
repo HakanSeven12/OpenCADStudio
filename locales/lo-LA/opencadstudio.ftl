@@ -8597,6 +8597,9 @@ block-action-targets =
     .invalid = ເລືອກເປົ້າໝາຍທີ່ຮອງຮັບຂອງບລັອກນີ້.
     .stale = ການກະທຳ ຫຼື ເຊດຊັນຕົວແກ້ໄຂບລັອກປ່ຽນແປງແລ້ວ; ເລີ່ມ BACTIONSET ໃໝ່.
     .create-stale = ການກະທຳ ຫຼື ເຊດຊັນຕົວແກ້ໄຂບລັອກປ່ຽນແປງແລ້ວ; ເລີ່ມ BACTION ໃໝ່.
+    .flip-prompt = BACTIONSET  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  ເລືອກວັດຖຸ ຫຼື ພິມ Parameter ຕາມດ້ວຍຊື່ພາຣາມິເຕີ ແລ້ວກົດ Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = ເລືອກວັດຖຸທັງໝົດທີ່ຄວບຄຸມໂດຍພາຣາມິເຕີທີ່ເຊື່ອມໄວ້ ແລະກວດໃຫ້ແນ່ໃຈວ່າການກະທຳຂອງພວກມັນເກີດຂຶ້ນກ່ອນການພິກ.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

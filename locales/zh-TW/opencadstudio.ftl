@@ -8591,6 +8591,9 @@ block-action-targets =
     .invalid = 請選取屬於此圖塊的受支援目標。
     .stale = 動作或圖塊編輯器工作階段已變更；請重新執行 BACTIONSET。
     .create-stale = 動作或圖塊編輯器工作階段已變更；請重新執行 BACTION。
+    .flip-prompt = BACTIONSET  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  選取物件，或輸入 Parameter 後接參數名稱，然後按 Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = 請選取由關聯參數控制的所有物件，並確保這些物件的動作在翻轉之前執行。
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

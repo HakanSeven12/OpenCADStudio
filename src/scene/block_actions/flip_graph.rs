@@ -6,6 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 mod recovery;
 pub(super) const INPUTS: &str = "OCS_BLOCK_INPUT_FRAMES";
 pub(super) const FRAME_ERROR: &str = "The block parameter frame is unavailable.";
+const SELECTION_ERROR: &str =
+    "Select all objects driven by the linked parameters and ensure their actions precede the Flip.";
 
 /// Native action nodes follow their selected Linear parameter. Geometry stays
 /// explicit so a parameter pick cannot silently expand the reflection.
@@ -67,7 +69,40 @@ pub(super) fn validate_authored_selection(
     {
         return Ok(());
     }
-    Err("Select all objects driven by the linked parameters and ensure their actions precede the Flip.")
+    Err(SELECTION_ERROR)
+}
+
+/// Refuse edits that leave a previously supported coupling in the graph
+/// without an evaluation plan. Removing the last coupling is allowed.
+pub(super) fn preserve_authored_selection(
+    before: &Document,
+    after: &Document,
+    def: Handle,
+) -> Result<(), &'static str> {
+    if !actions(before, def).iter().any(|(_, action, kind, _)| {
+        *kind == Kind::Flip
+            && action
+                .dependencies
+                .iter()
+                .any(|h| before.get_entity(*h).is_none())
+    }) {
+        return Ok(());
+    }
+    let Some(previous) = Plan::for_rebuild(before, def) else {
+        return Ok(());
+    };
+    let remains_linked = actions(after, def).iter().any(|(_, action, kind, _)| {
+        *kind == Kind::Flip
+            && previous.steps.iter().any(|step| {
+                step.targets
+                    .iter()
+                    .any(|target| action.dependencies.contains(target))
+            })
+    });
+    if remains_linked && Plan::for_rebuild(after, def).is_none() {
+        return Err(SELECTION_ERROR);
+    }
+    Ok(())
 }
 
 struct Step {
@@ -683,10 +718,17 @@ impl Plan {
             }
             (frames, Some(previous_frames))
         } else {
-            (
-                self.load_canonical(doc, &mut evaluated, insert, false)?,
-                None,
-            )
+            let frames = if !self.steps.is_empty()
+                && self.read(doc, insert)?.is_none()
+                && Self::exit(before, def).is_ok()
+            {
+                // The previous definition had geometry-only Flips. Its
+                // native frames are inputs to the newly linked actions.
+                instance::load_frames(before, &mut evaluated, insert, &self.parameters)?
+            } else {
+                self.load_canonical(doc, &mut evaluated, insert, false)?
+            };
+            (frames, None)
         };
         let reference = cleaned.as_ref().unwrap_or(doc);
         let previous_frames = previous_frames.as_ref().unwrap_or(&frames);

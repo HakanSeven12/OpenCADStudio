@@ -258,6 +258,7 @@ fn set_follow_ups(
             return Err("An action chain cannot loop back to the action that started it.");
         }
     }
+    super::flip_graph::preserve_authored_selection(doc, &staged, definition)?;
     *doc = staged;
     Ok(true)
 }

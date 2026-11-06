@@ -8612,6 +8612,9 @@ block-action-targets =
     .invalid = Vyberte podporované cíle patřící do tohoto bloku.
     .stale = Akce nebo relace editoru bloků se změnila; spusťte BACTIONSET znovu.
     .create-stale = Akce nebo relace editoru bloků se změnila; spusťte BACTION znovu.
+    .flip-prompt = BACTIONSET  Vyberte objekty nebo zadejte Parameter a název parametru, poté stiskněte Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Vyberte objekty nebo zadejte Parameter a název parametru, poté stiskněte Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Vyberte všechny objekty řízené propojenými parametry a zajistěte, aby jejich akce předcházely převrácení.
 
 revcloud-cmd =
     .header = Minimální délka oblouku: { $min }   Maximální délka oblouku: { $max }   Styl: { $style }   Typ: { $kind }

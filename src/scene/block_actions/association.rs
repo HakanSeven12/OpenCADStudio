@@ -84,6 +84,7 @@ pub(crate) fn associate(
     if staged == *doc {
         return Ok(false);
     }
+    flip_graph::preserve_authored_selection(doc, &staged, definition)?;
     *doc = staged;
     Ok(true)
 }

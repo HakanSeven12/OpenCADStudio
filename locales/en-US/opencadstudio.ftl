@@ -8649,6 +8649,9 @@ block-action-targets =
     .invalid = Select supported targets belonging to this block.
     .stale = The action or its Block Editor session changed; restart BACTIONSET.
     .create-stale = The action or its Block Editor session changed; restart BACTION.
+    .flip-prompt = BACTIONSET  Select objects or type Parameter followed by a parameter name, then press Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Select objects or type Parameter followed by a parameter name, then press Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Select all objects driven by the linked parameters and ensure their actions precede the Flip.
 
 quad-menu =
     .label = QUAD

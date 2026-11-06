@@ -431,9 +431,9 @@ impl OpenCADStudio {
                 if tab.id != document
                     || tab.active_block_edit_session().map(|s| s.br_handle) != Some(definition)
                     || tab.scene.document.objects.get(&action) != Some(expected.as_ref())
-                    || point_choices.as_ref().is_some_and(|(source, expected)| {
+                    || point_choices.as_ref().is_some_and(|(target_kind, source, expected)| {
                         let current = actions::all_parameters(&tab.scene.document, definition)
-                            .into_iter().filter(|p| p.is_move_target() && p.id != *source)
+                            .into_iter().filter(|p| p.is_action_target(*target_kind, *source))
                             .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                         current != *expected
                     })
@@ -507,9 +507,9 @@ impl OpenCADStudio {
                     );
                     return Task::none();
                 }
-                if point_choices.as_ref().is_some_and(|(source, expected)| {
+                if point_choices.as_ref().is_some_and(|(target_kind, source, expected)| {
                     let current = actions::all_parameters(&self.tabs[i].scene.document, definition)
-                        .into_iter().filter(|p| p.is_move_target() && p.id != *source)
+                        .into_iter().filter(|p| p.is_action_target(*target_kind, *source))
                         .map(|p| (p.handle, p.id, p.name)).collect::<Vec<_>>();
                     current != *expected || !actions::all_parameters(&self.tabs[i].scene.document, definition)
                         .iter().any(|p| p.handle == parameter && p.id == *source)
@@ -537,14 +537,14 @@ impl OpenCADStudio {
                     } else if !rotate_only.is_empty() {
                         return Err("Rotate-only objects require a Polar Stretch action.");
                     }
-                    if kind == Kind::Move && targets.iter().any(|h| staged.get_entity(*h).is_none()) {
+                    if matches!(kind, Kind::Move | Kind::Flip) && targets.iter().any(|h| staged.get_entity(*h).is_none()) {
                         staged = actions::instance::refresh_after_edit(&staged, &self.tabs[i].scene.document, definition)?;
                     }
                     Ok(handle)
                 }) {
                     Ok(_) => {
                         self.push_undo_snapshot(i, super::document::HistoryLabel::formatted(format!("{} action", kind.name()), "action", super::document::HistoryLabel::Message(kind.name())));
-                        self.tabs[i].scene.document = staged;
+                        self.apply_action_document(i, staged);
                         self.tabs[i].scene.bump_geometry();
                         self.tabs[i].dirty = true;
                         self.tabs[i].active_cmd = None;

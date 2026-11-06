@@ -8606,6 +8606,9 @@ block-action-targets =
     .invalid = Επιλέξτε υποστηριζόμενους στόχους που ανήκουν σε αυτό το μπλοκ.
     .stale = Η ενέργεια ή η συνεδρία επεξεργασίας μπλοκ άλλαξε· επανεκκινήστε το BACTIONSET.
     .create-stale = Η ενέργεια ή η συνεδρία επεξεργασίας μπλοκ άλλαξε· επανεκκινήστε το BACTION.
+    .flip-prompt = BACTIONSET  Επιλέξτε αντικείμενα ή πληκτρολογήστε Parameter και όνομα παραμέτρου και πατήστε Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Επιλέξτε αντικείμενα ή πληκτρολογήστε Parameter και όνομα παραμέτρου και πατήστε Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Επιλέξτε όλα τα αντικείμενα που ελέγχονται από τις συνδεδεμένες παραμέτρους και βεβαιωθείτε ότι οι ενέργειές τους προηγούνται της αναστροφής.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

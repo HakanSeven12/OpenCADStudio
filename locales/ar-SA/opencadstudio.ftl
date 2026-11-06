@@ -8609,6 +8609,9 @@ block-action-targets =
     .invalid = حدد أهدافًا مدعومة تنتمي إلى هذه الكتلة.
     .stale = تغير الإجراء أو جلسة محرر الكتل؛ أعد تشغيل BACTIONSET.
     .create-stale = تغير الإجراء أو جلسة محرر الكتل؛ أعد تشغيل BACTION.
+    .flip-prompt = BACTIONSET  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  حدد العناصر أو اكتب Parameter متبوعة باسم المعلمة، ثم اضغط Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = حدد كل العناصر التي تحركها المعلمات المرتبطة، وتأكد من أن إجراءاتها تسبق إجراء القلب.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

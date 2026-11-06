@@ -8606,6 +8606,9 @@ block-action-targets =
     .invalid = Selecione destinos compatíveis pertencentes a este bloco.
     .stale = A ação ou a sessão do editor de blocos mudou; reinicie BACTIONSET.
     .create-stale = A ação ou a sessão do editor de blocos mudou; reinicie BACTION.
+    .flip-prompt = BACTIONSET  Selecione objetos ou digite Parameter seguido do nome do parâmetro e pressione Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Selecione objetos ou digite Parameter seguido do nome do parâmetro e pressione Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Selecione todos os objetos controlados pelos parâmetros vinculados e certifique-se de que suas ações sejam executadas antes da inversão.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

@@ -8604,6 +8604,9 @@ block-action-targets =
     .invalid = Selecteer ondersteunde doelen in dit blok.
     .stale = De actie of blokeditorsessie is gewijzigd; start BACTIONSET opnieuw.
     .create-stale = De actie of blokeditorsessie is gewijzigd; start BACTION opnieuw.
+    .flip-prompt = BACTIONSET  Selecteer objecten of typ Parameter gevolgd door een parameternaam en druk op Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Selecteer objecten of typ Parameter gevolgd door een parameternaam en druk op Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Selecteer alle objecten die door de gekoppelde parameters worden aangestuurd en zorg dat hun acties vóór de spiegelactie worden uitgevoerd.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

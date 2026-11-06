@@ -8579,6 +8579,9 @@ block-action-targets =
     .invalid = 请选择属于此块的受支持目标。
     .stale = 动作或块编辑器会话已更改；请重新运行 BACTIONSET。
     .create-stale = 动作或块编辑器会话已更改；请重新运行 BACTION。
+    .flip-prompt = BACTIONSET  选择对象，或输入 Parameter 后跟参数名称，然后按 Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  选择对象，或输入 Parameter 后跟参数名称，然后按 Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = 请选择由关联参数控制的所有对象，并确保这些对象的动作在翻转之前执行。
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

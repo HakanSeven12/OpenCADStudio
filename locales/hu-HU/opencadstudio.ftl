@@ -8584,6 +8584,9 @@ block-action-targets =
     .invalid = Válasszon a blokkhoz tartozó támogatott célokat.
     .stale = A művelet vagy a blokkszerkesztő munkamenete megváltozott; indítsa újra a BACTIONSET parancsot.
     .create-stale = A művelet vagy a blokkszerkesztő munkamenete megváltozott; indítsa újra a BACTION parancsot.
+    .flip-prompt = BACTIONSET  Válasszon objektumokat, vagy írja be a Parameter szót és egy paraméter nevét, majd nyomjon Entert (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Válasszon objektumokat, vagy írja be a Parameter szót és egy paraméter nevét, majd nyomjon Entert (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Jelölje ki a csatolt paraméterek által vezérelt összes objektumot, és ellenőrizze, hogy műveleteik megelőzik a tükrözést.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

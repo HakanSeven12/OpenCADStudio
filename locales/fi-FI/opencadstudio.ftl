@@ -8603,6 +8603,9 @@ block-action-targets =
     .invalid = Valitse tuettuja kohteita tästä lohkosta.
     .stale = Toiminto tai lohkoeditorin istunto on muuttunut; käynnistä BACTIONSET uudelleen.
     .create-stale = Toiminto tai lohkoeditorin istunto on muuttunut; käynnistä BACTION uudelleen.
+    .flip-prompt = BACTIONSET  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Valitse objekteja tai kirjoita Parameter ja parametrin nimi ja paina Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Valitse kaikki linkitettyjen parametrien ohjaamat kohteet ja varmista, että niiden toiminnot suoritetaan ennen kääntöä.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

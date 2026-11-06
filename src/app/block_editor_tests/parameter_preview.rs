@@ -1757,6 +1757,172 @@ fn block_move_marker_click_respects_pickadd_replacement() {
 }
 
 #[test]
+fn block_flip_action_targets_support_commands_and_reference_history() {
+    use crate::command::StepInput;
+
+    let (mut app, insert) = fixture();
+    begin(&mut app, insert);
+    let i = app.active_tab;
+    let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let member = members(&app)[0];
+    let doc = &mut app.tabs[i].scene.document;
+    let linear = distance::create(
+        doc,
+        def,
+        distance::Kind::Linear,
+        Vector3::UNIT_Y * 4.,
+        Vector3::new(8., 4., 0.),
+        Vector3::UNIT_Y * 5.,
+    )
+    .unwrap();
+    let flip = orientation::create(
+        doc,
+        def,
+        orientation::Kind::Flip,
+        Vector3::ZERO,
+        Vector3::UNIT_X * 10.,
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    actions::create(
+        doc,
+        def,
+        actions::Kind::Move,
+        linear,
+        &[member],
+        DVec3::ZERO,
+    )
+    .unwrap();
+    let parameters = actions::all_parameters(doc, def);
+    let axis = parameters.iter().find(|p| p.handle == flip).unwrap();
+    let child = parameters.iter().find(|p| p.handle == linear).unwrap();
+    let name = format!("Parameter {}", serde_json::to_string(&child.name).unwrap());
+    let _ = app.dispatch_command("BACTIONBARMODE 0");
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    for complete in [false, true] {
+        let _ = app.dispatch_command("BACTION FLIP");
+        feed(&mut app, &axis.name);
+        feed(&mut app, &name);
+        assert!(app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .selection_marker_selected(linear));
+        if complete {
+            let _ = app.feed_command(StepInput::SelectionComplete(vec![member]));
+        }
+        let _ = app.feed_command(StepInput::Enter);
+        let _ = app.feed_command(StepInput::Point(DVec3::new(2., 2., 0.)));
+        if !complete {
+            assert!(app
+                .command_line
+                .last_error
+                .as_deref()
+                .unwrap()
+                .contains("linked parameters"));
+            assert_eq!(app.tabs[i].scene.document, before);
+            assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+            let _ = app.update(Message::CommandEscape);
+        }
+    }
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
+    let action = actions::actions(&app.tabs[i].scene.document, def)
+        .into_iter()
+        .find(|(_, _, kind, _)| *kind == actions::Kind::Flip)
+        .unwrap()
+        .0;
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    app.tabs[i].scene.document = actions::instance::evaluate_value(
+        &app.tabs[i].scene.document,
+        insert,
+        flip,
+        actions::Value::Flip(true),
+    )
+    .unwrap()
+    .unwrap();
+    let frame = |app: &OpenCADStudio| {
+        actions::instance::frame(&app.tabs[i].scene.document, insert, child).unwrap()
+    };
+    let reflected = frame(&app);
+    assert_eq!(reflected.base, -DVec3::Y * 4.);
+    assert_eq!(reflected.end, DVec3::new(8., -4., 0.));
+    begin(&mut app, insert);
+    app.tabs[i].selected_authoring = Some(action);
+    let _ = app.dispatch_command("BACTIONSET");
+    feed(&mut app, "Remove");
+    let size = iced::Size::new(1600., 900.);
+    let scene = &app.tabs[i].scene;
+    scene.selection.borrow_mut().view.vp_size = (size.width, size.height);
+    scene.camera.borrow_mut().fit_to_bounds_f64(
+        DVec3::new(-2., -2., 0.),
+        DVec3::new(12., 7., 0.),
+        size.width / size.height,
+    );
+    let marker = scene
+        .camera
+        .borrow()
+        .project(child.end, iced::Rectangle::with_size(size))
+        .unwrap();
+    let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(
+        marker.x, marker.y,
+    )));
+    let _ = app.update(Message::ViewportLeftRelease);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(linear));
+    let _ = app.feed_command(StepInput::Enter);
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "{:?}",
+        app.command_line.last_error
+    );
+    assert_eq!(
+        frame(&app),
+        actions::instance::ParameterFrame {
+            base: child.base,
+            end: child.end
+        }
+    );
+    app.undo_steps(1);
+    assert_eq!(frame(&app), reflected);
+    app.redo_steps(1);
+    assert_eq!(frame(&app).base, child.base);
+
+    app.tabs[i].selected_authoring = Some(action);
+    app.pick_drag_rect = true;
+    let _ = app.dispatch_command("BACTIONSET");
+    feed(&mut app, "Add");
+    let _ = app.update(Message::ViewportLeftPressAt(iced::Point::new(
+        marker.x + 20.,
+        marker.y - 10.,
+    )));
+    let _ = app.update(Message::ViewportMove(iced::Point::new(
+        marker.x - 20.,
+        marker.y + 10.,
+    )));
+    let _ = app.update(Message::ViewportLeftRelease);
+    assert!(app.tabs[i]
+        .active_cmd
+        .as_ref()
+        .unwrap()
+        .selection_marker_selected(linear));
+    let _ = app.feed_command(StepInput::Enter);
+    assert!(
+        app.tabs[i].active_cmd.is_none(),
+        "{:?}",
+        app.command_line.last_error
+    );
+    assert_eq!(frame(&app), reflected);
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+    assert_eq!(frame(&app), reflected);
+}
+
+#[test]
 fn block_move_linear_targets_support_names_markers_and_history() {
     check_move_parameter_targets(false);
 }

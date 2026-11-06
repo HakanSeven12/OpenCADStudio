@@ -594,6 +594,14 @@ mod tests {
                 );
             }
             assert!(!loader.get_attr("block-action-targets", "unique-point").is_empty());
+            for attribute in ["flip-prompt", "flip-create-prompt"] {
+                let rendered = loader.get_attr("block-action-targets", attribute);
+                assert!(
+                    rendered.contains("Parameter") && rendered.contains(&linear) && rendered.contains(&flip),
+                    "{language:?}: {rendered}"
+                );
+            }
+            assert!(!loader.get_attr("block-action-targets", "flip-invalid").is_empty());
         }
     }
 

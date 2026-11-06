@@ -813,6 +813,8 @@ pub(crate) fn create_with_frame_points(
     }
     if flip_links {
         flip_graph::validate_authored_selection(&staged, definition, handle, p.id, &dependencies)?;
+    } else {
+        flip_graph::preserve_authored_selection(doc, &staged, definition)?;
     }
     *doc = staged;
     Ok(handle)
@@ -973,6 +975,7 @@ pub(crate) fn retarget_frame_points(
         };
         targets::action_mut(&mut object.data).unwrap().dependencies.clone_from(&dependencies);
         flip_graph::validate_authored_selection(&staged, definition, handle, id, &dependencies)?;
+        flip_graph::preserve_authored_selection(doc, &staged, definition)?;
         *doc = staged;
         return Ok(true);
     }
@@ -1089,6 +1092,7 @@ pub(crate) fn retarget_frame_points(
     if staged == *doc {
         return Ok(false);
     }
+    flip_graph::preserve_authored_selection(doc, &staged, definition)?;
     *doc = staged;
     Ok(true)
 }

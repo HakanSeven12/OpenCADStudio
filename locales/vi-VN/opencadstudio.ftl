@@ -8603,6 +8603,9 @@ block-action-targets =
     .invalid = Chọn các mục tiêu được hỗ trợ thuộc khối này.
     .stale = Hành động hoặc phiên trình chỉnh sửa khối đã thay đổi; hãy chạy lại BACTIONSET.
     .create-stale = Hành động hoặc phiên trình chỉnh sửa khối đã thay đổi; hãy chạy lại BACTION.
+    .flip-prompt = BACTIONSET  Chọn đối tượng hoặc nhập Parameter rồi nhập tên tham số, sau đó nhấn Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  Chọn đối tượng hoặc nhập Parameter rồi nhập tên tham số, sau đó nhấn Enter (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = Chọn tất cả đối tượng do các tham số liên kết điều khiển và bảo đảm các thao tác của chúng chạy trước thao tác lật.
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

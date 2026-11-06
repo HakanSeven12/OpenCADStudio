@@ -8594,6 +8594,9 @@ block-action-targets =
     .invalid = इस ब्लॉक से संबंधित समर्थित लक्ष्य चुनें।
     .stale = क्रिया या ब्लॉक संपादक सत्र बदल गया है; BACTIONSET फिर से शुरू करें।
     .create-stale = क्रिया या ब्लॉक संपादक सत्र बदल गया है; BACTION फिर से शुरू करें।
+    .flip-prompt = BACTIONSET  ऑब्जेक्ट चुनें या Parameter के बाद पैरामीटर का नाम लिखें, फिर Enter दबाएँ (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-create-prompt = BACTION  ऑब्जेक्ट चुनें या Parameter के बाद पैरामीटर का नाम लिखें, फिर Enter दबाएँ (Parameter "…") ({ common.linear } / { block-history-kinds.flip }):
+    .flip-invalid = लिंक किए गए पैरामीटरों से नियंत्रित सभी ऑब्जेक्ट चुनें और सुनिश्चित करें कि उनकी क्रियाएँ फ़्लिप से पहले चलें।
 
 revcloud-cmd =
     .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }

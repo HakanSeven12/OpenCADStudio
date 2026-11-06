@@ -592,11 +592,13 @@ impl Plan {
         let actions: Vec<_> = self.steps.iter().map(|s| s.action).collect();
         let mut active = BTreeMap::new();
         let mut canonical = frames.clone();
+        let action_bases = instance::load_action_bases(doc, insert, def)?;
         let resolved = super::rebuild_framed_with_flips(
             evaluated,
             baseline,
             def,
             &canonical,
+            Some(&action_bases),
             Some(previous),
             &actions,
             Some(&mut active),
@@ -612,6 +614,7 @@ impl Plan {
         let visible = self.display_frames(&states, &canonical, &active)?;
         let mut result = instance::materialize(doc, insert, def, evaluated)?;
         instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
+        instance::save_action_bases(&mut result, insert, def, &action_bases)?;
         if self.keep_cache {
             self.write(&mut result, insert, &canonical);
         } else {
@@ -939,8 +942,22 @@ impl Plan {
             let f = frames.get_mut(&parameter).ok_or(FRAME_ERROR)?;
             base_changed = f.base.distance(base) > 1e-10;
             f.base = base;
+            f.end = end;
             input = Value::Point(end);
+        } else if let Value::Point(end) = input {
+            if let Some(f) = frames.get_mut(&parameter) {
+                f.end = end;
+            }
         }
+        let action_bases = instance::update_action_bases(
+            doc,
+            insert,
+            def,
+            &self.parameters,
+            &previous,
+            &frames,
+            parameter,
+        )?;
         let mut resolved = BTreeMap::new();
         let mut active = BTreeMap::new();
         let actions: Vec<_> = self.steps.iter().map(|s| s.action).collect();
@@ -951,6 +968,7 @@ impl Plan {
             parameter,
             input,
             &frames,
+            Some(&action_bases),
             base_changed,
             &previous,
             &mut resolved,
@@ -977,6 +995,7 @@ impl Plan {
             instance::materialize(doc, insert, def, &staged)?
         };
         instance::save_resolved_frames(&mut result, &self.parameters, insert, &visible)?;
+        instance::save_action_bases(&mut result, insert, def, &action_bases)?;
         if selected.flip {
             instance::save(
                 &mut result,

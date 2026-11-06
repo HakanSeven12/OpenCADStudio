@@ -4220,3 +4220,70 @@ fn linked_linear_flip_coexists_with_an_independent_geometry_flip() {
         }
     }
 }
+
+#[test]
+fn dependent_scale_accumulates_base_edits_and_survives_refresh() {
+    let (mut doc, def, handles) = fixture();
+    let parameter = linear(&mut doc, def);
+    let _scale = add_action(&mut doc, def, parameter, handles[1], Kind::Scale);
+    let insert = doc
+        .add_entity(EntityType::Insert(document::entities::Insert::new(
+            "ACTIONS",
+            Vector3::ZERO,
+        )))
+        .unwrap();
+
+    // Edit 1: Move base outward to -10, end remains 10 (dist=20, 2x scale)
+    let edit1 = instance::evaluate_frame(
+        &doc,
+        insert,
+        parameter,
+        instance::ParameterFrame {
+            base: DVec3::new(-10., 0., 0.),
+            end: DVec3::new(10., 0., 0.),
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    let EntityType::Insert(ins1) = edit1.get_entity(insert).unwrap() else { panic!() };
+    let c1 = edit1
+        .entities_in_block(&ins1.block_name)
+        .find_map(|e| if let EntityType::Circle(c) = e { Some(c) } else { None })
+        .unwrap();
+    // Center was (4,3). Scaled by 2 => (8,6). Transformed by action_base (10) => (18, 6).
+    assert_eq!(c1.center, Vector3::new(18., 6., 0.));
+    assert_eq!(c1.radius, 4.);
+
+    // Edit 2: Move base outward again to -20, end remains 10 (dist=30, 3x scale)
+    let edit2 = instance::evaluate_frame(
+        &edit1,
+        insert,
+        parameter,
+        instance::ParameterFrame {
+            base: DVec3::new(-20., 0., 0.),
+            end: DVec3::new(10., 0., 0.),
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    let EntityType::Insert(ins2) = edit2.get_entity(insert).unwrap() else { panic!() };
+    let c2 = edit2
+        .entities_in_block(&ins2.block_name)
+        .find_map(|e| if let EntityType::Circle(c) = e { Some(c) } else { None })
+        .unwrap();
+    // Center was (4,3). Scaled by 3 => (12,9). Transformed by accumulated action_base (25) => (37, 9).
+    assert_eq!(c2.center, Vector3::new(37., 9., 0.));
+    assert_eq!(c2.radius, 6.);
+
+    // Refresh: Definition refresh reconstructs from definition baseline and must preserve accumulated action base!
+    let refreshed = instance::refresh_after_edit(&edit2, &edit1, def).unwrap();
+    let EntityType::Insert(ins_ref) = refreshed.get_entity(insert).unwrap() else { panic!() };
+    let c_ref = refreshed
+        .entities_in_block(&ins_ref.block_name)
+        .find_map(|e| if let EntityType::Circle(c) = e { Some(c) } else { None })
+        .unwrap();
+    assert_eq!(c_ref.center, Vector3::new(37., 9., 0.));
+    assert_eq!(c_ref.radius, 6.);
+}

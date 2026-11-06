@@ -500,15 +500,18 @@ fn evaluate_row_context(
             previous,
         )?
     } else {
+        let action_bases = super::block_actions::instance::load_action_bases(document, insert, definition).unwrap_or_default();
         let resolved_frames = super::block_actions::rebuild_framed(
             &mut evaluated,
             baseline.unwrap_or(document),
             definition,
             &frames,
+            Some(&action_bases),
             Some(previous),
         )?;
         let mut result =
             super::block_actions::instance::materialize(document, insert, definition, &evaluated)?;
+        super::block_actions::instance::save_action_bases(&mut result, insert, definition, &action_bases)?;
         for parameter in &parameters {
             if let Some(frame) = resolved_frames.get(&parameter.handle) {
                 super::block_actions::instance::save_frame(&mut result, insert, parameter, *frame)?;

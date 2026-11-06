@@ -1158,6 +1158,23 @@ pub(crate) fn actions(
         })
         .collect()
 }
+
+pub(crate) fn action_node_id(doc: &Document, action_handle: Handle) -> Option<i32> {
+    let ObjectType::DynamicBlock(object) = doc.objects.get(&action_handle)? else {
+        return None;
+    };
+    match &object.data {
+        DynamicBlockData::MoveAction(a) => Some(a.action.element.eval.node_id),
+        DynamicBlockData::StretchAction(a) => Some(a.action.element.eval.node_id),
+        DynamicBlockData::PolarStretchAction(a) => Some(a.action.element.eval.node_id),
+        DynamicBlockData::FlipAction(a) => Some(a.action.element.eval.node_id),
+        DynamicBlockData::RotateAction(a) => Some(a.action.action.element.eval.node_id),
+        DynamicBlockData::ScaleAction(a) => Some(a.action.action.element.eval.node_id),
+        DynamicBlockData::ArrayAction(a) => Some(a.action.element.eval.node_id),
+        _ => None,
+    }
+}
+
 /// Drop erased objects from action targets without replacing graph nodes.
 pub(crate) fn prune_erased_targets(doc: &mut Document, definition: Handle) {
     let mut live = authoring::members(doc, definition)
@@ -1388,6 +1405,7 @@ pub(crate) fn rebuild(
 struct Evaluation<'a> {
     rebuild: bool,
     bases: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
+    action_bases: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     base_changed: bool,
     previous_bases: Option<&'a std::collections::BTreeMap<Handle, DVec3>>,
     previous_graph: Option<&'a Document>,
@@ -1408,6 +1426,7 @@ pub(crate) fn evaluate_framed(
     parameter: Handle,
     input: Value,
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    action_bases: Option<&std::collections::BTreeMap<Handle, DVec3>>,
     base_changed: bool,
     previous_frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
     resolved_frames: &mut std::collections::BTreeMap<Handle, instance::ParameterFrame>,
@@ -1435,6 +1454,7 @@ pub(crate) fn evaluate_framed(
         input,
         Evaluation {
             bases: Some(&bases),
+            action_bases,
             previous_bases: Some(&previous_bases),
             previous_values: Some(&previous_values),
             base_changed,
@@ -1464,9 +1484,10 @@ pub(crate) fn rebuild_framed(
     baseline: &Document,
     definition: Handle,
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    action_bases: Option<&std::collections::BTreeMap<Handle, DVec3>>,
     previous: Option<RebuildInputs<'_>>,
 ) -> Result<std::collections::BTreeMap<Handle, instance::ParameterFrame>, &'static str> {
-    rebuild_framed_with_flips(doc, baseline, definition, frames, previous, &[], None)
+    rebuild_framed_with_flips(doc, baseline, definition, frames, action_bases, previous, &[], None)
 }
 
 fn rebuild_framed_with_flips(
@@ -1474,6 +1495,7 @@ fn rebuild_framed_with_flips(
     baseline: &Document,
     definition: Handle,
     frames: &std::collections::BTreeMap<Handle, instance::ParameterFrame>,
+    action_bases: Option<&std::collections::BTreeMap<Handle, DVec3>>,
     previous: Option<RebuildInputs<'_>>,
     managed_flips: &[Handle],
     resolved_active: Option<&mut std::collections::BTreeMap<Handle, instance::ParameterFrame>>,
@@ -1495,6 +1517,7 @@ fn rebuild_framed_with_flips(
         value(doc, &p)?,
         Evaluation {
             bases: Some(&bases),
+            action_bases,
             frames: Some(frames),
             rebuild: true,
             base_changed: false,
@@ -1946,8 +1969,20 @@ fn evaluate_impl(
         if matches!(kind, Kind::Rotate | Kind::Scale)
             && options::base(baseline, action_handle).is_some_and(|action| action.dependent)
         {
+            let translation = if kind == Kind::Scale {
+                let action_opt = options::base(baseline, action_handle).ok_or("The action base is unavailable.")?;
+                let pivot_def = options::pivot(action_opt, q.base)?;
+                let action_base = evaluation
+                    .action_bases
+                    .and_then(|m| m.get(&action_handle))
+                    .copied()
+                    .unwrap_or(base + (pivot_def - q.base));
+                action_base - pivot_def
+            } else {
+                base - q.base
+            };
             super::view::dispatch::apply_transform(
-                entity, &crate::command::EntityTransform::Translate(base - q.base),
+                entity, &crate::command::EntityTransform::Translate(translation),
             );
         }
         let bounds = entity.as_entity().bounding_box();

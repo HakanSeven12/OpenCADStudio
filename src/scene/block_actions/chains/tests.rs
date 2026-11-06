@@ -260,6 +260,7 @@ fn block_move_point_chains_rebuild_bulk_inputs_from_the_previous_effective_frame
             &changed,
             definition,
             &frames,
+            None,
             Some(RebuildInputs {
                 document: &changed,
                 frames: &frames,

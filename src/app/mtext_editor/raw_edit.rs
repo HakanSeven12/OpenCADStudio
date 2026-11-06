@@ -147,6 +147,12 @@ impl crate::app::OpenCADStudio {
                         text = symbol.into();
                     }
                 }
+                // The fourth hex digit of a typed `\U+XXXX` makes that
+                // character (`m\U+00B2` → m²).
+                if let Some(ch) = typed_unicode_code(&cells, range.start, &text) {
+                    range.start -= 6;
+                    text = ch.to_string();
+                }
             }
             let start = range.start;
             let mut edit = index.replace(range, &text)?;
@@ -226,6 +232,27 @@ impl crate::app::OpenCADStudio {
 
 /// A font control for `font`; refused when a field would not survive the
 /// control's own syntax. A stroke font file is written as `\F…;`.
+/// The character a `\U+` code becomes when `typed` is its fourth hex digit,
+/// with `\U+` and the first three digits right before `at`.
+fn typed_unicode_code(cells: &[Cell], at: usize, typed: &str) -> Option<char> {
+    let last = typed.chars().next().filter(char::is_ascii_hexdigit)?;
+    let before: String = cells
+        .get(at.checked_sub(6)?..at)?
+        .iter()
+        .map(|cell| match cell {
+            Cell::Char(ch, _) => Some(*ch),
+            _ => None,
+        })
+        .collect::<Option<String>>()?;
+    let digits = before
+        .strip_prefix("\\U+")
+        .or_else(|| before.strip_prefix("\\u+"))?;
+    if !digits.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return None;
+    }
+    char::from_u32(u32::from_str_radix(&format!("{digits}{last}"), 16).ok()?)
+}
+
 pub(super) fn font_code(font: &MTextFont) -> Result<String, EditError> {
     if font.name.trim().is_empty()
         || font.name.contains(['|', ','])
@@ -689,6 +716,17 @@ mod tests {
             app.mtext_type(ch);
         }
         assert_eq!(app.mtext_editor.as_ref().unwrap().doc.to_plain_text(), "xØ");
+    }
+
+    /// D#2575: `\U+00B2` typed after `m` becomes m².
+    #[test]
+    fn a_typed_unicode_code_becomes_its_character() {
+        let mut app = app("m");
+        caret(&mut app, 1);
+        for ch in ["\\", "U", "+", "0", "0", "B", "2"] {
+            app.mtext_type(ch);
+        }
+        assert_eq!(app.mtext_editor.as_ref().unwrap().doc.to_plain_text(), "m²");
     }
 
     #[test]

@@ -799,28 +799,28 @@ fn bulge_to_arc(
 /// `mline_lines` the renderer uses, so they keep the style's elements and
 /// offsets, the justification, MLEDIT breaks, joints and end caps (#2538).
 fn explode_mline(ml: &MLine, doc: &Document) -> Vec<EntityType> {
-    use document::types::Color;
-
     let mut result = Vec::new();
     for element in crate::entities::mline::mline_lines(ml, doc) {
         let mut common = ml.common.clone();
         common.handle = Handle::NULL;
-        // ByLayer / ByBlock elements show in the multiline's own colour and
-        // linetype; an explicit element value carries over to its lines.
-        if !matches!(element.color, Color::ByLayer | Color::ByBlock) {
-            common.color = element.color;
-            common.color_name = None;
-            common.color_book_handle = None;
-        }
+        // Each line takes its element's colour and linetype as they are,
+        // ByLayer and ByBlock included: the multiline's own are not part of it.
+        common.color = element.color;
+        common.color_name = None;
+        common.color_book_handle = None;
         let linetype = element.linetype.as_str();
-        if !linetype.eq_ignore_ascii_case("ByLayer") && !linetype.eq_ignore_ascii_case("ByBlock") {
-            common.linetype = element.linetype.clone();
-            common.linetype_handle = doc
-                .line_types
-                .iter()
-                .find(|line_type| line_type.name.eq_ignore_ascii_case(linetype))
-                .map(|line_type| line_type.handle);
-        }
+        common.linetype = if linetype.is_empty() || linetype.eq_ignore_ascii_case("ByLayer") {
+            "ByLayer".to_string()
+        } else if linetype.eq_ignore_ascii_case("ByBlock") {
+            "ByBlock".to_string()
+        } else {
+            element.linetype.clone()
+        };
+        common.linetype_handle = doc
+            .line_types
+            .iter()
+            .find(|line_type| line_type.name.eq_ignore_ascii_case(&common.linetype))
+            .map(|line_type| line_type.handle);
         // A NaN point separates the drawn runs of one element (MLEDIT cuts).
         for pair in element.points.windows(2) {
             let (a, b) = (pair[0], pair[1]);
@@ -4166,9 +4166,58 @@ mod mline_tests {
         assert_eq!(
             styles,
             vec![
-                (Color::from_index(3), "ByLayer".to_string()),
+                (Color::ByLayer, "ByLayer".to_string()),
                 (Color::from_index(1), "DASHED".to_string()),
             ]
+        );
+    }
+
+    /// One element of `color` and `linetype`, exploded from a multiline with a
+    /// colour and a linetype of its own.
+    fn exploded_element_style(color: Color, linetype: &str, own_linetype: &str) -> (Color, String) {
+        let mut doc = Document::new();
+        let mut style = MLineStyle::new("ONE");
+        let mut element = MLineStyleElement::new(0.0);
+        element.color = color;
+        element.linetype = linetype.into();
+        style.add_element(element);
+        let mut mline = mline_in(
+            &mut doc,
+            style,
+            &[(0.0, 0.0), (10.0, 0.0)],
+            MLineJustification::Zero,
+        );
+        mline.common.color = Color::from_index(5);
+        mline.common.linetype = own_linetype.into();
+        let out = explode_entity(&EntityType::MLine(mline), &doc);
+        assert_eq!(out.len(), 1, "{out:?}");
+        let common = out[0].common();
+        (common.color, common.linetype.clone())
+    }
+
+    #[test]
+    fn exploding_a_mline_drops_its_own_style_for_a_bylayer_element() {
+        assert_eq!(
+            exploded_element_style(Color::ByLayer, "BYLAYER", "LT_L"),
+            (Color::ByLayer, "ByLayer".to_string())
+        );
+    }
+
+    #[test]
+    fn exploding_a_mline_keeps_a_byblock_element_byblock() {
+        for own_linetype in ["LT_L", "ByLayer"] {
+            assert_eq!(
+                exploded_element_style(Color::ByBlock, "BYBLOCK", own_linetype),
+                (Color::ByBlock, "ByBlock".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn exploding_a_mline_keeps_a_named_element_linetype() {
+        assert_eq!(
+            exploded_element_style(Color::from_index(1), "DASHED", "LT_L"),
+            (Color::from_index(1), "DASHED".to_string())
         );
     }
 }

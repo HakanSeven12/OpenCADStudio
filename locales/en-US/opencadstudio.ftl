@@ -2758,6 +2758,7 @@ command =
     .layer-transparency-range = Transparency is a whole number from 0 to 90.
     .layer-new-vp-frozen = New, frozen in every viewport
     .layer-objects-selected = __ocs_fmt_0__ object(s) on the selected layers are selected.
+    .layer-objects-in-blocks = __ocs_fmt_0__ of them in blocks
     .viewport-scale-needs-viewport = Select a viewport or double-click into one to set its scale.
     .viewport-scale-locked = The viewport's display is locked; unlock it to change its scale.
     .no-drawing-open-use-new-or-open-to-start-a-dra = No drawing open. Use NEW or OPEN to start a drawing.

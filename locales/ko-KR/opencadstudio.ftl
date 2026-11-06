@@ -2757,6 +2757,7 @@ command =
     .layer-transparency-range = 투명도는 0에서 90 사이의 정수입니다.
     .layer-new-vp-frozen = 새로 만들기(모든 뷰포트에서 동결)
     .layer-objects-selected = 선택한 레이어의 객체 __ocs_fmt_0__개를 선택했습니다.
+    .layer-objects-in-blocks = 그중 __ocs_fmt_0__개는 블록 안
     .viewport-scale-needs-viewport = 축척을 설정하려면 뷰포트를 선택하거나 뷰포트 안을 두 번 클릭하십시오.
     .viewport-scale-locked = 뷰포트 표시가 잠겨 있습니다. 축척을 바꾸려면 잠금을 해제하십시오.
     .no-drawing-open-use-new-or-open-to-start-a-dra = 열린 도면이 없습니다. NEW 또는 OPEN를 사용하여 도면을 시작합니다.

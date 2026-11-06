@@ -2757,6 +2757,7 @@ command =
     .layer-transparency-range = Przezroczystość to liczba całkowita od 0 do 90.
     .layer-new-vp-frozen = Nowa, zamrożona w każdej rzutni
     .layer-objects-selected = Wybrano __ocs_fmt_0__ obiektów z zaznaczonych warstw.
+    .layer-objects-in-blocks = w tym __ocs_fmt_0__ w blokach
     .viewport-scale-needs-viewport = Wybierz rzutnię lub kliknij w niej dwukrotnie, aby ustawić jej skalę.
     .viewport-scale-locked = Widok rzutni jest zablokowany; odblokuj go, aby zmienić skalę.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Żaden rysunek nie jest otwarty. Aby rozpocząć rysowanie, użyj NEW lub OPEN.

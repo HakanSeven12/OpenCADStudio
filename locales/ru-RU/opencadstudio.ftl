@@ -2761,6 +2761,7 @@ command =
     .layer-transparency-range = Прозрачность — целое число от 0 до 90.
     .layer-new-vp-frozen = Новый, заморожен во всех видовых экранах
     .layer-objects-selected = Выбрано объектов на выбранных слоях: __ocs_fmt_0__.
+    .layer-objects-in-blocks = из них __ocs_fmt_0__ в блоках
     .viewport-scale-needs-viewport = Выберите видовой экран или дважды щёлкните внутри него, чтобы задать масштаб.
     .viewport-scale-locked = Отображение видового экрана заблокировано; разблокируйте его, чтобы изменить масштаб.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Нет открытого чертежа. Выполните NEW или OPEN, чтобы начать работу.

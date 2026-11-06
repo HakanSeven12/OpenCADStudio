@@ -4280,6 +4280,11 @@ pub enum Message {
     LayerTransparencyEdit(String, String),
     /// Enter in the transparency field applies the typed value.
     LayerTransparencyCommit,
+    /// Typing in a layer's description: (layer name, text).
+    LayerDescriptionEdit(String, String),
+    LayerDescriptionCommit,
+    /// The widget focused after a click while a description is being typed.
+    LayerDescriptionFocus(Option<iced::advanced::widget::Id>),
     /// The widget focused after a click while a transparency is being typed.
     LayerTransparencyFocus(Option<iced::advanced::widget::Id>),
     LayerRenameCommit,

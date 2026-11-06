@@ -2758,6 +2758,7 @@ command =
     .layer-transparency-range = A transparência é um número inteiro de 0 a 90.
     .layer-new-vp-frozen = Nova, congelada em todas as janelas de exibição
     .layer-objects-selected = __ocs_fmt_0__ objeto(s) das camadas selecionadas foram selecionados.
+    .layer-objects-in-blocks = __ocs_fmt_0__ deles em blocos
     .viewport-scale-needs-viewport = Selecione uma viewport ou clique duas vezes nela para definir sua escala.
     .viewport-scale-locked = A exibição da viewport está bloqueada; desbloqueie-a para mudar a escala.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Nenhum desenho aberto. Use NEW ou OPEN para iniciar um desenho.

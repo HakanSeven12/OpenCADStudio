@@ -1983,6 +1983,7 @@ impl OpenCADStudio {
         if !panel.keys_active
             || panel.editing.is_some()
             || panel.transparency_edit.is_some()
+            || panel.description_edit.is_some()
             || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
         {
             return None;
@@ -2021,6 +2022,7 @@ impl OpenCADStudio {
         if !panel.keys_active
             || panel.editing.is_some()
             || panel.transparency_edit.is_some()
+            || panel.description_edit.is_some()
             || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
         {
             return false;
@@ -2058,7 +2060,78 @@ impl OpenCADStudio {
             layers.edit_buf.clear();
             return true;
         }
-        layers.transparency_edit.take().is_some()
+        layers.description_edit.take().is_some() || layers.transparency_edit.take().is_some()
+    }
+
+    /// Apply the typed description to the layer as one undo step (#2610).
+    pub(super) fn on_layer_description_commit(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some((name, typed)) = self.tabs[i].layers.description_edit.take() else {
+            return Task::none();
+        };
+        let typed = typed.trim().to_string();
+        let unchanged = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .get(&name)
+            .is_none_or(|layer| layer.description == typed);
+        if unchanged {
+            return Task::none();
+        }
+        let undo = self.begin_layer_undo(i, "LAYER DESCRIPTION", std::slice::from_ref(&name));
+        if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(&name) {
+            layer.description = typed.clone();
+        }
+        if let Some(row) = self.tabs[i]
+            .layers
+            .layers
+            .iter_mut()
+            .find(|l| l.name == name)
+        {
+            row.description = typed;
+        }
+        self.tabs[i].dirty = true;
+        self.commit_layer_undo(i, undo);
+        Task::none()
+    }
+
+    /// Count the objects on each layer for the Layer manager's Objects column
+    /// and status, again only when the drawing or its layers changed and the
+    /// manager is open. Objects inside block definitions count too, apart.
+    pub(in crate::app) fn refresh_layer_counts(&mut self) {
+        use std::hash::{Hash, Hasher};
+        if self.tabs.get(self.active_tab).is_none()
+            || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
+        {
+            return;
+        }
+        let i = self.active_tab;
+        let scene = &self.tabs[i].scene;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for layer in scene.document.layers.iter() {
+            layer.name.hash(&mut hasher);
+        }
+        let key = (scene.geometry_epoch, hasher.finish());
+        if self.tabs[i].layers.counts_key == Some(key) {
+            return;
+        }
+        let mut counts: std::collections::HashMap<String, (usize, usize)> = Default::default();
+        for record in scene.document.block_records.iter() {
+            let in_block = !record.is_layout();
+            for handle in &record.entity_handles {
+                if let Some(entity) = scene.document.get_entity(*handle) {
+                    let entry = counts
+                        .entry(entity.common().layer.to_lowercase())
+                        .or_default();
+                    entry.0 += 1;
+                    if in_block {
+                        entry.1 += 1;
+                    }
+                }
+            }
+        }
+        self.tabs[i].layers.set_counts(counts, key);
     }
 
     /// Apply the typed transparency to the layer (and the selection it is
@@ -6629,6 +6702,108 @@ mod layer_name_target_tests {
             !app.tabs[i].scene.document.layers.contains(&name),
             "one undo step"
         );
+    }
+
+    fn row(app: &OpenCADStudio, name: &str) -> crate::ui::window::layers::Layer {
+        app.tabs[app.active_tab]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == name)
+            .expect("layer in panel")
+            .clone()
+    }
+
+    /// #2610: the Objects column counts the layer's objects, block contents
+    /// apart, and follows the drawing.
+    #[test]
+    fn layer_object_counts_follow_the_drawing() {
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let line_on = |layer: &str| {
+            let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+            line.common.layer = layer.into();
+            document::EntityType::Line(line)
+        };
+        let first = app.tabs[i].scene.add_entity(line_on("ZULU"));
+        let _ = app.tabs[i].scene.add_entity(line_on("zulu"));
+        // One more inside a block definition.
+        let mut block = document::tables::BlockRecord::new("DOOR");
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        let owner = block.handle;
+        let _ = app.tabs[i].scene.document.block_records.add(block);
+        let mut inside = line_on("ZULU");
+        inside.common_mut().owner_handle = owner;
+        let _ = app.tabs[i].scene.document.add_entity(inside);
+        app.tabs[i].scene.bump_geometry();
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        assert_eq!(
+            (row(&app, "ZULU").objects, row(&app, "ZULU").in_blocks),
+            (3, 1)
+        );
+        assert_eq!(row(&app, "ALPHA").objects, 0);
+        let _ = app.tabs[i].scene.document.remove_entity(first);
+        app.tabs[i].scene.bump_geometry();
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        assert_eq!(
+            row(&app, "ZULU").objects,
+            2,
+            "counted again after the change"
+        );
+    }
+
+    #[test]
+    fn layer_description_is_typed_and_applied_in_one_step() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        for typed in ["W", "Walls"] {
+            let _ = app.update(Message::LayerDescriptionEdit("ZULU".into(), typed.into()));
+        }
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before,
+            "typing alone changes nothing"
+        );
+        let _ = app.update(Message::LayerDescriptionFocus(None));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ZULU")
+                .unwrap()
+                .description,
+            "Walls"
+        );
+        assert_eq!(row(&app, "ZULU").description, "Walls");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        let _ = app.update(Message::LayerDescriptionEdit("ZULU".into(), "Doors".into()));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ZULU")
+                .unwrap()
+                .description,
+            "Walls"
+        );
+        app.undo_active_tab();
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .description
+            .is_empty());
     }
 
     #[test]

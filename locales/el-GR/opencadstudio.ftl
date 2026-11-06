@@ -2757,6 +2757,7 @@ command =
     .layer-transparency-range = Η διαφάνεια είναι ακέραιος αριθμός από 0 έως 90.
     .layer-new-vp-frozen = Νέο, παγωμένο σε κάθε παράθυρο προβολής
     .layer-objects-selected = Επιλέχθηκαν __ocs_fmt_0__ αντικείμενα στα επιλεγμένα επίπεδα.
+    .layer-objects-in-blocks = από αυτά __ocs_fmt_0__ σε μπλοκ
     .viewport-scale-needs-viewport = Επιλέξτε ένα παράθυρο προβολής ή κάντε διπλό κλικ μέσα του για να ορίσετε την κλίμακά του.
     .viewport-scale-locked = Η προβολή του παραθύρου είναι κλειδωμένη· ξεκλειδώστε την για να αλλάξετε την κλίμακα.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Δεν υπάρχει ανοικτό σχέδιο. Χρησιμοποιήστε NEW ή OPEN για να ξεκινήσετε ένα σχέδιο.

@@ -2757,6 +2757,7 @@ command =
     .layer-transparency-range = Läpinäkyvyys on kokonaisluku väliltä 0–90.
     .layer-new-vp-frozen = Uusi, jäädytetty kaikissa näkymäikkunoissa
     .layer-objects-selected = Valituilta tasoilta valittiin __ocs_fmt_0__ objektia.
+    .layer-objects-in-blocks = niistä __ocs_fmt_0__ lohkoissa
     .viewport-scale-needs-viewport = Valitse näkymäikkuna tai kaksoisnapsauta sen sisään asettaaksesi sen mittakaavan.
     .viewport-scale-locked = Näkymäikkunan näyttö on lukittu; avaa lukitus muuttaaksesi mittakaavaa.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Piirustus ei ole auki. Käytä NEW tai OPEN piirtämisen aloittamiseen.

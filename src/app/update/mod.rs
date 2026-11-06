@@ -560,6 +560,7 @@ impl OpenCADStudio {
         }
         let from_options = self.active_modal == Some(super::ModalKind::Options);
         let mut task = self.update_message(msg);
+        self.refresh_layer_counts();
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let notices = std::mem::take(&mut tab.scene.center_notices);
             for notice in notices {
@@ -5640,6 +5641,34 @@ impl OpenCADStudio {
 
             Message::LayerTransparencyCommit => self.on_layer_transparency_commit(),
 
+            Message::LayerDescriptionEdit(name, s) => {
+                let i = self.active_tab;
+                if self.layer_panel_index(i, &name).is_none() {
+                    return Task::none();
+                }
+                let other = self.tabs[i]
+                    .layers
+                    .description_edit
+                    .as_ref()
+                    .is_some_and(|(editing, _)| *editing != name);
+                let task = if other {
+                    self.on_layer_description_commit()
+                } else {
+                    Task::none()
+                };
+                self.tabs[i].layers.description_edit = Some((name, s));
+                task
+            }
+
+            Message::LayerDescriptionCommit => self.on_layer_description_commit(),
+
+            Message::LayerDescriptionFocus(focused) => {
+                if focused != Some(crate::ui::window::layers::description_input_id()) {
+                    return self.on_layer_description_commit();
+                }
+                Task::none()
+            }
+
             // A click moved focus off the transparency field: apply what was
             // typed, as Enter would.
             Message::LayerTransparencyFocus(focused) => {
@@ -9776,6 +9805,12 @@ impl OpenCADStudio {
                     rename_blur = Task::batch([
                         rename_blur,
                         crate::ui::properties::focused_widget_task(Message::LayerTransparencyFocus),
+                    ]);
+                }
+                if self.tabs[self.active_tab].layers.description_edit.is_some() {
+                    rename_blur = Task::batch([
+                        rename_blur,
+                        crate::ui::properties::focused_widget_task(Message::LayerDescriptionFocus),
                     ]);
                 }
                 if self.style_rename.is_some() {

@@ -2757,6 +2757,7 @@ command =
     .layer-transparency-range = La trasparenza è un numero intero da 0 a 90.
     .layer-new-vp-frozen = Nuovo, congelato in tutte le finestre
     .layer-objects-selected = Selezionati __ocs_fmt_0__ oggetti sui layer selezionati.
+    .layer-objects-in-blocks = di cui __ocs_fmt_0__ nei blocchi
     .viewport-scale-needs-viewport = Selezionare una finestra o fare doppio clic al suo interno per impostarne la scala.
     .viewport-scale-locked = La visualizzazione della finestra è bloccata; sbloccarla per cambiarne la scala.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Nessun disegno aperto. Utilizzare NEW o OPEN per iniziare un disegno.

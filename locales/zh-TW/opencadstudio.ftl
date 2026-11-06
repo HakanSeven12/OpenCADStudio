@@ -2757,6 +2757,7 @@ command =
     .layer-transparency-range = 透明度是 0 到 90 之間的整數。
     .layer-new-vp-frozen = 新增（在所有視埠中凍結）
     .layer-objects-selected = 已選取所選圖層上的 __ocs_fmt_0__ 個物件。
+    .layer-objects-in-blocks = 其中 __ocs_fmt_0__ 個在圖塊中
     .viewport-scale-needs-viewport = 選取一個視埠或連按兩下進入視埠以設定其比例。
     .viewport-scale-locked = 視埠顯示已鎖定；解鎖後才能變更其比例。
     .no-drawing-open-use-new-or-open-to-start-a-dra = 沒有繪圖開啟。 使用 NEW 或 OPEN 開始繪圖 。

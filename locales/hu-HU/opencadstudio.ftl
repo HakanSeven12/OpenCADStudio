@@ -2751,6 +2751,7 @@ command =
     .layer-transparency-range = Az átlátszóság 0 és 90 közötti egész szám.
     .layer-new-vp-frozen = Új, minden nézetablakban fagyasztva
     .layer-objects-selected = __ocs_fmt_0__ objektum kijelölve a kijelölt fóliákról.
+    .layer-objects-in-blocks = ebből __ocs_fmt_0__ blokkokban
     .viewport-scale-needs-viewport = Válasszon ki egy nézetablakot, vagy kattintson bele duplán a lépték beállításához.
     .viewport-scale-locked = A nézetablak megjelenítése zárolva van; oldja fel a lépték módosításához.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Nincs nyitva rajz. A rajz elindításához használja a NEW vagy OPEN gombot.

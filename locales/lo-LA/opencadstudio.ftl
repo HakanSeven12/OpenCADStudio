@@ -2758,6 +2758,7 @@ command =
     .layer-transparency-range = ຄວາມໂປ່ງໃສແມ່ນຈຳນວນເຕັມແຕ່ 0 ຫາ 90.
     .layer-new-vp-frozen = ໃໝ່, ແຊ່ແຂງໃນທຸກວິວພອດ
     .layer-objects-selected = ເລືອກ __ocs_fmt_0__ ວັດຖຸໃນຊັ້ນງານທີ່ເລືອກແລ້ວ.
+    .layer-objects-in-blocks = ໃນນັ້ນ __ocs_fmt_0__ ຢູ່ໃນບລັອກ
     .viewport-scale-needs-viewport = ເລືອກວິວພອດ ຫຼື ຄລິກສອງເທື່ອເຂົ້າໄປເພື່ອຕັ້ງມາດຕາສ່ວນ.
     .viewport-scale-locked = ການສະແດງຜົນຂອງວິວພອດຖືກລັອກ; ປົດລັອກເພື່ອປ່ຽນມາດຕາສ່ວນ.
     .no-drawing-open-use-new-or-open-to-start-a-dra = ບໍ່ມີແບບແຕ້ມເປີດຢູ່. ໃຊ້ NEW ຫຼື OPEN ເພື່ອເລີ່ມຕົ້ນແບບແຕ້ມ.

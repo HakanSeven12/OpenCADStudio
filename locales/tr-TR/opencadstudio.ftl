@@ -7112,6 +7112,8 @@ measurement =
     .all-undone =
         Tüm parçalar zaten geri alındı.
         Komut tamamen geri alındı.
+    .point-or-keyword = 2B nokta veya seçenek anahtar sözcüğü gerekli.
+    .invalid-2d-point = Geçersiz 2B nokta.
     .arc-chord-direction = Yayın kiriş yönünü belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun) <{ $default }>:
     .arc-included-angle-ctrl = Kapsanan açıyı belirtin (yönü değiştirmek için Ctrl tuşunu basılı tutun):
     .arc-included-angle = Kapsanan açıyı belirtin:

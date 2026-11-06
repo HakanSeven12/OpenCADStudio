@@ -7187,6 +7187,8 @@ measurement =
     .all-undone =
         All segments already undone.
         Command has been completely undone.
+    .point-or-keyword = 2D point or option keyword required.
+    .invalid-2d-point = Invalid 2D point.
     .arc-chord-direction = Specify direction of chord for arc (hold Ctrl to switch direction) <{ $default }>:
     .arc-included-angle-ctrl = Specify included angle (hold Ctrl to switch direction):
     .arc-included-angle = Specify included angle:

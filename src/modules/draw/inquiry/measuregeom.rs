@@ -227,9 +227,12 @@ impl MeasureGeomCommand {
         if self.name != "MEASUREGEOM" {
             return CmdResult::Measurement(message);
         }
+        // A refused option prints a finished area or volume again; a
+        // finished distance is not repeated.
+        let repeat = self.mode != Mode::Distance;
         self.reset();
         self.mode = Mode::Choose;
-        self.last_result = Some(message.clone());
+        self.last_result = repeat.then(|| message.clone());
         CmdResult::ReportMeasurement(message)
     }
 
@@ -290,6 +293,60 @@ impl MeasureGeomCommand {
         }
     }
 
+    /// The error a sub-prompt of a chain (line length, an arc option)
+    /// prints for a word or for Enter (`enter`); None where Enter takes the
+    /// default (the tangent direction, the chord direction) or where no
+    /// sub-prompt is open.
+    fn sub_prompt_error(&self, enter: bool) -> Option<String> {
+        if self.step == AreaStep::Length {
+            return Some(t!("Requires numeric distance or second point.").into_owned());
+        }
+        if !self.arc {
+            return None;
+        }
+        let angle = || t!("Requires valid numeric angle or second point.").into_owned();
+        Some(match self.arc_sub {
+            Sub::None => return None,
+            Sub::ArcDirection if enter => return None,
+            _ if enter && self.chord_step() => return None,
+            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } | Sub::ArcDirection => angle(),
+            Sub::ArcRadius | Sub::ArcAngleRadius { .. } => {
+                t!("Requires numeric distance or two points.").into_owned()
+            }
+            Sub::ArcAngleEnd { .. } | Sub::ArcCenterEnd { .. } | Sub::ArcRadiusEnd { .. } => {
+                crate::tr!("measurement", "point-or-keyword")
+            }
+            _ => crate::tr!("measurement", "invalid-2d-point"),
+        })
+    }
+
+    /// A line-length or arc sub-prompt of a boundary or a Multiple points
+    /// chain is open.
+    fn chain_sub_prompt(&self) -> bool {
+        let chain = self.mode == Mode::Area || (self.mode == Mode::Distance && self.multiple);
+        chain
+            && (self.step == AreaStep::Length
+                || (self.step == AreaStep::Points && self.arc && self.arc_sub != Sub::None))
+    }
+
+    /// Enter at a sub-prompt: the chord and tangent directions take their
+    /// default (the direction the chain leaves in), every other one is
+    /// refused and asked again.
+    fn sub_prompt_enter(&mut self) -> CmdResult {
+        if let Some(error) = self.sub_prompt_error(true) {
+            return CmdResult::ReportError(error);
+        }
+        if self.chord_step() {
+            return self
+                .arc_chord(self.tangent_degrees())
+                .unwrap_or(CmdResult::NeedPoint);
+        }
+        self.arc_sub = Sub::ArcDirectionEnd {
+            dir: self.heading(),
+        };
+        CmdResult::NeedPoint
+    }
+
     fn keyword_error() -> CmdResult {
         CmdResult::ReportError(t!("Point or option keyword required.").into_owned())
     }
@@ -302,14 +359,23 @@ impl MeasureGeomCommand {
 
     // ── ARea / Volume boundary ─────────────────────────────────────────────
 
-    /// Total is offered once the closed boundary encloses an area.
+    /// Total is offered once the boundary has an arc segment or two
+    /// segments of non-zero length, even when they are collinear (the
+    /// closed boundary may then enclose no area); a repeated point adds a
+    /// zero-length segment that does not count.
     fn total_offered(&self) -> bool {
         if self.points.len() < 2 {
             return false;
         }
-        let measurement = self.boundary_measurement(None);
-        let perimeter = measurement.perimeter.unwrap_or(0.0);
-        measurement.area > perimeter * perimeter * 1e-12
+        let segments = self.points.len() - 1;
+        if self.segs.iter().take(segments).any(|bulge| *bulge != 0.0) {
+            return true;
+        }
+        self.points
+            .windows(2)
+            .filter(|pair| (pair[1] - pair[0]).length() > 1e-9)
+            .count()
+            >= 2
     }
 
     fn local(&self, point: DVec3) -> DVec3 {
@@ -491,8 +557,8 @@ impl MeasureGeomCommand {
             return crate::tr!("measurement", "arc-chord-direction", default = default);
         }
         match self.arc_sub {
-            Sub::ArcCenterAngle { .. } => crate::tr!("measurement", "arc-included-angle-ctrl"),
-            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => {
+            // MEASUREGEOM shows no Ctrl hint here, after CEnter included.
+            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } | Sub::ArcCenterAngle { .. } => {
                 crate::tr!("measurement", "arc-included-angle")
             }
             Sub::ArcAngleEnd { .. } => crate::tr!("measurement", "arc-end-center-radius"),
@@ -706,9 +772,7 @@ impl MeasureGeomCommand {
                 return None;
             }
             let Some(length) = crate::entities::common::parse_typed_length(input) else {
-                return Some(CmdResult::ReportError(
-                    t!("Requires numeric distance or two points.").into_owned(),
-                ));
+                return self.sub_prompt_error(false).map(CmdResult::ReportError);
             };
             let last = self.last_local()?;
             let end = last + self.heading().extend(0.0) * length;
@@ -716,8 +780,13 @@ impl MeasureGeomCommand {
             return Some(self.push_point(self.plane.to_world(end)));
         }
         if self.arc && self.chord_step() {
-            let degrees = crate::entities::common::parse_typed_angle(input)?.to_degrees();
-            return self.arc_chord(degrees);
+            if Self::is_point_text(input) {
+                return None;
+            }
+            let Some(radians) = crate::entities::common::parse_typed_angle(input) else {
+                return self.sub_prompt_error(false).map(CmdResult::ReportError);
+            };
+            return self.arc_chord(radians.to_degrees());
         }
         if self.arc && self.arc_sub != Sub::None {
             let next = match (self.arc_sub, input) {
@@ -728,15 +797,20 @@ impl MeasureGeomCommand {
                 (Sub::ArcCenterEnd { c }, "A" | "ANGLE") => Sub::ArcCenterAngle { c },
                 (Sub::ArcCenterEnd { c }, "L" | "LENGTH") => Sub::ArcCenterLength { c },
                 (Sub::ArcRadiusEnd { r }, "A" | "ANGLE") => Sub::ArcRadiusAngle { r },
-                (sub, text) if sub.is_scalar() => {
+                (sub, text) if sub.is_scalar() && !Self::is_point_text(text) => {
                     let value = if sub.is_angle() {
                         crate::entities::common::parse_typed_angle(text).map(f64::to_degrees)
                     } else {
                         crate::entities::common::parse_typed_length(text)
                     };
-                    return value.and_then(|v| self.arc_value(v));
+                    return match value {
+                        Some(v) => self.arc_value(v),
+                        None => self.sub_prompt_error(false).map(CmdResult::ReportError),
+                    };
                 }
-                (_, text) if Self::is_keyword(text) => return Some(Self::keyword_error()),
+                (_, text) if Self::is_keyword(text) => {
+                    return self.sub_prompt_error(false).map(CmdResult::ReportError);
+                }
                 _ => return None,
             };
             self.arc_sub = next;
@@ -864,6 +938,10 @@ impl MeasureGeomCommand {
         match result {
             CmdResult::NeedPoint | CmdResult::NeedPointQuiet if changed => {
                 CmdResult::ReportMeasurement(self.running_distance())
+            }
+            // A sub-prompt (line length, an arc option) only repeats itself.
+            CmdResult::ReportError(error) if self.sub_prompt_error(false).is_some() => {
+                CmdResult::ReportError(error)
             }
             CmdResult::ReportError(error) => {
                 CmdResult::ReportErrorAndMeasurement(error, self.running_distance())
@@ -1802,12 +1880,11 @@ impl CadCommand for MeasureGeomCommand {
                 CmdResult::NeedPoint
             }
             Mode::Quick => CmdResult::Measurement(String::new()),
-            Mode::Distance if self.multiple && self.step == AreaStep::Length => {
-                CmdResult::ReportError(t!("Requires numeric distance or two points.").into_owned())
+            Mode::Distance | Mode::Area if self.chain_sub_prompt() => {
+                let before = (self.points.len(), self.arc);
+                let result = self.sub_prompt_enter();
+                self.report_chain_change(before, result)
             }
-            Mode::Distance if self.multiple && self.arc && self.chord_step() => self
-                .arc_chord(self.tangent_degrees())
-                .unwrap_or(CmdResult::NeedPoint),
             Mode::Distance if self.multiple => self.finish_chain(),
             Mode::Area => match self.step {
                 // Enter with nothing measured just leaves the object prompt.
@@ -1820,16 +1897,11 @@ impl CadCommand for MeasureGeomCommand {
                     }
                 }
                 AreaStep::Height => CmdResult::ReportError(t!("Invalid point.").into_owned()),
-                AreaStep::Length => CmdResult::ReportError(
-                    t!("Requires numeric distance or two points.").into_owned(),
-                ),
+                AreaStep::Length => self.sub_prompt_enter(),
                 AreaStep::Points if self.points.is_empty() => {
                     self.step = AreaStep::Objects;
                     CmdResult::NeedPoint
                 }
-                AreaStep::Points if self.arc && self.chord_step() => self
-                    .arc_chord(self.tangent_degrees())
-                    .unwrap_or(CmdResult::NeedPoint),
                 // In arc mode Enter finishes like Total, whatever the boundary.
                 AreaStep::Points if self.arc || self.total_offered() => self.finish_boundary(),
                 AreaStep::Points => Self::keyword_error(),
@@ -1839,6 +1911,17 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn on_escape(&mut self) -> CmdResult {
+        // Esc at a sub-prompt of a chain only leaves it: back to the line
+        // or arc prompt, Distance printing the chain length again. A second
+        // Esc ends the command.
+        if self.chain_sub_prompt() {
+            self.step = AreaStep::Points;
+            self.arc_sub = Sub::None;
+            if self.mode == Mode::Distance {
+                return CmdResult::ReportMeasurement(self.running_distance());
+            }
+            return CmdResult::NeedPoint;
+        }
         CmdResult::Cancel
     }
 

@@ -203,6 +203,7 @@ pub(super) const NAMES: &[&str] = &[
     "mtext_cancel",
     "text_input",
     "text_commit",
+    "command_escape",
     "layer_visible",
     "layer_locked",
     "layer_frozen",
@@ -3595,6 +3596,9 @@ impl OpenCADStudio {
             "mtext_cancel" => Message::MTextCancel,
             "text_input" => Message::TextInlineInput(string(req, "value")?.into()),
             "text_commit" => Message::TextInlineOk,
+            // One Esc key press, as the keyboard gives it: a command that
+            // steps back on Esc (a sub-prompt) stays active.
+            "command_escape" => Message::CommandEscape,
             "pointer_move"
             | "pointer_press"
             | "pointer_release"

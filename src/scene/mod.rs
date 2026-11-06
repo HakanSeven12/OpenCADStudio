@@ -6560,44 +6560,23 @@ impl Scene {
         };
     }
 
-    /// Conversion from one drawing unit to the paper unit used by the
-    /// standard annotation-scale family: millimetres for metric drawings
-    /// and inches for imperial drawings.
-    ///
-    /// The built-in scale factors are defined assuming model and paper use
-    /// the same base unit. A drawing in metres therefore needs an extra
-    /// factor of 1000 when its paper side is measured in millimetres.
-    pub(crate) fn annotation_scale_unit_factor(&self) -> f64 {
+    /// Conversion from one drawing unit to the paper unit of the standard
+    /// scale family: millimetres for metric drawings, inches for imperial
+    /// ones. Only the standard set the program offers is converted with it, so
+    /// a metre drawing's "1:100" is stored as 1 = 0.1. A scale the drawing
+    /// holds is used as its paper and drawing units say, whatever INSUNITS is.
+    pub(crate) fn default_scale_unit_factor(&self) -> f64 {
         let paper_unit = if self.prefers_imperial_scales() == Some(true) {
             1 // Inches
         } else {
             4 // Millimeters
         };
-
-        let factor = crate::modules::draw::units::conversion_factor(
+        crate::modules::draw::units::conversion_factor(
             self.document.header.insertion_units,
             paper_unit,
         )
-        .unwrap_or(1.0);
-        // Some templates store their ratio scales already converted to the
-        // drawing unit (a metre drawing's "1:50" as 1 paper = 0.05 drawing).
-        // Those must not be converted a second time.
-        let converted = self.document.objects.values().find_map(|object| {
-            let ObjectType::Scale(scale) = object else {
-                return None;
-            };
-            let (paper, drawing) = scale.name.split_once(':')?;
-            let paper = paper.trim().parse::<f64>().ok()?;
-            let nominal = drawing.trim().parse::<f64>().ok()? / paper;
-            let stored = scale.drawing_units / scale.paper_units;
-            (nominal.is_finite() && nominal > 0.0)
-                .then(|| (stored * factor - nominal).abs() <= 1.0e-6 * nominal)
-        });
-        if factor != 1.0 && converted == Some(true) {
-            1.0
-        } else {
-            factor
-        }
+        .filter(|factor| factor.is_finite() && *factor > 0.0)
+        .unwrap_or(1.0)
     }
 
     fn is_architectural_scale_name(name: &str) -> bool {
@@ -6641,9 +6620,11 @@ impl Scene {
         if self.has_own_scales() {
             return false;
         }
+        let unit_factor = self.default_scale_unit_factor();
         for &(label, factor) in self.default_scales() {
             // Fallback labels are "paper:drawing"; parse them for tidy whole
             // units, else derive drawing units from the factor (paper = 1).
+            // The drawing side is in the drawing's own unit.
             let (paper, drawing) = label
                 .split_once(':')
                 .and_then(|(p, d)| {
@@ -6651,14 +6632,13 @@ impl Scene {
                 })
                 .filter(|&(p, d)| p > 0.0 && d > 0.0)
                 .unwrap_or((1.0, 1.0 / factor));
-            self.add_scale(label, paper, drawing);
+            self.add_scale(label, paper, drawing / unit_factor);
         }
         self.bump_scale_epoch();
         true
     }
 
     pub fn scale_list(&self) -> Vec<(String, f32, f64)> {
-        let unit_factor = self.annotation_scale_unit_factor();
         let mut list: Vec<(String, f32, f64)> = self
             .document
             .objects
@@ -6673,11 +6653,7 @@ impl Scene {
                         && !s.name.contains('|')
                         && !s.name.to_ascii_uppercase().ends_with("_XREF") =>
                 {
-                    Some((
-                        s.name.clone(),
-                        (s.inverse_factor() / unit_factor) as f32,
-                        s.factor() * unit_factor,
-                    ))
+                    Some((s.name.clone(), s.inverse_factor() as f32, s.factor()))
                 }
                 _ => None,
             })
@@ -6690,6 +6666,7 @@ impl Scene {
             // broken. Substitute the standard ratio set — file scales still
             // win whenever the drawing actually defines any. (#154)
 
+            let unit_factor = self.default_scale_unit_factor();
             list = self
                 .default_scales()
                 .iter()
@@ -6734,7 +6711,7 @@ impl Scene {
             }
         });
         if !has_matching_family {
-            let unit_factor = self.annotation_scale_unit_factor();
+            let unit_factor = self.default_scale_unit_factor();
 
             visible.extend(self.default_scales().iter().map(|&(label, base_vp)| {
                 let vp = base_vp * unit_factor;
@@ -7199,7 +7176,7 @@ impl Scene {
             .default_scales()
             .iter()
             .find(|(label, _)| label.eq_ignore_ascii_case(name))
-            .map(|(_, factor)| (1.0, 1.0 / factor))
+            .map(|(_, factor)| (1.0, 1.0 / factor / self.default_scale_unit_factor()))
             .or_else(|| {
                 let (paper, drawing) = name.split_once(':')?;
                 let paper = paper.trim().parse::<f64>().ok()?;
@@ -7925,10 +7902,10 @@ impl Scene {
 
     pub fn set_viewport_scale_named_for(&mut self, viewport: Handle, name: &str) -> Option<Handle> {
         let scale_handle = self.scale_handle_ensuring(name)?;
-        let unit_factor = self.annotation_scale_unit_factor();
 
+        // The scale's own paper : drawing ratio, as stored.
         let factor = match self.document.objects.get(&scale_handle) {
-            Some(ObjectType::Scale(scale)) => scale.factor() * unit_factor,
+            Some(ObjectType::Scale(scale)) => scale.factor(),
             _ => return None,
         };
 
@@ -7974,7 +7951,6 @@ impl Scene {
     /// Scale `viewport` to `factor` paper units per model unit, as
     /// [`Self::set_viewport_scale_factor`] does for the active one.
     pub fn set_viewport_scale_factor_for(&mut self, viewport: Handle, factor: f64) -> bool {
-        let unit_factor = self.annotation_scale_unit_factor();
         let named = self
             .document
             .objects
@@ -7982,7 +7958,7 @@ impl Scene {
             .find_map(|object| match object {
                 ObjectType::Scale(scale)
                     if !scale.is_temporary
-                        && (scale.factor() * unit_factor - factor).abs()
+                        && (scale.factor() - factor).abs()
                             <= 1.0e-9 * factor.max(1.0) =>
                 {
                     Some(scale.name.clone())
@@ -8019,7 +7995,7 @@ impl Scene {
 
         let effective = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
 
-        let expected = scale.factor() * self.annotation_scale_unit_factor();
+        let expected = scale.factor();
 
         Some((effective - expected).abs() <= 1.0e-6 * expected.max(1.0))
     }
@@ -8030,10 +8006,8 @@ impl Scene {
         let Some(scale_handle) = self.viewport_scale_handle(viewport) else {
             return false;
         };
-        let unit_factor = self.annotation_scale_unit_factor();
-
         let factor = match self.document.objects.get(&scale_handle) {
-            Some(ObjectType::Scale(scale)) => scale.factor() * unit_factor,
+            Some(ObjectType::Scale(scale)) => scale.factor(),
             _ => return false,
         };
         let Some(EntityType::Viewport(vp)) = self.document.get_entity_mut(viewport) else {
@@ -8151,7 +8125,7 @@ impl Scene {
     }
 
     pub fn cached_scale_picker_list(&self) -> std::sync::Arc<Vec<(String, f32, f64)>> {
-        let factor = self.annotation_scale_unit_factor();
+        let factor = self.default_scale_unit_factor();
         let imperial = self.prefers_imperial_scales();
         let current = self.document.header.current_annotation_scale.clone();
         if let Some((epoch, cached_factor, cached_imperial, cached_current, list)) =
@@ -18306,6 +18280,42 @@ mod layout_cache_tests {
             number.is_some() && name == "1:50" && synced == Some(true),
             "pill trio must agree"
         );
+    }
+
+    /// D#2542: a metre drawing's own "1:100 m" scale (1000 paper = 100
+    /// drawing) sets the viewport to exactly that ratio; INSUNITS is not
+    /// applied a second time. The standard set the program brings in for a
+    /// metre drawing is stored already converted.
+    #[test]
+    fn a_metre_drawing_scale_sets_the_viewport_to_its_own_ratio() {
+        let mut scene = Scene::new();
+        scene.document.header.insertion_units = 6;
+        scene.add_layout("P1").unwrap();
+        scene.current_layout = "P1".to_string();
+        assert!(scene.add_scale("1:1", 1.0, 1.0));
+        assert!(scene.add_scale("1:100 m", 1000.0, 100.0));
+        let mut vp = codec::entities::Viewport::new();
+        vp.width = 100.0;
+        vp.height = 100.0;
+        let handle = scene
+            .document
+            .add_entity_to_layout(codec::EntityType::Viewport(Box::new(vp)), "P1")
+            .unwrap();
+        assert!(scene.set_viewport_scale_named_for(handle, "1:100 m").is_some());
+        let Some(codec::EntityType::Viewport(vp)) = scene.document.get_entity(handle) else {
+            panic!("viewport");
+        };
+        assert!((vp.custom_scale - 10.0).abs() < 1e-9, "{}", vp.custom_scale);
+        assert!(scene
+            .scale_list()
+            .iter()
+            .any(|(name, _, factor)| name == "1:100 m" && (factor - 10.0).abs() < 1e-9));
+
+        let mut fresh = Scene::new();
+        fresh.document.header.insertion_units = 6;
+        assert!(fresh.ensure_real_scale_list());
+        let (paper, drawing) = fresh.scale_paper_drawing("1:100").unwrap();
+        assert!((paper / drawing - 10.0).abs() < 1e-9, "{paper} = {drawing}");
     }
 
     #[test]

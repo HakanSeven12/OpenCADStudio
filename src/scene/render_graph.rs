@@ -84,9 +84,12 @@ impl InsertStyleSpec {
         let common = &insert.common;
         let has_book_color = has_resolved_book_color_common(document, common);
         let linetype = &common.linetype;
+        let mut insert = render_style_for_common_viewport(document, common, viewport);
+        (insert.1, insert.2) =
+            crate::scene::view::render::insert_pattern_for_children(common, insert.1, insert.2);
         Self {
             own: BlockStyle {
-                insert: render_style_for_common_viewport(document, common, viewport),
+                insert,
                 layer0: layer_render_style_viewport(document, &common.layer, viewport),
                 layer0_aci: layer_aci(document, &common.layer),
             },

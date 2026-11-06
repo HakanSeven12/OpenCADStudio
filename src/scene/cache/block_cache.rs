@@ -106,6 +106,9 @@ pub struct LocalWire {
     pub color_is_byblock: bool,
     pub transparency_is_byblock: bool,
     pub lt_is_byblock: bool,
+    /// The child's own linetype scale. An inherited pattern is multiplied by it
+    /// at expand time, as the pattern baked here already is.
+    pub entity_lt_scale: f32,
     pub lw_is_byblock: bool,
     /// Set when this child sits on layer "0" and the matching property is
     /// ByLayer. At expand time the value is then taken from the INSERT's
@@ -986,6 +989,7 @@ fn tessellate_sub_local(
             color_is_byblock: color_is_byblock && wire_on_base_color,
             transparency_is_byblock,
             lt_is_byblock,
+            entity_lt_scale: sub.common().linetype_scale as f32,
             lw_is_byblock,
             color_l0: color_l0 && wire_on_base_color,
             transparency_l0,
@@ -2388,7 +2392,7 @@ fn resolve_wire_color(lw: &LocalWire, ctx: &ExpandCtx) -> [f32; 4] {
     color
 }
 
-/// Effective linetype scale along this wire after an INSERT transform.
+/// How much an INSERT transform stretches this wire's length.
 ///
 /// A non-uniform INSERT has no single global scale. Weight each segment by its
 /// local length, producing the exact factor for a line and a stable
@@ -2633,10 +2637,16 @@ fn emit_wire(
     } else {
         lw.aci
     };
+    let inherit = |pat_len: f32, pat: [f32; 8]| {
+        (
+            pat_len * lw.entity_lt_scale,
+            pat.map(|value| value * lw.entity_lt_scale),
+        )
+    };
     let (final_pat_len, final_pat) = if lw.lt_is_byblock {
-        (ctx.ins_pat_len, ctx.ins_pat)
+        inherit(ctx.ins_pat_len, ctx.ins_pat)
     } else if lw.lt_l0 {
-        (ctx.l0.pat_len, ctx.l0.pat)
+        inherit(ctx.l0.pat_len, ctx.l0.pat)
     } else {
         (lw.pattern_length, lw.pattern)
     };
@@ -2825,9 +2835,12 @@ fn emit_wire(
             .and_then(|map| transformed_station_data(values, map, lw.plinegen, accum_xform))
     });
     let has_stations = station_values.is_some();
-    let pattern_scale = transformed_stations.as_ref().map_or_else(
+    // The stations measure this wire's own length, which the insert stretches.
+    // The dash pattern is not scaled with them: a dash is as long in a scaled
+    // block as outside one.
+    let station_scale = transformed_stations.as_ref().map_or_else(
         || {
-            if final_pat_len > 0.0 || has_stations {
+            if has_stations {
                 transformed_wire_length_scale(lw, accum_xform)
             } else {
                 1.0
@@ -2843,10 +2856,10 @@ fn emit_wire(
             })
         },
     );
-    let final_pat_len = final_pat_len * ctx.pslt_factor * pattern_scale;
-    let final_pat = final_pat.map(|v| v * ctx.pslt_factor * pattern_scale);
+    let final_pat_len = final_pat_len * ctx.pslt_factor;
+    let final_pat = final_pat.map(|v| v * ctx.pslt_factor);
     let source_length = transformed_stations.as_ref().map_or_else(
-        || station_values.map_or(0.0, |(_, length)| length * pattern_scale),
+        || station_values.map_or(0.0, |(_, length)| length * station_scale),
         |data| data.source_length,
     );
 
@@ -2988,7 +3001,7 @@ fn emit_wire(
             let station = transformed_stations
                 .as_ref()
                 .map(|data| data.values[idx])
-                .or_else(|| has_stations.then(|| lw.pattern_stations[idx] * pattern_scale));
+                .or_else(|| has_stations.then(|| lw.pattern_stations[idx] * station_scale));
             let station_segment = transformed_stations
                 .as_ref()
                 .map(|data| data.point_segments[idx]);

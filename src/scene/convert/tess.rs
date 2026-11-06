@@ -66,6 +66,8 @@ fn block_object_style(
     let entity = EntityType::Insert(insert.clone());
     let (color, pattern_length, pattern, line_weight_px, aci) =
         view::render::render_style_for_viewport(document, &entity, active_viewport);
+    let (pattern_length, pattern) =
+        view::render::insert_pattern_for_children(&insert.common, pattern_length, pattern);
     let mut layer =
         view::render::layer_render_style_viewport(document, &insert.common.layer, active_viewport);
     layer.color = view::render::adapt_to_bg(layer.color, bg_color);

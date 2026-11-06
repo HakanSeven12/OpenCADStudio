@@ -842,9 +842,10 @@ impl MeasureGeomCommand {
 
     /// Multiple points: every change of the chain prints its length.
     /// Switching between line and arc mode prints it too, and a refused
-    /// entry prints it again after the error.
+    /// entry prints it again after the error. With only the first point
+    /// there is no chain yet and nothing is printed.
     fn report_chain_change(&mut self, before: (usize, bool), result: CmdResult) -> CmdResult {
-        if self.mode != Mode::Distance || !self.multiple {
+        if self.mode != Mode::Distance || !self.multiple || self.points.len() < 2 {
             return result;
         }
         let changed = self.points.len() != before.0 || self.arc != before.1;

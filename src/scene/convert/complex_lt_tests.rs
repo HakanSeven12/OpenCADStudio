@@ -1346,3 +1346,216 @@ fn psltscale_reaches_a_multileader_block() {
     let (scene, viewport) = scene_with_viewport(document, 15.0);
     assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
 }
+
+// ── Wide polylines ───────────────────────────────────────────────────────────
+
+fn wide_polyline(vertices: &[(f64, f64, f64, f64)], plinegen: bool) -> LwPolyline {
+    let mut polyline = LwPolyline::new();
+    polyline.plinegen = plinegen;
+    polyline.vertices = vertices
+        .iter()
+        .map(|&(x, y, start_width, end_width)| {
+            let mut vertex = LwVertex::new(Vector2::new(x, y));
+            vertex.start_width = start_width;
+            vertex.end_width = end_width;
+            vertex
+        })
+        .collect();
+    polyline.common.linetype = "FENCE".to_string();
+    polyline
+}
+
+fn band_polyline(width: f64) -> LwPolyline {
+    let mut polyline = wide_polyline(&[(0.0, 0.0, 0.0, 0.0), (100.0, 0.0, 0.0, 0.0)], true);
+    polyline.constant_width = width;
+    polyline
+}
+
+fn dash_wires(wires: &[WireModel]) -> Vec<&WireModel> {
+    wires
+        .iter()
+        .filter(|wire| !wire.snap_only && wire.points.len() >= 2 && wire.text_verts.is_empty())
+        .collect()
+}
+
+/// The dashes all drawn as a band of `width`, the glyphs as thin as ever.
+fn assert_band(wires: &[WireModel], width: f32) {
+    // A block batches its dashes into one wire, broken between them.
+    let dashes: usize = dash_wires(wires)
+        .iter()
+        .map(|wire| wire.points.split(|p| p[0].is_nan()).count())
+        .sum();
+    assert!(dashes > 10, "{dashes} dashes");
+    for dash in dash_wires(wires) {
+        assert!(
+            (dash.world_width - width).abs() < 1e-4,
+            "dash band {}",
+            dash.world_width
+        );
+        assert!(dash.taper_widths.is_empty());
+    }
+    let glyphs: Vec<&WireModel> = wires
+        .iter()
+        .filter(|wire| !wire.text_verts.is_empty())
+        .collect();
+    assert!(!glyphs.is_empty());
+    assert!(glyphs.iter().all(|wire| wire.world_width == 0.0));
+}
+
+#[test]
+fn a_wide_polyline_keeps_its_band_on_each_dash() {
+    let mut document = fence_document();
+    let handle = add(&mut document, EntityType::LwPolyline(band_polyline(3.0)));
+    let wide = wires(&document, handle);
+    assert_band(&wide, 3.0);
+
+    let thin = add(&mut document, EntityType::LwPolyline(band_polyline(0.0)));
+    assert_same_stations(
+        &glyph_stations(&wide, [0.0, 0.0], 8.0),
+        &glyph_stations(&wires(&document, thin), [0.0, 0.0], 8.0),
+    );
+}
+
+#[test]
+fn a_wide_polyline_still_picks_across_its_band() {
+    let mut document = fence_document();
+    let handle = add(&mut document, EntityType::LwPolyline(band_polyline(3.0)));
+    let wires = wires(&document, handle);
+    assert!(wires.iter().any(|wire| !wire.pick_tris.is_empty()));
+}
+
+#[test]
+fn a_tapered_polyline_narrows_along_its_dashes() {
+    let mut document = fence_document();
+    let handle = add(
+        &mut document,
+        EntityType::LwPolyline(wide_polyline(
+            &[(0.0, 0.0, 0.0, 6.0), (100.0, 0.0, 0.0, 0.0)],
+            true,
+        )),
+    );
+    let wires = wires(&document, handle);
+    let dashes = dash_wires(&wires);
+    assert!(dashes.len() > 10, "{} dashes", dashes.len());
+    let mut widest: f32 = 0.0;
+    for dash in dashes {
+        assert_eq!(dash.taper_widths.len(), dash.points.len());
+        for (point, width) in dash.points.iter().zip(&dash.taper_widths) {
+            let low = dash.points_low.first().map_or(0.0, |low| low[0]);
+            let x = point[0] + low;
+            assert!((width - x * 0.06).abs() < 1e-2, "{width} at x={x}");
+            widest = widest.max(*width);
+        }
+    }
+    assert!(widest > 5.5, "widest {widest}");
+}
+
+#[test]
+fn a_tapered_polyline_restarts_its_pattern_at_each_vertex() {
+    let vertices = [
+        (0.0, 0.0, 0.0, 6.0),
+        (60.0, 0.0, 6.0, 0.0),
+        (120.0, 0.0, 0.0, 0.0),
+    ];
+    let mut document = fence_document();
+    let restarts = add(
+        &mut document,
+        EntityType::LwPolyline(wide_polyline(&vertices, false)),
+    );
+    let runs_on = add(
+        &mut document,
+        EntityType::LwPolyline(wide_polyline(&vertices, true)),
+    );
+    let starts_at_vertex = |wires: &[WireModel]| {
+        dash_wires(wires).iter().any(|dash| {
+            let low = dash.points_low.first().map_or(0.0, |low| low[0]);
+            (dash.points[0][0] + low - 60.0).abs() < 1e-3
+        })
+    };
+    let restarted = wires(&document, restarts);
+    assert!(starts_at_vertex(&restarted));
+    assert!(!starts_at_vertex(&wires(&document, runs_on)));
+    // The band peaks at the vertex on both sides of the restart.
+    for dash in dash_wires(&restarted) {
+        assert_eq!(dash.taper_widths.len(), dash.points.len());
+    }
+}
+
+/// A block of `name` holding `polyline` on layer `layer`.
+fn polyline_block(
+    document: &mut Document,
+    name: &str,
+    layer: &str,
+    linetype: &str,
+    mut polyline: LwPolyline,
+) {
+    let owner = new_block(document, name);
+    polyline.common.owner_handle = owner;
+    polyline.common.layer = layer.to_string();
+    polyline.common.linetype = linetype.to_string();
+    document
+        .add_entity(EntityType::LwPolyline(polyline))
+        .unwrap();
+}
+
+#[test]
+fn a_wide_polyline_in_a_block_keeps_its_band_and_glyphs() {
+    let mut document = fence_document();
+    polyline_block(&mut document, "B", "0", "FENCE", band_polyline(3.0));
+    let wires = insert_wires(&document, Insert::new("B", Vector3::ZERO), 1.0);
+    assert_band(&wires, 3.0);
+    assert_same_stations(
+        &glyph_stations(&wires, [0.0, 0.0], 8.0),
+        &line_stations(100.0, 1.0, 1.0, 8.0),
+    );
+}
+
+#[test]
+fn a_wide_byblock_polyline_keeps_its_band_under_the_inserts_linetype() {
+    let mut document = fence_document();
+    polyline_block(&mut document, "B", "0", "ByBlock", band_polyline(3.0));
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.common.linetype = "FENCE".to_string();
+    assert_band(&insert_wires(&document, insert, 1.0), 3.0);
+}
+
+#[test]
+fn a_scaled_insert_scales_the_band_but_not_the_pattern() {
+    let mut document = fence_document();
+    polyline_block(&mut document, "B", "0", "FENCE", band_polyline(3.0));
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.set_x_scale(2.0);
+    insert.set_y_scale(2.0);
+    let wires = insert_wires(&document, insert, 1.0);
+    assert_band(&wires, 6.0);
+    assert_same_stations(
+        &glyph_stations(&wires, [0.0, 0.0], 8.0),
+        &line_stations(200.0, 1.0, 1.0, 8.0),
+    );
+}
+
+#[test]
+fn a_tapered_polyline_in_a_block_scales_its_widths() {
+    let mut document = fence_document();
+    polyline_block(
+        &mut document,
+        "B",
+        "0",
+        "FENCE",
+        wide_polyline(&[(0.0, 0.0, 0.0, 6.0), (100.0, 0.0, 0.0, 0.0)], true),
+    );
+    let mut insert = Insert::new("B", Vector3::ZERO);
+    insert.set_x_scale(2.0);
+    insert.set_y_scale(2.0);
+    let wires = insert_wires(&document, insert, 1.0);
+    let dashes = dash_wires(&wires);
+    assert!(dashes.len() > 10, "{} dashes", dashes.len());
+    let widest = dashes
+        .iter()
+        .flat_map(|dash| {
+            assert_eq!(dash.taper_widths.len(), dash.points.len());
+            dash.taper_widths.iter().copied()
+        })
+        .fold(0.0f32, f32::max);
+    assert!(widest > 11.0 && widest <= 12.0 + 1e-3, "widest {widest}");
+}

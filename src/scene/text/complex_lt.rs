@@ -82,6 +82,8 @@ pub fn apply_along(
     // element still ends on a dash at its own endpoint. `None` tiles the pattern
     // from the start vertex.
     ref_total: Option<f32>,
+    // A wide polyline's band width at each point of the path.
+    band: Option<&[f32]>,
 ) -> Vec<WireModel> {
     apply_stretched(
         name,
@@ -93,6 +95,7 @@ pub fn apply_along(
         selected,
         line_weight_px,
         ref_total,
+        band,
     )
 }
 
@@ -107,6 +110,7 @@ pub fn apply_closed(
     color: [f32; 4],
     selected: bool,
     line_weight_px: f32,
+    band: Option<&[f32]>,
 ) -> Vec<WireModel> {
     let period: f32 = scale_segments(&lt.segments, scale)
         .iter()
@@ -132,6 +136,7 @@ pub fn apply_closed(
             selected,
             line_weight_px,
             Some(length),
+            band,
         );
     }
     let periods = crate::scene::pipeline::wire_gpu::closed_dash_periods(length, period);
@@ -145,6 +150,7 @@ pub fn apply_closed(
         selected,
         line_weight_px,
         None,
+        band,
     )
 }
 
@@ -159,10 +165,12 @@ fn apply_stretched(
     selected: bool,
     line_weight_px: f32,
     ref_total: Option<f32>,
+    band: Option<&[f32]>,
 ) -> Vec<WireModel> {
     if path_pts.len() < 2 || lt.segments.is_empty() {
         return vec![];
     }
+    let band = band.filter(|band| band.len() == path_pts.len());
 
     let mut scaled: Vec<LtSeg> = scale_segments(&lt.segments, scale);
     if scaled.is_empty() {
@@ -232,8 +240,11 @@ fn apply_stretched(
     let atype_on = atype_segs.is_some();
     let walk_segs: &[LtSeg] = atype_segs.as_deref().unwrap_or(&scaled);
 
-    let mut strokes: Vec<Vec<[f32; 3]>> = Vec::new();
+    // Each stroke with its band width per point, empty for a hairline: only a
+    // dash takes the band, a dot or a shape stays as thin as a glyph.
+    let mut strokes: Vec<(Vec<[f32; 3]>, Vec<f32>)> = Vec::new();
     let mut cur_stroke: Vec<[f32; 3]> = Vec::new();
+    let mut cur_widths: Vec<f32> = Vec::new();
     // Embedded linetype text (LtSeg::Text) renders as SDF glyph quads collected
     // here; emitted as one extra text-carrying WireModel at the end.
     let mut text_verts: Vec<crate::scene::pipeline::text_gpu::TextVertex> = Vec::new();
@@ -280,6 +291,13 @@ fn apply_stretched(
                     let p_start = lerp(ps, pe, pos / seg_len);
                     let p_end = lerp(ps, pe, (pos + advance) / seg_len);
 
+                    if let Some(band) = band {
+                        let width_at = |at: f32| band[i] + (band[i + 1] - band[i]) * (at / seg_len);
+                        if cur_stroke.is_empty() {
+                            cur_widths.push(width_at(pos));
+                        }
+                        cur_widths.push(width_at(pos + advance));
+                    }
                     if cur_stroke.is_empty() {
                         cur_stroke.push(p_start);
                     }
@@ -297,7 +315,7 @@ fn apply_stretched(
                     let remaining = space_len - elem_consumed;
                     let advance = remaining.min(seg_len - pos);
 
-                    flush(&mut cur_stroke, &mut strokes);
+                    flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
 
                     pos += advance;
                     elem_consumed += advance;
@@ -308,9 +326,9 @@ fn apply_stretched(
                 }
 
                 LtSeg::Dot => {
-                    flush(&mut cur_stroke, &mut strokes);
+                    flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
                     let p = lerp(ps, pe, pos / seg_len);
-                    strokes.push(vec![p, p]);
+                    strokes.push((vec![p, p], Vec::new()));
                     elem_idx += 1;
                     elem_consumed = 0.0;
                     if pos < 1e-6 {
@@ -328,7 +346,7 @@ fn apply_stretched(
                     rot_deg,
                     rot_mode,
                 } => {
-                    flush(&mut cur_stroke, &mut strokes);
+                    flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
 
                     let insert = lerp(ps, pe, pos / seg_len);
                     let insert = offset_pt(insert, fwd, perp, *x, *y);
@@ -346,7 +364,7 @@ fn apply_stretched(
                     let shape_strokes = emit_shape(
                         sh_name, shx_file, *number, insert, frame_fwd, frame_perp, *sh_scale, rot,
                     );
-                    strokes.extend(shape_strokes);
+                    strokes.extend(shape_strokes.into_iter().map(|stroke| (stroke, Vec::new())));
 
                     elem_idx += 1;
                     elem_consumed = 0.0;
@@ -363,7 +381,7 @@ fn apply_stretched(
                     rot_deg,
                     rot_mode,
                 } => {
-                    flush(&mut cur_stroke, &mut strokes);
+                    flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
 
                     let insert = lerp(ps, pe, pos / seg_len);
                     let mut insert = offset_pt(insert, fwd, perp, *x, *y);
@@ -447,46 +465,49 @@ fn apply_stretched(
         }
     }
 
-    flush(&mut cur_stroke, &mut strokes);
+    flush(&mut cur_stroke, &mut cur_widths, &mut strokes);
 
     let mut out: Vec<WireModel> = strokes
         .into_iter()
-        .filter(|s| s.len() >= 2)
-        .map(|pts| WireModel {
-            bg_adapt: None,
-            point_marker: None,
-            taper_widths: Vec::new(),
-            pattern_stations: Vec::new(),
-            world_width: 0.0,
-            depth_override: None,
-            display_visible: true,
-            snap_only: false,
-            plot_visible: true,
-            fill_is_3d: false,
-            fill_is_2d_solid: false,
-            render_instance: None,
-            pick_tris: Vec::new(),
-            pick_tris_low: Vec::new(),
-            dash_from_start: false,
-            text_verts: Vec::new(),
-            name: name.to_string(),
-            points: pts,
-            points_low: Vec::new(),
-            color,
-            selected,
-            pattern_length: 0.0,
-            pattern: [0.0; 8],
-            line_weight_px,
-            snap_pts: vec![],
-            tangent_geoms: vec![],
-            aci: 0,
-            key_vertices: vec![],
-            aabb: WireModel::UNBOUNDED_AABB,
-            plinegen: true,
-            fill_tris: vec![],
-            fill_tris_low: Vec::new(),
+        .filter(|(pts, _)| pts.len() >= 2)
+        .map(|(pts, widths)| {
+            let (world_width, taper_widths) = band_widths(&widths);
+            WireModel {
+                bg_adapt: None,
+                point_marker: None,
+                taper_widths,
+                pattern_stations: Vec::new(),
+                world_width,
+                depth_override: None,
+                display_visible: true,
+                snap_only: false,
+                plot_visible: true,
+                fill_is_3d: false,
+                fill_is_2d_solid: false,
+                render_instance: None,
+                pick_tris: Vec::new(),
+                pick_tris_low: Vec::new(),
+                dash_from_start: false,
+                text_verts: Vec::new(),
+                name: name.to_string(),
+                points: pts,
+                points_low: Vec::new(),
+                color,
+                selected,
+                pattern_length: 0.0,
+                pattern: [0.0; 8],
+                line_weight_px,
+                snap_pts: vec![],
+                tangent_geoms: vec![],
+                aci: 0,
+                key_vertices: vec![],
+                aabb: WireModel::UNBOUNDED_AABB,
+                plinegen: true,
+                fill_tris: vec![],
+                fill_tris_low: Vec::new(),
 
             ..Default::default()
+            }
         })
         .collect();
 
@@ -621,9 +642,26 @@ fn scale_segments(segs: &[LtSegment], scale: f32) -> Vec<LtSeg> {
         .collect()
 }
 
-fn flush(cur: &mut Vec<[f32; 3]>, strokes: &mut Vec<Vec<[f32; 3]>>) {
+fn flush(
+    cur: &mut Vec<[f32; 3]>,
+    widths: &mut Vec<f32>,
+    strokes: &mut Vec<(Vec<[f32; 3]>, Vec<f32>)>,
+) {
     if !cur.is_empty() {
-        strokes.push(std::mem::take(cur));
+        strokes.push((std::mem::take(cur), std::mem::take(widths)));
+    }
+}
+
+/// A wire's `world_width` and `taper_widths` for these per-point widths: one
+/// width when they all agree, a taper with its widest edge when they vary.
+pub(crate) fn band_widths(widths: &[f32]) -> (f32, Vec<f32>) {
+    let widest = widths.iter().copied().fold(0.0f32, f32::max);
+    if widest <= 0.0 {
+        (0.0, Vec::new())
+    } else if widths.iter().all(|width| (widest - width).abs() < 1e-6) {
+        (widest, Vec::new())
+    } else {
+        (widest, widths.to_vec())
     }
 }
 
@@ -748,7 +786,7 @@ mod upright_tests {
                 LtSegment::Space(0.3),
             ],
         };
-        apply_along("GAS", &path, &lt, 1.0, [1.0; 4], false, 1.0, None)
+        apply_along("GAS", &path, &lt, 1.0, [1.0; 4], false, 1.0, None, None)
             .iter()
             .flat_map(|wire| wire.text_verts.iter())
             .map(|v| [v.pos[0] + v.pos_low[0], v.pos[1] + v.pos_low[1]])

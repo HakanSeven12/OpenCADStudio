@@ -23,11 +23,12 @@ fn fade_if_locked(
 /// the path `tessellate` splits into one wire per arc segment plus one wire of
 /// the straight segments. `None` for any other entity or render form.
 ///
-/// Also says how the pattern closes around that path.
+/// Also says how the pattern closes around that path, and for a wide polyline
+/// gives its band width at each point of the path.
 pub(crate) fn polyline_lt_path(
     document: &document::Document,
     e: &EntityType,
-) -> Option<(Vec<[f64; 3]>, DashClosure)> {
+) -> Option<(Vec<[f64; 3]>, DashClosure, Option<Vec<f32>>)> {
     use convert::acad_to_render::RenderObject;
     if !matches!(e, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
         return None;
@@ -40,10 +41,73 @@ pub(crate) fn polyline_lt_path(
                 &rendered.key_vertices,
                 points.iter().copied(),
             );
-            Some((points, closure))
+            let width = convert::tessellate::polyline_band_width(e, document.header.fill_mode);
+            let band = (width > 0.0).then(|| vec![width; points.len()]);
+            Some((points, closure, band))
+        }
+        RenderObject::TaperedLines(points, widths) => {
+            let plinegen = match e {
+                EntityType::LwPolyline(polyline) => polyline.plinegen,
+                EntityType::Polyline2D(polyline) => {
+                    polyline.flags.bits()
+                        & document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+                        != 0
+                }
+                _ => false,
+            };
+            let (points, widths) = if plinegen {
+                (points, widths)
+            } else {
+                restart_at_vertices(&points, &widths, &rendered.key_vertices)
+            };
+            // A step in width breaks the band, and no fit goes round a break.
+            let closure = if points.iter().any(|p| p[0].is_nan()) {
+                DashClosure::Open
+            } else {
+                convert::tessellate::dash_closure_of(
+                    e,
+                    &rendered.key_vertices,
+                    points.iter().copied(),
+                )
+            };
+            Some((points, closure, Some(widths)))
         }
         _ => None,
     }
+}
+
+/// Break a tapered band's path at each interior vertex, where PLINEGEN off
+/// restarts the linetype. A taper draws as one wire, so its path has no break
+/// there unless the width steps.
+fn restart_at_vertices(
+    points: &[[f64; 3]],
+    widths: &[f32],
+    key_vertices: &[[f64; 3]],
+) -> (Vec<[f64; 3]>, Vec<f32>) {
+    let interior = key_vertices
+        .get(1..key_vertices.len().saturating_sub(1))
+        .unwrap_or_default();
+    let mut next = 0;
+    let mut out_points = Vec::with_capacity(points.len() + 2 * interior.len());
+    let mut out_widths = Vec::with_capacity(points.len() + 2 * interior.len());
+    for (index, (&point, &width)) in points.iter().zip(widths).enumerate() {
+        out_points.push(point);
+        out_widths.push(width);
+        let at_vertex = interior
+            .get(next)
+            .is_some_and(|vertex| (0..3).all(|axis| (point[axis] - vertex[axis]).abs() < 1e-6));
+        if at_vertex {
+            next += 1;
+            if points
+                .get(index + 1)
+                .is_some_and(|after| !after[0].is_nan())
+            {
+                out_points.extend([[f64::NAN; 3], point]);
+                out_widths.extend([0.0, width]);
+            }
+        }
+    }
+    (out_points, out_widths)
 }
 
 /// The annotation ratio a complex linetype bakes in. It is walked on the CPU,
@@ -86,13 +150,16 @@ pub(crate) fn walk_complex_linetype(
     color: [f32; 4],
     selected: bool,
     line_weight_px: f32,
+    band: Option<&[f32]>,
 ) -> Option<Vec<WireModel>> {
+    let band = band.filter(|band| band.len() == path.len());
     // A closed path takes its pattern from its own start: for a polyline the
     // walk goes round from the second vertex, back to it.
     let rotated: Vec<[f64; 3]>;
-    let (path, closed) = match closure {
-        DashClosure::Open => (path, false),
-        DashClosure::Curve => (path, true),
+    let rotated_band: Option<Vec<f32>>;
+    let (path, closed, band) = match closure {
+        DashClosure::Open => (path, false, band),
+        DashClosure::Curve => (path, true, band),
         DashClosure::Polyline { start } => {
             let start = (start as usize).min(path.len().saturating_sub(1));
             rotated = path[start..]
@@ -100,11 +167,21 @@ pub(crate) fn walk_complex_linetype(
                 .chain(path.iter().skip(1).take(start))
                 .copied()
                 .collect();
-            (rotated.as_slice(), true)
+            rotated_band = band.map(|band| {
+                band[start..]
+                    .iter()
+                    .chain(band.iter().skip(1).take(start))
+                    .copied()
+                    .collect::<Vec<f32>>()
+            });
+            (rotated.as_slice(), true, rotated_band.as_deref())
         }
     };
     let mut wires = Vec::new();
+    let mut next_run = 0;
     for run in path.split(|p| p[0].is_nan()) {
+        let run_band = band.map(|band| &band[next_run..next_run + run.len()]);
+        next_run += run.len() + 1;
         let length: f64 = run
             .windows(2)
             .map(|w| {
@@ -137,6 +214,7 @@ pub(crate) fn walk_complex_linetype(
                 color,
                 selected,
                 line_weight_px,
+                run_band,
             )
         } else {
             text::complex_lt::apply_along(
@@ -148,6 +226,7 @@ pub(crate) fn walk_complex_linetype(
                 selected,
                 line_weight_px,
                 Some(length as f32),
+                run_band,
             )
         };
         if run_wires.is_empty() {
@@ -198,6 +277,7 @@ fn walk_mline_element(
         wire.color,
         wire.selected,
         wire.line_weight_px,
+        None,
     ) else {
         return vec![wire];
     };
@@ -1688,7 +1768,7 @@ fn tessellate_entity_inner(
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex
             // linetype's shapes and dashes. Reconstruct the absolute f64 path
             // (high + low).
-            let (path, closure) = polyline_lt_path(document, e).unwrap_or_else(|| {
+            let (path, closure, band) = polyline_lt_path(document, e).unwrap_or_else(|| {
                 let path = base
                     .points
                     .iter()
@@ -1705,7 +1785,7 @@ fn tessellate_entity_inner(
                         ]
                     })
                     .collect();
-                (path, base.dash_closure)
+                (path, base.dash_closure, None)
             });
             // Nothing to walk (pattern blow-up guard): draw the base wires.
             if let Some(mut wires) = walk_complex_linetype(
@@ -1717,9 +1797,18 @@ fn tessellate_entity_inner(
                 entity_color,
                 sel,
                 base.line_weight_px,
+                band.as_deref(),
             ) {
                 for wire in &mut wires {
                     set_wire_aabb(wire, aabb);
+                }
+                // Dashes and gaps don't change where a wide band picks.
+                if let (Some(first), Some(picks)) = (
+                    wires.first_mut(),
+                    bases.iter().find(|wire| !wire.pick_tris.is_empty()),
+                ) {
+                    first.pick_tris = picks.pick_tris.clone();
+                    first.pick_tris_low = picks.pick_tris_low.clone();
                 }
                 return wires;
             }

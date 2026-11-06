@@ -81,7 +81,8 @@ pub enum ComplexWalk {
     /// Walks the polyline's whole ordered path, kept in block-local coordinates,
     /// and how the pattern closes around it. A polyline with arcs draws its
     /// wires separately, which an inherited dash pattern needs walking as one.
-    Path(Arc<Vec<[f64; 3]>>, DashClosure),
+    /// A wide polyline also has its band width at each point of the path.
+    Path(Arc<Vec<[f64; 3]>>, DashClosure, Option<Arc<Vec<f32>>>),
     /// A wire of a polyline whose path another wire walks.
     Covered,
 }
@@ -1119,18 +1120,18 @@ fn tessellate_sub_local(
         // colour would collapse colour-split geometry to one colour. (PR #301,
         // Kevin Griffin — extended to SDF text per-vertex in emit_wire.)
         let wire_on_base_color = wire.color == sub_color;
-        // A wide polyline keeps its band. Hidden reference geometry is never
-        // drawn, so it has no linetype to walk.
+        // Only a polyline walks a band, with the widths of its whole path.
+        // Hidden reference geometry is never drawn, so it has no linetype to
+        // walk.
         let complex_walk = if !(walks_complex || walks_whole_path)
             || wire.snap_only
             || wire.points.len() < 2
-            || wire.world_width != 0.0
-            || !wire.taper_widths.is_empty()
+            || (!walks_whole_path && (wire.world_width != 0.0 || !wire.taper_widths.is_empty()))
             || !wire.fill_tris.is_empty()
         {
             ComplexWalk::None
-        } else if let Some((path, closure)) = polyline_path.take() {
-            ComplexWalk::Path(Arc::new(path), closure)
+        } else if let Some((path, closure, band)) = polyline_path.take() {
+            ComplexWalk::Path(Arc::new(path), closure, band.map(Arc::new))
         } else if walks_whole_path {
             ComplexWalk::Covered
         } else {
@@ -2926,7 +2927,8 @@ fn emit_complex_walk(
     out: &mut Batches,
     d_range: (f32, f32),
 ) {
-    let Some((path, closure, mut plain)) = emit_path_reference(lw, accum_xform, ctx, out, d_range)
+    let Some((path, closure, band, mut plain)) =
+        emit_path_reference(lw, accum_xform, ctx, out, d_range)
     else {
         return;
     };
@@ -2943,10 +2945,11 @@ fn emit_complex_walk(
         lw.color,
         false,
         lw.line_weight_px,
+        band.as_deref(),
     );
     let Some(walked) = walked else {
         // Nothing to walk (pattern blow-up guard): the whole path, solid.
-        set_path_points(&mut plain, &path);
+        set_path_points(&mut plain, &path, band.as_deref());
         emit_wire(&plain, &identity, ctx, out, d_range);
         return;
     };
@@ -2954,6 +2957,8 @@ fn emit_complex_walk(
         let mut piece = plain.clone();
         piece.points = wire.points;
         piece.points_low = wire.points_low;
+        piece.world_width = wire.world_width;
+        piece.taper_widths = wire.taper_widths;
         piece.text_verts = wire.text_verts;
         piece.searchable_text = wire.searchable_text;
         emit_wire(&piece, &identity, ctx, out, d_range);
@@ -2971,11 +2976,12 @@ fn emit_inherited_dash_path(
     out: &mut Batches,
     d_range: (f32, f32),
 ) {
-    let Some((path, closure, mut piece)) = emit_path_reference(lw, accum_xform, ctx, out, d_range)
+    let Some((path, closure, band, mut piece)) =
+        emit_path_reference(lw, accum_xform, ctx, out, d_range)
     else {
         return;
     };
-    set_path_points(&mut piece, &path);
+    set_path_points(&mut piece, &path, band.as_deref());
     piece.pattern_length = pattern_length;
     piece.pattern = pattern;
     piece.plinegen = !path.iter().any(|p| p[0].is_nan());
@@ -2983,7 +2989,9 @@ fn emit_inherited_dash_path(
     emit_wire(&piece, &Transform::identity(), ctx, out, d_range);
 }
 
-fn set_path_points(wire: &mut LocalWire, path: &[[f64; 3]]) {
+fn set_path_points(wire: &mut LocalWire, path: &[[f64; 3]], band: Option<&[f32]>) {
+    (wire.world_width, wire.taper_widths) =
+        crate::scene::text::complex_lt::band_widths(band.unwrap_or_default());
     let (points, points_low) = path
         .iter()
         .map(|p| {
@@ -3002,14 +3010,15 @@ fn set_path_points(wire: &mut LocalWire, path: &[[f64; 3]]) {
 
 /// Keep a walked child's own wire as hidden reference geometry. When this wire
 /// is the one that walks, gives the drawing-space path, how the pattern closes
-/// around it, and an empty wire of the child's style to draw it with.
+/// around it, its band widths at drawing scale, and an empty wire of the child's
+/// style to draw it with.
 fn emit_path_reference(
     lw: &LocalWire,
     accum_xform: &Transform,
     ctx: &ExpandCtx,
     out: &mut Batches,
     d_range: (f32, f32),
-) -> Option<(Vec<[f64; 3]>, DashClosure, LocalWire)> {
+) -> Option<(Vec<[f64; 3]>, DashClosure, Option<Vec<f32>>, LocalWire)> {
     let mut plain = lw.clone();
     plain.complex_walk = ComplexWalk::None;
     plain.own_complex = None;
@@ -3030,41 +3039,49 @@ fn emit_path_reference(
         let point = accum_xform.apply(Vector3::new(x, y, z));
         [point.x, point.y, point.z]
     };
-    let (path, closure): (Vec<[f64; 3]>, DashClosure) = match &lw.complex_walk {
-        ComplexWalk::None | ComplexWalk::Covered => return None,
-        ComplexWalk::Path(path, closure) => (
-            path.iter()
-                .map(|p| {
-                    if p[0].is_nan() {
-                        [f64::NAN; 3]
-                    } else {
-                        to_world(p[0], p[1], p[2])
-                    }
-                })
-                .collect(),
-            *closure,
-        ),
-        ComplexWalk::Points => (
-            lw.points
-                .iter()
-                .enumerate()
-                .map(|(index, p)| {
-                    if p[0].is_nan() {
-                        return [f64::NAN; 3];
-                    }
-                    let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
-                    to_world(
-                        p[0] as f64 + low[0] as f64,
-                        p[1] as f64 + low[1] as f64,
-                        p[2] as f64 + low[2] as f64,
-                    )
-                })
-                .collect(),
-            lw.dash_closure,
-        ),
-    };
+    let (path, closure, band): (Vec<[f64; 3]>, DashClosure, Option<Vec<f32>>) =
+        match &lw.complex_walk {
+            ComplexWalk::None | ComplexWalk::Covered => return None,
+            ComplexWalk::Path(path, closure, band) => (
+                path.iter()
+                    .map(|p| {
+                        if p[0].is_nan() {
+                            [f64::NAN; 3]
+                        } else {
+                            to_world(p[0], p[1], p[2])
+                        }
+                    })
+                    .collect(),
+                *closure,
+                band.as_ref().map(|band| {
+                    let scale = band_scale(accum_xform);
+                    band.iter().map(|width| width * scale).collect()
+                }),
+            ),
+            ComplexWalk::Points => (
+                lw.points
+                    .iter()
+                    .enumerate()
+                    .map(|(index, p)| {
+                        if p[0].is_nan() {
+                            return [f64::NAN; 3];
+                        }
+                        let low = lw.points_low.get(index).copied().unwrap_or([0.0; 3]);
+                        to_world(
+                            p[0] as f64 + low[0] as f64,
+                            p[1] as f64 + low[1] as f64,
+                            p[2] as f64 + low[2] as f64,
+                        )
+                    })
+                    .collect(),
+                lw.dash_closure,
+                None,
+            ),
+        };
 
     // Everything here is already in drawing space and takes no further pattern.
+    plain.world_width = 0.0;
+    plain.taper_widths = Vec::new();
     plain.points = Vec::new();
     plain.points_low = Vec::new();
     plain.key_vertices = Vec::new();
@@ -3073,7 +3090,20 @@ fn emit_path_reference(
     plain.pick_tris = Vec::new();
     plain.pick_tris_low = Vec::new();
     plain.searchable_text = Vec::new();
-    Some((path, closure, plain))
+    Some((path, closure, band, plain))
+}
+
+/// A wide polyline's band width is baked in block-local units; this scales it by
+/// the insert transform so the shader band matches the scaled geometry. The
+/// average of the X and Y axis image lengths is exact for a uniform insert and a
+/// sensible mean for a non-uniform one (the band carries one width).
+fn band_scale(accum_xform: &Transform) -> f32 {
+    let o = accum_xform.apply(Vector3::new(0.0, 0.0, 0.0));
+    let ax = accum_xform.apply(Vector3::new(1.0, 0.0, 0.0));
+    let ay = accum_xform.apply(Vector3::new(0.0, 1.0, 0.0));
+    let sx = ((ax.x - o.x).powi(2) + (ax.y - o.y).powi(2) + (ax.z - o.z).powi(2)).sqrt();
+    let sy = ((ay.x - o.x).powi(2) + (ay.y - o.y).powi(2) + (ay.z - o.z).powi(2)).sqrt();
+    ((sx + sy) * 0.5) as f32
 }
 
 fn emit_wire(
@@ -3155,21 +3185,9 @@ fn emit_wire(
         lw.line_weight_px
     };
 
-    // A wide polyline's band width is baked in block-local units; scale it by
-    // the insert transform so the shader band matches the scaled geometry.
-    // Average the X and Y axis image lengths — exact for a uniform insert, a
-    // sensible mean for a non-uniform one (the band carries one width).
-    // A taper's per-point widths scale the same way.
-    let band_scale = || {
-        let o = accum_xform.apply(Vector3::new(0.0, 0.0, 0.0));
-        let ax = accum_xform.apply(Vector3::new(1.0, 0.0, 0.0));
-        let ay = accum_xform.apply(Vector3::new(0.0, 1.0, 0.0));
-        let sx = ((ax.x - o.x).powi(2) + (ax.y - o.y).powi(2) + (ax.z - o.z).powi(2)).sqrt();
-        let sy = ((ay.x - o.x).powi(2) + (ay.y - o.y).powi(2) + (ay.z - o.z).powi(2)).sqrt();
-        ((sx + sy) * 0.5) as f32
-    };
+    // A taper's per-point widths scale the same way as a constant band.
     let final_world_width = if lw.world_width > 0.0 {
-        lw.world_width * band_scale()
+        lw.world_width * band_scale(accum_xform)
     } else if lw.world_width < 0.0 {
         lw.world_width
     } else {
@@ -3178,7 +3196,7 @@ fn emit_wire(
     let final_taper_widths: Vec<f32> = if lw.taper_widths.is_empty() {
         Vec::new()
     } else {
-        let scale = band_scale();
+        let scale = band_scale(accum_xform);
         lw.taper_widths.iter().map(|width| width * scale).collect()
     };
 

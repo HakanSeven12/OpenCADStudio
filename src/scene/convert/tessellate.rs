@@ -3401,7 +3401,7 @@ pub(crate) fn entity_z(entity: &EntityType) -> f32 {
 }
 
 /// Shader band width, or zero while FILLMODE draws the kernel boundary.
-fn polyline_band_width(entity: &EntityType, fill_mode: bool) -> f32 {
+pub(crate) fn polyline_band_width(entity: &EntityType, fill_mode: bool) -> f32 {
     let thick = match entity {
         EntityType::LwPolyline(p) => p.thickness.abs() > 1e-10,
         EntityType::Polyline2D(p) => p.thickness.abs() > 1e-10,

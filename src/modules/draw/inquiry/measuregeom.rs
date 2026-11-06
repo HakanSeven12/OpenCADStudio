@@ -557,8 +557,8 @@ impl MeasureGeomCommand {
             return crate::tr!("measurement", "arc-chord-direction", default = default);
         }
         match self.arc_sub {
-            Sub::ArcCenterAngle { .. } => crate::tr!("measurement", "arc-included-angle-ctrl"),
-            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => {
+            // MEASUREGEOM shows no Ctrl hint here, after CEnter included.
+            Sub::ArcAngle | Sub::ArcRadiusAngle { .. } | Sub::ArcCenterAngle { .. } => {
                 crate::tr!("measurement", "arc-included-angle")
             }
             Sub::ArcAngleEnd { .. } => crate::tr!("measurement", "arc-end-center-radius"),

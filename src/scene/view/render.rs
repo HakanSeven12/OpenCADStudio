@@ -4647,7 +4647,7 @@ impl Scene {
                     Some(&block_cache),
                     None,
                     None,
-                    content_viewport,
+                    content_viewport.then_some(1.0),
                     self.reference_only.handles(),
                 );
                 for wire in &mut context_wires {
@@ -5131,16 +5131,9 @@ impl Scene {
             if let Some(ratio) = model_linetype_ratio(&self.document) {
                 uniforms.linetype_scale = ratio;
             }
-        } else if self.document.header.paper_space_linetype_scaling
-            && !inst.paper_sheet
-            && inst.handle != Handle::NULL
-        {
-            if let Some(EntityType::Viewport(vp)) = self.document.get_entity(inst.handle) {
-                let viewport_scale = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
-
-                if viewport_scale.is_finite() && viewport_scale > 1e-9 {
-                    uniforms.linetype_scale = (1.0 / viewport_scale) as f32;
-                }
+        } else if !inst.paper_sheet && inst.handle != Handle::NULL {
+            if let Some(factor) = self.viewport_psltscale_factor(inst.handle) {
+                uniforms.linetype_scale = factor;
             }
         }
         if preview_wires.iter().any(|wire| wire.name == "from_guide") {

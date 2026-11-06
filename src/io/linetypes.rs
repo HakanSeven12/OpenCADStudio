@@ -232,23 +232,31 @@ pub fn document_complex_lt(document: &Document, name: &str) -> Option<ComplexLt>
         .line_types
         .iter()
         .find(|l| l.name.eq_ignore_ascii_case(name))?;
-    // Treat the linetype as complex only when an element carries *renderable*
-    // embedded content — a non-empty text string, or a shape backed by a shape
-    // file. Some DWGs store dash elements with a placeholder `complex` (shape
-    // #0, null style handle, zero scale) that draws nothing; routing those
-    // through the CPU complex-linetype path needlessly skips the normal dash
-    // shader — and with it the "A"-type endpoint alignment. Fall through to the
-    // ordinary `resolve_pattern` path for them.
-    let has_real_complex = lt.elements.iter().any(|e| {
+    if !has_real_complex(lt) {
+        return None;
+    }
+    document_lt_segments(document, name)
+}
+
+/// Treat a linetype as complex only when an element carries *renderable*
+/// embedded content — a non-empty text string, or a shape backed by a shape
+/// file. Some DWGs store dash elements with a placeholder `complex` (shape
+/// #0, null style handle, zero scale) that draws nothing; routing those
+/// through the CPU complex-linetype path needlessly skips the normal dash
+/// shader — and with it the "A"-type endpoint alignment. Fall through to the
+/// ordinary `resolve_pattern` path for them.
+fn has_real_complex(lt: &LineType) -> bool {
+    lt.elements.iter().any(|e| {
         e.complex.as_ref().is_some_and(|cx| match &cx.content {
             LineTypeComplexContent::Text { text } => !text.trim().is_empty(),
             LineTypeComplexContent::Shape { .. } => !cx.style_handle.is_null(),
         })
-    });
-    if !has_real_complex {
-        return None;
-    }
-    document_lt_segments(document, name)
+    })
+}
+
+/// Whether the drawing's linetype table holds a complex linetype.
+pub fn defines_complex_lt(document: &Document) -> bool {
+    document.line_types.iter().any(has_real_complex)
 }
 
 /// Resolve a complex linetype honouring "**document first, bundled catalog

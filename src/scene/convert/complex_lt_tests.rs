@@ -63,7 +63,7 @@ fn wires_at(document: &Document, handle: Handle, anno: f32, paper_space: bool) -
         None,
         None,
         None,
-        paper_space,
+        paper_space.then_some(1.0),
         &HashSet::default(),
     )
 }
@@ -573,7 +573,7 @@ fn insert_wires(document: &Document, insert: Insert, anno: f32) -> Vec<WireModel
         None,
         None,
         None,
-        false,
+        None,
         &HashSet::default(),
     )
 }
@@ -827,7 +827,7 @@ fn cached_stations(document: &Document, inserts: &[Insert], start: [f64; 2]) -> 
                 Some(&cache),
                 None,
                 None,
-                false,
+                None,
                 &HashSet::default(),
             );
             let origin = [
@@ -896,7 +896,7 @@ fn copies_inheriting_different_complex_linetypes_keep_them_apart() {
             Some(&cache),
             None,
             None,
-            false,
+            None,
             &HashSet::default(),
         )
         .iter()
@@ -1135,4 +1135,159 @@ fn an_mline_element_in_a_block_keeps_its_length_and_its_glyphs() {
         &glyph_stations(&insert_wires(&document, insert, 1.0), [0.0, 0.0], 0.5),
         &line_stations(50.0, 1.0, 1.0, 0.5),
     );
+}
+
+/// A paper layout with one viewport showing the model at 1:`ratio`, with
+/// PSLTSCALE on.
+fn scene_with_viewport(document: Document, ratio: f64) -> (crate::scene::Scene, Handle) {
+    let mut scene = crate::scene::Scene::new();
+    scene.document = document;
+    scene.add_layout("P1").unwrap();
+    scene.current_layout = "P1".to_string();
+    let mut viewport = document::entities::Viewport::new();
+    viewport.width = 100.0;
+    viewport.height = 100.0;
+    viewport.view_height = 100.0 * ratio;
+    viewport.custom_scale = 1.0 / ratio;
+    let handle = scene
+        .document
+        .add_entity_to_layout(EntityType::Viewport(Box::new(viewport)), "P1")
+        .unwrap();
+    scene.document.header.paper_space_linetype_scaling = true;
+    scene.bump_geometry();
+    (scene, handle)
+}
+
+fn fence_line_document() -> Document {
+    let mut document = fence_document();
+    let line = Line::from_points(Vector3::ZERO, Vector3::new(100.0, 0.0, 0.0));
+    add(&mut document, EntityType::Line(line));
+    document
+}
+
+fn viewport_stations(scene: &crate::scene::Scene, viewport: Handle, reach: f64) -> Vec<f64> {
+    glyph_stations(
+        &scene.model_wires_for_viewport_arc(viewport, 0.0),
+        [0.0, 0.0],
+        reach,
+    )
+}
+
+/// Turn a view that just moved into one that has settled.
+fn settle_view(scene: &crate::scene::Scene) {
+    let _ = scene.navigating_lod();
+    let past = iced::time::Instant::now() - std::time::Duration::from_secs(1);
+    scene.nav_changed_at.set(Some(past));
+}
+
+#[test]
+fn psltscale_keeps_a_complex_linetype_at_its_sheet_length_in_a_viewport() {
+    let (scene, viewport) = scene_with_viewport(fence_line_document(), 15.0);
+    assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
+}
+
+#[test]
+fn without_psltscale_a_complex_linetype_scales_with_the_viewport() {
+    let (mut scene, viewport) = scene_with_viewport(fence_line_document(), 15.0);
+    scene.document.header.paper_space_linetype_scaling = false;
+    assert!(viewport_stations(&scene, viewport, 0.5).len() > 60);
+}
+
+#[test]
+fn psltscale_reaches_a_complex_linetype_in_a_block() {
+    let mut document = fence_document();
+    line_block(&mut document, "B", "0", "FENCE", 1.0);
+    let insert = Insert::new("B", Vector3::ZERO);
+    document.add_entity(EntityType::Insert(insert)).unwrap();
+    let (scene, viewport) = scene_with_viewport(document, 15.0);
+    assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
+}
+
+#[test]
+fn psltscale_reaches_a_complex_mline_element() {
+    let mut document = fence_document();
+    add_mline_style(&mut document, "FENCES", &[(0.0, "FENCE")]);
+    document
+        .add_entity(EntityType::MLine(mline(
+            "FENCES",
+            &[(0.0, 0.0), (100.0, 0.0)],
+        )))
+        .unwrap();
+    let (scene, viewport) = scene_with_viewport(document, 15.0);
+    assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
+}
+
+#[test]
+fn a_viewport_relays_its_complex_linetype_only_once_the_zoom_settles() {
+    let (mut scene, viewport) = scene_with_viewport(fence_line_document(), 15.0);
+    scene.active_viewport = Some(viewport);
+    assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
+
+    // Every tick moves the camera, as the wheel does; the bake stays put.
+    for _ in 0..3 {
+        scene.zoom_active_viewport(-1.0, None);
+        scene.camera_generation += 1;
+        assert_fence_at_15(&viewport_stations(&scene, viewport, 8.0));
+    }
+
+    settle_view(&scene);
+    let factor = scene
+        .viewport_psltscale_factor(viewport)
+        .expect("PSLTSCALE");
+    assert_ne!(factor, 15.0);
+    assert_eq!(
+        scene.viewport_complex_lt_factor(viewport, false),
+        Some(factor),
+    );
+    assert_same_stations(
+        &viewport_stations(&scene, viewport, 8.0),
+        &line_stations(100.0, factor as f64, 1.0, 8.0),
+    );
+}
+
+#[test]
+fn a_plot_right_after_a_zoom_takes_the_current_viewport_scale() {
+    let (mut scene, viewport) = scene_with_viewport(fence_line_document(), 15.0);
+    scene.active_viewport = Some(viewport);
+    let _ = viewport_stations(&scene, viewport, 8.0);
+    scene.zoom_active_viewport(-1.0, None);
+    scene.camera_generation += 1;
+    let factor = scene
+        .viewport_psltscale_factor(viewport)
+        .expect("PSLTSCALE");
+    assert_eq!(
+        scene.viewport_complex_lt_factor(viewport, false),
+        Some(15.0)
+    );
+
+    let paper = scene.current_layout_block_handle();
+    let _ = scene.viewport_content_wires(paper, Some(viewport), None, true);
+    assert_eq!(
+        scene.viewport_complex_lt_factor(viewport, false),
+        Some(factor),
+    );
+}
+
+#[test]
+fn a_drawing_without_complex_linetypes_keeps_one_viewport_set_across_zooms() {
+    let mut document = Document::new();
+    document
+        .add_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(100.0, 0.0, 0.0),
+        )))
+        .unwrap();
+    let (mut scene, viewport) = scene_with_viewport(document, 15.0);
+    scene.active_viewport = Some(viewport);
+    assert_eq!(scene.viewport_complex_lt_factor(viewport, false), None);
+    let _ = scene.model_wires_for_viewport_arc(viewport, 0.0);
+    let generation = scene.last_model_wire_gen.get();
+    settle_view(&scene);
+    scene.document.header.paper_space_linetype_scaling = true;
+    if let Some(EntityType::Viewport(vp)) = scene.document.get_entity_mut(viewport) {
+        vp.view_height *= 2.0;
+        vp.custom_scale = vp.height / vp.view_height;
+    }
+    let _ = scene.model_wires_for_viewport_arc(viewport, 0.0);
+    assert_eq!(scene.last_model_wire_gen.get(), generation);
 }

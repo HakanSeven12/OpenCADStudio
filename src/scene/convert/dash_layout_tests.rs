@@ -70,7 +70,7 @@ fn tessellated(document: &Document, entity: EntityType) -> Vec<WireModel> {
         None,
         None,
         None,
-        false,
+        None,
         &HashSet::default(),
     )
 }

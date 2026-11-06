@@ -54,10 +54,12 @@ pub(crate) fn polyline_lt_path(
 pub(crate) fn complex_linetype_anno(
     document: &document::Document,
     anno_scale: f32,
-    paper_space: bool,
+    viewport_lt: Option<f32>,
 ) -> f32 {
-    if !paper_space
-        && anno_scale.is_finite()
+    if let Some(factor) = viewport_lt {
+        return factor;
+    }
+    if anno_scale.is_finite()
         && anno_scale > 1e-9
         && crate::scene::annotative::model_linetypes_follow_annotation(document)
     {
@@ -854,7 +856,7 @@ pub(crate) fn tessellate_entity_dim_text(
         None,
         view_aabb,
         world_per_pixel,
-        false,
+        None,
         reference_only,
     );
     for w in &mut wires {
@@ -880,7 +882,7 @@ pub(crate) fn tessellate_entity(
     block_cache: Option<&cache::block_cache::BlockCache>,
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
-    paper_space: bool,
+    viewport_lt: Option<f32>,
     reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = tessellate_entity_inner(
@@ -894,7 +896,7 @@ pub(crate) fn tessellate_entity(
         block_cache,
         view_aabb,
         world_per_pixel,
-        paper_space,
+        viewport_lt,
         reference_only,
     );
 
@@ -943,10 +945,11 @@ fn tessellate_entity_inner(
     view_aabb: Option<[f32; 4]>,
     // World units per screen pixel for LOD culling. `None` = no LOD.
     world_per_pixel: Option<f32>,
-    // True only when tessellating content shown inside a paper-space viewport.
-    // PSLTSCALE itself is applied by the viewport's GPU uniform so it never
-    // changes resident wire content.
-    paper_space: bool,
+    // `Some` only when tessellating content shown inside a paper-space viewport:
+    // the factor on a complex linetype's pattern there. PSLTSCALE reaches plain
+    // dashes through the viewport's GPU uniform, but a complex linetype's dashes
+    // and glyphs are baked, so they take it here.
+    viewport_lt: Option<f32>,
     // The scene's reference-only designation set (API v9): drives the
     // `WireModel::reference_only` stamp for dimensions' synthesis paths that
     // bypass the wrapper's post-stamp.
@@ -1287,11 +1290,7 @@ fn tessellate_entity_inner(
                 BlockObjectOptions {
                     suppress_root_points: block_use.suppress_root_points,
                     scale_policy: block_use.scale_policy,
-                    complex_lt_anno: Some(complex_linetype_anno(
-                        document,
-                        anno_scale,
-                        paper_space,
-                    )),
+                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, viewport_lt)),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1400,11 +1399,7 @@ fn tessellate_entity_inner(
                 pslt_factor,
                 BlockObjectOptions {
                     scale_policy: block_use.scale_policy,
-                    complex_lt_anno: Some(complex_linetype_anno(
-                        document,
-                        anno_scale,
-                        paper_space,
-                    )),
+                    complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, viewport_lt)),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1455,7 +1450,7 @@ fn tessellate_entity_inner(
                         complex_lt_anno: Some(complex_linetype_anno(
                             document,
                             anno_scale,
-                            paper_space,
+                            viewport_lt,
                         )),
                         ..BlockObjectOptions::default()
                     },
@@ -1531,11 +1526,7 @@ fn tessellate_entity_inner(
             pslt_factor,
             BlockObjectOptions {
                 apply_xclip: true,
-                complex_lt_anno: Some(complex_linetype_anno(
-                    document,
-                    anno_scale,
-                    paper_space,
-                )),
+                complex_lt_anno: Some(complex_linetype_anno(document, anno_scale, viewport_lt)),
                 ..BlockObjectOptions::default()
             },
         );
@@ -1653,10 +1644,9 @@ fn tessellate_entity_inner(
     // An MLINE's linetypes are its elements': its own plays no part.
     if let EntityType::MLine(mline) = e {
         if bases.iter().any(|wire| wire.element_linetype.is_some()) && !sel {
-            let scale = (lt_scale
-                * pslt_factor
-                * complex_linetype_anno(document, anno_scale, paper_space))
-            .max(1e-4);
+            let scale =
+                (lt_scale * pslt_factor * complex_linetype_anno(document, anno_scale, viewport_lt))
+                    .max(1e-4);
             let mut walked = Vec::with_capacity(bases.len());
             for wire in bases {
                 walked.extend(walk_mline_element(document, &mline.common.layer, wire, scale));
@@ -1679,7 +1669,7 @@ fn tessellate_entity_inner(
         .then(|| crate::io::linetypes::resolve_complex_lt(document, lt_name))
         .flatten();
     if let Some(clt) = own_complex {
-        let complex_lt_anno = complex_linetype_anno(document, anno_scale, paper_space);
+        let complex_lt_anno = complex_linetype_anno(document, anno_scale, viewport_lt);
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex
@@ -2263,7 +2253,7 @@ mod viewport_colour_tests {
                     None,
                     None,
                     None,
-                    false,
+                    None,
                     &HashSet::default(),
                 );
                 assert!(!wires.is_empty());

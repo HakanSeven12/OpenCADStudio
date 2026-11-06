@@ -2751,6 +2751,13 @@ command =
     .layer-protected-skipped = Το επίπεδο "0", το Defpoints, το τρέχον επίπεδο και τα επίπεδα εξωτερικών αναφορών δεν μπορούν να διαγραφούν — παραλείφθηκαν.
     .frozen-layer-cannot-be-current = Ένα παγωμένο επίπεδο δεν μπορεί να γίνει τρέχον.
     .current-layer-cannot-be-frozen = Το τρέχον επίπεδο δεν μπορεί να παγώσει — παραλείφθηκε.
+    .layer-cannot-be-renamed = Το επίπεδο "__ocs_fmt_0__" δεν μπορεί να μετονομαστεί.
+    .layer-name-invalid = Το "__ocs_fmt_0__" δεν είναι έγκυρο όνομα επιπέδου (χωρίς < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Υπάρχει ήδη επίπεδο με όνομα "__ocs_fmt_0__".
+    .layer-transparency-range = Η διαφάνεια είναι ακέραιος αριθμός από 0 έως 90.
+    .layer-new-vp-frozen = Νέο, παγωμένο σε κάθε παράθυρο προβολής
+    .layer-objects-selected = Επιλέχθηκαν __ocs_fmt_0__ αντικείμενα στα επιλεγμένα επίπεδα.
+    .layer-objects-in-blocks = από αυτά __ocs_fmt_0__ σε μπλοκ
     .viewport-scale-needs-viewport = Επιλέξτε ένα παράθυρο προβολής ή κάντε διπλό κλικ μέσα του για να ορίσετε την κλίμακά του.
     .viewport-scale-locked = Η προβολή του παραθύρου είναι κλειδωμένη· ξεκλειδώστε την για να αλλάξετε την κλίμακα.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Δεν υπάρχει ανοικτό σχέδιο. Χρησιμοποιήστε NEW ή OPEN για να ξεκινήσετε ένα σχέδιο.

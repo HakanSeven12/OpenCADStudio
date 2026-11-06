@@ -2740,6 +2740,13 @@ command =
     .layer-protected-skipped = लेयर "0", Defpoints, वर्तमान लेयर और बाहरी संदर्भ की लेयर हटाई नहीं जा सकतीं - छोड़ दी गईं।
     .frozen-layer-cannot-be-current = फ्रीज़ की गई लेयर को वर्तमान नहीं बनाया जा सकता।
     .current-layer-cannot-be-frozen = वर्तमान लेयर को फ्रीज़ नहीं किया जा सकता - छोड़ दी गई।
+    .layer-cannot-be-renamed = लेयर "__ocs_fmt_0__" का नाम नहीं बदला जा सकता।
+    .layer-name-invalid = "__ocs_fmt_0__" मान्य लेयर नाम नहीं है (< > / \ " : ; ? * | , = ` के बिना)।
+    .layer-name-taken = "__ocs_fmt_0__" नाम की लेयर पहले से मौजूद है।
+    .layer-transparency-range = पारदर्शिता 0 से 90 तक की पूर्ण संख्या है।
+    .layer-new-vp-frozen = नई, हर व्यूपोर्ट में फ़्रीज़
+    .layer-objects-selected = चुनी गई लेयरों के __ocs_fmt_0__ ऑब्जेक्ट चुने गए।
+    .layer-objects-in-blocks = इनमें से __ocs_fmt_0__ ब्लॉकों में
     .viewport-scale-needs-viewport = स्केल सेट करने के लिए व्यूपोर्ट चुनें या उसमें डबल-क्लिक करें।
     .viewport-scale-locked = व्यूपोर्ट का डिस्प्ले लॉक है; स्केल बदलने के लिए इसे अनलॉक करें।
     .no-drawing-open-use-new-or-open-to-start-a-dra = कोई ड्रॉइंग खुली नहीं है। ड्रॉइंग शुरू करने के लिए NEW या OPEN का उपयोग करें।

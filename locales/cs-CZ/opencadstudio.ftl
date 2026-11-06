@@ -2756,6 +2756,13 @@ command =
     .layer-protected-skipped = Hladinu „0“, Defpoints, aktuální hladinu a hladiny externích referencí nelze odstranit – přeskakuje se.
     .frozen-layer-cannot-be-current = Zmrazenou hladinu nelze nastavit jako aktuální.
     .current-layer-cannot-be-frozen = Aktuální hladinu nelze zmrazit – přeskakuje se.
+    .layer-cannot-be-renamed = Hladinu "__ocs_fmt_0__" nelze přejmenovat.
+    .layer-name-invalid = "__ocs_fmt_0__" není platný název hladiny (bez < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Hladina s názvem "__ocs_fmt_0__" již existuje.
+    .layer-transparency-range = Průhlednost je celé číslo od 0 do 90.
+    .layer-new-vp-frozen = Nová, zmrazená ve všech výřezech
+    .layer-objects-selected = Vybráno __ocs_fmt_0__ objektů ve vybraných hladinách.
+    .layer-objects-in-blocks = z toho __ocs_fmt_0__ v blocích
     .viewport-scale-needs-viewport = Vyberte výřez nebo do něj dvakrát klikněte, abyste nastavili jeho měřítko.
     .viewport-scale-locked = Zobrazení výřezu je zamčené; odemkněte jej, chcete-li změnit měřítko.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Žádný výkres není otevřený. Pro začátek použijte NEW nebo OPEN.

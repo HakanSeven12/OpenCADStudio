@@ -2752,6 +2752,13 @@ command =
     .layer-protected-skipped = Laag "0", Defpoints, de huidige laag en lagen van externe verwijzingen kunnen niet worden verwijderd — overgeslagen.
     .frozen-layer-cannot-be-current = Een bevroren laag kan niet huidig worden gemaakt.
     .current-layer-cannot-be-frozen = De huidige laag kan niet worden bevroren — overgeslagen.
+    .layer-cannot-be-renamed = Laag "__ocs_fmt_0__" kan niet worden hernoemd.
+    .layer-name-invalid = "__ocs_fmt_0__" is geen geldige laagnaam (zonder < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Er bestaat al een laag met de naam "__ocs_fmt_0__".
+    .layer-transparency-range = Transparantie is een geheel getal van 0 tot 90.
+    .layer-new-vp-frozen = Nieuw, bevroren in elke viewport
+    .layer-objects-selected = __ocs_fmt_0__ object(en) op de geselecteerde lagen zijn geselecteerd.
+    .layer-objects-in-blocks = waarvan __ocs_fmt_0__ in blokken
     .viewport-scale-needs-viewport = Selecteer een viewport of dubbelklik erin om de schaal in te stellen.
     .viewport-scale-locked = De weergave van de viewport is vergrendeld; ontgrendel deze om de schaal te wijzigen.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Geen tekening geopend. Gebruik NEW of OPEN om een tekening te starten.

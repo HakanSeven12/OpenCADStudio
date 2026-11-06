@@ -2756,6 +2756,13 @@ command =
     .layer-protected-skipped = Lớp "0", Defpoints, lớp hiện hành và các lớp của tham chiếu ngoài không thể bị xóa - bị bỏ qua.
     .frozen-layer-cannot-be-current = Không thể đặt lớp bị đóng băng làm lớp hiện hành.
     .current-layer-cannot-be-frozen = Không thể đóng băng lớp hiện hành - bị bỏ qua.
+    .layer-cannot-be-renamed = Không thể đổi tên lớp "__ocs_fmt_0__".
+    .layer-name-invalid = "__ocs_fmt_0__" không phải là tên lớp hợp lệ (không dùng < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Đã có lớp tên "__ocs_fmt_0__".
+    .layer-transparency-range = Độ trong suốt là số nguyên từ 0 đến 90.
+    .layer-new-vp-frozen = Mới, đóng băng trong mọi khung nhìn
+    .layer-objects-selected = Đã chọn __ocs_fmt_0__ đối tượng trên các lớp đã chọn.
+    .layer-objects-in-blocks = trong đó __ocs_fmt_0__ trong khối
     .viewport-scale-needs-viewport = Chọn một khung nhìn hoặc nhấp đúp vào đó để đặt tỷ lệ.
     .viewport-scale-locked = Hiển thị khung nhìn đang bị khóa; hãy mở khóa để đổi tỷ lệ.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Chưa mở bản vẽ nào. Dùng NEW hoặc OPEN để bắt đầu.

@@ -2751,6 +2751,13 @@ command =
     .layer-protected-skipped = Слой "0", Defpoints, текущият слой и слоевете на външни препратки не могат да бъдат изтрити — пропуснати.
     .frozen-layer-cannot-be-current = Замразен слой не може да стане текущ.
     .current-layer-cannot-be-frozen = Текущият слой не може да бъде замразен — пропуснат.
+    .layer-cannot-be-renamed = Слоят "__ocs_fmt_0__" не може да бъде преименуван.
+    .layer-name-invalid = "__ocs_fmt_0__" не е валидно име на слой (без < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Вече съществува слой с име "__ocs_fmt_0__".
+    .layer-transparency-range = Прозрачността е цяло число от 0 до 90.
+    .layer-new-vp-frozen = Нов, замразен във всеки изглед
+    .layer-objects-selected = Избрани са __ocs_fmt_0__ обекта от избраните слоеве.
+    .layer-objects-in-blocks = от тях __ocs_fmt_0__ в блокове
     .viewport-scale-needs-viewport = Изберете прозорец за изглед или щракнете двукратно в него, за да зададете мащаба му.
     .viewport-scale-locked = Изгледът на прозореца е заключен; отключете го, за да промените мащаба.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Няма отворен чертеж. Използвай NEW или OPEN, за да започнеш чертеж.

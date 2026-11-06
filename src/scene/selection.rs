@@ -359,6 +359,23 @@ impl Scene {
         }
     }
 
+    /// Select the current space's objects on `layers` (names, any case).
+    /// Returns how many are selected.
+    pub fn select_objects_on_layers(&mut self, layers: &[String]) -> usize {
+        let handles: HashSet<Handle> = self
+            .qselect_candidate_handles(crate::app::QSelectScope::CurrentSpace)
+            .into_iter()
+            .filter(|h| {
+                self.document.get_entity(*h).is_some_and(|e| {
+                    let layer = &e.common().layer;
+                    layers.iter().any(|name| name.eq_ignore_ascii_case(layer))
+                })
+            })
+            .collect();
+        self.replace_selection(handles);
+        self.selected.len()
+    }
+
     pub fn qselect_candidate_count(&self, scope: crate::app::QSelectScope) -> usize {
         self.qselect_candidate_handles(scope).len()
     }

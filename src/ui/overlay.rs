@@ -602,9 +602,8 @@ pub struct GripMarker {
     pub is_hovered: bool,
     /// Screen-plane direction with positive Y pointing up.
     pub dir: Option<[f32; 2]>,
-    /// True → a plugin-declared custom grip (API v11): drawn with the
-    /// distinct plugin accent so it reads differently from built-in
-    /// selection grips.
+    /// True → a plugin-declared custom grip (API v11). Its idle, hover and
+    /// active paint matches the built-in selection grips.
     pub is_plugin: bool,
     pub is_authoring: bool,
     pub is_dynamic: bool,
@@ -1527,6 +1526,30 @@ fn draw_move_gizmo(frame: &mut canvas::Frame, grips: &[GripMarker]) {
     }
 }
 
+fn idle_grip_color(
+    grip: &GripMarker,
+    palette: &iced::theme::Palette,
+    visual: &SelectionVisualOptions,
+) -> Color {
+    if grip.is_dynamic {
+        codec::types::aci_table::aci_to_rgb(visual.grip_dynamic)
+            .map(|(r, g, b)| Color::from_rgb8(r, g, b))
+            .unwrap_or(palette.primary.base.color)
+    } else if matches!(grip.shape, GripShape::Diamond) {
+        // The table-cell fill grip is light cyan, apart from the cell range's
+        // square grips.
+        Color::from_rgb8(0, 191, 255)
+    } else if visual.grip_color > 0 {
+        if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
+            Color::from_rgb8(r, g, b)
+        } else {
+            palette.primary.base.color
+        }
+    } else {
+        palette.primary.base.color
+    }
+}
+
 fn draw_grip_marker(
     frame: &mut canvas::Frame,
     grip: &GripMarker,
@@ -1648,26 +1671,8 @@ fn draw_grip_marker(
     } else {
         let color = if grip.is_authoring {
             authoring.grip
-        } else if grip.is_dynamic {
-            codec::types::aci_table::aci_to_rgb(visual.grip_dynamic)
-                .map(|(r,g,b)| Color::from_rgb8(r,g,b)).unwrap_or(palette.primary.base.color)
-        } else if grip.is_plugin {
-            // Plugin-declared custom grip (API v11): a distinct accent so
-            // it never reads as a built-in selection grip. Hot and hover
-            // treatments stay identical to built-ins.
-            palette.success.base.color
-        } else if matches!(grip.shape, GripShape::Diamond) {
-            // The table-cell fill grip is light cyan, apart from the cell
-            // range's square grips.
-            Color::from_rgb8(0, 191, 255)
-        } else if visual.grip_color > 0 {
-            if let Some((r, g, b)) = codec::types::aci_table::aci_to_rgb(visual.grip_color) {
-                Color::from_rgb8(r, g, b)
-            } else {
-                palette.primary.base.color
-            }
         } else {
-            palette.primary.base.color
+            idle_grip_color(grip, palette, visual)
         };
         let fill = if grip.is_filled || grip.is_dynamic || matches!(
             grip.shape,
@@ -6702,6 +6707,43 @@ mod selection_canvas_state_tests {
 #[cfg(test)]
 mod selection_visual_color_tests {
     use super::*;
+
+    #[test]
+    fn idle_plugin_square_matches_native_custom_color_and_square_paint() {
+        let native = GripMarker {
+            pos: Point::ORIGIN,
+            shape: GripShape::Square,
+            is_hot: false,
+            is_hovered: false,
+            dir: None,
+            is_plugin: false,
+            is_authoring: false,
+            is_dynamic: false,
+            is_filled: false,
+        };
+        let plugin = GripMarker {
+            is_plugin: true,
+            ..native.clone()
+        };
+        let palette = Theme::Dark.palette();
+        let mut visual = SelectionVisualOptions::default();
+        assert_eq!(
+            idle_grip_color(&plugin, palette, &visual),
+            idle_grip_color(&native, palette, &visual),
+            "the default theme path is shared too"
+        );
+
+        visual.grip_color = 1;
+        let native_color = idle_grip_color(&native, palette, &visual);
+        let plugin_color = idle_grip_color(&plugin, palette, &visual);
+        assert_eq!(plugin_color, native_color);
+        assert_eq!(plugin_color, Color::from_rgb8(255, 0, 0));
+        assert_ne!(plugin_color, palette.success.base.color);
+        assert_eq!(plugin.shape, native.shape);
+        assert_eq!(plugin.is_filled, native.is_filled);
+        // Both markers therefore take the same square path and translucent
+        // background fill + colored stroke branch in `draw_grip_marker`.
+    }
 
     #[test]
     fn default_selection_colors_match_theme_palette() {

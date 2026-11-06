@@ -50,7 +50,7 @@ pub fn serialize_document(doc: &Document, ext: &str) -> Result<Vec<u8>, String> 
 /// Converters for formats other than DWG/DXF, which keep their own richer read
 /// and write paths. A converter crate implementing [`Format`] is listed here to
 /// become available to open, save and the file dialogs.
-const EXTERNAL_FORMATS: &[&(dyn Format + Sync)] = &[&document::Ifcx];
+const EXTERNAL_FORMATS: &[&(dyn Format + Sync)] = &[&ifccad::IfccadFormat];
 
 pub fn external_formats() -> &'static [&'static (dyn Format + Sync)] {
     EXTERNAL_FORMATS
@@ -79,6 +79,15 @@ pub fn external_format(ext: &str) -> Option<&'static (dyn Format + Sync)> {
         .iter()
         .copied()
         .find(|format| format.extensions().iter().any(|e| e.eq_ignore_ascii_case(ext)))
+}
+
+/// Filename gate shared by browser drop and URL opening. Matches the reader's
+/// extension convention, including dot-less names such as `DWG`.
+pub fn is_drawing_name(name: &str) -> bool {
+    let extension = name.rsplit('.').next().unwrap_or_default();
+    extension.eq_ignore_ascii_case("dwg")
+        || extension.eq_ignore_ascii_case("dxf")
+        || external_format(extension).is_some()
 }
 
 /// Write `doc` with a converter. Unless the user allowed it beforehand (see
@@ -299,6 +308,38 @@ mod tests {
         line.common.handle = doc.allocate_handle();
         let _ = doc.add_entity(EntityType::Line(line));
         doc
+    }
+
+    #[test]
+    fn ifccad_names_pass_the_shared_web_open_filter() {
+        for name in [
+            "plan.ifccad", "PLAN.IFCCAD", "plan.ifcx", "PLAN.IFCX", "plan.dwg", "PLAN.DXF",
+        ] {
+            assert!(is_drawing_name(name), "{name}");
+        }
+        for name in ["plan.ifccad.txt", "image.png", "model.ifc", ""] {
+            assert!(!is_drawing_name(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn ifccad_extension_aliases_roundtrip_through_the_production_reader() {
+        let source = sample_document();
+        for extension in ["ifccad", "IFCCAD", "ifcx", "IFCX"] {
+            let format = external_format(extension).expect("native drawing extension");
+            let bytes = serialize_document(&source, extension).unwrap();
+            assert_eq!(bytes.first(), Some(&b'{'), "must not fall back to DWG");
+            let reopened = read_external(format, &bytes).unwrap();
+            assert!(reopened
+                .document
+                .entities()
+                .any(|e| matches!(e, EntityType::Line(_))));
+            assert!(read_external(format, b"{}").is_err());
+        }
+        for label in ["IFCCAD", "IFCX", "ifccad"] {
+            let format = external_format_by_label(label).unwrap();
+            assert_eq!(format.extensions().first(), Some(&"ifccad"));
+        }
     }
 
     #[test]

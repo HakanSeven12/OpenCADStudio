@@ -12,17 +12,19 @@
 //! fetched (never `file:`, `javascript:`, or any other scheme — refused with
 //! a console warning), the body is read with the same capped streaming reader
 //! (64 MB cap, 8 s deadline, honest network/CORS/size/status classification),
-//! and the URL must end in a `.dwg`/`.dxf` name like a drop. Fetched bytes
+//! and the URL must end in a supported drawing name like a drop. Fetched bytes
 //! then enter the guarded drop-open queue (`web_drop::enqueue_open`), so the
 //! deep link cannot bypass the open slot guard or the parse + recovery
 //! machinery every other open goes through.
+
+use ocs_save::is_drawing_name;
 
 /// What `?file=` asked for, after validation.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LinkTarget {
     /// An absolute `http(s)` URL whose trailing path segment is a
-    /// `.dwg`/`.dxf` name; `name` is that decoded segment.
+    /// supported drawing name; `name` is that decoded segment.
     Url { url: String, name: String },
     /// A bare drawing name (no scheme) — resolved against the OPFS recent
     /// copies, the same store `open_recent_web` reads.
@@ -39,7 +41,7 @@ pub enum LinkRefusal {
     Scheme,
     /// Started with `http(s)://` but did not parse as an absolute URL.
     BadUrl,
-    /// Parsed, but the trailing path segment is not a `.dwg`/`.dxf` name.
+    /// Parsed, but the trailing path segment is not a supported drawing name.
     NotDrawing,
 }
 
@@ -57,7 +59,7 @@ pub enum ParsedLink {
 /// Extract and validate the `file` query parameter from a raw `search`
 /// string (with or without the leading `?`). Values are form-decoded
 /// (`%XX` and `+`), trimmed, and scheme-gated: `http(s)` URLs must parse and
-/// end in a `.dwg`/`.dxf` path segment; any other scheme-like prefix is
+/// end in a supported drawing path segment; any other scheme-like prefix is
 /// refused (never dereferenced); anything else is treated as a bare drawing
 /// name for the OPFS recent-copy lookup.
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))] // unit-tested on native
@@ -109,7 +111,7 @@ pub fn refusal_warning(refusal: LinkRefusal, value: &str) -> String {
             format!("ocs: ignored ?file=\"{value}\" (not a valid absolute URL)")
         }
         LinkRefusal::NotDrawing => {
-            format!("ocs: ignored ?file=\"{value}\" (URL must end in a .dwg/.dxf name)")
+            format!("ocs: ignored ?file=\"{value}\" (URL must end in a supported drawing name)")
         }
     }
 }
@@ -133,7 +135,7 @@ fn scheme_prefix(value: &str) -> Option<String> {
 }
 
 /// The URL's trailing path segment, percent-decoded, when it is a
-/// `.dwg`/`.dxf` drawing name. Same extension convention as the drop filter
+/// supported drawing name. Same extension convention as the drop filter
 /// (`web_drop::is_drawing_name`): a dot-less segment is its own extension.
 fn trailing_drawing_name(url: &url::Url) -> Option<String> {
     // `Url::path()` keeps the percent-encoding, so decode it here; query and
@@ -144,20 +146,6 @@ fn trailing_drawing_name(url: &url::Url) -> Option<String> {
     }
     Some(segment)
 }
-
-/// Same convention as `web_drop::is_drawing_name` (which lives in the
-/// wasm-gated drop module, so the rule is restated here for the pure parser).
-fn is_drawing_name(name: &str) -> bool {
-    matches!(
-        name.rsplit('.')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "dwg" | "dxf"
-    )
-}
-
 /// Decode `%XX` escapes (NOT `+`, which path segments do not carry). Invalid
 /// or truncated escapes pass through verbatim; undecodable bytes become
 /// U+FFFD via lossy conversion — a name is display data, never a path.

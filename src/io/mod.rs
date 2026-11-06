@@ -204,6 +204,7 @@ pub async fn pick_open_path() -> Option<(PathBuf, u64)> {
             crate::t!("CAD Files").as_ref(),
             &[
                 "dwg", "dxf", "dwt", "bak", "sv$", "DWG", "DXF", "DWT", "BAK",
+                "ifccad", "ifcx", "IFCCAD", "IFCX",
             ],
         )
         .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
@@ -620,7 +621,7 @@ pub async fn pick_and_load_web(progress: Arc<OpenProgressState>) -> WebOpenOutco
         .set_title(crate::t!("Open CAD file").as_ref())
         .add_filter(
             crate::t!("CAD Files").as_ref(),
-            &["dwg", "dxf", "dwt", "DWG", "DXF", "DWT"],
+            &["dwg", "dxf", "dwt", "DWG", "DXF", "DWT", "ifccad", "ifcx", "IFCCAD", "IFCX"],
         )
         .add_filter(
             crate::t!("Drawing Template (*.dwt)").as_ref(),

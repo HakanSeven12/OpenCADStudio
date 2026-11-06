@@ -59,6 +59,7 @@ pub(crate) mod helpers;
 mod history;
 mod layer_filters;
 pub(crate) mod layer_groups;
+pub(crate) mod layer_import;
 mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
@@ -1452,6 +1453,8 @@ pub(super) struct OpenCADStudio {
     qselect: Option<QSelectState>,
     /// The FILTER dialog while it is open.
     filter_dialog: Option<filter_dialog::FilterDialogState>,
+    /// The Layer manager's import dialog while it is open.
+    layer_import: Option<layer_import::LayerImportState>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -4334,6 +4337,8 @@ pub enum Message {
         crate::ui::window::layers::TreeNode,
         crate::ui::window::layers::TreeAction,
     ),
+    /// Import layers from another drawing.
+    LayerImport(layer_import::LayerImportMsg),
     /// A new layer, frozen in every layout viewport.
     LayerNewVpFrozen,
     /// A layer row's right-click menu: (the row's layer, what to do).
@@ -6320,6 +6325,7 @@ impl OpenCADStudio {
             grip_text_slide: false,
             qselect: None,
             filter_dialog: None,
+            layer_import: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

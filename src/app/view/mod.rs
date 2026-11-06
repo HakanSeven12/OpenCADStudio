@@ -3474,6 +3474,10 @@ bg={bg_ms:.1}ms n={view_count}"
             Some(state) => self.filter_overlay(state),
             None => iced::widget::Space::new().width(0).height(0).into(),
         };
+        let layer_import_layer: Element<'_, Message> = match &self.layer_import {
+            Some(state) => self.layer_import_overlay(state),
+            None => iced::widget::Space::new().width(0).height(0).into(),
+        };
         let qselect_layer: Element<'_, Message> = if let Some(state) = &self.qselect {
             qselect_overlay(
                 state,
@@ -3561,6 +3565,7 @@ bg={bg_ms:.1}ms n={view_count}"
             ribbon_menu_layer,
             qselect_layer,
             filter_layer,
+            layer_import_layer,
             snap_override_layer,
             open_progress_layer,
             keytip_layer,

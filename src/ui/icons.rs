@@ -65,6 +65,7 @@ pub static CHECK: &[u8] = include_bytes!("../../assets/icons/ui/check.svg");
 pub static CLOSE: &[u8] = include_bytes!("../../assets/icons/ui/close.svg");
 pub static EYEDROPPER: &[u8] = include_bytes!("../../assets/icons/ui/eyedropper.svg");
 pub static PLUS: &[u8] = include_bytes!("../../assets/icons/ui/plus.svg");
+pub static IMPORT: &[u8] = include_bytes!("../../assets/icons/ui/import.svg");
 pub static REFRESH: &[u8] = include_bytes!("../../assets/icons/ui/refresh.svg");
 pub static SWAP: &[u8] = include_bytes!("../../assets/icons/ui/swap.svg");
 pub static MINUS: &[u8] = include_bytes!("../../assets/icons/ui/minus.svg");

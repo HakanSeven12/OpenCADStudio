@@ -6513,6 +6513,13 @@ ui =
         ຄຸນສົມບັດດ່ວນ
         ແຜງລອຍເມື່ອມີການເລືອກ
     .quick-select-title-case = ການເລືອກດ່ວນ
+    .qselect-update-condition = ອັບເດດເງື່ອນໄຂ
+    .qselect-add-condition = ເພີ່ມເງື່ອນໄຂ
+    .qselect-cancel-edit = ຍົກເລີກການແກ້ໄຂ
+    .qselect-clear-conditions = ລ້າງເງື່ອນໄຂ
+    .qselect-no-conditions = ບໍ່ມີເງື່ອນໄຂທີ່ເພີ່ມ.
+    .qselect-conditions-heading = ເງື່ອນໄຂ (ທຸກເງື່ອນໄຂຂອງປະເພດວັດຖຸຕ້ອງກົງກັນ)
+    .qselect-list-note = ເມື່ອລາຍການບໍ່ຫວ່າງ, ຈະໃຊ້ສະເພາະເງື່ອນໄຂໃນລາຍການເທົ່ານັ້ນ.
     .quick-select-menu-period-title-case = ການເລືອກດ່ວນ...
     .reading-file = ກຳລັງອ່ານໄຟລ໌…
     .redo = ເຮັດຄືນ

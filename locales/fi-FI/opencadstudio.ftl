@@ -6509,6 +6509,13 @@ ui =
         Pikaominaisuudet
         Kelluva paneeli valinnassa
     .quick-select-title-case = Pikavalinta
+    .qselect-update-condition = Päivitä ehto
+    .qselect-add-condition = Lisää ehto
+    .qselect-cancel-edit = Peruuta muokkaus
+    .qselect-clear-conditions = Tyhjennä ehdot
+    .qselect-no-conditions = Ehtoja ei ole lisätty.
+    .qselect-conditions-heading = Ehdot (kaikkien objektin tyypin ehtojen on täytyttävä)
+    .qselect-list-note = Kun luettelo ei ole tyhjä, vain luetellut ehdot otetaan käyttöön.
     .quick-select-menu-period-title-case = Pikavalinta...
     .reading-file = Luetaan tiedostoa…
     .redo = Toista

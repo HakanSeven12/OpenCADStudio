@@ -344,7 +344,17 @@ impl Scene {
 
     fn qselect_candidate_handles(&self, scope: crate::app::QSelectScope) -> Vec<Handle> {
         match scope {
-            crate::app::QSelectScope::CurrentSpace => self.current_layout_entity_handles(),
+            // Through an active viewport the current space is model space,
+            // the same space picking works in (#2611).
+            crate::app::QSelectScope::CurrentSpace => {
+                let block = self.interaction_block_handle();
+                self.document
+                    .block_records
+                    .iter()
+                    .find(|br| br.handle == block)
+                    .map(|br| br.entity_handles.clone())
+                    .unwrap_or_default()
+            }
             crate::app::QSelectScope::CurrentSelection => self.selected_handles_in_order(),
         }
     }
@@ -487,13 +497,23 @@ impl Scene {
             let Some(e) = self.document.get_entity(h) else {
                 continue;
             };
-            let matches_filter = conditions.iter().all(|condition| {
+            // A condition with a type applies to objects of that type only, so
+            // samples of a Line and of a Circle find lines like the one and
+            // circles like the other (#2611). An object whose type no typed
+            // condition names is left out when there are typed conditions.
+            let own_type = entity_type_name(e);
+            let typed = conditions.iter().any(|c| c.type_filter.is_some());
+            let type_named = conditions
+                .iter()
+                .any(|c| c.type_filter.as_deref() == Some(own_type));
+            let all_match = conditions.iter().all(|condition| {
                 let type_ok = condition
                     .type_filter
                     .as_deref()
-                    .is_none_or(|t| entity_type_name(e) == t);
+                    .is_none_or(|t| own_type == t);
                 let prop_ok = if !type_ok {
-                    true
+                    // Another type's condition: not this object's concern.
+                    return true;
                 } else {
                     match (
                         condition
@@ -505,8 +525,8 @@ impl Scene {
                         (None, _) | (_, QSelectOp::Any) => true,
                         (Some(field), op) => match self.entity_property_value(e, field) {
                             Some(actual) => match op {
-                                QSelectOp::Eq => actual.eq_ignore_ascii_case(&condition.value),
-                                QSelectOp::Neq => !actual.eq_ignore_ascii_case(&condition.value),
+                                QSelectOp::Eq => qselect_values_equal(&actual, &condition.value),
+                                QSelectOp::Neq => !qselect_values_equal(&actual, &condition.value),
                                 QSelectOp::Gt | QSelectOp::Lt => {
                                     match (
                                         crate::entities::common::parse_f64(&actual),
@@ -525,6 +545,7 @@ impl Scene {
                 };
                 type_ok && prop_ok
             });
+            let matches_filter = (!typed || type_named) && all_match;
             let keep = match mode {
                 QSelectMode::Include => matches_filter,
                 QSelectMode::Exclude => !matches_filter,
@@ -1431,6 +1452,36 @@ mod tests {
         assert!(scene.selected.contains(&first) && scene.selected.contains(&second));
     }
 
+    /// #2611: samples of two types find objects like either one, and a typed
+    /// number matches its displayed value whatever the precision.
+    #[test]
+    fn qselect_samples_of_two_types_and_numbers_compare_as_numbers() {
+        use crate::app::{QSelectMode, QSelectScope};
+        use codec::entities::{Circle, Line};
+        use codec::types::Vector3;
+        let mut scene = Scene::new();
+        let line = scene.add_entity(EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::new(10.0, 0.0, 0.0),
+        )));
+        let mut circle = Circle::new();
+        circle.radius = 3.0;
+        let circle = scene.add_entity(EntityType::Circle(circle));
+        let mut conditions = scene.qselect_conditions_from_entity(line);
+        conditions.extend(scene.qselect_conditions_from_entity(circle));
+        let found = scene.qselect_conditions(
+            QSelectScope::CurrentSpace,
+            &conditions,
+            QSelectMode::Include,
+            false,
+        );
+        assert_eq!(found, 2, "a Line and a Circle sample find both");
+
+        assert!(super::qselect_values_equal("10.0000", "10"));
+        assert!(!super::qselect_values_equal("10.0000", "10.5"));
+        assert!(super::qselect_values_equal("Walls", "WALLS"));
+    }
+
     #[test]
     fn pe_url_of_reads_standard_hyperlink_xdata() {
         use codec::entities::Point;
@@ -1782,5 +1833,15 @@ impl Scene {
         self.table_cells
             .filter(|cells| self.selected.contains(&cells.table))
             .map(|cells| cells.table)
+    }
+}
+
+/// `=` and `!=` in QSELECT: numbers compare as numbers, so a typed `10`
+/// matches a length shown as `10.0000`; anything else as text, ignoring case.
+fn qselect_values_equal(actual: &str, wanted: &str) -> bool {
+    use crate::entities::common::parse_f64;
+    match (parse_f64(actual), parse_f64(wanted)) {
+        (Some(a), Some(b)) => (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0),
+        _ => actual.eq_ignore_ascii_case(wanted),
     }
 }

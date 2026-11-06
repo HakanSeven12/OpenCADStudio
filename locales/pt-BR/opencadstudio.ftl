@@ -6512,6 +6512,13 @@ ui =
         Propriedades rápidas
         Painel flutuante ao selecionar
     .quick-select-title-case = Seleção rápida
+    .qselect-update-condition = Atualizar condição
+    .qselect-add-condition = Adicionar condição
+    .qselect-cancel-edit = Cancelar edição
+    .qselect-clear-conditions = Limpar condições
+    .qselect-no-conditions = Nenhuma condição adicionada.
+    .qselect-conditions-heading = Condições (todas as do tipo do objeto devem corresponder)
+    .qselect-list-note = Quando a lista não está vazia, só as condições listadas são aplicadas.
     .quick-select-menu-period-title-case = Seleção rápida...
     .reading-file = Lendo arquivo…
     .redo = Refazer

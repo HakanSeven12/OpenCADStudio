@@ -6512,6 +6512,13 @@ ui =
         Γρήγορες ιδιότητες
         Αιωρούμενο πλαίσιο κατά την επιλογή
     .quick-select-title-case = Γρήγορη επιλογή
+    .qselect-update-condition = Ενημέρωση συνθήκης
+    .qselect-add-condition = Προσθήκη συνθήκης
+    .qselect-cancel-edit = Ακύρωση επεξεργασίας
+    .qselect-clear-conditions = Εκκαθάριση συνθηκών
+    .qselect-no-conditions = Δεν έχουν προστεθεί συνθήκες.
+    .qselect-conditions-heading = Συνθήκες (πρέπει να ισχύουν όλες για τον τύπο του αντικειμένου)
+    .qselect-list-note = Όταν η λίστα δεν είναι κενή, εφαρμόζονται μόνο οι συνθήκες της.
     .quick-select-menu-period-title-case = Γρήγορη επιλογή...
     .reading-file = Ανάγνωση αρχείου…
     .redo = Επανάληψη

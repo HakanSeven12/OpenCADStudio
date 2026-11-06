@@ -6524,6 +6524,13 @@ ui =
         خصائص سريعة
         لوحة عائمة عند التحديد
     .quick-select-title-case = تحديد سريع
+    .qselect-update-condition = تحديث الشرط
+    .qselect-add-condition = إضافة شرط
+    .qselect-cancel-edit = إلغاء التعديل
+    .qselect-clear-conditions = مسح الشروط
+    .qselect-no-conditions = لم تتم إضافة شروط.
+    .qselect-conditions-heading = الشروط (يجب أن تتطابق كل شروط نوع الكائن)
+    .qselect-list-note = عندما لا تكون القائمة فارغة، تُطبّق الشروط المدرجة فقط.
     .quick-select-menu-period-title-case = تحديد سريع...
     .reading-file = يجري قراءة الملف…
     .redo = إعادة

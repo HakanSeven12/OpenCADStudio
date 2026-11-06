@@ -6513,6 +6513,13 @@ ui =
         Quick Properties
         Floating panel on selection
     .quick-select-title-case = Quick Select
+    .qselect-update-condition = Update condition
+    .qselect-add-condition = Add condition
+    .qselect-cancel-edit = Cancel edit
+    .qselect-clear-conditions = Clear conditions
+    .qselect-no-conditions = No conditions added.
+    .qselect-conditions-heading = Conditions (all of an object's type must match)
+    .qselect-list-note = When the list is nonempty, only listed conditions are applied.
     .quick-select-menu-period-title-case = Quick Select...
     .reading-file = Reading file…
     .redo = Redo

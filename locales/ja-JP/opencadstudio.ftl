@@ -6500,6 +6500,13 @@ ui =
         クイックプロパティ
         選択時にフローティングパネルを表示
     .quick-select-title-case = クイック選択
+    .qselect-update-condition = 条件を更新
+    .qselect-add-condition = 条件を追加
+    .qselect-cancel-edit = 編集をキャンセル
+    .qselect-clear-conditions = 条件をクリア
+    .qselect-no-conditions = 条件が追加されていません。
+    .qselect-conditions-heading = 条件 (オブジェクトの種類の条件をすべて満たす必要があります)
+    .qselect-list-note = リストが空でない場合は、リストの条件だけが適用されます。
     .quick-select-menu-period-title-case = クイック選択...
     .reading-file = ファイルを読み込み中…
     .redo = やり直し

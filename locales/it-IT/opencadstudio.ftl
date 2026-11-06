@@ -6511,6 +6511,13 @@ ui =
         Proprietà rapide
         Pannello mobile su selezione
     .quick-select-title-case = Selezione rapida
+    .qselect-update-condition = Aggiorna condizione
+    .qselect-add-condition = Aggiungi condizione
+    .qselect-cancel-edit = Annulla modifica
+    .qselect-clear-conditions = Cancella condizioni
+    .qselect-no-conditions = Nessuna condizione aggiunta.
+    .qselect-conditions-heading = Condizioni (devono valere tutte quelle del tipo dell'oggetto)
+    .qselect-list-note = Se l'elenco non è vuoto, si applicano solo le condizioni elencate.
     .quick-select-menu-period-title-case = Selezione rapida...
     .reading-file = Lettura del file…
     .redo = Rifare

@@ -6510,6 +6510,13 @@ ui =
         Sneleigenschappen
         Zwevend paneel bij selectie
     .quick-select-title-case = Snel selecteren
+    .qselect-update-condition = Voorwaarde bijwerken
+    .qselect-add-condition = Voorwaarde toevoegen
+    .qselect-cancel-edit = Bewerking annuleren
+    .qselect-clear-conditions = Voorwaarden wissen
+    .qselect-no-conditions = Geen voorwaarden toegevoegd.
+    .qselect-conditions-heading = Voorwaarden (alle voor het objecttype moeten kloppen)
+    .qselect-list-note = Als de lijst niet leeg is, gelden alleen de vermelde voorwaarden.
     .quick-select-menu-period-title-case = Snel selecteren...
     .reading-file = Bestand wordt gelezen...
     .redo = Opnieuw

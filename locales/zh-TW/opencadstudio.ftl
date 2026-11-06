@@ -6507,6 +6507,13 @@ ui =
         快捷特性
         選中時顯示浮動面板
     .quick-select-title-case = 快速選擇
+    .qselect-update-condition = 更新條件
+    .qselect-add-condition = 新增條件
+    .qselect-cancel-edit = 取消編輯
+    .qselect-clear-conditions = 清除條件
+    .qselect-no-conditions = 未新增條件。
+    .qselect-conditions-heading = 條件（物件類型的所有條件都須符合）
+    .qselect-list-note = 清單不為空時，只套用列出的條件。
     .quick-select-menu-period-title-case = 快速選擇...
     .reading-file = 正在讀取檔案…
     .redo = 重做

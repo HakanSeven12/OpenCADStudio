@@ -6510,6 +6510,13 @@ ui =
         Schnelle Eigenschaften
         Schwimmendes Panel bei Auswahl
     .quick-select-title-case = Schnell auswählen
+    .qselect-update-condition = Bedingung aktualisieren
+    .qselect-add-condition = Bedingung hinzufügen
+    .qselect-cancel-edit = Bearbeitung abbrechen
+    .qselect-clear-conditions = Bedingungen löschen
+    .qselect-no-conditions = Keine Bedingungen hinzugefügt.
+    .qselect-conditions-heading = Bedingungen (alle für den Objekttyp müssen zutreffen)
+    .qselect-list-note = Ist die Liste nicht leer, gelten nur die aufgeführten Bedingungen.
     .quick-select-menu-period-title-case = Schnellauswahl…
     .reading-file = Lesedatei...
     .redo = Wiederholen

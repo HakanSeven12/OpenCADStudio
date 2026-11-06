@@ -6511,6 +6511,13 @@ ui =
         Szybkie właściwości
         Pływający panel po wybraniu
     .quick-select-title-case = Szybki wybór
+    .qselect-update-condition = Aktualizuj warunek
+    .qselect-add-condition = Dodaj warunek
+    .qselect-cancel-edit = Anuluj edycję
+    .qselect-clear-conditions = Wyczyść warunki
+    .qselect-no-conditions = Nie dodano warunków.
+    .qselect-conditions-heading = Warunki (wszystkie dla typu obiektu muszą być spełnione)
+    .qselect-list-note = Gdy lista nie jest pusta, stosowane są tylko wymienione warunki.
     .quick-select-menu-period-title-case = Szybki wybór...
     .reading-file = Czytanie pliku…
     .redo = Powtórz

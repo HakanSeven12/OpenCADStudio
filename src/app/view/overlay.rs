@@ -2133,7 +2133,7 @@ fn qselect_content<'a>(
             button::secondary,
         ),
         Space::new().height(8),
-        section_label(t!("Conditions (all must match)")),
+        section_label(t!("Conditions (all of an object's type must match)")),
         Space::new().height(5),
         iced::widget::scrollable(condition_rows)
             .height(120)

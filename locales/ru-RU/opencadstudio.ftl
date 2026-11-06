@@ -6513,6 +6513,13 @@ ui =
         Быстрые свойства
         Плавающая панель на выбор
     .quick-select-title-case = Быстрое Выделение
+    .qselect-update-condition = Обновить условие
+    .qselect-add-condition = Добавить условие
+    .qselect-cancel-edit = Отменить изменение
+    .qselect-clear-conditions = Очистить условия
+    .qselect-no-conditions = Условия не добавлены.
+    .qselect-conditions-heading = Условия (должны выполняться все для типа объекта)
+    .qselect-list-note = Если список не пуст, применяются только перечисленные условия.
     .quick-select-menu-period-title-case = Быстрый выбор...
     .reading-file = Чтение файла...
     .redo = Повторить

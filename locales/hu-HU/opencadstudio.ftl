@@ -6531,6 +6531,13 @@ ui =
         Gyors tulajdonságok
         Lebegő panel a kiválasztáskor
     .quick-select-title-case = Gyors kiválasztás
+    .qselect-update-condition = Feltétel frissítése
+    .qselect-add-condition = Feltétel hozzáadása
+    .qselect-cancel-edit = Szerkesztés megszakítása
+    .qselect-clear-conditions = Feltételek törlése
+    .qselect-no-conditions = Nincs hozzáadott feltétel.
+    .qselect-conditions-heading = Feltételek (az objektum típusára vonatkozó összesnek teljesülnie kell)
+    .qselect-list-note = Ha a lista nem üres, csak a felsorolt feltételek érvényesek.
     .quick-select-menu-period-title-case = Gyors kiválasztás...
     .reading-file = Fájl olvasása…
     .redo = Újra

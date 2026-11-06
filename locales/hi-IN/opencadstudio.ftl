@@ -6500,6 +6500,13 @@ ui =
         त्वरित गुण
         चयन पर फ्लोटिंग पैनल
     .quick-select-title-case = त्वरित चयन
+    .qselect-update-condition = शर्त अपडेट करें
+    .qselect-add-condition = शर्त जोड़ें
+    .qselect-cancel-edit = संपादन रद्द करें
+    .qselect-clear-conditions = शर्तें साफ़ करें
+    .qselect-no-conditions = कोई शर्त नहीं जोड़ी गई।
+    .qselect-conditions-heading = शर्तें (ऑब्जेक्ट के प्रकार की सभी शर्तें मेल खानी चाहिए)
+    .qselect-list-note = सूची खाली न होने पर केवल सूचीबद्ध शर्तें लागू होती हैं।
     .quick-select-menu-period-title-case = त्वरित चयन...
     .reading-file = फ़ाइल पढ़ना...
     .redo = रेडो

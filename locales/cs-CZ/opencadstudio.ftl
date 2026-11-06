@@ -6514,6 +6514,13 @@ ui =
         Rychlé vlastnosti
         Plovoucí panel při výběru
     .quick-select-title-case = Rychlý výběr
+    .qselect-update-condition = Aktualizovat podmínku
+    .qselect-add-condition = Přidat podmínku
+    .qselect-cancel-edit = Zrušit úpravu
+    .qselect-clear-conditions = Vymazat podmínky
+    .qselect-no-conditions = Nebyly přidány žádné podmínky.
+    .qselect-conditions-heading = Podmínky (musí platit všechny pro typ objektu)
+    .qselect-list-note = Pokud seznam není prázdný, použijí se jen uvedené podmínky.
     .quick-select-menu-period-title-case = Rychlý výběr…
     .reading-file = Čtení souboru…
     .redo = Znovu

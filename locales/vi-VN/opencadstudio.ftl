@@ -6519,6 +6519,13 @@ ui =
         Thuộc tính nhanh
         Bảng nổi khi chọn
     .quick-select-title-case = Chọn nhanh
+    .qselect-update-condition = Cập nhật điều kiện
+    .qselect-add-condition = Thêm điều kiện
+    .qselect-cancel-edit = Hủy chỉnh sửa
+    .qselect-clear-conditions = Xóa các điều kiện
+    .qselect-no-conditions = Chưa thêm điều kiện nào.
+    .qselect-conditions-heading = Điều kiện (mọi điều kiện của loại đối tượng phải khớp)
+    .qselect-list-note = Khi danh sách không trống, chỉ các điều kiện trong danh sách được áp dụng.
     .quick-select-menu-period-title-case = Chọn nhanh...
     .reading-file = Đang đọc tệp…
     .redo = Làm lại

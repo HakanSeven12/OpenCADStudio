@@ -6439,6 +6439,13 @@ ui =
     .quick-properties-floating-panel-on-selection = Hızlı Özellikler
             Seçim yapıldığında yüzen paneli gösterir
     .quick-select-title-case = Hızlı Seçim
+    .qselect-update-condition = Koşulu güncelle
+    .qselect-add-condition = Koşul ekle
+    .qselect-cancel-edit = Düzenlemeyi iptal et
+    .qselect-clear-conditions = Koşulları temizle
+    .qselect-no-conditions = Koşul eklenmedi.
+    .qselect-conditions-heading = Koşullar (nesne türünün tüm koşulları sağlanmalı)
+    .qselect-list-note = Liste boş değilse yalnızca listelenen koşullar uygulanır.
     .quick-select-menu-period-title-case = Hızlı Seçim...
     .reading-file = Dosya okunuyor…
     .redo = Yinele

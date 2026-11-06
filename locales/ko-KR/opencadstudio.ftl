@@ -6511,6 +6511,13 @@ ui =
         빠른 특성
         선택 시 부동 패널
     .quick-select-title-case = 빠른 선택
+    .qselect-update-condition = 조건 업데이트
+    .qselect-add-condition = 조건 추가
+    .qselect-cancel-edit = 편집 취소
+    .qselect-clear-conditions = 조건 지우기
+    .qselect-no-conditions = 추가된 조건이 없습니다.
+    .qselect-conditions-heading = 조건 (객체 유형의 조건을 모두 만족해야 함)
+    .qselect-list-note = 목록이 비어 있지 않으면 목록의 조건만 적용됩니다.
     .quick-select-menu-period-title-case = 빠른 선택...
     .reading-file = 파일을 읽는 중…
     .redo = 다시 실행

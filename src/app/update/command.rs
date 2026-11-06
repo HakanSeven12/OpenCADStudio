@@ -2132,8 +2132,9 @@ impl OpenCADStudio {
         }
         if !self.dock_panel_visible(crate::ui::dock::PanelId::Layers) {
             let i = self.active_tab;
-            if self.tabs[i].layers.show_in_drawing {
-                self.tabs[i].layers.show_in_drawing = false;
+            if !self.tabs[i].layers.eye_layers.is_empty() {
+                self.tabs[i].layers.eye_layers.clear();
+                self.tabs[i].layers.highlighted = 0;
                 self.tabs[i].layers.highlight_key = None;
                 self.tabs[i].scene.set_filter_preview_highlights(&[]);
             }
@@ -2281,19 +2282,20 @@ impl OpenCADStudio {
     /// objects in the drawing; again only when the layers or the drawing
     /// changed.
     fn refresh_layer_highlight(&mut self, i: usize) {
-        if !self.tabs[i].layers.show_in_drawing
+        if self.tabs[i].layers.eye_layers.is_empty()
             || self.filter_dialog.is_some()
             || self.qselect.is_some()
         {
             return;
         }
-        let names = self.tabs[i].layers.selected_names();
+        let names = self.tabs[i].layers.eye_layers.clone();
         let key = (self.tabs[i].scene.geometry_epoch, names.clone());
         if self.tabs[i].layers.highlight_key.as_ref() == Some(&key) {
             return;
         }
         let handles = self.tabs[i].scene.objects_on_layers(&names);
         self.tabs[i].scene.set_filter_preview_highlights(&handles);
+        self.tabs[i].layers.highlighted = handles.len();
         self.tabs[i].layers.highlight_key = Some(key);
     }
 
@@ -7227,15 +7229,21 @@ mod layer_name_target_tests {
             .add_entity(document::EntityType::Circle(circle));
         app.tabs[i].scene.bump_geometry();
 
-        let _ = app.update(Message::LayerSelect("ZULU".into()));
-        let _ = app.update(Message::LayerShowInDrawing(true));
+        let _ = app.update(Message::LayerEye("ZULU".into()));
         let lit = app.tabs[i].scene.hover_highlight_handles();
         assert!(lit.contains(&on_zulu) && !lit.contains(&on_alpha));
+        assert_eq!(app.tabs[i].layers.highlighted, 1);
         assert!(
             app.tabs[i].scene.selected.is_empty(),
             "showing doesn't select"
         );
-        let _ = app.update(Message::LayerShowInDrawing(false));
+        // Two eyes light both layers; the eye of ZULU off leaves ALPHA.
+        let _ = app.update(Message::LayerEye("alpha".into()));
+        assert_eq!(app.tabs[i].layers.highlighted, 2);
+        let _ = app.update(Message::LayerEye("zulu".into()));
+        let lit = app.tabs[i].scene.hover_highlight_handles();
+        assert!(!lit.contains(&on_zulu) && lit.contains(&on_alpha));
+        let _ = app.update(Message::LayerEye("ALPHA".into()));
         assert!(app.tabs[i].scene.hover_highlight_handles().is_empty());
 
         // A row's "Filter objects..." starts FILTER on its layer.

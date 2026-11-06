@@ -30,6 +30,9 @@ pub struct ColorExtras {
     pub by_block: bool,
     pub none: bool,
     pub background: bool,
+    /// The closed selector as a plain table cell: swatch and name, no
+    /// button colour or arrow (the Layer manager's Color column).
+    pub flat: bool,
 }
 
 thread_local! {
@@ -200,20 +203,36 @@ fn color_selector_with_indicator<'a>(
     let on_dismiss = on_toggle.clone();
 
     // Closed button: current swatch + name + caret.
-    let head = button(
-        row![
-            indicator,
-            text(name).size(11),
-            iced::widget::Space::new().width(Length::Fill),
-            crate::ui::icons::themed_arrow_toggle(open, 9.0),
-        ]
-        .spacing(5)
-        .align_y(iced::Center),
-    )
-    .on_press(on_toggle)
-    .padding([3, 6])
-    .height(ROW_H)
-    .width(Length::Fill);
+    let mut head_row = row![
+        indicator,
+        text(name).size(11),
+        iced::widget::Space::new().width(Length::Fill),
+    ]
+    .spacing(5)
+    .align_y(iced::Center);
+    if !extras.flat || open {
+        head_row = head_row.push(crate::ui::icons::themed_arrow_toggle(open, 9.0));
+    }
+    let mut head = button(head_row)
+        .on_press(on_toggle)
+        .padding([3, 6])
+        .height(ROW_H)
+        .width(Length::Fill);
+    if extras.flat {
+        head = head.style(|theme: &Theme, status| {
+            let palette = theme.palette();
+            button::Style {
+                background: matches!(status, button::Status::Hovered | button::Status::Pressed)
+                    .then(|| Background::Color(palette.background.strong.color)),
+                text_color: palette.background.base.text,
+                border: Border {
+                    radius: 2.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        });
+    }
 
     if !open {
         return head.into();

@@ -58,6 +58,8 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Viewport overrides" => Some(("command", "layer-tree-vp-overrides")),
         "Invert filter" => Some(("command", "layer-tree-invert")),
         "{} of {} layers shown" => Some(("command", "layer-tree-shown")),
+        "{} selected" => Some(("command", "layer-footer-selected")),
+        "Highlighting {} objects of {}. Selection unchanged." => Some(("command", "layer-footer-highlighting")),
         "Layers that match" => Some(("command", "layer-filter-intro")),
         "Turn all off" => Some(("command", "layer-tree-all-off")),
         "Freeze all" => Some(("command", "layer-tree-freeze-all")),

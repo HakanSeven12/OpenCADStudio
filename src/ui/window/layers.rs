@@ -448,8 +448,11 @@ pub struct LayerPanel {
     pub filters: Vec<(String, Vec<String>)>,
     /// The layers of FILTER's last result sent here (the Found node).
     pub found_layers: Vec<String>,
-    /// The selected layers' objects are highlighted in the drawing.
-    pub show_in_drawing: bool,
+    /// The layers whose eye is on: their objects are highlighted in the
+    /// drawing, the selection kept.
+    pub eye_layers: Vec<String>,
+    /// How many objects the eyes light up.
+    pub highlighted: usize,
     /// What the highlight was made for: geometry epoch and layer names.
     pub highlight_key: Option<(u64, Vec<String>)>,
     /// The tree's sections the user closed.
@@ -495,7 +498,8 @@ impl Default for LayerPanel {
             selected_object_layers: Vec::new(),
             filters: Vec::new(),
             found_layers: Vec::new(),
-            show_in_drawing: false,
+            eye_layers: Vec::new(),
+            highlighted: 0,
             highlight_key: None,
             closed_sections: Vec::new(),
         }
@@ -616,6 +620,11 @@ impl LayerPanel {
                 .find(|(name, _)| name.eq_ignore_ascii_case(filter))
                 .is_some_and(|(_, members)| named(members)),
         }
+    }
+
+    /// Whether the layer's eye is on.
+    pub fn eye_on(&self, name: &str) -> bool {
+        self.eye_layers.iter().any(|l| l.eq_ignore_ascii_case(name))
     }
 
     /// Opens or closes a section of the tree.
@@ -822,9 +831,36 @@ impl LayerPanel {
             .into()
     }
 
-    /// Under the table: invert the node, and how many layers are shown.
+    /// Under the table: invert the node, what the eyes light, the current
+    /// layer and the node shown with its counts.
     fn tree_footer(&self) -> Element<'_, Message> {
         let shown = self.visible_indices().len();
+        let selected = self.selected_names().len();
+        let mut summary = format!(
+            "{} · {}",
+            self.view.label(),
+            crate::tf!("{} of {} layers shown", shown, self.layers.len())
+        );
+        if selected > 0 {
+            summary.push_str(" · ");
+            summary.push_str(&crate::tf!("{} selected", selected));
+        }
+        let lit: Element<'_, Message> = if self.eye_layers.is_empty() {
+            iced::widget::Space::new().width(0).into()
+        } else {
+            row![
+                crate::ui::icons::themed(crate::ui::icons::EYE, 12.0),
+                text(crate::tf!(
+                    "Highlighting {} objects of {}. Selection unchanged.",
+                    self.highlighted,
+                    self.eye_layers.join(", ")
+                ))
+                .size(FONT_SZ),
+            ]
+            .spacing(6)
+            .align_y(iced::Center)
+            .into()
+        };
         container(
             row![
                 checkbox(self.invert)
@@ -832,14 +868,13 @@ impl LayerPanel {
                     .text_size(FONT_SZ)
                     .size(13)
                     .on_toggle(Message::LayerInvert),
+                lit,
                 iced::widget::Space::new().width(Length::Fill),
-                text(crate::tf!(
-                    "{} of {} layers shown",
-                    shown,
-                    self.layers.len()
-                ))
-                .size(FONT_SZ)
-                .style(muted_style),
+                text(format!("{}:", t!("Current layer")))
+                    .size(FONT_SZ)
+                    .style(muted_style),
+                text(self.current_layer.as_str()).size(FONT_SZ),
+                text(summary).size(FONT_SZ).style(muted_style),
             ]
             .spacing(8)
             .align_y(iced::Center),
@@ -1119,32 +1154,6 @@ impl LayerPanel {
             .and_then(|i| self.layers.get(i))
             .is_some_and(|layer| layer.name != self.current_layer && !layer.frozen);
 
-        // The selected layers' objects lit in the drawing, the selection kept.
-        let show_in_drawing = with_tip(
-            button(
-                row![crate::ui::icons::themed(
-                    if self.show_in_drawing {
-                        crate::ui::icons::EYE
-                    } else {
-                        crate::ui::icons::EYE_OFF
-                    },
-                    12.0,
-                )]
-                .push(if compact {
-                    iced::Element::from(iced::widget::Space::new().width(0))
-                } else {
-                    text(t!("Show")).size(11).into()
-                })
-                .spacing(5)
-                .align_y(iced::Center),
-            )
-            .on_press(Message::LayerShowInDrawing(!self.show_in_drawing))
-            .style(crate::ui::style::form::button_style(self.show_in_drawing))
-            .padding(if compact { [4, 6] } else { [4, 10] }),
-            t!("Show"),
-            compact,
-        );
-
         // In a layout with viewports, a new layer can start frozen in all of
         // them, so it shows only in the viewports that thaw it.
         let new_vp_frozen: Element<'_, Message> = if self.vp_cols.is_empty() {
@@ -1231,7 +1240,6 @@ impl LayerPanel {
                     Message::Command("LAYERP".into()),
                     compact,
                 ),
-                show_in_drawing,
                 node_picker,
                 iced::widget::Space::new().width(Length::Fill),
                 // Search box: filters rows by name as the user types (#343).
@@ -1300,6 +1308,8 @@ impl LayerPanel {
                     .width(Length::Fixed(COL_ICON * 2.0 + 4.0)),
             );
         }
+        // Over the rows' eye buttons.
+        header_row = header_row.push(iced::widget::Space::new().width(COL_EYE));
 
         let col_header = container(header_row)
             .style(|theme: &Theme| {
@@ -1364,6 +1374,7 @@ impl LayerPanel {
                 active_vp,
                 name_col_w,
                 &columns,
+                self.eye_on(&layer.name),
             );
             let (name, groups, in_group) = (
                 layer.name.clone(),
@@ -1484,8 +1495,11 @@ fn sortable_header<'a>(
     active: Option<LayerSortCol>,
     asc: bool,
 ) -> Element<'a, Message> {
-    let mut content = row![text(label).size(10).style(muted_style)]
-        .spacing(3)
+    let mut content = row![text(label)
+        .size(10)
+        .style(muted_style)
+        .wrapping(iced::widget::text::Wrapping::None)]
+    .spacing(3)
         .align_y(iced::Center);
     if active == Some(col) {
         content = content.push(if asc {
@@ -1494,7 +1508,8 @@ fn sortable_header<'a>(
             crate::ui::icons::themed_arrow_down(8.0)
         });
     }
-    button(content)
+    // Cut at the column: a long translated label ran into the next one.
+    button(container(content).clip(true))
         .on_press(Message::LayerSort(col))
         .style(header_button_style)
         .padding(Padding {
@@ -1731,6 +1746,7 @@ fn layer_row<'a>(
     active_vp: Option<Handle>,
     name_col_w: f32,
     columns: &[LayerSortCol],
+    eye_on: bool,
 ) -> Element<'a, Message> {
     // #22: messages carry the layer name (resolved at dispatch time) so a
     // resort between view() and the handler cannot mistarget the row.
@@ -1776,13 +1792,25 @@ fn layer_row<'a>(
         .height(Length::Fixed(ROW_H))
         .into();
 
-    // Current: a tick; with objects: a dot; empty: a faint dot (#2610).
+    // Current: a tick; with objects: a dot; empty: a ring (#2610).
     let status_dot: Element<'_, Message> = if is_current {
-        crate::ui::icons::themed_success(crate::ui::icons::CHECK, 13.0)
-    } else if layer.objects > 0 {
-        crate::ui::icons::themed_secondary(crate::ui::icons::DOT, 9.0)
+        crate::ui::icons::themed(crate::ui::icons::CHECK, 13.0)
     } else {
-        crate::ui::icons::themed_disabled(crate::ui::icons::DOT, 9.0)
+        let filled = layer.objects > 0;
+        container(iced::widget::Space::new().width(7).height(7))
+            .style(move |theme: &Theme| {
+                let ink = theme.palette().background.base.text.scale_alpha(0.7);
+                container::Style {
+                    background: filled.then_some(Background::Color(ink)),
+                    border: Border {
+                        color: ink,
+                        width: 1.5,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                }
+            })
+            .into()
     };
 
     // Name cell
@@ -1851,6 +1879,7 @@ fn layer_row<'a>(
             crate::ui::color_select::ColorExtras {
                 by_layer: false,
                 by_block: false,
+                flat: true,
                 ..Default::default()
             },
             Message::LayerColorSet,
@@ -1949,7 +1978,7 @@ fn layer_row<'a>(
     // Description: typed like the transparency, applied on Enter or leaving.
     let desc_str = desc_buf.unwrap_or(layer.description.as_str());
     let lname_desc = lname.clone();
-    let mut desc_cell = text_input("", desc_str)
+    let mut desc_cell = text_input("—", desc_str)
         .on_input(move |s| Message::LayerDescriptionEdit(lname_desc.clone(), s))
         .on_submit(Message::LayerDescriptionCommit)
         .size(FONT_SZ)
@@ -2077,6 +2106,34 @@ fn layer_row<'a>(
             .spacing(4),
         );
     }
+
+    // The eye: this layer's objects lit in the drawing, the selection kept.
+    let eye = button(if eye_on {
+        crate::ui::icons::themed_primary(crate::ui::icons::EYE, 13.0)
+    } else {
+        crate::ui::icons::themed_disabled(crate::ui::icons::EYE, 13.0)
+    })
+    .on_press(Message::LayerEye(lname.clone()))
+    .padding([3, 4])
+    .style(move |theme: &Theme, status| {
+        let palette = theme.palette();
+        button::Style {
+            background: matches!(status, button::Status::Hovered)
+                .then(|| Background::Color(palette.background.strong.color)),
+            border: Border {
+                color: if eye_on {
+                    palette.primary.base.color
+                } else {
+                    Color::TRANSPARENT
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        }
+    });
+    row_content = row_content.push(iced::widget::Space::new().width(Fill));
+    row_content = row_content.push(container(eye).width(COL_EYE).align_x(iced::Center));
 
     mouse_area(
         container(row_content)
@@ -2308,6 +2365,8 @@ const COL_DESC: f32 = 160.0;
 /// The filter tree beside the table.
 const TREE_W: f32 = 190.0;
 const COL_OBJECTS: f32 = 70.0;
+/// The eye button at the row's end.
+const COL_EYE: f32 = 30.0;
 
 #[cfg(test)]
 mod column_layout_tests {

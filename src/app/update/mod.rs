@@ -12328,11 +12328,17 @@ impl OpenCADStudio {
                 self.tabs[i].layers.invert = on;
                 Task::none()
             }
-            Message::LayerShowInDrawing(on) => {
+            Message::LayerEye(name) => {
                 let i = self.active_tab;
-                self.tabs[i].layers.show_in_drawing = on;
-                self.tabs[i].layers.highlight_key = None;
-                if !on {
+                let panel = &mut self.tabs[i].layers;
+                if panel.eye_on(&name) {
+                    panel.eye_layers.retain(|l| !l.eq_ignore_ascii_case(&name));
+                } else {
+                    panel.eye_layers.push(name);
+                }
+                panel.highlight_key = None;
+                if panel.eye_layers.is_empty() {
+                    panel.highlighted = 0;
                     self.tabs[i].scene.set_filter_preview_highlights(&[]);
                 }
                 self.refresh_layer_counts();

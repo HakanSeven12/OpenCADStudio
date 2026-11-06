@@ -4330,8 +4330,8 @@ pub enum Message {
     LayerTreeSection(crate::ui::window::layers::TreeSection),
     /// Show the layers the node leaves out instead.
     LayerInvert(bool),
-    /// Highlight the selected layers' objects in the drawing.
-    LayerShowInDrawing(bool),
+    /// Turn a layer's eye on or off: its objects highlighted in the drawing.
+    LayerEye(String),
     /// Open FILTER over the layers: a new filter from the search text
     /// (`None`), or the LAYERFILTER filter named.
     LayerFilterEdit(Option<String>),

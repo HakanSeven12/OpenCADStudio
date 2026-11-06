@@ -6,8 +6,17 @@ use crate::scene::{
 };
 use glam::DVec3;
 
-#[test]
-fn nested_dynamic_properties_follow_editor_and_drawing_history() {
+struct NestedFixture {
+    app: OpenCADStudio,
+    parent: Handle,
+    nested: Handle,
+    sibling: Handle,
+    independent: Handle,
+    child_def: Handle,
+    parameter: actions::Parameter,
+}
+
+fn nested_fixture() -> NestedFixture {
     let (mut app, independent) = fixture();
     begin(&mut app, independent);
     let i = app.active_tab;
@@ -75,6 +84,29 @@ fn nested_dynamic_properties_follow_editor_and_drawing_history() {
         .into_iter()
         .find(|p| p.handle == linear)
         .unwrap();
+    NestedFixture {
+        app,
+        parent,
+        nested,
+        sibling,
+        independent,
+        child_def,
+        parameter,
+    }
+}
+
+#[test]
+fn nested_dynamic_properties_follow_editor_and_drawing_history() {
+    let NestedFixture {
+        mut app,
+        parent,
+        nested,
+        sibling,
+        independent,
+        child_def,
+        parameter,
+    } = nested_fixture();
+    let i = app.active_tab;
     let length = |app: &OpenCADStudio, reference| {
         let frame =
             actions::instance::frame(&app.tabs[i].scene.document, reference, &parameter).unwrap();
@@ -221,4 +253,131 @@ fn nested_dynamic_properties_follow_editor_and_drawing_history() {
     assert!(app.tabs[i].scene.document.get_entity(copied).is_none());
     app.redo_steps(1);
     assert_eq!(length(&app, copied_nested(&app)), 21.);
+}
+
+#[test]
+fn batch_nested_properties_respect_ownership_and_save_in_one_undo_step() {
+    let NestedFixture {
+        mut app,
+        parent,
+        nested,
+        sibling,
+        independent,
+        parameter,
+        ..
+    } = nested_fixture();
+    let i = app.active_tab;
+    let doc = &mut app.tabs[i].scene.document;
+    *doc = actions::instance::evaluate_value(
+        doc,
+        nested,
+        parameter.handle,
+        actions::Value::Point(DVec3::X * 14.),
+    )
+    .unwrap()
+    .unwrap();
+    let drawing_depth = main_depth(&app);
+    let select = |app: &mut OpenCADStudio, second| {
+        app.tabs[i].scene.select_entity(nested, true);
+        app.tabs[i].scene.select_entity(second, false);
+        app.refresh_properties();
+    };
+    let key = |app: &OpenCADStudio, visibility: bool| {
+        app.tabs[i]
+            .properties
+            .sections
+            .iter()
+            .flat_map(|section| &section.props)
+            .find_map(|row| match &row.value {
+                PropValue::BlockNumber { key, .. }
+                    if !visibility && key.component == BlockParameterComponent::Distance =>
+                {
+                    Some(*key)
+                }
+                PropValue::BlockChoice { key, .. }
+                    if visibility
+                        && matches!(key.component, BlockParameterComponent::Visibility(_)) =>
+                {
+                    Some(*key)
+                }
+                _ => None,
+            })
+    };
+    let submit = |app: &mut OpenCADStudio, key, value: &str| {
+        let _ = app.update(Message::PropBlockInput {
+            key,
+            value: value.into(),
+        });
+        let _ = app.update(Message::PropBlockCommit(key));
+    };
+    let lengths = |app: &OpenCADStudio| {
+        [nested, sibling, independent].map(|handle| {
+            let frame =
+                actions::instance::frame(&app.tabs[i].scene.document, handle, &parameter).unwrap();
+            frame.base.distance(frame.end)
+        })
+    };
+    let hidden = |app: &OpenCADStudio, handle| {
+        matches!(
+            OpenCADStudio::visibility_property(&app.tabs[i].scene.document, handle).unwrap().value,
+            PropValue::ChoiceWithTooltip { selected, .. } if selected == "Hidden"
+        )
+    };
+    begin(&mut app, parent);
+    select(&mut app, sibling);
+    let stale = key(&app, false).unwrap();
+    assert!(stale.batch_generation.is_some() && stale.editor_session.is_some());
+    assert!(app.tabs[i]
+        .properties
+        .sections
+        .iter()
+        .flat_map(|section| &section.props)
+        .any(|row| {
+            matches!(&row.value, PropValue::BlockNumber { key, value, .. }
+            if *key == stale && value == &crate::tr!("common", "varies"))
+        }));
+    select(&mut app, independent);
+    assert!(key(&app, false).is_none());
+    submit(&mut app, stale, "30");
+    assert_eq!(lengths(&app), [14., 10., 10.]);
+
+    select(&mut app, sibling);
+    let current = key(&app, false).unwrap();
+    submit(&mut app, current, "22");
+    assert_eq!(lengths(&app), [22., 22., 10.]);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), 1);
+    let _ = app.update(Message::PropBlockChoice {
+        key: key(&app, true).unwrap(),
+        index: 1,
+    });
+    assert!(hidden(&app, nested) && hidden(&app, sibling));
+    assert!(!hidden(&app, independent));
+    assert_eq!(app.tabs[i].history.undo_stack.len(), 2);
+    app.undo_steps(2);
+    assert_eq!(lengths(&app), [14., 10., 10.]);
+    assert!(!hidden(&app, nested) && !hidden(&app, sibling));
+    app.redo_steps(2);
+    assert_eq!(lengths(&app), [22., 22., 10.]);
+    assert!(hidden(&app, nested) && hidden(&app, sibling));
+    assert_eq!(main_depth(&app), drawing_depth);
+    assert!(app.save_block_edit(i), "{:?}", app.command_line.last_error);
+    app.close_block_edit(i, false);
+    assert_eq!(main_depth(&app), drawing_depth + 1);
+    app.undo_steps(1);
+    assert_eq!(lengths(&app), [14., 10., 10.]);
+    assert!(!hidden(&app, nested) && !hidden(&app, sibling));
+    app.redo_steps(1);
+    assert_eq!(lengths(&app), [22., 22., 10.]);
+    assert!(hidden(&app, nested) && hidden(&app, sibling));
+
+    begin(&mut app, parent);
+    select(&mut app, sibling);
+    let reopened = key(&app, false).unwrap();
+    assert_ne!(reopened.editor_session, current.editor_session);
+    submit(&mut app, current, "30");
+    assert_eq!(lengths(&app), [22., 22., 10.]);
+    submit(&mut app, reopened, "25");
+    assert_eq!(lengths(&app), [25., 25., 10.]);
+    app.close_block_edit(i, true);
+    assert_eq!(lengths(&app), [22., 22., 10.]);
 }

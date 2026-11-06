@@ -31,21 +31,28 @@ impl OpenCADStudio {
         Some(tab.block_edit_history.as_ref()?.id)
     }
 
-    fn batch_block_definition(&self, i: usize, handles: &[Handle]) -> Option<Handle> {
+    fn batch_block_scope(&self, i: usize, handles: &[Handle]) -> Option<(Handle, Option<u64>)> {
         let tab = &self.tabs[i];
-        if handles.len() < 2
-            || tab.active_block_edit_session().is_some()
-            || tab.block_test.is_some()
-        {
+        if handles.len() < 2 || tab.block_test.is_some() {
             return None;
         }
+        let editor_session = if tab.active_block_edit_session().is_some() {
+            Some(self.nested_block_property_session(i, handles[0])?)
+        } else {
+            None
+        };
         let definition =
             |handle| crate::scene::block_actions::instance::definition(&tab.scene.document, handle);
         let first = definition(handles[0])?;
         handles
             .iter()
-            .all(|&handle| !tab.scene.is_layer_locked(handle) && definition(handle) == Some(first))
-            .then_some(first)
+            .all(|&handle| {
+                !tab.scene.is_layer_locked(handle)
+                    && definition(handle) == Some(first)
+                    && (editor_session.is_none()
+                        || self.nested_block_property_session(i, handle) == editor_session)
+            })
+            .then_some((first, editor_session))
     }
 
     pub(super) fn batch_block_property_section(
@@ -54,7 +61,7 @@ impl OpenCADStudio {
         handles: &[Handle],
         generation: u64,
     ) -> Option<PropSection> {
-        self.batch_block_definition(i, handles)?;
+        let (_, editor_session) = self.batch_block_scope(i, handles)?;
         let tab = &self.tabs[i];
         let rows = |insert| {
             let doc = &tab.scene.document;
@@ -114,6 +121,7 @@ impl OpenCADStudio {
                 PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => {
                     key.insert = Handle::NULL;
                     key.batch_generation = Some(generation);
+                    key.editor_session = editor_session;
                 }
                 _ => unreachable!(),
             }
@@ -130,6 +138,18 @@ impl OpenCADStudio {
         if tab.id != key.document || tab.active_cmd.is_some() || tab.active_grip.is_some() {
             return false;
         }
+        if let Some(generation) = key.batch_generation {
+            let handles = &tab.properties.source_handles;
+            return self.property_target_override.is_none()
+                && tab.properties.block_batch_generation == generation
+                && tab.scene.selected_entities().iter().map(|(handle, _)| handle).eq(handles)
+                && self.batch_block_scope(i, handles) == Some((key.definition, key.editor_session))
+                && tab.properties.sections.iter().flat_map(|section| &section.props).any(|row| {
+                    matches!(&row.value,
+                        PropValue::BlockNumber { key: shown, .. } | PropValue::BlockChoice { key: shown, .. }
+                        if *shown == key)
+                });
+        }
         if tab.active_block_edit_session().is_some() {
             if key.editor_session.is_none()
                 || key.editor_session != self.nested_block_property_session(i, key.insert)
@@ -140,18 +160,6 @@ impl OpenCADStudio {
             }
         } else if key.editor_session.is_some() {
             return false;
-        }
-        if let Some(generation) = key.batch_generation {
-            let handles = &tab.properties.source_handles;
-            return self.property_target_override.is_none()
-                && tab.properties.block_batch_generation == generation
-                && tab.scene.selected_entities().iter().map(|(handle, _)| handle).eq(handles)
-                && self.batch_block_definition(i, handles) == Some(key.definition)
-                && tab.properties.sections.iter().flat_map(|section| &section.props).any(|row| {
-                    matches!(&row.value,
-                        PropValue::BlockNumber { key: shown, .. } | PropValue::BlockChoice { key: shown, .. }
-                        if *shown == key)
-                });
         }
         let definition = if matches!(key.component, BlockParameterComponent::Visibility(_)) {
             tab.scene.document.dynamic_visibility_for_insert(key.insert).map(|(definition, _)| definition)

@@ -6440,6 +6440,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Relative path" => Some(("common", "relative-path")),
         "Remaining degrees of freedom in the current parametric constraint scope" => Some(("common", "remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope")),
         "Requires an integer between 0 and 99." => Some(("common", "requires-an-integer-between-0-and-99")),
+        "Requires an integer value." => Some(("common", "requires-an-integer-value")),
         "Requires numeric distance or two points." => Some(("common", "requires-numeric-distance-or-two-points")),
         "SECTIONPLANE  Align section to [Front/bAck/Top/Bottom/Left/Right] <Top>:" => Some(("common", "sectionplane-align-section-to-front-back-top-bottom-left-right-top")),
         "SECTIONPLANE  Enter section plane type [Plane/Slice/Boundary/Volume] <Plane>:" => Some(("common", "sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane")),

@@ -517,29 +517,38 @@ impl Scene {
         true
     }
 
-    /// MATCHPROP's Center object: the destination centre line takes the
-    /// source's end extensions and is rebuilt on its own source lines.
-    pub(crate) fn match_centerline_extensions(&mut self, src: Handle, dst: Handle) {
-        let Some(EntityType::Line(source)) = self.document.get_entity(src) else {
-            return;
+    /// MATCHPROP's Center object: centre line `line` with the end
+    /// extensions of centre line `source`, rebuilt on its own source lines.
+    /// `None` when either is not a centre line or its sources are gone.
+    pub(crate) fn centerline_with_extensions_of(
+        &self,
+        source: &EntityType,
+        line: &codec::Line,
+    ) -> Option<codec::Line> {
+        let EntityType::Line(source) = source else {
+            return None;
         };
-        let Some(from) = CenterLineAssociation::read(&source.common.extended_data) else {
-            return;
-        };
-        let Some(EntityType::Line(line)) = self.document.get_entity(dst) else {
-            return;
-        };
-        let Some(mut association) = CenterLineAssociation::read(&line.common.extended_data) else {
-            return;
-        };
+        let from = CenterLineAssociation::read(&source.common.extended_data)?;
+        let mut association = CenterLineAssociation::read(&line.common.extended_data)?;
         association.start_extension = from.start_extension;
         association.end_extension = from.end_extension;
-        let Some(mut rebuilt) = rebuild_line(&self.document, &association) else {
-            return;
+        let mut rebuilt = rebuild_line(&self.document, &association)?;
+        rebuilt.common = line.common.clone();
+        association.write(&mut rebuilt.common.extended_data);
+        Some(rebuilt)
+    }
+
+    /// [`Self::centerline_with_extensions_of`] written to `dst`.
+    pub(crate) fn match_centerline_extensions(&mut self, src: Handle, dst: Handle) {
+        let rebuilt = match (self.document.get_entity(src), self.document.get_entity(dst)) {
+            (Some(source), Some(EntityType::Line(line))) => {
+                self.centerline_with_extensions_of(source, line)
+            }
+            _ => None,
         };
-        if let Some(EntityType::Line(line)) = self.document.get_entity_mut(dst) {
-            rebuilt.common = line.common.clone();
-            association.write(&mut rebuilt.common.extended_data);
+        if let (Some(rebuilt), Some(EntityType::Line(line))) =
+            (rebuilt, self.document.get_entity_mut(dst))
+        {
             *line = rebuilt;
         }
     }

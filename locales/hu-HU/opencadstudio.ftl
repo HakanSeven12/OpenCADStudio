@@ -2500,6 +2500,7 @@ common =
     .relative-path = Relatív elérési út
     .remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope = Fennmaradó szabadságfokok az aktuális parametrikus kényszerek hatókörében
     .requires-an-integer-between-0-and-99 = 0 és 99 közötti egész szám szükséges.
+    .requires-an-integer-value = Requires an integer value.
     .requires-numeric-distance-or-two-points = Számként megadott távolság vagy két pont szükséges.
     .sectionplane-align-section-to-front-back-top-bottom-left-right-top = SECTIONPLANE  Igazítsa a metszetet a nézethez [Front/bAck/Top/Bottom/Left/Right] <Top>:
     .sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane = SECTIONPLANE  Adja meg a metszősík típusát [Plane/Slice/Boundary/Volume] <Plane>:

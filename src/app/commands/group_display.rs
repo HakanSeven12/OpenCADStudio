@@ -47,9 +47,10 @@ impl OpenCADStudio {
 
 impl OpenCADStudio {
     /// `MATCHMODE [value]`: the properties MATCHPROP transfers, a profile
-    /// value; outside 0–262143 it is refused and asked for again.
+    /// value. Any whole number from 0 is kept as given; anything else is
+    /// refused and asked for again.
     pub(super) fn match_mode_setvar(&mut self, value: Option<&str>) {
-        use crate::entities::match_props::{match_mode, set_match_mode, MatchOpts};
+        use crate::entities::match_props::{match_mode, set_match_mode};
         let ask = |app: &mut Self| {
             let (name, current) = ("MATCHMODE", match_mode());
             app.command_line
@@ -60,17 +61,19 @@ impl OpenCADStudio {
             ask(self);
             return;
         };
-        match value.parse::<u32>() {
-            Ok(mode) if mode <= MatchOpts::ALL_BITS => {
+        // A larger whole number keeps its low 32 bits, as the reference does
+        // (4294967296 → 0, 99999999999 → 1215752191).
+        let wrapped = value.parse::<u128>().ok().map(|v| (v % (1u128 << 32)) as u32);
+        match wrapped.ok_or(()) {
+            Ok(mode) => {
                 if mode != match_mode() {
                     set_match_mode(mode);
                     self.save_config();
                 }
             }
-            _ => {
-                let (min, max) = (0, MatchOpts::ALL_BITS);
+            Err(_) => {
                 self.command_line
-                    .push_rejection(crate::tf!("Requires an integer between {min} and {max}.").as_ref());
+                    .push_rejection(crate::t!("Requires an integer value.").as_ref());
                 ask(self);
             }
         }

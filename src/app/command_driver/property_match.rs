@@ -113,7 +113,7 @@ impl OpenCADStudio {
             // MATCHMODE decides what crosses; the xdata paths below honour
             // the same bits.
             use crate::entities::match_props::MatchOpts;
-            let match_opts = MatchOpts::current();
+            let match_opts = MatchOpts::for_document(&self.tabs[i].scene.document);
             self.apply_property_op(i, "MATCHPROP", &dest, |app, handle| {
                 let mut is_dim = false;
                 let mut is_hatch = false;

@@ -2501,6 +2501,7 @@ common =
     .relative-path = ທີ່ຢູ່ໄຟລ໌ແບບສຳພັດ
     .remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope = ລະດັບຄວາມເປັນອິດສະຫຼະທີ່ເຫຼືອຢູ່ໃນຂອບເຂດການຜູກມັດພາລາມິເຕີປັດຈຸບັນ
     .requires-an-integer-between-0-and-99 = ຕ້ອງການຈຳນວນຖ້ວນລະຫວ່າງ 0 ຫາ 99.
+    .requires-an-integer-value = Requires an integer value.
     .requires-numeric-distance-or-two-points = ຕ້ອງການຄ່າໄລຍະຫ່າງເປັນຕົວເລກ ຫຼື ສອງຈຸດ.
     .sectionplane-align-section-to-front-back-top-bottom-left-right-top = SECTIONPLANE  ຈັດລະນາບໜ້າຕັດໄປທີ່ [Front/bAck/Top/Bottom/Left/Right] <Top>:
     .sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane = SECTIONPLANE  ປ້ອນປະເພດລະນາບໜ້າຕັດ [Plane/Slice/Boundary/Volume] <Plane>:

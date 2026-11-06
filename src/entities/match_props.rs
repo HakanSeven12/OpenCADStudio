@@ -510,8 +510,9 @@ pub fn match_mode() -> u32 {
     MATCH_MODE.load(std::sync::atomic::Ordering::Relaxed)
 }
 
+/// Kept as given: bits with no property of their own are stored too.
 pub fn set_match_mode(mode: u32) {
-    MATCH_MODE.store(mode & MatchOpts::ALL_BITS, std::sync::atomic::Ordering::Relaxed);
+    MATCH_MODE.store(mode, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// MATCHPROP transfer switches: the MATCHMODE bitmask. The entity-level
@@ -573,6 +574,16 @@ impl MatchOpts {
     /// The MATCHMODE in force.
     pub fn current() -> Self {
         Self(match_mode())
+    }
+
+    /// The MATCHMODE in force for `document`: a plot style only crosses
+    /// between named plot styles, never under colour-dependent ones.
+    pub fn for_document(document: &codec::Document) -> Self {
+        let mut opts = Self::current();
+        if document.header.plotstyle_mode {
+            opts.0 &= !Self::PLOTSTYLE;
+        }
+        opts
     }
 
     pub fn has(&self, bit: u32) -> bool {

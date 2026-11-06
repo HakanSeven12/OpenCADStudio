@@ -396,13 +396,15 @@ impl OpenCADStudio {
             crate::entities::common::format_decimal(
                 crate::scene::view::dispatch::entity_thickness(entity).unwrap_or(0.0),
             ),
-            match (plot_style, common.plotstyle_flags) {
-                (false, _) => "ByColor",
-                (true, 0) => "ByLayer",
-                (true, 1) => "ByBlock",
-                _ => "Normal",
-            }
-            .to_string(),
+            if plot_style {
+                crate::app::properties::plot_style_name(
+                    doc,
+                    common.plotstyle_flags,
+                    common.plotstyle_handle,
+                )
+            } else {
+                "ByColor".to_string()
+            },
         ];
         self.matchprop_dialog = Some(crate::ui::window::pdf_dialogs::MatchPropDialog {
             mode: crate::entities::match_props::match_mode(),

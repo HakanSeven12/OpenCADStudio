@@ -2485,6 +2485,7 @@ common =
     .relative-path = Göreli yol
     .remaining-degrees-of-freedom-in-the-current-parametric-constraint-scope = Remaining degrees of freedom in the current parametric constraint scope
     .requires-an-integer-between-0-and-99 = Requires an integer between 0 and 99.
+    .requires-an-integer-value = Bir tam sayı değeri gerekir.
     .requires-numeric-distance-or-two-points = Sayısal uzaklık veya iki nokta gerekir.
     .sectionplane-align-section-to-front-back-top-bottom-left-right-top = SECTIONPLANE  Align section to [Front/bAck/Top/Bottom/Left/Right] <Top>:
     .sectionplane-enter-section-plane-type-plane-slice-boundary-volume-plane = SECTIONPLANE  Enter section plane type [Plane/Slice/Boundary/Volume] <Plane>:

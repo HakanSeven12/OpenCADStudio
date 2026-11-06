@@ -513,22 +513,7 @@ impl OpenCADStudio {
                     }
                 }
             }
-            let selected = match common.plotstyle_flags {
-                0 => "ByLayer".to_string(),
-                1 => "ByBlock".to_string(),
-                2 => "Normal".to_string(),
-                _ => common
-                    .plotstyle_handle
-                    .and_then(|ph| {
-                        crate::scene::annotative::as_dict(doc, dict_h).and_then(|dict| {
-                            dict.entries
-                                .iter()
-                                .find(|(_, h)| *h == ph)
-                                .map(|(n, _)| n.clone())
-                        })
-                    })
-                    .unwrap_or_else(|| "ByLayer".to_string()),
-            };
+            let selected = plot_style_name(doc, common.plotstyle_flags, common.plotstyle_handle);
             for section in sections.iter_mut() {
                 if let Some(row) = section.props.iter_mut().find(|p| p.field == "plot_style") {
                     row.value = crate::scene::model::object::PropValue::Choice {
@@ -5152,6 +5137,31 @@ fn update_row_color(
 
 /// The lineweight dropdown options (named defaults + the standard millimetre
 /// steps), matching the labels `dim_lineweight_label` produces.
+/// An object's named plot style as the drawing calls it: ByLayer, ByBlock,
+/// Normal, or the name its handle has in the plot style dictionary.
+pub(crate) fn plot_style_name(
+    doc: &codec::Document,
+    flags: u8,
+    handle: Option<codec::Handle>,
+) -> String {
+    match flags {
+        0 => "ByLayer".to_string(),
+        1 => "ByBlock".to_string(),
+        2 => "Normal".to_string(),
+        _ => handle
+            .and_then(|ph| {
+                crate::scene::annotative::as_dict(doc, doc.header.acad_plotstylename_dict_handle)
+                    .and_then(|dict| {
+                        dict.entries
+                            .iter()
+                            .find(|(_, h)| *h == ph)
+                            .map(|(n, _)| n.clone())
+                    })
+            })
+            .unwrap_or_else(|| "ByLayer".to_string()),
+    }
+}
+
 pub(crate) fn lineweight_options() -> Vec<String> {
     crate::entities::common::lineweight_options()
 }

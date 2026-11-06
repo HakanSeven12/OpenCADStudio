@@ -249,7 +249,6 @@ impl OpenCADStudio {
             STRIP_PAD, STRIP_PLUS_GAP, STRIP_PLUS_H,
         };
         let (layout, _) = self.dock_strip_layout(side);
-        let cell_h = layout.first().map_or(STRIP_CELL_H, |g| g.cell_h);
         let labels = self.dock.strip_labels;
         // Only a group actually on screen is marked as shown: on an
         // auto-hiding edge nothing is, until a group is revealed.
@@ -271,10 +270,13 @@ impl OpenCADStudio {
             let group_dragged =
                 dragging && movement.is_some_and(|(_, group, _)| group == Some((side, gi)));
             let panels = self.dock_group_visible(side, gi);
-            let row_h = 2.0 * STRIP_PAD + panels.len() as f32 * cell_h;
+            let Some(placed) = layout.iter().find(|g| g.group == gi) else {
+                continue;
+            };
+            let row_h = placed.bottom() - placed.top;
 
             let mut icons: Vec<Element<'_, Message>> = vec![Space::new().height(STRIP_PAD).into()];
-            for id in panels {
+            for (id, &cell_h) in panels.into_iter().zip(&placed.cells) {
                 let faded = group_dragged
                     || (dragging
                         && movement
@@ -902,7 +904,7 @@ impl OpenCADStudio {
                     .iter()
                     .filter(|p| self.dock_panel_visible(**p) || Some(**p) == dragged)
                     .count();
-                let y = g.icons_top + above as f32 * g.cell_h;
+                let y = g.cell_top(above);
                 marks.push(place_at(dock_insert_line(), strip_x + 7.0, y - 3.5));
             }
             DropTarget::Edge { index, .. } => {

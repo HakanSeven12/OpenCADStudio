@@ -2365,22 +2365,21 @@ fn visibility_parameter_placement_starts_from_the_actual_palette_row() {
 }
 
 #[test]
-fn labelled_strip_shares_the_edge_height_between_pallets() {
+fn labelled_strip_tabs_are_as_long_as_their_names() {
     use crate::app::config::DockSide;
-    use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H, STRIP_LABEL_MIN_H};
+    use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H};
     let mut app = dock_app();
     app.show_browser = false;
     let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
     let (icons, _) = app.dock_strip_layout(DockSide::Left);
-    assert!(icons.iter().all(|g| g.cell_h == STRIP_CELL_H));
+    assert!(icons.iter().flat_map(|g| &g.cells).all(|&h| h == STRIP_CELL_H));
     let _ = app.on_dock(DockMsg::StripLabels(true));
     let (labelled, plus_top) = app.dock_strip_layout(DockSide::Left);
-    let height = app.dock_workspace_size().1;
-    assert!(labelled[0].cell_h >= STRIP_LABEL_MIN_H);
-    // The pallets fill the edge, leaving room for the + button.
-    if labelled[0].cell_h > STRIP_LABEL_MIN_H {
-        assert!(plus_top < height && plus_top > height - 60.0, "{plus_top} of {height}");
-    }
+    // A tab holds its icon and name, stacked like a tab bar: a short strip,
+    // not one that stretches down the whole edge.
+    let tabs: Vec<f32> = labelled.iter().flat_map(|g| g.cells.clone()).collect();
+    assert!(tabs.iter().all(|&h| h > STRIP_CELL_H && h < 200.0), "{tabs:?}");
+    assert!(plus_top < app.dock_workspace_size().1 / 2.0, "{plus_top}");
     let _ = app.on_dock(DockMsg::StripLabels(false));
     assert_eq!(app.dock_strip_layout(DockSide::Left).0, icons);
 }

@@ -7963,6 +7963,44 @@ impl Scene {
             .unwrap_or_else(|| "1:1".to_string())
     }
 
+    /// The viewport(s) of the current paper layout, excluding the layout's
+    /// own sheet viewport (id 1). Used by commands that act on a layout
+    /// viewport without the user picking one.
+    pub fn layout_viewport_handles(&self) -> Vec<Handle> {
+        let layout_block = self.current_layout_block_handle();
+        self.document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Viewport(vp) if vp.id > 1 && vp.common.owner_handle == layout_block => {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The effective paper-to-model scale (paper units per model unit) that
+    /// `viewport` is displaying at right now.
+    pub fn viewport_effective_scale(&self, viewport: Handle) -> Option<f64> {
+        let EntityType::Viewport(vp) = self.document.get_entity(viewport)? else {
+            return None;
+        };
+        Some(crate::scene::vp_effective_scale(
+            vp.custom_scale,
+            vp.view_height,
+            vp.height,
+        ))
+    }
+
+    /// Display name of the named scale object driving `viewport`, if any.
+    pub fn viewport_display_scale_name(&self, viewport: Handle) -> Option<String> {
+        let scale_handle = self.viewport_scale_handle(viewport)?;
+        match self.document.objects.get(&scale_handle) {
+            Some(ObjectType::Scale(scale)) => Some(scale.name.clone()),
+            _ => None,
+        }
+    }
+
     pub fn set_viewport_scale_named(&mut self, name: &str) -> Option<Handle> {
         let viewport = self.scale_target_viewport()?;
         self.set_viewport_scale_named_for(viewport, name)

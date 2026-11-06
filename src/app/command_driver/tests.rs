@@ -5514,4 +5514,117 @@ mod batch4_tests {
         assert!((got[0].2 - 0.0).abs() < 1e-6 && (got[0].3 - 10.0).abs() < 1e-6, "{got:?}");
         assert!((got[1].2 - 10.0).abs() < 1e-6, "{got:?}");
     }
+
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history_plain_text()
+            .trim()
+            .to_string()
+    }
+
+    fn enter_layout(app: &mut OpenCADStudio) {
+        let i = app.active_tab;
+        let name = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        app.tabs[i].scene.set_current_layout(name);
+        app.tabs[i].scene.load_current_layout_state();
+    }
+
+    fn layout_viewport_handles(app: &OpenCADStudio) -> Vec<codec::Handle> {
+        let i = app.active_tab;
+        let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                codec::EntityType::Viewport(vp)
+                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn vp(app: &OpenCADStudio, handle: codec::Handle) -> &codec::entities::Viewport {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(codec::EntityType::Viewport(vp)) => vp,
+            _ => panic!("viewport missing"),
+        }
+    }
+
+    fn effective_scale(app: &OpenCADStudio, handle: codec::Handle) -> f64 {
+        let vp = vp(app, handle);
+        crate::scene::vp_effective_scale(vp.custom_scale, vp.view_height, vp.height)
+    }
+
+    #[test]
+    fn vpscale_sets_the_viewport_plot_scale_and_reports_it() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+
+        assert!(app.command_line.last_error.is_none());
+        let _ = app.run_command_line("VPSCALE 1:50");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let eff = effective_scale(&app, handles[0]);
+        assert!((eff - 0.02).abs() < 1e-9, "the viewport is not at 1:50");
+
+        let text = out(&app);
+        assert!(text.contains("VPSCALE"), "{text}");
+
+        assert!(app.command_line.last_error.is_none());
+        let _ = app.run_command_line("VPSCALE ?");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let text = out(&app);
+        assert!(text.contains("1:50"), "{text}");
+    }
+
+    #[test]
+    fn vp_lock_toggles_the_viewport_display_lock() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+
+        let _ = app.run_command_line("VPLOCK ON");
+        assert!(!app.command_line.last_error.is_some(), "{}", out(&app));
+        assert!(vp(&app, handles[0]).status.locked);
+
+        let _ = app.run_command_line("VPLOCK TOGGLE");
+        assert!(!app.command_line.last_error.is_some(), "{}", out(&app));
+        assert!(!vp(&app, handles[0]).status.locked);
+
+        let _ = app.run_command_line("VPLOCK OFF");
+        assert!(!app.command_line.last_error.is_some(), "{}", out(&app));
+        assert!(!vp(&app, handles[0]).status.locked);
+    }
+
+    #[test]
+    fn vpscale_in_model_space_is_refused() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.run_command_line("VPSCALE 1:50");
+        assert!(
+            app.command_line
+                .last_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("switch to a paper layout first"),
+            "{:?}",
+            app.command_line.last_error
+        );
+    }
 }

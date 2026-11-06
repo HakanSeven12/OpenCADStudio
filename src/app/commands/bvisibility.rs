@@ -811,7 +811,7 @@ impl OpenCADStudio {
                     && !parameter_type.eq_ignore_ascii_case("V")
                 {
                     self.command_line
-                        .push_error(crate::t!("Invalid option keyword.").as_ref());
+                        .push_rejection(crate::t!("Invalid option keyword.").as_ref());
                     return Some(Task::none());
                 }
                 let command = crate::modules::block_editor::visibility_parameter::VisibilityParameterCommand::new(self.tabs[i].id, block, parameter_type.is_empty());

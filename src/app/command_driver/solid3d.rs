@@ -226,7 +226,7 @@ impl OpenCADStudio {
         }
         if !distance.is_finite() {
             self.command_line
-                .push_error(crate::t!("Requires numeric distance or two points.").as_ref());
+                .push_rejection(crate::t!("Requires numeric distance or two points.").as_ref());
             return Some(Task::none());
         }
         if distance.abs() <= f64::EPSILON {

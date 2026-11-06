@@ -182,7 +182,7 @@ impl OpenCADStudio {
                     connect.filter(|v| *v > 0.0),
                 ) else {
                     self.command_line
-                        .push_error(crate::t!("Requires a positive number.").as_ref());
+                        .push_rejection(crate::t!("Requires a positive number.").as_ref());
                     return Task::none();
                 };
                 let Some(angle) = state
@@ -204,7 +204,7 @@ impl OpenCADStudio {
                     .filter(|v| *v > 0)
                 else {
                     self.command_line
-                        .push_error(crate::t!("Requires a positive integer.").as_ref());
+                        .push_rejection(crate::t!("Requires a positive integer.").as_ref());
                     return Task::none();
                 };
                 let current = crate::t!("Use Current").into_owned();

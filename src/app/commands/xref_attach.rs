@@ -221,7 +221,7 @@ impl OpenCADStudio {
         if let Some(host) = host.as_deref() {
             if crate::modules::insert::xattach::is_self_attach(host, &full, host.parent()) {
                 self.command_line
-                    .push_error("Error: Possible circular reference to current drawing. *Invalid*");
+                    .push_rejection("Error: Possible circular reference to current drawing. *Invalid*");
                 return;
             }
         }
@@ -244,7 +244,7 @@ impl OpenCADStudio {
                     .unwrap_or(full.clone());
                 self.command_line
                     .push_output(&format!("\"{}\" cannot be found.", file));
-                self.command_line.push_error("*Invalid*");
+                self.command_line.push_rejection("*Invalid*");
                 return;
             }
             self.command_line
@@ -640,7 +640,7 @@ impl OpenCADStudio {
                     || (!state.rotation_on_screen && placement.rotation.is_none());
                 if invalid || state.path.is_empty() {
                     self.command_line
-                        .push_error(crate::t!("Invalid input.").as_ref());
+                        .push_rejection(crate::t!("Invalid input.").as_ref());
                     self.xref_attach = Some(state);
                     return Task::none();
                 }

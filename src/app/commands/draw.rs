@@ -351,7 +351,7 @@ impl OpenCADStudio {
                     "ON" => 2,
                     "NORMAL" | "N" => 1,
                     _ => {
-                        self.command_line.push_error("Invalid option keyword.");
+                        self.command_line.push_rejection("Invalid option keyword.");
                         return Some(Task::none());
                     }
                 };

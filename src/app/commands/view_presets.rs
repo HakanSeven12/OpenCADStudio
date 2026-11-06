@@ -682,7 +682,7 @@ impl OpenCADStudio {
                             .filter(|v| v.is_finite())
                         else {
                             self.command_line
-                                .push_error(crate::t!("Requires a number.").as_ref());
+                                .push_rejection(crate::t!("Requires a number.").as_ref());
                             return Task::none();
                         };
                         Some(D::GradientBackground(GradientBackground {
@@ -714,7 +714,7 @@ impl OpenCADStudio {
                             number(&state.scale[1]),
                         ) else {
                             self.command_line
-                                .push_error(crate::t!("Requires a number.").as_ref());
+                                .push_rejection(crate::t!("Requires a number.").as_ref());
                             return Task::none();
                         };
                         // Within the reference's slider ranges; a zero scale

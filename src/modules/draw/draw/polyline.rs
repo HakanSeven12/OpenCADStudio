@@ -136,6 +136,176 @@ impl Sub {
     }
 }
 
+/// What an arc option step makes of an input: the next step, or the arc.
+pub(crate) enum ArcStep {
+    Next(Sub),
+    Arc(DVec2, f64),
+}
+
+/// The arc options of a polyline-like path (VPCLIP's boundary, HATCH's drawn
+/// boundary): their steps, prompts and inputs, solved by `arc_for`.
+impl Sub {
+    /// The step a typed arc option starts: Angle, CEnter, Direction, Radius
+    /// or Second pt.
+    pub(crate) fn arc_option(upper: &str) -> Option<Sub> {
+        Some(match upper {
+            "A" | "ANGLE" => Sub::ArcAngle,
+            "CE" | "CENTER" | "CENTRE" => Sub::ArcCenter,
+            "D" | "DIRECTION" => Sub::ArcDirection,
+            "R" | "RADIUS" => Sub::ArcRadius,
+            "S" | "SECOND" | "SECOND PT" => Sub::ArcSecond,
+            _ => return None,
+        })
+    }
+
+    /// The step asks for the chord direction (Angle → Radius, Radius → Angle).
+    pub(crate) fn is_chord_step(self) -> bool {
+        matches!(self, Sub::ArcAngleRadiusDir { .. } | Sub::ArcRadiusAngleDir { .. })
+    }
+
+    /// A typed value (an angle in degrees for the angle steps).
+    pub(crate) fn arc_value(self, value: f64, a: DVec2, tangent: Option<Vec2>) -> Option<ArcStep> {
+        let angle_ok = |r: f64| r.abs() > 1e-9 && r.abs() < std::f64::consts::TAU;
+        Some(ArcStep::Next(match self {
+            Sub::ArcAngle if angle_ok(value.to_radians()) => Sub::ArcAngleEnd {
+                angle: value.to_radians(),
+            },
+            Sub::ArcAngleRadius { angle } if value > 0.0 => {
+                Sub::ArcAngleRadiusDir { angle, r: value }
+            }
+            Sub::ArcRadius if value > 0.0 => Sub::ArcRadiusEnd { r: value },
+            Sub::ArcRadiusAngle { r } if angle_ok(value.to_radians()) => Sub::ArcRadiusAngleDir {
+                r,
+                angle: value.to_radians(),
+            },
+            sub @ Sub::ArcCenterAngle { .. } => {
+                let (e, bulge) = arc_for(sub, a, DVec2::new(value.to_radians(), 0.0), tangent)?;
+                return Some(ArcStep::Arc(e, bulge));
+            }
+            sub @ Sub::ArcCenterLength { .. } => {
+                let (e, bulge) = arc_for(sub, a, DVec2::new(value, 0.0), tangent)?;
+                return Some(ArcStep::Arc(e, bulge));
+            }
+            _ => return None,
+        }))
+    }
+
+    /// A picked point: a value read from it, a centre / direction / second
+    /// point, or the arc's end.
+    pub(crate) fn arc_point(self, p: DVec2, a: DVec2, tangent: Option<Vec2>) -> Option<ArcStep> {
+        if self.is_scalar() {
+            let value = if self.is_angle() {
+                (p - a).y.atan2((p - a).x).to_degrees()
+            } else {
+                (p - a).length()
+            };
+            return self.arc_value(value, a, tangent);
+        }
+        match self {
+            Sub::ArcCenter if (p - a).length_squared() > 1e-12 => {
+                Some(ArcStep::Next(Sub::ArcCenterEnd { c: p }))
+            }
+            Sub::ArcDirection => (p - a)
+                .try_normalize()
+                .map(|dir| ArcStep::Next(Sub::ArcDirectionEnd { dir })),
+            Sub::ArcSecond if (p - a).length_squared() > 1e-12 => {
+                Some(ArcStep::Next(Sub::ArcSecondEnd { s: p }))
+            }
+            Sub::ArcCenter | Sub::ArcSecond => None,
+            sub => arc_for(sub, a, p, tangent).map(|(e, bulge)| ArcStep::Arc(e, bulge)),
+        }
+    }
+
+    /// The chord direction (degrees) of a chord step.
+    pub(crate) fn arc_chord(self, degrees: f64, a: DVec2, tangent: Option<Vec2>) -> Option<ArcStep> {
+        let p = a + DVec2::from_angle(degrees.to_radians());
+        arc_for(self, a, p, tangent).map(|(e, bulge)| ArcStep::Arc(e, bulge))
+    }
+
+    /// Typed text at an arc option step: a keyword of the step, a value, or
+    /// a chord direction.
+    pub(crate) fn arc_text(self, upper: &str, a: DVec2, tangent: Option<Vec2>) -> Option<ArcStep> {
+        if self.is_chord_step() {
+            let degrees = crate::entities::common::parse_typed_angle(upper)?.to_degrees();
+            return self.arc_chord(degrees, a, tangent);
+        }
+        let next = match (self, upper) {
+            (Sub::ArcAngleEnd { angle }, "CE" | "CENTER" | "CENTRE") => {
+                Sub::ArcAngleCenter { angle }
+            }
+            (Sub::ArcAngleEnd { angle }, "R" | "RADIUS") => Sub::ArcAngleRadius { angle },
+            (Sub::ArcCenterEnd { c }, "A" | "ANGLE") => Sub::ArcCenterAngle { c },
+            (Sub::ArcCenterEnd { c }, "L" | "LENGTH") => Sub::ArcCenterLength { c },
+            (Sub::ArcRadiusEnd { r }, "A" | "ANGLE") => Sub::ArcRadiusAngle { r },
+            (sub, text) if sub.is_scalar() => {
+                let value = if sub.is_angle() {
+                    crate::entities::common::parse_typed_angle(text).map(f64::to_degrees)
+                } else {
+                    crate::entities::common::parse_typed_length(text)
+                };
+                return value.and_then(|v| self.arc_value(v, a, tangent));
+            }
+            _ => return None,
+        };
+        Some(ArcStep::Next(next))
+    }
+
+    /// The prompt of an arc option step; `None` outside them.
+    pub(crate) fn arc_prompt(self, tangent: Option<Vec2>) -> Option<String> {
+        if self.is_chord_step() {
+            let t = tangent.map_or(DVec2::X, |t| t.as_dvec2());
+            let default = format!("{:.4}", t.y.atan2(t.x).to_degrees().rem_euclid(360.0));
+            let default = default.trim_end_matches('0').trim_end_matches('.');
+            return Some(
+                crate::t!(
+                    "Specify direction of chord for arc (hold Ctrl to switch direction) <%{default}>:",
+                    default = default
+                )
+                .into_owned(),
+            );
+        }
+        Some(
+            crate::t!(match self {
+                Sub::ArcCenterAngle { .. } =>
+                    "Specify included angle (hold Ctrl to switch direction):",
+                Sub::ArcAngle | Sub::ArcRadiusAngle { .. } => "Specify included angle:",
+                Sub::ArcAngleEnd { .. } =>
+                    "Specify endpoint of arc (hold Ctrl to switch direction) or [CEnter/Radius]:",
+                Sub::ArcCenter | Sub::ArcAngleCenter { .. } => "Specify center point of arc:",
+                Sub::ArcCenterEnd { .. } =>
+                    "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle/Length]:",
+                Sub::ArcCenterLength { .. } =>
+                    "Specify length of chord (hold Ctrl to switch direction):",
+                Sub::ArcDirection => "Specify the tangent direction for the start point of arc:",
+                Sub::ArcDirectionEnd { .. } =>
+                    "Specify endpoint of the arc (hold Ctrl to switch direction):",
+                Sub::ArcRadius | Sub::ArcAngleRadius { .. } => "Specify radius of arc:",
+                Sub::ArcRadiusEnd { .. } =>
+                    "Specify endpoint of arc (hold Ctrl to switch direction) or [Angle]:",
+                Sub::ArcSecond => "Specify second point on arc:",
+                Sub::ArcSecondEnd { .. } => "Specify end point of arc:",
+                _ => return None,
+            })
+            .into_owned(),
+        )
+    }
+
+    /// The options of an arc option step.
+    pub(crate) fn arc_options(self) -> Vec<crate::command::CmdOption> {
+        use crate::command::CmdOption;
+        match self {
+            Sub::ArcAngleEnd { .. } => {
+                vec![CmdOption::new("CEnter", "CE"), CmdOption::new("Radius", "R")]
+            }
+            Sub::ArcCenterEnd { .. } => {
+                vec![CmdOption::new("Angle", "A"), CmdOption::new("Length", "L")]
+            }
+            Sub::ArcRadiusEnd { .. } => vec![CmdOption::new("Angle", "A")],
+            _ => Vec::new(),
+        }
+    }
+}
+
 // ── Command implementation ─────────────────────────────────────────────────
 
 pub struct PlineCommand {

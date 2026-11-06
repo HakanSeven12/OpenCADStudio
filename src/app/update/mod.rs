@@ -12318,6 +12318,11 @@ impl OpenCADStudio {
                 self.tabs[i].layers.view = node;
                 Task::none()
             }
+            Message::LayerTreeSection(section) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.toggle_section(section);
+                Task::none()
+            }
             Message::LayerInvert(on) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.invert = on;

@@ -2174,6 +2174,9 @@ impl OpenCADStudio {
     pub(super) fn on_layer_filter_edit(&mut self, name: Option<String>) -> Task<Message> {
         use crate::filter::{Condition, Filter, Item, Match, Op};
         let i = self.active_tab;
+        // `Some("")`: a new, empty filter (the toolbar's New Filter); `None`
+        // starts from the search text (Advanced…).
+        let blank = name.as_deref() == Some("");
         let (name, filter) = match name.and_then(|name| {
             self.layer_filters
                 .iter()
@@ -2182,7 +2185,11 @@ impl OpenCADStudio {
         }) {
             Some(found) => found,
             None => {
-                let search = self.tabs[i].layers.filter.trim().to_string();
+                let search = if blank {
+                    String::new()
+                } else {
+                    self.tabs[i].layers.filter.trim().to_string()
+                };
                 let condition = if search.is_empty() {
                     Condition::default()
                 } else {
@@ -2234,6 +2241,14 @@ impl OpenCADStudio {
                 }
                 self.refresh_layer_counts();
                 return Task::none();
+            }
+            // A group goes from the tree's menu; its layers stay.
+            (TreeNode::Group(name), A::Delete) => {
+                let name = name.clone();
+                if self.tabs[i].layers.view == node {
+                    self.tabs[i].layers.set_group(None);
+                }
+                return self.dispatch_command(&format!("LAYERGROUP DELETE {name}"));
             }
             (_, A::Edit | A::Delete) => return Task::none(),
             _ => {}
@@ -7008,6 +7023,56 @@ mod layer_name_target_tests {
         assert_eq!(shown(&app), ["ALPHA", "ZULU"]);
         let _ = app.update(Message::LayerShow(TreeNode::All));
         assert_eq!(shown(&app).len(), 4);
+    }
+
+    /// #2610: the tree as in the mockup: "All" with its count, Groups and
+    /// Property filters as sections that close, a group deleted from its
+    /// node's menu, and New Filter starting empty whatever the search says.
+    #[test]
+    fn layer_tree_sections_counts_and_group_delete() {
+        use crate::ui::window::layers::{TreeAction, TreeNode, TreeRow, TreeSection};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.run_command_line("LAYERGROUP NEW WALLS ZULU");
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        app.sync_layer_panel(i);
+        app.refresh_layer_counts();
+        let rows = app.tabs[i].layers.tree_rows();
+        let group = TreeRow::Node(TreeNode::Group("WALLS".into()), 2);
+        let filter = TreeRow::Node(TreeNode::Filter("LETTERS".into()), 2);
+        assert_eq!(rows[0], TreeRow::Section(TreeSection::All, 0));
+        assert!(rows.contains(&TreeRow::Section(TreeSection::Groups, 1)));
+        assert!(rows.contains(&group));
+        assert!(rows.contains(&filter));
+        let panel = &app.tabs[i].layers;
+        assert_eq!(panel.node_count(&TreeNode::Group("WALLS".into())), 1);
+        assert_eq!(panel.node_count(&TreeNode::Filter("LETTERS".into())), 2);
+        // A closed section hides its nodes, "All" closed hides the rest.
+        let _ = app.update(Message::LayerTreeSection(TreeSection::Groups));
+        let rows = app.tabs[i].layers.tree_rows();
+        assert!(!rows.contains(&group) && rows.contains(&filter));
+        let _ = app.update(Message::LayerTreeSection(TreeSection::All));
+        assert_eq!(app.tabs[i].layers.tree_rows().len(), 1);
+        let _ = app.update(Message::LayerTreeSection(TreeSection::All));
+        let _ = app.update(Message::LayerTreeSection(TreeSection::Groups));
+        assert!(app.tabs[i].layers.tree_rows().contains(&group));
+        // The group goes from its node's menu; the node shown falls back.
+        let _ = app.update(Message::LayerShow(TreeNode::Group("WALLS".into())));
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Group("WALLS".into()),
+            TreeAction::Delete,
+        ));
+        app.sync_layer_panel(i);
+        assert_eq!(app.tabs[i].layers.view, TreeNode::All);
+        assert!(app.tabs[i].layers.groups.is_empty());
+        assert!(app.tabs[i].layers.layers.iter().any(|l| l.name == "ZULU"));
+        // New Filter: no first row from the search text.
+        app.tabs[i].layers.filter = "LU".into();
+        let _ = app.update(Message::LayerFilterEdit(Some(String::new())));
+        let state = app.filter_dialog.as_ref().expect("FILTER over the layers");
+        assert_eq!(state.live_count, 3, "an empty row finds every layer");
     }
 
     /// #2610: a layer filter made with FILTER's rows over layer properties,

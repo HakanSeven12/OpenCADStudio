@@ -4326,6 +4326,8 @@ pub enum Message {
     LayerNew,
     /// Show a node of the Layer manager's filter tree.
     LayerShow(crate::ui::window::layers::TreeNode),
+    /// Open or close a section of the Layer manager's filter tree.
+    LayerTreeSection(crate::ui::window::layers::TreeSection),
     /// Show the layers the node leaves out instead.
     LayerInvert(bool),
     /// Highlight the selected layers' objects in the drawing.

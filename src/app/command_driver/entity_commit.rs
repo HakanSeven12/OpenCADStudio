@@ -876,7 +876,7 @@ impl OpenCADStudio {
 
     /// What the Hatch panel sets on a new hatch entity once it exists:
     /// annotative, draw order, colour, transparency, background and a
-    /// user-defined pattern. A gradient prints that its boundary
+    /// user-defined pattern. The GRADIENT command prints that its boundary
     /// associativity was removed.
     fn apply_hatch_commit_options(
         &mut self,
@@ -893,7 +893,13 @@ impl OpenCADStudio {
         else {
             return;
         };
-        if matches!(settings.fill, HatchFill::Gradient(..)) {
+        // The GRADIENT command prints this; HATCH switched to a gradient
+        // (on the panel or by -HATCH's Gradient option) does not.
+        let gradient_command = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|command| command.name() == "GRADIENT");
+        if gradient_command {
             self.command_line
                 .push_output(&crate::tr!("hatch-cmd", "associativity-removed"));
         }

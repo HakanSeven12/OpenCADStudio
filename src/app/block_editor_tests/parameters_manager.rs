@@ -1083,6 +1083,30 @@ fn closing_the_pane_applies_the_number_typed_in_its_open_cell() {
 }
 
 #[test]
+fn closing_the_manager_in_clean_screen_applies_its_open_cell() {
+    use crate::ui::dock::PanelId;
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    let _ = app.update(Message::ToggleCleanScreen);
+    let _ = app.dispatch_command("PARAMETERS");
+    assert!(app.dock_panel_visible(PanelId::ParametersManager));
+    let history = app.tabs[tab].history.undo_stack.len();
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Value,
+    ));
+    let _ = app.update(Message::ParametersManagerInput("20".to_owned()));
+    let _ = app.dispatch_command("PARAMETERSCLOSE");
+    assert!(app.clean_screen);
+    assert!(!app.dock_panel_visible(PanelId::ParametersManager));
+    assert!(app.tabs[tab].parameters_panel.editing.is_none());
+    assert!(app.tabs[tab].parameters_panel.edit_buf.is_empty());
+    assert_eq!(printed(&app, tab, definition, "Distance1").expression, "20");
+    assert_eq!(endpoints(&app, tab, definition).1, glam::DVec3::X * 20.);
+    assert_eq!(app.tabs[tab].history.undo_stack.len(), history + 1);
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
 fn manager_edit_refreshes_ordered_actions_and_transported_parameters_with_undo() {
     use crate::scene::block_actions::{self as actions, instance, Kind, Value};
     use crate::scene::{block_distance_parameter as distance, block_point_parameter as point};

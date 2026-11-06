@@ -599,6 +599,13 @@ impl OpenCADStudio {
                     }
                 }
             }
+            if self.clean_screen {
+                match id {
+                    PanelId::ParametersManager => self.clean_screen_parameters_manager = true,
+                    PanelId::AuthoringPalettes => self.clean_screen_authoring_palettes = true,
+                    _ => {}
+                }
+            }
             self.dock_reveal(id);
             return task;
         }
@@ -608,9 +615,11 @@ impl OpenCADStudio {
                 self.block_palette.placing = None;
             }
             PanelId::AuthoringPalettes => {
+                self.clean_screen_authoring_palettes = false;
                 self.show_authoring_palettes = false;
             }
             PanelId::ParametersManager => {
+                self.clean_screen_parameters_manager = false;
                 // Closing the pane moves the click off an open cell, which is how
                 // every other route out of a cell applies what was typed. A cell
                 // left on another definition is not this pane's to apply, so it
@@ -741,8 +750,16 @@ impl OpenCADStudio {
         if self.tabs[self.active_tab].is_start {
             return false;
         }
-        if self.clean_screen && !(id == PanelId::Properties && self.clean_screen_properties) {
-            return false;
+        if self.clean_screen {
+            let reopened = match id {
+                PanelId::Properties => self.clean_screen_properties,
+                PanelId::ParametersManager => self.clean_screen_parameters_manager,
+                PanelId::AuthoringPalettes => self.clean_screen_authoring_palettes,
+                _ => false,
+            };
+            if !reopened {
+                return false;
+            }
         }
         self.dock_panel_wanted(id)
     }

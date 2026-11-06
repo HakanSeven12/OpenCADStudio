@@ -2419,3 +2419,109 @@ fn the_parameters_manager_docks_above_the_authoring_palettes() {
         palettes.1
     );
 }
+
+#[test]
+fn parameters_command_reopens_the_manager_in_clean_screen() {
+    with_stack(|| authoring_clean_screen("PARAMETERS", "PARAMETERSCLOSE", true));
+}
+
+#[test]
+fn bparameters_command_reopens_the_manager_in_clean_screen() {
+    with_stack(|| authoring_clean_screen("BPARAMETERS", "BPARAMETERSCLOSE", true));
+}
+
+#[test]
+fn authoring_palette_command_reopens_the_palettes_in_clean_screen() {
+    with_stack(|| authoring_clean_screen("BAUTHORPALETTE", "BAUTHORPALETTECLOSE", false));
+}
+
+fn authoring_clean_screen(open: &str, close: &str, manager: bool) {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockMsg, PanelId};
+    let (id, label, other, other_open) = if manager {
+        (
+            PanelId::ParametersManager,
+            "Parameters Manager",
+            PanelId::AuthoringPalettes,
+            "BAUTHORPALETTE",
+        )
+    } else {
+        (
+            PanelId::AuthoringPalettes,
+            "Authoring Palettes",
+            PanelId::ParametersManager,
+            "PARAMETERS",
+        )
+    };
+    for initially_open in [false, true] {
+        let mut app = authoring_app();
+        let i = app.active_tab;
+        let before = app.tabs[i].scene.document.clone();
+        let history = app.tabs[i].history.undo_stack.len();
+        let _ = app.dispatch_command(other_open);
+        if initially_open {
+            let _ = app.dispatch_command(open);
+            let _ = app.on_dock(DockMsg::DockTo(id, DockSide::Left));
+        }
+        let placement = app.dock.location(id);
+        assert!(try_find_in_view(&app, "Parametric").is_some());
+        let _ = app.update(Message::ToggleCleanScreen);
+        assert!(app.clean_screen);
+        assert!(try_find_in_view(&app, "Parametric").is_none());
+        assert!(!app.dock_panel_visible(id));
+        assert!(!app.dock_panel_visible(other));
+        assert!(try_find_in_view(&app, label).is_none());
+
+        let _ = app.dispatch_command(open);
+        assert!(
+            app.dock_panel_visible(id),
+            "{open} reopens its pane in clean screen (initially open: {initially_open})"
+        );
+        assert!(try_find_in_view(&app, label).is_some());
+        assert!(app.clean_screen, "opening a pane keeps clean screen active");
+        assert!(try_find_in_view(&app, "Parametric").is_none());
+        assert!(!app.dock_panel_visible(other));
+        assert!(!app.dock_panel_visible(PanelId::Properties));
+        if initially_open {
+            assert_eq!(app.dock.location(id), placement);
+        } else {
+            assert!(app.dock.is_placed(id));
+        }
+        authoring_capture(&app, &format!("cleanscreen-{open}-{initially_open}"));
+
+        let _ = app.dispatch_command(open);
+        assert!(
+            !app.dock_panel_visible(id),
+            "a visible pane still toggles off"
+        );
+        let _ = app.dispatch_command(open);
+        assert!(app.dock_panel_visible(id));
+        let _ = app.dispatch_command(other_open);
+        assert!(app.dock_panel_visible(other));
+        let _ = app.dispatch_command(close);
+        assert!(!app.dock_panel_visible(id));
+        assert!(
+            app.dock_panel_visible(other),
+            "close affects only its own pane"
+        );
+
+        let _ = app.update(Message::ToggleCleanScreen);
+        assert!(!app.clean_screen);
+        assert!(try_find_in_view(&app, "Parametric").is_some());
+        assert!(
+            !app.dock_panel_visible(id),
+            "an explicit close survives clean-screen exit"
+        );
+        assert!(app.dock_panel_visible(other));
+        assert!(app.dock_panel_visible(PanelId::Properties));
+        let _ = app.update(Message::ToggleCleanScreen);
+        assert!(!app.dock_panel_visible(id));
+        assert!(
+            !app.dock_panel_visible(other),
+            "a new clean-screen session hides reopened panes"
+        );
+        assert_eq!(app.tabs[i].scene.document, before);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), history);
+        assert!(!app.block_edit_dirty(i));
+    }
+}

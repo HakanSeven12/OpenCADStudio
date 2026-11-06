@@ -6858,6 +6858,8 @@ impl OpenCADStudio {
             Message::ToggleCleanScreen => {
                 self.clean_screen ^= true;
                 self.clean_screen_properties = false;
+                self.clean_screen_parameters_manager = false;
+                self.clean_screen_authoring_palettes = false;
                 if self.clean_screen {
                     // The panel goes with the chrome; its list cannot stay open.
                     self.tabs[self.active_tab].properties.open_block_picker = None;

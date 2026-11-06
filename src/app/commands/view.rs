@@ -235,10 +235,9 @@ impl OpenCADStudio {
                     .active_block_edit_session()
                     .is_some()
                 {
-                    let open = !self.show_parameters_manager;
-                    return Some(
-                        self.dock_set_open(crate::ui::dock::PanelId::ParametersManager, open),
-                    );
+                    let id = crate::ui::dock::PanelId::ParametersManager;
+                    let open = !self.dock_panel_visible(id);
+                    return Some(self.dock_set_open(id, open));
                 }
                 return Some(Task::done(Message::NamedParametersOpen));
             }

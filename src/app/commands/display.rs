@@ -725,13 +725,15 @@ impl OpenCADStudio {
             }
 
             "BPARAMETERS" | "BPARAMETERSCLOSE" => {
-                let open = cmd == "BPARAMETERS" && !self.show_parameters_manager;
-                return Some(self.dock_set_open(crate::ui::dock::PanelId::ParametersManager, open));
+                let id = crate::ui::dock::PanelId::ParametersManager;
+                let open = cmd == "BPARAMETERS" && !self.dock_panel_visible(id);
+                return Some(self.dock_set_open(id, open));
             }
 
             "BAUTHORPALETTE" | "BAUTHORPALETTECLOSE" => {
-                let open = cmd == "BAUTHORPALETTE" && !self.show_authoring_palettes;
-                return Some(self.dock_set_open(crate::ui::dock::PanelId::AuthoringPalettes, open));
+                let id = crate::ui::dock::PanelId::AuthoringPalettes;
+                let open = cmd == "BAUTHORPALETTE" && !self.dock_panel_visible(id);
+                return Some(self.dock_set_open(id, open));
             }
 
             // ── TOOLPALETTES — not yet implemented ───────────────────────────────

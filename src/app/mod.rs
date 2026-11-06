@@ -772,6 +772,8 @@ pub(super) struct OpenCADStudio {
     clean_screen: bool,
     /// Properties opened on top of clean screen (Ctrl+1 while it is on).
     clean_screen_properties: bool,
+    clean_screen_parameters_manager: bool,
+    clean_screen_authoring_palettes: bool,
     /// A property list closed itself a moment ago. The overlay reports Escape
     /// before the global shortcut repeats it, so the repeat is dropped instead
     /// of clearing the selection the list was opened for.
@@ -5939,6 +5941,8 @@ impl OpenCADStudio {
             otrack_kind: None,
             clean_screen: false,
             clean_screen_properties: false,
+            clean_screen_parameters_manager: false,
+            clean_screen_authoring_palettes: false,
             block_picker_dismissed: false,
             quick_properties: false,
             quick_properties_anchor: Point::new(12.0, 12.0),

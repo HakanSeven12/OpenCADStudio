@@ -509,6 +509,11 @@ impl OpenCADStudio {
         // (#677) A quoted navigation command does the same; an interactive
         // one (ZOOM Window) parks the running command and resumes it when the
         // zoom ends, as does a ZOOM the zoom prompt itself hands off to.
+        // 'FILTER and 'QSELECT work for the command asking for objects; they
+        // park it and hand it what they find (#2611).
+        if quoted && matches!(cmd, "FILTER" | "QSELECT") {
+            return Some(self.start_transparent_select(i, cmd));
+        }
         let transparent = is_transparent(cmd)
             || (cmd == "PARAMETERS" && self.tabs[i].active_block_edit_session().is_some())
             || (quoted && is_transparent_capable(cmd))

@@ -1452,6 +1452,9 @@ pub(super) struct OpenCADStudio {
     qselect: Option<QSelectState>,
     /// The FILTER dialog while it is open.
     filter_dialog: Option<filter_dialog::FilterDialogState>,
+    /// 'FILTER or 'QSELECT opened inside this command's "Select objects:";
+    /// the dialogs hand their result to it (#2611).
+    transparent_select: Option<String>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -6294,6 +6297,7 @@ impl OpenCADStudio {
             grip_text_slide: false,
             qselect: None,
             filter_dialog: None,
+            transparent_select: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

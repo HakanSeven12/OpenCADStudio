@@ -2643,7 +2643,7 @@ impl OpenCADStudio {
         ))
     }
 
-    pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
+    pub(in crate::app) fn on_qselect_open(&mut self) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.selection.borrow_mut().menu.close();
         let remembered = self.qselect_settings.clone();

@@ -8928,6 +8928,13 @@ impl OpenCADStudio {
 
             Message::QSelectClose => {
                 self.qselect_clear_preview();
+                if self.transparent_select.is_some() {
+                    if let Some(state) = self.qselect.take() {
+                        self.qselect_settings = Some((&state).into());
+                    }
+                    self.reset_modal_geometry();
+                    return self.finish_transparent_select(None);
+                }
                 if let Some(state) = self.qselect.take() {
                     self.qselect_settings = Some((&state).into());
                 }
@@ -9187,6 +9194,9 @@ impl OpenCADStudio {
                     state.mode,
                     state.result,
                 );
+                if self.transparent_select.is_some() {
+                    return self.finish_transparent_select(Some(matched));
+                }
                 self.command_line
                     .push_output(crate::tf!("QSELECT: {} object(s) selected.", matched).as_ref());
                 self.refresh_properties();

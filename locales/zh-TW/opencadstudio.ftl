@@ -8596,84 +8596,84 @@ block-action-targets =
     .flip-invalid = 請選取由關聯參數控制的所有物件，並確保這些物件的動作在翻轉之前執行。
 
 revcloud-cmd =
-    .header = Minimum arc length: { $min }   Maximum arc length: { $max }   Style: { $style }   Type: { $kind }
-    .style-normal = Normal
-    .style-calligraphy = Calligraphy
-    .type-rectangular = Rectangular
-    .type-polygonal = Polygonal
-    .type-freehand = Freehand
-    .first-corner = REVCLOUD  Specify first corner point or [Arc length/Object/Rectangular/Polygonal/Freehand/Style/Modify] <Object>:
-    .start-point = REVCLOUD  Specify start point or [Arc length/Object/Rectangular/Polygonal/Freehand/Style/Modify] <Object>:
-    .first-point = REVCLOUD  Specify first point or [Arc length/Object/Rectangular/Polygonal/Freehand/Style/Modify] <Object>:
-    .opposite = REVCLOUD  Specify opposite corner:
-    .next = REVCLOUD  Specify next point:
-    .next-undo = REVCLOUD  Specify next point or [Undo]:
-    .guide = REVCLOUD  Guide crosshairs along cloud path...
-    .arc = REVCLOUD  Specify approximate length of arc <{ $length }>:
-    .second = REVCLOUD  Specify second point:
-    .second-point = Specify second point:
-    .style = REVCLOUD  Select arc style [Normal/Calligraphy] <{ $style }>:
-    .object = REVCLOUD  Select object:
-    .reverse = REVCLOUD  Reverse direction [Yes/No] <No>:
-    .modify-select = REVCLOUD  Select polyline to modify:
-    .modify-first = REVCLOUD  Specify next point or [First point]:
-    .modify-start = REVCLOUD  Specify a start point:
-    .modify-side = REVCLOUD  Pick a side to erase:
-    .invalid-shape = Invalid shape to create revision cloud.
-    .finished = Revision cloud finished.
-    .unable = Unable to convert object, must be a polyline, spline, or circle.
-    .positive = Value must be positive and nonzero.
-    .numeric = Requires numeric distance or two points.
-    .keyword = Invalid option keyword.
-    .var-mode = Requires an integer between 0 and 2.
-    .var-onoff = Requires 0 or 1 only, or option keyword.
+    .header = 最小弧長: { $min }   最大弧長: { $max }   型式: { $style }   類型: { $kind }
+    .style-normal = 一般
+    .style-calligraphy = 書法
+    .type-rectangular = 矩形
+    .type-polygonal = 多邊形
+    .type-freehand = 手繪
+    .first-corner = REVCLOUD  指定第一個角點或 [弧長(Arc length)/物件(Object)/矩形(Rectangular)/多邊形(Polygonal)/手繪(Freehand)/型式(Style)/修改(Modify)] <物件>：
+    .start-point = REVCLOUD  指定起點或 [弧長(Arc length)/物件(Object)/矩形(Rectangular)/多邊形(Polygonal)/手繪(Freehand)/型式(Style)/修改(Modify)] <物件>：
+    .first-point = REVCLOUD  指定第一點或 [弧長(Arc length)/物件(Object)/矩形(Rectangular)/多邊形(Polygonal)/手繪(Freehand)/型式(Style)/修改(Modify)] <物件>：
+    .opposite = REVCLOUD  指定對角點：
+    .next = REVCLOUD  指定下一點：
+    .next-undo = REVCLOUD  指定下一點或 [放棄(Undo)]：
+    .guide = REVCLOUD  沿雲形線路徑引導十字游標...
+    .arc = REVCLOUD  指定弧的大約長度 <{ $length }>:
+    .second = REVCLOUD  指定第二點：
+    .second-point = 指定第二點：
+    .style = REVCLOUD  選取弧型式 [一般(Normal)/書法(Calligraphy)] <{ $style }>:
+    .object = REVCLOUD  選取物件：
+    .reverse = REVCLOUD  反轉方向 [是(Yes)/否(No)] <否>:
+    .modify-select = REVCLOUD  選取要修改的多段線：
+    .modify-first = REVCLOUD  指定下一點或 [第一點(First point)]：
+    .modify-start = REVCLOUD  指定起點：
+    .modify-side = REVCLOUD  挑選要刪除的一側：
+    .invalid-shape = 建立修訂雲形線的圖形無效。
+    .finished = 修訂雲形線已完成。
+    .unable = 無法轉換物件，必須是多段線、雲形線或圓形。
+    .positive = 數值必須為正數且不為零。
+    .numeric = 需要數值距離或兩個點。
+    .keyword = 無效的選項關鍵字。
+    .var-mode = 需要 0 到 2 之間的整數。
+    .var-onoff = 僅限 0 或 1，或是選項關鍵字。
 
 wipeout-cmd =
-    .select-polyline = WIPEOUT  Select a closed polyline:
-    .polyline-invalid = The polyline must be closed and made up of only line segments.
-    .erase-polyline = WIPEOUT  Erase polyline? [Yes/No] <No>:
-    .frames = WIPEOUT  Enter mode [ON/OFF/Display but not plot] <{ $current }>:
-    .frame-on = ON
-    .frame-off = OFF
-    .frame-display = Display but not plot
-    .keyword = Invalid option keyword.
-    .point-or-keyword = 2D point or option keyword required.
+    .select-polyline = WIPEOUT  選取封閉多段線：
+    .polyline-invalid = 多段線必須是封閉的，且只能由直線段組成。
+    .erase-polyline = WIPEOUT  要刪除多段線嗎？[是(Yes)/否(No)] <否>：
+    .frames = WIPEOUT  輸入模式 [開啟(ON)/關閉(OFF)/顯示但不列印(Display but not plot)] <{ $current }>:
+    .frame-on = 開啟
+    .frame-off = 關閉
+    .frame-display = 顯示但不列印
+    .keyword = 無效的選項關鍵字。
+    .point-or-keyword = 需要 2D 點或選項關鍵字。
 
 quad-menu =
     .label = QUAD
-    .menu = Quad Cursor Menu
+    .menu = 四方游標功能表
     .pill-tip =
-        Quad cursor menu
-        Click to toggle on/off
+        四方游標功能表
+        按一下以切換開啟/關閉
     .options-tip =
-        Quad display options
-        Click to choose
-    .show = Show the Quad cursor menu (Shift+F12, QUAD)
-    .on-hover = Hover an object: offer its commands
-    .on-select = A selection offers its shared commands
-    .on-void = Right-click in the void: creation commands
-    .suppress-hover = Suppress the hover quad while a selection exists
-    .hover-delay = Hover delay
-    .width = Quad width
-    .launch = Right-click over an object launches its default command directly (QUADCOMMANDLAUNCH)
-    .about = The Quad cursor menu appears at the cursor: default commands for what it points at, recent and creation commands otherwise (QUAD, QUADWIDTH).
+        四方顯示選項
+        按一下以選擇
+    .show = 顯示四方游標功能表 (Shift+F12, QUAD)
+    .on-hover = 游標懸停於物件：提供其指令
+    .on-select = 選取物件後提供共用指令
+    .on-void = 在空白處按滑鼠右鍵：建立指令
+    .suppress-hover = 存在選取集時隱藏懸停四方功能表
+    .hover-delay = 懸停延遲
+    .width = 四方寬度
+    .launch = 在物件上按滑鼠右鍵可直接啟動其預設指令 (QUADCOMMANDLAUNCH)
+    .about = 四方游標功能表會顯示在游標處：指向物件時顯示預設指令，否則顯示最近使用的指令與建立指令 (QUAD, QUADWIDTH)。
 
 block-flip-frame-feedback =
     .unavailable = 圖塊參數座標框無法使用。
 
 tool-windows =
-    .detach = Open in its own window
-    .back = Back to the main window
-    .command-history = Command History
+    .detach = 在獨立視窗中開啟
+    .back = 返回主視窗
+    .command-history = 指令記錄
 
 ifccad-ui =
-    .alpha-title = IFCCAD alpha — save warning
-    .alpha-note = Alpha — file format under development.
+    .alpha-title = IFCCAD Alpha 版 — 儲存警告
+    .alpha-note = Alpha 版 — 檔案格式仍在開發中。
     .alpha-body =
-        IFCCAD is an alpha file format in active development. A file saved today may not open in a later OCS version. Backward compatibility and migration are not guaranteed.
+        IFCCAD 是開發中的 Alpha 檔案格式。今天儲存的檔案可能無法在未來的 OCS 版本中開啟。不保證相容性與移轉支援。
 
-        Use IFCCAD for testing and evaluation. Keep the original drawing and a separate DWG/DXF copy; do not use it as your only copy or for long-term archiving.
-    .conversion-title = Conversion messages for this save
+        請將 IFCCAD 用於測試與評估。請保留原始圖面與獨立的 DWG/DXF 複本；切勿將其作為唯一複本或用於長期歸檔。
+    .conversion-title = 此次儲存的轉換訊息
 
 hatch-cmd =
     .pick = HATCH  點選內部點或 [選取物件(S)/繪製(D)/復原(U)/設定(T)]：

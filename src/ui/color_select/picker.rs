@@ -926,6 +926,7 @@ impl ColorPicker {
     fn true_color_tab(&self) -> Element<'_, Message> {
         // The eyedropper reads the window back from the GPU, which the web
         // build cannot do.
+        let eyedropper = crate::ui::icons::art_for(crate::ui::icons::EYEDROPPER, 24.0);
         let pipette: Option<Element<'_, Message>> = if cfg!(target_arch = "wasm32") {
             None
         } else {
@@ -933,21 +934,19 @@ impl ColorPicker {
                 // Just the icon, without a button frame.
                 button(
                     // Gray at rest; the accent colour while the pointer is on it.
-                    iced::widget::svg(crate::ui::icons::themed_handle(
-                        crate::ui::icons::EYEDROPPER,
-                    ))
-                    .width(24)
-                    .height(24)
-                    .style(|theme: &Theme, status| iced::widget::svg::Style {
-                        color: Some(match status {
-                            iced::widget::svg::Status::Hovered => {
-                                theme.palette().primary.base.color
-                            }
-                            iced::widget::svg::Status::Idle => {
-                                theme.palette().background.base.text.scale_alpha(0.5)
-                            }
+                    iced::widget::svg(crate::ui::icons::themed_handle(eyedropper))
+                        .width(24)
+                        .height(24)
+                        .style(|theme: &Theme, status| iced::widget::svg::Style {
+                            color: Some(match status {
+                                iced::widget::svg::Status::Hovered => {
+                                    theme.palette().primary.base.color
+                                }
+                                iced::widget::svg::Status::Idle => {
+                                    theme.palette().background.base.text.scale_alpha(0.5)
+                                }
+                            }),
                         }),
-                    }),
                 )
                 .on_press(picker_msg(ColorPickerMsg::Eyedropper(EyedropperMsg::Start)))
                 .padding(0)

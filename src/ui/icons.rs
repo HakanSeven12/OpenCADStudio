@@ -546,7 +546,7 @@ pub fn logo<'a, M: 'a>(letters: bool, width: f32, height: f32) -> Element<'a, M>
 /// Render a multi-colour tool icon using semantic colours from the active theme.
 pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
         tint: None,
@@ -556,7 +556,7 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 /// [`semantic`] faded like disabled menu text.
 pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
         tint: None,
@@ -567,7 +567,7 @@ pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<
 /// is: the whole canvas fits the box and the lines keep their own width.
 pub fn tool<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
         tint: None,
@@ -577,7 +577,7 @@ pub fn tool<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 /// [`tool`] faded like disabled menu text.
 pub fn tool_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
         tint: None,
@@ -587,7 +587,7 @@ pub fn tool_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, 
 /// A chrome icon in the theme's text colour, drawn like [`tool`].
 pub fn chrome<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
         tint: Some(|theme| theme.palette().background.base.text),
@@ -597,7 +597,7 @@ pub fn chrome<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 /// [`chrome`] faded like disabled menu text.
 pub fn chrome_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
         tint: Some(|theme| theme.palette().background.base.text),
@@ -782,7 +782,7 @@ fn color_hex(color: Color) -> [u8; 7] {
 
 /// Render a chrome icon with the active Iced theme's normal text color.
 pub fn themed<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -793,7 +793,7 @@ pub fn themed<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 
 /// Render secondary chrome with the active Iced theme's text color.
 pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -806,7 +806,7 @@ pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'
 /// like disabled text. The fade goes through the widget's opacity: an SVG
 /// tint only replaces RGB, so alpha on the style colour would be ignored.
 pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .opacity(0.42_f32)
@@ -818,7 +818,7 @@ pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a
 
 /// Render an emphasized chrome icon with the active Iced theme's primary color.
 pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -829,7 +829,7 @@ pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 
 /// Render an icon with the foreground chosen for a weak primary surface.
 pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -840,7 +840,7 @@ pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> E
 
 /// Render a positive-state chrome icon with the active Iced theme's success color.
 pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -851,7 +851,7 @@ pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 
 /// Render an icon with the foreground chosen for a success-coloured surface.
 pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -862,7 +862,7 @@ pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Elemen
 
 /// Render a warning-state chrome icon from the active Iced theme.
 pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -873,7 +873,7 @@ pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a,
 
 /// Render a destructive-state chrome icon from the active Iced theme.
 pub fn themed_danger<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {
@@ -884,7 +884,7 @@ pub fn themed_danger<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, 
 
 /// Render an icon with the foreground chosen for a danger-coloured surface.
 pub fn themed_danger_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
+    svg(themed_handle(art_for(bytes, size)))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {

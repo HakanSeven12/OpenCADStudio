@@ -73,7 +73,8 @@ pub fn resolved_path(address: &str, base: &str) -> String {
 }
 
 fn icon<'a>(bytes: &'static [u8], size: f32) -> Element<'a, Message> {
-    svg(crate::ui::icons::themed_handle(bytes))
+    let art = crate::ui::icons::art_for(bytes, size);
+    svg(crate::ui::icons::themed_handle(art))
         .width(size)
         .height(size)
         .style(|theme: &Theme, _| svg::Style {

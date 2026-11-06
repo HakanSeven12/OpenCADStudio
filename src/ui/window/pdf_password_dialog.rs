@@ -70,7 +70,8 @@ impl PdfPasswordState {
 }
 
 fn icon<'a>(bytes: &'static [u8], size: f32, accent: bool) -> Element<'a, Message> {
-    svg(crate::ui::icons::themed_handle(bytes))
+    let art = crate::ui::icons::art_for(bytes, size);
+    svg(crate::ui::icons::themed_handle(art))
         .width(size)
         .height(size)
         .style(move |theme: &Theme, _| svg::Style {

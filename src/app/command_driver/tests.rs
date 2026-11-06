@@ -5627,4 +5627,42 @@ mod batch4_tests {
             app.command_line.last_error
         );
     }
+
+    #[test]
+    fn objectscale_adds_an_explicit_scale_and_delete_removes_it() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("TEXT 0,0 2 0 hello");
+        let _ = app.run_command_line("SELECTALL");
+        let i = app.active_tab;
+        let handle = app.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .next()
+            .expect("the text is selected");
+
+        let _ = app.run_command_line("OBJECTSCALE ADD 1:100");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let after_add = crate::scene::annotative::object_scale_memberships(
+            &app.tabs[i].scene.document,
+            handle,
+        );
+        assert!(
+            after_add.iter().any(|(name, _)| name == "1:100"),
+            "{after_add:?}"
+        );
+
+        let _ = app.run_command_line("OBJECTSCALE DELETE 1:100");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let after_del = crate::scene::annotative::object_scale_memberships(
+            &app.tabs[i].scene.document,
+            handle,
+        );
+        assert!(
+            !after_del.iter().any(|(name, _)| name == "1:100"),
+            "{after_del:?}"
+        );
+    }
 }

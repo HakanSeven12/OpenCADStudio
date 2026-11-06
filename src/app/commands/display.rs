@@ -1659,11 +1659,45 @@ impl OpenCADStudio {
                 return Some(Task::done(Message::PlotDialogOpen));
             }
 
-            // Add or remove the current representation on the selected
-            // annotative objects. With no preselection, gather one through the
-            // regular selection engine before applying the action.
-            action @ ("OBJECTSCALE ADD" | "OBJECTSCALE DELETE") => {
-                let selected: Vec<document::Handle> = self.tabs[i]
+            // Add or remove a scale on the selected annotative objects. With
+            // no preselection, gather one through the regular selection engine
+            // before applying the action; a bare ADD/DELETE acts on the drawing's
+            // active annotation scale, `ADD|DELETE <scale>` on that named scale.
+            cmd if cmd == "OBJECTSCALE ADD"
+                || cmd == "OBJECTSCALE DELETE"
+                || cmd.starts_with("OBJECTSCALE ADD ")
+                || cmd.starts_with("OBJECTSCALE DELETE ") =>
+            {
+                let adding = if cmd == "OBJECTSCALE ADD" || cmd.starts_with("OBJECTSCALE ADD ") {
+                    true
+                } else {
+                    false
+                };
+                let explicit: Option<String> = if adding {
+                    cmd.strip_prefix("OBJECTSCALE ADD").map(|r| r.trim().to_string())
+                } else {
+                    cmd.strip_prefix("OBJECTSCALE DELETE").map(|r| r.trim().to_string())
+                };
+                let explicit_scale = explicit
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_string);
+                let scale = if let Some(name) = explicit_scale.as_deref() {
+                    self.tabs[i].scene.scale_handle_ensuring(name)
+                } else {
+                    self.tabs[i].scene.creation_annotation_scale_handle()
+                };
+                let Some(scale) = scale else {
+                    self.command_line.push_error(
+                        crate::t!("OBJECTSCALE: the active annotation scale is unavailable.")
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                };
+                let scale_label: &str = explicit_scale.as_deref().unwrap_or("the current annotation scale");
+
+                let selected: Vec<codec::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
                     .iter()
@@ -1671,29 +1705,16 @@ impl OpenCADStudio {
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
                     .collect();
                 if selected.is_empty() {
-                    let action = if action.ends_with("ADD") {
-                        "OBJECTSCALE ADD"
-                    } else {
-                        "OBJECTSCALE DELETE"
-                    };
                     let command = crate::modules::annotate::annotation_scale::AnnotationScaleSelectionCommand::new(
                         "OBJECTSCALE",
-                        action,
+                        if adding { "OBJECTSCALE ADD" } else { "OBJECTSCALE DELETE" },
                     );
                     self.command_line
                         .push_info(&crate::command::CadCommand::prompt(&command));
                     self.tabs[i].active_cmd = Some(Box::new(command));
                     return Some(Task::none());
                 }
-                let Some(scale) = self.tabs[i].scene.creation_annotation_scale_handle() else {
-                    self.command_line.push_error(
-                        crate::t!("OBJECTSCALE: the active annotation scale is unavailable.")
-                            .as_ref(),
-                    );
-                    return Some(Task::none());
-                };
 
-                let adding = action.ends_with("ADD");
                 let handles: Vec<_> = selected
                     .into_iter()
                     .filter(|handle| {
@@ -1761,9 +1782,10 @@ impl OpenCADStudio {
                 self.tabs[i].dirty = true;
                 self.command_line.push_output(
                     crate::tf!(
-                        "OBJECTSCALE: {} the current scale on {} object(s).",
+                        "OBJECTSCALE: {} the scale on {} object(s) ({}).",
                         if adding { "added" } else { "removed" },
-                        changed.len()
+                        changed.len(),
+                        scale_label
                     )
                     .as_ref(),
                 );

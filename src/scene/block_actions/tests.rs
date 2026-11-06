@@ -1211,6 +1211,54 @@ fn block_actions_stretch_frozen_vertices_polyline_and_whole_objects_roundtrip() 
 }
 
 #[test]
+fn block_actions_stretch_legacy_polyline_vertices_and_solid_corners() {
+    use document::entities::{Insert, Polyline2D, Solid, Vertex2D};
+
+    let a = Vector3::ZERO;
+    let b = Vector3::new(10., 0., 0.);
+    let c = Vector3::new(0., 4., 0.);
+    let d = Vector3::new(10., 4., 0.);
+    let mut polyline = Polyline2D::new();
+    for point in [a, b, d] {
+        polyline.add_vertex(Vertex2D::new(point));
+    }
+    polyline.vertices[0].bulge = 0.2;
+    let mut scene = Scene::new();
+    scene.define_block_raw(
+        "PLANAR_STRETCH",
+        a,
+        vec![EntityType::Polyline2D(polyline), EntityType::Solid(Solid::new(a, b, c, d))],
+    );
+    let mut doc = scene.document;
+    let block = doc.block_records.get("PLANAR_STRETCH").unwrap();
+    let (def, targets) = (block.handle, block.entity_handles.clone());
+    let parameter = distance::create(&mut doc, def, distance::Kind::Linear, a, b, b).unwrap();
+    create_with_frame(
+        &mut doc, def, Kind::Stretch, parameter, &targets, DVec3::ZERO,
+        Some([DVec3::new(9., -1., 0.), DVec3::new(11., 5., 0.)]),
+    ).unwrap();
+    let insert = doc.add_entity(EntityType::Insert(Insert::new("PLANAR_STRETCH", a))).unwrap();
+    let result = instance::evaluate(&doc, insert, parameter, DVec3::new(20., 0., 0.))
+        .unwrap().unwrap();
+    let reopened = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&result).unwrap()))
+        .read().unwrap();
+    for drawing in [&result, &reopened] {
+        let EntityType::Insert(reference) = drawing.get_entity(insert).unwrap() else { panic!() };
+        let members = &drawing.block_records.get(&reference.block_name).unwrap().entity_handles;
+        let EntityType::Polyline2D(polyline) = drawing.get_entity(members[0]).unwrap() else { panic!() };
+        assert_eq!(polyline.vertices.iter().map(|v| v.location.x).collect::<Vec<_>>(), [0., 20., 20.]);
+        assert!((polyline.vertices[0].bulge - 0.1).abs() < 1e-8);
+        let EntityType::Solid(solid) = drawing.get_entity(members[1]).unwrap() else { panic!() };
+        assert_eq!(solid.first_corner, a);
+        assert_eq!(solid.third_corner, c);
+        assert_eq!(solid.second_corner, Vector3::new(20., 0., 0.));
+        assert_eq!(solid.fourth_corner, Vector3::new(20., 4., 0.));
+    }
+    assert_eq!(result.get_entity(targets[0]), doc.get_entity(targets[0]));
+    assert_eq!(result.get_entity(targets[1]), doc.get_entity(targets[1]));
+}
+
+#[test]
 fn block_actions_stretch_saved_reference_independence_copy_and_reopen() {
     let (mut doc, def, handles, p, _) = stretch_fixture();
     let a = doc

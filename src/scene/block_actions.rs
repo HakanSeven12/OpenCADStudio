@@ -483,6 +483,12 @@ fn parameters_at(doc: &Document, definition: Handle, kind: Kind, graph: Handle) 
 }
 
 pub(crate) fn supported(e: &EntityType) -> bool {
+    let in_xy = |normal: Vector3| normal.x == 0. && normal.y == 0. && normal.z == 1.;
+    match e {
+        EntityType::Polyline2D(p) => return in_xy(p.normal),
+        EntityType::Solid(s) => return in_xy(s.normal),
+        _ => {}
+    }
     matches!(
         e,
         EntityType::Line(_)

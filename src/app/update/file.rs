@@ -808,7 +808,11 @@ impl OpenCADStudio {
             aperture: self.snapper.osnap_radius_px,
             hatch_associative: self.hatch_associative,
             hatch_gap_tolerance: self.hatch_gap_tolerance,
-            hatch_start_method: self.hatch_start_method,
+            hatch_start_method: self.hatch_prefs.method,
+            hatch_draw_path: self.hatch_prefs.path,
+            hatch_path_width: self.hatch_prefs.width,
+            hatch_path_alignment: self.hatch_prefs.alignment,
+            hatch_boundary_warning_off: self.hatch_boundary_warning_off,
             show_menu_bar: self.show_menu_bar,
             ribbon_closed: self.ribbon_closed,
             command_line_hidden: self.command_line_hidden,
@@ -1000,7 +1004,17 @@ impl OpenCADStudio {
         if !(0.0..=max_gap).contains(&self.hatch_gap_tolerance) {
             self.hatch_gap_tolerance = 0.0;
         }
-        self.hatch_start_method = s.hatch_start_method.min(2);
+        self.hatch_prefs = crate::modules::draw::draw::hatch::HatchPrefs {
+            method: s.hatch_start_method.min(2),
+            path: s.hatch_draw_path,
+            width: if s.hatch_path_width.is_finite() && s.hatch_path_width > 0.0 {
+                s.hatch_path_width
+            } else {
+                0.25
+            },
+            alignment: s.hatch_path_alignment.min(2),
+        };
+        self.hatch_boundary_warning_off = s.hatch_boundary_warning_off;
         self.show_menu_bar = s.show_menu_bar;
         self.ribbon_closed = s.ribbon_closed;
         self.command_line_hidden = s.command_line_hidden;

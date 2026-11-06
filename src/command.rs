@@ -2073,6 +2073,13 @@ pub enum CmdResult {
         boundaries: Vec<EntityType>,
         entity_style: Option<(codec::types::Color, codec::types::Transparency)>,
     },
+    /// Show the Hatch panel for the running HATCH / GRADIENT (even with
+    /// HPDLGMODE 0); the command keeps its prompt.
+    ShowHatchPanel,
+    /// A picked point or selection gave no closed boundary: the boundary
+    /// warning window (or, once turned off, the message), then the prompt.
+    /// The text is what the search printed first (empty when nothing).
+    HatchBoundaryMissed(String),
     /// Commit one hatch, print `message` and keep the command at its prompt
     /// (HATCH's drawn boundaries).
     CommitHatchContinue {
@@ -3814,9 +3821,9 @@ pub trait CadCommand: Send {
         None
     }
 
-    /// The boundary method HATCH was switched to (0 pick internal point,
-    /// 1 select objects, 2 draw), kept for its next start. Default `None`.
-    fn hatch_start_method(&self) -> Option<u8> {
+    /// HATCH / GRADIENT's boundary method and draw mode after a change at a
+    /// prompt, kept for the next start. Default `None`.
+    fn hatch_prefs(&self) -> Option<crate::modules::draw::draw::hatch::HatchPrefs> {
         None
     }
 

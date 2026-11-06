@@ -30,6 +30,7 @@ pub mod spell_dialog;
 pub mod extraction_outdated;
 pub mod import_dialogs;
 pub mod gradient_editor;
+pub mod hatch_dialogs;
 pub mod graphic_attributes;
 pub mod hatch_panel;
 pub mod ribbon_customize;

@@ -205,7 +205,7 @@ fn hatch_preview_scale(pattern: &crate::scene::model::hatch_model::HatchPattern)
     }
 }
 
-fn hatch_pattern_preview(
+pub(crate) fn hatch_pattern_preview(
     pattern: crate::scene::model::hatch_model::HatchPattern,
     height: f32,
 ) -> Element<'static, Message> {

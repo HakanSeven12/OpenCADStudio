@@ -980,11 +980,12 @@ impl OpenCADStudio {
                     .with_origin(self.tabs[i].scene.document.hatch_origin())
                     .with_associative(self.hatch_associative)
                     .with_gap_tolerance(self.hatch_gap_tolerance)
-                    .with_start_method(self.hatch_start_method);
+                    .with_prefs(self.hatch_prefs);
                 if let Some(message) = new_cmd.start_message() {
                     self.command_line.push_output(&message);
                 }
                 self.hatch_drafts = Default::default();
+                self.hatch_panel_shown = false;
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
                 self.refresh_area_preview(i);
@@ -1051,17 +1052,27 @@ impl OpenCADStudio {
             }
 
             "GRADIENT" => {
-                use crate::modules::draw::draw::hatch::GradientCommand;
+                use crate::modules::draw::draw::hatch::HatchCommand;
                 let plane = crate::command::WorkingPlane::default();
                 let mut boundary_sources =
                     self.tabs[i].scene.boundary_sources_on_plane(plane, 1.0e-6);
                 self.tabs[i]
                     .scene
                     .retain_sources_on_screen(&mut boundary_sources, plane);
-                let new_cmd = GradientCommand::new(boundary_sources)
-                    .with_gap_tolerance(self.hatch_gap_tolerance);
+                let new_cmd = HatchCommand::new(boundary_sources, Vec::new(), None, plane)
+                    .gradient()
+                    .with_origin(self.tabs[i].scene.document.hatch_origin())
+                    .with_associative(self.hatch_associative)
+                    .with_gap_tolerance(self.hatch_gap_tolerance)
+                    .with_prefs(self.hatch_prefs);
+                if let Some(message) = new_cmd.start_message() {
+                    self.command_line.push_output(&message);
+                }
+                self.hatch_drafts = Default::default();
+                self.hatch_panel_shown = false;
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
+                self.refresh_area_preview(i);
             }
 
             "BOUNDARY" => {
@@ -1187,7 +1198,6 @@ impl OpenCADStudio {
                     self.command_line.push_info(&cmd.prompt());
                     self.tabs[i].active_cmd = Some(Box::new(cmd));
                 } else {
-                    let n = handles.len();
                     let delta_safe = self.delta_erase_safe(i, &handles);
                     let pending = self.begin_undo(i, "ERASE", handles.len(), delta_safe);
                     // Stash the erased entities so OOPS can restore them.
@@ -1195,11 +1205,20 @@ impl OpenCADStudio {
                         .iter()
                         .filter_map(|h| self.tabs[i].scene.document.get_entity_arc(*h))
                         .collect();
+                    // Erasing an associative hatch drops its link to its boundary.
+                    let associative_hatch = handles.iter().any(|h| {
+                        matches!(
+                            self.tabs[i].scene.document.get_entity(*h),
+                            Some(codec::EntityType::Hatch(hatch)) if hatch.is_associative
+                        )
+                    });
                     self.tabs[i].scene.erase_entities(&handles);
                     self.tabs[i].dirty = true;
                     self.refresh_properties();
-                    self.command_line
-                        .push_output(crate::tf!("{n} object(s) erased.").as_ref());
+                    if associative_hatch {
+                        self.command_line
+                            .push_output(&crate::tr!("hatch-cmd", "associativity-removed"));
+                    }
                     if let Some(pd) = pending {
                         self.commit_undo_delta(i, pd);
                     }
@@ -3261,7 +3280,39 @@ impl OpenCADStudio {
         match msg {
             M::Accept => return self.feed_command(StepInput::Enter),
             M::Cancel => return self.feed_command(StepInput::Escape),
-            M::Pattern(name) => settings.pattern = name,
+            M::Kind(kind) => {
+                use crate::modules::draw::draw::hatch::HatchFill;
+                if kind != crate::ui::window::hatch_panel::kind_code(&settings.fill) {
+                    settings.fill = match kind {
+                        0 => HatchFill::Solid,
+                        1 => HatchFill::Gradient(
+                            crate::scene::model::hatch_model::GradientKind::Linear,
+                            false,
+                        ),
+                        2 => HatchFill::Pattern(
+                            crate::modules::draw::draw::hatch::last_pattern_name("ANSI31"),
+                        ),
+                        _ => HatchFill::User {
+                            spacing: 1.0,
+                            double: false,
+                        },
+                    };
+                }
+            }
+            M::Pattern(name) => {
+                settings.fill = if name.eq_ignore_ascii_case("SOLID") {
+                    crate::modules::draw::draw::hatch::HatchFill::Solid
+                } else {
+                    crate::modules::draw::draw::hatch::HatchFill::Pattern(name)
+                };
+            }
+            M::Gradient(label) => {
+                if let Some((kind, invert)) =
+                    crate::scene::model::hatch_model::GradientKind::from_choice_label(&label)
+                {
+                    settings.fill = crate::modules::draw::draw::hatch::HatchFill::Gradient(kind, invert);
+                }
+            }
             M::Angle(typed) => {
                 if let Some(value) = number(&typed).filter(|value| value.is_finite()) {
                     settings.angle_deg = value;
@@ -3274,6 +3325,31 @@ impl OpenCADStudio {
                 }
                 self.hatch_drafts.scale = Some(typed);
             }
+            M::Spacing(typed) => {
+                if let (Some(value), crate::modules::draw::draw::hatch::HatchFill::User { spacing, .. }) =
+                    (number(&typed).filter(|value| *value > 0.0), &mut settings.fill)
+                {
+                    *spacing = value;
+                }
+                self.hatch_drafts.spacing = Some(typed);
+            }
+            M::Double(on) => {
+                if let crate::modules::draw::draw::hatch::HatchFill::User { double, .. } = &mut settings.fill {
+                    *double = on;
+                }
+            }
+            M::OriginX(typed) => {
+                if let Some(value) = number(&typed).filter(|value| value.is_finite()) {
+                    settings.origin[0] = value;
+                }
+                self.hatch_drafts.origin_x = Some(typed);
+            }
+            M::OriginY(typed) => {
+                if let Some(value) = number(&typed).filter(|value| value.is_finite()) {
+                    settings.origin[1] = value;
+                }
+                self.hatch_drafts.origin_y = Some(typed);
+            }
             M::Gap(typed) => {
                 if let Some(value) = number(&typed).filter(|value| *value >= 0.0) {
                     settings.gap_tolerance = value;
@@ -3285,6 +3361,47 @@ impl OpenCADStudio {
             M::Associative(on) => settings.associative = on,
             M::Separate(on) => settings.separate = on,
             M::KeepBoundaries(on) => settings.keep_boundaries = on,
+            M::Color(label) => {
+                settings.color = if label == crate::ui::window::hatch_panel::current_label() {
+                    None
+                } else {
+                    crate::ui::window::attman_dialog::parse_color(&label)
+                };
+            }
+            M::Background(label) => {
+                settings.background = if label == crate::ui::window::hatch_panel::none_label() {
+                    None
+                } else {
+                    crate::ui::window::attman_dialog::parse_color(&label)
+                };
+            }
+            M::GradientColor1(label) => {
+                if let Some(color) = crate::ui::window::attman_dialog::parse_color(&label) {
+                    settings.gradient_colors[0] = color;
+                }
+            }
+            M::GradientColor2(label) => {
+                if let Some(color) = crate::ui::window::attman_dialog::parse_color(&label) {
+                    settings.gradient_colors[1] = color;
+                }
+            }
+            M::Layer(name) => {
+                settings.layer =
+                    (name != crate::ui::window::hatch_panel::current_label()).then_some(name);
+            }
+            M::Transparency(typed) => {
+                match typed.trim() {
+                    "" => settings.transparency = None,
+                    text => {
+                        if let Some(value) = text.parse::<u8>().ok().filter(|v| *v <= 90) {
+                            settings.transparency = Some(value);
+                        }
+                    }
+                }
+                self.hatch_drafts.transparency = Some(typed);
+            }
+            M::DrawOrder(order) => settings.draw_order = order.min(4),
+            M::Annotative(on) => settings.annotative = on,
         }
         if let Some(command) = self.tabs[i].active_cmd.as_mut() {
             command.set_hatch_settings(settings);

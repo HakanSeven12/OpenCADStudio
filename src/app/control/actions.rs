@@ -152,6 +152,8 @@ pub(super) const NAMES: &[&str] = &[
     "tds_import_dialog",
     "tds_material_dialog",
     "tds_map_dialog",
+    "hatch_panel",
+    "hatch_boundary_warning",
     "extraction_outdated",
     "print_all",
     "data_link_manager",
@@ -2873,7 +2875,7 @@ impl OpenCADStudio {
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 let bad = || failure("invalid_value", spec);
                 if key == "cancel" {
-                    return Ok(Task::done(Message::CloseModal));
+                    return Ok(self.update(Message::CloseModal));
                 }
                 Message::PdfDialog(match key {
                     "ok" => P::ImportOk,
@@ -2901,7 +2903,7 @@ impl OpenCADStudio {
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 let bad = || failure("invalid_value", spec);
                 if key == "cancel" {
-                    return Ok(Task::done(Message::CloseModal));
+                    return Ok(self.update(Message::CloseModal));
                 }
                 Message::ImportDialog(match key {
                     "ok" => I::ImportOk,
@@ -2938,7 +2940,7 @@ impl OpenCADStudio {
                 let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
                 let bad = || failure("invalid_value", spec);
                 if key == "cancel" {
-                    return Ok(Task::done(Message::CloseModal));
+                    return Ok(self.update(Message::CloseModal));
                 }
                 let pick = |options: &[&str]| options.iter().position(|o| *o == value).ok_or_else(bad);
                 Message::ImportDialog(match key {
@@ -2998,7 +3000,7 @@ impl OpenCADStudio {
                         _ => return Err(bad()),
                     }),
                     "apply" | "ok" => I::TdsMatApply,
-                    "cancel" => return Ok(Task::done(Message::CloseModal)),
+                    "cancel" => return Ok(self.update(Message::CloseModal)),
                     _ => return Err(bad()),
                 })
             }
@@ -3170,6 +3172,83 @@ impl OpenCADStudio {
                     _ => return Err(failure("invalid_value", spec)),
                 }
             }
+            // The Hatch panel of a running HATCH / GRADIENT, one edit per
+            // call: "kind=solid|gradient|pattern|user", "pattern=<name>",
+            // "gradient=<label>", "color=<label>", "background=<label>",
+            // "angle=<deg>", "scale=<n>", "spacing=<n>", "double=on|off",
+            // "origin_x=<n>", "origin_y=<n>", "method=pick|select|draw",
+            // "associative=on|off", "separate=on|off", "keep=on|off",
+            // "island=normal|outer|ignore", "gap=<n>", "layer=<name>",
+            // "transparency=<0-90 or empty>", "color1=<label>",
+            // "color2=<label>", "draw_order=<0-4>", "annotative=on|off",
+            // "ok" or "cancel".
+            "hatch_panel" => {
+                use crate::ui::window::hatch_panel::HatchPanelMsg as H;
+                let i = self.active_tab;
+                if self.tabs[i]
+                    .active_cmd
+                    .as_ref()
+                    .and_then(|command| command.hatch_settings())
+                    .is_none()
+                {
+                    return Err(failure("no_dialog", "No HATCH or GRADIENT is running"));
+                }
+                let spec = string(req, "value")?;
+                let (key, value) = spec.split_once('=').unwrap_or((spec, ""));
+                let on = matches!(value, "on" | "1" | "true");
+                let text = value.to_string();
+                let code = |names: &[&str]| {
+                    names
+                        .iter()
+                        .position(|name| *name == value)
+                        .map(|code| code as u8)
+                        .ok_or_else(|| failure("invalid_value", spec))
+                };
+                let message = match key {
+                    "kind" => H::Kind(code(&["solid", "gradient", "pattern", "user"])?),
+                    "pattern" => H::Pattern(text),
+                    "gradient" => H::Gradient(text),
+                    "color" => H::Color(text),
+                    "background" => H::Background(text),
+                    "angle" => H::Angle(text),
+                    "scale" => H::Scale(text),
+                    "spacing" => H::Spacing(text),
+                    "double" => H::Double(on),
+                    "origin_x" => H::OriginX(text),
+                    "origin_y" => H::OriginY(text),
+                    "method" => H::Method(code(&["pick", "select", "draw"])?),
+                    "associative" => H::Associative(on),
+                    "separate" => H::Separate(on),
+                    "keep" => H::KeepBoundaries(on),
+                    "island" => H::Islands(code(&["normal", "outer", "ignore"])?),
+                    "gap" => H::Gap(text),
+                    "layer" => H::Layer(text),
+                    "transparency" => H::Transparency(text),
+                    "color1" => H::GradientColor1(text),
+                    "color2" => H::GradientColor2(text),
+                    "draw_order" => H::DrawOrder(code(&["0", "1", "2", "3", "4"])?),
+                    "annotative" => H::Annotative(on),
+                    "ok" => H::Accept,
+                    "cancel" => H::Cancel,
+                    _ => return Err(failure("invalid_value", spec)),
+                };
+                Message::HatchPanel(message)
+            }
+            // The boundary warning of an empty-area HATCH pick: "details",
+            // "dont_show" (ticks "Do not show this message again"), "close".
+            "hatch_boundary_warning" => {
+                use crate::ui::window::hatch_dialogs::HatchDialogMsg as H;
+                if !self.focus_dialog(crate::app::ModalKind::HatchBoundaryWarning) {
+                    return Err(failure("no_dialog", "The hatch boundary warning is not open"));
+                }
+                let state = self.hatch_boundary_warning.clone().unwrap_or_default();
+                match string(req, "value")? {
+                    "details" => Message::HatchDialog(H::WarningDetails(!state.details)),
+                    "dont_show" => Message::HatchDialog(H::WarningDontShow(true)),
+                    "close" => Message::HatchDialog(H::WarningClose),
+                    other => return Err(failure("invalid_value", other)),
+                }
+            }
             "tds_map_dialog" => {
                 if !self.focus_dialog(crate::app::ModalKind::TdsMissingMap) {
                     return Err(failure("no_dialog", "The missing texture map window is not open"));
@@ -3199,7 +3278,7 @@ impl OpenCADStudio {
                     _ => Err(bad()),
                 };
                 if key == "cancel" {
-                    return Ok(Task::done(Message::CloseModal));
+                    return Ok(self.update(Message::CloseModal));
                 }
                 Message::ImportDialog(match key {
                     "ok" => I::DgnOk,

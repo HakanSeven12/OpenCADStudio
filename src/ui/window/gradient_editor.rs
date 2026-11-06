@@ -219,6 +219,30 @@ fn preview(state: &GradientEditorState) -> Element<'static, Message> {
     preview_image(cache.as_ref().and_then(|(_, handle)| handle.clone()))
 }
 
+/// A preview of a two-colour gradient fill (the Hatch panel swatch).
+pub(crate) fn fill_preview(
+    kind: GradientKind,
+    inverted: bool,
+    color_1: AcadColor,
+    color_2: AcadColor,
+    angle_deg: f64,
+) -> Option<iced::widget::image::Handle> {
+    // ponytail: rebuilt every frame the window draws; cache it if it shows.
+    let state = GradientEditorState {
+        handles: Vec::new(),
+        color_mode: GradientColorMode::Two,
+        color_1,
+        color_2,
+        shade_tint: 1.0,
+        kind,
+        inverted,
+        angle: format!("{angle_deg}"),
+        centered: true,
+        preview: Default::default(),
+    };
+    preview_sized(&state, 240, 32)
+}
+
 pub(crate) fn compact_preview(
     hatch: &codec::entities::Hatch,
 ) -> Option<iced::widget::image::Handle> {

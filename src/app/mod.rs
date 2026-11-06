@@ -999,9 +999,16 @@ pub(super) struct OpenCADStudio {
     /// HPGAPTOL: gaps up to this size count as closed for HATCH/BOUNDARY
     /// internal-point picks (0 = exact).
     hatch_gap_tolerance: f64,
-    /// HATCH starts with the boundary method used last (0 pick internal
-    /// point, 1 select objects, 2 draw).
-    hatch_start_method: u8,
+    /// HATCH / GRADIENT start with the boundary method and draw mode used
+    /// last.
+    hatch_prefs: crate::modules::draw::draw::hatch::HatchPrefs,
+    /// The empty-area pick warning was turned off: print the message instead.
+    hatch_boundary_warning_off: bool,
+    /// seTtings showed the Hatch panel for the running HATCH / GRADIENT,
+    /// even with HPDLGMODE 0.
+    hatch_panel_shown: bool,
+    /// The Hatch boundary warning window.
+    hatch_boundary_warning: Option<crate::ui::window::hatch_dialogs::BoundaryWarningState>,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
     show_menu_bar: bool,
     /// RIBBONCLOSE hid the ribbon; RIBBON brings it back.
@@ -3207,6 +3214,7 @@ pub enum ModalKind {
     TdsMaterial,
     /// A texture map a 3D Studio import did not find, one window per map.
     TdsMissingMap,
+    HatchBoundaryWarning,
     /// An extraction table outdated at open/save/plot/publish.
     ExtractionOutdated,
     /// Web: a crash-recovery autosave snapshot newer than the drawing's last
@@ -5699,6 +5707,7 @@ pub enum Message {
     PdfImportPick,
     /// An edit in one of the PDF dialogs.
     PdfDialog(crate::ui::window::pdf_dialogs::PdfDialogMsg),
+    HatchDialog(crate::ui::window::hatch_dialogs::HatchDialogMsg),
     AttdefDialog(crate::ui::window::attdef_dialog::AttdefDialogMsg),
     InsertAttrDialog(crate::ui::window::insert_attr_dialog::InsertAttrMsg),
     /// Block Attribute Manager edits.
@@ -6044,7 +6053,10 @@ impl OpenCADStudio {
             ribbon_customize: None,
             context_menu_editing: None,
             hatch_gap_tolerance: 0.0,
-            hatch_start_method: 0,
+            hatch_prefs: Default::default(),
+            hatch_boundary_warning_off: false,
+            hatch_panel_shown: false,
+            hatch_boundary_warning: None,
             show_menu_bar: false,
             ribbon_closed: false,
             command_line_hidden: false,

@@ -1911,6 +1911,17 @@ impl CadCommand for MeasureGeomCommand {
     }
 
     fn on_escape(&mut self) -> CmdResult {
+        // Esc at a sub-prompt of a chain only leaves it: back to the line
+        // or arc prompt, Distance printing the chain length again. A second
+        // Esc ends the command.
+        if self.chain_sub_prompt() {
+            self.step = AreaStep::Points;
+            self.arc_sub = Sub::None;
+            if self.mode == Mode::Distance {
+                return CmdResult::ReportMeasurement(self.running_distance());
+            }
+            return CmdResult::NeedPoint;
+        }
         CmdResult::Cancel
     }
 

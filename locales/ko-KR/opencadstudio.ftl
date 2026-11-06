@@ -6141,6 +6141,7 @@ styles =
     .enter-new-value-for-name-current = Enter __ocs_fmt_0__ <__ocs_fmt_1__>의 새 값:
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
+    .dimension-variable = dimension variable
     .ext-line-1-linetype-dimltex1 = 외부 선 1 선종류(DIMLTEX1)
     .ext-line-2-linetype-dimltex2 = 외부 선 2 선종류(DIMLTEX2)
     .extension-line = 연장선

@@ -6143,6 +6143,7 @@ styles =
     .enter-new-value-for-name-current = Saisissez une nouvelle valeur pour __ocs_fmt_0__ <__ocs_fmt_1__> :
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
+    .dimension-variable = dimension variable
     .ext-line-1-linetype-dimltex1 = Type de la première ligne d’attache (DIMLTEX1)
     .ext-line-2-linetype-dimltex2 = Type de la deuxième ligne d’attache (DIMLTEX2)
     .extension-line = Ligne d'attache

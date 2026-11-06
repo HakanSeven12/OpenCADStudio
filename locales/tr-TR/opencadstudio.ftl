@@ -6082,6 +6082,7 @@ styles =
     .enter-new-value-for-name-current = __ocs_fmt_0__ için yeni değer girin <__ocs_fmt_1__>:
     .enter-new-value-for-name-or-none = __ocs_fmt_0__ için yeni değer girin veya hiçbiri için . <"__ocs_fmt_1__">:
     .enter-new-value-for-name = __ocs_fmt_0__ için yeni değer girin:
+    .dimension-variable = ölçü değişkeni
     .ext-line-1-linetype-dimltex1 = Uzatma çizgisi 1 çizgi tipi (DIMLTEX1)
     .ext-line-2-linetype-dimltex2 = Uzatma çizgisi 2 çizgi tipi (DIMLTEX2)
     .extension-line = Uzatma Çizgisi

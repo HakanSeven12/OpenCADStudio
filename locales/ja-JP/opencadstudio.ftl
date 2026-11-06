@@ -6130,6 +6130,7 @@ styles =
     .enter-new-value-for-name-current = __ocs_fmt_0__ の新しい値を入力 <__ocs_fmt_1__>:
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
+    .dimension-variable = dimension variable
     .ext-line-1-linetype-dimltex1 = 寸法補助線 1 の線種 (DIMLTEX1)
     .ext-line-2-linetype-dimltex2 = 寸法補助線 2 の線種 (DIMLTEX2)
     .extension-line = 寸法補助線

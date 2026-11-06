@@ -6154,6 +6154,7 @@ styles =
     .enter-new-value-for-name-current = أدخل قيمة جديدة لـ __ocs_fmt_0__ <__ocs_fmt_1__>:
     .enter-new-value-for-name-or-none = Enter new value for __ocs_fmt_0__, or . for none <"__ocs_fmt_1__">:
     .enter-new-value-for-name = Enter new value for __ocs_fmt_0__:
+    .dimension-variable = dimension variable
     .ext-line-1-linetype-dimltex1 = نوع خط الامتداد 1 (DIMLTEX1)
     .ext-line-2-linetype-dimltex2 = نوع خط الامتداد 2 (DIMLTEX2)
     .extension-line = خط امتداد

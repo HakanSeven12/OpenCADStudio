@@ -224,14 +224,17 @@ fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
 /// Pixel-grid icon art rewritten so it reads sharp at small sizes, without
 /// touching its geometry:
 ///
-/// - Straight stroked lines are drawn without anti-aliasing
-///   (`shape-rendering="crispEdges"`): a 1 px diagonal becomes a solid
-///   staircase of whole pixels instead of a row of faint grey dots.
-/// - Curves and filled shapes stay anti-aliased but are drawn twice, which
-///   turns a pixel's coverage `a` into `1 - (1 - a)²`: their edge pixels are
-///   as bright as the straight lines instead of fading out. Drawing curves
-///   without anti-aliasing instead leaves gaps in them, and tiny filled
-///   arrowheads disappear.
+/// - Stroked lines that only run horizontally and vertically are drawn
+///   without anti-aliasing (`shape-rendering="crispEdges"`). They already
+///   sit on the pixel grid, so this changes nothing for solid lines, but it
+///   keeps a dotted line dotted: dashes that start half a pixel off the grid
+///   would otherwise smear into a solid grey line.
+/// - Everything else — diagonals, curves and filled shapes — stays
+///   anti-aliased but is drawn twice, which turns a pixel's coverage `a`
+///   into `1 - (1 - a)²`: edge pixels come out nearly as bright as the
+///   line itself instead of fading into faint grey dots, while diagonals
+///   and curves stay smooth. (Without anti-aliasing, diagonals turn into
+///   visible staircases, curves get gaps and tiny arrowheads disappear.)
 ///
 /// Masks and clip paths are left as they are, and so is any path with its
 /// own opacity.
@@ -283,14 +286,43 @@ fn sharpen_path(tag: &str, out: &mut String) {
     }
     let stroked =
         attr("stroke").is_some_and(|stroke| stroke != "none") && attr("fill") == Some("none");
-    let curved = attr("d").is_some_and(|d| d.bytes().any(|b| b"AaCcQqSsTt".contains(&b)));
-    if stroked && !curved {
+    if stroked && attr("d").is_some_and(only_horizontal_and_vertical) {
         out.push_str(r#"<path shape-rendering="crispEdges""#);
         out.push_str(&tag["<path".len()..]);
     } else {
         out.push_str(tag);
         out.push_str(tag);
     }
+}
+
+/// Whether path data `d` holds only horizontal and vertical lines. Anything
+/// it cannot read counts as no.
+fn only_horizontal_and_vertical(d: &str) -> bool {
+    use svgtypes::SimplePathSegment as Seg;
+    let (mut at, mut start) = ((0.0, 0.0), (0.0, 0.0));
+    let straight = |a: (f64, f64), b: (f64, f64)| a.0 == b.0 || a.1 == b.1;
+    for segment in svgtypes::SimplifyingPathParser::from(d) {
+        match segment {
+            Ok(Seg::MoveTo { x, y }) => {
+                at = (x, y);
+                start = at;
+            }
+            Ok(Seg::LineTo { x, y }) => {
+                if !straight(at, (x, y)) {
+                    return false;
+                }
+                at = (x, y);
+            }
+            Ok(Seg::ClosePath) => {
+                if !straight(at, start) {
+                    return false;
+                }
+                at = start;
+            }
+            _ => return false,
+        }
+    }
+    true
 }
 
 // Tool SVGs share a small source palette. These colours are semantic rather
@@ -1680,12 +1712,16 @@ mod tests {
     }
 
     #[test]
-    fn sharpening_makes_straight_lines_crisp_and_doubles_curves() {
-        let source = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><defs><mask id="m1"><path d="M0 0H16V16H0Z" fill="#fff"/></mask></defs><g mask="url(#m1)"><path d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/></g><path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/><path d="M2 12H4V14H2Z" fill="#4a9eff"/><path d="M1 1L5 5" fill="none" stroke="#ffffff" stroke-opacity="0.5"/></svg>"##;
+    fn sharpening_keeps_grid_lines_crisp_and_doubles_the_rest() {
+        let source = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><defs><mask id="m1"><path d="M0 0H16V16H0Z" fill="#fff"/></mask></defs><g mask="url(#m1)"><path d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/></g><path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/><path d="M2 12H4V14H2Z" fill="#4a9eff"/><path d="M1 1L5 5" fill="none" stroke="#ffffff" stroke-opacity="0.5"/><path d="M2.5 2.5H8.5V8.5" fill="none" stroke="#ffffff" stroke-dasharray="1 1"/></svg>"##;
         let sharp = String::from_utf8(sharpen_grid_svg(source).unwrap()).unwrap();
+        // Horizontal and vertical lines are crisp, which keeps dashes apart.
         assert!(sharp.contains(
-            r##"<path shape-rendering="crispEdges" d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/>"##
+            r##"<path shape-rendering="crispEdges" d="M2.5 2.5H8.5V8.5" fill="none" stroke="#ffffff" stroke-dasharray="1 1"/>"##
         ));
+        // A diagonal, like a curve, stays smooth and is drawn twice.
+        let diagonal = r##"<path d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/>"##;
+        assert_eq!(sharp.matches(diagonal).count(), 2);
         let arc = r##"<path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/>"##;
         assert_eq!(sharp.matches(arc).count(), 2);
         assert_eq!(sharp.matches(r##"<path d="M2 12H4V14H2Z""##).count(), 2);

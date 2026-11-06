@@ -21,6 +21,7 @@ pub mod config;
 pub mod discussions;
 pub mod entities;
 pub(crate) mod entity_creation;
+pub mod filter;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpu_backend;
 pub mod i18n;

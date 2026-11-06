@@ -488,64 +488,17 @@ impl Scene {
         mode: crate::app::QSelectMode,
         append: bool,
     ) -> usize {
-        use crate::app::{QSelectMode, QSelectOp};
-        use crate::entities::traits::entity_type_name;
+        use crate::app::QSelectMode;
         let previous = self.selected.clone();
         let handles = self.qselect_candidate_handles(scope);
+        let filter = crate::filter::qselect::filter_from_conditions(conditions);
+        let source = EntityProperties(self);
         let mut result = HashSet::default();
         for h in handles {
             let Some(e) = self.document.get_entity(h) else {
                 continue;
             };
-            // A condition with a type applies to objects of that type only, so
-            // samples of a Line and of a Circle find lines like the one and
-            // circles like the other (#2611). An object whose type no typed
-            // condition names is left out when there are typed conditions.
-            let own_type = entity_type_name(e);
-            let typed = conditions.iter().any(|c| c.type_filter.is_some());
-            let type_named = conditions
-                .iter()
-                .any(|c| c.type_filter.as_deref() == Some(own_type));
-            let all_match = conditions.iter().all(|condition| {
-                let type_ok = condition
-                    .type_filter
-                    .as_deref()
-                    .is_none_or(|t| own_type == t);
-                let prop_ok = if !type_ok {
-                    // Another type's condition: not this object's concern.
-                    return true;
-                } else {
-                    match (
-                        condition
-                            .property
-                            .as_ref()
-                            .map(|property| property.field.as_str()),
-                        condition.operator,
-                    ) {
-                        (None, _) | (_, QSelectOp::Any) => true,
-                        (Some(field), op) => match self.entity_property_value(e, field) {
-                            Some(actual) => match op {
-                                QSelectOp::Eq => qselect_values_equal(&actual, &condition.value),
-                                QSelectOp::Neq => !qselect_values_equal(&actual, &condition.value),
-                                QSelectOp::Gt | QSelectOp::Lt => {
-                                    match (
-                                        crate::entities::common::parse_f64(&actual),
-                                        crate::entities::common::parse_f64(&condition.value),
-                                    ) {
-                                        (Some(a), Some(b)) if matches!(op, QSelectOp::Gt) => a > b,
-                                        (Some(a), Some(b)) => a < b,
-                                        _ => false,
-                                    }
-                                }
-                                QSelectOp::Any => true,
-                            },
-                            None => false,
-                        },
-                    }
-                };
-                type_ok && prop_ok
-            });
-            let matches_filter = (!typed || type_named) && all_match;
+            let matches_filter = filter.matches(&source, e);
             let keep = match mode {
                 QSelectMode::Include => matches_filter,
                 QSelectMode::Exclude => !matches_filter,
@@ -1477,11 +1430,92 @@ mod tests {
         );
         assert_eq!(found, 2, "a Line and a Circle sample find both");
 
-        assert!(super::qselect_values_equal("10.0000", "10"));
-        assert!(!super::qselect_values_equal("10.0000", "10.5"));
-        assert!(super::qselect_values_equal("Walls", "WALLS"));
+        assert!(crate::filter::compare::values_equal("10.0000", "10"));
+        assert!(!crate::filter::compare::values_equal("10.0000", "10.5"));
+        assert!(crate::filter::compare::values_equal("Walls", "WALLS"));
     }
 
+    /// #2611: Quick Select on the shared filter engine. Layer patterns work,
+    /// an untyped condition holds for every type group, and Exclude keeps the
+    /// rest.
+    #[test]
+    fn qselect_runs_on_the_filter_engine_with_patterns_and_type_groups() {
+        use crate::app::{
+            QSelectCondition, QSelectMode, QSelectOp, QSelectPropertyChoice, QSelectScope,
+            QSelectValueEditor,
+        };
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
+        let mut scene = Scene::new();
+        for name in ["FAL-KULSO", "AJTO"] {
+            let _ = scene
+                .document
+                .layers
+                .add(document::tables::Layer::new(name));
+        }
+        let mut add = |entity: EntityType, layer: &str| {
+            let mut entity = entity;
+            entity.common_mut().layer = layer.to_string();
+            scene.add_entity(entity)
+        };
+        let line = || {
+            EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(1.0, 0.0, 0.0),
+            ))
+        };
+        let circle = || EntityType::Circle(Circle::new());
+        let wall_line = add(line(), "FAL-KULSO");
+        let wall_circle = add(circle(), "FAL-KULSO");
+        let door_line = add(line(), "AJTO");
+        let condition =
+            |type_filter: Option<&str>, field: Option<&str>, value: &str| QSelectCondition {
+                type_filter: type_filter.map(str::to_owned),
+                property: field.map(|field| QSelectPropertyChoice {
+                    field: field.to_owned(),
+                    label: field.to_owned(),
+                    editor: QSelectValueEditor::Text,
+                }),
+                operator: QSelectOp::Eq,
+                value: value.to_owned(),
+            };
+        let layer_fal = condition(None, Some("layer"), "FAL*");
+        assert_eq!(
+            scene.qselect_conditions(
+                QSelectScope::CurrentSpace,
+                &[layer_fal.clone()],
+                QSelectMode::Include,
+                false
+            ),
+            2
+        );
+        assert!(scene.selected.contains(&wall_line) && scene.selected.contains(&wall_circle));
+        // Line or Circle, both on FAL*: the door line is left out.
+        let typed = [
+            condition(Some("Line"), None, ""),
+            condition(Some("Circle"), None, ""),
+            layer_fal,
+        ];
+        assert_eq!(
+            scene.qselect_conditions(
+                QSelectScope::CurrentSpace,
+                &typed,
+                QSelectMode::Include,
+                false
+            ),
+            2
+        );
+        assert_eq!(
+            scene.qselect_conditions(
+                QSelectScope::CurrentSpace,
+                &typed,
+                QSelectMode::Exclude,
+                false
+            ),
+            1
+        );
+        assert!(scene.selected.contains(&door_line));
+    }
     #[test]
     fn pe_url_of_reads_standard_hyperlink_xdata() {
         use document::entities::Point;
@@ -1836,12 +1870,16 @@ impl Scene {
     }
 }
 
-/// `=` and `!=` in QSELECT: numbers compare as numbers, so a typed `10`
-/// matches a length shown as `10.0000`; anything else as text, ignoring case.
-fn qselect_values_equal(actual: &str, wanted: &str) -> bool {
-    use crate::entities::common::parse_f64;
-    match (parse_f64(actual), parse_f64(wanted)) {
-        (Some(a), Some(b)) => (a - b).abs() <= 1e-9 * a.abs().max(b.abs()).max(1.0),
-        _ => actual.eq_ignore_ascii_case(wanted),
+/// The drawing's objects as the filter engine reads them: the type name and
+/// each property as Properties shows it.
+struct EntityProperties<'a>(&'a Scene);
+
+impl crate::filter::PropertySource for EntityProperties<'_> {
+    type Item = document::EntityType;
+    fn type_name<'a>(&'a self, item: &'a document::EntityType) -> &'a str {
+        crate::entities::traits::entity_type_name(item)
+    }
+    fn value(&self, item: &document::EntityType, property: &str) -> Option<String> {
+        self.0.entity_property_value(item, property)
     }
 }

@@ -549,6 +549,203 @@ pub(crate) fn exact_hatch_paths(
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
 ) -> Vec<document::entities::BoundaryPath> {
+    exact_hatch_paths_by_ring(rings, exterior, sources, tolerance)
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+/// How a HATCH or GRADIENT loop was found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HatchLoopSource {
+    /// Detected around a picked internal point.
+    Picked,
+    /// Built from selected objects.
+    Selected,
+}
+
+/// The loops of a new hatch with the reference path flags (DXF 92): a
+/// picked loop is a derived polyline path (outer 7, first island 22, deeper
+/// islands 6); a selected loop keeps its edges (outer 1, first island 16,
+/// deeper islands 0). Islands carry no external bit, with or without
+/// associativity. A picked loop with an elliptical or spline edge keeps its
+/// edges, since a polyline path cannot hold them.
+pub(crate) fn new_hatch_paths(
+    rings: &[Vec<[f64; 2]>],
+    source_of: impl Fn(usize) -> HatchLoopSource,
+    sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
+    tolerance: f64,
+) -> Vec<document::entities::BoundaryPath> {
+    use document::entities::BoundaryPathFlags;
+    let depths = kernel::geom2d::ring_nesting_depths(rings);
+    let exterior: Vec<bool> = depths.iter().map(|depth| *depth == 0).collect();
+    let paths = exact_hatch_paths_by_ring(rings, &exterior, sources, tolerance);
+    let circles: Vec<Option<([f64; 2], f64)>> = paths
+        .iter()
+        .map(|path| match path.as_ref().map(|path| path.edges.as_slice()) {
+            Some([document::entities::BoundaryEdge::CircularArc(arc)])
+                if (arc.end_angle - arc.start_angle).abs() >= std::f64::consts::TAU - 1.0e-9 =>
+            {
+                Some(([arc.center.x, arc.center.y], arc.radius))
+            }
+            _ => None,
+        })
+        .collect();
+    let base = |depth: usize| match depth {
+        0 => BoundaryPathFlags::EXTERNAL.bits(),
+        1 => BoundaryPathFlags::OUTERMOST.bits(),
+        _ => 0,
+    };
+    paths
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, path)| {
+            let mut path = path?;
+            let depth = depths.get(index).copied().unwrap_or(0);
+            let picked = source_of(index) == HatchLoopSource::Picked;
+            let mut bits = base(depth);
+            // A selected circle directly inside a selected circle takes the
+            // flags of one level up plus the outermost bit (circle in circle
+            // 17, deeper 16), where any other island reads 16 then 0.
+            let circle_in_circle = !picked
+                && depth > 0
+                && circles[index].is_some_and(|(centre, radius)| {
+                    circles.iter().enumerate().any(|(other, circle)| {
+                        depths.get(other) == Some(&(depth - 1))
+                            && circle.is_some_and(|(outer, outer_radius)| {
+                                (centre[0] - outer[0]).hypot(centre[1] - outer[1]) + radius
+                                    <= outer_radius + 1.0e-9
+                            })
+                    })
+                });
+            if circle_in_circle {
+                bits = base(depth - 1) | BoundaryPathFlags::OUTERMOST.bits();
+            }
+            if picked {
+                if let Some(edges) = polyline_form(&path.edges) {
+                    path.edges = edges;
+                }
+            }
+            if picked {
+                bits |= BoundaryPathFlags::DERIVED.bits();
+            }
+            if path.is_polyline() {
+                bits |= BoundaryPathFlags::POLYLINE.bits();
+            }
+            path.flags = BoundaryPathFlags::from_bits(bits);
+            Some(path)
+        })
+        .collect()
+}
+
+/// A drawn HATCH boundary (vertices with bulges) as the reference stores
+/// it: line and arc edges, a drawn circle one circle edge, flagged external
+/// and derived (5).
+pub(crate) fn drawn_hatch_path(vertices: &[[f64; 3]]) -> document::entities::BoundaryPath {
+    use document::entities::{
+        BoundaryEdge, BoundaryPath, BoundaryPathFlags, CircularArcEdge, LineEdge,
+    };
+    use document::types::Vector2;
+    let mut path = BoundaryPath::with_flags(BoundaryPathFlags::from_bits(
+        BoundaryPathFlags::EXTERNAL.bits() | BoundaryPathFlags::DERIVED.bits(),
+    ));
+    let count = vertices.len();
+    let arc = |index: usize| {
+        let [x, y, bulge] = vertices[index];
+        let [nx, ny, _] = vertices[(index + 1) % count];
+        kernel::geom2d::BulgeArc::from_bulge([x, y], [nx, ny], bulge)
+            .filter(|_| bulge.abs() > 1.0e-12)
+    };
+    // Two half circles of one circle: the reference writes a circle edge.
+    let whole = count == 2
+        && match (arc(0), arc(1)) {
+            (Some(a), Some(b)) => {
+                a.sweep.signum() == b.sweep.signum()
+                    && (a.center[0] - b.center[0]).hypot(a.center[1] - b.center[1]) <= 1.0e-9
+                    && (a.radius - b.radius).abs() <= 1.0e-9
+            }
+            _ => false,
+        };
+    for index in 0..count {
+        let [x, y, _] = vertices[index];
+        let [nx, ny, _] = vertices[(index + 1) % count];
+        match arc(index) {
+            Some(a) => {
+                let ccw = a.sweep > 0.0;
+                let (start_angle, end_angle) =
+                    stored_arc_angles(a.start_angle, a.end_angle, ccw, whole);
+                path.edges.push(BoundaryEdge::CircularArc(CircularArcEdge {
+                    center: Vector2::new(a.center[0], a.center[1]),
+                    radius: a.radius,
+                    start_angle,
+                    end_angle,
+                    counter_clockwise: ccw,
+                }));
+                if whole {
+                    break;
+                }
+            }
+            None => path.edges.push(BoundaryEdge::Line(LineEdge {
+                start: Vector2::new(x, y),
+                end: Vector2::new(nx, ny),
+            })),
+        }
+    }
+    path
+}
+
+/// Line and circular arc edges as one closed polyline edge with bulges; a
+/// whole circle is two half-circle vertices. `None` when an edge is
+/// elliptical or a spline.
+fn polyline_form(
+    edges: &[document::entities::BoundaryEdge],
+) -> Option<Vec<document::entities::BoundaryEdge>> {
+    use document::entities::{BoundaryEdge, PolylineEdge};
+    use document::types::Vector3;
+    let mut vertices = Vec::new();
+    for edge in edges {
+        match edge {
+            BoundaryEdge::Line(line) => {
+                vertices.push(Vector3::new(line.start.x, line.start.y, 0.0));
+            }
+            BoundaryEdge::CircularArc(arc) => {
+                // Stored angles run clockwise from their negatives.
+                let sign = if arc.counter_clockwise { 1.0 } else { -1.0 };
+                let start = sign * arc.start_angle;
+                let sweep = (arc.end_angle - arc.start_angle).abs();
+                let at = |angle: f64| {
+                    (
+                        arc.center.x + arc.radius * angle.cos(),
+                        arc.center.y + arc.radius * angle.sin(),
+                    )
+                };
+                if sweep >= std::f64::consts::TAU - 1.0e-9 {
+                    let (x0, y0) = at(start);
+                    let (x1, y1) = at(start + sign * std::f64::consts::PI);
+                    vertices.push(Vector3::new(x0, y0, sign));
+                    vertices.push(Vector3::new(x1, y1, sign));
+                } else {
+                    let (x, y) = at(start);
+                    vertices.push(Vector3::new(x, y, sign * (sweep * 0.25).tan()));
+                }
+            }
+            BoundaryEdge::Polyline(polyline) => vertices.extend(polyline.vertices.iter().cloned()),
+            BoundaryEdge::EllipticArc(_) | BoundaryEdge::Spline(_) => return None,
+        }
+    }
+    Some(vec![BoundaryEdge::Polyline(PolylineEdge {
+        vertices,
+        is_closed: true,
+    })])
+}
+
+/// [`exact_hatch_paths`] with one entry per ring (`None` for a degenerate one).
+fn exact_hatch_paths_by_ring(
+    rings: &[Vec<[f64; 2]>],
+    exterior: &[bool],
+    sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
+    tolerance: f64,
+) -> Vec<Option<document::entities::BoundaryPath>> {
     use document::entities::{BoundaryPath, BoundaryPathFlags};
 
     let near = sources_near_rings(rings, sources, tolerance.max(WELD_TOLERANCE));
@@ -556,7 +753,7 @@ pub(crate) fn exact_hatch_paths(
     rings
         .iter()
         .enumerate()
-        .filter_map(|(ring_index, ring)| {
+        .map(|(ring_index, ring)| {
             let (points, curves) = refined_boundary_ring(ring, sources, tolerance);
             let count = points.len();
             if count < 3 {

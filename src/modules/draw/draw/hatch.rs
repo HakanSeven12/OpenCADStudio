@@ -150,6 +150,23 @@ pub(crate) fn resolve_hatch_rings(outlines: &[Vec<[f64; 2]>], p: [f64; 2]) -> Op
     Some(rings)
 }
 
+/// HATCH's picked region: [`resolve_hatch_rings`] plus every outline nested
+/// deeper inside it. The reference keeps all of them, whatever the island
+/// style; the style picks the drawn loops from their path flags.
+fn picked_hatch_rings(outlines: &[Vec<[f64; 2]>], p: [f64; 2]) -> Option<Vec<Vec<[f64; 2]>>> {
+    let mut rings = resolve_hatch_rings(outlines, p)?;
+    let outer = rings[0].clone();
+    for outline in outlines {
+        if !rings.contains(outline)
+            && polygon_contains_polygon(&outer, outline)
+            && !point_in_polygon(p, outline)
+        {
+            rings.push(outline.clone());
+        }
+    }
+    Some(rings)
+}
+
 /// Pack one or more rings (outer boundary + optional holes) into the Hatch
 /// model storage: the `boundary` f32 ring list (NaN-separated) plus the exact
 /// `boundary_wcs` (NaN-separated) used for persistence. The first vertex of the
@@ -448,24 +465,6 @@ fn bulged_ring(points: &[[f64; 2]], bulges: &[f64]) -> Vec<[f64; 2]> {
         }
     }
     ring
-}
-
-/// A closed polyline boundary loop with its bulges.
-fn polyline_path(points: &[[f64; 2]], bulges: &[f64]) -> document::entities::BoundaryPath {
-    use document::entities::{BoundaryEdge, BoundaryPath, PolylineEdge};
-    let vertices = points
-        .iter()
-        .enumerate()
-        .map(|(index, p)| {
-            document::types::Vector3::new(p[0], p[1], bulges.get(index).copied().unwrap_or(0.0))
-        })
-        .collect();
-    let mut path = BoundaryPath::new();
-    path.add_edge(BoundaryEdge::Polyline(PolylineEdge {
-        vertices,
-        is_closed: true,
-    }));
-    path
 }
 
 /// One side of a path band: the path's segments moved `distance` to the left
@@ -1070,7 +1069,17 @@ impl HatchCommand {
         let hatch = (!loops.is_empty()).then(|| {
             let mut hatch = self.make_hatch(loops.iter().map(|(p, b)| bulged_ring(p, b)).collect());
             hatch.boundary_paths = Some(std::sync::Arc::new(
-                loops.iter().map(|(p, b)| polyline_path(p, b)).collect(),
+                loops
+                    .iter()
+                    .map(|(points, bulges)| {
+                        let vertices: Vec<[f64; 3]> = points
+                            .iter()
+                            .enumerate()
+                            .map(|(index, p)| [p[0], p[1], bulges.get(index).copied().unwrap_or(0.0)])
+                            .collect();
+                        crate::scene::drawn_hatch_path(&vertices)
+                    })
+                    .collect(),
             ));
             hatch
         });
@@ -1282,7 +1291,14 @@ impl HatchCommand {
             .iter()
             .map(|ring| crate::scene::ring_source_handles(ring, &near))
             .collect();
-        let mut boundary_paths = crate::scene::exact_hatch_paths(&rings, &exterior, &near, 1.0e-6);
+        let source_of = |index: usize| {
+            if self.point_regions.iter().flatten().any(|ring| *ring == rings[index]) {
+                crate::scene::HatchLoopSource::Picked
+            } else {
+                crate::scene::HatchLoopSource::Selected
+            }
+        };
+        let mut boundary_paths = crate::scene::new_hatch_paths(&rings, source_of, &near, 1.0e-6);
 
         if !self.associative {
             for handles in &mut boundary_sources {
@@ -1290,7 +1306,6 @@ impl HatchCommand {
             }
             for path in &mut boundary_paths {
                 path.boundary_handles.clear();
-                path.flags.set_external(false);
             }
         }
         if let Some((source, _, _)) = &self.inherited {
@@ -1585,7 +1600,7 @@ impl CadCommand for HatchCommand {
                     xy,
                     self.gap_tolerance,
                 );
-                match resolve_hatch_rings(&faces, xy) {
+                match picked_hatch_rings(&faces, xy) {
                     Some(rings) => {
                         self.add_point_region(rings);
                         let islands = crate::tr!("hatch-cmd", "analyzing-islands");

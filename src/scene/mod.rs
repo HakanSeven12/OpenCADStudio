@@ -111,6 +111,7 @@ pub(crate) use boundary::{
     remap_hatch_associations, ring_source_handles, separated_hatch_path_groups, sources_near_rings,
     BoundarySource,
 };
+pub(crate) use boundary::{drawn_hatch_path, new_hatch_paths, HatchLoopSource};
 
 // Parallel tessellation free functions live in `convert::tess` (alongside the
 // other tessellation code); re-exported here so this root and sibling topic

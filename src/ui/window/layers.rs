@@ -218,6 +218,40 @@ pub fn move_column(col: LayerSortCol, step: i8) {
     });
 }
 
+/// A node of the Layer manager's filter tree: which layers the table shows
+/// (#2610).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum TreeNode {
+    #[default]
+    All,
+    /// Layers with objects on them.
+    Used,
+    /// Layers without objects.
+    Unused,
+    /// Layers of the objects selected in the drawing.
+    Selected,
+    /// The layers of one xref (`name|layer`).
+    Xref(String),
+    /// Layers with a colour or freeze override in a layout viewport.
+    ViewportOverrides,
+    Group(String),
+    /// A LAYERFILTER filter.
+    Filter(String),
+}
+
+impl TreeNode {
+    pub fn label(&self) -> String {
+        match self {
+            Self::All => crate::tr!("layer-groups", "all-layers"),
+            Self::Used => t!("Used layers").into_owned(),
+            Self::Unused => t!("Unused layers").into_owned(),
+            Self::Selected => t!("Layers of selected objects").into_owned(),
+            Self::Xref(name) | Self::Group(name) | Self::Filter(name) => name.clone(),
+            Self::ViewportOverrides => t!("Viewport overrides").into_owned(),
+        }
+    }
+}
+
 /// What a layer row's right-click menu does. The menu has one level: a
 /// choice with options lists them under it, inside the menu (#2610).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -353,8 +387,14 @@ pub struct LayerPanel {
     pub columns_menu: bool,
     /// The drawing's layer groups by layer name.
     pub groups: Vec<(String, Vec<String>)>,
-    /// The group shown, `None` for every layer.
-    pub group: Option<String>,
+    /// The filter tree's node shown in the table.
+    pub view: TreeNode,
+    /// Show the layers the node leaves out instead.
+    pub invert: bool,
+    /// Layers (lower case) of the objects selected in the drawing.
+    pub selected_object_layers: Vec<String>,
+    /// LAYERFILTER filters with the layers each one matches.
+    pub filters: Vec<(String, Vec<String>)>,
 }
 
 impl Default for LayerPanel {
@@ -391,7 +431,10 @@ impl Default for LayerPanel {
             filter: String::new(),
             columns_menu: false,
             groups: Vec::new(),
-            group: None,
+            view: TreeNode::All,
+            invert: false,
+            selected_object_layers: Vec::new(),
+            filters: Vec::new(),
         }
     }
 }
@@ -399,12 +442,188 @@ impl Default for LayerPanel {
 impl LayerPanel {
     /// Take the drawing's groups; a shown group that is gone shows all.
     pub fn set_groups(&mut self, groups: Vec<(String, Vec<String>)>) {
-        if let Some(shown) = &self.group {
+        if let Some(shown) = self.shown_group() {
             if !groups.iter().any(|(name, _)| name == shown) {
-                self.group = None;
+                self.view = TreeNode::All;
             }
         }
         self.groups = groups;
+    }
+
+    /// The group shown, if a group node is.
+    pub fn shown_group(&self) -> Option<&String> {
+        match &self.view {
+            TreeNode::Group(name) => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Show `group`, or every layer for `None`.
+    pub fn set_group(&mut self, group: Option<String>) {
+        self.view = group.map_or(TreeNode::All, TreeNode::Group);
+    }
+
+    /// The xrefs whose layers are in the drawing (`name|layer`).
+    fn xref_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .layers
+            .iter()
+            .filter_map(|layer| layer.name.split_once('|').map(|(xref, _)| xref.to_string()))
+            .collect();
+        names.sort_by_key(|name| name.to_lowercase());
+        names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        names
+    }
+
+    /// The tree's nodes in order, with how deep each sits.
+    pub fn tree_nodes(&self) -> Vec<(TreeNode, u8)> {
+        let mut nodes = vec![
+            (TreeNode::All, 0),
+            (TreeNode::Used, 1),
+            (TreeNode::Unused, 1),
+            (TreeNode::Selected, 1),
+        ];
+        nodes.extend(
+            self.xref_names()
+                .into_iter()
+                .map(|x| (TreeNode::Xref(x), 1)),
+        );
+        if !self.vp_cols.is_empty() {
+            nodes.push((TreeNode::ViewportOverrides, 1));
+        }
+        nodes.extend(
+            self.groups
+                .iter()
+                .map(|(g, _)| (TreeNode::Group(g.clone()), 1)),
+        );
+        nodes.extend(
+            self.filters
+                .iter()
+                .map(|(f, _)| (TreeNode::Filter(f.clone()), 1)),
+        );
+        nodes
+    }
+
+    /// Whether `layer` belongs to the node shown.
+    fn in_view(&self, layer: &Layer) -> bool {
+        let named = |list: &[String]| {
+            list.iter()
+                .any(|name| name.eq_ignore_ascii_case(&layer.name))
+        };
+        match &self.view {
+            TreeNode::All => true,
+            TreeNode::Used => layer.objects > 0,
+            TreeNode::Unused => layer.objects == 0,
+            TreeNode::Selected => self
+                .selected_object_layers
+                .contains(&layer.name.to_lowercase()),
+            TreeNode::Xref(xref) => layer
+                .name
+                .split_once('|')
+                .is_some_and(|(owner, _)| owner.eq_ignore_ascii_case(xref)),
+            TreeNode::ViewportOverrides => {
+                layer.vp_frozen.iter().any(|frozen| *frozen)
+                    || layer.vp_colors.iter().any(Option::is_some)
+            }
+            TreeNode::Group(group) => self
+                .groups
+                .iter()
+                .find(|(name, _)| name == group)
+                .is_some_and(|(_, members)| named(members)),
+            TreeNode::Filter(filter) => self
+                .filters
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(filter))
+                .is_some_and(|(_, members)| named(members)),
+        }
+    }
+
+    /// The filter tree beside the table on a wide pallet.
+    fn tree(&self) -> Element<'_, Message> {
+        let heading = |label: Cow<'static, str>| -> Element<'_, Message> {
+            container(text(label).size(10).style(muted_style))
+                .padding(Padding {
+                    top: 6.0,
+                    bottom: 2.0,
+                    left: 6.0,
+                    right: 6.0,
+                })
+                .into()
+        };
+        let mut list = column![].spacing(1);
+        let mut section = None;
+        for (node, depth) in self.tree_nodes() {
+            let kind = match &node {
+                TreeNode::Xref(_) => Some(t!("External References")),
+                TreeNode::Group(_) => Some(t!("Groups")),
+                TreeNode::Filter(_) => Some(t!("Filters")),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                if section.as_deref() != Some(kind.as_ref()) {
+                    section = Some(kind.to_string());
+                    list = list.push(heading(kind));
+                }
+            }
+            let chosen = self.view == node;
+            let label = node.label();
+            list = list.push(
+                button(
+                    text(label)
+                        .size(FONT_SZ)
+                        .wrapping(iced::widget::text::Wrapping::None),
+                )
+                .on_press(Message::LayerShow(node))
+                .style(crate::ui::style::form::button_style(chosen))
+                .padding(Padding {
+                    top: 3.0,
+                    bottom: 3.0,
+                    left: 6.0 + f32::from(depth) * 10.0,
+                    right: 6.0,
+                })
+                .width(Fill),
+            );
+        }
+        container(scrollable(list).height(Length::Fill))
+            .width(Length::Fixed(TREE_W))
+            .height(Length::Fill)
+            .padding(4)
+            .style(|theme: &Theme| container::Style {
+                border: Border {
+                    color: theme.palette().background.neutral.color,
+                    width: 1.0,
+                    radius: 0.0.into(),
+                },
+                ..Default::default()
+            })
+            .into()
+    }
+
+    /// Under the table: invert the node, and how many layers are shown.
+    fn tree_footer(&self) -> Element<'_, Message> {
+        let shown = self.visible_indices().len();
+        container(
+            row![
+                checkbox(self.invert)
+                    .label(t!("Invert filter"))
+                    .text_size(FONT_SZ)
+                    .size(13)
+                    .on_toggle(Message::LayerInvert),
+                iced::widget::Space::new().width(Length::Fill),
+                text(crate::tf!(
+                    "{} of {} layers shown",
+                    shown,
+                    self.layers.len()
+                ))
+                .size(FONT_SZ)
+                .style(muted_style),
+            ]
+            .spacing(8)
+            .align_y(iced::Center),
+        )
+        .padding([3, 8])
+        .width(Length::Fill)
+        .into()
     }
 
     /// The selected rows' layer names.
@@ -422,15 +641,18 @@ impl LayerPanel {
     /// the selection, adding the selection to a group, taking it out of the
     /// shown group and deleting that group.
     fn group_bar(&self, compact: bool) -> Element<'_, Message> {
-        let all = crate::tr!("layer-groups", "all-layers");
-        let mut shown_options = vec![all.clone()];
-        shown_options.extend(self.groups.iter().map(|(name, _)| name.clone()));
-        let shown = self.group.clone().unwrap_or_else(|| all.clone());
         let has_selection = !self.selected_names().is_empty();
         let names: Vec<String> = self.groups.iter().map(|(name, _)| name.clone()).collect();
+        // The tree's nodes as a list opening below (#2610: on a narrow
+        // pallet the tree has no room beside the table).
+        let nodes: Vec<TreeNode> = self
+            .tree_nodes()
+            .into_iter()
+            .map(|(node, _)| node)
+            .collect();
         let show =
-            crate::ui::dropdown_list::pick_list(Some(shown), shown_options, |v| v.to_string())
-                .on_select(move |picked| Message::LayerGroupShow((picked != all).then_some(picked)))
+            crate::ui::dropdown_list::pick_list(Some(self.view.clone()), nodes, TreeNode::label)
+                .on_select(Message::LayerShow)
                 .text_size(FONT_SZ)
                 .padding([3, 6])
                 .width(Length::Fixed(if compact { 120.0 } else { 170.0 }));
@@ -445,7 +667,7 @@ impl LayerPanel {
         } else {
             iced::widget::Space::new().width(0).into()
         };
-        let in_group = self.group.is_some();
+        let in_group = self.shown_group().is_some();
         container(
             row![
                 show,
@@ -672,16 +894,10 @@ impl LayerPanel {
     /// these; raw `selected_multi` ranges would sweep in hidden rows (#50).
     pub fn visible_indices(&self) -> Vec<usize> {
         let filter = self.filter.to_lowercase();
-        let members = self.group.as_ref().and_then(|shown| {
-            self.groups
-                .iter()
-                .find(|(name, _)| name == shown)
-                .map(|(_, layers)| layers)
-        });
         self.layers
             .iter()
             .enumerate()
-            .filter(|(_, layer)| members.is_none_or(|members| members.contains(&layer.name)))
+            .filter(|(_, layer)| self.in_view(layer) != self.invert)
             .filter(|(_, layer)| filter.is_empty() || layer.name.to_lowercase().contains(&filter))
             .map(|(i, _)| i)
             .collect()
@@ -918,7 +1134,7 @@ impl LayerPanel {
                     .iter()
                     .map(|(g, _)| g.clone())
                     .collect::<Vec<_>>(),
-                self.group.is_some(),
+                self.shown_group().is_some(),
             );
             rows_col = rows_col.push(iced_aw::ContextMenu::new(row, move || {
                 row_menu(&name, &groups, in_group)
@@ -952,8 +1168,18 @@ impl LayerPanel {
             column![toolbar, self.group_bar(compact), column_chooser(), grid]
                 .height(Length::Fill)
                 .into()
+        } else if band == WidthBand::Wide {
+            // A wide pallet has the tree beside the table.
+            column![
+                toolbar,
+                self.group_bar(compact),
+                row![self.tree(), grid].height(Length::Fill),
+                self.tree_footer(),
+            ]
+            .height(Length::Fill)
+            .into()
         } else {
-            column![toolbar, self.group_bar(compact), grid]
+            column![toolbar, self.group_bar(compact), grid, self.tree_footer()]
                 .height(Length::Fill)
                 .into()
         }
@@ -1717,6 +1943,8 @@ const COL_LT: f32 = 110.0;
 const COL_LW: f32 = 90.0;
 const COL_TRANS: f32 = 80.0;
 const COL_DESC: f32 = 160.0;
+/// The filter tree beside the table.
+const TREE_W: f32 = 190.0;
 const COL_OBJECTS: f32 = 70.0;
 
 #[cfg(test)]

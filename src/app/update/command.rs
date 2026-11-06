@@ -2107,6 +2107,7 @@ impl OpenCADStudio {
             return;
         }
         let i = self.active_tab;
+        self.refresh_layer_tree(i);
         let scene = &self.tabs[i].scene;
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         for layer in scene.document.layers.iter() {
@@ -2132,6 +2133,46 @@ impl OpenCADStudio {
             }
         }
         self.tabs[i].layers.set_counts(counts, key);
+    }
+
+    /// The filter tree's live parts: the layers of the selected objects and
+    /// what each LAYERFILTER filter matches. Set only when they changed.
+    fn refresh_layer_tree(&mut self, i: usize) {
+        let scene = &self.tabs[i].scene;
+        let mut selected: Vec<String> = scene
+            .selected
+            .iter()
+            .filter_map(|h| scene.document.get_entity(*h))
+            .map(|e| e.common().layer.to_lowercase())
+            .collect();
+        selected.sort();
+        selected.dedup();
+        let filters: Vec<(String, Vec<String>)> = self
+            .layer_filters
+            .iter()
+            .map(|filter| {
+                let members = scene
+                    .document
+                    .layers
+                    .iter()
+                    .filter(|layer| filter.matches(layer))
+                    .map(|layer| layer.name.clone())
+                    .collect();
+                (filter.name.clone(), members)
+            })
+            .collect();
+        let panel = &mut self.tabs[i].layers;
+        if panel.selected_object_layers != selected {
+            panel.selected_object_layers = selected;
+        }
+        if panel.filters != filters {
+            if let crate::ui::window::layers::TreeNode::Filter(name) = &panel.view {
+                if !filters.iter().any(|(f, _)| f.eq_ignore_ascii_case(name)) {
+                    panel.view = crate::ui::window::layers::TreeNode::All;
+                }
+            }
+            panel.filters = filters;
+        }
     }
 
     /// Apply the typed transparency to the layer (and the selection it is
@@ -6763,6 +6804,63 @@ mod layer_name_target_tests {
             2,
             "counted again after the change"
         );
+    }
+
+    fn shown(app: &OpenCADStudio) -> Vec<String> {
+        let panel = &app.tabs[app.active_tab].layers;
+        let mut names: Vec<String> = panel
+            .visible_indices()
+            .into_iter()
+            .map(|row| panel.layers[row].name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// #2610: the filter tree's nodes pick the layers the table shows.
+    #[test]
+    fn filter_tree_nodes_choose_the_rows() {
+        use crate::ui::window::layers::TreeNode;
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.layer = "ZULU".into();
+        let on_zulu = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        app.tabs[i].scene.bump_geometry();
+        let mut xref = document::tables::Layer::new("SITE|ROAD");
+        xref.handle = app.tabs[i].scene.document.allocate_handle();
+        let _ = app.tabs[i].scene.document.layers.add(xref);
+        app.sync_layer_panel(i);
+        let _ = app.update(Message::LayerShow(TreeNode::Used));
+        assert_eq!(shown(&app), ["ZULU"]);
+        let _ = app.update(Message::LayerInvert(true));
+        assert_eq!(shown(&app), ["0", "ALPHA", "SITE|ROAD"]);
+        let _ = app.update(Message::LayerInvert(false));
+        let _ = app.update(Message::LayerShow(TreeNode::Unused));
+        assert_eq!(shown(&app), ["0", "ALPHA", "SITE|ROAD"]);
+        assert!(app.tabs[i]
+            .layers
+            .tree_nodes()
+            .iter()
+            .any(|(n, _)| *n == TreeNode::Xref("SITE".into())));
+        let _ = app.update(Message::LayerShow(TreeNode::Xref("site".into())));
+        assert_eq!(shown(&app), ["SITE|ROAD"]);
+        // Layers of the selected objects follow the selection.
+        app.tabs[i].scene.select_entity(on_zulu, false);
+        let _ = app.update(Message::LayerShow(TreeNode::Selected));
+        assert_eq!(shown(&app), ["ZULU"]);
+        // A LAYERFILTER filter is a node too.
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        let _ = app.update(Message::LayerShow(TreeNode::Filter("LETTERS".into())));
+        assert_eq!(shown(&app), ["ALPHA", "ZULU"]);
+        let _ = app.update(Message::LayerShow(TreeNode::All));
+        assert_eq!(shown(&app).len(), 4);
     }
 
     #[test]

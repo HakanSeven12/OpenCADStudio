@@ -4322,6 +4322,10 @@ pub enum Message {
     /// Toggle per-viewport freeze: (layer_name, vp_col_index)
     LayerToggleVpFreeze(String, usize),
     LayerNew,
+    /// Show a node of the Layer manager's filter tree.
+    LayerShow(crate::ui::window::layers::TreeNode),
+    /// Show the layers the node leaves out instead.
+    LayerInvert(bool),
     /// A new layer, frozen in every layout viewport.
     LayerNewVpFrozen,
     /// A layer row's right-click menu: (the row's layer, what to do).

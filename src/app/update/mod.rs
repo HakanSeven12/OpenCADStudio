@@ -12310,7 +12310,17 @@ impl OpenCADStudio {
             }
             Message::LayerGroupShow(group) => {
                 let i = self.active_tab;
-                self.tabs[i].layers.group = group;
+                self.tabs[i].layers.set_group(group);
+                Task::none()
+            }
+            Message::LayerShow(node) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.view = node;
+                Task::none()
+            }
+            Message::LayerInvert(on) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.invert = on;
                 Task::none()
             }
             Message::LayerGroupNew => {
@@ -12318,7 +12328,7 @@ impl OpenCADStudio {
                 let name = self.next_layer_group_name(i);
                 let layers = self.tabs[i].layers.selected_names();
                 self.set_layer_group(i, &name, &layers, true);
-                self.tabs[i].layers.group = Some(name);
+                self.tabs[i].layers.set_group(Some(name));
                 Task::none()
             }
             Message::LayerGroupAdd(name) => {
@@ -12329,7 +12339,7 @@ impl OpenCADStudio {
             }
             Message::LayerGroupRemove => {
                 let i = self.active_tab;
-                if let Some(name) = self.tabs[i].layers.group.clone() {
+                if let Some(name) = self.tabs[i].layers.shown_group().cloned() {
                     let layers = self.tabs[i].layers.selected_names();
                     self.set_layer_group(i, &name, &layers, false);
                 }
@@ -12337,7 +12347,8 @@ impl OpenCADStudio {
             }
             Message::LayerGroupDelete => {
                 let i = self.active_tab;
-                if let Some(name) = self.tabs[i].layers.group.take() {
+                if let Some(name) = self.tabs[i].layers.shown_group().cloned() {
+                    self.tabs[i].layers.set_group(None);
                     return self.dispatch_command(&format!("LAYERGROUP DELETE {name}"));
                 }
                 Task::none()

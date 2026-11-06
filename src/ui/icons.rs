@@ -366,30 +366,35 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
             return;
         }
 
-        let image_size = Size::new(measured.width as f32, measured.height as f32);
         // The icon keeps its own square, centred, when a stretched button
-        // lays it out wider.
+        // lays it out wider. The square is a whole number of physical pixels
+        // and its corner sits on a physical pixel, so pixel-grid art is
+        // drawn 1:1 at 100 % and exactly 2x at 200 %.
         let laid = layout.bounds();
-        let bounds = Rectangle::new(
-            Point::new(
-                laid.center_x() - self.size / 2.0,
-                laid.center_y() - self.size / 2.0,
-            ),
-            Size::new(self.size, self.size),
-        );
+        let bounds = physical_square(laid.center_x(), laid.center_y(), self.size);
         let svg = core_svg::Svg {
             handle,
             color: self.tint.map(|tint| tint(theme)),
             rotation: Radians(0.0),
             opacity: self.opacity,
         };
-        let fitted = ContentFit::Contain.fit(image_size, bounds.size());
-        let position = Point::new(
-            bounds.center_x() - fitted.width / 2.0,
-            bounds.center_y() - fitted.height / 2.0,
-        );
+        let drawn = if measured.width == measured.height {
+            // `ContentFit::Contain` could shrink a square by a fraction of
+            // a pixel; a square image fills the square exactly.
+            bounds
+        } else {
+            let image_size = Size::new(measured.width as f32, measured.height as f32);
+            let fitted = ContentFit::Contain.fit(image_size, bounds.size());
+            Rectangle::new(
+                Point::new(
+                    on_physical_pixel(bounds.center_x() - fitted.width / 2.0),
+                    on_physical_pixel(bounds.center_y() - fitted.height / 2.0),
+                ),
+                fitted,
+            )
+        };
 
-        renderer.draw_svg(svg, Rectangle::new(position, fitted), bounds);
+        renderer.draw_svg(svg, drawn, bounds);
     }
 }
 
@@ -1168,6 +1173,21 @@ pub fn hairline() -> f32 {
 fn on_physical_pixel(value: f32) -> f32 {
     let scale = scale_factor();
     (value * scale).round() / scale
+}
+
+/// A square of about `size` logical px centred on `(center_x, center_y)`:
+/// `round(size × scale)` physical px wide, with its corner on a whole
+/// physical pixel.
+fn physical_square(center_x: f32, center_y: f32, size: f32) -> Rectangle {
+    let scale = scale_factor();
+    let side = (size * scale).round().max(1.0) / scale;
+    Rectangle::new(
+        Point::new(
+            on_physical_pixel(center_x - side / 2.0),
+            on_physical_pixel(center_y - side / 2.0),
+        ),
+        Size::new(side, side),
+    )
 }
 
 thread_local! {

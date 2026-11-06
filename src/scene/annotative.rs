@@ -18,7 +18,6 @@ use codec::types::{Vector2, Vector3};
 use codec::{Document, Handle};
 use std::borrow::Cow;
 
-/// Resolve a handle to a `Dictionary` object, if it is one.
 /// MSLTSCALE: whether model-space linetypes follow the annotation scale. A
 /// drawing that doesn't store the variable gets its default, on.
 pub fn model_linetypes_follow_annotation(doc: &Document) -> bool {
@@ -27,6 +26,7 @@ pub fn model_linetypes_follow_annotation(doc: &Document) -> bool {
         .map_or(true, |value| value != 0)
 }
 
+/// Resolve a handle to a `Dictionary` object, if it is one.
 pub fn as_dict(doc: &Document, handle: Handle) -> Option<&Dictionary> {
     match doc.objects.get(&handle) {
         Some(ObjectType::Dictionary(d)) => Some(d),

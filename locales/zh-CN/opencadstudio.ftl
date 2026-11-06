@@ -2739,6 +2739,10 @@ command =
     .layer-protected-skipped = 层"0"、Defpoints、当前层和外部参照的层不能被删除——跳过。
     .frozen-layer-cannot-be-current = 冻结的层不能置为当前。
     .current-layer-cannot-be-frozen = 当前层不能被冻结——跳过。
+    .layer-cannot-be-renamed = 无法重命名图层“__ocs_fmt_0__”。
+    .layer-name-invalid = “__ocs_fmt_0__”不是有效的图层名（不能包含 < > / \ " : ; ? * | , = `）。
+    .layer-name-taken = 已存在名为“__ocs_fmt_0__”的图层。
+    .layer-transparency-range = 透明度是 0 到 90 之间的整数。
     .viewport-scale-needs-viewport = 选择一个视口或双击进入视口以设置其比例。
     .viewport-scale-locked = 视口显示已锁定；解锁后才能更改其比例。
     .no-drawing-open-use-new-or-open-to-start-a-dra = 没有绘图打开。 使用 NEW 或 OPEN 开始绘图 。

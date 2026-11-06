@@ -235,6 +235,9 @@ pub struct LayerPanel {
     /// `selected`/`selected_multi` below stay index-based and are re-resolved.
     pub editing: Option<String>,
     pub edit_buf: String,
+    /// Transparency being typed: (layer name, text). Enter or leaving the
+    /// field applies it as one undo step; Esc drops it.
+    pub transparency_edit: Option<(String, String)>,
     pub current_layer: String,
     pub linetype_items: Vec<LinetypeItem>,
     /// Row whose color swatch is open. Name-keyed for the same reason (#44).
@@ -267,6 +270,7 @@ impl Default for LayerPanel {
             selected_multi: Vec::new(),
             editing: None,
             edit_buf: String::new(),
+            transparency_edit: None,
             current_layer: "0".to_string(),
             linetype_items: vec![LinetypeItem {
                 name: "Continuous".into(),
@@ -715,6 +719,11 @@ impl LayerPanel {
             let is_current = layer.name == self.current_layer;
             let is_editing = self.editing.as_deref() == Some(layer.name.as_str());
             let color_open = self.color_picker_row.as_deref() == Some(layer.name.as_str());
+            let trans_buf = self
+                .transparency_edit
+                .as_ref()
+                .filter(|(name, _)| *name == layer.name)
+                .map(|(_, typed)| typed.as_str());
 
             let (ltc, lwc) = if is_anchor {
                 (Some(&self.linetype_combo), Some(&self.lw_combo))
@@ -730,6 +739,7 @@ impl LayerPanel {
                 is_editing,
                 &self.edit_buf,
                 color_open,
+                trans_buf,
                 ltc,
                 lwc,
                 &self.vp_cols,
@@ -944,7 +954,6 @@ fn toolbar_btn_cond<'a>(
 
 // ── Layer row ─────────────────────────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
 /// Hover popup showing a layer's full name when the cell truncates it.
 fn name_tip<'a>(name: &'a str) -> Element<'a, Message> {
     container(text(name).size(FONT_SZ))
@@ -976,6 +985,12 @@ pub fn rename_input_id() -> iced::widget::Id {
     iced::widget::Id::new("layer-rename-input")
 }
 
+/// The transparency field being typed in; leaving it applies the value.
+pub fn transparency_input_id() -> iced::widget::Id {
+    iced::widget::Id::new("layer-transparency-input")
+}
+
+#[allow(clippy::too_many_arguments)]
 fn layer_row<'a>(
     index: usize,
     layer: &'a Layer,
@@ -984,6 +999,7 @@ fn layer_row<'a>(
     is_editing: bool,
     edit_buf: &'a str,
     color_picker_open: bool,
+    trans_buf: Option<&'a str>,
     lt_combo: Option<&'a combo_box::State<LinetypeItem>>,
     lw_combo_state: Option<&'a combo_box::State<LwItem>>,
     vp_cols: &'a [VpCol],
@@ -1173,11 +1189,13 @@ fn layer_row<'a>(
             .into()
     };
 
-    // Transparency cell
-    let trans_str = layer.transparency.to_string();
+    // Transparency cell: typing only fills the field; Enter or leaving it
+    // applies the value as one undo step.
+    let trans_str = trans_buf.map_or_else(|| layer.transparency.to_string(), str::to_owned);
     let lname_trans = lname.clone();
-    let trans_cell = text_input("0", &trans_str)
+    let mut trans_cell = text_input("0", &trans_str)
         .on_input(move |s| Message::LayerTransparencyEdit(lname_trans.clone(), s))
+        .on_submit(Message::LayerTransparencyCommit)
         .size(FONT_SZ)
         .padding(Padding {
             top: COMBO_PAD_V,
@@ -1191,6 +1209,9 @@ fn layer_row<'a>(
             style
         })
         .width(Length::Fixed(COL_TRANS));
+    if trans_buf.is_some() {
+        trans_cell = trans_cell.id(transparency_input_id());
+    }
 
     let mut row_content = row![
         container(status_dot)

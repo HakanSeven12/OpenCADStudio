@@ -1669,7 +1669,7 @@ impl OpenCADStudio {
                         y: idx as f32 * crate::ui::ROW_H,
                     },
                 ),
-                iced::widget::operation::focus(crate::ui::window::layers::rename_input_id()),
+                super::focus_layer_name_field(),
             ]),
             None => Task::none(),
         }
@@ -1846,27 +1846,112 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_layer_rename_commit(&mut self) -> Task<Message> {
+        self.commit_layer_rename(true)
+    }
+
+    /// Apply the typed layer name. A name that can't be used says why (#2610).
+    /// On Enter (`refocus`) the field stays open with what was typed and
+    /// takes the keyboard again; a click elsewhere keeps the old name.
+    pub(super) fn commit_layer_rename(&mut self, refocus: bool) -> Task<Message> {
         let i = self.active_tab;
-        let editing_name = self.tabs[i].layers.editing.take();
-        if let Some(old_name) = editing_name {
-            let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
-            // The name was captured at RenameStart; look it up fresh so
-            // a sort/sync/filter in between cannot retarget the rename.
-            // Deleted meanwhile → clear and no-op.
-            let still_there = self.tabs[i]
-                .layers
-                .layers
-                .iter()
-                .any(|l| l.name == old_name);
-            if !new_name.is_empty() && new_name != old_name && still_there {
-                self.push_undo_snapshot(i, "LAYER RENAME");
-                if !self.tabs[i].rename_layer(&old_name, &new_name) {
-                    self.discard_last_undo_entry(i);
+        let Some(old_name) = self.tabs[i].layers.editing.take() else {
+            return Task::none();
+        };
+        let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
+        // The name was captured at RenameStart; look it up fresh so a
+        // sort/sync/filter in between cannot retarget the rename. Deleted
+        // meanwhile → clear and no-op.
+        let still_there = self.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .any(|l| l.name == old_name);
+        if !new_name.is_empty() && new_name != old_name && still_there {
+            if let Some(problem) =
+                layer_rename_problem(&self.tabs[i].scene.document, &old_name, &new_name)
+            {
+                self.command_line.push_error(&problem);
+                if refocus {
+                    self.tabs[i].layers.editing = Some(old_name);
+                    return super::focus_layer_name_field();
                 }
+                // A click elsewhere moves on; the old name stays.
+                self.tabs[i].layers.edit_buf.clear();
+                return Task::none();
             }
-            self.tabs[i].layers.edit_buf.clear();
-            self.refresh_layer_panel();
+            self.push_undo_snapshot(i, "LAYER RENAME");
+            if !self.tabs[i].rename_layer(&old_name, &new_name) {
+                self.discard_last_undo_entry(i);
+            }
         }
+        self.tabs[i].layers.edit_buf.clear();
+        self.refresh_layer_panel();
+        Task::none()
+    }
+
+    /// Esc while the Layer manager is typing a name or a transparency drops
+    /// what was typed. Returns whether there was something to drop.
+    pub(super) fn cancel_layer_manager_edit(&mut self) -> bool {
+        let layers = &mut self.tabs[self.active_tab].layers;
+        if layers.editing.take().is_some() {
+            layers.edit_buf.clear();
+            return true;
+        }
+        layers.transparency_edit.take().is_some()
+    }
+
+    /// Apply the typed transparency to the layer (and the selection it is
+    /// part of) as one undo step. A value that isn't a whole number from 0 to
+    /// 90 says so and the field shows the layer's value again (#2610).
+    pub(super) fn on_layer_transparency_commit(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some((name, typed)) = self.tabs[i].layers.transparency_edit.take() else {
+            return Task::none();
+        };
+        let Some(idx) = self.layer_panel_index(i, &name) else {
+            return Task::none();
+        };
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Task::none();
+        }
+        let Some(value) = typed.parse::<i32>().ok().filter(|v| (0..=90).contains(v)) else {
+            self.command_line
+                .push_error(crate::t!("Transparency is a whole number from 0 to 90.").as_ref());
+            return Task::none();
+        };
+        let targets: Vec<String> = self
+            .layer_row_action_targets(i, idx)
+            .into_iter()
+            .filter(|target| {
+                self.tabs[i]
+                    .layers
+                    .layers
+                    .iter()
+                    .any(|l| &l.name == target && l.transparency != value)
+            })
+            .collect();
+        if targets.is_empty() {
+            return Task::none();
+        }
+        let undo = self.begin_layer_undo(i, "LAYER TRANSPARENCY", &targets);
+        for target in &targets {
+            if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(target) {
+                layer.transparency =
+                    document::types::Transparency::from_percent(value as f64 / 100.0);
+            }
+            if let Some(pl) = self.tabs[i]
+                .layers
+                .layers
+                .iter_mut()
+                .find(|l| &l.name == target)
+            {
+                pl.transparency = value;
+            }
+        }
+        self.tabs[i].scene.invalidate_layer_dependencies(&targets);
+        self.tabs[i].dirty = true;
+        self.commit_layer_undo(i, undo);
         Task::none()
     }
 
@@ -6100,38 +6185,171 @@ mod layer_name_target_tests {
         assert_eq!(before, after, "unknown name must change nothing");
     }
 
+    fn panel_transparency(app: &OpenCADStudio, name: &str) -> i32 {
+        app.tabs[app.active_tab]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == name)
+            .expect("layer in panel")
+            .transparency
+    }
+
     #[test]
-    fn layer_transparency_edit_pushes_undo() {
-        // #43: every sibling layer arm pushes an undo entry; transparency must too.
+    fn layer_transparency_edit_is_one_undo_step_on_enter() {
+        // #43 / #2610: typing fills the field only; Enter applies it as one
+        // undo step, however many keys were typed.
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         app.finish_pending_history(i);
         let before = app.tabs[i].history.undo_stack.len();
-        let _ = app.update(Message::LayerTransparencyEdit(
-            "0".to_string(),
-            "50".to_string(),
-        ));
+        for typed in ["5", "50"] {
+            let _ = app.update(Message::LayerTransparencyEdit(
+                "0".to_string(),
+                typed.into(),
+            ));
+        }
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before,
+            "typing alone changes nothing"
+        );
+        assert_eq!(panel_transparency(&app, "0"), 0);
+        let _ = app.update(Message::LayerTransparencyCommit);
         assert_eq!(
             app.tabs[i].history.undo_stack.len(),
             before + 1,
-            "transparency edit must push an undo entry like its siblings"
+            "one undo step"
         );
-        let panel = app.tabs[i]
-            .layers
-            .layers
-            .iter()
-            .find(|l| l.name == "0")
-            .expect("layer 0 in panel");
-        assert_eq!(panel.transparency, 50);
+        assert_eq!(panel_transparency(&app, "0"), 50);
+        assert!(app.tabs[i].layers.transparency_edit.is_none());
         app.undo_active_tab();
-        let panel = app.tabs[i]
+        assert_eq!(
+            panel_transparency(&app, "0"),
+            0,
+            "undo must restore transparency"
+        );
+    }
+
+    #[test]
+    fn layer_transparency_out_of_range_says_so_and_keeps_the_value() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        for typed in ["95", "x"] {
+            app.command_line.last_error = None;
+            let _ = app.update(Message::LayerTransparencyEdit(
+                "0".to_string(),
+                typed.into(),
+            ));
+            let _ = app.update(Message::LayerTransparencyCommit);
+            assert!(
+                app.command_line.last_error.is_some(),
+                "{typed} is refused with a message"
+            );
+        }
+        assert_eq!(panel_transparency(&app, "0"), 0);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        // Leaving the field applies like Enter; Esc drops what was typed.
+        let _ = app.update(Message::LayerTransparencyEdit("0".to_string(), "30".into()));
+        let _ = app.update(Message::LayerTransparencyFocus(None));
+        assert_eq!(panel_transparency(&app, "0"), 30);
+        let _ = app.update(Message::LayerTransparencyEdit("0".to_string(), "60".into()));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(app.tabs[i].layers.transparency_edit.is_none());
+        assert_eq!(panel_transparency(&app, "0"), 30);
+    }
+
+    #[test]
+    fn layer_rename_to_a_taken_name_says_why_and_stays_open() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerRenameStart("ZULU".to_string()));
+        let _ = app.update(Message::LayerRenameEdit("alpha".to_string()));
+        app.command_line.last_error = None;
+        let _ = app.update(Message::LayerRenameCommit);
+        assert!(app.command_line.last_error.is_some(), "the reason is shown");
+        assert_eq!(
+            app.tabs[i].layers.editing.as_deref(),
+            Some("ZULU"),
+            "field stays open"
+        );
+        assert_eq!(app.tabs[i].layers.edit_buf, "alpha", "with what was typed");
+        assert!(app.tabs[i].scene.document.layers.contains("ZULU"));
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before, "no undo step");
+        // Esc gives up: the old name stays and the field closes.
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(app.tabs[i].layers.editing.is_none());
+        assert!(app.tabs[i].layers.edit_buf.is_empty());
+        // Invalid characters and protected layers are refused the same way.
+        for (layer, typed) in [("ZULU", "A*B"), ("0", "ZERO")] {
+            let _ = app.update(Message::LayerRenameStart(layer.to_string()));
+            let _ = app.update(Message::LayerRenameEdit(typed.to_string()));
+            app.command_line.last_error = None;
+            let _ = app.update(Message::LayerRenameCommit);
+            assert!(
+                app.command_line.last_error.is_some(),
+                "{layer} → {typed} refused"
+            );
+            assert!(app.tabs[i].scene.document.layers.contains(layer));
+            let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        }
+        // A click elsewhere after a refused name keeps the old one and moves on.
+        let _ = app.update(Message::LayerRenameStart("ZULU".to_string()));
+        let _ = app.update(Message::LayerRenameEdit("ALPHA".to_string()));
+        let _ = app.update(Message::LayerRenameFocus(None));
+        assert!(app.tabs[i].layers.editing.is_none());
+        assert!(app.tabs[i].scene.document.layers.contains("ZULU"));
+    }
+
+    #[test]
+    fn ctrl_click_on_a_layer_name_extends_the_selection() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerSelect("ALPHA".to_string()));
+        app.ctrl_down = true;
+        let _ = app.update(Message::LayerRenameStart("ZULU".to_string()));
+        app.ctrl_down = false;
+        assert!(app.tabs[i].layers.editing.is_none(), "no rename starts");
+        let selected: Vec<String> = app.tabs[i]
             .layers
-            .layers
+            .selected_multi
             .iter()
-            .find(|l| l.name == "0")
-            .expect("layer 0 in panel");
-        assert_eq!(panel.transparency, 0, "undo must restore transparency");
+            .map(|&idx| app.tabs[i].layers.layers[idx].name.clone())
+            .collect();
+        assert!(selected.contains(&"ALPHA".to_string()) && selected.contains(&"ZULU".to_string()));
+    }
+
+    #[test]
+    fn plot_toggle_keeps_the_row_order_like_the_other_toggles() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerSort(LayerSortCol::Plot));
+        let order = |app: &OpenCADStudio| -> Vec<String> {
+            app.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .map(|l| l.name.clone())
+                .collect()
+        };
+        let before = order(&app);
+        let _ = app.update(Message::LayerTogglePlot("ZULU".to_string()));
+        assert_eq!(order(&app), before);
+        assert!(
+            !app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ZULU")
+                .unwrap()
+                .is_plottable
+        );
     }
 }
 
@@ -6675,6 +6893,29 @@ mod grip_ctrl_cycle_tests {
             Some(0)
         );
     }
+}
+
+/// Why `new` can't be the name of layer `old`, or `None` when the rename can
+/// go ahead. The same rules the document applies, said in the user's words.
+pub(super) fn layer_rename_problem(
+    document: &document::Document,
+    old: &str,
+    new: &str,
+) -> Option<String> {
+    if old == "0" || old.eq_ignore_ascii_case("Defpoints") || old.contains('|') {
+        return Some(crate::tf!("Layer \"{old}\" can't be renamed.").into_owned());
+    }
+    if !crate::scene::valid_block_name(new) {
+        return Some(
+            crate::tf!("\"{new}\" isn't a valid layer name (no < > / \\ \" : ; ? * | , = `).")
+                .into_owned(),
+        );
+    }
+    // A case-only change finds the layer itself, which is fine.
+    if document.layers.get(new).is_some_and(|taken| taken.name != old) {
+        return Some(crate::tf!("A layer named \"{new}\" already exists.").into_owned());
+    }
+    None
 }
 
 /// Layers the Layer manager never deletes: "0", Defpoints, the current layer

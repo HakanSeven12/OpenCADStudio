@@ -2752,6 +2752,10 @@ command =
     .layer-protected-skipped = Layer "0", Defpoints, the current layer and xref layers can't be deleted — skipped.
     .frozen-layer-cannot-be-current = A frozen layer can't be made current.
     .current-layer-cannot-be-frozen = The current layer can't be frozen — skipped.
+    .layer-cannot-be-renamed = Layer "__ocs_fmt_0__" can't be renamed.
+    .layer-name-invalid = "__ocs_fmt_0__" isn't a valid layer name (no < > / \ " : ; ? * | , = `).
+    .layer-name-taken = A layer named "__ocs_fmt_0__" already exists.
+    .layer-transparency-range = Transparency is a whole number from 0 to 90.
     .viewport-scale-needs-viewport = Select a viewport or double-click into one to set its scale.
     .viewport-scale-locked = The viewport's display is locked; unlock it to change its scale.
     .no-drawing-open-use-new-or-open-to-start-a-dra = No drawing open. Use NEW or OPEN to start a drawing.

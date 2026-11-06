@@ -4272,7 +4272,12 @@ pub enum Message {
     LayerColorSet(document::types::Color),
     LayerLinetypeSet(String),
     LayerLineweightSet(LineWeight),
+    /// Typing in a layer's transparency field: (layer name, text).
     LayerTransparencyEdit(String, String),
+    /// Enter in the transparency field applies the typed value.
+    LayerTransparencyCommit,
+    /// The widget focused after a click while a transparency is being typed.
+    LayerTransparencyFocus(Option<iced::advanced::widget::Id>),
     LayerRenameCommit,
     /// The widget focused after a click while a layer rename is open.
     LayerRenameFocus(Option<iced::advanced::widget::Id>),

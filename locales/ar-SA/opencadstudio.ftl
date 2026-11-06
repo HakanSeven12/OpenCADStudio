@@ -2764,6 +2764,10 @@ command =
     .layer-protected-skipped = لا يمكن حذف الطبقة "0" وDefpoints والطبقة الحالية وطبقات المراجع الخارجية — تم التخطي.
     .frozen-layer-cannot-be-current = لا يمكن جعل طبقة مجمدة طبقة حالية.
     .current-layer-cannot-be-frozen = لا يمكن تجميد الطبقة الحالية — تم التخطي.
+    .layer-cannot-be-renamed = لا يمكن إعادة تسمية الطبقة "__ocs_fmt_0__".
+    .layer-name-invalid = "__ocs_fmt_0__" ليس اسم طبقة صالحًا (بدون < > / \ " : ; ? * | , = `).
+    .layer-name-taken = توجد طبقة باسم "__ocs_fmt_0__" بالفعل.
+    .layer-transparency-range = الشفافية عدد صحيح من 0 إلى 90.
     .viewport-scale-needs-viewport = حدد إطار عرض أو انقر نقرًا مزدوجًا داخله لتعيين مقياسه.
     .viewport-scale-locked = عرض إطار العرض مقفل؛ ألغِ قفله لتغيير مقياسه.
     .no-drawing-open-use-new-or-open-to-start-a-dra = لا يوجد رسم مفتوح. استخدم NEW أو OPEN لبدء رسم.

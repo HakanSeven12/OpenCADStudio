@@ -2752,6 +2752,10 @@ command =
     .layer-protected-skipped = Le calque « 0 », Defpoints, le calque actuel et les calques des références externes ne peuvent pas être supprimés — ignorés.
     .frozen-layer-cannot-be-current = Un calque gelé ne peut pas devenir le calque actuel.
     .current-layer-cannot-be-frozen = Le calque actuel ne peut pas être gelé — ignoré.
+    .layer-cannot-be-renamed = Le calque "__ocs_fmt_0__" ne peut pas être renommé.
+    .layer-name-invalid = "__ocs_fmt_0__" n'est pas un nom de calque valide (sans < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Un calque nommé "__ocs_fmt_0__" existe déjà.
+    .layer-transparency-range = La transparence est un nombre entier de 0 à 90.
     .viewport-scale-needs-viewport = Sélectionnez une fenêtre ou double-cliquez dedans pour définir son échelle.
     .viewport-scale-locked = L'affichage de la fenêtre est verrouillé ; déverrouillez-le pour changer son échelle.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Aucun dessin ouvert. Utilisez NEW ou OPEN pour commencer un dessin.

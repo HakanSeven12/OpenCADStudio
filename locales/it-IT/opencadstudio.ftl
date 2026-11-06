@@ -2751,6 +2751,10 @@ command =
     .layer-protected-skipped = Il layer "0", Defpoints, il layer corrente e i layer dei riferimenti esterni non possono essere eliminati: saltati.
     .frozen-layer-cannot-be-current = Un layer congelato non può diventare corrente.
     .current-layer-cannot-be-frozen = Il layer corrente non può essere congelato: saltato.
+    .layer-cannot-be-renamed = Il layer "__ocs_fmt_0__" non può essere rinominato.
+    .layer-name-invalid = "__ocs_fmt_0__" non è un nome di layer valido (senza < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Esiste già un layer denominato "__ocs_fmt_0__".
+    .layer-transparency-range = La trasparenza è un numero intero da 0 a 90.
     .viewport-scale-needs-viewport = Selezionare una finestra o fare doppio clic al suo interno per impostarne la scala.
     .viewport-scale-locked = La visualizzazione della finestra è bloccata; sbloccarla per cambiarne la scala.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Nessun disegno aperto. Utilizzare NEW o OPEN per iniziare un disegno.

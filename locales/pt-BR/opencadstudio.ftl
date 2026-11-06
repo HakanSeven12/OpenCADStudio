@@ -2752,6 +2752,10 @@ command =
     .layer-protected-skipped = A camada “0”, Defpoints, a camada atual e as camadas de referências externas não podem ser excluídas — ignoradas.
     .frozen-layer-cannot-be-current = Uma camada congelada não pode se tornar a atual.
     .current-layer-cannot-be-frozen = A camada atual não pode ser congelada — ignorada.
+    .layer-cannot-be-renamed = A camada "__ocs_fmt_0__" não pode ser renomeada.
+    .layer-name-invalid = "__ocs_fmt_0__" não é um nome de camada válido (sem < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Já existe uma camada chamada "__ocs_fmt_0__".
+    .layer-transparency-range = A transparência é um número inteiro de 0 a 90.
     .viewport-scale-needs-viewport = Selecione uma viewport ou clique duas vezes nela para definir sua escala.
     .viewport-scale-locked = A exibição da viewport está bloqueada; desbloqueie-a para mudar a escala.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Nenhum desenho aberto. Use NEW ou OPEN para iniciar um desenho.

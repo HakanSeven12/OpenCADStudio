@@ -2751,6 +2751,10 @@ command =
     .layer-protected-skipped = Tasoa "0", Defpoints-tasoa, nykyistä tasoa ja ulkoisten viitteiden tasoja ei voi poistaa – ohitetaan.
     .frozen-layer-cannot-be-current = Jäädytettyä tasoa ei voi asettaa nykyiseksi.
     .current-layer-cannot-be-frozen = Nykyistä tasoa ei voi jäädyttää – ohitetaan.
+    .layer-cannot-be-renamed = Tasoa "__ocs_fmt_0__" ei voi nimetä uudelleen.
+    .layer-name-invalid = "__ocs_fmt_0__" ei ole kelvollinen tason nimi (ei merkkejä < > / \ " : ; ? * | , = `).
+    .layer-name-taken = Taso nimeltä "__ocs_fmt_0__" on jo olemassa.
+    .layer-transparency-range = Läpinäkyvyys on kokonaisluku väliltä 0–90.
     .viewport-scale-needs-viewport = Valitse näkymäikkuna tai kaksoisnapsauta sen sisään asettaaksesi sen mittakaavan.
     .viewport-scale-locked = Näkymäikkunan näyttö on lukittu; avaa lukitus muuttaaksesi mittakaavaa.
     .no-drawing-open-use-new-or-open-to-start-a-dra = Piirustus ei ole auki. Käytä NEW tai OPEN piirtämisen aloittamiseen.

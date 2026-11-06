@@ -5665,4 +5665,20 @@ mod batch4_tests {
             "{after_del:?}"
         );
     }
+
+    #[test]
+    fn tablestyle_set_applies_an_existing_style() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("TABLESTYLE NEW MYPAPER");
+        let _ = app.run_command_line("TABLESTYLE SET MYPAPER");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let current = app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .current_table_style_name
+            .clone();
+        assert_eq!(current, "MYPAPER");
+    }
 }

@@ -103,8 +103,8 @@ struct VOut {
     var o: VOut;
     // Double-single relative-to-eye: anchor high cancels eye_high (Sterbenz);
     // boundary-local v.pos + anchor low + (−eye_low) carry the residual.
-    let hi = vec3<f32>(h.origin.x + v.translation.x - u.eye_high.x,
-                       h.origin.y + v.translation.y - u.eye_high.y,
+    let hi = vec3<f32>(h.origin.x - u.eye_high.x + v.translation.x,
+                       h.origin.y - u.eye_high.y + v.translation.y,
                        -u.eye_high.z);
     let lo = vec3<f32>(v.pos.x + h.origin_low.x + v.translation_low.x - u.eye_low.x,
                        v.pos.y + h.origin_low.y + v.translation_low.y - u.eye_low.y,

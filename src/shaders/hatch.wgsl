@@ -111,9 +111,11 @@ struct VOut {
     // Double-single relative-to-eye: the anchor high half cancels exactly
     // against eye_high (Sterbenz); local + anchor low + (−eye_low) carry the
     // residual. `local` is small (boundary-relative), so adding it in the low
-    // term keeps full precision at UTM-scale anchors.
-    let hi = vec3<f32>(inst.world_origin.x + v.translation.x - u.eye_high.x,
-                       inst.world_origin.y + v.translation.y - u.eye_high.y,
+    // term keeps full precision at UTM-scale anchors. The instance delta is
+    // added after that cancellation: summed onto the anchor first it rounds to
+    // the anchor's f32 step (1 unit at X≈8e6) and block copies drift. (#2638)
+    let hi = vec3<f32>(inst.world_origin.x - u.eye_high.x + v.translation.x,
+                       inst.world_origin.y - u.eye_high.y + v.translation.y,
                        -u.eye_high.z);
     let lo = vec3<f32>(local.x + inst.world_origin_low.x + v.translation_low.x - u.eye_low.x,
                        local.y + inst.world_origin_low.y + v.translation_low.y - u.eye_low.y,

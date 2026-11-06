@@ -51,7 +51,7 @@ struct VertOut {
 @vertex
 fn vs_main(in: VertIn) -> VertOut {
     var out: VertOut;
-    let rel = (in.pos + in.translation - u.eye_high)
+    let rel = (in.pos - u.eye_high + in.translation)
         + (in.pos_low + in.translation_low - u.eye_low);
     out.clip_pos = u.view_rot * vec4<f32>(rel, 1.0);
     out.clip_pos = apply_draw_order(out.clip_pos, img_params.draw_depth + in.draw_depth);

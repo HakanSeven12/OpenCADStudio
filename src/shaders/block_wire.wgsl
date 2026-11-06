@@ -111,12 +111,12 @@ fn marker_relative(
     translation_low: vec3<f32>,
 ) -> vec3<f32> {
     if wire_const.marker_normal_scale.w <= 0.0 {
-        return (position_high + translation - u.eye_high)
+        return (position_high - u.eye_high + translation)
             + (position_low + translation_low - u.eye_low);
     }
     let origin_high = wire_const.marker_origin_high.xyz;
     let origin_low = wire_const.marker_origin_low.xyz;
-    let origin_relative = (origin_high + translation - u.eye_high)
+    let origin_relative = (origin_high - u.eye_high + translation)
         + (origin_low + translation_low - u.eye_low);
     let delta = (position_high - origin_high) + (position_low - origin_low);
     let normal = normalize(wire_const.marker_normal_scale.xyz);

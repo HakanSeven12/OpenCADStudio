@@ -48,7 +48,7 @@ impl OpenCADStudio {
                 ])
             {
                 self.command_line
-                    .push_error(crate::t!("Cannot set TEXTLAYER to that value.").as_ref());
+                    .push_rejection(crate::t!("Cannot set TEXTLAYER to that value.").as_ref());
                 let current = self
                     .text_layer(i)
                     .unwrap_or_else(|| crate::tr!("text-layer", "use-current"));

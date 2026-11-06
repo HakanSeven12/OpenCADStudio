@@ -42,8 +42,8 @@ impl OpenCADStudio {
             Some(style) => Some(self.on_ribbon_style_changed(StyleKey::TableStyle, style)),
             None => {
                 self.command_line
-                    .push_error(crate::t!("Cannot set CTABLESTYLE to that value.").as_ref());
-                self.command_line.push_error("*Invalid*");
+                    .push_rejection(crate::t!("Cannot set CTABLESTYLE to that value.").as_ref());
+                self.command_line.push_rejection("*Invalid*");
                 Some(Task::none())
             }
         }

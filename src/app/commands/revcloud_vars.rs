@@ -96,7 +96,7 @@ impl OpenCADStudio {
         };
         match refused {
             Some(message) => {
-                self.command_line.push_error(&message);
+                self.command_line.push_rejection(&message);
                 match first_point {
                     Some(first) => {
                         self.command_line.push_output(&second_prompt());

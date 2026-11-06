@@ -31,7 +31,7 @@ impl OpenCADStudio {
                 "TOGGLE" => !self.tabs[i].scene.block_constraint_status_mode,
                 _ => {
                     self.command_line
-                        .push_error(crate::t!("BCONSTATUSMODE requires 0 or 1.").as_ref());
+                        .push_rejection(crate::t!("BCONSTATUSMODE requires 0 or 1.").as_ref());
                     return Task::none();
                 }
             };

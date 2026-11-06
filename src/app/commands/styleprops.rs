@@ -63,7 +63,7 @@ impl OpenCADStudio {
                             None => x,
                         };
                         let (Some(x), Some(y)) = (x, y) else {
-                            self.command_line.push_error(
+                            self.command_line.push_rejection(
                                 crate::t!("Requires two positive values (x,y) or one for both.")
                                     .as_ref(),
                             );
@@ -76,7 +76,7 @@ impl OpenCADStudio {
                     }
                     _ => self
                         .command_line
-                        .push_error(crate::t!("Requires 0 or 1").as_ref()),
+                        .push_rejection(crate::t!("Requires 0 or 1").as_ref()),
                 }
                 return Some(Task::none());
             }
@@ -611,7 +611,7 @@ impl OpenCADStudio {
                     crate::modules::draw::modify::setbylayer::set_mode(mode);
                 } else {
                     self.command_line
-                        .push_error("SETBYLAYERMODE requires an integer from 0 to 255.");
+                        .push_rejection("SETBYLAYERMODE requires an integer from 0 to 255.");
                 }
             }
             "SETBYLAYER" | "-SETBYLAYER" => {
@@ -1163,7 +1163,7 @@ impl OpenCADStudio {
                             // Refused: say why, and ask again unless the value ends it.
                             Some(Err(refusal)) => {
                                 for line in &refusal.lines {
-                                    self.command_line.push_error(line);
+                                    self.command_line.push_rejection(line);
                                 }
                                 if refusal.ask_again {
                                     self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
@@ -1185,7 +1185,7 @@ impl OpenCADStudio {
                                 // Refused: say why and ask again.
                                 None => {
                                     self.command_line
-                                        .push_error("Requires an integer between -90 and 90.");
+                                        .push_rejection("Requires an integer between -90 and 90.");
                                     self.command_line.push_output(&crate::ui::command_line::value_prompt("XDWGFADECTL", &current));
                                     self.pending_setvar = Some(name.clone());
                                 }
@@ -1213,7 +1213,7 @@ impl OpenCADStudio {
                                     }
                                     self.command_line.push_output(&format!("CETRANSPARENCY = {}", crate::scene::creation_style::current_transparency_label(transparency)));
                                 }
-                                None => self.command_line.push_error("CETRANSPARENCY: expected ByLayer (-1), ByBlock (-2), or an integer from 0 to 90."),
+                                None => self.command_line.push_rejection("CETRANSPARENCY: expected ByLayer (-1), ByBlock (-2), or an integer from 0 to 90."),
                             }
                         } else {
                             self.command_line.push_output(&crate::ui::command_line::value_prompt("CETRANSPARENCY", &crate::scene::creation_style::current_transparency_label(current)
@@ -1254,7 +1254,7 @@ impl OpenCADStudio {
                                     }
                                     set_import_settings(settings);
                                 }
-                                None => self.command_line.push_error(&format!(
+                                None => self.command_line.push_rejection(&format!(
                                     "Requires an integer between 0 and {max}."
                                 )),
                             }
@@ -1330,7 +1330,7 @@ impl OpenCADStudio {
                                 }
                             }
                             Some(None) => {
-                                self.command_line.push_error(
+                                self.command_line.push_rejection(
                                     crate::t!("Requires 0 or 1 only, or option keyword.").as_ref(),
                                 );
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
@@ -1370,7 +1370,7 @@ impl OpenCADStudio {
                                 }
                             }
                             Some(None) => {
-                                self.command_line.push_error(
+                                self.command_line.push_rejection(
                                     crate::t!("Requires 0 or 1 only, or option keyword.").as_ref(),
                                 );
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
@@ -1406,7 +1406,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1437,7 +1437,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error("Requires an integer between 0 and 2.");
+                                    .push_rejection("Requires an integer between 0 and 2.");
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt("DGNIMPORTMODE", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1463,7 +1463,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt("SURFACEASSOCIATIVITY", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1503,7 +1503,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt(&name, &current));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1551,7 +1551,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt("FIELDDISPLAY", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1578,7 +1578,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&prompt);
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1609,7 +1609,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&prompt);
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1633,7 +1633,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&prompt);
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1659,7 +1659,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 let (min, max) = (0, 255);
-                                self.command_line.push_error(&crate::tf!(
+                                self.command_line.push_rejection(&crate::tf!(
                                     "Requires an integer between {min} and {max}."
                                 ));
                                 self.command_line.push_output(&prompt);
@@ -1687,7 +1687,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 let (min, max) = (0, 1);
-                                self.command_line.push_error(&crate::tf!(
+                                self.command_line.push_rejection(&crate::tf!(
                                     "Requires an integer between {min} and {max}."
                                 ));
                                 self.command_line.push_output(&prompt);
@@ -1718,7 +1718,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 let (min, max) = (0, 2);
-                                self.command_line.push_error(&crate::tf!(
+                                self.command_line.push_rejection(&crate::tf!(
                                     "Requires an integer between {min} and {max}."
                                 ));
                                 self.command_line.push_output(&prompt);
@@ -1742,7 +1742,7 @@ impl OpenCADStudio {
                             Some(Some(mode)) => self.sdi = mode == 1,
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&prompt);
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1767,7 +1767,7 @@ impl OpenCADStudio {
                             }
                             Some(None) => {
                                 self.command_line
-                                    .push_error(crate::t!("Requires 0 or 1 only.").as_ref());
+                                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
                                 self.command_line.push_output(&crate::ui::command_line::value_prompt("FILEDIA", &current));
                                 self.pending_setvar = Some(name.clone());
                             }
@@ -1809,7 +1809,7 @@ impl OpenCADStudio {
                                         self.sync_underlay_tab();
                                     }
                                 }
-                                None => self.command_line.push_error("Requires 0 or 1 only"),
+                                None => self.command_line.push_rejection("Requires 0 or 1 only"),
                             }
                         } else {
                             self.command_line
@@ -1856,7 +1856,7 @@ impl OpenCADStudio {
                                     self.command_line
                                         .push_output(&crate::tf!("{name} = {mode}"));
                                 }
-                                None => self.command_line.push_error(&crate::tf!(
+                                None => self.command_line.push_rejection(&crate::tf!(
                                     "{name}: expected an integer from 0 to {maximum}."
                                 )),
                             }
@@ -1933,7 +1933,7 @@ impl OpenCADStudio {
                                 }
                                 // Out of range: say so and ask again.
                                 _ => {
-                                    self.command_line.push_error(
+                                    self.command_line.push_rejection(
                                         crate::t!("Requires an integer between 0 and 2.").as_ref(),
                                     );
                                     self.command_line.push_output(
@@ -1967,7 +1967,7 @@ impl OpenCADStudio {
                                     self.command_line
                                         .push_output(&crate::tf!("DIMCONTINUEMODE = {mode}"));
                                 }
-                                _ => self.command_line.push_error(
+                                _ => self.command_line.push_rejection(
                                     crate::t!("SETVAR: DIMCONTINUEMODE requires 0 or 1.").as_ref(),
                                 ),
                             }
@@ -2046,7 +2046,7 @@ impl OpenCADStudio {
                                     self.command_line
                                         .push_output(&crate::tf!("{name} = {mode}"));
                                 }
-                                None => self.command_line.push_error(&crate::tf!(
+                                None => self.command_line.push_rejection(&crate::tf!(
                                     "{name}: expected an integer from 0 to {maximum}."
                                 )),
                             }
@@ -2091,7 +2091,7 @@ impl OpenCADStudio {
                                 self.command_line
                                     .push_output(&crate::tf!("{name} = {number}"));
                             } else {
-                                self.command_line.push_error(crate::t!(if name == "DONUTID" {
+                                self.command_line.push_rejection(crate::t!(if name == "DONUTID" {
                                     "SETVAR: DONUTID requires a finite value greater than or equal to zero."
                                 } else {
                                     "SETVAR: DONUTOD requires a finite value greater than zero."
@@ -3585,7 +3585,7 @@ impl OpenCADStudio {
                             }
                         }
                         Err(e) => {
-                            self.command_line.push_error(&e);
+                            self.command_line.push_rejection(&e);
                             if name == "SPLFRAME" {
                                 let current = self.tabs[i].scene.document.header.spline_frame as i32;
                                 self.command_line.push_output(
@@ -3939,7 +3939,7 @@ impl OpenCADStudio {
                             .push_output(crate::tf!("LTSCALE set to {v:.4}").as_ref());
                     } else {
                         self.command_line
-                            .push_error(crate::t!("LTSCALE: value must be positive.").as_ref());
+                            .push_rejection(crate::t!("LTSCALE: value must be positive.").as_ref());
                     }
                 } else {
                     self.command_line
@@ -3990,7 +3990,7 @@ impl OpenCADStudio {
                         .push_output(crate::tf!("TEXTEDITMODE set to {n}").as_ref());
                 } else {
                     self.command_line
-                        .push_error(crate::t!("Requires 0 OR 1 OR MULTIPLE OR SINGLE").as_ref());
+                        .push_rejection(crate::t!("Requires 0 OR 1 OR MULTIPLE OR SINGLE").as_ref());
                 }
             }
             "ISAVEBAK" => {
@@ -4023,7 +4023,7 @@ impl OpenCADStudio {
                     }
                     _ => self
                         .command_line
-                        .push_error(crate::t!("Requires 0 or 1").as_ref()),
+                        .push_rejection(crate::t!("Requires 0 or 1").as_ref()),
                 }
             }
             "FILEASSOC" => {
@@ -4072,7 +4072,7 @@ impl OpenCADStudio {
                     }
                     _ => self
                         .command_line
-                        .push_error(crate::t!("Requires 0 or 1").as_ref()),
+                        .push_rejection(crate::t!("Requires 0 or 1").as_ref()),
                 }
             }
             cmd if cmd == "SCRIPTCOMMANDS" || cmd.starts_with("SCRIPTCOMMANDS ") => {
@@ -4125,7 +4125,7 @@ impl OpenCADStudio {
                         };
                         self.command_line.push_output(&msg);
                     }
-                    _ => self.command_line.push_error(
+                    _ => self.command_line.push_rejection(
                         crate::t!("Requires a non-negative number of minutes (0 = off)").as_ref(),
                     ),
                 }
@@ -4230,7 +4230,7 @@ impl OpenCADStudio {
                             .push_output(crate::tf!("CELTSCALE set to {v:.4}").as_ref());
                     } else {
                         self.command_line
-                            .push_error(crate::t!("CELTSCALE: value must be positive.").as_ref());
+                            .push_rejection(crate::t!("CELTSCALE: value must be positive.").as_ref());
                     }
                 } else {
                     self.command_line
@@ -4295,7 +4295,7 @@ impl OpenCADStudio {
                             );
                         }
                         None => {
-                            self.command_line.push_error(
+                            self.command_line.push_rejection(
                                 crate::t!(
                                     "CANNOSCALE: use a scale in the list (e.g. 1:50, 2:1, or a factor)."
                                 )
@@ -4328,7 +4328,7 @@ impl OpenCADStudio {
                             );
                         }
                         None => {
-                            self.command_line.push_error(
+                            self.command_line.push_rejection(
                                 crate::t!("ANNOALLVISIBLE: enter 0 or 1.").as_ref(),
                             );
                             self.command_line.push_output(&crate::ui::command_line::value_prompt("ANNOALLVISIBLE", &"0"));
@@ -4346,7 +4346,7 @@ impl OpenCADStudio {
                             .push_output(crate::tf!("ANNOAUTOSCALE = {mode}").as_ref());
                     }
                     _ if value.is_some_and(|v| !v.trim().is_empty()) => {
-                        self.command_line.push_error(
+                        self.command_line.push_rejection(
                             crate::t!("ANNOAUTOSCALE: enter an integer from -4 through 4.")
                                 .as_ref(),
                         );
@@ -4394,7 +4394,7 @@ impl OpenCADStudio {
                             self.command_line
                                 .push_output(crate::tf!("HPLAYER = {value}").as_ref());
                         } else {
-                            self.command_line.push_error(
+                            self.command_line.push_rejection(
                                 crate::tf!("HPLAYER: no layer named \"{value}\".").as_ref(),
                             );
                             self.command_line.push_output(&crate::ui::command_line::value_prompt_bare("HPLAYER"));

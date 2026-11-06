@@ -623,7 +623,7 @@ impl OpenCADStudio {
                     None => ask(self, name),
                     Some(v) => match v.parse::<i32>() {
                         Ok(n) if !(min..=max).contains(&n) => {
-                            self.command_line.push_error(&if max == 1 {
+                            self.command_line.push_rejection(&if max == 1 {
                                 crate::t!("Requires 0 or 1").into_owned()
                             } else {
                                 crate::tf!("Requires an integer between {min} and {max}.")
@@ -632,7 +632,7 @@ impl OpenCADStudio {
                             ask(self, name);
                         }
                         Err(_) => {
-                            self.command_line.push_error(&crate::tf!(
+                            self.command_line.push_rejection(&crate::tf!(
                                 "Requires an integer between {min} and {max}."
                             ));
                             ask(self, name);

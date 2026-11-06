@@ -484,6 +484,15 @@ impl CommandLine {
         self.last_error = Some(msg.to_owned());
         self.push(EntryKind::Error, format_error(msg));
     }
+    /// A typed value or keyword the prompt refused (`Requires 0 or 1 only.`,
+    /// `Invalid option keyword.`): a plain line, as the reference prints it
+    /// before asking again. It still counts as a failed input for automation
+    /// (`last_error` / `error_revision`).
+    pub fn push_rejection(&mut self, msg: &str) {
+        self.error_revision = self.error_revision.wrapping_add(1);
+        self.last_error = Some(msg.to_owned());
+        self.push(EntryKind::Output, msg.to_string());
+    }
     /// Append an error unless it is already the latest history line. Repeated
     /// retry failures should refresh the concise message, not flood history
     /// with identical copies (#498).

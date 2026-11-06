@@ -973,7 +973,7 @@ impl OpenCADStudio {
                     if let Some(crate::command::CmdResult::ReportError(message)) =
                         command.on_text_input(rest)
                     {
-                        self.command_line.push_error(&message);
+                        self.command_line.push_rejection(&message);
                     }
                 }
                 self.command_line.push_info(&command.prompt());

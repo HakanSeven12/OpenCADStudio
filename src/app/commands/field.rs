@@ -136,7 +136,7 @@ impl OpenCADStudio {
                     }
                     _ => {
                         let (min, max) = (0, 31);
-                        self.command_line.push_error(&crate::tf!(
+                        self.command_line.push_rejection(&crate::tf!(
                             "Requires an integer between {min} and {max}."
                         ));
                         ask(self);

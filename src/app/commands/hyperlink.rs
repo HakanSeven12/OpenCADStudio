@@ -134,7 +134,7 @@ impl OpenCADStudio {
                     }
                     None => {
                         self.command_line
-                            .push_error(&crate::tr!("hyperlink-cmd", "invalid-keyword"));
+                            .push_rejection(&crate::tr!("hyperlink-cmd", "invalid-keyword"));
                     }
                 }
                 Some(Task::none())

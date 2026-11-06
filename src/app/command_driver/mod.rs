@@ -1832,7 +1832,7 @@ impl OpenCADStudio {
         let i = self.active_tab;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
-        self.command_line.push_error(&msg);
+        self.command_line.push_rejection(&msg);
         // Reports can advance a step (LAYMRG's warning or Name input), so
         // refresh its options and dynamic input along with the prompt.
         let _ = self.handle_need_point();

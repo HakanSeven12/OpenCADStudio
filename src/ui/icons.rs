@@ -1361,6 +1361,132 @@ mod tests {
         assert!(contains(&themed, &colors.text));
     }
 
+    fn icon_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                icon_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "svg") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn icons_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons")
+    }
+
+    /// `name="<value>"` in the root `<svg>` tag.
+    fn root_attr<'a>(source: &'a str, name: &str) -> Option<&'a str> {
+        let root = &source[..source.find('>')?];
+        let start = root.find(&format!(" {name}=\""))? + name.len() + 3;
+        Some(&root[start..start + root[start..].find('"')?])
+    }
+
+    #[test]
+    fn icon_files_are_square_pixel_grid_svgs() {
+        let mut files = Vec::new();
+        icon_files(&icons_dir(), &mut files);
+        assert!(files.len() > 800, "only {} icon files", files.len());
+        for path in files {
+            // A brand logo, kept as its owner draws it.
+            if path.ends_with("reddit.svg") {
+                continue;
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            let source = std::str::from_utf8(&bytes).unwrap();
+            let name = path.display();
+            for banned in ["currentColor", "var(", "<style", "class="] {
+                assert!(!source.contains(banned), "{name} contains {banned}");
+            }
+            let width = root_attr(source, "width").unwrap_or_else(|| panic!("{name}: width"));
+            let height = root_attr(source, "height").unwrap_or_else(|| panic!("{name}: height"));
+            let view_box =
+                root_attr(source, "viewBox").unwrap_or_else(|| panic!("{name}: viewBox"));
+            assert_eq!(width, height, "{name}");
+            assert_eq!(view_box, format!("0 0 {width} {width}"), "{name}");
+            let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let side: f32 = width.parse().unwrap();
+            assert_eq!(tree.size().width(), side, "{name}");
+            assert_eq!(tree.size().height(), side, "{name}");
+        }
+    }
+
+    /// 16 px files that are byte-identical but whose 32 px drawings differ:
+    /// the bytes cannot tell them apart, so both get the first partner in
+    /// path order.
+    const SHARED_SMALL_ART: &[&str] = &[
+        "constrain/distance_x.svg",
+        "box3d.svg",
+        "mt_cancel.svg",
+        "vports_restore.svg",
+    ];
+
+    #[test]
+    fn every_large_icon_has_a_small_partner() {
+        let large_root = icons_dir().join("32");
+        let mut files = Vec::new();
+        icon_files(&large_root, &mut files);
+        assert_eq!(files.len(), ICON_PAIRS.len());
+        for large_path in files {
+            let relative = large_path.strip_prefix(&large_root).unwrap();
+            let rel = relative.to_string_lossy().replace('\\', "/");
+            let small_path = icons_dir().join(relative);
+            assert!(small_path.is_file(), "32/{rel} has no 16 px partner");
+            let small: &'static [u8] = std::fs::read(&small_path).unwrap().leak();
+            let large = std::fs::read(&large_path).unwrap();
+            let found = large_art(small).unwrap_or_else(|| panic!("no large art for {rel}"));
+            assert!(
+                found == large.as_slice() || SHARED_SMALL_ART.contains(&rel.as_str()),
+                "{rel} finds another icon's 32 px art"
+            );
+        }
+    }
+
+    #[test]
+    fn art_for_picks_the_drawing_by_size() {
+        let cases: [(&'static [u8], &[u8]); 3] = [
+            (
+                include_bytes!("../../assets/icons/line.svg"),
+                include_bytes!("../../assets/icons/32/line.svg"),
+            ),
+            (
+                include_bytes!("../../assets/icons/arc/arc_sca.svg"),
+                include_bytes!("../../assets/icons/32/arc/arc_sca.svg"),
+            ),
+            (UNDO, include_bytes!("../../assets/icons/32/ui/undo.svg")),
+        ];
+        for (small, large) in cases {
+            assert_eq!(art_for(small, metrics::SMALL_ICON), small);
+            assert_eq!(art_for(small, metrics::LARGE_ICON), large);
+            assert_eq!(art_for(small, metrics::LARGE_ART_MIN), large);
+        }
+        // Bytes without a 32 px drawing are drawn as they are.
+        let plain: &'static [u8] = b"<svg/>";
+        assert_eq!(art_for(plain, metrics::LARGE_ICON), plain);
+    }
+
+    #[test]
+    fn recolouring_keeps_masks_intact() {
+        let source = include_bytes!("../../assets/icons/32/add_scale.svg");
+        assert!(contains(source, b"url(#m1)"));
+        for theme in [Theme::Dark, Theme::Light] {
+            let themed = recolor_semantic_svg(source, &theme);
+            for kept in [
+                &b"fill=\"#fff\""[..],
+                b"fill=\"#000\"",
+                b"url(#m1)",
+                b"id=\"m1\"",
+            ] {
+                assert!(contains(&themed, kept), "{}", String::from_utf8_lossy(kept));
+            }
+            let colors = SemanticColors::from_theme(&theme);
+            assert!(contains(&themed, &colors.text));
+            assert!(contains(&themed, &colors.primary));
+        }
+    }
+
     fn contains(source: &[u8], needle: &[u8]) -> bool {
         source.windows(needle.len()).any(|window| window == needle)
     }

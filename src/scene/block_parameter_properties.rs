@@ -187,6 +187,7 @@ pub(crate) fn component_id(component: &Component) -> String {
         Component::Distance => "Distance".to_owned(),
         Component::Angle => "Angle".to_owned(),
         Component::Flip => "Flip".to_owned(),
+        Component::Visibility(_) => "Visibility".to_owned(),
         Component::TableRow(_) => "TableRow".to_owned(),
         Component::LookupOutput { column, .. } => format!("Lookup{column}"),
     }
@@ -368,7 +369,7 @@ pub(crate) fn evaluate(
                     frame.end =
                         frame.base + DVec3::new(angle.cos(), angle.sin(), 0.) * delta.length();
                 }
-                Component::Flip | Component::TableRow(_) | Component::LookupOutput { .. } => unreachable!(),
+                Component::Flip | Component::Visibility(_) | Component::TableRow(_) | Component::LookupOutput { .. } => unreachable!(),
             }
             if !frame.end.is_finite() {
                 return Err("Specify a finite parameter value.");

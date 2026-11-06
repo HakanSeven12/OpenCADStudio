@@ -20,6 +20,7 @@ pub enum BlockParameterComponent {
     Distance,
     Angle,
     Flip,
+    Visibility(u64),
     TableRow(u64),
     LookupOutput { column: usize, revision: u64 },
 }

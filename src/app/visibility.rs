@@ -10,11 +10,14 @@
 //! per-entity `apply_grip_menu` path can't reach.
 
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 
 use codec::objects::BlockVisibilityParameter;
 use codec::{EntityType, Handle};
 
-use crate::scene::model::object::{GripDef, GripShape};
+use crate::scene::model::object::{
+    BlockParameterComponent, BlockParameterKey, GripDef, GripShape, PropValue, Property,
+};
 
 use super::OpenCADStudio;
 
@@ -86,6 +89,43 @@ struct StateMapping {
     /// Indices the state rules on at all. What the set does not govern keeps
     /// the flag the definition gave it.
     governed_idx: HashSet<usize>,
+}
+
+impl StateMapping {
+    fn changes(&self, doc: &codec::Document) -> Option<Vec<(Handle, bool)>> {
+        let mut changes = Vec::new();
+        for (index, &handle) in self.anon_handles.iter().enumerate() {
+            if !self.governed_idx.contains(&index) {
+                continue;
+            }
+            let entity = doc.get_entity(handle)?;
+            let hidden = !self.visible_idx.contains(&index)
+                || crate::scene::block_construction::is_construction(entity.common());
+            if entity.common().invisible != hidden {
+                changes.push((handle, hidden));
+            }
+        }
+        Some(changes)
+    }
+}
+
+fn visibility_revision(parameter: &BlockVisibilityParameter) -> u64 {
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    parameter.all_blocks.hash(&mut hash);
+    parameter.states.len().hash(&mut hash);
+    for state in &parameter.states {
+        state.name.hash(&mut hash);
+        state.visible_blocks.hash(&mut hash);
+    }
+    hash.finish()
+}
+
+fn visibility_label(parameter: &BlockVisibilityParameter) -> String {
+    if parameter.name.trim().is_empty() {
+        "Visibility1".into()
+    } else {
+        parameter.name.clone()
+    }
 }
 
 impl OpenCADStudio {
@@ -344,6 +384,7 @@ impl OpenCADStudio {
         state_idx: usize,
         param: &BlockVisibilityParameter,
     ) -> Option<StateMapping> {
+        param.states.get(state_idx)?;
         let def_handles = crate::scene::block_authoring::members(doc, def_block);
         let anon_block = doc
             .block_records
@@ -389,28 +430,104 @@ impl OpenCADStudio {
         anon_name: &str,
         param: &BlockVisibilityParameter,
     ) -> Option<usize> {
-        // Currently-visible member positions in the anonymous block.
-        let anon = doc.block_records.iter().find(|b| b.name == anon_name)?;
-        let cur_visible: HashSet<usize> = anon
-            .entity_handles
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| {
-                doc.get_entity(**h)
-                    .map(|e| !e.common().invisible)
-                    .unwrap_or(false)
-            })
-            .map(|(i, _)| i)
-            .collect();
         (0..param.states.len()).find(|&si| {
-            Self::state_mapping(doc, def_block, anon_name, si, param).is_some_and(|m| {
-                m.visible_idx
-                    == cur_visible
-                        .intersection(&m.governed_idx)
-                        .cloned()
-                        .collect::<HashSet<usize>>()
-            })
+            Self::state_mapping(doc, def_block, anon_name, si, param)
+                .and_then(|mapping| mapping.changes(doc))
+                .is_some_and(|changes| changes.is_empty())
         })
+    }
+
+    /// Indexed Visibility choices for the shared dynamic property editor.
+    pub(super) fn batch_visibility_property(
+        doc: &codec::Document,
+        document: u64,
+        insert: Handle,
+    ) -> Option<Property> {
+        let (definition, parameter) = doc.dynamic_visibility_for_insert(insert)?;
+        if !parameter.show_properties {
+            return None;
+        }
+        let EntityType::Insert(reference) = doc.get_entity(insert)? else {
+            return None;
+        };
+        Self::state_mapping(doc, definition, &reference.block_name, 0, parameter)?;
+        let selected =
+            Self::current_visibility_state(doc, definition, &reference.block_name, parameter);
+        Some(Property {
+            label: visibility_label(parameter),
+            field: "dyn_visibility",
+            value: PropValue::BlockChoice {
+                key: BlockParameterKey {
+                    document,
+                    definition,
+                    insert,
+                    batch_generation: None,
+                    parameter: parameter.handle,
+                    component: BlockParameterComponent::Visibility(visibility_revision(parameter)),
+                },
+                selected: selected.unwrap_or(usize::MAX),
+                options: parameter
+                    .states
+                    .iter()
+                    .map(|state| state.name.clone())
+                    .collect(),
+                description: parameter.description.clone(),
+            },
+        })
+    }
+
+    pub(super) fn stage_visibility_property(
+        doc: &codec::Document,
+        key: BlockParameterKey,
+        state: usize,
+    ) -> Result<Option<codec::Document>, &'static str> {
+        const INVALID: &str = "Select supported targets belonging to this block.";
+        let (definition, parameter) = doc
+            .dynamic_visibility_for_insert(key.insert)
+            .ok_or(INVALID)?;
+        if definition != key.definition
+            || parameter.handle != key.parameter
+            || !parameter.show_properties
+            || key.component != BlockParameterComponent::Visibility(visibility_revision(parameter))
+        {
+            return Err(INVALID);
+        }
+        let changes = |doc: &codec::Document| {
+            let EntityType::Insert(reference) = doc.get_entity(key.insert).ok_or(INVALID)? else {
+                return Err(INVALID);
+            };
+            Self::state_mapping(doc, definition, &reference.block_name, state, parameter)
+                .and_then(|mapping| mapping.changes(doc))
+                .ok_or(INVALID)
+        };
+        if changes(doc)?.is_empty() {
+            return Ok(None);
+        }
+        let mut scene = crate::scene::Scene::new();
+        scene.document = doc.clone();
+        scene.visibility_representation(key.insert);
+        let doc = &mut scene.document;
+        let EntityType::Insert(reference) = doc.get_entity(key.insert).ok_or(INVALID)? else {
+            return Err(INVALID);
+        };
+        if doc
+            .block_records
+            .get(&reference.block_name)
+            .is_none_or(|b| b.handle == definition)
+            || doc.entities().any(|e| {
+                matches!(e, EntityType::Insert(other)
+                if other.common.handle != key.insert && other.block_name == reference.block_name)
+            })
+        {
+            return Err(INVALID);
+        }
+        for (handle, hidden) in changes(doc)? {
+            doc.get_entity_mut(handle)
+                .ok_or(INVALID)?
+                .common_mut()
+                .invisible = hidden;
+        }
+        Ok(Some(scene.document))
     }
 
     /// The visibility parameter of a dynamic-block reference as a Properties
@@ -427,13 +544,8 @@ impl OpenCADStudio {
         let options: Vec<String> = param.states.iter().map(|s| s.name.clone()).collect();
         let current = Self::current_visibility_state(doc, def_block, &ins.block_name, param);
         // An unnamed parameter takes the name a new one gets in the file.
-        let label = if param.name.trim().is_empty() {
-            "Visibility1".to_string()
-        } else {
-            param.name.clone()
-        };
         Some(crate::scene::model::object::Property {
-            label,
+            label: visibility_label(param),
             field: "dyn_visibility",
             value: crate::scene::model::object::PropValue::ChoiceWithTooltip {
                 selected: current

@@ -1,6 +1,6 @@
 use super::{Message, OpenCADStudio};
 use crate::scene::block_parameter_properties::{self as native, Input};
-use crate::scene::model::object::{BlockParameterKey, PropSection, PropValue};
+use crate::scene::model::object::{BlockParameterComponent, BlockParameterKey, PropSection, PropValue};
 use crate::ui::properties::FieldKey;
 use codec::Handle;
 use iced::Task;
@@ -44,7 +44,12 @@ impl OpenCADStudio {
     ) -> Option<PropSection> {
         self.batch_block_definition(i, handles)?;
         let tab = &self.tabs[i];
-        let rows = |insert| native::properties(&tab.scene.document, None, tab.id, insert);
+        let rows = |insert| {
+            let doc = &tab.scene.document;
+            let mut rows = native::properties(doc, None, tab.id, insert);
+            rows.extend(Self::batch_visibility_property(doc, tab.id, insert));
+            rows
+        };
         let key = |value: &PropValue| match value {
             PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => Some(*key),
             _ => None,
@@ -177,7 +182,13 @@ impl OpenCADStudio {
                         batch_generation: None,
                         ..key
                     };
-                    if let Some(next) = native::evaluate(source, None, target, input)? {
+                    let next = match (target.component, input) {
+                        (BlockParameterComponent::Visibility(_), Input::Choice(state)) => {
+                            Self::stage_visibility_property(source, target, state)
+                        }
+                        _ => native::evaluate(source, None, target, input),
+                    }?;
+                    if let Some(next) = next {
                         staged = Some(next);
                     }
                     Ok(())

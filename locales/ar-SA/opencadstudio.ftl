@@ -6598,7 +6598,6 @@ ui =
     .qselect-conditions-heading = الشروط (يجب أن تتطابق كل شروط نوع الكائن)
     .qselect-search-in = البحث في
     .qselect-new-selection = تحديد جديد
-    .qselect-live-count = __ocs_fmt_0__ من __ocs_fmt_1__ كائن مطابق
     .qselect-select-count = تحديد __ocs_fmt_0__
     .qselect-greater-or-equal = >= أكبر من أو يساوي
     .qselect-less-or-equal = <= أصغر من أو يساوي
@@ -6613,6 +6612,12 @@ ui =
     .filter-not = ليس
     .filter-reads = يُقرأ:
     .filter-live-result = النتيجة المباشرة
+    .live-of = من __ocs_fmt_0__
+    .live-of-layers = من __ocs_fmt_0__ طبقة
+    .live-of-current-space = من __ocs_fmt_0__ في المساحة الحالية
+    .live-of-selection = من __ocs_fmt_0__ في التحديد
+    .live-objects-match = كائنات مطابقة
+    .live-click-hint = انقر على صف لإظهار هذا النوع أو هذه الطبقة فقط في الرسم.
     .filter-by-type = حسب النوع
     .filter-and = و
     .filter-or = أو

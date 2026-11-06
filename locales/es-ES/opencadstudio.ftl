@@ -6586,7 +6586,6 @@ ui =
     .qselect-conditions-heading = Condiciones (deben cumplirse todas las del tipo del objeto)
     .qselect-search-in = Buscar en
     .qselect-new-selection = Nueva selección
-    .qselect-live-count = __ocs_fmt_0__ de __ocs_fmt_1__ objetos coinciden
     .qselect-select-count = Seleccionar __ocs_fmt_0__
     .qselect-greater-or-equal = >= Mayor o igual que
     .qselect-less-or-equal = <= Menor o igual que
@@ -6601,6 +6600,12 @@ ui =
     .filter-not = No
     .filter-reads = Se lee:
     .filter-live-result = Resultado en vivo
+    .live-of = de __ocs_fmt_0__
+    .live-of-layers = de __ocs_fmt_0__ capas
+    .live-of-current-space = de __ocs_fmt_0__ en el espacio actual
+    .live-of-selection = de __ocs_fmt_0__ en la selección
+    .live-objects-match = objetos coinciden
+    .live-click-hint = Haga clic en una fila para mostrar solo ese tipo o capa en el dibujo.
     .filter-by-type = Por tipo
     .filter-and = y
     .filter-or = o

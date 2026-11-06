@@ -6584,7 +6584,6 @@ ui =
     .qselect-conditions-heading = Bedingungen (alle für den Objekttyp müssen zutreffen)
     .qselect-search-in = Suchen in
     .qselect-new-selection = Neue Auswahl
-    .qselect-live-count = __ocs_fmt_0__ von __ocs_fmt_1__ Objekten passen
     .qselect-select-count = __ocs_fmt_0__ auswählen
     .qselect-greater-or-equal = >= Größer oder gleich
     .qselect-less-or-equal = <= Kleiner oder gleich
@@ -6599,6 +6598,12 @@ ui =
     .filter-not = Nicht
     .filter-reads = Liest sich:
     .filter-live-result = Live-Ergebnis
+    .live-of = von __ocs_fmt_0__
+    .live-of-layers = von __ocs_fmt_0__ Layern
+    .live-of-current-space = von __ocs_fmt_0__ im aktuellen Bereich
+    .live-of-selection = von __ocs_fmt_0__ in der Auswahl
+    .live-objects-match = Objekte passen
+    .live-click-hint = Eine Zeile anklicken, um nur diesen Typ oder Layer in der Zeichnung zu zeigen.
     .filter-by-type = Nach Typ
     .filter-and = und
     .filter-or = oder

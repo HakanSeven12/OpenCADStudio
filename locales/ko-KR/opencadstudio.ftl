@@ -6585,7 +6585,6 @@ ui =
     .qselect-conditions-heading = 조건 (객체 유형의 조건을 모두 만족해야 함)
     .qselect-search-in = 검색 위치
     .qselect-new-selection = 새 선택
-    .qselect-live-count = __ocs_fmt_1__개 중 __ocs_fmt_0__개 객체 일치
     .qselect-select-count = __ocs_fmt_0__개 선택
     .qselect-greater-or-equal = >= 크거나 같음
     .qselect-less-or-equal = <= 작거나 같음
@@ -6600,6 +6599,12 @@ ui =
     .filter-not = 아님
     .filter-reads = 읽기:
     .filter-live-result = 실시간 결과
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / 레이어 __ocs_fmt_0__개
+    .live-of-current-space = / 현재 공간의 __ocs_fmt_0__개
+    .live-of-selection = / 선택의 __ocs_fmt_0__개
+    .live-objects-match = 개 객체 일치
+    .live-click-hint = 행을 클릭하면 도면에 해당 유형 또는 레이어만 표시됩니다.
     .filter-by-type = 유형별
     .filter-and = 그리고
     .filter-or = 또는

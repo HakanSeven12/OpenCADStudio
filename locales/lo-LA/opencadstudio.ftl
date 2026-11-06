@@ -6587,7 +6587,6 @@ ui =
     .qselect-conditions-heading = ເງື່ອນໄຂ (ທຸກເງື່ອນໄຂຂອງປະເພດວັດຖຸຕ້ອງກົງກັນ)
     .qselect-search-in = ຄົ້ນຫາໃນ
     .qselect-new-selection = ການເລືອກໃໝ່
-    .qselect-live-count = __ocs_fmt_0__ ຈາກ __ocs_fmt_1__ ວັດຖຸກົງກັນ
     .qselect-select-count = ເລືອກ __ocs_fmt_0__
     .qselect-greater-or-equal = >= ໃຫຍ່ກວ່າ ຫຼື ເທົ່າກັບ
     .qselect-less-or-equal = <= ນ້ອຍກວ່າ ຫຼື ເທົ່າກັບ
@@ -6602,6 +6601,12 @@ ui =
     .filter-not = ບໍ່
     .filter-reads = ອ່ານວ່າ:
     .filter-live-result = ຜົນລັບສົດ
+    .live-of = ຈາກ __ocs_fmt_0__
+    .live-of-layers = ຈາກ __ocs_fmt_0__ ຊັ້ນງານ
+    .live-of-current-space = ຈາກ __ocs_fmt_0__ ໃນພື້ນທີ່ປັດຈຸບັນ
+    .live-of-selection = ຈາກ __ocs_fmt_0__ ໃນການເລືອກ
+    .live-objects-match = ວັດຖຸກົງກັນ
+    .live-click-hint = ຄລິກແຖວເພື່ອສະແດງສະເພາະປະເພດ ຫຼື ຊັ້ນງານນັ້ນໃນແບບແຕ້ມ.
     .filter-by-type = ຕາມປະເພດ
     .filter-and = ແລະ
     .filter-or = ຫຼື

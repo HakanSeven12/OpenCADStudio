@@ -6582,7 +6582,6 @@ ui =
     .qselect-conditions-heading = 條件（必須符合物件類型的所有條件）
     .qselect-search-in = 搜尋範圍
     .qselect-new-selection = 新選取
-    .qselect-live-count = __ocs_fmt_1__ 個物件中有 __ocs_fmt_0__ 個符合
     .qselect-select-count = 選取 __ocs_fmt_0__ 個
     .qselect-greater-or-equal = >= 大於或等於
     .qselect-less-or-equal = <= 小於或等於
@@ -6597,6 +6596,12 @@ ui =
     .filter-not = 非
     .filter-reads = 讀作：
     .filter-live-result = 即時結果
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / __ocs_fmt_0__ 個圖層
+    .live-of-current-space = / 目前空間中的 __ocs_fmt_0__ 個
+    .live-of-selection = / 選取集中的 __ocs_fmt_0__ 個
+    .live-objects-match = 個物件符合
+    .live-click-hint = 按一下某列，圖面中只顯示該類型或圖層。
     .filter-by-type = 依類型
     .filter-and = 且
     .filter-or = 或

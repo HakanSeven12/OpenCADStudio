@@ -2170,14 +2170,28 @@ fn qselect_content<'a>(
     } else {
         crate::ui::icons::EYE_OFF
     };
+    // The count large; with samples of several types, how many of each.
+    let of_scope = match state.scope {
+        QSelectScope::CurrentSelection => crate::tf!("of {} in the selection", candidate_count),
+        _ => crate::tf!("of {} in current space", candidate_count),
+    };
+    let first = if state.live_by_type.len() > 1 {
+        state
+            .live_by_type
+            .iter()
+            .map(|(name, n)| format!("{n} {}", qselect_type_label(name)))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    } else {
+        t!("objects match").into_owned()
+    };
     let live = container(
         row![
-            text(crate::tf!(
-                "{} of {} objects match",
+            container(crate::ui::live_result::big_count_two_lines(
                 state.live_count,
-                candidate_count
+                first,
+                of_scope,
             ))
-            .size(13)
             .width(flex_width),
             button(
                 row![

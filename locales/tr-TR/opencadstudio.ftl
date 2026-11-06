@@ -6513,7 +6513,6 @@ ui =
     .qselect-conditions-heading = Koşullar (nesne türünün tüm koşulları sağlanmalı)
     .qselect-search-in = Arama yeri
     .qselect-new-selection = Yeni seçim
-    .qselect-live-count = __ocs_fmt_1__ nesneden __ocs_fmt_0__ tanesi eşleşiyor
     .qselect-select-count = __ocs_fmt_0__ nesneyi seç
     .qselect-greater-or-equal = >= Büyük veya eşit
     .qselect-less-or-equal = <= Küçük veya eşit
@@ -6528,6 +6527,12 @@ ui =
     .filter-not = Değil
     .filter-reads = Okunuşu:
     .filter-live-result = Canlı sonuç
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / __ocs_fmt_0__ katman
+    .live-of-current-space = / geçerli alandaki __ocs_fmt_0__
+    .live-of-selection = / seçimdeki __ocs_fmt_0__
+    .live-objects-match = nesne eşleşiyor
+    .live-click-hint = Çizimde yalnızca o türü veya katmanı göstermek için bir satıra tıklayın.
     .filter-by-type = Türe göre
     .filter-and = ve
     .filter-or = veya

@@ -6588,7 +6588,6 @@ ui =
     .qselect-conditions-heading = Podmínky (musí platit všechny pro typ objektu)
     .qselect-search-in = Hledat v
     .qselect-new-selection = Nový výběr
-    .qselect-live-count = Vyhovuje __ocs_fmt_0__ z __ocs_fmt_1__ objektů
     .qselect-select-count = Vybrat __ocs_fmt_0__
     .qselect-greater-or-equal = >= Větší nebo rovno
     .qselect-less-or-equal = <= Menší nebo rovno
@@ -6603,6 +6602,12 @@ ui =
     .filter-not = Ne
     .filter-reads = Čte se:
     .filter-live-result = Živý výsledek
+    .live-of = z __ocs_fmt_0__
+    .live-of-layers = z __ocs_fmt_0__ hladin
+    .live-of-current-space = z __ocs_fmt_0__ v aktuálním prostoru
+    .live-of-selection = z __ocs_fmt_0__ ve výběru
+    .live-objects-match = objektů vyhovuje
+    .live-click-hint = Klepnutím na řádek se ve výkresu zobrazí jen tento typ nebo hladina.
     .filter-by-type = Podle typu
     .filter-and = a
     .filter-or = nebo

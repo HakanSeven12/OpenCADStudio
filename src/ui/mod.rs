@@ -11,6 +11,7 @@ pub mod font_picker;
 pub mod hover_zone;
 pub mod ime_zone;
 pub mod icons;
+pub mod live_result;
 pub mod menu_bar;
 pub mod modal;
 pub mod node_graph;

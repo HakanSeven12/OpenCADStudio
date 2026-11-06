@@ -6574,7 +6574,6 @@ ui =
     .qselect-conditions-heading = 条件 (オブジェクトの種類の条件をすべて満たす必要があります)
     .qselect-search-in = 検索範囲
     .qselect-new-selection = 新しい選択
-    .qselect-live-count = __ocs_fmt_1__ 個中 __ocs_fmt_0__ 個のオブジェクトが一致
     .qselect-select-count = __ocs_fmt_0__ 個を選択
     .qselect-greater-or-equal = >= 以上
     .qselect-less-or-equal = <= 以下
@@ -6589,6 +6588,12 @@ ui =
     .filter-not = 否定
     .filter-reads = 読み:
     .filter-live-result = ライブ結果
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / __ocs_fmt_0__ レイヤー
+    .live-of-current-space = / 現在の空間の __ocs_fmt_0__
+    .live-of-selection = / 選択の __ocs_fmt_0__
+    .live-objects-match = 個が一致
+    .live-click-hint = 行をクリックすると、図面にその種類またはレイヤーだけを表示します。
     .filter-by-type = タイプ別
     .filter-and = かつ
     .filter-or = または

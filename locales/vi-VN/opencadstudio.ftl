@@ -6593,7 +6593,6 @@ ui =
     .qselect-conditions-heading = Điều kiện (mọi điều kiện của loại đối tượng phải khớp)
     .qselect-search-in = Tìm trong
     .qselect-new-selection = Lựa chọn mới
-    .qselect-live-count = __ocs_fmt_0__ trên __ocs_fmt_1__ đối tượng khớp
     .qselect-select-count = Chọn __ocs_fmt_0__
     .qselect-greater-or-equal = >= Lớn hơn hoặc bằng
     .qselect-less-or-equal = <= Nhỏ hơn hoặc bằng
@@ -6608,6 +6607,12 @@ ui =
     .filter-not = Không
     .filter-reads = Đọc là:
     .filter-live-result = Kết quả trực tiếp
+    .live-of = trên __ocs_fmt_0__
+    .live-of-layers = trên __ocs_fmt_0__ lớp
+    .live-of-current-space = trên __ocs_fmt_0__ trong không gian hiện tại
+    .live-of-selection = trên __ocs_fmt_0__ trong lựa chọn
+    .live-objects-match = đối tượng khớp
+    .live-click-hint = Nhấp vào một hàng để chỉ hiện loại hoặc lớp đó trong bản vẽ.
     .filter-by-type = Theo loại
     .filter-and = và
     .filter-or = hoặc

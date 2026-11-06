@@ -941,6 +941,10 @@ mod tests {
         let _ = app.update(Message::QSelectAddCondition);
         let _ = app.update(Message::QSelectSetMode(QSelectMode::Include));
         let quick = app.qselect.as_ref().unwrap().live_count;
+        // Quick Select's live line counts each type (#2611 mockup).
+        let by_type = &app.qselect.as_ref().unwrap().live_by_type;
+        assert_eq!(by_type.len(), 2);
+        assert_eq!(by_type.iter().map(|(_, n)| n).sum::<usize>(), quick);
         let _ = app.update(Message::QSelectAdvanced);
         assert!(app.qselect.is_none());
         let state = app.filter_dialog.as_ref().unwrap();
@@ -1471,21 +1475,19 @@ mod view {
         } else {
             crate::ui::icons::EYE_OFF
         };
+        // A line per type or layer: a click shows only those, again shows
+        // all of them.
         let bucket_line =
             |label: String, count: usize, bucket: FilterBucket| -> Element<'a, Message> {
                 let on = state.focus.as_ref() == Some(&bucket);
-                button(
-                    row![
-                        text(label).size(11).width(Fill),
-                        text(count.to_string()).size(11)
-                    ]
-                    .spacing(6),
+                let next = (!on).then_some(bucket);
+                crate::ui::live_result::bucket(
+                    label,
+                    count,
+                    state.live_count,
+                    on,
+                    msg(FilterMsg::Focus(next)),
                 )
-                .on_press(msg(FilterMsg::Focus(Some(bucket))))
-                .style(button_style(on))
-                .padding([2, 6])
-                .width(Fill)
-                .into()
             };
         let mut live = column![
             row![
@@ -1503,20 +1505,15 @@ mod view {
                 .padding([3, 8]),
             ]
             .align_y(iced::Alignment::Center),
-            text(if layers_mode {
-                crate::tf!(
-                    "{} of {} layers shown",
-                    state.live_count,
-                    state.candidate_count
-                )
-            } else {
-                crate::tf!(
-                    "{} of {} objects match",
-                    state.live_count,
-                    state.candidate_count
-                )
-            })
-            .size(13),
+            crate::ui::live_result::big_count(
+                state.live_count,
+                if layers_mode {
+                    crate::tf!("of {} layers", state.candidate_count)
+                } else {
+                    crate::tf!("of {}", state.candidate_count)
+                },
+            ),
+            crate::ui::live_result::track(state.live_count, state.candidate_count, true),
         ]
         .spacing(6)
         .width(Length::Fixed(240.0));
@@ -1544,6 +1541,16 @@ mod view {
             for (l, n) in &state.by_layer {
                 live = live.push(bucket_line(l.clone(), *n, FilterBucket::Layer(l.clone())));
             }
+            live = live.push(Space::new().height(Fill));
+            live = live.push(
+                text(t!(
+                    "Click a row to show only that type or layer in the drawing."
+                ))
+                .size(11)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                }),
+            );
         }
         let live = container(live).padding(10).style(panel_style);
 

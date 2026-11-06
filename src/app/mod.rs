@@ -483,6 +483,8 @@ pub struct QSelectState {
     pub error: Option<String>,
     /// Objects the conditions find right now.
     pub live_count: usize,
+    /// What the conditions find, by object type, most first.
+    pub live_by_type: Vec<(String, usize)>,
     /// The matches are highlighted in the drawing.
     pub show: bool,
     /// Values of the chosen property in the scope, most frequent first.

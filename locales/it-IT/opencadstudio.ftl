@@ -6585,7 +6585,6 @@ ui =
     .qselect-conditions-heading = Condizioni (devono valere tutte quelle del tipo dell'oggetto)
     .qselect-search-in = Cerca in
     .qselect-new-selection = Nuova selezione
-    .qselect-live-count = __ocs_fmt_0__ oggetti su __ocs_fmt_1__ corrispondono
     .qselect-select-count = Seleziona __ocs_fmt_0__
     .qselect-greater-or-equal = >= Maggiore o uguale a
     .qselect-less-or-equal = <= Minore o uguale a
@@ -6600,6 +6599,12 @@ ui =
     .filter-not = Non
     .filter-reads = Si legge:
     .filter-live-result = Risultato in tempo reale
+    .live-of = di __ocs_fmt_0__
+    .live-of-layers = di __ocs_fmt_0__ layer
+    .live-of-current-space = di __ocs_fmt_0__ nello spazio corrente
+    .live-of-selection = di __ocs_fmt_0__ nella selezione
+    .live-objects-match = oggetti corrispondono
+    .live-click-hint = Fai clic su una riga per mostrare nel disegno solo quel tipo o layer.
     .filter-by-type = Per tipo
     .filter-and = e
     .filter-or = o

@@ -6586,7 +6586,6 @@ ui =
     .qselect-conditions-heading = Συνθήκες (πρέπει να ισχύουν όλες για τον τύπο του αντικειμένου)
     .qselect-search-in = Αναζήτηση σε
     .qselect-new-selection = Νέα επιλογή
-    .qselect-live-count = __ocs_fmt_0__ από __ocs_fmt_1__ αντικείμενα ταιριάζουν
     .qselect-select-count = Επιλογή __ocs_fmt_0__
     .qselect-greater-or-equal = >= Μεγαλύτερο ή ίσο
     .qselect-less-or-equal = <= Μικρότερο ή ίσο
@@ -6601,6 +6600,12 @@ ui =
     .filter-not = Όχι
     .filter-reads = Διαβάζεται:
     .filter-live-result = Ζωντανό αποτέλεσμα
+    .live-of = από __ocs_fmt_0__
+    .live-of-layers = από __ocs_fmt_0__ επίπεδα
+    .live-of-current-space = από __ocs_fmt_0__ στον τρέχοντα χώρο
+    .live-of-selection = από __ocs_fmt_0__ στην επιλογή
+    .live-objects-match = αντικείμενα ταιριάζουν
+    .live-click-hint = Κάντε κλικ σε μια γραμμή για να εμφανιστεί μόνο αυτός ο τύπος ή το επίπεδο στο σχέδιο.
     .filter-by-type = Κατά τύπο
     .filter-and = και
     .filter-or = ή

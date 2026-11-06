@@ -6569,7 +6569,6 @@ ui =
     .qselect-conditions-heading = 条件（对象类型的所有条件都须匹配）
     .qselect-search-in = 搜索范围
     .qselect-new-selection = 新选择
-    .qselect-live-count = __ocs_fmt_1__ 个对象中有 __ocs_fmt_0__ 个匹配
     .qselect-select-count = 选择 __ocs_fmt_0__ 个
     .qselect-greater-or-equal = >= 大于或等于
     .qselect-less-or-equal = <= 小于或等于
@@ -6584,6 +6583,12 @@ ui =
     .filter-not = 非
     .filter-reads = 读作：
     .filter-live-result = 实时结果
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / __ocs_fmt_0__ 个图层
+    .live-of-current-space = / 当前空间中的 __ocs_fmt_0__ 个
+    .live-of-selection = / 选择集中的 __ocs_fmt_0__ 个
+    .live-objects-match = 个对象匹配
+    .live-click-hint = 单击一行，图形中只显示该类型或图层。
     .filter-by-type = 按类型
     .filter-and = 且
     .filter-or = 或

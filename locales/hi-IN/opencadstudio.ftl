@@ -6574,7 +6574,6 @@ ui =
     .qselect-conditions-heading = शर्तें (ऑब्जेक्ट के प्रकार की सभी शर्तें मेल खानी चाहिए)
     .qselect-search-in = इसमें खोजें
     .qselect-new-selection = नया चयन
-    .qselect-live-count = __ocs_fmt_1__ में से __ocs_fmt_0__ ऑब्जेक्ट मेल खाते हैं
     .qselect-select-count = __ocs_fmt_0__ चुनें
     .qselect-greater-or-equal = >= से बड़ा या बराबर
     .qselect-less-or-equal = <= से छोटा या बराबर
@@ -6589,6 +6588,12 @@ ui =
     .filter-not = नहीं
     .filter-reads = पढ़ा जाता है:
     .filter-live-result = लाइव परिणाम
+    .live-of = __ocs_fmt_0__ में से
+    .live-of-layers = __ocs_fmt_0__ लेयर में से
+    .live-of-current-space = वर्तमान स्पेस के __ocs_fmt_0__ में से
+    .live-of-selection = चयन के __ocs_fmt_0__ में से
+    .live-objects-match = ऑब्जेक्ट मेल खाते हैं
+    .live-click-hint = ड्रॉइंग में केवल वह प्रकार या लेयर दिखाने के लिए किसी पंक्ति पर क्लिक करें।
     .filter-by-type = प्रकार के अनुसार
     .filter-and = और
     .filter-or = या

@@ -6605,7 +6605,6 @@ ui =
     .qselect-conditions-heading = Feltételek (az objektum típusára vonatkozó összesnek teljesülnie kell)
     .qselect-search-in = Keresés itt
     .qselect-new-selection = Új kijelölés
-    .qselect-live-count = __ocs_fmt_1__ objektumból __ocs_fmt_0__ felel meg
     .qselect-select-count = __ocs_fmt_0__ kijelölése
     .qselect-greater-or-equal = >= Nagyobb vagy egyenlő
     .qselect-less-or-equal = <= Kisebb vagy egyenlő
@@ -6620,6 +6619,12 @@ ui =
     .filter-not = Nem
     .filter-reads = Így olvasható:
     .filter-live-result = Élő eredmény
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / __ocs_fmt_0__ fólia
+    .live-of-current-space = / __ocs_fmt_0__ az aktuális térben
+    .live-of-selection = / __ocs_fmt_0__ a kijelölésben
+    .live-objects-match = objektum felel meg
+    .live-click-hint = Egy sorra kattintva a rajzban csak az a típus vagy fólia látszik.
     .filter-by-type = Típus szerint
     .filter-and = és
     .filter-or = vagy

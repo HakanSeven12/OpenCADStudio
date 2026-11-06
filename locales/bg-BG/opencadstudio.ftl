@@ -6586,7 +6586,6 @@ ui =
     .qselect-conditions-heading = Условия (всички за типа на обекта трябва да съвпадат)
     .qselect-search-in = Търсене в
     .qselect-new-selection = Нова селекция
-    .qselect-live-count = __ocs_fmt_0__ от __ocs_fmt_1__ обекта отговарят
     .qselect-select-count = Избери __ocs_fmt_0__
     .qselect-greater-or-equal = >= По-голямо или равно
     .qselect-less-or-equal = <= По-малко или равно
@@ -6601,6 +6600,12 @@ ui =
     .filter-not = Не
     .filter-reads = Чете се:
     .filter-live-result = Резултат на живо
+    .live-of = от __ocs_fmt_0__
+    .live-of-layers = от __ocs_fmt_0__ слоя
+    .live-of-current-space = от __ocs_fmt_0__ в текущото пространство
+    .live-of-selection = от __ocs_fmt_0__ в избора
+    .live-objects-match = обекта съвпадат
+    .live-click-hint = Щракнете ред, за да се покаже в чертежа само този тип или слой.
     .filter-by-type = По тип
     .filter-and = и
     .filter-or = или

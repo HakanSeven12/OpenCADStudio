@@ -6583,7 +6583,6 @@ ui =
     .qselect-conditions-heading = Ehdot (kaikkien objektin tyypin ehtojen on täytyttävä)
     .qselect-search-in = Hae kohteesta
     .qselect-new-selection = Uusi valinta
-    .qselect-live-count = __ocs_fmt_0__/__ocs_fmt_1__ objektia täsmää
     .qselect-select-count = Valitse __ocs_fmt_0__
     .qselect-greater-or-equal = >= Suurempi tai yhtä suuri
     .qselect-less-or-equal = <= Pienempi tai yhtä suuri
@@ -6598,6 +6597,12 @@ ui =
     .filter-not = Ei
     .filter-reads = Luetaan:
     .filter-live-result = Reaaliaikainen tulos
+    .live-of = / __ocs_fmt_0__
+    .live-of-layers = / __ocs_fmt_0__ tasoa
+    .live-of-current-space = / __ocs_fmt_0__ nykyisessä tilassa
+    .live-of-selection = / __ocs_fmt_0__ valinnassa
+    .live-objects-match = objektia täsmää
+    .live-click-hint = Napsauta riviä, niin piirustuksessa näkyy vain se tyyppi tai taso.
     .filter-by-type = Tyypin mukaan
     .filter-and = ja
     .filter-or = tai

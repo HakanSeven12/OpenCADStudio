@@ -6584,7 +6584,6 @@ ui =
     .qselect-conditions-heading = Voorwaarden (alle voor het objecttype moeten kloppen)
     .qselect-search-in = Zoeken in
     .qselect-new-selection = Nieuwe selectie
-    .qselect-live-count = __ocs_fmt_0__ van __ocs_fmt_1__ objecten komen overeen
     .qselect-select-count = __ocs_fmt_0__ selecteren
     .qselect-greater-or-equal = >= Groter dan of gelijk aan
     .qselect-less-or-equal = <= Kleiner dan of gelijk aan
@@ -6599,6 +6598,12 @@ ui =
     .filter-not = Niet
     .filter-reads = Leest als:
     .filter-live-result = Live resultaat
+    .live-of = van __ocs_fmt_0__
+    .live-of-layers = van __ocs_fmt_0__ lagen
+    .live-of-current-space = van __ocs_fmt_0__ in de huidige ruimte
+    .live-of-selection = van __ocs_fmt_0__ in de selectie
+    .live-objects-match = objecten voldoen
+    .live-click-hint = Klik op een rij om alleen dat type of die laag in de tekening te tonen.
     .filter-by-type = Per type
     .filter-and = en
     .filter-or = of

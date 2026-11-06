@@ -137,11 +137,12 @@ include!(concat!(env!("OUT_DIR"), "/icon_pairs.rs"));
 /// from two places need not have one address. A per-thread cache on
 /// `(address, length)` sits in front so a frame never hashes file contents.
 fn large_art(bytes: &'static [u8]) -> Option<&'static [u8]> {
+    /// `(address, length)` of the 16 px bytes → their 32 px partner.
+    type ByAddress = FxHashMap<(usize, usize), Option<&'static [u8]>>;
     static BY_CONTENT: std::sync::OnceLock<FxHashMap<&'static [u8], &'static [u8]>> =
         std::sync::OnceLock::new();
     thread_local! {
-        static BY_ADDRESS: RefCell<FxHashMap<(usize, usize), Option<&'static [u8]>>> =
-            RefCell::new(FxHashMap::default());
+        static BY_ADDRESS: RefCell<ByAddress> = RefCell::new(FxHashMap::default());
     }
     let key = (bytes.as_ptr() as usize, bytes.len());
     if let Some(hit) = BY_ADDRESS.with(|cache| cache.borrow().get(&key).copied()) {

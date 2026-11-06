@@ -5312,7 +5312,18 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let frozen = self.tabs[i].layers.layers.get(idx).map(|l| !l.frozen);
-                let targets = self.layer_row_action_targets(i, idx);
+                let mut targets = self.layer_row_action_targets(i, idx);
+                // The current layer can't be frozen; thawing it is fine.
+                if frozen == Some(true) {
+                    let current = self.tabs[i].scene.document.header.current_layer_name.clone();
+                    let before = targets.len();
+                    targets.retain(|name| !name.eq_ignore_ascii_case(&current));
+                    if targets.len() < before {
+                        self.command_line.push_info(
+                            crate::t!("The current layer can't be frozen — skipped.").as_ref(),
+                        );
+                    }
+                }
                 if let Some(frozen) = frozen {
                     if !targets.is_empty() {
                         let undo = self.begin_layer_undo(i, "LAYER FREEZE", &targets);
@@ -5464,7 +5475,7 @@ impl OpenCADStudio {
                 self.tabs[i].layers.selected_multi = vec![idx];
                 self.tabs[i].layers.edit_buf = name.clone();
                 self.tabs[i].layers.editing = Some(name);
-                Task::none()
+                iced::widget::operation::focus(crate::ui::window::layers::rename_input_id())
             }
 
             Message::LayerRenameEdit(s) => {

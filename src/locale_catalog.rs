@@ -3,6 +3,15 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "When the list is nonempty, only listed conditions are applied." => Some(("ui", "qselect-list-note")),
+        "Conditions (all of an object's type must match)" => Some(("ui", "qselect-conditions-heading")),
+        "No conditions added." => Some(("ui", "qselect-no-conditions")),
+        "Clear conditions" => Some(("ui", "qselect-clear-conditions")),
+        "Cancel edit" => Some(("ui", "qselect-cancel-edit")),
+        "Add condition" => Some(("ui", "qselect-add-condition")),
+        "Update condition" => Some(("ui", "qselect-update-condition")),
+        "The current layer can't be frozen — skipped." => Some(("command", "current-layer-cannot-be-frozen")),
+        "A frozen layer can't be made current." => Some(("command", "frozen-layer-cannot-be-current")),
         "An action needs at least one target." => Some(("block-action-targets", "empty")),
         "Select supported targets belonging to this block." => Some(("block-action-targets", "invalid")),
         "The action or its Block Editor session changed; restart BACTIONSET." => Some(("block-action-targets", "stale")),
@@ -2369,7 +2378,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Latest" => Some(("ui", "latest")),
         "Layer" => Some(("common", "layer")),
         "Layer \"%{name}\"" => Some(("modal", "layer-name")),
-        "Layer \"0\" and the current layer can't be deleted — skipped." => Some(("command", "layer-0-and-the-current-layer-can-t-be-deleted")),
+        "Layer \"0\", Defpoints, the current layer and xref layers can't be deleted — skipped." => Some(("command", "layer-protected-skipped")),
         "Layer Freeze" => Some(("layers", "layer-freeze")),
         "Layer Lock" => Some(("layers", "layer-lock")),
         "Layer Manager" => Some(("layers", "layer-manager")),

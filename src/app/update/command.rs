@@ -1647,14 +1647,21 @@ impl OpenCADStudio {
         // rename prompt is visible (#271). Offset is layout-independent
         // (idx × fixed row height), so it holds even before the freshly
         // added row is measured.
+        // The name field takes the keyboard, so typing renames the layer
+        // instead of reaching the command line (#2610).
         match new_idx {
-            Some(idx) => iced::widget::operation::scroll_to(
-                iced::advanced::widget::Id::new(crate::ui::window::layers::LAYER_TABLE_SCROLL_ID),
-                iced::widget::scrollable::AbsoluteOffset {
-                    x: 0.0,
-                    y: idx as f32 * crate::ui::ROW_H,
-                },
-            ),
+            Some(idx) => Task::batch([
+                iced::widget::operation::scroll_to(
+                    iced::advanced::widget::Id::new(
+                        crate::ui::window::layers::LAYER_TABLE_SCROLL_ID,
+                    ),
+                    iced::widget::scrollable::AbsoluteOffset {
+                        x: 0.0,
+                        y: idx as f32 * crate::ui::ROW_H,
+                    },
+                ),
+                iced::widget::operation::focus(crate::ui::window::layers::rename_input_id()),
+            ]),
             None => Task::none(),
         }
     }
@@ -1666,8 +1673,8 @@ impl OpenCADStudio {
         if names.is_empty() {
             return Task::none();
         }
-        // Layer "0" and the current layer can't be deleted — drop them
-        // from the batch and note it.
+        // Layer "0", Defpoints, the current layer and layers of an xref
+        // can't be deleted — drop them from the batch and note it.
         let current = self.tabs[i]
             .scene
             .document
@@ -1675,10 +1682,11 @@ impl OpenCADStudio {
             .current_layer_name
             .clone();
         let before = names.len();
-        names.retain(|n| n != "0" && *n != current);
+        names.retain(|n| !layer_is_protected(n, &current));
         if names.len() < before {
             self.command_line.push_info(
-                crate::t!("Layer \"0\" and the current layer can't be deleted — skipped.").as_ref(),
+                crate::t!("Layer \"0\", Defpoints, the current layer and xref layers can't be deleted — skipped.")
+                    .as_ref(),
             );
         }
         if names.is_empty() {
@@ -1798,6 +1806,12 @@ impl OpenCADStudio {
             if let Some(layer) = self.tabs[i].layers.layers.get(idx) {
                 let name = layer.name.clone();
                 if name == self.tabs[i].layers.current_layer {
+                    return Task::none();
+                }
+                if layer.frozen {
+                    self.command_line.push_error(
+                        crate::t!("A frozen layer can't be made current.").as_ref(),
+                    );
                     return Task::none();
                 }
                 // Mirror the change into the document header (CLAYER) too,
@@ -5925,6 +5939,39 @@ mod layer_name_target_tests {
         );
     }
 
+    /// #2610: the current layer can't be frozen, a frozen layer can't be
+    /// made current, and Defpoints and xref layers can't be deleted.
+    #[test]
+    fn layer_manager_guards_current_frozen_and_protected_layers() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let current = app.tabs[i].scene.document.header.current_layer_name.clone();
+        let _ = app.update(Message::LayerToggleFreeze(current.clone()));
+        assert!(
+            !app.tabs[i].scene.document.layers.get(&current).unwrap().is_frozen(),
+            "the current layer stays thawed"
+        );
+
+        let _ = app.update(Message::LayerToggleFreeze("ZULU".to_string()));
+        assert!(app.tabs[i].scene.document.layers.get("ZULU").unwrap().is_frozen());
+        let zulu = app.layer_panel_index(i, "ZULU").unwrap();
+        app.tabs[i].layers.selected = Some(zulu);
+        let _ = app.on_layer_set_current();
+        assert_eq!(app.tabs[i].scene.document.header.current_layer_name, current);
+
+        for name in ["Defpoints", "XREF|WALLS"] {
+            let mut layer = codec::tables::layer::Layer::new(name);
+            layer.handle = app.tabs[i].scene.document.allocate_handle();
+            let _ = app.tabs[i].scene.document.layers.add(layer);
+            app.sync_layer_panel(i);
+            let idx = app.layer_panel_index(i, name).unwrap();
+            app.tabs[i].layers.selected = Some(idx);
+            app.tabs[i].layers.selected_multi = vec![idx];
+            let _ = app.on_layer_delete();
+            assert!(app.tabs[i].scene.document.layers.contains(name), "{name} kept");
+        }
+    }
+
     #[test]
     fn layer_rename_commit_deleted_layer_is_noop() {
         // Renaming a layer deleted mid-edit must clear state without
@@ -6619,4 +6666,13 @@ mod grip_ctrl_cycle_tests {
             Some(0)
         );
     }
+}
+
+/// Layers the Layer manager never deletes: "0", Defpoints, the current layer
+/// and a layer that belongs to an xref (`XREF|name`).
+pub(super) fn layer_is_protected(name: &str, current: &str) -> bool {
+    name == "0"
+        || name.eq_ignore_ascii_case("Defpoints")
+        || name.eq_ignore_ascii_case(current)
+        || name.contains('|')
 }

@@ -650,6 +650,17 @@ impl OpenCADStudio {
                     return task;
                 }
             }
+            CmdResult::CopySelectedAndExit(handles, transform) => {
+                if let Some(task) = self.handle_copy_selected(handles, transform) {
+                    return task;
+                }
+                let i = self.active_tab;
+                self.tabs[i].active_cmd = None;
+                self.tabs[i].snap_result = None;
+                self.tabs[i].scene.clear_preview_wire();
+                self.restore_pre_cmd_tangent();
+                self.refresh_properties();
+            }
             CmdResult::CopyToClipboard { handles, base } => {
                 self.handle_copy_to_clipboard(handles, base);
             }

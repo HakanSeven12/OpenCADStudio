@@ -5460,3 +5460,58 @@ mod menu_keyboard_tests {
         }
     }
 }
+
+/// Batch 4: behaviour that still failed against current HEAD.
+#[cfg(test)]
+mod batch4_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn lines(app: &mut OpenCADStudio) -> Vec<(f64, f64, f64, f64)> {
+        let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"full"}"#);
+        q["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["start"][0].as_f64().unwrap(),
+                    e["start"][1].as_f64().unwrap(),
+                    e["end"][0].as_f64().unwrap(),
+                    e["end"][1].as_f64().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scale_copy_keeps_the_source_and_adds_a_scaled_duplicate() {
+        let mut app = new_app();
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("SELECTALL");
+        let _ = app.run_command_line("SCALE 0,0 C 2");
+        let mut got = lines(&mut app);
+        got.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!((got[0].2 - 10.0).abs() < 1e-9, "{got:?}");
+        assert!((got[1].2 - 20.0).abs() < 1e-9, "{got:?}");
+    }
+
+    #[test]
+    fn rotate_copy_keeps_the_source_and_adds_a_rotated_duplicate() {
+        let mut app = new_app();
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("SELECTALL");
+        let _ = app.run_command_line("ROTATE 0,0 C 90");
+        let mut got = lines(&mut app);
+        got.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!((got[0].2 - 0.0).abs() < 1e-6 && (got[0].3 - 10.0).abs() < 1e-6, "{got:?}");
+        assert!((got[1].2 - 10.0).abs() < 1e-6, "{got:?}");
+    }
+}

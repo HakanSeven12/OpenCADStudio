@@ -122,13 +122,101 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
         if let Some(handle) = handle {
+            // The picked object's properties are offered ticked or not; only
+            // what describes it, not where it sits, is ticked (#2611).
             let conditions = self.tabs[i].scene.qselect_conditions_from_entity(handle);
-            append_unique_conditions(&mut state.conditions, conditions);
+            let type_name = conditions
+                .first()
+                .and_then(|condition| condition.type_filter.clone())
+                .unwrap_or_default();
+            let rows = conditions
+                .into_iter()
+                .map(|condition| {
+                    let ticked = condition.property.as_ref().is_none_or(|property| {
+                        SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
+                    });
+                    (condition, ticked)
+                })
+                .collect();
+            state.sample = Some(crate::app::QSelectSample { type_name, rows });
             state.error = None;
         }
         self.qselect = Some(state);
+        self.qselect_refresh_live();
+    }
+
+    /// Add the picked object's ticked properties as conditions.
+    pub(super) fn on_qselect_sample_add(&mut self) {
+        if let Some(state) = self.qselect.as_mut() {
+            if let Some(sample) = state.sample.take() {
+                let ticked = sample
+                    .rows
+                    .into_iter()
+                    .filter_map(|(condition, ticked)| ticked.then_some(condition))
+                    .collect();
+                append_unique_conditions(&mut state.conditions, ticked);
+            }
+        }
+        self.qselect_refresh_live();
+    }
+
+    /// Count (and, with Show on, highlight) what the conditions find now.
+    pub(in crate::app) fn qselect_refresh_live(&mut self) {
+        let i = self.active_tab;
+        let Some(state) = self.qselect.as_ref() else {
+            self.tabs[i].scene.set_filter_preview_highlights(&[]);
+            return;
+        };
+        let matches = state
+            .effective_conditions()
+            .map_or_else(Vec::new, |conditions| {
+                self.tabs[i]
+                    .scene
+                    .qselect_matches(state.scope, &conditions, state.mode)
+            });
+        let show = state.show;
+        self.tabs[i]
+            .scene
+            .set_filter_preview_highlights(if show { &matches } else { &[] });
+        if let Some(state) = self.qselect.as_mut() {
+            state.live_count = matches.len();
+        }
+    }
+
+    /// The values the chosen property takes in the scope, for the value list
+    /// and its shortcuts. Typing a value doesn't change them.
+    pub(in crate::app) fn qselect_refresh_values(&mut self) {
+        let i = self.active_tab;
+        let Some(state) = self.qselect.as_ref() else {
+            return;
+        };
+        let values = match &state.property {
+            Some(property) => self.tabs[i].scene.qselect_value_counts(
+                state.scope,
+                state.type_filter.as_deref(),
+                &property.field,
+                QSELECT_VALUE_LIMIT,
+            ),
+            None => Vec::new(),
+        };
+        if let Some(state) = self.qselect.as_mut() {
+            state.value_counts = values;
+        }
+    }
+
+    /// The dialog goes away: its highlight goes with it.
+    pub(in crate::app) fn qselect_clear_preview(&mut self) {
+        let i = self.active_tab;
+        self.tabs[i].scene.set_filter_preview_highlights(&[]);
     }
 }
+
+/// Properties of a picked object ticked by default: what it is and how it
+/// looks, not its geometry.
+const SAMPLE_TICKED_FIELDS: &[&str] = &["layer", "color", "linetype"];
+
+/// How many distinct values the value list offers.
+const QSELECT_VALUE_LIMIT: usize = 50;
 
 #[cfg(test)]
 mod tests {
@@ -148,8 +236,12 @@ mod tests {
             operator: QSelectOp::Eq,
             value: "unfinished draft".into(),
             mode: QSelectMode::Exclude,
-            append: false,
+            result: crate::app::QSelectResult::New,
             error: None,
+            live_count: 0,
+            show: false,
+            value_counts: Vec::new(),
+            sample: None,
         }
     }
 
@@ -234,7 +326,24 @@ mod tests {
             .on_entity_pick(sample, DVec3::ZERO);
         let _ = app.apply_cmd_result(result);
         let restored = app.qselect.as_ref().unwrap();
-        assert!(!restored.conditions.is_empty());
+        // The picked object's properties wait to be ticked; only the type,
+        // layer, colour and linetype rows start ticked.
+        let sample = restored
+            .sample
+            .as_ref()
+            .expect("the pick offers its properties");
+        assert_eq!(sample.type_name, "Line");
+        assert!(sample.rows.iter().all(|(condition, ticked)| {
+            *ticked
+                == condition
+                    .property
+                    .as_ref()
+                    .is_none_or(|p| super::SAMPLE_TICKED_FIELDS.contains(&p.field.as_str()))
+        }));
+        assert!(
+            restored.conditions.is_empty(),
+            "nothing is added before the ticks"
+        );
         assert_eq!(restored.value, "unfinished draft");
         assert!(matches!(restored.scope, QSelectScope::CurrentSelection));
         assert_eq!(app.tabs[i].scene.selected, selection);
@@ -243,11 +352,95 @@ mod tests {
         assert_eq!(app.modal_resize, iced::Vector::new(30.0, 40.0));
         assert!(app.tabs[i].active_cmd.is_none());
 
+        app.qselect.as_mut().unwrap().mode = QSelectMode::Include;
+        app.on_qselect_sample_add();
+        let restored = app.qselect.as_ref().unwrap();
+        assert_eq!(
+            restored.conditions.len(),
+            1 + super::SAMPLE_TICKED_FIELDS.len(),
+            "the type and the ticked rows"
+        );
+        // Geometry isn't ticked, so the selected line (the scope here) matches
+        // the sample although it is shorter.
+        assert_eq!(restored.live_count, 1);
         let count = restored.conditions.len();
         let _ = app.on_qselect_pick_object();
         let result = app.tabs[i].active_cmd.as_mut().unwrap().on_escape();
         let _ = app.apply_cmd_result(result);
         assert_eq!(app.qselect.as_ref().unwrap().conditions.len(), count);
         assert_eq!(app.tabs[i].scene.selected, selection);
+    }
+
+    /// #2611: the dialog counts what it finds as it is edited, highlights it
+    /// on request without touching the selection, and Select adds or removes.
+    #[test]
+    fn live_count_show_and_result_modes() {
+        use crate::app::{Message, QSelectResult};
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let line = |app: &mut OpenCADStudio| {
+            app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(10.0, 0.0, 0.0),
+                )))
+        };
+        let first = line(&mut app);
+        let second = line(&mut app);
+        let circle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Circle(Circle::new()));
+        app.tabs[i].scene.select_entity(circle, false);
+
+        let _ = app.update(Message::QSelectOpen);
+        let _ = app.update(Message::QSelectSetScope(QSelectScope::CurrentSpace));
+        let _ = app.update(Message::QSelectSetType(Some("Line".into())));
+        let state = app.qselect.as_ref().unwrap();
+        assert_eq!(
+            state.live_count, 2,
+            "the two lines, before anything is applied"
+        );
+        assert!(state.available_types.contains(&("Line".to_string(), 2)));
+        assert!(!state.show, "highlighting starts off");
+        assert!(app.tabs[i].scene.hover_highlight_handles().is_empty());
+
+        let _ = app.update(Message::QSelectSetShow(true));
+        let shown = app.tabs[i].scene.hover_highlight_handles();
+        assert!(shown.contains(&first) && shown.contains(&second) && !shown.contains(&circle));
+        assert_eq!(
+            app.tabs[i].scene.selected.len(),
+            1,
+            "showing doesn't select"
+        );
+
+        let _ = app.update(Message::QSelectSetResult(QSelectResult::Add));
+        let _ = app.update(Message::QSelectApply);
+        assert!(app.qselect.is_none());
+        assert_eq!(
+            app.tabs[i].scene.selected.len(),
+            3,
+            "the lines join the circle"
+        );
+        assert!(
+            app.tabs[i].scene.hover_highlight_handles().is_empty(),
+            "the highlight goes with the dialog"
+        );
+
+        let _ = app.update(Message::QSelectOpen);
+        let state = app.qselect.as_ref().unwrap();
+        assert!(state.show, "Show is remembered");
+        assert_eq!(state.result, QSelectResult::Add, "so is the result");
+        let _ = app.update(Message::QSelectSetResult(QSelectResult::Remove));
+        let _ = app.update(Message::QSelectApply);
+        assert_eq!(app.tabs[i].scene.selected.len(), 1);
+        assert!(app.tabs[i].scene.selected.contains(&circle));
+
+        let _ = app.update(Message::QSelectOpen);
+        let _ = app.update(Message::QSelectClose);
+        assert!(app.tabs[i].scene.hover_highlight_handles().is_empty());
     }
 }

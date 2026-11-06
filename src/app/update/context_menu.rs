@@ -105,6 +105,7 @@ impl OpenCADStudio {
             undo_label: tab.history.undo_stack.last().map(|s| s.display_label().into_owned()),
             redo_label: tab.history.redo_stack.last().map(|s| s.display_label().into_owned()),
             props_open: self.show_properties,
+            saved_filters: self.saved_filter_names(self.active_tab),
         }
     }
 

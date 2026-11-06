@@ -153,10 +153,19 @@ impl OpenCADStudio {
                 return Some(self.cmd_add_selected(i));
             }
 
-            // QSELECT builds a selection set by object type / property; FILTER is
-            // the same criteria-based selection.
-            "QSELECT" | "FILTER" => {
+            // QSELECT builds a selection set from one or a few conditions;
+            // FILTER is the advanced one, with groups and NOT (#2611).
+            "QSELECT" => {
                 return Some(Task::done(Message::QSelectOpen));
+            }
+            "FILTER" => {
+                return Some(Task::done(Message::FilterDialog(
+                    crate::app::filter_dialog::FilterMsg::Open(None),
+                )));
+            }
+            // FILTER <name>: a saved filter, applied without the dialog.
+            other if other.starts_with("FILTER ") => {
+                return Some(self.apply_saved_filter(&cmd["FILTER ".len()..]));
             }
 
             // CAL <expression> — evaluate an expression on the

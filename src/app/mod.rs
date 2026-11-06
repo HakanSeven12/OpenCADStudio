@@ -53,6 +53,7 @@ mod dock;
 mod tab_document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
+mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
@@ -86,6 +87,7 @@ mod quick_calc;
 mod qselect_tests;
 mod recent;
 mod record_api;
+mod saved_filters;
 pub(crate) mod settings;
 pub(crate) mod tool_windows;
 mod shortcuts;
@@ -300,7 +302,16 @@ pub enum QSelectOp {
     Eq,
     Neq,
     Gt,
+    Ge,
     Lt,
+    Le,
+}
+
+impl QSelectOp {
+    /// Operators that order numbers, only offered for numeric properties.
+    pub fn needs_number(self) -> bool {
+        matches!(self, Self::Gt | Self::Ge | Self::Lt | Self::Le)
+    }
 }
 
 /// Candidate set searched by Quick Select.
@@ -327,6 +338,25 @@ pub enum QSelectMode {
     Exclude,
 }
 
+/// What Quick Select does with the objects it finds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QSelectResult {
+    /// They become the selection.
+    #[default]
+    New,
+    /// They join the selection.
+    Add,
+    /// They leave the selection.
+    Remove,
+}
+
+/// The properties of a picked object, each ticked to become a condition.
+#[derive(Clone, Debug)]
+pub struct QSelectSample {
+    pub type_name: String,
+    pub rows: Vec<(QSelectCondition, bool)>,
+}
+
 /// Editor used by the Quick Select value field.
 #[derive(Clone, Debug)]
 pub enum QSelectValueEditor {
@@ -342,7 +372,9 @@ impl std::fmt::Display for QSelectOp {
             QSelectOp::Eq => "= Equals",
             QSelectOp::Neq => "!= Not equal",
             QSelectOp::Gt => "> Greater than",
+            QSelectOp::Ge => ">= Greater or equal",
             QSelectOp::Lt => "< Less than",
+            QSelectOp::Le => "<= Less or equal",
         };
         f.write_str(crate::t!(s).as_ref())
     }
@@ -402,9 +434,7 @@ impl QSelectCondition {
         if matches!(operator, QSelectOp::Any) {
             return None;
         }
-        if matches!(operator, QSelectOp::Gt | QSelectOp::Lt)
-            && !matches!(property.editor, QSelectValueEditor::Number)
-        {
+        if operator.needs_number() && !matches!(property.editor, QSelectValueEditor::Number) {
             return Some(crate::t!("This operator requires a numeric property.").into_owned());
         }
         match &property.editor {
@@ -437,7 +467,8 @@ pub struct QSelectState {
     pub conditions: Vec<QSelectCondition>,
     pub editing_condition: Option<usize>,
     pub scope: QSelectScope,
-    pub available_types: Vec<String>,
+    /// Object types in the scope with how many of each.
+    pub available_types: Vec<(String, usize)>,
     pub available_properties: Vec<QSelectPropertyChoice>,
     pub candidate_count: usize,
     /// `None` = "(Any type)".
@@ -447,13 +478,33 @@ pub struct QSelectState {
     pub operator: QSelectOp,
     pub value: String,
     pub mode: QSelectMode,
-    pub append: bool,
+    pub result: QSelectResult,
     pub error: Option<String>,
+    /// Objects the conditions find right now.
+    pub live_count: usize,
+    /// The matches are highlighted in the drawing.
+    pub show: bool,
+    /// Values of the chosen property in the scope, most frequent first.
+    pub value_counts: Vec<(String, usize)>,
+    /// A picked object's properties waiting to be ticked.
+    pub sample: Option<QSelectSample>,
 }
 
 impl QSelectState {
+    /// The conditions Select would apply: the list, or the draft while the
+    /// list is empty and the draft is complete.
+    pub fn effective_conditions(&self) -> Option<Vec<QSelectCondition>> {
+        if !self.conditions.is_empty() {
+            return Some(self.conditions.clone());
+        }
+        let draft = self.draft_condition();
+        ((draft.type_filter.is_some() || draft.property.is_some())
+            && draft.validation_error().is_none())
+        .then(|| vec![draft])
+    }
+
     pub fn normalize_operator(&mut self) {
-        if matches!(self.operator, QSelectOp::Gt | QSelectOp::Lt)
+        if self.operator.needs_number()
             && !self
                 .property
                 .as_ref()
@@ -502,7 +553,8 @@ struct QSelectSettings {
     operator: QSelectOp,
     value: String,
     mode: QSelectMode,
-    append: bool,
+    result: QSelectResult,
+    show: bool,
 }
 
 impl From<&QSelectState> for QSelectSettings {
@@ -518,7 +570,8 @@ impl From<&QSelectState> for QSelectSettings {
             operator: state.operator,
             value: state.value.clone(),
             mode: state.mode,
-            append: state.append,
+            result: state.result,
+            show: state.show,
         }
     }
 }
@@ -1397,6 +1450,8 @@ pub(super) struct OpenCADStudio {
     /// applied via `Message::QSelectApply`; the panel is dismissed on
     /// Apply / Cancel / Esc / outside-click.
     qselect: Option<QSelectState>,
+    /// The FILTER dialog while it is open.
+    filter_dialog: Option<filter_dialog::FilterDialogState>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -4267,6 +4322,22 @@ pub enum Message {
     /// Toggle per-viewport freeze: (layer_name, vp_col_index)
     LayerToggleVpFreeze(String, usize),
     LayerNew,
+    /// Show a node of the Layer manager's filter tree.
+    LayerShow(crate::ui::window::layers::TreeNode),
+    /// Show the layers the node leaves out instead.
+    LayerInvert(bool),
+    /// Open FILTER over the layers: a new filter from the search text
+    /// (`None`), or the LAYERFILTER filter named.
+    LayerFilterEdit(Option<String>),
+    /// A filter tree node's right-click menu.
+    LayerTreeAction(
+        crate::ui::window::layers::TreeNode,
+        crate::ui::window::layers::TreeAction,
+    ),
+    /// A new layer, frozen in every layout viewport.
+    LayerNewVpFrozen,
+    /// A layer row's right-click menu: (the row's layer, what to do).
+    LayerMenu(String, crate::ui::window::layers::LayerMenuAction),
     LayerDelete,
     /// Confirm deleting a non-empty layer (erases its objects too).
     LayerDeleteConfirm,
@@ -4279,7 +4350,17 @@ pub enum Message {
     LayerColorSet(document::types::Color),
     LayerLinetypeSet(String),
     LayerLineweightSet(LineWeight),
+    /// Typing in a layer's transparency field: (layer name, text).
     LayerTransparencyEdit(String, String),
+    /// Enter in the transparency field applies the typed value.
+    LayerTransparencyCommit,
+    /// Typing in a layer's description: (layer name, text).
+    LayerDescriptionEdit(String, String),
+    LayerDescriptionCommit,
+    /// The widget focused after a click while a description is being typed.
+    LayerDescriptionFocus(Option<iced::advanced::widget::Id>),
+    /// The widget focused after a click while a transparency is being typed.
+    LayerTransparencyFocus(Option<iced::advanced::widget::Id>),
     LayerRenameCommit,
     /// The widget focused after a click while a layer rename is open.
     LayerRenameFocus(Option<iced::advanced::widget::Id>),
@@ -5337,8 +5418,14 @@ pub enum Message {
     QSelectSetValue(String),
     /// Include or exclude objects matching the filter.
     QSelectSetMode(QSelectMode),
-    /// Append-to-current-selection toggle.
-    QSelectSetAppend(bool),
+    QSelectSetResult(QSelectResult),
+    /// Highlight the matches in the drawing.
+    QSelectSetShow(bool),
+    /// Tick or untick a picked object's property.
+    QSelectSampleToggle(usize),
+    /// Add the ticked properties as conditions.
+    QSelectSampleAdd,
+    QSelectSampleCancel,
     /// Apply the current filter and close the panel.
     QSelectAddCondition,
     /// Hide the filter and sample an object's filterable properties.
@@ -5348,6 +5435,10 @@ pub enum Message {
     QSelectClearConditions,
     QSelectCancelEdit,
     QSelectApply,
+    /// Quick Select's conditions, scope and result, carried over to FILTER.
+    QSelectAdvanced,
+    /// The FILTER dialog.
+    FilterDialog(filter_dialog::FilterMsg),
     /// The user clicked the title-bar ✕ (fires before the window closes).
     WindowCloseRequested(window::Id),
     /// A window was fully closed (fires after `window::close()` is called).
@@ -6228,6 +6319,7 @@ impl OpenCADStudio {
             grip_text_verts: Vec::new(),
             grip_text_slide: false,
             qselect: None,
+            filter_dialog: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

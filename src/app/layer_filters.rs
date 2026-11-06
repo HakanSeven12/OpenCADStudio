@@ -32,32 +32,82 @@ pub(in crate::app) struct LayerFilter {
     pub predicates: Vec<LayerPredicate>,
     /// Nested filters: when present, a layer must match one of them too.
     pub children: Vec<LayerFilter>,
+    /// Conditions made in the Layer manager's editor (FILTER's condition
+    /// editor over layer properties); used instead of the pattern and the
+    /// predicates when present.
+    pub conditions: Option<crate::filter::Filter>,
+}
+
+/// A layer as the shared filter engine reads it (#2610, #2611): the same
+/// comparisons and name patterns as Quick Select and FILTER.
+pub(in crate::app) struct LayerProperties;
+
+impl crate::filter::PropertySource for LayerProperties {
+    type Item = document::tables::Layer;
+
+    fn type_name<'a>(&'a self, _: &'a document::tables::Layer) -> &'a str {
+        "Layer"
+    }
+
+    fn value(&self, layer: &document::tables::Layer, property: &str) -> Option<String> {
+        let flag = |on: bool| if on { "1" } else { "0" }.to_string();
+        Some(match property {
+            "name" => layer.name.clone(),
+            "description" => layer.description.clone(),
+            "color" => layer.color.index()?.to_string(),
+            "linetype" => layer.line_type.clone(),
+            "on" => flag(!layer.is_off()),
+            "frozen" => flag(layer.is_frozen()),
+            "locked" => flag(layer.is_locked()),
+            "plot" => flag(layer.is_plottable),
+            _ => return None,
+        })
+    }
 }
 
 impl LayerFilter {
-    pub(in crate::app) fn matches(&self, layer: &document::tables::Layer) -> bool {
-        if !self.pattern.is_empty() && !wildcard_match(&layer.name, &self.pattern) {
-            return false;
+    /// The name pattern and the predicates as one all-filter.
+    pub(in crate::app) fn to_filter(&self) -> crate::filter::Filter {
+        use crate::filter::{Condition, Filter, Item, Match, Op};
+        if let Some(conditions) = &self.conditions {
+            return conditions.clone();
+        }
+        let condition = |property: &str, value: String| {
+            Item::Condition(Condition {
+                property: Some(property.to_string()),
+                op: Op::Eq,
+                value,
+                ..Default::default()
+            })
+        };
+        let flag = |on: bool| if on { "1" } else { "0" }.to_string();
+        let mut items = Vec::new();
+        if !self.pattern.is_empty() {
+            items.push(condition("name", self.pattern.clone()));
         }
         for predicate in &self.predicates {
-            let ok = match predicate {
-                LayerPredicate::Color(index) => layer.color.index() == Some(*index),
-                LayerPredicate::Linetype(name) => layer.line_type.eq_ignore_ascii_case(name),
-                LayerPredicate::Off(off) => layer.is_off() == *off,
-                LayerPredicate::Frozen(frozen) => layer.is_frozen() == *frozen,
-                LayerPredicate::Locked(locked) => layer.is_locked() == *locked,
-                LayerPredicate::Plottable(plottable) => layer.is_plottable == *plottable,
-            };
-            if !ok {
-                return false;
-            }
+            items.push(match predicate {
+                LayerPredicate::Color(index) => condition("color", index.to_string()),
+                LayerPredicate::Linetype(name) => condition("linetype", name.clone()),
+                LayerPredicate::Off(off) => condition("on", flag(!off)),
+                LayerPredicate::Frozen(frozen) => condition("frozen", flag(*frozen)),
+                LayerPredicate::Locked(locked) => condition("locked", flag(*locked)),
+                LayerPredicate::Plottable(plot) => condition("plot", flag(*plot)),
+            });
         }
-        if !self.children.is_empty()
-            && !self.children.iter().any(|child| child.matches(layer))
-        {
+        Filter {
+            root: Match::All,
+            items,
+        }
+    }
+
+    /// The layer passes the name pattern and every predicate, and, when the
+    /// filter nests others, one of them too.
+    pub(in crate::app) fn matches(&self, layer: &document::tables::Layer) -> bool {
+        if !self.to_filter().matches(&LayerProperties, layer) {
             return false;
         }
-        true
+        self.children.is_empty() || self.children.iter().any(|child| child.matches(layer))
     }
 }
 
@@ -152,6 +202,7 @@ impl OpenCADStudio {
             pattern,
             predicates: Vec::new(),
             children: Vec::new(),
+            conditions: None,
         };
         let matches = self.matching_layers(i, &filter).len();
         match self.find_layer_filter(name) {

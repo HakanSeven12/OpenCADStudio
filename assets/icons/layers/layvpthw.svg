@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <rect x="1.5" y="3.5" width="21" height="17" rx="1.5" fill="none" stroke="#8FA3B5" stroke-width="1.6"/>
-  <circle cx="12" cy="12" r="2.6" fill="#f0c040" fill-opacity="0.4" stroke="#f0c040" stroke-width="1.6"/>
-  <g stroke="#f0c040" stroke-width="1.6" stroke-linecap="round">
-    <line x1="12" y1="6.3" x2="12" y2="7.6"/>
-    <line x1="12" y1="16.4" x2="12" y2="17.7"/>
-    <line x1="6.3" y1="12" x2="7.6" y2="12"/>
-    <line x1="16.4" y1="12" x2="17.7" y2="12"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M8 8H15V15H8Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M1.5 1.5H12.5V9.5H1.5Z" fill="none" stroke="#ffffff"/></g><path d="M10 10H13V13H10Z" fill="#f0c040"/><path d="M11.5 8L11.5 9" fill="none" stroke="#f0c040"/><path d="M11.5 14L11.5 15" fill="none" stroke="#f0c040"/><path d="M8 11.5L9 11.5" fill="none" stroke="#f0c040"/><path d="M14 11.5L15 11.5" fill="none" stroke="#f0c040"/></svg>

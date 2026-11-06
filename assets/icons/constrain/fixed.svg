@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <line x1="4" y1="8" x2="20" y2="8" stroke="#6DB7ED" stroke-width="2.25" stroke-linecap="round"/>
-  <line x1="6" y1="8" x2="3" y2="13" stroke="#B4B6B9" stroke-width="1.6" stroke-linecap="round"/>
-  <line x1="11" y1="8" x2="8" y2="13" stroke="#B4B6B9" stroke-width="1.6" stroke-linecap="round"/>
-  <line x1="16" y1="8" x2="13" y2="13" stroke="#B4B6B9" stroke-width="1.6" stroke-linecap="round"/>
-  <line x1="21" y1="8" x2="18" y2="13" stroke="#B4B6B9" stroke-width="1.6" stroke-linecap="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M8 8H15V15H8Z" fill="#000"/></mask><mask id="m2" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M1 8H5V12H1Z" fill="#000"/></mask></defs><g mask="url(#m2)"><g mask="url(#m1)"><path d="M1.5 11.5L7.5 5.5" fill="none" stroke="#ffffff"/></g><path d="M9 11H15V15H9Z" fill="#f0c040"/><path d="M10.5 11V9.5A1.5 1.5 0 0 1 13.5 9.5V11" fill="none" stroke="#f0c040"/></g><path d="M2 9H4V11H2Z" fill="#4a9eff"/></svg>

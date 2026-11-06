@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Dim Tedit">
-  <line x1="5" y1="6" x2="5" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="19" y1="6" x2="19" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="7" y1="11" x2="17" y2="11" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="9,9 7,11 9,13" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="15,9 17,11 15,13" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M13 18 L18 13 L21 16 L16 21 H13 Z" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M5 1H11V5H5Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M2.5 13.5L13.5 13.5" fill="none" stroke="#ffffff"/><path d="M2.5 2.5L2.5 12.5" fill="none" stroke="#f0c040"/><path d="M13.5 2.5L13.5 12.5" fill="none" stroke="#f0c040"/><path d="M3 9.5L6 8L6 11Z" fill="#f0c040"/><path d="M13 9.5L10 8L10 11Z" fill="#f0c040"/><path d="M6 9.5L10 9.5" fill="none" stroke="#f0c040"/></g><path d="M5.5 1.5H10.5V4.5H5.5Z" fill="none" stroke="#4a9eff"/></svg>

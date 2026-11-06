@@ -1,14 +1,1 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg viewBox="0 0 24 24" width="64" height="64" version="1.1"
-   xmlns="http://www.w3.org/2000/svg">
-  <!-- Closed shackle -->
-  <path d="M 7.5,10.5 V 7 a 4.5,4.5 0 0 1 9,0 v 3.5" fill="none" stroke="#f0c040"
-     stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" />
-  <!-- Lock body (filled = locked) -->
-  <rect x="4.5" y="10.5" width="15" height="11.5" rx="2" fill="#f0c040"
-     fill-opacity="0.45" stroke="#f0c040" stroke-width="2.25" />
-  <!-- Keyhole -->
-  <circle cx="12" cy="15" r="1.5" fill="#f0c040" />
-  <line x1="12" y1="15.5" x2="12" y2="18.5" stroke="#f0c040" stroke-width="2"
-     stroke-linecap="round" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M8 8H15V15H8Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M7.5 1.5L13.5 4.5L7.5 7.5L1.5 4.5Z" fill="none" stroke="#ffffff"/><path d="M1.5 7.5L7.5 10.5L13.5 7.5" fill="none" stroke="#ffffff"/></g><path d="M9 11H15V15H9Z" fill="#f0c040"/><path d="M10.5 11V9.5A1.5 1.5 0 0 1 13.5 9.5V11" fill="none" stroke="#f0c040"/></svg>

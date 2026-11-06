@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Leader">
-  <polyline points="4,18 10,12 18,12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polygon points="3.5,18.5 6.5,17.5 4.5,15.5" stroke="none" fill="#6DB7ED"/>
-  <line x1="14" y1="8" x2="20" y2="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M3.5 12.5L8.5 7.5L13.5 7.5" fill="none" stroke="#f0c040"/><path d="M2 14L6.5 12.5L3.5 9.5Z" fill="#f0c040"/><path d="M9.5 4.5L14.5 4.5" fill="none" stroke="#ffffff"/><path d="M9.5 2.5L12.5 2.5" fill="none" stroke="#ffffff"/></svg>

@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Dim Linear">
-  <line x1="5" y1="6" x2="5" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="19" y1="6" x2="19" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="7" y1="11" x2="17" y2="11" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="9,9 7,11 9,13" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="15,9 17,11 15,13" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2.5 13.5L13.5 13.5" fill="none" stroke="#ffffff"/><path d="M2.5 2.5L2.5 12.5" fill="none" stroke="#f0c040"/><path d="M13.5 2.5L13.5 12.5" fill="none" stroke="#f0c040"/><path d="M3 5.5L6 4L6 7Z" fill="#f0c040"/><path d="M13 5.5L10 4L10 7Z" fill="#f0c040"/><path d="M6 5.5L10 5.5" fill="none" stroke="#f0c040"/></svg>

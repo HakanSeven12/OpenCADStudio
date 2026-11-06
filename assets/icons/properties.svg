@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Properties">
-  <line x1="5" y1="6" x2="19" y2="6" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="5" y1="12" x2="19" y2="12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="5" y1="18" x2="19" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="9" cy="6" r="1.8" stroke="none" fill="#6DB7ED"/>
-  <circle cx="15" cy="12" r="1.8" stroke="none" fill="#6DB7ED"/>
-  <circle cx="11" cy="18" r="1.8" stroke="none" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 3.5L14.5 3.5" fill="none" stroke="#ffffff"/><path d="M4 2H7V5H4Z" fill="#4a9eff"/><path d="M1.5 7.5L14.5 7.5" fill="none" stroke="#ffffff"/><path d="M9 6H12V9H9Z" fill="#4a9eff"/><path d="M1.5 11.5L14.5 11.5" fill="none" stroke="#ffffff"/><path d="M6 10H9V13H6Z" fill="#4a9eff"/></svg>

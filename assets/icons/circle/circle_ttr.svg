@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <line x1="1" y1="22" x2="11" y2="2" stroke="#B4B6B9" stroke-width="2" fill="none"/>
-  <line x1="23" y1="22" x2="13" y2="2" stroke="#B4B6B9" stroke-width="2" fill="none"/>
-  <circle cx="12" cy="14" r="6" stroke="#B4B6B9" stroke-width="2" fill="none"/>
-  <line x1="12" y1="14" x2="12" y2="8" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2" fill="none"/>
-  <circle cx="12" cy="14" r="1.8" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M0 7H4V11H0ZM5 12H9V16H5Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M2.5 1.5L2.5 14.5" fill="none" stroke="#ffffff"/><path d="M1.5 13.5L14.5 13.5" fill="none" stroke="#ffffff"/><path d="M12.5 8.5A5 5 0 1 1 2.5 8.5A5 5 0 1 1 12.5 8.5Z" fill="none" stroke="#4a9eff"/></g><path d="M1 8H3V10H1Z" fill="#4a9eff"/><path d="M6 13H8V15H6Z" fill="#4a9eff"/></svg>

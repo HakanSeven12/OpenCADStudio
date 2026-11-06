@@ -1,11 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Boundary: polygon outline only, no fill -->
-  <polygon points="12,3 21,9 18,20 6,20 3,9"
-           stroke="#B4B6B9" stroke-width="1.5" fill="none"/>
-  <!-- Corner dots at vertices -->
-  <circle cx="12" cy="3"  r="1.4" fill="#6DB7ED"/>
-  <circle cx="21" cy="9"  r="1.4" fill="#6DB7ED"/>
-  <circle cx="18" cy="20" r="1.4" fill="#6DB7ED"/>
-  <circle cx="6"  cy="20" r="1.4" fill="#6DB7ED"/>
-  <circle cx="3"  cy="9"  r="1.4" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M6 6H10V10H6Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M1.5 2.5L14.5 2.5" fill="none" stroke="#ffffff"/><path d="M2.5 1.5L2.5 14.5" fill="none" stroke="#ffffff"/><path d="M1.5 13.5L14.5 13.5" fill="none" stroke="#ffffff"/><path d="M13.5 1.5L13.5 14.5" fill="none" stroke="#ffffff"/><path d="M2.5 2.5H13.5V13.5H2.5Z" fill="none" stroke="#4a9eff"/><path d="M3 3H13V13H3Z" fill="#4a9eff" fill-opacity="0.33"/></g><path d="M7 7H9V9H7Z" fill="#4a9eff"/></svg>

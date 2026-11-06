@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Copy Clip">
-  <rect x="5" y="5" width="10" height="12" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <rect x="9" y="8" width="10" height="12" rx="1" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M8 4 H12 V7 H8 Z" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M2 4H10V15H2Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M5.5 1.5H13.5V11.5H5.5Z" fill="none" stroke="#ffffff"/></g><path d="M6.5 4.5L2.5 4.5L2.5 14.5L9.5 14.5L9.5 7.5L6.5 4.5" fill="none" stroke="#4a9eff"/><path d="M6.5 4.5L6.5 7.5L9.5 7.5" fill="none" stroke="#4a9eff"/></svg>

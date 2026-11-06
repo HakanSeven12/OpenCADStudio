@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Merge Cells">
-  <rect x="4.8" y="4.8" width="14.4" height="7.2" stroke="none" fill="#6DB7ED"/>
-  <rect x="4" y="4" width="16" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="4" y1="12" x2="20" y2="12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="12" y1="12" x2="12" y2="20" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2 2H14V7H2Z" fill="#4a9eff" fill-opacity="0.33"/><path d="M1.5 1.5H14.5V14.5H1.5Z" fill="none" stroke="#ffffff"/><path d="M1.5 7.5L14.5 7.5" fill="none" stroke="#ffffff"/><path d="M7.5 7.5L7.5 14.5" fill="none" stroke="#ffffff"/><path d="M1.5 1.5H14.5V7.5H1.5Z" fill="none" stroke="#4a9eff"/></svg>

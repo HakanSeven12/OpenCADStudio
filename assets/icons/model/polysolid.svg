@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Polysolid">
-  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M4 10 9 7 17 11 24 7 28 9 17 16Z" fill="#DCE7F0"/>
-    <path d="M4 10 17 16V28L4 22Z" fill="#A9BFCE"/>
-    <path d="M17 16 28 9V21L17 28Z" fill="#718C9E"/>
-    <path d="M9 7V19L17 23V11Z" fill="#718C9E"/>
-    <path d="M17 11V23L24 19V7Z" fill="#A9BFCE"/>
-    <path d="M4 10 9 7 17 11 24 7 28 9 17 16Z" fill="#DCE7F0"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 6.5L4.5 8L4.5 13.5L1.5 12Z" fill="#ffffff" fill-opacity="0.12"/><path d="M1.5 5.5L7.5 2.5L13.5 5.5L13.5 11.5L11.5 12.5L11.5 6.5L7.5 4.5L3.5 6.5L3.5 12.5L1.5 11.5Z" fill="none" stroke="#ffffff"/></svg>

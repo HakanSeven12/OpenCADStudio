@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Start (first=large) + radius to center + angle arc indicator -->
-  <path d="M 4 18 A 11 11 0 0 1 20 6" stroke="#B4B6B9" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <line x1="15" y1="16" x2="4"  y2="18" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <line x1="15" y1="16" x2="20" y2="6"  stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <!-- Angle arc between the two radii -->
-  <path d="M 12 16.5 A 3 3 0 0 1 16.4 13.3" stroke="#6DB7ED" stroke-width="1.3" fill="none"/>
-  <circle cx="4"  cy="18" r="2.5" fill="#6DB7ED"/>
-  <circle cx="15" cy="16" r="1.8" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M1 11H5V15H1ZM11 11H15V15H11Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M3.5 12.5A9 9 0 0 1 12.5 3.5" fill="none" stroke="#ffffff"/><path d="M5 12.5L8.5 12.5" fill="none" stroke="#4a9eff"/><path d="M11 12.5L8 11L8 14Z" fill="#4a9eff"/><path d="M8 7H10V8H8Z" fill="#4a9eff"/><path d="M11 7H12V8H11Z" fill="#4a9eff"/><path d="M7 8H8V9H7Z" fill="#4a9eff"/><path d="M10 8H11V9H10Z" fill="#4a9eff"/><path d="M7 9H8V10H7Z" fill="#4a9eff"/><path d="M10 9H11V10H10Z" fill="#4a9eff"/><path d="M8 10H10V11H8Z" fill="#4a9eff"/><path d="M11 10H12V11H11Z" fill="#4a9eff"/></g><path d="M2 12H4V14H2Z" fill="#4a9eff"/><path d="M12 12H14V14H12Z" fill="#4a9eff"/></svg>

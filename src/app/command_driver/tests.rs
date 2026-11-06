@@ -3318,6 +3318,25 @@ mod layer_filter_tests {
         assert_eq!(matching(&app, "DIMS"), ["DIMS-A", "DIMS-B"]);
     }
 
+    /// #2610 / #2611: layer filters match on the shared filter engine, so a
+    /// name takes the same patterns as Quick Select and FILTER.
+    #[test]
+    fn layer_filter_names_take_the_shared_patterns() {
+        let mut app = app_with_layers();
+        let _ = app.run_command_line("LAYERFILTER NEW SOME DIMS-A,WALLS");
+        assert_eq!(matching(&app, "SOME"), ["DIMS-A", "WALLS"]);
+        let _ = app.run_command_line("LAYERFILTER NEW OTHERS ~DIMS*");
+        assert!(matching(&app, "OTHERS").contains(&"WALLS".to_string()));
+        assert!(!matching(&app, "OTHERS")
+            .iter()
+            .any(|name| name.starts_with("DIMS")));
+        let _ = app.run_command_line("-LAYER NEW A1");
+        let _ = app.run_command_line("LAYERFILTER NEW NUMBERED A#");
+        assert_eq!(matching(&app, "NUMBERED"), ["A1"]);
+        let _ = app.run_command_line("LAYERFILTER SET SOME COLOR 1");
+        assert_eq!(matching(&app, "SOME"), ["DIMS-A", "WALLS"], "both are red");
+    }
+
     #[test]
     fn name_wildcard_filter_selects_the_discipline() {
         let mut app = app_with_layers();

@@ -16,6 +16,7 @@ pub(crate) fn is_modal_blocked_key_msg(msg: &Message) -> bool {
     matches!(
         msg,
         Message::CommandInput(_)
+            | Message::CommandPasteMarkup
             | Message::CommandAppendChar(_)
             | Message::CommandSpace
             | Message::CommandFinalize
@@ -8641,6 +8642,16 @@ impl OpenCADStudio {
                     // text is read here and typed in as rows. (#1883)
                     Task::none()
                 } else {
+            // The paste shortcut already places the drawing's own copy; only
+            // markup from another program is read back to come in as a picture.
+            Message::CommandPasteMarkup => {
+                if self.clipboard.is_empty() {
+                    self.read_system_clipboard_for_paste()
+                } else {
+                    Task::none()
+                }
+            }
+
                     self.read_system_clipboard_for_paste()
                 }
             }

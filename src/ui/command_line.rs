@@ -103,6 +103,12 @@ fn strip_option_listing(s: &str, options: &[CmdOption]) -> String {
     out.replace(" :", ":").trim().to_string()
 }
 
+/// Whether pasted command-line text holds SVG markup, which the copy commands
+/// put on the system clipboard beside their own copy.
+fn is_svg_markup(text: &str) -> bool {
+    text.contains("<svg")
+}
+
 /// An option label split around the letters typed to pick it: the capitals
 /// (`T` in `Ttr`, `RE` in `REpeat`, `X` in `eXit`), or the whole label when
 /// it has no lower case (`3P`).
@@ -1078,6 +1084,13 @@ impl CommandLine {
         if !dyn_capturing {
             input = input
                 .on_input(Message::CommandInput)
+                .on_paste(|buffer| {
+                    if is_svg_markup(&buffer) {
+                        Message::CommandPasteMarkup
+                    } else {
+                        Message::CommandInput(buffer)
+                    }
+                })
                 .on_submit(Message::CommandSubmit);
         }
         let input = input
@@ -1926,4 +1939,16 @@ pub fn value_prompt_or_none(name: &str, current: &dyn std::fmt::Display) -> Stri
 /// [`value_prompt`] for a variable with no value to offer.
 pub fn value_prompt_bare(name: &str) -> String {
     crate::tf!("Enter new value for {name}:").into_owned()
+}
+
+#[cfg(test)]
+mod svg_paste_tests {
+    #[test]
+    fn copied_svg_is_markup_and_commands_are_not() {
+        assert!(super::is_svg_markup(
+            r#"<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"></svg>"#
+        ));
+        assert!(!super::is_svg_markup("LINE"));
+        assert!(!super::is_svg_markup("TEXT <value>"));
+    }
 }

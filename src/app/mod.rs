@@ -4066,6 +4066,9 @@ pub enum Message {
     ExternalChangeCancel,
     // ─────────────────────────────────────────────────────────────────────
     CommandInput(String),
+    /// SVG markup pasted into the command line: the drawing's own copy or a
+    /// picture, never typed text (#2623).
+    CommandPasteMarkup,
     CommandSubmit,
     Command(String),
     /// Execute one complete line read from a command script. Unlike UI/ribbon

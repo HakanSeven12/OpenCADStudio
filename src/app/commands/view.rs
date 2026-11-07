@@ -580,9 +580,14 @@ impl OpenCADStudio {
                     // accept a ratio (1:50) or a bare paper/model factor. The
                     // explicit factor goes through the same path ZOOM nXP uses,
                     // so a named ratio and a bare factor land identically.
+                    // The picker exposes effective viewport factors, whereas
+                    // scale_ratio intentionally exposes the drawing's raw
+                    // paper/drawing units for page setups.
                     let factor = scene
-                        .scale_ratio(&value)
-                        .map(|(paper, drawing)| paper / drawing)
+                        .scale_list()
+                        .into_iter()
+                        .find(|(name, _, _)| name.eq_ignore_ascii_case(&value))
+                        .map(|(_, _, factor)| factor)
                         .or_else(|| parse_viewport_scale(&value));
                     let applied = factor
                         .and_then(|factor| {

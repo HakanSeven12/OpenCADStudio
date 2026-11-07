@@ -57,6 +57,7 @@ pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
+mod layer_filter_store;
 mod layer_filters;
 pub(crate) mod layer_groups;
 pub(crate) mod layer_import;
@@ -794,6 +795,8 @@ pub(super) struct OpenCADStudio {
     /// Named layer filters (LAYERFILTER). A view over the layer table, so it is
     /// kept with the app rather than written to the drawing.
     layer_filters: Vec<layer_filters::LayerFilter>,
+    /// The ribbon's layer list follows the Layer manager's node (LM-25).
+    ribbon_layers_follow_filter: bool,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -4350,6 +4353,10 @@ pub enum Message {
     LayerTreeRenameCancel,
     /// A tree node's eye: all its layers lit, or none of them.
     LayerNodeEye(crate::ui::window::layers::TreeNode),
+    /// The search text as a new property filter (#2610 LM-22a).
+    LayerSaveSearch,
+    /// The ribbon's layer list follows the chosen node, or lists them all.
+    LayerRibbonFollows(bool),
     /// The compact Layer manager toolbar's "…" menu open or closed.
     LayerMoreMenu(bool),
     /// An item of that menu: close it, then do this.
@@ -6068,6 +6075,7 @@ impl OpenCADStudio {
             discussions_loading: false,
             collapsed_property_sections: rustc_hash::FxHashSet::default(),
             layer_filters: Vec::new(),
+            ribbon_layers_follow_filter: false,
             start_section: StartSection::default(),
             start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             history_content: iced::widget::text_editor::Content::new(),

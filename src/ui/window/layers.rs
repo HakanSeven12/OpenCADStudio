@@ -453,6 +453,8 @@ pub struct LayerPanel {
     pub selected_object_layers: Vec<String>,
     /// LAYERFILTER filters with the layers each one matches.
     pub filters: Vec<(String, Vec<String>)>,
+    /// How deep each of `filters` sits: 0 at the top, 1 under another…
+    pub filter_depths: Vec<u8>,
     /// The layers of FILTER's last result sent here (the Found node).
     pub found_layers: Vec<String>,
     /// The layers whose eye is on: their objects are highlighted in the
@@ -476,6 +478,9 @@ pub struct LayerPanel {
     pub more_menu: bool,
     /// The compact toolbar's search field is open.
     pub search_open: bool,
+    /// The ribbon's layer list follows the chosen node (mirrors the app's
+    /// setting for the footer's box).
+    pub ribbon_follows: bool,
 }
 
 impl Default for LayerPanel {
@@ -521,6 +526,7 @@ impl Default for LayerPanel {
             eye_layers: Vec::new(),
             highlighted: 0,
             highlight_key: None,
+            filter_depths: Vec::new(),
             closed_sections: Vec::new(),
             tree_rename: None,
             tree_focus: false,
@@ -528,6 +534,7 @@ impl Default for LayerPanel {
             drag_over: None,
             more_menu: false,
             search_open: false,
+            ribbon_follows: false,
         }
     }
 }
@@ -609,6 +616,12 @@ impl LayerPanel {
             .collect()
     }
 
+    /// Whether `layer` is in the node chosen in the tree (inverted when the
+    /// tree is): what the ribbon's list follows with LM-25 on.
+    pub fn in_chosen_node(&self, layer: &Layer) -> bool {
+        self.in_view(layer) != self.invert
+    }
+
     /// Whether `layer` belongs to the node shown.
     fn in_view(&self, layer: &Layer) -> bool {
         self.in_node(&self.view, layer)
@@ -681,7 +694,19 @@ impl LayerPanel {
         let section = |rows: &mut Vec<TreeRow>, section: TreeSection, nodes: Vec<TreeNode>| {
             rows.push(TreeRow::Section(section, 1));
             if self.section_open(section) {
-                rows.extend(nodes.into_iter().map(|node| TreeRow::Node(node, 2)));
+                for node in nodes {
+                    // A filter under another sits one deeper (#2610).
+                    let extra = match &node {
+                        TreeNode::Filter(name) => self
+                            .filters
+                            .iter()
+                            .position(|(f, _)| f == name)
+                            .and_then(|at| self.filter_depths.get(at).copied())
+                            .unwrap_or(0),
+                        _ => 0,
+                    };
+                    rows.push(TreeRow::Node(node, 2 + extra));
+                }
             }
         };
         section(
@@ -941,6 +966,7 @@ impl LayerPanel {
     /// Under the table: invert the node, what the eyes light, the current
     /// layer and the node shown with its counts.
     fn tree_footer(&self) -> Element<'_, Message> {
+        let ribbon_follows = self.ribbon_follows;
         let shown = self.visible_indices().len();
         let selected = self.selected_names().len();
         let node = match &self.view {
@@ -982,6 +1008,11 @@ impl LayerPanel {
                     .on_toggle(Message::LayerInvert),
                 lit,
                 iced::widget::Space::new().width(Length::Fill),
+                checkbox(ribbon_follows)
+                    .label(t!("Ribbon list follows the tree"))
+                    .text_size(FONT_SZ)
+                    .size(13)
+                    .on_toggle(Message::LayerRibbonFollows),
                 text(format!("{}:", t!("Current layer")))
                     .size(FONT_SZ)
                     .style(muted_style),
@@ -1572,6 +1603,12 @@ impl LayerPanel {
                     .style(|theme, status| field_style_with_radius(theme, status, 2.0)),
                 // The search text as a filter, edited with FILTER's rows.
                 toolbar_text_btn(t!("Advanced…"), Message::LayerFilterEdit(None)),
+                // The search text kept as a property filter (LM-22a).
+                if self.filter.trim().is_empty() {
+                    Element::from(iced::widget::Space::new().width(0))
+                } else {
+                    toolbar_text_btn(t!("Save as filter"), Message::LayerSaveSearch)
+                },
             ]
             .spacing(4)
             .align_y(iced::Center),

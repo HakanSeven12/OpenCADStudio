@@ -74,15 +74,17 @@ Supplementary checks exercised eight dynamic references, all 20 exposed Properti
 
 An edited state spanning all eight references and two active Flips passed same-version DWG audit and verified save with no dropped records. Reopening restored property values, world grip positions, reference positions and queried geometry. Another grip edit on every reference passed after reopening. An unflip/reflip cycle restored the saved geometry. These observations establish the tested workflows, not every retained graph or possible edit sequence.
 
-## Open DXF conversion gate
+## Resolved DXF reference integrity milestone
 
-Synthetic supported-object DWG/DXF lifecycle tests pass. Full-drawing DXF conversion does not yet pass:
+Synthetic supported-object DWG/DXF lifecycle tests pass. The DXF reference-integrity milestone for acknowledged lossy export of drawings carrying DWG-only unsupported objects is resolved:
 
-- Same-version DWG retains 200 raw `DIMCONTAINER2` objects without loss.
-- DXF export reports that those unsupported objects would be omitted.
-- An explicitly acknowledged disposable conversion failed structural verification because of dangling handle references. Its output is diagnostic only.
+- Same-version DWG preserves raw unsupported objects (including `DIMCONTAINER2`) and dynamic block graphs without loss.
+- DXF export preserves the loss warning when unacknowledged (`allow_lossy: false`), reporting dropped record counts and refusing to write corrupt data.
+- When lossy export is explicitly acknowledged (`allow_lossy: true`), reference-integrity pruning removes dangling handle references to omitted objects and transitively un-emitted child records across dictionary entries, reactors, extension dictionaries, proxy references, and handle fields, ensuring emitted DXF files pass structural verification.
+- Structural verification continues to reject broken essential references on surviving native objects (such as corrupt dynamic block evaluation graph node expressions).
+- Upstream reviewable dependency changes are isolated on branch `codex/dxf-reference-integrity` in `acadrust`.
 
-The next format milestone is a synthetic reproduction containing a raw DWG-only unknown object and references to it. Determine which references require preservation, decoding or safe removal under an acknowledged lossy-conversion policy. Export must produce structurally valid output under that policy or refuse before presenting the file as valid. Preserve the loss warning and verification; do not bypass either to close this gate.
+Remaining limitations: unsupported DWG-only objects (`DIMCONTAINER2`) remain lossy on DXF export and are not synthesized into native DXF entities. Full semantic decoding of proprietary third-party container schemas remains outside scope.
 
 ## Reproducing the relevant checks
 

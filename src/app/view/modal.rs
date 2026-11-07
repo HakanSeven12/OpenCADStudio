@@ -2367,8 +2367,6 @@ fn unsaved_changes_dialog_window(
     let block_edit = block_references.is_some();
     let prompt = if block_edit {
         column![
-            text(crate::tf!("Save changes to {}?", name).into_owned()).size(14),
-            iced::widget::Space::new().height(4),
             text(t!(
                 "Changes to parameters may update existing block references in ways that are not always obvious. What do you want to do?"
             ))

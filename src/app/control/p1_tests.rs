@@ -2042,6 +2042,116 @@ fn a_converted_constraint_clamps_the_grip_that_moves_a_level_line() {
     );
 }
 
+/// A created constraint's annotation is complete across a save: it measures
+/// the span the constraint was given, and the written file carries the
+/// anonymous block the live document leaves to the writer. Reopening resolves
+/// the dimension back to model space.
+#[test]
+fn a_created_dimension_is_a_complete_record_across_a_save() {
+    use crate::command::CmdResult;
+    use crate::scene::named_parameters::DrivingValue;
+    use crate::scene::parametric_constraints::{ConstraintKind, ParametricRef, ParametricScope};
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.automation_op(r#"{"op":"run","cmd":"LINE 700,200 700,240"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .expect("the drawn line has a handle")
+        .to_owned();
+    let line = document::Handle::new(u64::from_str_radix(&handle, 16).unwrap());
+    let task = app.apply_cmd_result(CmdResult::AddDimensionalConstraint {
+        kind: ConstraintKind::DistanceY,
+        first: ParametricRef::point(line, 0),
+        second: ParametricRef::point(line, 1),
+        first_point: glam::DVec3::new(700.0, 200.0, 0.0),
+        second_point: glam::DVec3::new(700.0, 240.0, 0.0),
+        location: glam::DVec3::new(740.0, 220.0, 0.0),
+        axis: glam::DVec3::Y,
+        direction: None,
+        name: "d1".to_string(),
+        expression: "40".to_string(),
+        renamed: false,
+        label: "Vertical distance constraint",
+    });
+    app.drive_headless_task(task).unwrap();
+
+    let set = app.tabs[i]
+        .scene
+        .parametric_constraint_set(ParametricScope::ModelSpace)
+        .expect("the drawing has a constraint set");
+    let id = set
+        .constraints
+        .iter()
+        .find(|constraint| {
+            matches!(&constraint.driving_param, Some(DrivingValue::Named(name)) if name == "d1")
+        })
+        .map(|constraint| constraint.id)
+        .expect("the created constraint is driven by the name it was given");
+    let dimension = set
+        .dimensions
+        .get(&id)
+        .copied()
+        .expect("the constraint drives a dimension");
+    let record = |document: &document::Document| {
+        let document::EntityType::Dimension(printed) = document
+            .get_entity(dimension)
+            .expect("the dimension is in the document")
+        else {
+            panic!("the constraint's dimension is a dimension");
+        };
+        (
+            printed.base().actual_measurement,
+            printed.base().block_name.clone(),
+            printed.base().common.entity_mode,
+        )
+    };
+    let (measured, block, mode) = record(&app.tabs[i].scene.document);
+    assert!(
+        (measured - 40.0).abs() < 1e-6,
+        "the annotation measures the span the constraint was given: {measured}"
+    );
+    assert!(
+        block.is_empty() && mode.is_none(),
+        "the live document leaves the anonymous block to the writer and carries no mode yet: \
+         {block:?} {mode:?}"
+    );
+
+    // The document prepared the way a worker save prepares it before writing.
+    let document = app.tabs[i].scene.document_for_save();
+    let version = document.version;
+    let prepared = crate::io::prepare_document_for_save(document, version);
+    let bytes = document::DxfWriter::new(&prepared).write_to_vec().unwrap();
+    let reopened = document::DxfReader::from_reader(std::io::Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap();
+    let (saved_measured, saved_block, saved_mode) = record(&reopened);
+    assert!(
+        (saved_measured - 40.0).abs() < 1e-6,
+        "the measured span survives the save: {saved_measured}"
+    );
+    assert!(
+        saved_block.starts_with("*D"),
+        "the save bakes the annotation block: {saved_block:?}"
+    );
+    assert_eq!(
+        saved_mode,
+        Some(2),
+        "reopening resolves the dimension to model space"
+    );
+    let annotation = reopened
+        .block_records
+        .get(&saved_block)
+        .expect("the baked block is in the reopened document");
+    assert!(
+        !annotation.entity_handles.is_empty(),
+        "the annotation block holds the exploded geometry"
+    );
+}
+
 /// A dimensional constraint added by the constraint command owns the span its
 /// value names, so the grip that moves one of its participants is clamped by
 /// that drag rather than by whatever constraint command walks the network next.

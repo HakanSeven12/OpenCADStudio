@@ -99,7 +99,8 @@ fn dxf_skips_object(object: &ObjectType, doc: &Document) -> bool {
             DataObjectData::BreakData(b) if b.dimension_reference.is_null()
         ),
         ObjectType::ImageDefinitionReactor(reactor) => {
-            !doc.objects.contains_key(&reactor.image_handle)
+            doc.get_entity(reactor.image_handle).is_none()
+                && !doc.objects.contains_key(&reactor.image_handle)
         }
         _ => false,
     }
@@ -525,11 +526,7 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
                 dict.entries
                     .retain(|(_, target)| !omitted_handles.contains(target));
                 if omitted_handles.contains(&dict.default_handle) {
-                    dict.default_handle = dict
-                        .entries
-                        .first()
-                        .map(|(_, target)| *target)
-                        .unwrap_or(Handle::NULL);
+                    dict.default_handle = Handle::NULL;
                 }
             }
             ObjectType::XRecord(xrecord) => {
@@ -870,4 +867,54 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_reactors_retain_their_surviving_entity_owner() {
+        let mut doc = Document::new();
+        let image = doc.add_entity(EntityType::RasterImage(document::entities::RasterImage::new(
+            "synthetic.png", document::types::Vector3::ZERO, 8., 8.,
+        ))).unwrap();
+        let handle = doc.allocate_handle();
+        let mut reactor = document::objects::ImageDefinitionReactor::new(image);
+        reactor.handle = handle;
+        reactor.owner = image;
+        doc.objects.insert(handle, ObjectType::ImageDefinitionReactor(reactor));
+        let before = doc.clone();
+        assert!(!has_omitted_dxf_records(&doc));
+        assert!(!prune_omitted_dxf_records(&mut doc));
+        assert_eq!(doc, before);
+    }
+
+    #[test]
+    fn removing_a_default_does_not_select_an_unrelated_dictionary_entry() {
+        let mut doc = Document::new();
+        let root = find_root_dict_handle(&doc);
+        let dictionary = doc.allocate_handle();
+        let removed = doc.allocate_handle();
+        let retained = doc.allocate_handle();
+        let mut placeholder = document::objects::PlaceHolder::default();
+        placeholder.handle = retained;
+        placeholder.owner = dictionary;
+        doc.objects.insert(retained, ObjectType::PlaceHolder(placeholder));
+        doc.objects.insert(removed, ObjectType::Unknown {
+            type_name: "SYNTHETIC_RAW_OBJECT".into(), handle: removed, owner: dictionary,
+            raw_dxf_codes: None, raw_dwg_data: Some(vec![0]), raw_dwg_handle_bits: 0,
+            raw_dwg_version: Some(document::DxfVersion::AC1032),
+        });
+        let mut value = document::objects::DictionaryWithDefault::default();
+        value.handle = dictionary;
+        value.owner = root;
+        value.entries = vec![("removed".into(), removed), ("retained".into(), retained)];
+        value.default_handle = removed;
+        doc.objects.insert(dictionary, ObjectType::DictionaryWithDefault(value));
+        assert!(prune_omitted_dxf_records(&mut doc));
+        let ObjectType::DictionaryWithDefault(value) = &doc.objects[&dictionary] else { panic!() };
+        assert_eq!(value.default_handle, Handle::NULL);
+        assert_eq!(value.entries, vec![("retained".into(), retained)]);
+    }
 }

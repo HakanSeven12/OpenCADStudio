@@ -1138,31 +1138,34 @@ impl WireModel {
 
     /// Return a clone with every point uniformly scaled from `center` by `factor`.
     pub fn scaled(&self, center: glam::Vec3, factor: f32) -> Self {
+        self.scaled_precise(center.as_dvec3(), factor as f64)
+    }
+
+    /// Uniform preview scaling without rounding a world-space base to f32.
+    pub fn scaled_precise(&self, center: glam::DVec3, factor: f64) -> Self {
         let mut out = self.clone();
         out.name = format!("preview_{}", self.name);
         out.color = Self::CYAN;
         out.selected = false;
         if let Some(marker) = out.point_marker {
-            let center = center.as_dvec3();
             let normal = marker.normal.normalize_or(glam::DVec3::Z);
-            let target_origin = center + (marker.origin - center) * factor as f64;
+            let target_origin = center + (marker.origin - center) * factor;
             map_points(&mut out.points, &mut out.points_low, |point| {
                 let delta = point - marker.origin;
                 let axial = normal * delta.dot(normal);
-                target_origin + (delta - axial) + axial * factor as f64
+                target_origin + (delta - axial) + axial * factor
             });
             if let Some(target) = &mut out.point_marker {
                 target.origin = target_origin;
             }
         } else {
-            let center = center.as_dvec3();
             map_points(&mut out.points, &mut out.points_low, |point| {
-                center + (point - center) * factor as f64
+                center + (point - center) * factor
             });
         }
         if !out.text_verts.is_empty() {
-            let (cx, cy, cz) = (center.x as f64, center.y as f64, center.z as f64);
-            let f = factor as f64;
+            let (cx, cy, cz) = (center.x, center.y, center.z);
+            let f = factor;
             out.text_verts = map_text_verts(&self.text_verts, |x, y, z| {
                 (cx + (x - cx) * f, cy + (y - cy) * f, cz + (z - cz) * f)
             });
@@ -1170,7 +1173,7 @@ impl WireModel {
         out.tangent_geoms = self
             .tangent_geoms
             .iter()
-            .map(|tg| tg.scaled(center.as_dvec3(), factor as f64))
+            .map(|tg| tg.scaled(center, factor))
             .collect();
         out.searchable_text.clear();
         out

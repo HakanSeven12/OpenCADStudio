@@ -367,6 +367,7 @@ impl Scene {
             .flatten()
             .collect();
         let mut refresh_solid_handles = Vec::new();
+        let mut scaled_table_handles = Vec::new();
         for &h in handles {
             if self.is_recording_undo() {
                 let context_objects = self
@@ -398,7 +399,29 @@ impl Scene {
                 let before = self.document.get_entity_arc(h);
                 self.record_undo_before(h, before);
             }
+            let scaled_table = match self.document.get_entity(h) {
+                Some(EntityType::Table(table)) => {
+                    crate::entities::table::scaling::prepare(table, &self.document, t)
+                }
+                _ => None,
+            };
+            if scaled_table.is_some() {
+                scaled_table_handles.push(h);
+            }
+            if scaled_table.is_some() && self.is_recording_undo() {
+                if let Some(EntityType::Table(table)) = self.document.get_entity(h) {
+                    let members =
+                        crate::entities::table::scaling::picture_members(table, &self.document);
+                    for member in members {
+                        let before = self.document.get_entity_arc(member);
+                        self.record_undo_before(member, before);
+                    }
+                }
+            }
             if let Some(entity) = self.document.get_entity_mut(h) {
+                if let (EntityType::Table(table), Some(prepared)) = (&mut *entity, scaled_table) {
+                    **table = prepared;
+                }
                 view::dispatch::apply_transform(entity, t);
                 render_graph::clear_dim_picture_placement(entity);
                 if mirror_true {
@@ -512,6 +535,19 @@ impl Scene {
             &transformed_refs,
             &retained_originals,
         );
+        if self.is_recording_undo() {
+            for handle in scaled_table_handles {
+                if let Some(EntityType::Table(table)) = self.document.get_entity(handle) {
+                    let members =
+                        crate::entities::table::scaling::picture_members(table, &self.document);
+                    for member in members {
+                        // First-touch recording keeps any old member's before
+                        // image; newly allocated picture entities undo to None.
+                        self.record_undo_before(member, None);
+                    }
+                }
+            }
+        }
         self.refresh_meshes_for_handles(&refresh_solid_handles);
     }
 
@@ -1300,6 +1336,13 @@ impl Scene {
                 None
             };
             let picture_placement = render_graph::dim_picture_placement(&entity);
+            if let EntityType::Table(table) = &mut entity {
+                if let Some(prepared) =
+                    crate::entities::table::scaling::prepare(table, &self.document, t)
+                {
+                    **table = prepared;
+                }
+            }
             view::dispatch::apply_transform(&mut entity, t);
             render_graph::clear_dim_picture_placement(&mut entity);
             if let Some(o) = &text_orient {

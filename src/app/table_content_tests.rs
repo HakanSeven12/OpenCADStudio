@@ -170,3 +170,144 @@ fn check_undo(delta: bool) {
     assert_eq!(widths(table(doc, handle)), vec![30.0; 4]);
     assert_content_matches(doc, handle);
 }
+
+#[test]
+fn table_scaling_command_grip_and_affine_rebuild_picture_and_content() {
+    use crate::command::{EntityTransform, StepInput};
+    use crate::scene::pick::grip::GripEdit;
+    use crate::ui::popup::context_menu::GripMenuCmd;
+    use glam::DVec3;
+
+    for (path, factor) in (0..3).flat_map(|path| [0.01, 3.0].map(|factor| (path, factor))) {
+        let (mut app, h) = fixture();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entity(h, false);
+        let before = table(&app.tabs[i].scene.document, h).clone();
+        if path == 2 {
+            app.push_undo_snapshot(i, "SCALE");
+            app.tabs[i].scene.transform_entities(
+                &[h],
+                &EntityTransform::Affine(document::types::Transform::from_scaling_with_origin(
+                    Vector3::new(factor, factor, factor),
+                    Vector3::ZERO,
+                )),
+            );
+        } else {
+            if path == 0 {
+                let _ = app.dispatch_command("SCALE");
+                let _ = app.feed_command(StepInput::Point(DVec3::ZERO));
+            } else {
+                app.tabs[i].active_grip = Some(GripEdit::single(h, 0, false, DVec3::ZERO));
+                let _ = app.on_grip_context_pick(GripMenuCmd::Scale);
+            }
+            let input = if path == 1 {
+                StepInput::Point(DVec3::X * factor)
+            } else {
+                StepInput::Text(factor.to_string())
+            };
+            let _ = app.feed_command(input);
+        }
+        let doc = &app.tabs[i].scene.document;
+        let scaled = table(doc, h);
+        assert!((scaled.total_width() - 80.0 * factor).abs() < 1e-6);
+        assert_eq!(widths(scaled), widths(content(doc, h)), "stale TABLECONTENT");
+        assert_table_scaling_picture_width(doc, h, 80.0 * factor);
+        if path == 0 {
+            for ext in ["dwg", "dxf"] {
+                let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
+                let reopened = crate::io::load_bytes(&format!("scaled-table.{ext}"), bytes).unwrap();
+                let saved = reopened
+                    .entities()
+                    .find_map(|entity| {
+                        matches!(entity, EntityType::Table(_)).then_some(entity.common().handle)
+                    })
+                    .unwrap();
+                assert!((table(&reopened, saved).total_width() - 80.0 * factor).abs() < 1e-6);
+                assert_table_scaling_picture_width(&reopened, saved, 80.0 * factor);
+            }
+        }
+        app.undo_steps(1);
+        assert_eq!(widths(table(&app.tabs[i].scene.document, h)), widths(&before));
+        assert_eq!(
+            widths(content(&app.tabs[i].scene.document, h)),
+            widths(&before)
+        );
+        assert_table_scaling_picture_width(&app.tabs[i].scene.document, h, 80.0);
+        app.redo_steps(1);
+        assert_eq!(
+            widths(table(&app.tabs[i].scene.document, h)),
+            vec![20.0 * factor; 4]
+        );
+        assert_table_scaling_picture_width(&app.tabs[i].scene.document, h, 80.0 * factor);
+    }
+}
+
+#[test]
+fn table_scaling_keeps_shared_style_dimensions_on_other_instances() {
+    use crate::command::EntityTransform;
+    use document::entities::table::CellStylePropertyFlags as P;
+    let (mut app, h) = fixture();
+    let i = app.active_tab;
+    let doc = &mut app.tabs[i].scene.document;
+    let style_handle = doc.allocate_handle();
+    let mut shared = document::objects::TableStyle::new("Shared dimensions");
+    shared.handle = style_handle;
+    shared.set_all_text_heights(5.0);
+    shared.horizontal_margin = 1.0;
+    shared.vertical_margin = 1.0;
+    doc.objects
+        .insert(style_handle, ObjectType::TableStyle(shared.clone()));
+    let Some(EntityType::Table(source)) = doc.get_entity_mut(h) else {
+        panic!("table");
+    };
+    source.table_style_handle = Some(style_handle);
+    source.set_cell_text(2, 0, "Scaled content");
+    let other = app.tabs[i]
+        .scene
+        .copy_entities(&[h], &EntityTransform::Translate(glam::DVec3::X))[0];
+    app.tabs[i].scene.transform_entities(
+        &[h],
+        &EntityTransform::Scale {
+            center: glam::DVec3::ZERO,
+            factor: 0.01,
+        },
+    );
+    let doc = &app.tabs[i].scene.document;
+    let scaled = table(doc, h);
+    let style = crate::entities::table::style_for_property(
+        scaled,
+        &scaled.rows[2],
+        0,
+        &scaled.rows[2].cells[0],
+        P::TEXT_HEIGHT,
+    )
+    .expect("instance text height");
+    assert!((style.text_height - 0.05).abs() < 1e-9);
+    assert!((style.margin_left - 0.025).abs() < 1e-9);
+    assert_eq!(table(doc, other).total_width(), 80.0);
+    let Some(ObjectType::TableStyle(unchanged)) = doc.objects.get(&style_handle) else {
+        panic!("style");
+    };
+    assert_eq!(unchanged, &shared);
+}
+
+fn assert_table_scaling_picture_width(doc: &Document, handle: Handle, width: f64) {
+    let table = table(doc, handle);
+    let picture = table
+        .block_record_handle
+        .and_then(|handle| doc.block_records.iter().find(|r| r.handle == handle))
+        .or_else(|| doc.block_records.get(&table.block_name))
+        .expect("picture block");
+    let max_x = picture
+        .entity_handles
+        .iter()
+        .filter_map(|handle| match doc.get_entity(*handle) {
+            Some(EntityType::Line(line)) => Some(line.start.x.max(line.end.x)),
+            _ => None,
+        })
+        .fold(0.0_f64, f64::max);
+    assert!(
+        (max_x - width).abs() < 1e-5,
+        "stale picture: {max_x} != {width}"
+    );
+}

@@ -42,7 +42,17 @@ impl OpenCADStudio {
         // A translation carries its complete connected constraint
         // component so each member keeps its own dimensions. Other
         // transforms retain their selected-object behavior.
-        let pending = self.begin_undo(i, label, handles.len(), true);
+        // Scaling a table rebuilds its picture block and its membership.
+        let table_scale = matches!(
+            transform,
+            crate::command::EntityTransform::Scale { .. } | crate::command::EntityTransform::Affine(_)
+        ) && handles.iter().any(|h| {
+            matches!(
+                self.tabs[i].scene.document.get_entity(*h),
+                Some(document::EntityType::Table(_))
+            )
+        });
+        let pending = self.begin_undo(i, label, handles.len(), !table_scale);
         let handles = self.tabs[i]
             .scene
             .transform_picked_segments(&handles, &transform);

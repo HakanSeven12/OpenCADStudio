@@ -2699,6 +2699,15 @@ impl OpenCADStudio {
                 self.tabs[i].last_cursor_world = snapped;
             }
             let delta = snapped - grip.last_world;
+            // A table grip edits the table as it was when the drag started,
+            // at the cursor: a fill, a break or a column line need not follow
+            // the cursor, so the drag is not rebased onto them.
+            let table_targets: rustc_hash::FxHashSet<Handle> = self
+                .grip_originals
+                .iter()
+                .filter(|(_, entity)| matches!(entity, document::EntityType::Table(_)))
+                .map(|(handle, _)| *handle)
+                .collect();
             let menu_action = match grip.mode {
                 GripEditMode::Lengthen => {
                     Some(crate::scene::model::object::GripMenuAction::Lengthen)
@@ -2756,7 +2765,9 @@ impl OpenCADStudio {
                 grip.targets
                     .iter()
                     .map(|target| {
-                        let apply = if target.is_translate {
+                        let apply = if target.is_translate
+                            && !table_targets.contains(&target.handle)
+                        {
                             GripApply::Translate(delta)
                         } else {
                             GripApply::Absolute(target.last_world + delta)
@@ -2860,9 +2871,46 @@ impl OpenCADStudio {
                         .map(|bulge| (target.handle, target.grip_id, bulge))
                 })
                 .collect();
+            for &handle in &table_targets {
+                let original = self
+                    .grip_originals
+                    .iter()
+                    .find(|(original_handle, _)| *original_handle == handle)
+                    .map(|(_, entity)| entity.clone());
+                if let (Some(original), Some(current)) =
+                    (original, self.tabs[i].scene.document.get_entity_mut(handle))
+                {
+                    *current = original;
+                }
+            }
             for (handle, grip_id, apply) in actions {
+                let fill_point = match &apply {
+                    GripApply::Absolute(point) => Some(*point),
+                    _ => None,
+                };
                 if !rebuilt_arcs.contains(&handle) {
                     self.tabs[i].scene.apply_grip(handle, grip_id, apply);
+                }
+                // A fill shows the cells it reaches, filled or empty.
+                if let (true, Some(point), Some(range)) = (
+                    grip_id == crate::entities::table::CELL_GRIP_FILL
+                        && table_targets.contains(&handle),
+                    fill_point,
+                    crate::entities::table::prop_cell_range(),
+                ) {
+                    if let Some((_, document::EntityType::Table(original))) = self
+                        .grip_originals
+                        .iter()
+                        .find(|(original_handle, _)| *original_handle == handle)
+                    {
+                        let (r0, c0, r1, c1) =
+                            crate::entities::table::fill_span(original, range, point);
+                        self.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+                            table: handle,
+                            anchor: (r0, c0),
+                            end: (r1, c1),
+                        });
+                    }
                 }
             }
             for (handle, vertex_id, original_bulge) in refit_arc_targets {
@@ -2973,6 +3021,9 @@ impl OpenCADStudio {
                 .collect();
             if let Some(active) = self.tabs[i].active_grip.as_mut() {
                 for target in &mut active.targets {
+                    if table_targets.contains(&target.handle) {
+                        continue;
+                    }
                     if let Some((_, world)) = refreshed_targets
                         .iter()
                         .find(|((handle, id), _)| *handle == target.handle && *id == target.grip_id)

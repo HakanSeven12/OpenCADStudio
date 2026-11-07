@@ -2503,7 +2503,9 @@ impl Grippable for Table {
         use crate::entities::common::oriented_triangle_grip;
         let (origin, horizontal, down) = grip_frame(self);
         let width = self.total_width();
-        let height = self.total_height();
+        // A broken table shows its grips on the first piece: the break
+        // arrow sits at the break height.
+        let height = first_piece_height(self).unwrap_or_else(|| self.total_height());
         let mut grips = vec![
             square_grip(0, origin),
             oriented_triangle_grip(1, origin + horizontal * width, horizontal),
@@ -2527,6 +2529,27 @@ impl Grippable for Table {
             ));
         }
         grips
+    }
+
+    /// The hover label says what the grip changes, in a few words.
+    fn grip_menu(&self, grip_id: usize) -> Vec<crate::scene::model::object::GripMenuItem> {
+        use crate::scene::model::object::{GripMenuAction, GripMenuItem};
+        let label = match grip_id {
+            0 => "Move table",
+            1 => "Table width",
+            2 => "Table height",
+            3 => "Table width and height",
+            4 => "Break table",
+            CELL_GRIP_LEFT | CELL_GRIP_RIGHT => "Column width",
+            CELL_GRIP_TOP | CELL_GRIP_BOTTOM => "Row height",
+            CELL_GRIP_FILL => "Autofill cells",
+            id if id >= 100 => "Column width",
+            _ => "Stretch",
+        };
+        vec![GripMenuItem {
+            label,
+            action: GripMenuAction::Stretch,
+        }]
     }
 
     fn apply_grip(&mut self, grip_id: usize, apply: GripApply) {
@@ -2578,7 +2601,7 @@ impl Grippable for Table {
             }
         };
         let scale_rows = |table: &mut Self, height: f64| {
-            let current = table.total_height();
+            let current = first_piece_height(table).unwrap_or_else(|| table.total_height());
             if current > 1.0e-12 {
                 for row in &mut table.rows {
                     row.height *= height.max(1.0e-6) / current;
@@ -2593,10 +2616,16 @@ impl Grippable for Table {
                 scale_rows(self, below);
             }
             // Breaking: the table splits where the arrow is left.
+            // Left at or below the table's bottom, the pieces join again.
             4 => {
                 use document::entities::table::BreakOptionFlags;
-                if below > 1.0e-6 && below < self.total_height() {
+                if below >= self.total_height() {
+                    self.break_options.remove(BreakOptionFlags::ENABLE_BREAKS);
+                    self.break_ranges.clear();
+                } else if below > 1.0e-6 {
                     self.break_options.insert(BreakOptionFlags::ENABLE_BREAKS);
+                    self.break_options
+                        .remove(BreakOptionFlags::ALLOW_MANUAL_HEIGHTS);
                     self.apply_geom_prop("tbl_break_height", &below.to_string());
                 }
             }
@@ -2625,6 +2654,27 @@ impl Grippable for Table {
         // name, just as a cell edit does. A move keeps its authored picture.
         self.block_record_handle = None;
     }
+}
+
+/// Height of the first piece of a broken table: the rows that fit in the
+/// break height (at least one). None when the table is whole.
+fn first_piece_height(table: &Table) -> Option<f64> {
+    use document::entities::table::BreakOptionFlags;
+    if !table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS) {
+        return None;
+    }
+    let limit = table.break_data.first().map(|data| data.height)?;
+    if limit <= 1.0e-6 || limit >= table.total_height() {
+        return None;
+    }
+    let mut height = 0.0;
+    for (index, row) in table.rows.iter().enumerate() {
+        if index > 0 && height + row.height > limit {
+            break;
+        }
+        height += row.height;
+    }
+    Some(height)
 }
 
 /// Insertion point and the table's across and downward directions.
@@ -4486,6 +4536,77 @@ pub fn table_indicator(
 mod tests {
     use super::*;
 
+    /// The fill diamond also runs up and left, a number series backwards.
+    #[test]
+    fn fill_grip_fills_up_and_left_too() {
+        let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 6, 6);
+        for (row, column, text) in [(3, 3, "5"), (4, 3, "6")] {
+            table.set_cell_text(row, column, text);
+            let cell = table.cell_mut(row, column).unwrap();
+            cell.contents[0].value.value_type = document::entities::table::CellValueType::Long;
+        }
+        let (origin, horizontal, down) = grip_frame(&table);
+        let centre = |t: &Table, row: usize, column: usize| {
+            let x: f64 = t.columns.iter().take(column).map(|c| c.width).sum::<f64>() + t.columns[column].width / 2.0;
+            let y: f64 = t.rows.iter().take(row).map(|r| r.height).sum::<f64>() + t.rows[row].height / 2.0;
+            origin + horizontal * x + down * y
+        };
+        let mut up = table.clone();
+        apply_cell_grip(&mut up, (3, 3, 4, 3), CELL_GRIP_FILL, centre(&table, 1, 3));
+        let text = |t: &Table, r: usize, c: usize| t.cell(r, c).unwrap().text_value().to_string();
+        assert_eq!((text(&up, 2, 3), text(&up, 1, 3)), ("4".into(), "3".into()));
+        assert_eq!(text(&up, 0, 3), "", "only up to the cursor's row");
+
+        let mut left = table.clone();
+        left.set_cell_text(3, 3, "A");
+        apply_cell_grip(&mut left, (3, 3, 3, 3), CELL_GRIP_FILL, centre(&table, 3, 1));
+        assert_eq!((text(&left, 3, 2), text(&left, 3, 1), text(&left, 3, 0)), ("A".into(), "A".into(), String::new()));
+    }
+
+    #[test]
+    fn table_grips_say_what_they_change() {
+        let table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 3, 3);
+        let label = |id: usize| table.grip_menu(id)[0].label;
+        assert_eq!(label(0), "Move table");
+        assert_eq!(label(4), "Break table");
+        assert_eq!(label(101), "Column width");
+        assert_eq!(label(CELL_GRIP_BOTTOM), "Row height");
+        assert_eq!(label(CELL_GRIP_FILL), "Autofill cells");
+        for id in table.grips().iter().map(|grip| grip.id) {
+            assert_ne!(label(id), "Stretch", "grip {id}");
+        }
+    }
+
+    fn grip_at(table: &Table, id: usize) -> glam::DVec3 {
+        table.grips().into_iter().find(|grip| grip.id == id).expect("grip").world
+    }
+
+    /// The bottom-middle arrow breaks the table where it is left, then sits
+    /// on the first piece's bottom; left below the table it joins it again.
+    #[test]
+    fn break_grip_sits_on_the_first_piece_and_joins_below_the_table() {
+        use document::entities::table::BreakOptionFlags;
+        let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 8, 2);
+        let total = table.total_height();
+        let (origin, _, down) = grip_frame(&table);
+        let depth = |p: glam::DVec3| (p - origin).dot(down);
+        assert!((depth(grip_at(&table, 4)) - total).abs() < 1e-9);
+
+        let row = table.rows[0].height;
+        table.apply_grip(4, GripApply::Absolute(origin + down * (row * 2.4)));
+        assert!(table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS));
+        for id in [2, 3, 4] {
+            assert!((depth(grip_at(&table, id)) - row * 2.0).abs() < 1e-9, "grip {id}");
+        }
+        // dragging it again moves the break instead of doing nothing
+        table.apply_grip(4, GripApply::Translate(down * row));
+        assert!((depth(grip_at(&table, 4)) - row * 3.0).abs() < 1e-9);
+
+        table.apply_grip(4, GripApply::Absolute(origin + down * (total + 1.0)));
+        assert!(!table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS));
+        assert!((depth(grip_at(&table, 4)) - total).abs() < 1e-9);
+    }
+
     fn sample_table() -> Table {
         let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 2, 2);
         table.set_cell_text(0, 0, "10");
@@ -4807,47 +4928,88 @@ pub fn apply_cell_grip(
             table.rows[r0].height = (table.rows[r0].height - (below - y0)).max(MIN);
         }
         CELL_GRIP_FILL => {
-            // The cell under the point decides how far the fill reaches.
-            let column_at = |x: f64| {
-                let mut edge = 0.0;
-                for (index, column) in table.columns.iter().enumerate() {
-                    edge += column.width;
-                    if x < edge {
-                        return index;
-                    }
-                }
-                table.columns.len() - 1
-            };
-            let row_at = |y: f64| {
-                let mut edge = 0.0;
-                for (index, row) in table.rows.iter().enumerate() {
-                    edge += row.height;
-                    if y < edge {
-                        return index;
-                    }
-                }
-                table.rows.len() - 1
-            };
-            let (to_row, to_column) = (row_at(below.max(0.0)), column_at(along.max(0.0)));
+            let (to_row, to_column) = fill_cell_at(table, below, along);
+            // The fill runs the way the cursor left the range farthest: down,
+            // up, right or left; up and left continue a series backwards.
             let down_rows = to_row.saturating_sub(r1);
+            let up_rows = r0.saturating_sub(to_row);
             let right_columns = to_column.saturating_sub(c1);
-            if down_rows >= right_columns && down_rows > 0 {
+            let left_columns = c0.saturating_sub(to_column);
+            let reach = down_rows.max(up_rows).max(right_columns).max(left_columns);
+            if reach == 0 {
+                return;
+            }
+            if down_rows == reach || up_rows == reach {
                 for column in c0..=c1 {
-                    let sources: Vec<(usize, usize)> = (r0..=r1).map(|row| (row, column)).collect();
-                    let targets: Vec<(usize, usize)> =
-                        (r1 + 1..=to_row).map(|row| (row, column)).collect();
-                    fill_series(table, &sources, &targets);
+                    let (sources, targets): (Vec<_>, Vec<_>) = if down_rows == reach {
+                        ((r0..=r1).collect(), (r1 + 1..=to_row).collect())
+                    } else {
+                        ((r0..=r1).rev().collect(), (to_row..r0).rev().collect())
+                    };
+                    let at = |rows: Vec<usize>| rows.into_iter().map(|row| (row, column)).collect::<Vec<_>>();
+                    fill_series(table, &at(sources), &at(targets));
                 }
-            } else if right_columns > 0 {
+            } else {
                 for row in r0..=r1 {
-                    let sources: Vec<(usize, usize)> = (c0..=c1).map(|column| (row, column)).collect();
-                    let targets: Vec<(usize, usize)> =
-                        (c1 + 1..=to_column).map(|column| (row, column)).collect();
-                    fill_series(table, &sources, &targets);
+                    let (sources, targets): (Vec<_>, Vec<_>) = if right_columns == reach {
+                        ((c0..=c1).collect(), (c1 + 1..=to_column).collect())
+                    } else {
+                        ((c0..=c1).rev().collect(), (to_column..c0).rev().collect())
+                    };
+                    let at = |columns: Vec<usize>| columns.into_iter().map(|column| (row, column)).collect::<Vec<_>>();
+                    fill_series(table, &at(sources), &at(targets));
                 }
             }
         }
         _ => {}
+    }
+}
+
+/// The cell under a point `below` / `along` the table's first cell corner.
+fn fill_cell_at(table: &Table, below: f64, along: f64) -> (usize, usize) {
+    let index_at = |sizes: &mut dyn Iterator<Item = f64>, at: f64, last: usize| {
+        let mut edge = 0.0;
+        for (index, size) in sizes.enumerate() {
+            edge += size;
+            if at < edge {
+                return index;
+            }
+        }
+        last
+    };
+    (
+        index_at(&mut table.rows.iter().map(|r| r.height), below.max(0.0), table.rows.len() - 1),
+        index_at(&mut table.columns.iter().map(|c| c.width), along.max(0.0), table.columns.len() - 1),
+    )
+}
+
+/// The picked range and the cells a fill dragged to `point` reaches:
+/// shown while dragging the fill diamond.
+pub fn fill_span(
+    table: &Table,
+    range: (usize, usize, usize, usize),
+    point: glam::DVec3,
+) -> (usize, usize, usize, usize) {
+    if table.rows.is_empty() || table.columns.is_empty() {
+        return range;
+    }
+    let (r0, c0, r1, c1) = widen_to_merged(table, range);
+    let (origin, horizontal, down) = grip_frame(table);
+    let (to_row, to_column) =
+        fill_cell_at(table, (point - origin).dot(down), (point - origin).dot(horizontal));
+    let reach = [
+        to_row.saturating_sub(r1),
+        r0.saturating_sub(to_row),
+        to_column.saturating_sub(c1),
+        c0.saturating_sub(to_column),
+    ];
+    let most = reach.iter().copied().max().unwrap_or(0);
+    match reach.iter().position(|&r| r == most && most > 0) {
+        Some(0) => (r0, c0, to_row, c1),
+        Some(1) => (to_row, c0, r1, c1),
+        Some(2) => (r0, c0, r1, to_column),
+        Some(3) => (r0, to_column, r1, c1),
+        _ => (r0, c0, r1, c1),
     }
 }
 

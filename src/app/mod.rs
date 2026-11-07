@@ -1441,6 +1441,9 @@ pub(super) struct OpenCADStudio {
     /// near it, the press was a click and the grip stays hot for a second
     /// click to place it.
     grip_engage_press: Option<Point>,
+    /// A point an MTP / M2P modifier resolved while a grip was hot: the next
+    /// grip placement uses it instead of the typed or cursor point.
+    grip_point_override: Option<glam::DVec3>,
     /// Frozen pre-drag wire geometry used only as a visual/reference snapshot.
     ///
     /// It is deliberately NOT added to normal snap candidates: the live entity is
@@ -6410,6 +6413,7 @@ impl OpenCADStudio {
             grip_history_originals: Vec::new(),
             grip_dirty_before: None,
             grip_engage_press: None,
+            grip_point_override: None,
             grip_reference_wires: Vec::new(),
             grip_text_verts: Vec::new(),
             grip_text_slide: false,

@@ -1673,7 +1673,7 @@ impl OpenCADStudio {
                 let allowed = self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
                     (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
                         && !c.needs_entity_pick()
-                });
+                }) || (!from && self.grip_point_prompt(i));
                 if allowed {
                     if from {
                         self.start_from_modifier(i);

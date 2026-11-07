@@ -2883,6 +2883,7 @@ impl OpenCADStudio {
                     *current = original;
                 }
             }
+            self.tabs[i].scene.table_fill_drag = None;
             for (handle, grip_id, apply) in actions {
                 let fill_point = match &apply {
                     GripApply::Absolute(point) => Some(*point),
@@ -2910,6 +2911,7 @@ impl OpenCADStudio {
                             anchor: (r0, c0),
                             end: (r1, c1),
                         });
+                        self.tabs[i].scene.table_fill_drag = Some(handle);
                     }
                 }
             }

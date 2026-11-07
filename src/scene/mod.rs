@@ -2658,6 +2658,9 @@ pub struct Scene {
     /// Separate from object isolation so a grip can never activate the
     /// isolation status or be captured in its undo state.
     pub preview_hidden: HashSet<Handle>,
+    /// The table whose fill grip is being dragged: its picked range stays
+    /// drawn over the grip preview that hides it.
+    pub table_fill_drag: Option<Handle>,
     /// Source handles replaced by an active command preview. Kept separate
     /// from grip state so either interaction can clean up only its own hides.
     command_preview_hidden: HashSet<Handle>,
@@ -3434,6 +3437,7 @@ impl Scene {
             layer_walk: LayerWalkState::default(),
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
+            table_fill_drag: None,
             command_preview_hidden: HashSet::default(),
             refedit_keep: None,
             refedit_lock: false,

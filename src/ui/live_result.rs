@@ -9,7 +9,7 @@ use iced::{Background, Border, Element, Fill, Length, Theme};
 /// The count, large, and what it is out of beside it.
 pub fn big_count<'a>(count: usize, of: impl Into<String>) -> Element<'a, Message> {
     row![
-        text(count.to_string())
+        text(fmt_count(count))
             .size(30)
             .font(iced::Font {
                 weight: iced::font::Weight::Bold,
@@ -29,7 +29,7 @@ pub fn big_count_two_lines<'a>(
     second: impl Into<String>,
 ) -> Element<'a, Message> {
     row![
-        text(count.to_string())
+        text(fmt_count(count))
             .size(30)
             .font(iced::Font {
                 weight: iced::font::Weight::Bold,
@@ -109,28 +109,29 @@ pub fn bucket<'a>(
     button(
         row![
             container(
-                text(label)
+                text(crate::ui::text_util::elide(&label, 14))
                     .size(11)
                     .wrapping(iced::widget::text::Wrapping::None)
             )
             .clip(true)
-            .width(Length::Fixed(90.0)),
+            .width(Length::Fixed(96.0)),
             track(count, total, false),
-            text(count.to_string())
+            text(fmt_count(count))
                 .size(11)
-                .width(Length::Fixed(40.0))
+                .width(Length::Fixed(44.0))
                 .align_x(iced::alignment::Horizontal::Right),
         ]
         .spacing(8)
         .align_y(iced::Alignment::Center),
     )
     .on_press(on_press)
-    .padding([2, 4])
+    .padding([3, 4])
+    .height(22)
     .width(Fill)
     .style(move |theme: &Theme, status| {
         let palette = theme.palette();
         let background = if on {
-            Some(palette.primary.weak.color)
+            Some(quiet_selection(theme))
         } else if matches!(status, button::Status::Hovered) {
             Some(palette.background.strong.color)
         } else {
@@ -138,11 +139,7 @@ pub fn bucket<'a>(
         };
         button::Style {
             background: background.map(Background::Color),
-            text_color: if on {
-                palette.primary.weak.text
-            } else {
-                palette.background.base.text
-            },
+            text_color: palette.background.base.text,
             border: Border {
                 radius: 3.0.into(),
                 ..Default::default()
@@ -151,6 +148,112 @@ pub fn bucket<'a>(
         }
     })
     .into()
+}
+
+/// The selection colour of the lists: the accent mixed into the
+/// background, quiet in a dark theme as in the mockups.
+pub fn quiet_selection(theme: &Theme) -> iced::Color {
+    let palette = theme.palette();
+    let bg = palette.background.base.color;
+    let accent = palette.primary.base.color;
+    let dark = bg.r * 0.299 + bg.g * 0.587 + bg.b * 0.114 < 0.5;
+    let t = if dark { 0.32 } else { 0.18 };
+    let mix = |a: f32, b: f32| a + (b - a) * t;
+    iced::Color::from_rgb(
+        mix(bg.r, accent.r),
+        mix(bg.g, accent.g),
+        mix(bg.b, accent.b),
+    )
+}
+
+/// A count with its thousands apart, as the mockup writes them: 3 997.
+pub fn fmt_count(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push('\u{2009}');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The "Show" switch of a live result: on, it has the selection colour and
+/// an accent border (mockup), off it is a plain button.
+pub fn show_toggle<'a>(on: bool, label: String, on_press: Message) -> Element<'a, Message> {
+    button(
+        row![
+            crate::ui::icons::themed(
+                if on {
+                    crate::ui::icons::EYE
+                } else {
+                    crate::ui::icons::EYE_OFF
+                },
+                12.0
+            ),
+            text(label).size(11)
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center),
+    )
+    .on_press(on_press)
+    .padding([3, 8])
+    .style(move |theme: &Theme, status| {
+        let palette = theme.palette();
+        button::Style {
+            background: Some(Background::Color(if on {
+                quiet_selection(theme)
+            } else if matches!(status, button::Status::Hovered) {
+                palette.background.strong.color
+            } else {
+                palette.background.weak.color
+            })),
+            text_color: palette.background.base.text,
+            border: Border {
+                color: if on {
+                    palette.primary.base.color
+                } else {
+                    palette.background.neutral.color
+                },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..Default::default()
+        }
+    })
+    .into()
+}
+
+/// A read-back sentence with its joining words (and, or, not) in the
+/// accent colour, as the mockup's "Reads:" line.
+pub fn reads<'a>(sentence: String, keywords: &[String]) -> Element<'a, Message> {
+    use iced::widget::text::Span;
+    let mut spans: Vec<Span<'a, Message>> = Vec::new();
+    let mut word = String::new();
+    let flush = |word: &mut String, spans: &mut Vec<Span<'a, Message>>| {
+        if word.is_empty() {
+            return;
+        }
+        let key = keywords
+            .iter()
+            .any(|k| k.eq_ignore_ascii_case(word.trim_matches(|c| c == '(' || c == ')')));
+        let span = iced::widget::span(std::mem::take(word));
+        // The accent of both built-in themes, readable on dark and light.
+        spans.push(if key {
+            span.color(iced::Color::from_rgb8(0x1E, 0x8F, 0xD0))
+        } else {
+            span
+        });
+    };
+    for c in sentence.chars() {
+        word.push(c);
+        if c == ' ' {
+            flush(&mut word, &mut spans);
+        }
+    }
+    flush(&mut word, &mut spans);
+    iced::widget::rich_text(spans).size(12).into()
 }
 
 pub fn muted<'a>(label: impl text::IntoFragment<'a>, size: f32) -> iced::widget::Text<'a> {

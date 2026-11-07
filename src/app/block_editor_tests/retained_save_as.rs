@@ -337,6 +337,12 @@ fn save_as_retained_constraints_clone_connections_runtime_and_history() {
     app.tabs[i].scene.sync_native_parametric_graph();
     assert_scope_graph(&app.tabs[i].scene.document, copied, copied_group);
     for ext in ["dwg", "dxf"] {
+        if ext == "dxf" {
+            let mut pruned = app.tabs[i].scene.document.clone();
+            ocs_save::prune_omitted_dxf_records(&mut pruned);
+            assert_scope_graph(&pruned, owner, group);
+            assert_scope_graph(&pruned, copied, copied_group);
+        }
         let bytes = crate::io::save_to_bytes(
             &app.tabs[i].scene.document,
             ext,

@@ -22,8 +22,13 @@ use document::{
 };
 
 fn is_unrestorable_assoc_object(dxf_name: &str) -> bool {
-    dxf_name.eq_ignore_ascii_case("ACDBASSOCDEPENDENCY")
-        || dxf_name.eq_ignore_ascii_case("ACDBBLOCKPURGEPREVENTER")
+    // Match the pinned codec writer: typed constraint dependencies are supported.
+    let normalized: String = dxf_name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect();
+    normalized.starts_with("ACDBDYNAMICBLOCKPURGEPREVENTER")
 }
 
 fn find_root_dict_handle(doc: &Document) -> Handle {
@@ -427,8 +432,7 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
         }
     }
 
-    let surviving_entity_handles: Vec<Handle> =
-        doc.entities().map(|e| e.common().handle).collect();
+    let surviving_entity_handles: Vec<Handle> = doc.entities().map(|e| e.common().handle).collect();
     for handle in surviving_entity_handles {
         let Some(entity) = doc.get_entity_mut(handle) else {
             continue;
@@ -668,16 +672,13 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
                 }
                 match &mut cls.data {
                     ClassObjectData::ObjectDataDictionary(dict) => {
-                        dict.entries
-                            .retain(|(_, h)| !omitted_handles.contains(h));
+                        dict.entries.retain(|(_, h)| !omitted_handles.contains(h));
                     }
                     ClassObjectData::SpatialIndex(idx) => {
-                        idx.indexed_objects
-                            .retain(|h| !omitted_handles.contains(h));
+                        idx.indexed_objects.retain(|h| !omitted_handles.contains(h));
                     }
                     ClassObjectData::PartialViewingIndex(idx) => {
-                        idx.entries
-                            .retain(|e| !omitted_handles.contains(&e.object));
+                        idx.entries.retain(|e| !omitted_handles.contains(&e.object));
                     }
                     ClassObjectData::SectionManager(mgr) => {
                         mgr.sections.retain(|h| !omitted_handles.contains(h));
@@ -691,8 +692,7 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
                         }
                     }
                     ClassObjectData::LightList(list) => {
-                        list.lights
-                            .retain(|e| !omitted_handles.contains(&e.handle));
+                        list.lights.retain(|e| !omitted_handles.contains(&e.handle));
                     }
                     ClassObjectData::ContextDataManager(mgr) => {
                         if omitted_handles.contains(&mgr.object_context) {
@@ -702,8 +702,7 @@ pub fn prune_omitted_dxf_records(doc: &mut Document) -> bool {
                             if omitted_handles.contains(&sub.handle) {
                                 sub.handle = Handle::NULL;
                             }
-                            sub.entries
-                                .retain(|e| !omitted_handles.contains(&e.item));
+                            sub.entries.retain(|e| !omitted_handles.contains(&e.item));
                         }
                     }
                     ClassObjectData::ViewRepModelSpaceViewSelectionSet(sel) => {
@@ -874,16 +873,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn supported_constraint_records_are_not_classified_as_omitted() {
+        for name in [
+            "ACDBASSOCDEPENDENCY",
+            "ACDBASSOCVALUEDEPENDENCY",
+            "ACDBASSOCGEOMDEPENDENCY",
+            "ACDBASSOCDIMDEPENDENCYBODY",
+        ] {
+            assert!(!is_unrestorable_assoc_object(name), "{name}");
+        }
+        for name in [
+            "ACDB_DYNAMICBLOCKPURGEPREVENTER_VERSION",
+            "AcDbDynamicBlockPurgePreventer",
+        ] {
+            assert!(is_unrestorable_assoc_object(name), "{name}");
+        }
+    }
+
+    #[test]
     fn image_reactors_retain_their_surviving_entity_owner() {
         let mut doc = Document::new();
-        let image = doc.add_entity(EntityType::RasterImage(document::entities::RasterImage::new(
-            "synthetic.png", document::types::Vector3::ZERO, 8., 8.,
-        ))).unwrap();
+        let image = doc
+            .add_entity(EntityType::RasterImage(
+                document::entities::RasterImage::new(
+                    "synthetic.png",
+                    document::types::Vector3::ZERO,
+                    8.,
+                    8.,
+                ),
+            ))
+            .unwrap();
         let handle = doc.allocate_handle();
         let mut reactor = document::objects::ImageDefinitionReactor::new(image);
         reactor.handle = handle;
         reactor.owner = image;
-        doc.objects.insert(handle, ObjectType::ImageDefinitionReactor(reactor));
+        doc.objects
+            .insert(handle, ObjectType::ImageDefinitionReactor(reactor));
         let before = doc.clone();
         assert!(!has_omitted_dxf_records(&doc));
         assert!(!prune_omitted_dxf_records(&mut doc));
@@ -900,20 +925,31 @@ mod tests {
         let mut placeholder = document::objects::PlaceHolder::default();
         placeholder.handle = retained;
         placeholder.owner = dictionary;
-        doc.objects.insert(retained, ObjectType::PlaceHolder(placeholder));
-        doc.objects.insert(removed, ObjectType::Unknown {
-            type_name: "SYNTHETIC_RAW_OBJECT".into(), handle: removed, owner: dictionary,
-            raw_dxf_codes: None, raw_dwg_data: Some(vec![0]), raw_dwg_handle_bits: 0,
-            raw_dwg_version: Some(document::DxfVersion::AC1032),
-        });
+        doc.objects
+            .insert(retained, ObjectType::PlaceHolder(placeholder));
+        doc.objects.insert(
+            removed,
+            ObjectType::Unknown {
+                type_name: "SYNTHETIC_RAW_OBJECT".into(),
+                handle: removed,
+                owner: dictionary,
+                raw_dxf_codes: None,
+                raw_dwg_data: Some(vec![0]),
+                raw_dwg_handle_bits: 0,
+                raw_dwg_version: Some(document::DxfVersion::AC1032),
+            },
+        );
         let mut value = document::objects::DictionaryWithDefault::default();
         value.handle = dictionary;
         value.owner = root;
         value.entries = vec![("removed".into(), removed), ("retained".into(), retained)];
         value.default_handle = removed;
-        doc.objects.insert(dictionary, ObjectType::DictionaryWithDefault(value));
+        doc.objects
+            .insert(dictionary, ObjectType::DictionaryWithDefault(value));
         assert!(prune_omitted_dxf_records(&mut doc));
-        let ObjectType::DictionaryWithDefault(value) = &doc.objects[&dictionary] else { panic!() };
+        let ObjectType::DictionaryWithDefault(value) = &doc.objects[&dictionary] else {
+            panic!()
+        };
         assert_eq!(value.default_handle, Handle::NULL);
         assert_eq!(value.entries, vec![("retained".into(), retained)]);
     }

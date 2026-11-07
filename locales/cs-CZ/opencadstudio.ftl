@@ -6608,6 +6608,7 @@ ui =
     .live-of-selection = z __ocs_fmt_0__ ve výběru
     .live-objects-match = objektů vyhovuje
     .live-click-hint = Klepnutím na řádek se ve výkresu zobrazí jen tento typ nebo hladina.
+    .filter-from-object = Z objektu
     .filter-by-type = Podle typu
     .filter-and = a
     .filter-or = nebo

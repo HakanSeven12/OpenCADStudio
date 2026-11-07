@@ -6605,6 +6605,7 @@ ui =
     .live-of-selection = z __ocs_fmt_0__ w wyborze
     .live-objects-match = obiektów pasuje
     .live-click-hint = Kliknij wiersz, aby pokazać na rysunku tylko ten typ lub warstwę.
+    .filter-from-object = Z obiektu
     .filter-by-type = Według typu
     .filter-and = i
     .filter-or = lub

@@ -6606,6 +6606,7 @@ ui =
     .live-of-selection = sur __ocs_fmt_0__ dans la sélection
     .live-objects-match = objets correspondent
     .live-click-hint = Cliquez sur une ligne pour ne montrer que ce type ou ce calque dans le dessin.
+    .filter-from-object = Depuis un objet
     .filter-by-type = Par type
     .filter-and = et
     .filter-or = ou

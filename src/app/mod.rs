@@ -53,7 +53,7 @@ mod dock;
 mod tab_document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
-mod filter_dialog;
+pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
@@ -350,6 +350,10 @@ pub enum QSelectResult {
     /// They leave the selection.
     Remove,
 }
+
+/// A picked object's properties ticked from the start: what describes it,
+/// not where it sits (#2611).
+pub(crate) const SAMPLE_TICKED_FIELDS: &[&str] = &["layer", "color", "linetype"];
 
 /// The properties of a picked object, each ticked to become a condition.
 #[derive(Clone, Debug)]

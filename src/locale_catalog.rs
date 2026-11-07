@@ -29,6 +29,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "of {} in the selection" => Some(("ui", "live-of-selection")),
         "objects match" => Some(("ui", "live-objects-match")),
         "Click a row to show only that type or layer in the drawing." => Some(("ui", "live-click-hint")),
+        "From object" => Some(("ui", "filter-from-object")),
         "By type" => Some(("ui", "filter-by-type")),
         "and" => Some(("ui", "filter-and")),
         "or" => Some(("ui", "filter-or")),

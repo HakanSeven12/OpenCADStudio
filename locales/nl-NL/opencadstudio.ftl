@@ -6604,6 +6604,7 @@ ui =
     .live-of-selection = van __ocs_fmt_0__ in de selectie
     .live-objects-match = objecten voldoen
     .live-click-hint = Klik op een rij om alleen dat type of die laag in de tekening te tonen.
+    .filter-from-object = Van object
     .filter-by-type = Per type
     .filter-and = en
     .filter-or = of

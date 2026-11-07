@@ -6594,6 +6594,7 @@ ui =
     .live-of-selection = चयन के __ocs_fmt_0__ में से
     .live-objects-match = ऑब्जेक्ट मेल खाते हैं
     .live-click-hint = ड्रॉइंग में केवल वह प्रकार या लेयर दिखाने के लिए किसी पंक्ति पर क्लिक करें।
+    .filter-from-object = ऑब्जेक्ट से
     .filter-by-type = प्रकार के अनुसार
     .filter-and = और
     .filter-or = या

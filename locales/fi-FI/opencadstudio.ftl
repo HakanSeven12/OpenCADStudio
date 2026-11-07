@@ -6603,6 +6603,7 @@ ui =
     .live-of-selection = / __ocs_fmt_0__ valinnassa
     .live-objects-match = objektia täsmää
     .live-click-hint = Napsauta riviä, niin piirustuksessa näkyy vain se tyyppi tai taso.
+    .filter-from-object = Objektista
     .filter-by-type = Tyypin mukaan
     .filter-and = ja
     .filter-or = tai

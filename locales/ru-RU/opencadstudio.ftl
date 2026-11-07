@@ -6607,6 +6607,7 @@ ui =
     .live-of-selection = из __ocs_fmt_0__ в выборе
     .live-objects-match = объектов подходят
     .live-click-hint = Щёлкните строку, чтобы показать на чертеже только этот тип или слой.
+    .filter-from-object = По объекту
     .filter-by-type = По типу
     .filter-and = и
     .filter-or = или

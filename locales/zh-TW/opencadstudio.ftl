@@ -6602,6 +6602,7 @@ ui =
     .live-of-selection = / 選取集中的 __ocs_fmt_0__ 個
     .live-objects-match = 個物件符合
     .live-click-hint = 按一下某列，圖面中只顯示該類型或圖層。
+    .filter-from-object = 從物件
     .filter-by-type = 依類型
     .filter-and = 且
     .filter-or = 或

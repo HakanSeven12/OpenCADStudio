@@ -6613,6 +6613,7 @@ ui =
     .live-of-selection = trên __ocs_fmt_0__ trong lựa chọn
     .live-objects-match = đối tượng khớp
     .live-click-hint = Nhấp vào một hàng để chỉ hiện loại hoặc lớp đó trong bản vẽ.
+    .filter-from-object = Từ đối tượng
     .filter-by-type = Theo loại
     .filter-and = và
     .filter-or = hoặc

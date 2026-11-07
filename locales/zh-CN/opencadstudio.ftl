@@ -6589,6 +6589,7 @@ ui =
     .live-of-selection = / 选择集中的 __ocs_fmt_0__ 个
     .live-objects-match = 个对象匹配
     .live-click-hint = 单击一行，图形中只显示该类型或图层。
+    .filter-from-object = 从对象
     .filter-by-type = 按类型
     .filter-and = 且
     .filter-or = 或

@@ -6618,6 +6618,7 @@ ui =
     .live-of-selection = من __ocs_fmt_0__ في التحديد
     .live-objects-match = كائنات مطابقة
     .live-click-hint = انقر على صف لإظهار هذا النوع أو هذه الطبقة فقط في الرسم.
+    .filter-from-object = من كائن
     .filter-by-type = حسب النوع
     .filter-and = و
     .filter-or = أو

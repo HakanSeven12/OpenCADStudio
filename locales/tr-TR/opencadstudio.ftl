@@ -6533,6 +6533,7 @@ ui =
     .live-of-selection = / seçimdeki __ocs_fmt_0__
     .live-objects-match = nesne eşleşiyor
     .live-click-hint = Çizimde yalnızca o türü veya katmanı göstermek için bir satıra tıklayın.
+    .filter-from-object = Nesneden
     .filter-by-type = Türe göre
     .filter-and = ve
     .filter-or = veya

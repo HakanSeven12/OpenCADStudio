@@ -6625,6 +6625,7 @@ ui =
     .live-of-selection = / __ocs_fmt_0__ a kijelölésben
     .live-objects-match = objektum felel meg
     .live-click-hint = Egy sorra kattintva a rajzban csak az a típus vagy fólia látszik.
+    .filter-from-object = Objektumból
     .filter-by-type = Típus szerint
     .filter-and = és
     .filter-or = vagy

@@ -6604,6 +6604,7 @@ ui =
     .live-of-selection = von __ocs_fmt_0__ in der Auswahl
     .live-objects-match = Objekte passen
     .live-click-hint = Eine Zeile anklicken, um nur diesen Typ oder Layer in der Zeichnung zu zeigen.
+    .filter-from-object = Aus Objekt
     .filter-by-type = Nach Typ
     .filter-and = und
     .filter-or = oder

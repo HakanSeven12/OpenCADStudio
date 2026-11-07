@@ -6607,6 +6607,7 @@ ui =
     .live-of-selection = ຈາກ __ocs_fmt_0__ ໃນການເລືອກ
     .live-objects-match = ວັດຖຸກົງກັນ
     .live-click-hint = ຄລິກແຖວເພື່ອສະແດງສະເພາະປະເພດ ຫຼື ຊັ້ນງານນັ້ນໃນແບບແຕ້ມ.
+    .filter-from-object = ຈາກວັດຖຸ
     .filter-by-type = ຕາມປະເພດ
     .filter-and = ແລະ
     .filter-or = ຫຼື

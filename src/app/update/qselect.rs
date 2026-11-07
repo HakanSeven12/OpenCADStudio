@@ -224,7 +224,7 @@ impl OpenCADStudio {
 
 /// Properties of a picked object ticked by default: what it is and how it
 /// looks, not its geometry.
-const SAMPLE_TICKED_FIELDS: &[&str] = &["layer", "color", "linetype"];
+use crate::app::SAMPLE_TICKED_FIELDS;
 
 /// How many distinct values the value list offers.
 const QSELECT_VALUE_LIMIT: usize = 50;

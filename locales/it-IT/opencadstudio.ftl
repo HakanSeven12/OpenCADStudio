@@ -6605,6 +6605,7 @@ ui =
     .live-of-selection = di __ocs_fmt_0__ nella selezione
     .live-objects-match = oggetti corrispondono
     .live-click-hint = Fai clic su una riga per mostrare nel disegno solo quel tipo o layer.
+    .filter-from-object = Da oggetto
     .filter-by-type = Per tipo
     .filter-and = e
     .filter-or = o

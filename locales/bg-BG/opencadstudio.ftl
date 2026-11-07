@@ -6606,6 +6606,7 @@ ui =
     .live-of-selection = от __ocs_fmt_0__ в избора
     .live-objects-match = обекта съвпадат
     .live-click-hint = Щракнете ред, за да се покаже в чертежа само този тип или слой.
+    .filter-from-object = От обект
     .filter-by-type = По тип
     .filter-and = и
     .filter-or = или

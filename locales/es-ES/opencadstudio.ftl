@@ -6606,6 +6606,7 @@ ui =
     .live-of-selection = de __ocs_fmt_0__ en la selección
     .live-objects-match = objetos coinciden
     .live-click-hint = Haga clic en una fila para mostrar solo ese tipo o capa en el dibujo.
+    .filter-from-object = Desde objeto
     .filter-by-type = Por tipo
     .filter-and = y
     .filter-or = o

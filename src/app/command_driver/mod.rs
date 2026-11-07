@@ -230,6 +230,7 @@ impl OpenCADStudio {
                 | CmdResult::Dispatch(..)
                 | CmdResult::Script(..)
                 | CmdResult::QSelectSample { .. }
+                | CmdResult::FilterSample { .. }
                 | CmdResult::SolidEdgeBlend { .. }
                 | CmdResult::SolidSubtract { .. }
                 | CmdResult::SliceEntities { .. }
@@ -547,6 +548,13 @@ impl OpenCADStudio {
                 handle,
             } => {
                 self.finish_qselect_sample(*state, tab_id, handle);
+            }
+            CmdResult::FilterSample {
+                state,
+                tab_id,
+                handle,
+            } => {
+                self.finish_filter_sample(*state, tab_id, handle);
             }
             CmdResult::QuickCalcPick(value) => {
                 self.tabs[i].active_cmd = None;

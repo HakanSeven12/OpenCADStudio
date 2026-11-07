@@ -66,6 +66,13 @@ pub enum FilterMsg {
     LayerName(String),
     /// Layer mode: keep the filter as a LAYERFILTER filter.
     SaveLayerFilter,
+    /// Hide the dialog and pick an object to take rows from.
+    PickObject,
+    /// Tick or untick a picked object's property.
+    SampleToggle(usize),
+    /// The ticked properties become rows.
+    SampleAdd,
+    SampleCancel,
 }
 
 /// What Quick Select hands over to FILTER.
@@ -108,6 +115,8 @@ pub struct FilterDialogState {
     pub layer_filter_from: Option<String>,
     /// Opened with 'FILTER inside this command's "Select objects:".
     pub for_command: Option<String>,
+    /// A picked object's properties, each ticked to become a row.
+    pub sample: Option<super::QSelectSample>,
 }
 
 impl FilterDialogState {
@@ -178,9 +187,180 @@ impl FilterDialogState {
 /// Live result lines shown per kind.
 const RESULT_LINES: usize = 6;
 
+/// The types a filter's rows name, each once.
+fn sample_type_of(filter: &Filter) -> Vec<String> {
+    let mut types: Vec<String> = Vec::new();
+    let mut note = |c: &Condition| {
+        if let Some(t) = &c.type_filter {
+            if !types.contains(t) {
+                types.push(t.clone());
+            }
+        }
+    };
+    for item in &filter.items {
+        match item {
+            Item::Condition(c) => note(c),
+            Item::Group(g) => g.conditions.iter().for_each(&mut note),
+        }
+    }
+    types
+}
+
+/// Rows from a picked object go into `filter` (#2611): into an empty filter
+/// as its rows; beside rows of the same type (or none) as more rows; next
+/// to rows of another type as a group of their own, the rows already there
+/// becoming a group too and the filter matching any of them.
+pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
+    if rows.is_empty() {
+        return;
+    }
+    let blank = |c: &Condition| c.property.is_none() && c.type_filter.is_none() && !c.negate;
+    let empty = filter.items.iter().all(|item| match item {
+        Item::Condition(c) => blank(c),
+        Item::Group(g) => g.conditions.iter().all(blank),
+    });
+    if empty {
+        filter.root = Match::All;
+        filter.items = rows.into_iter().map(Item::Condition).collect();
+        return;
+    }
+    let sample_type = rows.iter().find_map(|c| c.type_filter.clone());
+    let has_groups = filter
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Group(_)));
+    let types = sample_type_of(filter);
+    let same_type = types.iter().all(|t| Some(t) == sample_type.as_ref());
+    if filter.root == Match::All && !has_groups && same_type {
+        for row in rows {
+            if !filter
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Condition(c) if *c == row))
+            {
+                filter.items.push(Item::Condition(row));
+            }
+        }
+        return;
+    }
+    if filter.root == Match::All && !has_groups {
+        let before: Vec<Condition> = filter
+            .items
+            .drain(..)
+            .filter_map(|item| match item {
+                Item::Condition(c) if !blank(&c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        filter.items.push(Item::Group(Group {
+            mode: Match::All,
+            conditions: before,
+        }));
+        filter.root = Match::Any;
+    }
+    filter.items.push(Item::Group(Group {
+        mode: Match::All,
+        conditions: rows,
+    }));
+}
+
+/// The pick behind FILTER's From object: the dialog waits in the command
+/// and comes back with the object, or without one on Enter or Esc.
+struct FilterSampleCommand {
+    state: Option<Box<FilterDialogState>>,
+    tab_id: u64,
+}
+
+impl FilterSampleCommand {
+    fn finish(&mut self, handle: Option<Handle>) -> crate::command::CmdResult {
+        match self.state.take() {
+            Some(state) => crate::command::CmdResult::FilterSample {
+                state,
+                tab_id: self.tab_id,
+                handle,
+            },
+            None => crate::command::CmdResult::Cancel,
+        }
+    }
+}
+
+impl crate::command::CadCommand for FilterSampleCommand {
+    fn name(&self) -> &'static str {
+        "FILTER"
+    }
+    fn prompt(&self) -> String {
+        format!("FILTER  {}", crate::t!("Select object:"))
+    }
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+    fn entity_pick_includes_fills(&self) -> bool {
+        true
+    }
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+    fn on_entity_pick(&mut self, handle: Handle, _point: glam::DVec3) -> crate::command::CmdResult {
+        if handle.is_null() {
+            crate::command::CmdResult::NeedPoint
+        } else {
+            self.finish(Some(handle))
+        }
+    }
+    fn on_point(&mut self, _point: glam::DVec3) -> crate::command::CmdResult {
+        crate::command::CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        self.finish(None)
+    }
+    fn on_escape(&mut self) -> crate::command::CmdResult {
+        self.finish(None)
+    }
+}
+
 impl OpenCADStudio {
     pub(super) fn on_filter_message(&mut self, msg: FilterMsg) -> Task<Message> {
         match msg {
+            FilterMsg::PickObject => return self.filter_pick_object(),
+            FilterMsg::SampleToggle(index) => {
+                if let Some(row) = self
+                    .filter_dialog
+                    .as_mut()
+                    .and_then(|state| state.sample.as_mut())
+                    .and_then(|sample| sample.rows.get_mut(index))
+                {
+                    row.1 = !row.1;
+                }
+                return Task::none();
+            }
+            FilterMsg::SampleCancel => {
+                if let Some(state) = self.filter_dialog.as_mut() {
+                    state.sample = None;
+                }
+                return Task::none();
+            }
+            FilterMsg::SampleAdd => {
+                let types_now = if let Some(state) = self.filter_dialog.as_mut() {
+                    if let Some(sample) = state.sample.take() {
+                        let ticked: Vec<Condition> = sample
+                            .rows
+                            .iter()
+                            .filter(|(_, ticked)| *ticked)
+                            .map(|(condition, _)| Condition::from(condition))
+                            .collect();
+                        add_sample(&mut state.filter, ticked);
+                    }
+                    Some(sample_type_of(&state.filter))
+                } else {
+                    None
+                };
+                for t in types_now.into_iter().flatten() {
+                    self.filter_load_properties(Some(t));
+                }
+                self.filter_refresh_scope();
+                self.filter_refresh_live();
+                return Task::none();
+            }
             FilterMsg::Open(seed) => {
                 self.filter_open(seed.map(|seed| *seed));
                 return Task::none();
@@ -369,7 +549,11 @@ impl OpenCADStudio {
             | FilterMsg::Save
             | FilterMsg::SaveAsCommit
             | FilterMsg::DeleteSaved
-            | FilterMsg::SaveLayerFilter => {}
+            | FilterMsg::SaveLayerFilter
+            | FilterMsg::PickObject
+            | FilterMsg::SampleToggle(_)
+            | FilterMsg::SampleAdd
+            | FilterMsg::SampleCancel => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);
@@ -377,6 +561,68 @@ impl OpenCADStudio {
         self.filter_refresh_scope();
         self.filter_refresh_live();
         Task::none()
+    }
+
+    /// From object: the dialog steps aside while an object is picked.
+    fn filter_pick_object(&mut self) -> Task<Message> {
+        if self
+            .filter_dialog
+            .as_ref()
+            .is_none_or(|state| state.layer_filter.is_some())
+        {
+            return Task::none();
+        }
+        let state = self.filter_dialog.take().expect("checked open dialog");
+        let i = self.active_tab;
+        self.tabs[i].scene.set_filter_preview_highlights(&[]);
+        let command = FilterSampleCommand {
+            state: Some(Box::new(state)),
+            tab_id: self.tabs[i].id,
+        };
+        use crate::command::CadCommand;
+        self.command_line.input.clear();
+        self.command_line.set_step_options(Vec::new());
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].scene.selection.borrow_mut().menu.close();
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        Task::none()
+    }
+
+    /// The pick ended: the dialog is back, with the object's properties to
+    /// tick when one was picked.
+    pub(in crate::app) fn finish_filter_sample(
+        &mut self,
+        mut state: FilterDialogState,
+        tab_id: u64,
+        handle: Option<Handle>,
+    ) {
+        let i = self.active_tab;
+        if self.tabs[i].id != tab_id {
+            return;
+        }
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        if let Some(handle) = handle {
+            let conditions = self.tabs[i].scene.qselect_conditions_from_entity(handle);
+            let type_name = conditions
+                .first()
+                .and_then(|condition| condition.type_filter.clone())
+                .unwrap_or_default();
+            let rows = conditions
+                .into_iter()
+                .map(|condition| {
+                    let ticked = condition.property.as_ref().is_none_or(|property| {
+                        super::SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
+                    });
+                    (condition, ticked)
+                })
+                .collect();
+            state.sample = Some(super::QSelectSample { type_name, rows });
+        }
+        self.filter_dialog = Some(state);
+        self.filter_refresh_scope();
+        self.filter_refresh_live();
     }
 
     fn filter_open(&mut self, seed: Option<FilterSeed>) {
@@ -411,6 +657,7 @@ impl OpenCADStudio {
             layer_filter: None,
             layer_filter_from: None,
             for_command: self.transparent_select.clone(),
+            sample: None,
         });
         self.reset_modal_geometry();
         self.filter_refresh_scope();
@@ -928,6 +1175,86 @@ mod tests {
         assert!(app.tabs[i].scene.selected.contains(&handles[0]));
     }
 
+    /// #2611: From object hides the dialog for a pick; the object's ticked
+    /// properties become rows, and a second type goes into its own group.
+    #[test]
+    fn from_object_rows_and_a_second_type_as_a_group() {
+        let (mut app, handles) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        let pick = |app: &mut OpenCADStudio, handle| {
+            filter(app, FilterMsg::PickObject);
+            assert!(app.filter_dialog.is_none(), "the dialog steps aside");
+            let result = app.tabs[i]
+                .active_cmd
+                .as_mut()
+                .expect("picking")
+                .on_entity_pick(handle, glam::DVec3::ZERO);
+            let _ = app.apply_cmd_result(result);
+            assert!(app.tabs[i].active_cmd.is_none());
+        };
+        // The line on FAL-KULSO: type, layer, colour, linetype ticked.
+        pick(&mut app, handles[0]);
+        let sample = app.filter_dialog.as_ref().unwrap().sample.as_ref().unwrap();
+        assert_eq!(sample.type_name, "Line");
+        let ticked = sample.rows.iter().filter(|(_, t)| *t).count();
+        assert_eq!(ticked, 1 + crate::app::SAMPLE_TICKED_FIELDS.len());
+        filter(&mut app, FilterMsg::SampleAdd);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert!(state.sample.is_none());
+        assert_eq!(state.filter.root, Match::All);
+        assert_eq!(state.filter.items.len(), ticked);
+        assert_eq!(state.live_count, 1, "the line on FAL-KULSO");
+        // The circle: its own group, the filter now any of the two.
+        pick(&mut app, handles[1]);
+        filter(&mut app, FilterMsg::SampleAdd);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert_eq!(state.filter.root, Match::Any);
+        assert_eq!(state.filter.items.len(), 2);
+        assert!(state
+            .filter
+            .items
+            .iter()
+            .all(|item| matches!(item, Item::Group(_))));
+        assert_eq!(state.live_count, 2);
+        // Esc during a pick brings the dialog back as it was.
+        filter(&mut app, FilterMsg::PickObject);
+        let result = app.tabs[i].active_cmd.as_mut().unwrap().on_escape();
+        let _ = app.apply_cmd_result(result);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert!(state.sample.is_none());
+        assert_eq!(state.live_count, 2);
+    }
+
+    #[test]
+    fn a_sample_of_the_same_type_adds_rows_without_repeats() {
+        let row = |field: &str, value: &str| Condition {
+            type_filter: Some("Line".into()),
+            property: Some(field.into()),
+            value: value.into(),
+            ..Default::default()
+        };
+        let mut filter = Filter {
+            root: Match::All,
+            items: vec![Item::Condition(row("layer", "A"))],
+        };
+        add_sample(&mut filter, vec![row("layer", "A"), row("color", "1")]);
+        assert_eq!(filter.root, Match::All);
+        assert_eq!(filter.items.len(), 2);
+        // An untyped row of the user's stays beside a typed sample.
+        let mut filter = Filter {
+            root: Match::All,
+            items: vec![Item::Condition(Condition {
+                property: Some("layer".into()),
+                value: "A*".into(),
+                ..Default::default()
+            })],
+        };
+        add_sample(&mut filter, vec![row("color", "1")]);
+        assert_eq!(filter.items.len(), 2);
+        assert_eq!(filter.root, Match::All);
+    }
+
     /// Quick Select's "Advanced…" carries its conditions over: two types
     /// become two groups under "any", and the count is the same.
     #[test]
@@ -1424,11 +1751,27 @@ mod view {
                 }
             }
         }
-        let add_buttons = row![
+        let mut add_buttons = row![
             add_button(t!("Condition"), msg(FilterMsg::AddCondition(None))),
             add_button(t!("Group"), msg(FilterMsg::AddGroup)),
         ]
         .spacing(6);
+        if !layers_mode {
+            // Rows from a picked object's properties (#2611).
+            add_buttons = add_buttons.push(
+                button(
+                    row![
+                        crate::ui::icons::themed(crate::ui::icons::EYEDROPPER, 12.0),
+                        text(t!("From object")).size(12)
+                    ]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(msg(FilterMsg::PickObject))
+                .style(button_style(false))
+                .padding([4, 10]),
+            );
+        }
 
         // ── Read back ─────────────────────────────────────────────────────
         let property_label = |id: &str| -> String {
@@ -1457,17 +1800,51 @@ mod view {
         .width(Fill)
         .style(panel_style);
 
-        let editor = column![
-            scrollable(rows.padding(iced::Padding {
+        // After From object: the picked object's properties to tick, in
+        // place of the rows until they are added or dropped.
+        let rows_area: Element<'a, Message> = match &state.sample {
+            Some(sample) => {
+                let mut ticks = column![].spacing(4);
+                for (index, (condition, ticked)) in sample.rows.iter().enumerate() {
+                    let label = match &condition.property {
+                        None => type_label(&sample.type_name),
+                        Some(property) => format!("{} = {}", property.label, condition.value),
+                    };
+                    ticks = ticks.push(
+                        checkbox(*ticked)
+                            .label(label)
+                            .text_size(12)
+                            .size(14)
+                            .on_toggle(move |_| msg(FilterMsg::SampleToggle(index))),
+                    );
+                }
+                column![
+                    text(crate::tf!(
+                        "Properties of the picked {}",
+                        type_label(&sample.type_name)
+                    ))
+                    .size(12),
+                    scrollable(ticks).height(Length::Fixed(240.0)),
+                    row![
+                        dialog_button(t!("Add ticked conditions"), msg(FilterMsg::SampleAdd), true),
+                        dialog_button(t!("Cancel"), msg(FilterMsg::SampleCancel), false),
+                    ]
+                    .spacing(6),
+                ]
+                .spacing(8)
+                .height(Length::Fixed(300.0))
+                .into()
+            }
+            None => scrollable(rows.padding(iced::Padding {
                 right: 12.0,
                 ..Default::default()
             }))
-            .height(Length::Fixed(300.0)),
-            add_buttons,
-            reads,
-        ]
-        .spacing(8)
-        .width(Fill);
+            .height(Length::Fixed(300.0))
+            .into(),
+        };
+        let editor = column![rows_area, add_buttons, reads,]
+            .spacing(8)
+            .width(Fill);
 
         // ── Live result ───────────────────────────────────────────────────
         let show_icon = if state.show {

@@ -6605,6 +6605,7 @@ ui =
     .live-of-selection = / 선택의 __ocs_fmt_0__개
     .live-objects-match = 개 객체 일치
     .live-click-hint = 행을 클릭하면 도면에 해당 유형 또는 레이어만 표시됩니다.
+    .filter-from-object = 객체에서
     .filter-by-type = 유형별
     .filter-and = 그리고
     .filter-or = 또는

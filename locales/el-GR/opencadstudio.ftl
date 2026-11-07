@@ -6606,6 +6606,7 @@ ui =
     .live-of-selection = από __ocs_fmt_0__ στην επιλογή
     .live-objects-match = αντικείμενα ταιριάζουν
     .live-click-hint = Κάντε κλικ σε μια γραμμή για να εμφανιστεί μόνο αυτός ο τύπος ή το επίπεδο στο σχέδιο.
+    .filter-from-object = Από αντικείμενο
     .filter-by-type = Κατά τύπο
     .filter-and = και
     .filter-or = ή

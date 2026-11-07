@@ -6594,6 +6594,7 @@ ui =
     .live-of-selection = / 選択の __ocs_fmt_0__
     .live-objects-match = 個が一致
     .live-click-hint = 行をクリックすると、図面にその種類またはレイヤーだけを表示します。
+    .filter-from-object = オブジェクトから
     .filter-by-type = タイプ別
     .filter-and = かつ
     .filter-or = または

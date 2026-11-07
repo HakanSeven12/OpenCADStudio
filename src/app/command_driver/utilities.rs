@@ -1115,6 +1115,9 @@ impl OpenCADStudio {
     /// command, as a script line (`REGEN CIRCLE 0,0 5`) expects. Off, they stay
     /// unconsumed.
     fn run_command_line_impl(&mut self, cmd: &str, finish: bool, chain: bool) -> Task<Message> {
+        if cmd.split_whitespace().next().is_some_and(|verb| verb.eq_ignore_ascii_case("TABLEDIT")) {
+            return self.run_command_line_impl(&format!("-TABLEDIT{}", &cmd[8..]), finish, chain);
+        }
         let i = self.active_tab;
         self.command_line.unconsumed.clear();
         let tokens: Vec<&str> = cmd.split_whitespace().collect();

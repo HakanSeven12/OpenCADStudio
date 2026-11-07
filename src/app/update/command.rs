@@ -538,6 +538,12 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_command_submit(&mut self) -> Task<Message> {
+        if self.table_cell_editor.is_some() {
+            if self.field_dialog.is_some() && self.tabs[self.active_tab].active_cmd.is_some() {
+                return self.feed_command(crate::command::StepInput::Enter);
+            }
+            return self.table_editor_step(1, 0, false);
+        }
         // Submitting a command implicitly dismisses the history
         // dropdown so the dispatched command's new prompt is
         // immediately visible on the overlay.
@@ -1353,6 +1359,12 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_command_finalize(&mut self) -> Task<Message> {
+        if self.table_cell_editor.is_some() {
+            if self.field_dialog.is_some() && self.tabs[self.active_tab].active_cmd.is_some() {
+                return self.feed_command(crate::command::StepInput::Enter);
+            }
+            return self.table_editor_step(1, 0, false);
+        }
         // In the MText preview, Enter inserts a line break. The
         // free-text prompt case falls through deliberately: for it
         // Enter *finishes* the edit (Shift+Enter breaks the line,
@@ -1424,6 +1436,7 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_command_escape(&mut self) -> Task<Message> {
+        self.table_edit_command_line = false;
         self.tabs[self.active_tab].measurement.clear();
         // Escape also closes the overlapping-objects list.
         if self.cycle_candidates.take().is_some() {
@@ -1459,6 +1472,12 @@ impl OpenCADStudio {
         self.snapper.clear_override();
         // Clear the deferred snap dwell — the command is being cancelled.
         self.snap_dwell = None;
+        if self.table_cell_editor.is_some()
+            && self.field_dialog.is_some()
+            && self.tabs[self.active_tab].active_cmd.is_some()
+        {
+            return self.feed_command(crate::command::StepInput::Escape);
+        }
         // Open MText editor swallows Escape (cancel without committing). An
         // open menu or the colour list closes first, one per Escape.
         if let Some(ed) = self.mtext_editor.as_mut() {

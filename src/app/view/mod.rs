@@ -18,6 +18,8 @@ use iced_aw::ContextMenu;
 
 #[cfg(test)]
 mod select_similar_clipboard_tests;
+#[cfg(test)]
+mod table_inplace_widget_tests;
 
 /// Invisible event surface for accurate point picking. MouseArea emits a
 /// positionless press message; capturing the cursor in the actual button
@@ -3108,7 +3110,10 @@ bg={bg_ms:.1}ms n={view_count}"
                 let canvas = tab.scene.selection.borrow().view.vp_size;
                 // The editor's modal would swallow the clicks of a pick that
                 // the Field dialog started from it, so it waits meanwhile.
-                if let Some(ed) = self.mtext_editor.as_ref().filter(|_| tab.active_cmd.is_none()) {
+                if let (Some(ed), Some(cell)) = (self.mtext_editor.as_ref(), self.table_cell_canvas()) {
+                    viewport_stack = viewport_stack.push(overlay::table_cell_editor_overlay(ed, cell, canvas));
+                }
+                if let Some(ed) = self.mtext_editor.as_ref().filter(|_| tab.active_cmd.is_none() && self.table_cell_editor.is_none()) {
                     let styles: Vec<String> = tab
                         .scene
                         .document
@@ -3957,6 +3962,9 @@ impl OpenCADStudio {
     }
 
     pub(super) fn focus_cmd_input(&self) -> Task<Message> {
+        if self.table_cell_editor.is_some() {
+            return self.unfocus_widgets();
+        }
         iced::widget::operation::focus(iced::widget::Id::new(crate::ui::command_line::CMD_INPUT_ID))
     }
 

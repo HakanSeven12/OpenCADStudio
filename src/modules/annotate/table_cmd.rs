@@ -1354,7 +1354,7 @@ impl CadCommand for TableditCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["TABLEDIT"]
+    names: &["TABLEDIT", "-TABLEDIT"]
 });
 
 pub struct TableCellEditCommand {

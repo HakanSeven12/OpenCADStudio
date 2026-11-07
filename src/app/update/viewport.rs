@@ -1674,6 +1674,17 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
+        // Typing in a cell takes no snaps; a middle-button pan still runs.
+        if self.table_cell_editor.is_some()
+            && self.tabs[self.active_tab].active_cmd.is_none()
+            && !self.tabs[self.active_tab].scene.selection.borrow().input.middle_down
+        {
+            self.cursor_pos = p;
+            self.tabs[self.active_tab].last_cursor_screen = p;
+            self.tabs[self.active_tab].snap_result = None;
+            self.snap_dwell = None;
+            return Task::none();
+        }
         crate::perf::note_pointer_move();
         // A ribbon dropdown is open over the viewport. Its backdrop
         // cannot swallow cursor motion — in iced 0.14 mouse_area/opaque
@@ -8129,7 +8140,7 @@ properties={:.1}ms picked={}",
         if self.begin_table_cell_edit(i, handle, click_world)
             != crate::modules::annotate::table_cmd::TableCellEditStart::NoCell
         {
-            return Some(Task::none());
+            return Some(self.focus_cmd_input());
         }
         // A constraint dimension edits its parameter from the
         // command line, standing in for the reference's in-place
@@ -8563,6 +8574,9 @@ properties={:.1}ms picked={}",
         &mut self,
         expected_viewport: Option<document::Handle>,
     ) -> Task<Message> {
+        if self.table_cell_editor.is_some() && self.tabs[self.active_tab].active_cmd.is_none() {
+            return self.table_editor_click(self.cursor_pos);
+        }
         let i = self.active_tab;
         if self.tabs[i].scene.active_viewport != expected_viewport
             || (expected_viewport.is_none() && self.tabs[i].scene.current_layout != "Model")

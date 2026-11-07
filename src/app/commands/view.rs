@@ -580,8 +580,10 @@ impl OpenCADStudio {
                     // accept a ratio (1:50) or a bare paper/model factor. The
                     // explicit factor goes through the same path ZOOM nXP uses,
                     // so a named ratio and a bare factor land identically.
-                    let factor = parse_viewport_scale(&value)
-                        .or_else(|| scene.scale_ratio(&value).map(|(paper, drawing)| paper / drawing));
+                    let factor = scene
+                        .scale_ratio(&value)
+                        .map(|(paper, drawing)| paper / drawing)
+                        .or_else(|| parse_viewport_scale(&value));
                     let applied = factor
                         .and_then(|factor| {
                             Some(self.tabs[i]

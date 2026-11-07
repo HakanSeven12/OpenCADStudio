@@ -88,3 +88,39 @@ fn table_scaling_indicator_fits_small_cells_and_multi_letter_columns() {
         assert!(((outline[1] - outline[0]).length() - size as f32 * 2.0).abs() < 1e-5);
     }
 }
+
+/// One row and one column dragged down to almost nothing (a cell's top or
+/// left grip pulled onto the neighbour's far edge) leave the header bands
+/// at the size the rest of the grid gives them.
+#[test]
+fn table_indicator_bands_survive_one_collapsed_row_and_column() {
+    let doc = document::Document::new();
+    let mut table = Table::new(Vector3::ZERO, 4, 4);
+    for column in &mut table.columns {
+        column.width = 20.0;
+    }
+    for row in &mut table.rows {
+        row.height = 10.0;
+    }
+    let before = table_indicator(&table, &doc, Some((2, 2, 2, 2))).unwrap();
+    table.rows[1].height = 1.0e-6;
+    table.columns[1].width = 1.0e-6;
+    let after = table_indicator(&table, &doc, Some((2, 2, 2, 2))).unwrap();
+    assert!(
+        (after.text_height - before.text_height).abs() < 1e-6,
+        "labels shrank from {} to {}",
+        before.text_height,
+        after.text_height
+    );
+    let corner = |indicator: &TableIndicator| {
+        let c = indicator.boxes[0].0;
+        ((c[1] - c[0]).length(), (c[3] - c[0]).length())
+    };
+    let (w0, h0) = corner(&before);
+    let (w1, h1) = corner(&after);
+    assert!(
+        (w1 - w0).abs() < 1e-5 && (h1 - h0).abs() < 1e-5,
+        "corner band {w0}x{h0} -> {w1}x{h1}"
+    );
+    assert!(w1 > 0.1 && h1 > 0.1, "corner band {w1}x{h1}");
+}

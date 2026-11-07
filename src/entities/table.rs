@@ -4689,18 +4689,19 @@ pub fn table_indicator(
         .and_then(|handle| document.text_styles.iter().find(|s| s.handle == handle))
         .map_or_else(|| "Standard".to_string(), |s| s.name.clone());
     let style = crate::entities::text_support::resolve_text_style(&style_name, document);
-    let min_row = tab
-        .rows
-        .iter()
-        .map(|row| row.height as f32)
-        .filter(|height| *height > 0.0)
-        .fold(f32::INFINITY, f32::min);
-    let min_column = tab
-        .columns
-        .iter()
-        .map(|column| column.width as f32)
-        .filter(|width| *width > 0.0)
-        .fold(f32::INFINITY, f32::min);
+    // The grid's typical row / column (the median), not its smallest: one
+    // row or column dragged down to almost nothing must not shrink every
+    // band and label with it.
+    let typical = |sizes: &mut dyn Iterator<Item = f32>| {
+        let mut sizes: Vec<f32> = sizes.filter(|size| *size > 0.0).collect();
+        if sizes.is_empty() {
+            return f32::INFINITY;
+        }
+        sizes.sort_by(f32::total_cmp);
+        sizes[sizes.len() / 2]
+    };
+    let min_row = typical(&mut tab.rows.iter().map(|row| row.height as f32));
+    let min_column = typical(&mut tab.columns.iter().map(|column| column.width as f32));
     let label_chars = column_label(tab.columns.len() - 1).len().max(3) as f32;
     // Labels and padding must fit the current grid, including multi-letter
     // columns and tables whose inherited text style is much larger than a cell.

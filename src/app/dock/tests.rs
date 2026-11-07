@@ -2,7 +2,7 @@
 
 use crate::app::{Message, OpenCADStudio};
 
-fn fresh() -> OpenCADStudio {
+pub(super) fn fresh() -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
     // These tests drive dock controls, not the hardware warning dialog.
@@ -1453,7 +1453,7 @@ fn orientation_parameter_batch_starts_from_actual_palette_rows() {
     });
 }
 
-fn authoring_app() -> OpenCADStudio {
+pub(super) fn authoring_app() -> OpenCADStudio {
     use document::{
         entities::{Insert, Line},
         types::Vector3,
@@ -2722,25 +2722,32 @@ fn toolpalettes_commands_transparency_and_distinct_from_authoring_palettes() {
     assert!(crate::app::commands::is_transparent("TP"));
 
     // Dispatch TOOLPALETTES, TOOLPALETTESCLOSE and alias TP
-    for cmd in ["TOOLPALETTES", "TOOLPALETTESCLOSE", "TP"] {
-        let history_len_before = app.command_line.history.len();
-        let _ = app.dispatch_command(cmd);
-        // Active command must remain LINE
-        assert_eq!(
-            app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
-            Some("LINE"),
-            "{cmd} must be transparent and preserve running command"
-        );
-        // An info message must have been output reporting that it is not yet implemented
-        let last_msg = app.command_line.history[history_len_before..]
-            .iter()
-            .map(|l| &l.text)
-            .find(|text| text.contains("TOOLPALETTES: Tool Palettes not yet implemented."));
-        assert!(
-            last_msg.is_some(),
-            "{cmd} must output placeholder message"
-        );
-    }
+    let _ = app.dispatch_command("TOOLPALETTES");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE"),
+        "TOOLPALETTES must be transparent and preserve running command"
+    );
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
+
+    let _ = app.dispatch_command("TOOLPALETTESCLOSE");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE"),
+        "TOOLPALETTESCLOSE must be transparent and preserve running command"
+    );
+    assert!(!app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
+
+    let _ = app.dispatch_command("TP");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE"),
+        "TP must be transparent and preserve running command"
+    );
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
+
+    let _ = app.dispatch_command("TOOLPALETTESCLOSE");
+    assert!(!app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
 
     // Cancel LINE command
     let _ = app.update(Message::CommandEscape);

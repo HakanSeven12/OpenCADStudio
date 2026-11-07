@@ -10,3 +10,5 @@ mod view;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tool_palettes_tests;

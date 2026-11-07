@@ -623,8 +623,16 @@ impl OpenCADStudio {
             }
 
             // ── CLEANSCREEN — collapse the surrounding panels for a full canvas ──
-            "CLEANSCREEN" => {
-                return Some(Task::done(Message::ToggleCleanScreen));
+            "CLEANSCREEN" | "CLEANSCREENON" | "CLEANSCREENOFF" => {
+                let want = match cmd {
+                    "CLEANSCREENON" => true,
+                    "CLEANSCREENOFF" => false,
+                    _ => !self.clean_screen,
+                };
+                if self.clean_screen != want {
+                    return Some(Task::done(Message::ToggleCleanScreen));
+                }
+                return Some(Task::none());
             }
             // ── TOOLBAR — the ribbon's panels as floating toolbars ──────────────
             // TOOLBAR lists them; TOOLBAR / -TOOLBAR <tab/panel | panel>
@@ -736,11 +744,10 @@ impl OpenCADStudio {
                 return Some(self.dock_set_open(id, open));
             }
 
-            // ── TOOLPALETTES / TOOLPALETTESCLOSE — not yet implemented ───────────
+            // ── TOOLPALETTES / TOOLPALETTESCLOSE — dockable Tool Palettes panel ──
             "TOOLPALETTES" | "TOOLPALETTESCLOSE" => {
-                self.command_line.push_info(
-                    crate::t!("TOOLPALETTES: Tool Palettes not yet implemented.").as_ref(),
-                );
+                let open = cmd == "TOOLPALETTES";
+                return Some(self.set_tool_palettes_open(open));
             }
 
             // ── XDATA — read/write extended entity data ──────────────────────────

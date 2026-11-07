@@ -841,6 +841,7 @@ pub(super) struct OpenCADStudio {
     clean_screen_properties: bool,
     clean_screen_parameters_manager: bool,
     clean_screen_authoring_palettes: bool,
+    clean_screen_tool_palettes: bool,
     /// A property list closed itself a moment ago. The overlay reports Escape
     /// before the global shortcut repeats it, so the repeat is dropped instead
     /// of clearing the selection the list was opened for.
@@ -1497,6 +1498,10 @@ pub(super) struct OpenCADStudio {
     graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
+    /// Docked Tool Palettes panel visibility (TOOLPALETTES / TP).
+    pub(crate) show_tool_palettes: bool,
+    /// Reusable block tools and palette tabs shown in Tool Palettes.
+    pub(crate) tool_palettes: crate::ui::window::tool_palettes::ToolPalettesState,
     /// Authoring palette preference, visible only in a Block Editor session.
     show_authoring_palettes: bool,
     show_parameters_manager: bool,
@@ -2551,7 +2556,8 @@ pub enum ColorPickTarget {
 /// drawing at copy time. On paste into a drawing that lacks any of them, the
 /// missing records are recreated (with a fresh handle) so the entities keep
 /// their layer / linetype / style instead of dangling. See #129.
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ClipboardDeps {
     pub layers: Vec<document::tables::Layer>,
     pub linetypes: Vec<document::tables::LineType>,
@@ -2597,13 +2603,43 @@ pub struct ClipboardDeps {
     /// handle (text style, linetypes, arrow blocks), keyed by source handle.
     /// A paste re-points each recreated style at this drawing's records of
     /// the same name, so it never names an object of the source drawing.
+    #[serde(with = "dim_style_refs_serde", default)]
     pub dim_style_refs: rustc_hash::FxHashMap<document::Handle, String>,
+}
+
+mod dim_style_refs_serde {
+    use document::Handle;
+    use rustc_hash::FxHashMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        map: &FxHashMap<Handle, String>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut pairs: Vec<(Handle, String)> =
+            map.iter().map(|(k, v)| (*k, v.clone())).collect();
+        pairs.sort_by_key(|(h, _)| h.value());
+        pairs.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<FxHashMap<Handle, String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let pairs = Vec::<(Handle, String)>::deserialize(deserializer)?;
+        Ok(pairs.into_iter().collect())
+    }
 }
 
 /// A captured block definition: its base point and the entities it owns
 /// (in block-local coordinates), minus the structural Block/BlockEnd
 /// markers which are rebuilt on paste.
-#[derive(Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockDef {
     pub name: String,
     pub base_point: document::types::Vector3,
@@ -2611,7 +2647,18 @@ pub struct BlockDef {
     /// The source drawing's record, which other captured graphs name.
     pub source: document::Handle,
     /// The record's object graph: a dynamic block's parameters and states.
+    #[serde(skip)]
     pub graph: Option<document::BlockGraph>,
+}
+
+impl PartialEq for BlockDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.base_point == other.base_point
+            && self.entities == other.entities
+            && self.source == other.source
+            && self.graph.is_some() == other.graph.is_some()
+    }
 }
 
 /// The extension-dictionary object graph captured for one copied entity.
@@ -2619,7 +2666,7 @@ pub struct BlockDef {
 /// (dictionaries + their leaf objects), keyed by their source handles; `root`
 /// is the xdictionary handle. On paste the whole set is cloned into the target
 /// document with fresh handles and the references are remapped.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClipExtObjects {
     pub entity_index: usize,
     pub src_entity_handle: document::Handle,
@@ -5882,6 +5929,7 @@ pub enum Message {
     /// The QuickCalc pallet.
     QuickCalc(crate::ui::window::quick_calc::QuickCalcMsg),
     SheetSet(crate::ui::window::sheet_set::SheetSetMsg),
+    ToolPalettes(crate::ui::window::tool_palettes::ToolPalettesMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -6101,6 +6149,7 @@ impl OpenCADStudio {
             clean_screen_properties: false,
             clean_screen_parameters_manager: false,
             clean_screen_authoring_palettes: false,
+            clean_screen_tool_palettes: false,
             block_picker_dismissed: false,
             quick_properties: false,
             quick_properties_anchor: Point::new(12.0, 12.0),
@@ -6382,6 +6431,8 @@ impl OpenCADStudio {
             show_command_history: false,
             graphic_attributes: Default::default(),
             show_block_palette: false,
+            show_tool_palettes: false,
+            tool_palettes: Default::default(),
             show_authoring_palettes: false,
             show_parameters_manager: false,
             authoring_palette_tab: Default::default(),

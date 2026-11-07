@@ -40,6 +40,7 @@ pub(super) struct ToggleState {
     pub show_properties: bool,
     pub show_count_palette: bool,
     pub show_graphic_attributes: bool,
+    pub show_tool_palettes: bool,
     pub show_authoring_palettes: bool,
     pub show_parameters_manager: bool,
     pub show_block_palette: bool,
@@ -461,6 +462,7 @@ pub(super) fn is_active_tool(id: &str, active_tool: &Option<String>, state: &Tog
         "PROPERTIES" => state.show_properties,
         "COUNTLIST" => state.show_count_palette,
         "GRAPHICATTRIBUTES" => state.show_graphic_attributes,
+        "TOOLPALETTES" => state.show_tool_palettes,
         "BAUTHORPALETTE" => state.show_authoring_palettes,
         // The id is the command name, and the Parametric tab carries a tool with
         // it too; the light follows the pane, which only exists in a session.

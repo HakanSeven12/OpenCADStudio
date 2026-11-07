@@ -9067,3 +9067,18 @@ toolbar =
     .list = Barres d'outils (● affichées) :
     .not-found = TOOLBAR : aucune barre d'outils nommée « { $name } ».
     .workspace = WSCURRENT  espace de travail courant : { $current } [Classic/Ribbon]
+
+
+tool-palettes =
+    .title = Tool Palettes
+    .search-placeholder = Search tools
+    .add-selected = Add Selected
+    .add-selected-hint = Add selected block reference to active tool palette
+    .new-palette = New palette name
+    .dynamic-badge = Dynamic
+    .annotative-badge = Annotative
+    .no-tools = No tools in this palette. Add a block from the drawing or selection.
+    .tool-unavailable = Tool "{ $name }" definition is not available.
+    .added-tool = Added tool "{ $name }" to palette "{ $palette }".
+    .updated-tool = Updated tool "{ $name }" in palette "{ $palette }".
+    .select-block-first = TOOLPALETTES: Select at least one block reference first.

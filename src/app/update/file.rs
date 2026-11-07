@@ -981,6 +981,7 @@ impl OpenCADStudio {
             count_invalid_area: self.count_palette.invalid_choice,
             sheet_set: self.sheet_set.settings,
             quick_calc: self.quick_calc.settings(),
+            tool_palettes: self.tool_palettes.to_persisted(),
         }
     }
 
@@ -1233,6 +1234,8 @@ impl OpenCADStudio {
         self.count_palette.invalid_choice = s.count_invalid_area.min(2);
         self.sheet_set.settings = s.sheet_set;
         self.quick_calc.apply_settings(&s.quick_calc);
+        self.tool_palettes.apply_persisted(s.tool_palettes.clone());
+        self.refresh_tool_palettes();
         self.block_palette.recent = s.block_recent.clone();
         self.block_palette.favorites = s.block_favorites.clone();
         self.block_palette.libraries = s.block_libraries.clone();
@@ -1555,6 +1558,7 @@ impl OpenCADStudio {
                 dock
             },
             show_graphic_attributes: self.show_graphic_attributes,
+            show_tool_palettes: self.show_tool_palettes,
             show_command_history: self.show_command_history,
             show_layers: self.show_layers,
             show_file_tabs: self.show_file_tabs,
@@ -1629,6 +1633,8 @@ impl OpenCADStudio {
         dock.ensure_settings();
         self.dock = dock;
         self.show_graphic_attributes = cfg.show_graphic_attributes;
+        self.show_tool_palettes = cfg.show_tool_palettes;
+        self.ribbon.show_tool_palettes = self.show_tool_palettes;
         self.show_command_history = cfg.show_command_history;
         if self.show_command_history {
             self.sync_command_history_panel();

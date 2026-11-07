@@ -1243,6 +1243,9 @@ pub struct UserSettings {
     /// QuickCalc: the global variables, the open sections and the angle mode.
     #[serde(default)]
     pub quick_calc: crate::ui::window::quick_calc::QuickCalcSettings,
+    /// Tool Palettes: reusable block tools, tabs and placement options.
+    #[serde(default)]
+    pub tool_palettes: crate::ui::window::tool_palettes::ToolPalettesData,
 }
 
 /// A block the Blocks palette lists from outside the current drawing (a
@@ -1604,6 +1607,7 @@ impl Default for UserSettings {
             count_invalid_area: 0,
             sheet_set: Default::default(),
             quick_calc: Default::default(),
+            tool_palettes: Default::default(),
         }
     }
 }

@@ -113,6 +113,8 @@ pub enum PanelId {
     BlockPalette,
     /// Block Editor authoring tools.
     AuthoringPalettes,
+    /// Reusable block tools (TOOLPALETTES / TP).
+    ToolPalettes,
     /// The Block Editor's Parameters Manager.
     ParametersManager,
     ExternalReferences,
@@ -140,10 +142,11 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 15] = [
+    pub const ALL: [PanelId; 16] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
+        PanelId::ToolPalettes,
         PanelId::AuthoringPalettes,
         PanelId::ParametersManager,
         PanelId::ExternalReferences,
@@ -164,6 +167,7 @@ impl PanelId {
             PanelId::Properties => "Properties",
             PanelId::GraphicAttributes => "Graphic Attributes",
             PanelId::BlockPalette => "Block Palette",
+            PanelId::ToolPalettes => "Tool Palettes",
             PanelId::AuthoringPalettes => "Authoring Palettes",
             PanelId::ParametersManager => "Parameters Manager",
             PanelId::ExternalReferences => "External References",
@@ -188,6 +192,7 @@ impl PanelId {
                 include_bytes!("../../assets/icons/graphic_attributes.svg")
             }
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
+            PanelId::ToolPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
             PanelId::AuthoringPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
             PanelId::ParametersManager => include_bytes!("../../assets/icons/table.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
@@ -210,6 +215,7 @@ impl PanelId {
             PanelId::Properties => 250.0,
             PanelId::GraphicAttributes => 250.0,
             PanelId::BlockPalette => 260.0,
+            PanelId::ToolPalettes => 260.0,
             PanelId::AuthoringPalettes => 260.0,
             PanelId::ParametersManager => 420.0,
             PanelId::ExternalReferences => 460.0,

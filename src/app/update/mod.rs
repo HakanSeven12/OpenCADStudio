@@ -127,6 +127,7 @@ fn reorder_insertion_index(from: usize, to: usize, after: bool, len: usize) -> O
 #[cfg(test)]
 mod block_ops_tests;
 pub(super) mod blocks_palette;
+pub(super) mod tool_palettes;
 mod command;
 pub(crate) mod context_menu;
 mod dialog;
@@ -625,6 +626,8 @@ impl OpenCADStudio {
             self.dock_panel_visible(crate::ui::dock::PanelId::ParametersManager);
         self.ribbon.show_authoring_palettes =
             self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes);
+        self.ribbon.show_tool_palettes =
+            self.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes);
         task
     }
 
@@ -6965,6 +6968,7 @@ impl OpenCADStudio {
                 self.clean_screen_properties = false;
                 self.clean_screen_parameters_manager = false;
                 self.clean_screen_authoring_palettes = false;
+                self.clean_screen_tool_palettes = false;
                 if self.clean_screen {
                     // The panel goes with the chrome; its list cannot stay open.
                     self.tabs[self.active_tab].properties.open_block_picker = None;
@@ -13505,6 +13509,7 @@ impl OpenCADStudio {
             Message::PlotDialogOpen => self.on_plot_dialog_open(),
             Message::PlotDlg(m) => self.on_plot_dlg(m),
             Message::BlockPalette(m) => self.on_block_palette(m),
+            Message::ToolPalettes(m) => self.on_tool_palettes(m),
             Message::GraphicAttributes(m) => self.on_graphic_attributes(m),
             Message::Dock(m) => self.on_dock(m),
             Message::AuthoringPaletteTabSelected(tab) => {

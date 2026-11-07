@@ -290,6 +290,18 @@ pub struct BlockPreview {
     gallery_cache: canvas::Cache,
 }
 
+impl Default for BlockPreview {
+    fn default() -> Self {
+        Self::pending()
+    }
+}
+
+impl std::fmt::Debug for BlockPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockPreview").finish_non_exhaustive()
+    }
+}
+
 impl BlockPreview {
     /// A preview whose wires are not worked out yet.
     pub fn pending() -> Self {

@@ -9056,3 +9056,18 @@ toolbar =
     .list = 도구 막대 (● 표시됨):
     .not-found = TOOLBAR: "{ $name }" 도구 막대가 없습니다.
     .workspace = WSCURRENT  현재 작업공간: { $current } [Classic/Ribbon]
+
+
+tool-palettes =
+    .title = Tool Palettes
+    .search-placeholder = Search tools
+    .add-selected = Add Selected
+    .add-selected-hint = Add selected block reference to active tool palette
+    .new-palette = New palette name
+    .dynamic-badge = Dynamic
+    .annotative-badge = Annotative
+    .no-tools = No tools in this palette. Add a block from the drawing or selection.
+    .tool-unavailable = Tool "{ $name }" definition is not available.
+    .added-tool = Added tool "{ $name }" to palette "{ $palette }".
+    .updated-tool = Updated tool "{ $name }" in palette "{ $palette }".
+    .select-block-first = TOOLPALETTES: Select at least one block reference first.

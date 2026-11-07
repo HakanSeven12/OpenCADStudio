@@ -529,6 +529,13 @@ impl OpenCADStudio {
             crate::ui::dock::PanelId::BlockPalette => {
                 crate::ui::window::block_palette::view(&self.block_palette, width, chrome)
             }
+            crate::ui::dock::PanelId::ToolPalettes => crate::ui::window::tool_palettes::view(
+                &self.tool_palettes,
+                &tab.scene.document,
+                &tab.scene.selected,
+                width,
+                chrome,
+            ),
             crate::ui::dock::PanelId::ExternalReferences => {
                 self.xref_manager
                     .view(width, chrome, tab.xref_missing, &tab.scene.document)

@@ -561,6 +561,13 @@ impl OpenCADStudio {
                         self.dock_open_at_default(id);
                         self.save_config();
                     }
+                    PanelId::ToolPalettes => {
+                        self.show_tool_palettes = true;
+                        self.refresh_tool_palettes();
+                        self.dock_open_at_default(id);
+                        self.ribbon.show_tool_palettes = !self.tabs[self.active_tab].is_start;
+                        self.save_config();
+                    }
                     PanelId::ExternalReferences => {
                         self.show_external_references = true;
                         self.refresh_xref_manager();
@@ -604,6 +611,7 @@ impl OpenCADStudio {
                 match id {
                     PanelId::ParametersManager => self.clean_screen_parameters_manager = true,
                     PanelId::AuthoringPalettes => self.clean_screen_authoring_palettes = true,
+                    PanelId::ToolPalettes => self.clean_screen_tool_palettes = true,
                     _ => {}
                 }
             }
@@ -618,6 +626,13 @@ impl OpenCADStudio {
             PanelId::AuthoringPalettes => {
                 self.clean_screen_authoring_palettes = false;
                 self.show_authoring_palettes = false;
+            }
+            PanelId::ToolPalettes => {
+                self.clean_screen_tool_palettes = false;
+                self.show_tool_palettes = false;
+                self.tool_palettes.placing = None;
+                self.ribbon.show_tool_palettes = false;
+                self.save_config();
             }
             PanelId::ParametersManager => {
                 self.clean_screen_parameters_manager = false;
@@ -758,6 +773,7 @@ impl OpenCADStudio {
                 PanelId::Properties => self.clean_screen_properties,
                 PanelId::ParametersManager => self.clean_screen_parameters_manager,
                 PanelId::AuthoringPalettes => self.clean_screen_authoring_palettes,
+                PanelId::ToolPalettes => self.clean_screen_tool_palettes,
                 _ => false,
             };
             if !reopened {
@@ -775,6 +791,7 @@ impl OpenCADStudio {
         match id {
             PanelId::Properties => self.show_properties,
             PanelId::BlockPalette => self.show_block_palette,
+            PanelId::ToolPalettes => self.show_tool_palettes,
             PanelId::ParametersManager => {
                 self.show_parameters_manager
                     && self.tabs[self.active_tab]

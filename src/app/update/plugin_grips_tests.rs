@@ -647,6 +647,37 @@ fn custom_grip_bare_click_stays_hot_and_second_click_settles_once() {
 }
 
 #[test]
+fn a_redundant_origin_move_does_not_cancel_click_move_click() {
+    let mut app = app();
+    app.dyn_input = true;
+    let state = install_sink(TEST_PLUGIN);
+    declare(&mut app, TEST_PLUGIN, vec![declared(77, [3.0, 3.0, 0.0])]);
+    let i = tab(&app);
+    let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+    left_press_at(&mut app, start);
+    app.move_plugin_grip_drag(i, glam::DVec3::new(3.0, 3.0, 0.0));
+    left_release_at(&mut app, start, false);
+    let active = app.tabs[i]
+        .active_plugin_grip
+        .as_ref()
+        .expect("an unchanged move leaves click-move-click hot");
+    assert!(!active.moved, "an unchanged point is not a drag");
+    let events = state.events.borrow();
+    assert_eq!(events.len(), 2, "Begin plus one redundant Move, no Settle: {:?}", *events);
+    assert!(matches!(
+        events[0].phase,
+        ocs_plugin_api::host::CustomGripPhase::Begin
+    ));
+    assert!(matches!(
+        events[1].phase,
+        ocs_plugin_api::host::CustomGripPhase::Move
+    ));
+    drop(events);
+    drop(state);
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+#[test]
 fn custom_grip_second_press_at_uses_event_point_without_a_preceding_move() {
     let mut app = app();
     app.snapper.snap_enabled = false;

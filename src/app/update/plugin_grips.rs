@@ -182,8 +182,8 @@ impl OpenCADStudio {
         point: DVec3,
     ) -> Task<Message> {
         if let Some(active) = self.tabs[i].active_plugin_grip.as_mut() {
+            active.moved |= point != active.last_world;
             active.last_world = point;
-            active.moved = true;
         }
         self.plugin_grip_deliveries.park_move(point);
         self.pump_plugin_grips()

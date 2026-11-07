@@ -22,8 +22,9 @@ const SPACING: f32 = 2.0;
 /// the same cells in the same places as one with a glyph.
 const GLYPH_WIDTH: f32 = 16.0;
 
-/// The row kinds whose leading glyph was read off the pane. Every other kind
-/// (a point's axes, a flip, a rotation) keeps the empty column rather than a
+/// The shapes the pane draws in its fixed-width leading cell: a group header's
+/// box, a row kind's glyph, and the toolbar's funnel. Every other row kind (a
+/// point's axes, a flip, a rotation) keeps the empty column rather than a
 /// guessed shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GlyphKind {
@@ -31,6 +32,7 @@ enum GlyphKind {
     Polar,
     Xy,
     Tag,
+    Funnel,
 }
 
 impl GlyphKind {
@@ -128,6 +130,18 @@ impl<Message> canvas::Program<Message> for Glyph {
                     line,
                 );
             }
+            GlyphKind::Funnel => {
+                let funnel = canvas::Path::new(|p| {
+                    p.move_to(Point::new(centre.x - reach, centre.y - reach * 0.6));
+                    p.line_to(Point::new(centre.x + reach, centre.y - reach * 0.6));
+                    p.line_to(Point::new(centre.x + reach * 0.25, centre.y + reach * 0.15));
+                    p.line_to(Point::new(centre.x + reach * 0.25, centre.y + reach * 0.8));
+                    p.line_to(Point::new(centre.x - reach * 0.25, centre.y + reach * 0.8));
+                    p.line_to(Point::new(centre.x - reach * 0.25, centre.y + reach * 0.15));
+                    p.close();
+                });
+                frame.stroke(&funnel, stroke);
+            }
         }
         vec![frame.into_geometry()]
     }
@@ -191,6 +205,8 @@ pub struct Panel {
     /// Which rows the funnel filter keeps: every row, or the ones another
     /// parameter's expression names.
     pub mode: manager::FilterMode,
+    /// Whether the funnel's two-entry menu is open.
+    pub filter_menu: bool,
 }
 
 impl Default for Panel {
@@ -202,6 +218,7 @@ impl Default for Panel {
             filter: "*".to_owned(),
             search: String::new(),
             mode: manager::FilterMode::All,
+            filter_menu: false,
         }
     }
 }
@@ -347,15 +364,16 @@ fn group_line(group: Group) -> Element<'static, Message> {
 fn toolbar(panel: &Panel) -> Element<'static, Message> {
     row(vec![
         container(
-            iced::widget::pick_list(
-                Some(panel.mode),
-                &manager::FilterMode::ALL[..],
-                |mode: &manager::FilterMode| mode.label().to_owned(),
+            button(
+                canvas(Glyph(GlyphKind::Funnel))
+                    .width(Length::Fixed(12.0))
+                    .height(Length::Fixed(12.0)),
             )
-            .on_select(Message::ParametersManagerFilterMode)
-            .text_size(11),
+            .on_press(Message::ParametersManagerFilterMenu)
+            .padding([2, 4]),
         )
-        .width(Length::Fixed(150.0))
+        .width(Length::Fixed(24.0))
+        .id(iced::widget::Id::from("parameters-manager-funnel"))
         .into(),
         container(
             text_input(&crate::tr!("parameters-manager", "filter"), &panel.filter)
@@ -374,6 +392,40 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
     ])
     .spacing(SPACING)
     .into()
+}
+
+/// The funnel's menu: the two filters it names, the active one ticked. An
+/// entry is what sets the filter; the menu then closes. Only the active entry
+/// carries the tick's id, so a test can tell which one is marked.
+fn filter_menu(panel: &Panel) -> Element<'static, Message> {
+    let mut list = column![].spacing(2);
+    for mode in manager::FilterMode::ALL {
+        let active = mode == panel.mode;
+        let tick = container(crate::ui::icons::themed_check_cell::<Message>(active));
+        let tick = if active {
+            tick.id(iced::widget::Id::from(format!(
+                "parameters-manager-filter-check-{mode:?}"
+            )))
+        } else {
+            tick
+        };
+        list = list.push(
+            button(
+                row![tick, text(mode.menu_label()).size(11)]
+                    .spacing(4)
+                    .align_y(iced::Center),
+            )
+            .on_press(Message::ParametersManagerFilterMode(mode))
+            .style(button::text)
+            .padding([2, 4])
+            .width(Fill),
+        );
+    }
+    container(list)
+        .style(container::bordered_box)
+        .padding(4)
+        .width(Fill)
+        .into()
 }
 
 fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element<'static, Message> {
@@ -457,26 +509,26 @@ pub fn view(
         }
     }
     let footer = manager::footer(panel.mode, rows.len(), listed.len());
+    let mut body = column![container(toolbar(panel)).width(Fill).padding([2, 2])].spacing(2);
+    if panel.filter_menu {
+        body = body.push(container(filter_menu(panel)).width(Fill).padding([0, 2]));
+    }
     dock::frame(
         dock::title_bar(
             PanelId::ParametersManager,
             crate::t!("Parameters Manager").into_owned(),
             chrome,
         ),
-        column![
-            container(toolbar(panel)).width(Fill).padding([2, 2]),
+        body.push(
             container(
                 scrollable(column(lines.into_iter()).spacing(2))
                     .width(Fill)
-                    .height(Fill)
+                    .height(Fill),
             )
             .width(Fill)
             .height(Fill),
-            container(text(footer).size(11))
-                .width(Fill)
-                .padding([2, 2]),
-        ]
-        .spacing(2)
+        )
+        .push(container(text(footer).size(11)).width(Fill).padding([2, 2]))
         .height(Fill),
         width,
     )
@@ -627,6 +679,99 @@ mod tests {
                 "{name} is not used in an expression"
             );
         }
+    }
+
+    #[test]
+    fn the_funnel_opens_the_two_named_entries() {
+        let closed = Panel::default();
+        assert!(
+            locate(&closed, "Display All Parameters").is_none(),
+            "the menu starts closed"
+        );
+        let open = Panel {
+            filter_menu: true,
+            ..Panel::default()
+        };
+        assert!(
+            locate(&open, "Display All Parameters").is_some(),
+            "the first entry lists every parameter"
+        );
+        assert!(
+            locate(&open, "Display Parameters Used in Expressions").is_some(),
+            "the second entry lists the parameters an expression names"
+        );
+    }
+
+    #[test]
+    fn the_funnel_button_toggles_the_menu_and_the_active_entry_carries_the_tick() {
+        let width = PanelId::ParametersManager.default_width();
+        let build = |panel: &Panel| {
+            iced_test::simulator::Simulator::with_size(
+                Default::default(),
+                iced::Size::new(width, 800.0),
+                view(&sample(), panel, document::Handle::new(1), width, chrome()),
+            )
+        };
+        let mut ui = build(&Panel::default());
+        let funnel = ui
+            .find(iced::widget::Id::new("parameters-manager-funnel"))
+            .expect("the toolbar draws the funnel");
+        let centre = funnel
+            .visible_bounds()
+            .expect("the funnel is visible")
+            .center();
+        ui.point_at(centre);
+        ui.simulate([
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            )),
+        ]);
+        let published = ui
+            .into_messages()
+            .filter(|message| matches!(message, Message::ParametersManagerFilterMenu))
+            .count();
+        assert_eq!(
+            published, 1,
+            "pressing the funnel publishes the toggle once"
+        );
+
+        let all = Panel {
+            filter_menu: true,
+            ..Panel::default()
+        };
+        let mut ui = build(&all);
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-filter-check-All"))
+                .is_ok(),
+            "the entry that is in force carries the tick"
+        );
+        assert!(
+            ui.find(iced::widget::Id::new(
+                "parameters-manager-filter-check-UsedInExpressions"
+            ))
+            .is_err(),
+            "the entry that is not in force carries none"
+        );
+
+        let used = Panel {
+            mode: manager::FilterMode::UsedInExpressions,
+            filter_menu: true,
+            ..Panel::default()
+        };
+        let mut ui = build(&used);
+        assert!(
+            ui.find(iced::widget::Id::new(
+                "parameters-manager-filter-check-UsedInExpressions"
+            ))
+            .is_ok(),
+            "the tick follows the filter that is in force"
+        );
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-filter-check-All"))
+                .is_err(),
+            "and leaves the other entry unmarked"
+        );
     }
 
     #[test]

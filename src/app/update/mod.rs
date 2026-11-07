@@ -13069,6 +13069,12 @@ impl OpenCADStudio {
             }
             Message::ParametersManagerFilterMode(mode) => {
                 self.tabs[self.active_tab].parameters_panel.mode = mode;
+                self.tabs[self.active_tab].parameters_panel.filter_menu = false;
+                Task::none()
+            }
+            Message::ParametersManagerFilterMenu => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                panel.filter_menu = !panel.filter_menu;
                 Task::none()
             }
             Message::ParametersManagerSearch(value) => {

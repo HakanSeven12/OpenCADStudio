@@ -3993,6 +3993,8 @@ pub enum Message {
     ParametersManagerFilter(String),
     /// The funnel menu entry: which rows the list keeps.
     ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
+    /// Toggles the funnel's two-entry menu.
+    ParametersManagerFilterMenu,
     ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click

@@ -228,6 +228,14 @@ impl FilterMode {
             Self::UsedInExpressions => "All Used in Expressions",
         }
     }
+
+    /// The wording the funnel menu gives this filter.
+    pub fn menu_label(self) -> &'static str {
+        match self {
+            Self::All => "Display All Parameters",
+            Self::UsedInExpressions => "Display Parameters Used in Expressions",
+        }
+    }
 }
 
 impl std::fmt::Display for FilterMode {

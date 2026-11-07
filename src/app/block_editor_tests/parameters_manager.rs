@@ -1283,6 +1283,32 @@ fn a_cell_the_pane_does_not_own_closes_without_a_refusal() {
 }
 
 #[test]
+fn the_funnel_menu_opens_and_a_choice_sets_the_filter_and_closes_it() {
+    let (mut app, tab, _definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    assert!(
+        !app.tabs[tab].parameters_panel.filter_menu,
+        "the menu starts closed"
+    );
+    let _ = app.update(Message::ParametersManagerFilterMenu);
+    assert!(
+        app.tabs[tab].parameters_panel.filter_menu,
+        "the funnel opens it"
+    );
+    let _ = app.update(Message::ParametersManagerFilterMode(
+        manager::FilterMode::UsedInExpressions,
+    ));
+    assert_eq!(
+        app.tabs[tab].parameters_panel.mode,
+        manager::FilterMode::UsedInExpressions
+    );
+    assert!(
+        !app.tabs[tab].parameters_panel.filter_menu,
+        "choosing an entry closes the menu"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
 fn the_two_fields_narrow_the_list_and_the_count_follows() {
     let (mut app, tab, definition) = open(
         &[

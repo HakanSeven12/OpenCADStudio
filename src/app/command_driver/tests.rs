@@ -250,14 +250,14 @@ mod parametric_constraint_undo_tests {
         start_angle: f64,
         end_angle: f64,
     ) -> Handle {
-        let mut arc = codec::entities::Arc::new();
-        arc.center = codec::types::Vector3::new(cx, cy, 0.0);
+        let mut arc = document::entities::Arc::new();
+        arc.center = document::types::Vector3::new(cx, cy, 0.0);
         arc.radius = radius;
         arc.start_angle = start_angle;
         arc.end_angle = end_angle;
         app.tabs[app.active_tab]
             .scene
-            .add_entity(codec::EntityType::Arc(arc))
+            .add_entity(document::EntityType::Arc(arc))
     }
 
     fn add_coincident_at(
@@ -282,7 +282,7 @@ mod parametric_constraint_undo_tests {
     fn assert_geometry_unchanged(
         app: &OpenCADStudio,
         handle: Handle,
-        expected: &codec::EntityType,
+        expected: &document::EntityType,
         stage: &str,
     ) {
         const EPS: f64 = 1.0e-10;
@@ -292,7 +292,7 @@ mod parametric_constraint_undo_tests {
             .get_entity(handle)
             .unwrap_or_else(|| panic!("{stage}: entity {handle:?} disappeared"));
         match (expected, actual) {
-            (codec::EntityType::Line(expected), codec::EntityType::Line(actual)) => {
+            (document::EntityType::Line(expected), document::EntityType::Line(actual)) => {
                 assert!(
                     (actual.start - expected.start).length() <= EPS
                         && (actual.end - expected.end).length() <= EPS,
@@ -307,7 +307,7 @@ mod parametric_constraint_undo_tests {
                     actual.length()
                 );
             }
-            (codec::EntityType::Arc(expected), codec::EntityType::Arc(actual)) => {
+            (document::EntityType::Arc(expected), document::EntityType::Arc(actual)) => {
                 assert!(
                     (actual.center - expected.center).length() <= EPS,
                     "{stage}: arc {handle:?} center moved: {:?} -> {:?}",
@@ -1445,7 +1445,7 @@ mod parametric_constraint_undo_tests {
             label: "Coincident constraint",
         });
 
-        let (codec::EntityType::Line(expected), Some(codec::EntityType::Line(actual))) = (
+        let (document::EntityType::Line(expected), Some(document::EntityType::Line(actual))) = (
             &first_before,
             app.tabs[app.active_tab].scene.document.get_entity(first),
         ) else {

@@ -5848,7 +5848,7 @@ impl OpenCADStudio {
                 let task = self.begin_plugin_grip_drag(i, &candidate);
                 self.grip_engage_press = Some(p_full);
                 if self.dyn_input {
-                    use crate::app::document::DynFieldEntry;
+                    use crate::app::tab_document::DynFieldEntry;
                     self.tabs[i].dyn_fields = [
                         crate::command::DynRole::Distance,
                         crate::command::DynRole::Angle,

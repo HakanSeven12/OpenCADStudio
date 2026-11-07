@@ -188,6 +188,9 @@ pub struct Panel {
     pub edit_original: String,
     pub filter: String,
     pub search: String,
+    /// Which rows the funnel filter keeps: every row, or the ones another
+    /// parameter's expression names.
+    pub mode: manager::FilterMode,
 }
 
 impl Default for Panel {
@@ -198,6 +201,7 @@ impl Default for Panel {
             edit_original: String::new(),
             filter: "*".to_owned(),
             search: String::new(),
+            mode: manager::FilterMode::All,
         }
     }
 }
@@ -337,13 +341,22 @@ fn group_line(group: Group) -> Element<'static, Message> {
     .into()
 }
 
-/// The two fields the list is narrowed with. Their effect is on the rows below
-/// and on the count in the footer, not on any parameter. What has been read off
-/// the pane is that the filter field carries `*` and that the search field says
-/// what it searches for; this filter placeholder word and the width it is given
-/// are layout, not measurement.
+/// The filter menu entry the funnel offers, beside the two fields that narrow
+/// the list. Their effect is on the rows below and on the count in the footer,
+/// not on any parameter.
 fn toolbar(panel: &Panel) -> Element<'static, Message> {
     row(vec![
+        container(
+            iced::widget::pick_list(
+                Some(panel.mode),
+                &manager::FilterMode::ALL[..],
+                |mode: &manager::FilterMode| mode.label().to_owned(),
+            )
+            .on_select(Message::ParametersManagerFilterMode)
+            .text_size(11),
+        )
+        .width(Length::Fixed(150.0))
+        .into(),
         container(
             text_input(&crate::tr!("parameters-manager", "filter"), &panel.filter)
                 .on_input(Message::ParametersManagerFilter)
@@ -427,7 +440,7 @@ pub fn view(
     width: f32,
     chrome: Chrome,
 ) -> Element<'static, Message> {
-    let listed = manager::displayed(rows, &panel.filter, &panel.search);
+    let listed = manager::displayed(rows, panel.mode, &panel.filter, &panel.search);
     let mut lines: Vec<Element<'static, Message>> = vec![header_line()];
     for group in Group::ALL {
         let group_rows: Vec<&Row> = listed
@@ -443,7 +456,7 @@ pub fn view(
             lines.push(row_line(row, panel, definition));
         }
     }
-    let footer = crate::tr!("parameters-manager", "footer", shown = listed.len().to_string(), total = rows.len().to_string());
+    let footer = manager::footer(panel.mode, rows.len(), listed.len());
     dock::frame(
         dock::title_bar(
             PanelId::ParametersManager,
@@ -561,7 +574,59 @@ mod tests {
             [Group::ActionParameters.name(), Group::Attributes.name()],
             ["Action Parameters", "Attributes"]
         );
-        assert_eq!(manager::footer(2, 2), "All: 2 of 2 parameters displayed");
+        assert_eq!(
+            manager::footer(manager::FilterMode::All, 2, 2),
+            "All: 2 of 2 parameters displayed"
+        );
+    }
+
+    #[test]
+    fn the_used_filter_keeps_rows_another_expression_names_and_names_itself_in_the_footer() {
+        let mut rows = sample();
+        rows[0].expression = "Point1*2".to_owned();
+        let listed = manager::displayed(&rows, manager::FilterMode::UsedInExpressions, "*", "");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Point1"],
+            "only the row another expression names is listed"
+        );
+        assert_eq!(
+            manager::footer(
+                manager::FilterMode::UsedInExpressions,
+                rows.len(),
+                listed.len()
+            ),
+            "All Used in Expressions: 1 of 3 parameters displayed"
+        );
+        assert_eq!(
+            manager::footer(manager::FilterMode::All, 3, 3),
+            "All: 3 of 3 parameters displayed"
+        );
+    }
+
+    #[test]
+    fn the_pane_names_the_used_filter_in_its_footer() {
+        let used = Panel {
+            mode: manager::FilterMode::UsedInExpressions,
+            ..Panel::default()
+        };
+        assert!(
+            locate(
+                &used,
+                &manager::footer(manager::FilterMode::UsedInExpressions, 3, 0)
+            )
+            .is_some(),
+            "the footer names the filter it is showing"
+        );
+        for name in ["Angle1", "Point1", "TAG1"] {
+            assert!(
+                locate(&used, name).is_none(),
+                "{name} is not used in an expression"
+            );
+        }
     }
 
     #[test]
@@ -574,7 +639,8 @@ mod tests {
         );
         assert_eq!(panel.search, "", "and the search field is empty");
         assert_eq!(
-            manager::displayed(&rows, &panel.filter, &panel.search).len(),
+            manager::displayed(&rows, manager::FilterMode::All, &panel.filter, &panel.search)
+                .len(),
             rows.len(),
             "which lists every row"
         );
@@ -583,7 +649,12 @@ mod tests {
             search: "point".to_owned(),
             ..Panel::default()
         };
-        let shown = manager::displayed(&rows, &filtered.filter, &filtered.search);
+        let shown = manager::displayed(
+            &rows,
+            manager::FilterMode::All,
+            &filtered.filter,
+            &filtered.search,
+        );
         assert_eq!(
             shown
                 .iter()
@@ -600,7 +671,7 @@ mod tests {
             chrome(),
         );
         assert_eq!(
-            manager::footer(rows.len(), shown.len()),
+            manager::footer(manager::FilterMode::All, rows.len(), shown.len()),
             "All: 1 of 3 parameters displayed",
             "which is what the pane's footer prints"
         );
@@ -659,7 +730,11 @@ mod tests {
             );
         }
         assert!(
-            locate(&both_empty, &crate::tr!("parameters-manager", "footer", shown = "3", total = "3")).is_some(),
+            locate(
+                &both_empty,
+                &manager::footer(manager::FilterMode::All, 3, 3)
+            )
+            .is_some(),
             "and the footer says so"
         );
 
@@ -682,7 +757,11 @@ mod tests {
             "and a group with no row left has no header either"
         );
         assert!(
-            locate(&angle_only, &crate::tr!("parameters-manager", "footer", shown = "1", total = "3")).is_some(),
+            locate(
+                &angle_only,
+                &manager::footer(manager::FilterMode::All, 3, 1)
+            )
+            .is_some(),
             "the footer counts what is left out of what there is"
         );
     }

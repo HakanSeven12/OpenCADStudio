@@ -210,6 +210,32 @@ pub fn rows(doc: &Document, definition: Handle) -> Vec<Row> {
     rows
 }
 
+/// Which rows the funnel filter keeps. `All` lists everything; the other
+/// keeps the rows another parameter's expression names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterMode {
+    All,
+    UsedInExpressions,
+}
+
+impl FilterMode {
+    pub const ALL: [Self; 2] = [Self::All, Self::UsedInExpressions];
+
+    /// The name the footer prints for this filter.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::UsedInExpressions => "All Used in Expressions",
+        }
+    }
+}
+
+impl std::fmt::Display for FilterMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
 /// Wildcard match for the filter field: `*` stands for any run of characters.
 fn wildcard(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
@@ -238,22 +264,55 @@ fn wildcard(pattern: &str, text: &str) -> bool {
     pi == pattern.len()
 }
 
+/// Whether `name` appears in `text` as a whole identifier, so a parameter named
+/// `Distance1` is not found inside `X Distance10`.
+fn names_identifier(text: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let text = text.as_bytes();
+    let name = name.as_bytes();
+    if name.len() > text.len() {
+        return false;
+    }
+    let word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    (0..=text.len().saturating_sub(name.len())).any(|at| {
+        let end = at + name.len();
+        text[at..end].eq_ignore_ascii_case(name)
+            && (at == 0 || !word(text[at - 1]))
+            && (end == text.len() || !word(text[end]))
+    })
+}
+
+fn used_in_expressions(row: &Row, rows: &[Row]) -> bool {
+    rows.iter()
+        .filter(|other| other.name != row.name)
+        .any(|other| names_identifier(&other.expression, &row.name))
+}
+
 /// The filter field holds a name pattern (`*` lists all); the search field
-/// narrows the rows that pattern left by a case-insensitive name substring.
+/// narrows the rows that pattern left by a case-insensitive name substring. The
+/// funnel mode narrows either by the other parameters' expressions.
 pub fn matches(row: &Row, filter: &str, search: &str) -> bool {
     let listed = matches!(filter.trim(), "" | "*") || wildcard(filter.trim(), &row.name);
     let query = search.trim().to_lowercase();
     listed && (query.is_empty() || row.name.to_lowercase().contains(&query))
 }
 
-pub(crate) fn displayed<'a>(rows: &'a [Row], filter: &str, search: &str) -> Vec<&'a Row> {
+pub(crate) fn displayed<'a>(
+    rows: &'a [Row],
+    mode: FilterMode,
+    filter: &str,
+    search: &str,
+) -> Vec<&'a Row> {
     rows.iter()
         .filter(|row| matches(row, filter, search))
+        .filter(|row| mode == FilterMode::All || used_in_expressions(row, rows))
         .collect()
 }
 
-pub fn footer(total: usize, shown: usize) -> String {
-    format!("All: {shown} of {total} parameters displayed")
+pub fn footer(mode: FilterMode, total: usize, shown: usize) -> String {
+    format!("{}: {shown} of {total} parameters displayed", mode.label())
 }
 
 /// Where a row points: the parameter object it names, and the component whose

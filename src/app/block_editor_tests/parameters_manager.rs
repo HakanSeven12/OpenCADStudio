@@ -812,20 +812,20 @@ fn the_filter_and_search_narrow_the_rows_and_the_footer_counts_them() {
         &["TAG1"],
     );
     assert_eq!(
-        manager::displayed(&rows, "*", "").len(),
+        manager::displayed(&rows, manager::FilterMode::All, "*", "").len(),
         4,
         "the default filter lists every row"
     );
     assert_eq!(
-        manager::displayed(&rows, "*1", "").len(),
+        manager::displayed(&rows, manager::FilterMode::All, "*1", "").len(),
         3,
         "Angle1, Distance1 and TAG1 end in 1"
     );
-    assert_eq!(manager::displayed(&rows, "Distance*", "").len(), 2);
-    assert_eq!(manager::displayed(&rows, "*", "angle").len(), 1);
-    assert_eq!(manager::displayed(&rows, "Angle*", "distance").len(), 0);
+    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "Distance*", "").len(), 2);
+    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "*", "angle").len(), 1);
+    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "Angle*", "distance").len(), 0);
     assert_eq!(
-        manager::footer(rows.len(), manager::displayed(&rows, "Angle*", "").len()),
+        manager::footer(manager::FilterMode::All, rows.len(), manager::displayed(&rows, manager::FilterMode::All, "Angle*", "").len()),
         "All: 1 of 4 parameters displayed"
     );
 }
@@ -1294,8 +1294,8 @@ fn the_two_fields_narrow_the_list_and_the_count_follows() {
     let count = |app: &OpenCADStudio| {
         let panel = &app.tabs[tab].parameters_panel;
         let rows = manager::rows(&app.tabs[tab].scene.document, definition);
-        let shown = manager::displayed(&rows, &panel.filter, &panel.search);
-        manager::footer(rows.len(), shown.len())
+        let shown = manager::displayed(&rows, manager::FilterMode::All, &panel.filter, &panel.search);
+        manager::footer(manager::FilterMode::All, rows.len(), shown.len())
     };
     assert_eq!(
         app.tabs[tab].parameters_panel.filter, "*",

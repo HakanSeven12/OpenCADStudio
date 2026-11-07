@@ -3991,6 +3991,8 @@ pub enum Message {
     ParametersManagerEdit(String, crate::ui::window::parameters_manager::Cell),
     ParametersManagerInput(String),
     ParametersManagerFilter(String),
+    /// The funnel menu entry: which rows the list keeps.
+    ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
     ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click

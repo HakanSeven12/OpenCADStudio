@@ -682,6 +682,8 @@ const INDICATOR_BAND: [f32; 4] = [173.0 / 255.0, 173.0 / 255.0, 173.0 / 255.0, 1
 const INDICATOR_PICKED: [f32; 4] = [1.0, 213.0 / 255.0, 141.0 / 255.0, 1.0];
 const INDICATOR_SELECTED: [f32; 4] = [117.0 / 255.0, 147.0 / 255.0, 208.0 / 255.0, 1.0];
 const INDICATOR_TEXT: [f32; 4] = [0.04, 0.04, 0.04, 1.0];
+/// The cells a fill drag reaches: the picked colour, see-through.
+const INDICATOR_FILL_SPAN: [f32; 4] = [1.0, 213.0 / 255.0, 141.0 / 255.0, 0.35];
 const INDICATOR_EDGE: [f32; 4] = [235.0 / 255.0, 235.0 / 255.0, 235.0 / 255.0, 1.0];
 
 impl Scene {
@@ -698,7 +700,11 @@ impl Scene {
             let Some(EntityType::Table(table)) = self.document.get_entity(handle) else {
                 continue;
             };
-            if self.entity_temporarily_hidden(handle) {
+            // A fill drag hides the table behind its grip preview; the
+            // range it reaches is the cue, so it stays drawn.
+            let fill_drag =
+                self.table_fill_drag == Some(handle) && self.preview_hidden.contains(&handle);
+            if self.entity_temporarily_hidden(handle) && !fill_drag {
                 continue;
             }
             let range = (picked == Some(handle))
@@ -734,6 +740,13 @@ impl Scene {
             edge_wire.plot_visible = false;
             edge_wire.text_verts = Self::indicator_text(&indicator);
             wires.push(edge_wire);
+            if fill_drag {
+                for corners in &indicator.outlines {
+                    if let Some(model) = Self::indicator_box(corners, INDICATOR_FILL_SPAN) {
+                        hatches.push(model);
+                    }
+                }
+            }
             for corners in &indicator.outlines {
                 // A band inside each edge of the range: a quarter of the
                 // label text height wide, never thinner than 4 pixels.
@@ -815,5 +828,57 @@ impl Scene {
             }
         }
         verts
+    }
+}
+
+#[cfg(test)]
+mod table_fill_cue_tests {
+    use super::*;
+
+    /// A fill drag hides the table behind its grip preview; the cells it
+    /// reaches stay drawn in the picked colour, with a see-through span.
+    #[test]
+    fn a_fill_drag_keeps_the_picked_range_drawn_over_the_grip_preview() {
+        let mut scene = Scene::new();
+        let table =
+            document::entities::Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 5, 4);
+        let handle = scene.add_entity(EntityType::Table(Box::new(table)));
+        scene.select_table_cells(crate::scene::TableCellSelection {
+            table: handle,
+            anchor: (2, 1),
+            end: (4, 1),
+        });
+        let span = |scene: &Scene| {
+            scene
+                .table_indicator_overlay(0.01)
+                .1
+                .iter()
+                .filter(|hatch| hatch.color == INDICATOR_FILL_SPAN)
+                .count()
+        };
+        let picked = |scene: &Scene| {
+            scene
+                .table_indicator_overlay(0.01)
+                .1
+                .iter()
+                .filter(|hatch| hatch.color == INDICATOR_PICKED)
+                .count()
+        };
+        assert!(picked(&scene) > 0, "picked cells show their range");
+        assert_eq!(span(&scene), 0, "no span outside a fill drag");
+
+        scene.preview_hidden.insert(handle);
+        assert_eq!(picked(&scene), 0, "a hidden table draws no range");
+
+        scene.table_fill_drag = Some(handle);
+        assert!(picked(&scene) > 0, "the fill drag keeps the range drawn");
+        assert_eq!(span(&scene), 1, "and lays a see-through span over it");
+
+        scene.preview_hidden.remove(&handle);
+        assert_eq!(
+            span(&scene),
+            0,
+            "a stale drag mark adds nothing once the drag ends"
+        );
     }
 }

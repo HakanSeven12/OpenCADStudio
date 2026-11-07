@@ -6879,20 +6879,11 @@ impl Scene {
         use document::objects::ObjectType;
         let stored = self.document.objects.values().find_map(|o| match o {
             ObjectType::Scale(s) if !s.is_temporary && s.name.eq_ignore_ascii_case(name) => {
-                // Command-line named ratios use the same effective factor
-                // as the scale picker, including legacy unconverted defaults.
-                let factor = self.effective_scale_factor(s);
-                Some((s.paper_units, s.paper_units / factor))
+                Some((s.paper_units, s.drawing_units))
             }
             _ => None,
         });
-        let standard = self
-            .default_scales()
-            .iter()
-            .find(|(label, _)| label.eq_ignore_ascii_case(name))
-            .map(|&(_, base)| (1.0, 1.0 / (base * self.default_scale_unit_factor())));
         stored
-            .or(standard)
             .or_else(|| Self::parse_scale_name_ratio(name))
             .filter(|(paper, drawing)| *paper > 0.0 && *drawing > 0.0)
     }
@@ -18594,8 +18585,10 @@ mod layout_cache_tests {
                     assert!(scene.scale_list().iter().any(|(label, _, factor)| {
                         label == name && (factor - expected_factor).abs() < 1.0e-9
                     }));
+                    // Stored SCALE object remains untouched, while the picker
+                    // and viewport apply the physically correct effective ratio.
                     let (paper, drawing) = scene.scale_ratio(name).unwrap();
-                    assert!((paper / drawing - expected_factor).abs() < 1.0e-9);
+                    assert!((paper / drawing - 1.0 / drawing_units).abs() < 1.0e-9);
                     assert!(scene.set_annotation_scale_named(name).is_some());
                     assert!(
                         ((scene.annotation_scale as f64) - 1.0 / expected_factor).abs() < 1.0e-5
@@ -18609,11 +18602,23 @@ mod layout_cache_tests {
     fn virtual_standard_scale_in_metre_drawing_is_unit_aware() {
         let mut scene = Scene::new();
         scene.document.header.insertion_units = 6;
+        // scale_ratio intentionally exposes literal stored/name ratios for
+        // plot settings; scale_list is the unit-aware viewport picker.
         let (paper, drawing) = scene.scale_ratio("1:200").unwrap();
-        assert!((paper / drawing - 5.0).abs() < 1.0e-9);
+        assert!((paper / drawing - 0.005).abs() < 1.0e-9);
+        let (_, _, fallback) = scene
+            .scale_list()
+            .into_iter()
+            .find(|(name, _, _)| name == "1:200")
+            .unwrap();
+        assert!((fallback - 5.0).abs() < 1.0e-9);
         assert!(scene.ensure_real_scale_list());
-        let (paper, drawing) = scene.scale_ratio("1:200").unwrap();
-        assert!((paper / drawing - 5.0).abs() < 1.0e-9);
+        let (_, _, stored) = scene
+            .scale_list()
+            .into_iter()
+            .find(|(name, _, _)| name == "1:200")
+            .unwrap();
+        assert!((stored - 5.0).abs() < 1.0e-9);
     }
 
     #[test]

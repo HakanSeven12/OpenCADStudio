@@ -486,6 +486,38 @@ pub(crate) fn save_action_bases(
     Ok(())
 }
 
+/// Preserve accumulated displacement while an authored pivot moves; caches
+/// belonging to a new association or an independent action cannot be reused.
+fn migrate_action_bases(doc: &mut Document, before: &Document, insert: Handle, definition: Handle) -> Result<(), &'static str> {
+    let parameters = all_parameters(doc, definition);
+    let previous_parameters = all_parameters(before, definition);
+    let actions: Vec<_> = super::actions(doc, definition).into_iter()
+        .filter(|(_, _, kind, _)| *kind == Kind::Scale)
+        .map(|(handle, _, _, code)| (handle, code)).collect();
+    for (handle, code) in actions {
+        let Some(id) = super::action_node_id(doc, handle) else { continue };
+        let current = super::options::base(doc, handle).cloned();
+        let previous = super::options::base(before, handle);
+        let old_code = super::actions(before, definition).into_iter()
+            .find(|(h, _, kind, _)| *h == handle && *kind == Kind::Scale).map(|(_, _, _, code)| code);
+        let parameter = parameters.iter().find(|p| p.id == code);
+        let old_parameter = previous_parameters.iter().find(|p| Some(p.id) == old_code);
+        match (current, previous, parameter, old_parameter) {
+            (Some(current), Some(previous), Some(p), Some(old))
+                if current.dependent && previous.dependent && p.handle == old.handle => {
+                if let Some(base) = action_base(doc, insert, id)? {
+                    let delta = super::options::pivot(&current, p.base)? - super::options::pivot(previous, old.base)?;
+                    if delta.length_squared() > 0. {
+                        save_action_base(doc, insert, id, base + delta)?;
+                    }
+                }
+            }
+            _ => remove_cache(doc, insert, id)?,
+        }
+    }
+    Ok(())
+}
+
 /// Reset discards per-reference dependent pivots along with parameter frames.
 fn clear_action_bases(doc: &mut Document, insert: Handle, definition: Handle) -> Result<(), &'static str> {
     let ids: Vec<_> = super::actions(doc, definition).into_iter()
@@ -546,8 +578,9 @@ pub(crate) fn update_action_bases(
             if new_frame.base.distance(p.base) < 1e-9 && (new_dist - def_dist).abs() < 1e-9 {
                 bases.insert(handle, pivot_def);
             } else if prev_dist > 1e-9 && new_dist > 1e-9 {
-                let delta = prev_act_base - new_frame.base;
-                let new_act_base = new_frame.base + delta * (new_dist / prev_dist);
+                let pivot = new_frame.base + (pivot_def - p.base);
+                let delta = prev_act_base - pivot;
+                let new_act_base = pivot + delta * (new_dist / prev_dist);
                 bases.insert(handle, new_act_base);
             } else {
                 bases.insert(handle, prev_act_base);
@@ -1502,6 +1535,9 @@ pub(crate) fn refresh_after_edit(
             _ => None,
         })
         .collect::<Vec<_>>();
+    for &insert in &inserts {
+        migrate_action_bases(&mut staged, before, insert, def)?;
+    }
     let previous_plan = super::flip_graph::Plan::for_rebuild(before, def);
     let plan = super::flip_graph::Plan::for_rebuild(&staged, def);
     if plan.is_some() || previous_plan.is_some() && !inserts.is_empty() {

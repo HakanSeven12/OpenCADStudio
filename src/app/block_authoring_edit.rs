@@ -217,7 +217,7 @@ impl OpenCADStudio {
             options::set_base_offset(&mut staged, definition, handle, point.unwrap())
         } else { options::set_base(&mut staged, definition, handle, dependent, point) };
         match result {
-            Ok(true) => match instance::refresh(&staged, definition) {
+            Ok(true) => match instance::refresh_after_edit(&staged, &self.tabs[i].scene.document, definition) {
                 Ok(staged) => {
                     self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Edit block action base point"));
                     self.apply_action_document(i, staged);

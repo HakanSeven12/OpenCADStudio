@@ -110,7 +110,10 @@ fn block_action_base_offsets_follow_frames_and_survive_native_rebuilds() {
                     },
             };
             let expected = if kind == Kind::Scale {
-                base + (DVec3::X - base) * 2.
+                // The dependent pivot includes its authored offset; scale about
+                // that pivot after moving the frame, rather than discarding it.
+                let pivot = base + offset;
+                pivot + (DVec3::X - pivot) * 2.
             } else {
                 offset + DVec3::new(offset.y, 1. - offset.x, 0.) + base
             };

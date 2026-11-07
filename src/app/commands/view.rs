@@ -3875,10 +3875,12 @@ mod viewport_highlight_tests {
         app.tabs[i].scene.selection.borrow_mut().input.pointer_away = true;
         assert!(app.model_viewport_outline(&app.tabs[i]).is_none(), "pointer away: no outline");
 
+        app.tabs[i].scene.sync_tiles_from_panes(800.0, 600.0);
+        app.tabs[i].scene.active_model_tile.set(1);
+
         let _ = app.update(Message::ViewportOutlineSwitchHover(true));
-        let active = app.tabs[i].scene.active_model_tile_bounds(800.0, 600.0);
         let (rect, alpha) = app.model_viewport_outline(&app.tabs[i]).expect("outline on the switch");
-        assert_eq!(rect, active);
+        assert!(rect.x > 350.0 && rect.width < 450.0 && rect.height > 550.0, "the right-hand viewport: {rect:?}");
         assert!((alpha - 0.5).abs() < 1e-6);
         let _ = app.update(Message::ViewportHighlightOpacity(70));
         let (_, alpha) = app.model_viewport_outline(&app.tabs[i]).unwrap();
@@ -3886,6 +3888,36 @@ mod viewport_highlight_tests {
 
         let _ = app.update(Message::ViewportOutlineSwitchHover(false));
         assert!(app.model_viewport_outline(&app.tabs[i]).is_none(), "gone once the pointer leaves");
+    }
+
+    /// The switch can disappear under a resting pointer and a removed widget
+    /// sends no exit; the outline must not stay pinned afterwards.
+    #[test]
+    fn the_outline_switch_hover_ends_when_the_chip_goes_away() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let two = |app: &mut OpenCADStudio| {
+            let _ = app.update(Message::DropdownSelectItem { dropdown_id: "VPORTS_CONFIG", cmd: "VPORTS 2V".into() });
+            app.tabs[app.active_tab].scene.selection.borrow_mut().input.pointer_away = true;
+            let _ = app.update(Message::ViewportOutlineSwitchHover(true));
+            assert!(app.model_viewport_outline(&app.tabs[app.active_tab]).is_some());
+        };
+
+        two(&mut app);
+        let _ = app.update(Message::DropdownSelectItem { dropdown_id: "VPORTS_CONFIG", cmd: "VPORTS SINGLE".into() });
+        let _ = app.update(Message::DropdownSelectItem { dropdown_id: "VPORTS_CONFIG", cmd: "VPORTS 2V".into() });
+        app.tabs[i].scene.selection.borrow_mut().input.pointer_away = true;
+        assert!(app.model_viewport_outline(&app.tabs[i]).is_none(), "a viewport count change ends the hover");
+
+        two(&mut app);
+        let _ = app.update(Message::WindowResized(700.0, 500.0));
+        assert!(app.model_viewport_outline(&app.tabs[i]).is_none(), "a resize ends the hover");
+
+        two(&mut app);
+        let _ = app.update(Message::ViewportHighlightOpacity(60));
+        assert!(app.model_viewport_outline(&app.tabs[i]).is_some(), "a wheel step keeps it");
     }
 
     #[test]

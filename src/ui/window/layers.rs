@@ -1607,14 +1607,17 @@ impl LayerPanel {
             .on_press(Message::LayerMoreMenu(!self.more_menu))
             .style(crate::ui::style::form::button_style(self.more_menu))
             .padding([4, 6]);
+        // The overlay takes the "…" button's width unless it is given one,
+        // and iced_aw's BottomStart opens it beside the button, not below.
         let more = iced_aw::DropDown::new(
             more_head,
-            container(iced::widget::Column::with_children(more_items).width(Length::Fixed(190.0)))
+            container(iced::widget::Column::with_children(more_items).width(Length::Fill))
                 .padding([4, 0])
                 .style(crate::ui::color_select::popup_panel_style),
             self.more_menu,
         )
-        .alignment(iced_aw::drop_down::Alignment::BottomStart)
+        .width(Length::Fixed(MORE_MENU_W))
+        .alignment(iced_aw::drop_down::Alignment::Bottom)
         .offset(2.0)
         .on_dismiss(Message::LayerMoreMenu(false));
         let search_btn = button(crate::ui::icons::themed(crate::ui::icons::SEARCH, 12.0))
@@ -2709,6 +2712,8 @@ const COL_OBJECTS: f32 = 60.0;
 const COL_STATUS: f32 = 36.0;
 /// The eye button at the row's end.
 const COL_EYE: f32 = 30.0;
+/// The compact toolbar's "…" menu.
+const MORE_MENU_W: f32 = 190.0;
 
 #[cfg(test)]
 mod column_layout_tests {
@@ -2747,5 +2752,38 @@ mod width_band_tests {
         assert!(narrow.contains(&LayerSortCol::On) && narrow.contains(&LayerSortCol::Color));
         let wide = shown_columns(WidthBand::Wide);
         assert!(wide.contains(&LayerSortCol::Description) && wide.contains(&LayerSortCol::Objects));
+    }
+}
+
+#[cfg(test)]
+mod more_menu_tests {
+    use super::*;
+    use iced_test::Simulator;
+
+    /// #2610: the narrow pallet's "…" menu opens below the button at its own
+    /// width; it had taken the button's ~30 px and showed no items.
+    #[test]
+    fn more_menu_opens_below_at_full_width() {
+        let panel = LayerPanel {
+            more_menu: true,
+            ..LayerPanel::default()
+        };
+        let mut ui = Simulator::with_size(
+            iced::Settings::default(),
+            iced::Size::new(360.0, 600.0),
+            panel.view_content(140.0, 360.0, None),
+        );
+        for label in ["New Filter", "Layer States", "Import...", "Advanced…"] {
+            let bounds = ui
+                .find(label.to_string())
+                .unwrap_or_else(|_| panic!("{label:?} is not in the menu"))
+                .visible_bounds()
+                .unwrap_or_else(|| panic!("{label:?} is not visible"));
+            assert!(bounds.width > 40.0, "{label:?} is squeezed: {bounds:?}");
+            assert!(
+                bounds.y > 24.0,
+                "{label:?} is not below the toolbar: {bounds:?}"
+            );
+        }
     }
 }

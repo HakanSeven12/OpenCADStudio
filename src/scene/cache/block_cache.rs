@@ -421,19 +421,15 @@ impl BlockCache {
         solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
     ) -> Self {
         use crate::par::prelude::*;
+        let perf = crate::perf::enabled();
+        let t_all = perf.then(iced::time::Instant::now);
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
         cache.complex_possible = crate::io::linetypes::defines_complex_lt(doc);
         cache.viewport = viewport;
-        let referenced = collect_referenced_blocks(doc, anno_scale);
-        let mut reference_counts: HashMap<String, usize> = HashMap::default();
-        for entity in doc.entities() {
-            if let EntityType::Insert(insert) = entity {
-                *reference_counts
-                    .entry(insert.block_name.clone())
-                    .or_default() += insert.instance_count();
-            }
-        }
+        let t_refs = perf.then(iced::time::Instant::now);
+        let (referenced, reference_counts) = collect_referenced_blocks(doc, anno_scale);
+        let refs_ms = crate::perf::elapsed_ms(t_refs);
         cache.prototype_blocks = reference_counts
             .into_iter()
             .filter_map(|(name, count)| (count > 1).then_some(name))
@@ -444,6 +440,7 @@ impl BlockCache {
         // builds embarrassingly parallel over the read-only `doc` — no
         // topological ordering required. Metrics are resolved after all
         // definitions exist.
+        let t_defns = perf.then(iced::time::Instant::now);
         cache.defns = referenced
             .par_iter()
             .map(|name| {
@@ -463,7 +460,19 @@ impl BlockCache {
                 )
             })
             .collect();
+        let defns_ms = crate::perf::elapsed_ms(t_defns);
+        let t_metrics = perf.then(iced::time::Instant::now);
         cache.compute_block_metrics(&referenced);
+        if perf {
+            crate::perf_record!(
+                "[perf] blk_cache-build total={:.1}ms refs={:.1} defns={:.1} metrics={:.1} blocks={}",
+                crate::perf::elapsed_ms(t_all),
+                refs_ms,
+                defns_ms,
+                crate::perf::elapsed_ms(t_metrics),
+                referenced.len(),
+            );
+        }
         cache
     }
 
@@ -623,12 +632,27 @@ fn block_object_names(doc: &Document, entity: &EntityType, anno_scale: f32) -> V
         .collect()
 }
 
-/// Collect block definitions needed by rendered representations.
-fn collect_referenced_blocks(doc: &Document, anno_scale: f32) -> Vec<String> {
+/// Collect block definitions needed by rendered representations, and, from the
+/// same walk, how many instances each top-level INSERT contributes — the two
+/// disjoint facts the build needs about the same entities. They used to be
+/// gathered by two full passes over `doc.entities()`; on a 1.17 M-entity
+/// drawing each pass is arena-latency bound, so they share one walk.
+fn collect_referenced_blocks(
+    doc: &Document,
+    anno_scale: f32,
+) -> (Vec<String>, HashMap<String, usize>) {
     let mut seen: HashSet<String> = HashSet::default();
     let mut queue: Vec<String> = Vec::new();
+    let mut reference_counts: HashMap<String, usize> = HashMap::default();
 
     for entity in doc.entities() {
+        // Reference counts are top-level INSERTs only, as before: the nested
+        // walk below never reaches this branch.
+        if let EntityType::Insert(insert) = entity {
+            *reference_counts
+                .entry(insert.block_name.clone())
+                .or_default() += insert.instance_count();
+        }
         for name in block_object_names(doc, entity, anno_scale) {
             if seen.insert(name.clone()) {
                 queue.push(name);
@@ -650,7 +674,7 @@ fn collect_referenced_blocks(doc: &Document, anno_scale: f32) -> Vec<String> {
             }
         }
     }
-    seen.into_iter().collect()
+    (seen.into_iter().collect(), reference_counts)
 }
 
 fn referenced_block_tree(doc: &Document, root: &str, anno_scale: f32) -> Vec<String> {

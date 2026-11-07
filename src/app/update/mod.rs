@@ -138,6 +138,7 @@ pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use file::native_paths_match;
 mod page_setup_import;
+mod prop_commit;
 #[cfg(not(target_arch = "wasm32"))]
 mod plugin_grips;
 #[cfg(not(target_arch = "wasm32"))]
@@ -841,6 +842,15 @@ impl OpenCADStudio {
         if self.snap_override_popup.is_some() {
             if let Some(task) = self.intercept_snap_override_key(&msg) {
                 return task;
+            }
+        }
+        // Tab in a Properties field applies it and moves to the next field
+        // (Shift+Tab: the previous one) instead of cycling Dynamic Input.
+        if let Message::ShortcutPressed(key) = &msg {
+            if matches!(key.as_str(), "TAB" | "SHIFT+TAB") {
+                if let Some(task) = self.prop_tab(key == "TAB") {
+                    return task;
+                }
             }
         }
         // After a click in the Layer manager's table, ↑/↓ move through its
@@ -5771,7 +5781,10 @@ impl OpenCADStudio {
             Message::PanePress(idx) => {
                 // A click-away into the drawing area re-syncs the active-row
                 // highlight against real focus before the pick runs.
-                let sweep = self.sync_active_field_if_any();
+                // The press takes the focus from a Properties field: what was typed
+                // there is applied before the pick can change the selection.
+                let applied = self.commit_active_prop_field();
+                let sweep = Task::batch([applied, self.sync_active_field_if_any()]);
                 // A fresh press ends any stale (un-dropped) pane move.
                 self.pane_move_from = None;
                 self.focus_model_pane(idx);
@@ -5857,13 +5870,19 @@ impl OpenCADStudio {
                     );
                 }
                 self.graphic_attributes.open_menu = None;
-                let sweep = self.sync_active_field_if_any();
+                // The press takes the focus from a Properties field: what was typed
+                // there is applied before the pick can change the selection.
+                let applied = self.commit_active_prop_field();
+                let sweep = Task::batch([applied, self.sync_active_field_if_any()]);
                 Task::batch(vec![moved, sweep, self.on_viewport_left_press()])
             }
 
             Message::ViewportLeftPress => {
                 self.graphic_attributes.open_menu = None;
-                let sweep = self.sync_active_field_if_any();
+                // The press takes the focus from a Properties field: what was typed
+                // there is applied before the pick can change the selection.
+                let applied = self.commit_active_prop_field();
+                let sweep = Task::batch([applied, self.sync_active_field_if_any()]);
                 Task::batch(vec![sweep, self.on_viewport_left_press()])
             }
 
@@ -9875,6 +9894,18 @@ impl OpenCADStudio {
             }
 
             Message::PropSyncActive(focused) => {
+                // The field the focus left keeps what was typed into it.
+                let left = self.tabs[self.active_tab]
+                    .properties
+                    .active_field
+                    .clone()
+                    .filter(|key| {
+                        !crate::ui::properties::active_key_focused(Some(key), focused.as_ref())
+                    });
+                let commit = match left {
+                    Some(key) => self.commit_prop_field(key),
+                    None => Task::none(),
+                };
                 // The Graphic Attributes linetype scale field behaves like a
                 // Properties field: the first click selects its value.
                 let scale_field = iced::widget::Id::new(
@@ -9883,9 +9914,12 @@ impl OpenCADStudio {
                 if focused.as_ref() == Some(&scale_field) {
                     if !std::mem::replace(&mut self.graphic_attributes.linetype_scale_focused, true)
                     {
-                        return iced::widget::operation::select_all(scale_field);
+                        return Task::batch([
+                            commit,
+                            iced::widget::operation::select_all(scale_field),
+                        ]);
                     }
-                    return Task::none();
+                    return commit;
                 }
                 self.graphic_attributes.linetype_scale_focused = false;
                 self.graphic_attributes.linetype_scale_input = None;
@@ -9899,9 +9933,12 @@ impl OpenCADStudio {
                         // the same field (or sweeping after a click elsewhere
                         // left its focus in place) must keep caret placement.
                         if changed {
-                            return iced::widget::operation::select_all(id.clone());
+                            return Task::batch([
+                                commit,
+                                iced::widget::operation::select_all(id.clone()),
+                            ]);
                         }
-                        return Task::none();
+                        return commit;
                     }
                 }
                 if !crate::ui::properties::active_key_focused(
@@ -9910,7 +9947,7 @@ impl OpenCADStudio {
                 ) {
                     panel.active_field = None;
                 }
-                Task::none()
+                commit
             }
 
             Message::PropPickerSurface(quick, message) => {

@@ -500,32 +500,36 @@ pub fn build_field_key_map(sections: &[PropSection]) -> HashMap<iced::widget::Id
     let mut map = HashMap::default();
     for section in sections {
         for prop in &section.props {
-            let key = match &prop.value {
-                PropValue::EditText(_) | PropValue::PlainText(_) | PropValue::EditChoice { .. } => {
-                    Some(FieldKey::Geom(prop.field))
-                }
-                PropValue::AttrText { tag, .. } => Some(FieldKey::Attr(tag.clone())),
-                PropValue::PluginParam {
-                    name,
-                    editable: true,
-                    ..
-                } => Some(FieldKey::PluginParam(name.clone())),
-                PropValue::BlockNumber { key, .. } => Some(FieldKey::BlockParameter(*key)),
-                _ => None,
-            };
-            if let Some(key) = key {
+            for key in prop_field_keys(prop) {
                 map.insert(key.widget_id(), key);
-            }
-            if let PropValue::ParamRow { index, .. } = &prop.value {
-                use crate::ui::window::named_parameters::ParamField;
-                for field in [ParamField::Name, ParamField::Formula] {
-                    let key = FieldKey::Param(*index, field);
-                    map.insert(key.widget_id(), key);
-                }
             }
         }
     }
     map
+}
+
+/// The typed-value fields one row holds, in their order on screen.
+fn prop_field_keys(prop: &crate::scene::model::object::Property) -> Vec<FieldKey> {
+    match &prop.value {
+        PropValue::EditText(_) | PropValue::PlainText(_) | PropValue::EditChoice { .. } => {
+            vec![FieldKey::Geom(prop.field)]
+        }
+        PropValue::AttrText { tag, .. } => vec![FieldKey::Attr(tag.clone())],
+        PropValue::PluginParam {
+            name,
+            editable: true,
+            ..
+        } => vec![FieldKey::PluginParam(name.clone())],
+        PropValue::BlockNumber { key, .. } => vec![FieldKey::BlockParameter(*key)],
+        PropValue::ParamRow { index, .. } => {
+            use crate::ui::window::named_parameters::ParamField;
+            vec![
+                FieldKey::Param(*index, ParamField::Name),
+                FieldKey::Param(*index, ParamField::Formula),
+            ]
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Returns a task that sweeps the widget tree for the currently-focused widget
@@ -730,6 +734,40 @@ impl PropertiesPanel {
     /// shown. O(1) via the [`PropertiesPanel::field_key_by_id`] map.
     pub fn prop_field_key_for_id(&self, id: &iced::widget::Id) -> Option<FieldKey> {
         self.field_key_by_id.get(id).cloned()
+    }
+
+    /// The typed-value fields Tab steps through, top to bottom: only the ones
+    /// on screen, so a collapsed section or coordinate group is skipped as
+    /// `render_section` skips it.
+    pub fn tab_order(&self) -> Vec<FieldKey> {
+        let mut keys = Vec::new();
+        for section in &self.sections {
+            if self.collapsed_sections.contains(&section.title) {
+                continue;
+            }
+            let mut idx = 0;
+            while idx < section.props.len() {
+                let group_len = if section.title == "View" {
+                    0
+                } else {
+                    coord_group_len(&section.props, idx)
+                };
+                if group_len >= 2 {
+                    let base = coord_base(&section.props[idx].label);
+                    let key = format!("{}:{}", section.title, base);
+                    if self.expanded_groups.contains(&key) {
+                        for prop in &section.props[idx..idx + group_len] {
+                            keys.extend(prop_field_keys(prop));
+                        }
+                    }
+                    idx += group_len;
+                } else {
+                    keys.extend(prop_field_keys(&section.props[idx]));
+                    idx += 1;
+                }
+            }
+        }
+        keys
     }
 
     /// Whether the open dropdown belongs to the surface being built.

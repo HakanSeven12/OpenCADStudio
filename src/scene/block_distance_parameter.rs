@@ -703,6 +703,30 @@ mod tests {
         (scene, definition)
     }
 
+    #[test]
+    fn the_first_parameter_tags_the_members_the_definition_already_holds() {
+        let (mut scene, definition) = fixture();
+        let member = members(&scene.document, definition)[0];
+        assert_eq!(
+            authoring::element_id(scene.document.get_entity(member).unwrap()),
+            None,
+            "a plain definition carries no element tags"
+        );
+        create(
+            &mut scene.document,
+            definition,
+            Kind::Linear,
+            Vector3::ZERO,
+            Vector3::new(5.0, 0.0, 0.0),
+            Vector3::new(2.5, 1.0, 0.0),
+        )
+        .unwrap();
+        assert!(
+            authoring::element_id(scene.document.get_entity(member).unwrap()).is_some(),
+            "creating the graph must tag the geometry the definition already holds"
+        );
+    }
+
     fn append_batch(document: &mut Document, definition: Handle) -> Vec<Handle> {
         [Kind::Linear, Kind::Polar, Kind::XY]
             .map(|kind| {

@@ -246,7 +246,7 @@ fn badge<'a>(support: Support) -> Element<'a, Message> {
     };
     let color = move |theme: &Theme| match tone {
         0 => theme.palette().success.base.color,
-        _ => theme.palette().background.base.text.scale_alpha(0.55),
+        _ => crate::ui::style::readable::muted_text(theme),
     };
     container(
         text(label)

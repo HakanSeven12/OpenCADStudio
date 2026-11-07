@@ -1583,7 +1583,7 @@ impl OpenCADStudio {
                 crate::app::config::resolve_system_theme().seed(),
             );
         }
-        self.active_theme = self.ui_theme.to_iced();
+        self.active_theme = crate::ui::style::readable::ui_theme(&self.ui_theme.to_iced());
         self.theme_color_inputs = self.ui_theme.palette.hex_values();
         self.model_space = cfg.model_space;
         self.model_bg_input = self

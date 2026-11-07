@@ -184,7 +184,7 @@ pub(super) fn viewcube_ucs_picker<'a>(
                     ..Default::default()
                 },
                 text_color: palette.background.base.text,
-                placeholder_color: palette.background.base.text.scale_alpha(0.68),
+                placeholder_color: crate::ui::style::readable::hint_text(theme),
                 handle_color: palette.background.base.text,
             }
         })

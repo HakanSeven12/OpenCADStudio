@@ -394,6 +394,9 @@ pub const DEFAULT_WINDOW_COLOR: Color = Color {
 /// Returns the curated (crossing_color, window_color) pair tailored for a specific theme.
 /// Crossing is always a theme-harmonious green/teal variant, and Window is always a theme-harmonious blue/cyan variant.
 pub fn theme_selection_colors(theme: &Theme) -> (Color, Color) {
+    // Match the theme the user chose, not the readable copy `ui_theme` made.
+    let base = crate::ui::style::readable::base_theme(theme);
+    let theme = &base;
     match theme {
         Theme::Dark => (DEFAULT_CROSSING_COLOR, DEFAULT_WINDOW_COLOR),
         Theme::Light => (
@@ -484,6 +487,9 @@ pub fn theme_selection_colors(theme: &Theme) -> (Color, Color) {
 /// Uses deep-contrast pairs for the six light themes and the shared engineering pair (#1F854D / #2166B3)
 /// for dark themes rendered on a light canvas.
 pub fn light_canvas_color(crossing: bool, theme: &Theme) -> Color {
+    // Match the theme the user chose, not the readable copy `ui_theme` made.
+    let base = crate::ui::style::readable::base_theme(theme);
+    let theme = &base;
     let (crossing_color, window_color) = match theme {
         Theme::Light => (
             Color::from_rgb8(0x1F, 0x85, 0x4D), // Engineering Forest Green (#1F854D)

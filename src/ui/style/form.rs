@@ -133,7 +133,7 @@ pub fn field_style_with_radius(
             radius: radius.into(),
         },
         icon: palette.background.base.text,
-        placeholder: palette.background.base.text.scale_alpha(0.48),
+        placeholder: crate::ui::style::readable::hint_text(theme),
         value: palette.background.base.text,
         selection: palette.primary.base.color.scale_alpha(0.5),
     }

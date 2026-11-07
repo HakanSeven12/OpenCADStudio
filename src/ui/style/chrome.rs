@@ -64,17 +64,17 @@ pub fn hover_border(theme: &Theme) -> Color {
 
 /// Section labels, shortcut text.
 pub fn muted(theme: &Theme) -> Color {
-    token(theme, 0.652)
+    super::readable::at_least_muted(token(theme, 0.652), theme)
 }
 
 /// Panel title text.
 pub fn title_text(theme: &Theme) -> Color {
-    token(theme, 0.714)
+    super::readable::at_least_muted(token(theme, 0.714), theme)
 }
 
 /// Inactive tab and menu-bar text.
 pub fn tab_text(theme: &Theme) -> Color {
-    token(theme, 0.859)
+    super::readable::at_least_muted(token(theme, 0.859), theme)
 }
 
 /// Button labels.

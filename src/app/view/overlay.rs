@@ -1926,7 +1926,7 @@ fn qselect_content<'a>(
         text(s)
             .size(11)
             .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                color: Some(crate::ui::style::readable::muted_text(theme)),
             })
     };
 
@@ -2064,7 +2064,7 @@ fn qselect_content<'a>(
         text(crate::tf!("{} candidate object(s)", candidate_count))
             .size(11)
             .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                color: Some(crate::ui::style::readable::muted_text(theme)),
             }),
         Space::new().height(10),
         container(rule::horizontal(1)).width(flex_width),

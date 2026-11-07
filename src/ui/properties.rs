@@ -2573,7 +2573,7 @@ fn text_input_style(theme: &Theme, status: text_input::Status) -> text_input::St
             radius: 2.0.into(),
         },
         icon: Color::TRANSPARENT,
-        placeholder: palette.background.base.text.scale_alpha(0.48),
+        placeholder: crate::ui::style::readable::hint_text(theme),
         value: palette.background.base.text,
         selection: palette.primary.base.color.scale_alpha(0.5),
     }
@@ -2585,13 +2585,13 @@ pub(crate) fn combo_input_style(theme: &Theme, status: text_input::Status) -> te
 
 fn muted_text_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.72)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     }
 }
 
 fn hint_text_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.48)),
+        color: Some(crate::ui::style::readable::hint_text(theme)),
     }
 }
 

@@ -972,7 +972,7 @@ impl ColorPicker {
                 color: Some(if exact {
                     theme.palette().success.base.color
                 } else {
-                    theme.palette().background.base.text.scale_alpha(0.65)
+                    crate::ui::style::readable::muted_text(theme)
                 }),
             }),
             button(
@@ -1233,7 +1233,7 @@ fn filled(color: Color) -> container::Style {
 
 pub(super) fn muted_text(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     }
 }
 

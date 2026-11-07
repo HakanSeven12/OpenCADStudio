@@ -2578,7 +2578,9 @@ impl OpenCADStudio {
                                             );
                                         self.theme_color_inputs =
                                             self.ui_theme.palette.hex_values();
-                                        self.active_theme = iced::Theme::Dark;
+                                        self.active_theme = crate::ui::style::readable::ui_theme(
+                                            &iced::Theme::Dark,
+                                        );
                                         self.sync_model_space_theme(true);
                                         Ok(("COLORTHEME = 0 (Dark)".to_string(), true))
                                     }
@@ -2593,7 +2595,9 @@ impl OpenCADStudio {
                                             );
                                         self.theme_color_inputs =
                                             self.ui_theme.palette.hex_values();
-                                        self.active_theme = iced::Theme::Light;
+                                        self.active_theme = crate::ui::style::readable::ui_theme(
+                                            &iced::Theme::Light,
+                                        );
                                         self.sync_model_space_theme(true);
                                         Ok(("COLORTHEME = 1 (Light)".to_string(), true))
                                     }

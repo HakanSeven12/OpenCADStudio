@@ -467,7 +467,7 @@ pub enum DataExtractionField {
 
 fn muted(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.62)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     }
 }
 

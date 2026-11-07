@@ -79,7 +79,7 @@ fn empty_row() -> Element<'static, Message> {
         text(t!("No objects"))
             .size(11)
             .style(|theme: &Theme| text::Style {
-                color: Some(theme.palette().background.base.text.scale_alpha(0.42)),
+                color: Some(crate::ui::style::readable::hint_text(theme)),
             }),
     )
     .padding([4, 10])

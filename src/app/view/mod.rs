@@ -2801,12 +2801,18 @@ bg={bg_ms:.1}ms n={view_count}"
             } else if tab.scene.table_cells_handle().is_some() {
                 {
                     let tools = crate::ui::ribbon::table_cell_tools();
-                    // Rows and columns, merging and locking, formats, inserts,
-                    // linked data and the cell's text, two to a row.
-                    crate::ui::side_toolbar::view_grid(
-                        &[&tools[..6], &tools[6..9], &tools[9..13], &tools[13..17], &tools[17..]],
-                        2,
-                    )
+                    let align = crate::ui::ribbon::table_cell_alignments();
+                    // Rows and columns, merging and locking, the nine
+                    // alignments three to a row, formats, inserts, linked
+                    // data and the cell's text, two to a row.
+                    crate::ui::side_toolbar::view_grid(&[
+                        (&tools[..6], 2),
+                        (&tools[6..9], 2),
+                        (&align[..], 3),
+                        (&tools[9..12], 2),
+                        (&tools[12..16], 2),
+                        (&tools[16..], 2),
+                    ])
                 }
             } else if self.ribbon.xref_context() {
                 crate::ui::side_toolbar::view(&crate::ui::ribbon::xref_tools())

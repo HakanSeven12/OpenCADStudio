@@ -621,6 +621,13 @@ impl OpenCADStudio {
             self.ribbon.set_block_testing(false);
             self.ribbon.set_block_editing(block_editing);
         }
+        let cells_picked = !testing
+            && !block_editing
+            && self
+                .tabs
+                .get(self.active_tab)
+                .is_some_and(|tab| tab.scene.table_cells.is_some());
+        self.ribbon.set_table_cell_context(cells_picked);
         // The ribbon light follows the pane that is actually rendered, so a
         // session ending, a clean screen or another tab closes the light with it.
         self.ribbon.show_parameters_manager =

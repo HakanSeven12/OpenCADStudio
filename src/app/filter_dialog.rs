@@ -718,14 +718,14 @@ impl OpenCADStudio {
             | FilterMsg::FromLayer(_)
             | FilterMsg::Window
             | FilterMsg::Export
-            | FilterMsg::Import => {}
-            #[cfg(not(target_arch = "wasm32"))]
-            FilterMsg::ExportTo(_)
-            | FilterMsg::ImportFrom(_)
+            | FilterMsg::Import
             | FilterMsg::ObjectsOnLayers
             | FilterMsg::SampleToggle(_)
             | FilterMsg::SampleAdd
             | FilterMsg::SampleCancel => {}
+            // Files only on the desktop.
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ExportTo(_) | FilterMsg::ImportFrom(_) => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);

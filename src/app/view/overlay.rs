@@ -328,6 +328,12 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 .is_some_and(|p| self.on_handle(p));
         if grabbing {
             iced::mouse::Interaction::ResizingHorizontally
+        } else if self
+            .cell
+            .zip(cursor.position_in(bounds))
+            .is_some_and(|(cell, p)| cell.contains(p))
+        {
+            iced::mouse::Interaction::Text
         } else {
             iced::mouse::Interaction::default()
         }

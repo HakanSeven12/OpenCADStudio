@@ -1674,17 +1674,19 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
-        // Typing in a cell takes no snaps; a middle-button pan still runs.
-        if self.table_cell_editor.is_some()
-            && self.tabs[self.active_tab].active_cmd.is_none()
-            && !self.tabs[self.active_tab].scene.selection.borrow().input.middle_down
-        {
-            self.cursor_pos = p;
-            self.tabs[self.active_tab].last_cursor_screen = p;
+        // While a cell is typed in the cursor moves (and pans) as usual but
+        // takes no snaps.
+        let typing = self.table_cell_editor.is_some()
+            && self.tabs[self.active_tab].active_cmd.is_none();
+        let task = self.on_viewport_move_inner(p);
+        if typing {
             self.tabs[self.active_tab].snap_result = None;
             self.snap_dwell = None;
-            return Task::none();
         }
+        task
+    }
+
+    fn on_viewport_move_inner(&mut self, p: Point) -> Task<Message> {
         crate::perf::note_pointer_move();
         // A ribbon dropdown is open over the viewport. Its backdrop
         // cannot swallow cursor motion — in iced 0.14 mouse_area/opaque

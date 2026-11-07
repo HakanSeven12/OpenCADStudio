@@ -824,6 +824,7 @@ impl OpenCADStudio {
             ribbon_closed: self.ribbon_closed,
             command_line_hidden: self.command_line_hidden,
             layer_columns: crate::ui::window::layers::column_layout_names(),
+            ribbon_layers_follow_filter: self.ribbon_layers_follow_filter,
             options_tab: self.options_tab,
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
@@ -1029,6 +1030,7 @@ impl OpenCADStudio {
         self.ribbon_closed = s.ribbon_closed;
         self.command_line_hidden = s.command_line_hidden;
         crate::ui::window::layers::set_column_layout_names(&s.layer_columns);
+        self.ribbon_layers_follow_filter = s.ribbon_layers_follow_filter;
         self.options_tab = s.options_tab;
         self.spacemouse_preferences = s.spacemouse;
         // These four drive real features with commands and status-bar pills,

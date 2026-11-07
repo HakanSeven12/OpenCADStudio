@@ -43,6 +43,8 @@ pub struct LayerImportState {
     pub groups: Vec<(String, Vec<String>)>,
     /// Bring the groups whose layers come in.
     pub bring_groups: bool,
+    /// The source's property filters, brought with the groups.
+    pub filters: Vec<super::layer_filter_store::StoredLayerFilter>,
 }
 
 #[derive(Clone, Debug)]
@@ -259,6 +261,9 @@ impl OpenCADStudio {
                 }
             })
             .collect();
+        // The source's property filters: they read properties, not layers,
+        // so they all come along.
+        let filters = super::layer_filter_store::stored_layer_filters(document);
         // The source's groups, by layer name, to bring with their layers.
         let groups: Vec<(String, Vec<String>)> = super::layer_groups::layer_groups(document)
             .into_iter()
@@ -284,8 +289,9 @@ impl OpenCADStudio {
             linetype_styles: document.text_styles.iter().cloned().collect(),
             on_conflict: OnConflict::Skip,
             search: String::new(),
-            bring_groups: !groups.is_empty(),
+            bring_groups: !groups.is_empty() || !filters.is_empty(),
             groups,
+            filters,
         });
         self.reset_modal_geometry();
     }
@@ -301,6 +307,20 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, "LAYER IMPORT");
         let report = import_layers(&mut self.tabs[i].scene.document, &state);
+        if state.bring_groups && !state.filters.is_empty() {
+            // Filters the drawing has not got, in the same undo step.
+            let document = &mut self.tabs[i].scene.document;
+            let mut stored = super::layer_filter_store::stored_layer_filters(document);
+            for filter in &state.filters {
+                if !stored
+                    .iter()
+                    .any(|s| s.name.eq_ignore_ascii_case(&filter.name))
+                {
+                    stored.push(filter.clone());
+                }
+            }
+            super::layer_filter_store::write_layer_filters(document, &stored);
+        }
         if state.bring_groups {
             let ticked: Vec<&str> = state
                 .rows
@@ -606,12 +626,16 @@ mod view {
                 })
                 .text_size(12)
                 .size(14),
-            checkbox(state.bring_groups && !state.groups.is_empty())
-                .label(crate::tf!("Groups ({})", state.groups.len()))
+            checkbox(state.bring_groups && !(state.groups.is_empty() && state.filters.is_empty()))
+                .label(crate::tf!(
+                    "Groups and filters ({})",
+                    state.groups.len() + state.filters.len()
+                ))
                 .text_size(12)
                 .size(14)
                 .on_toggle_maybe(
-                    (!state.groups.is_empty()).then_some(|on| msg(LayerImportMsg::BringGroups(on)))
+                    (!(state.groups.is_empty() && state.filters.is_empty()))
+                        .then_some(|on| msg(LayerImportMsg::BringGroups(on)))
                 ),
         ]
         .spacing(4);
@@ -776,6 +800,7 @@ mod tests {
             search: String::new(),
             groups: Vec::new(),
             bring_groups: false,
+            filters: Vec::new(),
         }
     }
 

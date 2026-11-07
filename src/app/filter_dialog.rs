@@ -68,6 +68,8 @@ pub enum FilterMsg {
     LayerName(String),
     /// Layer mode: keep the filter as a LAYERFILTER filter.
     SaveLayerFilter,
+    /// Layer mode: the filter to sit under ("" for the top).
+    LayerParent(String),
 }
 
 /// What Quick Select hands over to FILTER.
@@ -110,6 +112,10 @@ pub struct FilterDialogState {
     pub layer_filter_from: Option<String>,
     /// Opened with 'FILTER inside this command's "Select objects:".
     pub for_command: Option<String>,
+    /// Layer mode: the filter this one sits under (`None`: at the top), and
+    /// the filters it may go under.
+    pub layer_filter_parent: Option<String>,
+    pub layer_filter_parents: Vec<String>,
 }
 
 impl FilterDialogState {
@@ -368,6 +374,10 @@ impl OpenCADStudio {
                 state.layer_filter = Some(name);
                 return Task::none();
             }
+            FilterMsg::LayerParent(parent) => {
+                state.layer_filter_parent = (!parent.is_empty()).then_some(parent);
+                return Task::none();
+            }
             FilterMsg::Open(_)
             | FilterMsg::Close
             | FilterMsg::Apply
@@ -376,6 +386,7 @@ impl OpenCADStudio {
             | FilterMsg::SaveAsCommit
             | FilterMsg::DeleteSaved
             | FilterMsg::SaveLayerFilter
+            | FilterMsg::LayerParent(_)
             | FilterMsg::ShowLayers => {}
         }
         if let Some(t) = types_changed {
@@ -418,6 +429,8 @@ impl OpenCADStudio {
             layer_filter: None,
             layer_filter_from: None,
             for_command: self.transparent_select.clone(),
+            layer_filter_parent: None,
+            layer_filter_parents: Vec::new(),
         });
         self.reset_modal_geometry();
         self.filter_refresh_scope();
@@ -478,6 +491,7 @@ impl OpenCADStudio {
 
     /// FILTER over the layers, for a Layer manager filter named `name`.
     pub(super) fn filter_open_layers(&mut self, name: String, filter: Filter) {
+        let parents_source = self.layer_filters.clone();
         self.filter_open(Some(FilterSeed {
             filter,
             scope: QSelectScope::CurrentSpace,
@@ -490,6 +504,41 @@ impl OpenCADStudio {
             state.layer_filter = Some(name);
             // Layers, not the objects a parked command asks for.
             state.for_command = None;
+            // Where it sits, and where it may go: not under itself or a filter
+            // under it.
+            fn find_parent(
+                list: &[super::layer_filters::LayerFilter],
+                parent: Option<&str>,
+                name: &str,
+            ) -> Option<Option<String>> {
+                for f in list {
+                    if f.name.eq_ignore_ascii_case(name) {
+                        return Some(parent.map(str::to_owned));
+                    }
+                    if let Some(found) = find_parent(&f.children, Some(&f.name), name) {
+                        return Some(found);
+                    }
+                }
+                None
+            }
+            fn names(
+                list: &[super::layer_filters::LayerFilter],
+                skip: &str,
+                out: &mut Vec<String>,
+            ) {
+                for f in list {
+                    if !skip.is_empty() && f.name.eq_ignore_ascii_case(skip) {
+                        continue;
+                    }
+                    out.push(f.name.clone());
+                    names(&f.children, skip, out);
+                }
+            }
+            let current = state.layer_filter.clone().unwrap_or_default();
+            state.layer_filter_parent = find_parent(&parents_source, None, &current).flatten();
+            let mut options = Vec::new();
+            names(&parents_source, &current, &mut options);
+            state.layer_filter_parents = options;
         }
         self.filter_refresh_scope();
         self.filter_refresh_live();
@@ -531,6 +580,7 @@ impl OpenCADStudio {
     /// Layer manager's tree.
     fn save_layer_filter(&mut self) {
         let i = self.active_tab;
+        self.load_layer_filters(i);
         let Some(state) = self.filter_dialog.as_ref() else {
             return;
         };
@@ -546,34 +596,53 @@ impl OpenCADStudio {
         let conditions = Some(state.filter.clone());
         let from = state.layer_filter_from.clone();
         let matches = state.live_count;
-        let position = |filters: &[super::layer_filters::LayerFilter], name: &str| {
-            filters
-                .iter()
-                .position(|f| f.name.eq_ignore_ascii_case(name))
-        };
+        let parent = state.layer_filter_parent.clone();
+        fn take(
+            list: &mut Vec<super::layer_filters::LayerFilter>,
+            name: &str,
+        ) -> Option<super::layer_filters::LayerFilter> {
+            if let Some(at) = list.iter().position(|f| f.name.eq_ignore_ascii_case(name)) {
+                return Some(list.remove(at));
+            }
+            list.iter_mut().find_map(|f| take(&mut f.children, name))
+        }
+        fn under<'a>(
+            list: &'a mut Vec<super::layer_filters::LayerFilter>,
+            name: &str,
+        ) -> Option<&'a mut Vec<super::layer_filters::LayerFilter>> {
+            for f in list.iter_mut() {
+                if f.name.eq_ignore_ascii_case(name) {
+                    return Some(&mut f.children);
+                }
+                if let Some(found) = under(&mut f.children, name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
         // A renamed filter replaces the one it was, keeping its nested
         // filters; another filter of the new name gives way.
-        let at = from
+        let mut filter = from
             .as_deref()
-            .and_then(|from| position(&self.layer_filters, from))
-            .or_else(|| position(&self.layer_filters, &name));
-        match at {
-            Some(at) => {
-                let filter = &mut self.layer_filters[at];
-                filter.name = name.clone();
-                filter.conditions = conditions;
-                let mut index = 0;
-                self.layer_filters.retain(|f| {
-                    index += 1;
-                    index - 1 == at || !f.name.eq_ignore_ascii_case(&name)
-                });
+            .and_then(|from| take(&mut self.layer_filters, from))
+            .unwrap_or_default();
+        if let Some(other) = take(&mut self.layer_filters, &name) {
+            if filter.name.is_empty() {
+                filter = other;
             }
-            None => self.layer_filters.push(super::layer_filters::LayerFilter {
-                name: name.clone(),
-                conditions,
-                ..Default::default()
-            }),
         }
+        filter.name = name.clone();
+        filter.conditions = conditions;
+        filter.pattern.clear();
+        filter.predicates.clear();
+        match parent
+            .as_deref()
+            .and_then(|p| under(&mut self.layer_filters, p))
+        {
+            Some(children) => children.push(filter),
+            None => self.layer_filters.push(filter),
+        }
+        self.persist_layer_filters(i, "LAYERFILTER");
         self.filter_dialog = None;
         self.reset_modal_geometry();
         self.command_line.push_output(
@@ -1659,6 +1728,24 @@ mod view {
                     .on_submit(msg(FilterMsg::SaveLayerFilter))
                     .size(12)
                     .width(Length::Fixed(220.0)),
+                // Under: at the top, or under another filter (#2610).
+                text(t!("Under")).size(12),
+                crate::ui::dropdown_list::pick_list(
+                    Some(state.layer_filter_parent.clone().unwrap_or_default()),
+                    {
+                        let mut options = vec![String::new()];
+                        options.extend(state.layer_filter_parents.iter().cloned());
+                        options
+                    },
+                    |o: &String| if o.is_empty() {
+                        t!("Property filters").into_owned()
+                    } else {
+                        o.clone()
+                    },
+                )
+                .on_select(|o| msg(FilterMsg::LayerParent(o)))
+                .text_size(12)
+                .width(Length::Fixed(200.0)),
                 Space::new().width(Fill),
                 dialog_button(t!("Cancel"), msg(FilterMsg::Close), false),
                 dialog_button_styled_opt(

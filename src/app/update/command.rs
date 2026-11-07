@@ -2199,6 +2199,7 @@ impl OpenCADStudio {
     pub(super) fn on_layer_filter_edit(&mut self, name: Option<String>) -> Task<Message> {
         use crate::filter::{Condition, Filter, Item, Match, Op};
         let i = self.active_tab;
+        self.load_layer_filters(i);
         // `Some("")`: a new, empty filter (the toolbar's New Filter); `None`
         // starts from the search text (Advanced…).
         let blank = name.as_deref() == Some("");
@@ -2247,6 +2248,55 @@ impl OpenCADStudio {
     /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
     /// filter, or switch all of a node's layers at once (one undo step; the
     /// current layer is never frozen).
+    /// Save as filter: the search text as a property filter on the name,
+    /// shown in the tree (#2610 LM-22a).
+    pub(super) fn on_layer_save_search(&mut self) -> Task<Message> {
+        use crate::filter::{Condition, Filter, Item, Match, Op};
+        use crate::ui::window::layers::TreeNode;
+        let i = self.active_tab;
+        let search = self.tabs[i].layers.filter.trim().to_string();
+        if search.is_empty() {
+            return Task::none();
+        }
+        self.load_layer_filters(i);
+        // The search finds names containing the text; a pattern stays one.
+        let value = if search.contains(['*', '?', ',']) {
+            search.clone()
+        } else {
+            format!("*{search}*")
+        };
+        let mut name = search.clone();
+        let mut n = 2;
+        while self
+            .layer_filters
+            .iter()
+            .any(|f| f.name.eq_ignore_ascii_case(&name))
+        {
+            name = format!("{search} ({n})");
+            n += 1;
+        }
+        self.layer_filters
+            .push(crate::app::layer_filters::LayerFilter {
+                name: name.clone(),
+                conditions: Some(Filter {
+                    root: Match::All,
+                    items: vec![Item::Condition(Condition {
+                        property: Some("name".into()),
+                        op: Op::Eq,
+                        value,
+                        ..Default::default()
+                    })],
+                }),
+                ..Default::default()
+            });
+        self.persist_layer_filters(i, "LAYERFILTER");
+        let panel = &mut self.tabs[i].layers;
+        panel.filter.clear();
+        panel.view = TreeNode::Filter(name);
+        self.refresh_layer_counts();
+        Task::none()
+    }
+
     /// The tree's rename field: Enter. A group is renamed in the drawing, a
     /// filter in the list; an empty or taken name leaves it as it was.
     pub(super) fn on_layer_tree_rename_commit(&mut self) -> Task<Message> {
@@ -2272,6 +2322,7 @@ impl OpenCADStudio {
                 }
             }
             TreeNode::Filter(old) if !new.is_empty() && new != old => {
+                self.load_layer_filters(i);
                 let taken = self
                     .layer_filters
                     .iter()
@@ -2285,6 +2336,7 @@ impl OpenCADStudio {
                     .find(|f| f.name.eq_ignore_ascii_case(&old))
                 {
                     filter.name = new.clone();
+                    self.persist_layer_filters(i, "LAYERFILTER RENAME");
                     if self.tabs[i].layers.view == TreeNode::Filter(old) {
                         self.tabs[i].layers.view = TreeNode::Filter(new);
                     }
@@ -2308,8 +2360,10 @@ impl OpenCADStudio {
                 return self.on_layer_filter_edit(Some(name.clone()));
             }
             (TreeNode::Filter(name), A::Delete) => {
+                self.load_layer_filters(i);
                 self.layer_filters
                     .retain(|f| !f.name.eq_ignore_ascii_case(name));
+                self.persist_layer_filters(i, "LAYERFILTER DELETE");
                 if self.tabs[i].layers.view == node {
                     self.tabs[i].layers.view = TreeNode::All;
                 }
@@ -2396,6 +2450,8 @@ impl OpenCADStudio {
     /// The filter tree's live parts: the layers of the selected objects and
     /// what each LAYERFILTER filter matches. Set only when they changed.
     fn refresh_layer_tree(&mut self, i: usize) {
+        self.load_layer_filters(i);
+        self.tabs[i].layers.ribbon_follows = self.ribbon_layers_follow_filter;
         use std::hash::{Hash, Hasher};
         let scene = &self.tabs[i].scene;
         // This runs on every message while the panel shows: work the tree
@@ -2425,20 +2481,44 @@ impl OpenCADStudio {
             .collect();
         selected.sort();
         selected.dedup();
-        let filters: Vec<(String, Vec<String>)> = self
-            .layer_filters
-            .iter()
-            .map(|filter| {
-                let members = scene
-                    .document
+        // Every filter, a nested one right after its parent, its layers those
+        // its own conditions and all of its parents' take (#2610).
+        fn walk(
+            list: &[super::super::layer_filters::LayerFilter],
+            parents: &mut Vec<crate::filter::Filter>,
+            depth: u8,
+            document: &document::Document,
+            out: &mut Vec<(String, Vec<String>)>,
+            depths: &mut Vec<u8>,
+        ) {
+            let source = super::super::layer_filters::LayerProperties;
+            for filter in list {
+                let own = filter.to_filter();
+                let members = document
                     .layers
                     .iter()
-                    .filter(|layer| filter.matches(layer))
+                    .filter(|layer| !layer.name.starts_with('*'))
+                    .filter(|layer| own.matches(&source, *layer))
+                    .filter(|layer| parents.iter().all(|p| p.matches(&source, *layer)))
                     .map(|layer| layer.name.clone())
                     .collect();
-                (filter.name.clone(), members)
-            })
-            .collect();
+                out.push((filter.name.clone(), members));
+                depths.push(depth);
+                parents.push(own);
+                walk(&filter.children, parents, depth + 1, document, out, depths);
+                parents.pop();
+            }
+        }
+        let mut filters: Vec<(String, Vec<String>)> = Vec::new();
+        let mut depths = Vec::new();
+        walk(
+            &self.layer_filters,
+            &mut Vec::new(),
+            0,
+            &scene.document,
+            &mut filters,
+            &mut depths,
+        );
         let panel = &mut self.tabs[i].layers;
         if panel.selected_object_layers != selected {
             panel.selected_object_layers = selected;
@@ -2451,6 +2531,7 @@ impl OpenCADStudio {
             }
             panel.filters = filters;
         }
+        panel.filter_depths = depths;
     }
 
     /// Apply the typed transparency to the layer (and the selection it is
@@ -7130,6 +7211,83 @@ mod layer_name_target_tests {
         assert_eq!(shown(&app), ["ALPHA", "ZULU"]);
         let _ = app.update(Message::LayerShow(TreeNode::All));
         assert_eq!(shown(&app).len(), 4);
+    }
+
+    /// #2610 (J6): layer filters live in the drawing — one undo step to make,
+    /// undone like anything else; a filter under another sits deeper in the
+    /// tree and takes only what its parent does; the search text becomes a
+    /// filter; the ribbon's list can follow the tree.
+    #[test]
+    fn layer_filters_in_the_drawing_nested_saved_from_search() {
+        use crate::app::filter_dialog::FilterMsg;
+        use crate::filter::{Condition, Filter, Item, Match};
+        use crate::ui::window::layers::TreeNode;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        app.finish_pending_history(i);
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        let stored = |app: &OpenCADStudio| {
+            crate::app::layer_filter_store::stored_layer_filters(
+                &app.tabs[app.active_tab].scene.document,
+            )
+        };
+        assert_eq!(stored(&app).len(), 1, "kept in the drawing");
+        app.undo_active_tab();
+        assert!(stored(&app).is_empty());
+        app.refresh_layer_counts();
+        assert!(
+            app.tabs[i].layers.filters.is_empty(),
+            "undone in the tree too"
+        );
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        // ZULUS under LETTERS: Z* within A*,Z*.
+        app.filter_open_layers(
+            "ZULUS".into(),
+            Filter {
+                root: Match::All,
+                items: vec![Item::Condition(Condition {
+                    property: Some("name".into()),
+                    value: "Z*".into(),
+                    ..Default::default()
+                })],
+            },
+        );
+        let _ = app.update(Message::FilterDialog(FilterMsg::LayerParent(
+            "LETTERS".into(),
+        )));
+        let _ = app.update(Message::FilterDialog(FilterMsg::SaveLayerFilter));
+        let saved = stored(&app);
+        let zulus = saved.iter().find(|f| f.name == "ZULUS").unwrap();
+        assert_eq!(zulus.parent.as_deref(), Some("LETTERS"));
+        app.refresh_layer_counts();
+        let panel = &app.tabs[i].layers;
+        let at = panel
+            .filters
+            .iter()
+            .position(|(f, _)| f == "ZULUS")
+            .unwrap();
+        assert_eq!(panel.filter_depths[at], 1);
+        assert_eq!(panel.filters[at].1, ["ZULU"]);
+        // The search text as a filter.
+        app.tabs[i].layers.filter = "AL".into();
+        let _ = app.update(Message::LayerSaveSearch);
+        assert!(stored(&app).iter().any(|f| f.name == "AL"));
+        assert_eq!(app.tabs[i].layers.view, TreeNode::Filter("AL".into()));
+        assert!(app.tabs[i].layers.filter.is_empty());
+        // The ribbon follows the tree: ALPHA (and the current layer).
+        let _ = app.update(Message::LayerRibbonFollows(true));
+        let _ = app.update(Message::LayerShow(TreeNode::Filter("AL".into())));
+        let names: Vec<String> = app
+            .ribbon
+            .layer_infos
+            .iter()
+            .map(|l| l.name.clone())
+            .collect();
+        assert!(names.contains(&"ALPHA".to_string()));
+        assert!(!names.contains(&"ZULU".to_string()) || app.tabs[i].active_layer == "ZULU");
+        let _ = app.update(Message::LayerRibbonFollows(false));
     }
 
     /// #2610 (F1): a group with a space in its name is renamed in place and

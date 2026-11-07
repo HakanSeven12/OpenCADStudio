@@ -18,7 +18,7 @@ pub(crate) struct LayerGroup {
     pub layers: Vec<Handle>,
 }
 
-fn filter_dictionary(document: &Document) -> Option<Handle> {
+pub(crate) fn filter_dictionary(document: &Document) -> Option<Handle> {
     let extension = document.extension_dictionary_handle(document.layers.handle())?;
     let Some(ObjectType::Dictionary(extension)) = document.objects.get(&extension) else {
         return None;
@@ -85,7 +85,7 @@ fn find(document: &Document, name: &str) -> Option<(Handle, Handle)> {
     })
 }
 
-fn ensure_filter_dictionary(document: &mut Document) -> Handle {
+pub(crate) fn ensure_filter_dictionary(document: &mut Document) -> Handle {
     if let Some(handle) = filter_dictionary(document) {
         return handle;
     }

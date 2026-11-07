@@ -516,6 +516,30 @@ impl Scene {
             .collect()
     }
 
+    /// Pixel rect of the Model pane under `cursor` (canvas-relative), for
+    /// the hover outline. `None` outside Model, with a single pane (nothing to
+    /// tell apart), or when the cursor is off every pane, e.g. on a divider.
+    pub fn hovered_model_pane_px(
+        &self,
+        vw: f32,
+        vh: f32,
+        cursor: Option<iced::Point>,
+    ) -> Option<iced::Rectangle> {
+        if self.current_layout != "Model" || vw < 1.0 || vh < 1.0 {
+            return None;
+        }
+        let cursor = cursor?;
+        let regions = self.model_panes.layout().pane_regions(
+            TILE_DIVIDER_PX,
+            self.model_pane_min_px(),
+            iced::Size::new(vw, vh),
+        );
+        if regions.len() < 2 {
+            return None;
+        }
+        regions.values().find(|r| r.contains(cursor)).copied()
+    }
+
     /// Top-left pixel corner of Model pane `idx` within a `(vw, vh)` canvas,
     /// derived from the `pane_grid` layout (so it matches the rendered pane).
     pub fn pane_origin_px(&self, idx: usize, vw: f32, vh: f32) -> iced::Point {

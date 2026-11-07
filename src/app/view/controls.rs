@@ -31,6 +31,7 @@ pub(super) fn viewport_controls<'a>(
     render_mode_menu_open: bool,
     render_mode_preview: Option<document::entities::ViewportRenderMode>,
     style_name: Option<String>,
+    hover_outline: (bool, u8),
 ) -> Element<'a, Message> {
     let render_modes: Vec<RenderModeChoice> = crate::modules::view::visual_style::VISUAL_STYLES
         .iter()
@@ -278,7 +279,26 @@ pub(super) fn viewport_controls<'a>(
             .interaction(iced::mouse::Interaction::Grab)
             .on_press(Message::PaneMoveStart);
             let drag = viewport_tooltip(drag, crate::tr!("viewport", "move"), "VPORTS");
-            bar = bar.push(sep()).push(drag).push(sep()).push(danger_btn(
+            // Hover outline switch: one small icon, lit while the outline is
+            // on. A click switches it; the wheel over it sets the strength.
+            let (outline_on, outline_opacity) = hover_outline;
+            let outline_icon = if outline_on {
+                crate::ui::icons::themed_primary_weak_text(VPORTS_HIGHLIGHT_ICON, 15.0)
+            } else {
+                crate::ui::icons::themed(VPORTS_HIGHLIGHT_ICON, 15.0)
+            };
+            let outline = mouse_area(container(outline_icon).padding([4, 6]))
+                .interaction(iced::mouse::Interaction::Pointer)
+                .on_press(Message::ViewportHighlightToggle)
+                .on_scroll(move |delta| {
+                    Message::ViewportHighlightOpacity(outline_opacity_step(outline_opacity, delta))
+                });
+            let outline = viewport_tooltip(
+                outline,
+                outline_tooltip(outline_on, outline_opacity),
+                "VPHIGHLIGHT",
+            );
+            bar = bar.push(sep()).push(outline).push(drag).push(sep()).push(danger_btn(
                 crate::ui::icons::CLOSE,
                 Message::CloseModelViewport,
                 crate::tr!("viewport", "close"),
@@ -304,6 +324,38 @@ pub(super) fn viewport_controls<'a>(
             }
         })
         .into()
+}
+
+const VPORTS_HIGHLIGHT_ICON: &[u8] = include_bytes!("../../../assets/icons/vports_highlight.svg");
+
+/// Tooltip of the hover-outline switch: its state and how to change it.
+fn outline_tooltip(on: bool, opacity: u8) -> String {
+    let state = if on {
+        format!("{} {opacity}%", crate::t!("on,"))
+    } else {
+        crate::t!("off").into_owned()
+    };
+    format!(
+        "{} {state}\n{}",
+        crate::t!("Hover outline:"),
+        crate::t!("Click: on/off. Wheel: strength.")
+    )
+}
+
+/// One wheel notch over the hover-outline switch: 5 % up or down.
+fn outline_opacity_step(opacity: u8, delta: iced::mouse::ScrollDelta) -> u8 {
+    let y = match delta {
+        iced::mouse::ScrollDelta::Lines { y, .. } => y,
+        iced::mouse::ScrollDelta::Pixels { y, .. } => y / 40.0,
+    };
+    let step = if y > 0.0 {
+        5
+    } else if y < 0.0 {
+        -5
+    } else {
+        0
+    };
+    (i32::from(opacity) + step).clamp(5, 100) as u8
 }
 
 // ── Dynamic-input field formatting ─────────────────────────────────────────
@@ -378,9 +430,21 @@ mod tests {
     use document::entities::ViewportRenderMode as M;
 
     #[test]
+    fn the_outline_switch_wheel_steps_the_strength_within_range() {
+        use iced::mouse::ScrollDelta;
+        let up = ScrollDelta::Lines { x: 0.0, y: 1.0 };
+        let down = ScrollDelta::Lines { x: 0.0, y: -1.0 };
+        assert_eq!(outline_opacity_step(50, up), 55);
+        assert_eq!(outline_opacity_step(50, down), 45);
+        assert_eq!(outline_opacity_step(100, up), 100);
+        assert_eq!(outline_opacity_step(5, down), 5, "never wheeled out of sight");
+        assert!(outline_tooltip(true, 50).contains("50%"));
+    }
+
+    #[test]
     fn test_viewport_controls_construction() {
         for style in crate::modules::view::visual_style::VISUAL_STYLES {
-            let _el = viewport_controls(style.mode, true, true, true, 1, false, None, None);
+            let _el = viewport_controls(style.mode, true, true, true, 1, false, None, None, (true, 50));
             let _el_open = viewport_controls(
                 style.mode,
                 false,
@@ -390,6 +454,7 @@ mod tests {
                 true,
                 Some(M::Wireframe3D),
                 None,
+                (false, 15),
             );
         }
     }

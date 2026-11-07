@@ -968,7 +968,7 @@ impl OpenCADStudio {
                     .height(Fill)
                     .min_size(scene.model_pane_min_px())
                     .spacing(crate::scene::TILE_DIVIDER_PX)
-                    .on_resize(6.0, Message::PaneResized)
+                    .on_resize(crate::scene::TILE_RESIZE_LEEWAY_PX, Message::PaneResized)
                     .into(),
                 )
             };
@@ -1604,6 +1604,18 @@ bg={bg_ms:.1}ms n={view_count}"
                 _ => (None, None),
             };
 
+            // VPHIGHLIGHT: faint outline of the Model viewport under the
+            // pointer (only with several viewports; none while it is away).
+            let pane_hover = if !is_paper && self.model_space.viewport_hover_highlight {
+                let (vw, vh) = sel_ref.view.vp_size;
+                let input = &sel_ref.input;
+                let cursor = (!input.pointer_away).then_some(input.last_move_pos).flatten();
+                tab.scene.hovered_model_pane_px(vw, vh, cursor).map(|r| {
+                    (r, f32::from(self.model_space.viewport_hover_opacity.min(100)) / 100.0)
+                })
+            } else {
+                None
+            };
             let hover_locked = tab
                 .scene
                 .hover_highlight
@@ -1918,6 +1930,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 dividers,
                 pane_move_rect,
                 pane_drop_rect,
+                pane_hover,
                 nav_cursor(tab),
                 self.ribbon.open_dropdown.is_some(),
                 hover_locked,
@@ -2387,6 +2400,10 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.render_mode_menu_open,
                     self.render_mode_preview,
                     style_name,
+                    (
+                        self.model_space.viewport_hover_highlight,
+                        self.model_space.viewport_hover_opacity,
+                    ),
                 );
                 // Adaptive: DensitySwap measures the bar's real width every frame
                 // (reported into `render_bar_w`, which the ViewCube reads to decide
@@ -2480,6 +2497,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.render_mode_menu_open,
                     self.render_mode_preview,
                     named_visual_style(&tab.scene, vp_mode),
+                    (false, 0),
                 );
                 let adaptive: Element<'_, Message> = DensitySwap::new(vec![
                     iced::widget::opaque(bar),

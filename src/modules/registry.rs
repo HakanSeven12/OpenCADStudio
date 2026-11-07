@@ -983,6 +983,8 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "USERR",
     "USRTIMER",
     "VISRETAIN",
+    "VPHIGHLIGHT",
+    "VPHIGHLIGHTOPACITY",
     "VSCURRENT",
     "VSEDGECOLOR",
     "VSEDGESMOOTH",

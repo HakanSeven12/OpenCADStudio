@@ -425,3 +425,136 @@ fn synthetic_window_grip_edits_persist_through_dwg_and_dxf() {
         }
     }
 }
+
+
+/// A synthetic coupled-flip block with two orthogonal Flip parameters and a Linear parameter
+/// driving a Stretch action.
+fn coupled_flip_synthetic() -> (OpenCADStudio, Handle, i32, i32, i32) {
+    let entities = vec![
+        line((0., 0.), (100., 0.)),
+        line((100., 0.), (100., 20.)),
+        line((100., 20.), (0., 20.)),
+        line((0., 20.), (0., 0.)),
+    ];
+    let (mut app, plain, _) = drawing("COUPLED_FLIP", entities, |_| {});
+    begin(&mut app, plain);
+    let i = app.active_tab;
+    let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let members = definition_members(&app, "COUPLED_FLIP");
+    let doc = &mut app.tabs[i].scene.document;
+
+    // 1. Linear parameter along X
+    let linear = distance::create(
+        doc,
+        def,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(100., 0., 0.),
+        Vector3::new(50., -10., 0.),
+    )
+    .unwrap();
+    config::set(doc, def, linear, Some(1)).unwrap();
+
+    // 2. Flip parameter 1 (vertical flip axis along X = 50)
+    let flip_v = crate::scene::block_orientation_parameter::create(
+        doc,
+        def,
+        crate::scene::block_orientation_parameter::Kind::Flip,
+        Vector3::new(50., 0., 0.),
+        Vector3::new(50., 50., 0.),
+        Vector3::new(50., 60., 0.),
+    )
+    .unwrap();
+
+    // 3. Flip parameter 2 (horizontal flip axis along Y = 10)
+    let flip_h = crate::scene::block_orientation_parameter::create(
+        doc,
+        def,
+        crate::scene::block_orientation_parameter::Kind::Flip,
+        Vector3::new(0., 10., 0.),
+        Vector3::new(100., 10., 0.),
+        Vector3::new(110., 10., 0.),
+    )
+    .unwrap();
+
+    // Stretch action associated with Linear
+    actions::create_with_options(
+        doc,
+        def,
+        Kind::Stretch,
+        linear,
+        Some(XyKeyPoint::End),
+        &[members[1], members[2]],
+        DVec3::ZERO,
+        Some([DVec3::new(90., -5., 0.), DVec3::new(110., 25., 0.)]),
+        None,
+    )
+    .unwrap();
+
+    // Flip actions affecting all geometry and the linear parameter
+    let mut targets = members.clone();
+    targets.push(linear);
+    actions::create(doc, def, Kind::Flip, flip_v, &targets, DVec3::ZERO).unwrap();
+    actions::create(doc, def, Kind::Flip, flip_h, &targets, DVec3::ZERO).unwrap();
+
+    let all_p = actions::all_parameters(doc, def);
+    let lin_id = all_p.iter().find(|p| p.handle == linear).unwrap().id;
+    let flip_v_id = all_p.iter().find(|p| p.handle == flip_v).unwrap().id;
+    let flip_h_id = all_p.iter().find(|p| p.handle == flip_h).unwrap().id;
+
+    save_and_close(&mut app);
+    (app, plain, lin_id, flip_v_id, flip_h_id)
+}
+
+#[test]
+fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
+    let (mut app, insert, lin_id, flip_v_id, flip_h_id) = coupled_flip_synthetic();
+    let i = app.active_tab;
+
+    // Toggle Flip 1
+    let flip1_grip = grip(&mut app, insert, flip_v_id, 0);
+    assert_eq!(flip1_grip.shape, crate::scene::model::object::GripShape::Arrow);
+    let dir1_before = flip1_grip.dir.unwrap();
+    assert!(app.start_test_action_grip(insert, flip1_grip.id));
+    assert_eq!(app.command_line.last_error, None);
+
+    let flip1_after = grip(&mut app, insert, flip_v_id, 0);
+    assert!((flip1_after.dir.unwrap() + dir1_before).length() < 1e-6, "arrow reversed");
+
+    // Toggle Flip 2
+    let flip2_grip = grip(&mut app, insert, flip_h_id, 0);
+    let dir2_before = flip2_grip.dir.unwrap();
+    assert!(app.start_test_action_grip(insert, flip2_grip.id));
+    assert_eq!(app.command_line.last_error, None);
+
+    let flip2_after = grip(&mut app, insert, flip_h_id, 0);
+    assert!((flip2_after.dir.unwrap() + dir2_before).length() < 1e-6, "arrow reversed");
+
+    // Clear canonical inputs to verify native frame recovery on double-flipped block
+    actions::instance::clear_canonical_inputs(&mut app.tabs[i].scene.document, insert);
+
+    // Drag linear grip
+    let lin_grip = grip(&mut app, insert, lin_id, 1);
+    let delta = 30.0;
+    let target = lin_grip.world + lin_grip.dir.unwrap() * delta;
+    assert!(app.start_test_action_grip(insert, lin_grip.id));
+    let _ = app.feed_command(crate::command::StepInput::Point(target));
+    assert_eq!(app.command_line.last_error, None);
+
+    // Verify Undo & Redo
+    let changed_doc = app.tabs[i].scene.document.clone();
+    let _ = app.update(Message::Undo);
+    let _ = app.update(Message::Redo);
+    assert_eq!(app.tabs[i].scene.document, changed_doc);
+
+    // DWG & DXF roundtrip
+    for ext in ["dwg", "dxf"] {
+        let bytes = crate::io::save_to_bytes(&changed_doc, ext, changed_doc.version).unwrap();
+        let loaded = crate::io::load_bytes(&format!("coupled.{ext}"), bytes).unwrap();
+        let mut reopened = OpenCADStudio::new_for_test();
+        let j = reopened.active_tab;
+        reopened.tabs[j].scene.document = loaded;
+        let restored_lin = grip(&mut reopened, insert, lin_id, 1);
+        assert!((restored_lin.world - target).length() < 1e-3, "{ext} grip persisted");
+    }
+}

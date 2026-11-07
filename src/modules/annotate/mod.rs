@@ -295,8 +295,8 @@ impl CadModule for AnnotateModule {
                             icon: revcloud::ICON,
                             items: vec![
                                 ("REVCLOUD_RECTANGULAR", "Rectangular", revcloud::ICON),
-                                ("REVCLOUD_POLYGONAL", "Polygonal", revcloud::ICON),
-                                ("REVCLOUD_FREEHAND", "Freehand", revcloud::ICON),
+                                ("REVCLOUD_POLYGONAL", "Polygonal", revcloud::ICON_POLYGONAL),
+                                ("REVCLOUD_FREEHAND", "Freehand", revcloud::ICON_FREEHAND),
                             ],
                             default: "REVCLOUD_RECTANGULAR",
                         },

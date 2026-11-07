@@ -34,9 +34,9 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("RECTANG", "RECT"),
     ("RECTANGLE", "RECT"),
     ("POLYGON", "POLY"),
+    // Polygonal and Freehand have their own icons from the Revision Cloud
+    // dropdown; Rectangular shares the face's.
     ("REVCLOUD_RECTANGULAR", "REVCLOUD"),
-    ("REVCLOUD_POLYGONAL", "REVCLOUD"),
-    ("REVCLOUD_FREEHAND", "REVCLOUD"),
     ("CONSTRUCTIONLINE", "XLINE"),
     ("SPLINEFIT", "SPLINE"),
     ("FITSPLINE", "SPLINE"),
@@ -1016,13 +1016,48 @@ pub fn command_icon(command: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
+    /// The three revision cloud types each show their own icon, in the
+    /// Revision Cloud dropdown and wherever else the command appears; the
+    /// dropdown face shows the Rectangular cloud until another type is chosen.
+    #[test]
+    fn revision_cloud_types_have_their_own_icons() {
+        let mut found = None;
+        for module in all_modules() {
+            for group in module.ribbon_groups() {
+                for item in &group.tools {
+                    if let RibbonItem::LargeDropdown {
+                        id: "REVCLOUD",
+                        icon,
+                        items,
+                        ..
+                    } = item
+                    {
+                        found = Some((*icon, items.clone()));
+                    }
+                }
+            }
+        }
+        let (face, items) = found.expect("the Revision Cloud dropdown");
+        let bytes = |icon: IconKind| match icon {
+            IconKind::Svg(bytes) => bytes,
+            IconKind::Glyph(_) => panic!("revision cloud icons are SVG"),
+        };
+        let icons: Vec<&[u8]> = items.iter().map(|(_, _, icon)| bytes(*icon)).collect();
+        assert_eq!(icons.len(), 3);
+        assert_ne!(icons[0], icons[1]);
+        assert_ne!(icons[0], icons[2]);
+        assert_ne!(icons[1], icons[2]);
+        assert_eq!(bytes(face), icons[0], "the face starts as Rectangular");
+        for ((command, _, _), icon) in items.iter().zip(&icons) {
+            assert_eq!(command_icon(command), Some(*icon), "{command}");
+        }
+    }
+
     #[test]
     fn command_aliases_and_variants_resolve_target_icons() {
         for (alias, target) in [
             ("RECTANG", "RECT"),
             ("REVCLOUD_RECTANGULAR", "REVCLOUD"),
-            ("REVCLOUD_POLYGONAL", "REVCLOUD"),
-            ("REVCLOUD_FREEHAND", "REVCLOUD"),
             ("POLYGON", "POLY"),
             ("ARC", "ARC_3P"),
             ("PASTE", "PASTECLIP"),

@@ -13,7 +13,16 @@ use crate::entities::revcloud::{self as cloud, OnCloud};
 use crate::modules::{IconKind, ModuleEvent, ToolDef};
 use crate::scene::model::wire_model::WireModel;
 
+/// The rectangular cloud: the Revision Cloud face and its Rectangular type.
 pub const ICON: IconKind = IconKind::Svg(include_bytes!("../../../../assets/icons/revcloud.svg"));
+/// The Polygonal type: a five-sided cloud.
+pub const ICON_POLYGONAL: IconKind = IconKind::Svg(include_bytes!(
+    "../../../../assets/icons/revcloud_polygonal.svg"
+));
+/// The Freehand type: an irregular cloud.
+pub const ICON_FREEHAND: IconKind = IconKind::Svg(include_bytes!(
+    "../../../../assets/icons/revcloud_freehand.svg"
+));
 
 pub fn tool() -> ToolDef {
     ToolDef {

@@ -754,6 +754,7 @@ fn block_parameter_key() -> crate::scene::model::object::BlockParameterKey {
         definition: document::Handle::new(1),
         insert: document::Handle::new(2),
         batch_generation: None,
+        editor_session: None,
         parameter: document::Handle::new(3),
         component: BlockParameterComponent::Distance,
     }

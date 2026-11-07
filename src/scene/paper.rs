@@ -855,17 +855,79 @@ impl Scene {
         // annotation geometry to view_height rebuilt the entire model on every
         // wheel tick whenever the drawing contained one annotative object.
         // Explicit viewport annotation-scale changes still rebuild the resident
-        // set; PSLTSCALE is a viewport GPU uniform.
+        // set; PSLTSCALE is a viewport GPU uniform, except for complex linetypes,
+        // which rebuild once when the zoom settles.
         let frozen: HSet<Handle> = self.viewport_hidden_handles(vp_handle);
 
         let scale_handle = self.viewport_scale_handle(vp_handle);
-        self.resident_wires_for(
+        self.viewport_complex_lt
+            .set(self.viewport_complex_lt_factor(vp_handle, false));
+        let wires = self.resident_wires_for(
             self.model_space_block_handle(),
             Some(self.viewport_annotation_multiplier(vp_handle)),
             scale_handle,
             Some(&frozen),
             Some(vp_handle),
-        )
+        );
+        self.viewport_complex_lt.set(None);
+        wires
+    }
+
+    /// PSLTSCALE's factor on linetypes in a viewport: 1 / viewport scale, which
+    /// keeps a pattern at its length on the sheet. `None` when it doesn't apply.
+    pub(super) fn viewport_psltscale_factor(&self, vp_handle: Handle) -> Option<f32> {
+        if !self.document.header.paper_space_linetype_scaling {
+            return None;
+        }
+        let Some(EntityType::Viewport(vp)) = self.document.get_entity(vp_handle) else {
+            return None;
+        };
+        let scale = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
+        (scale.is_finite() && scale > 1e-9).then(|| (1.0 / scale) as f32)
+    }
+
+    /// The factor a viewport's complex linetypes are baked at. Their dashes and
+    /// glyphs are geometry, so a new factor means a new resident set: it follows
+    /// the viewport's scale only once the view has stopped moving, unless
+    /// `settle` asks for the current one. A drawing with no complex linetype gets
+    /// `None`, which leaves its resident set alone.
+    pub(super) fn viewport_complex_lt_factor(
+        &self,
+        vp_handle: Handle,
+        settle: bool,
+    ) -> Option<f32> {
+        if !crate::io::linetypes::defines_complex_lt(&self.document) {
+            return None;
+        }
+        let current = self.viewport_psltscale_factor(vp_handle)?;
+        let mut baked = self.viewport_complex_lt_baked.borrow_mut();
+        match baked.get(&vp_handle) {
+            Some(&factor) if factor == current || (!settle && self.navigating_lod()) => {
+                Some(factor)
+            }
+            _ => {
+                baked.insert(vp_handle, current);
+                // Hit-testing reads the projected copy of the old set.
+                self.paper_projected_cache.borrow_mut().remove(&vp_handle);
+                Some(current)
+            }
+        }
+    }
+
+    /// The factor on complex linetypes for a tessellation pass: the viewport's
+    /// PSLTSCALE factor, else 1 for any other viewport content.
+    pub(super) fn viewport_lt_for(&self, anno_scale_override: Option<f32>) -> Option<f32> {
+        self.viewport_complex_lt
+            .get()
+            .or(anno_scale_override.map(|_| 1.0))
+    }
+
+    /// Part of the resident memo's guard: what the memo holds is baked at this
+    /// factor.
+    pub(super) fn viewport_complex_lt_guard(&self) -> u64 {
+        self.viewport_complex_lt
+            .get()
+            .map_or(0, |factor| (factor.to_bits() as u64 + 1).rotate_left(31))
     }
 
     /// Resident model wires for a paper content viewport. Just the unified

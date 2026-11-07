@@ -4209,7 +4209,6 @@ impl OpenCADStudio {
                             pick_tris: Vec::new(),
                             pick_tris_low: Vec::new(),
                             dash_from_start: false,
-                            dash_align_end: None,
                             text_verts: Vec::new(),
                             name: "__polar_guide__".into(),
                             points: vec![

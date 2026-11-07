@@ -8,6 +8,11 @@ macro_rules! draw_order_shader {
                 "/src/shaders/draw_order.wgsl"
             )),
             "\n",
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/shaders/dash_layout.wgsl"
+            )),
+            "\n",
             include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders/", $file))
         )
     };
@@ -15,6 +20,8 @@ macro_rules! draw_order_shader {
 
 mod analytic_slots;
 pub mod circle_gpu;
+#[cfg(test)]
+mod dash_gpu_tests;
 #[cfg(test)]
 mod depth_tests;
 mod device_capabilities;

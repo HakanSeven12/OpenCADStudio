@@ -1298,7 +1298,13 @@ impl HatchCommand {
                 crate::scene::HatchLoopSource::Selected
             }
         };
-        let mut boundary_paths = crate::scene::new_hatch_paths(&rings, source_of, &near, 1.0e-6);
+        let mut boundary_paths = crate::scene::new_hatch_paths(
+            &rings,
+            source_of,
+            &self.selected_objects,
+            &near,
+            1.0e-6,
+        );
 
         if !self.associative {
             for handles in &mut boundary_sources {

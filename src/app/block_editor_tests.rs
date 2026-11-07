@@ -9,11 +9,14 @@ mod retained_save_as;
 mod table_properties;
 mod lookup_properties;
 mod visibility_properties;
+mod nested_properties;
 mod grip_descriptions;
 mod imported_flip_workflow;
+mod imported_reference_audit;
 mod flip_frame_grips;
 mod flip_state_labels;
 mod properties_internal_rows;
+mod synthetic_reference_grips;
 
 fn fixture() -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();
@@ -3439,7 +3442,7 @@ fn alignment_visibility_and_lookup_name_their_labels_without_asking() {
     assert_eq!(
         app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
         "Enter number of grips [0/1] <1>:",
-        "a lookup never asks for a label"
+        "the location is followed by the grip count"
     );
     feed(&mut app, "");
     assert!(app.tabs[i].active_cmd.is_none());
@@ -3493,9 +3496,45 @@ fn a_lookup_takes_its_name_description_and_palette_switch_at_the_placement_promp
     let doc = &app.tabs[i].scene.document;
     let lookups = crate::scene::block_lookup::parameters(doc, definition);
     assert_eq!(lookups.len(), 1);
-    assert_eq!(lookups[0].1.lookup_name, "Grip9");
+    assert_eq!(
+        lookups[0].1.parameter.parameter.element.name, "Grip9",
+        "the name answer names the parameter itself"
+    );
+    assert_eq!(
+        lookups[0].1.lookup_name, "Lookup1",
+        "and leaves the lookup property label at its default"
+    );
     assert_eq!(lookups[0].1.lookup_description, "shows the grip");
     assert!(!lookups[0].1.parameter.parameter.show_properties);
+    assert_eq!(
+        lookups[0].1.parameter.definition_point,
+        Vector3::new(6.0, 6.0, 0.0)
+    );
+}
+
+#[test]
+fn a_lookup_takes_its_property_label_at_the_placement_prompt() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+
+    let _ = app.dispatch_command("BPARAMETER LOOKUP");
+    feed(&mut app, "L");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().unwrap().prompt(),
+        "Enter lookup property label <Lookup1>:",
+        "the label question offers the next free label"
+    );
+    feed(&mut app, "Size");
+    feed(&mut app, "6,6");
+    feed(&mut app, "");
+    assert!(app.tabs[i].active_cmd.is_none());
+
+    let doc = &app.tabs[i].scene.document;
+    let lookups = crate::scene::block_lookup::parameters(doc, definition);
+    assert_eq!(lookups.len(), 1);
+    assert_eq!(lookups[0].1.lookup_name, "Size");
     assert_eq!(
         lookups[0].1.parameter.definition_point,
         Vector3::new(6.0, 6.0, 0.0)
@@ -5593,6 +5632,42 @@ fn point_parameter_placement_discard_and_stale_context_leave_no_objects() {
     let _ = app.dispatch_command("BPARAMETER POINT");
     assert_eq!(app.tabs[i].active_cmd.as_ref().unwrap().name(), "LINE");
     assert_eq!(app.tabs[i].scene.document, closed);
+}
+
+#[test]
+fn a_chain_answer_is_recorded_on_the_placed_point_parameter() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.dispatch_command("BPARAMETER");
+    feed(&mut app, "Point");
+    feed(&mut app, "C");
+    feed(&mut app, "Yes");
+    feed(&mut app, "3,4,5");
+    feed(&mut app, "6,7,5");
+    let placed = authored_points(&app);
+    assert_eq!(placed.len(), 1, "the answer still places the parameter");
+    assert!(
+        placed[0].parameter.parameter.chain_actions,
+        "the chained answer is stored on the parameter"
+    );
+}
+
+#[test]
+fn a_point_parameter_left_at_the_chain_default_keeps_actions_unchained() {
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let _ = app.dispatch_command("BPARAMETER");
+    feed(&mut app, "Point");
+    feed(&mut app, "C");
+    feed(&mut app, "");
+    feed(&mut app, "3,4,5");
+    feed(&mut app, "6,7,5");
+    let placed = authored_points(&app);
+    assert_eq!(placed.len(), 1);
+    assert!(
+        !placed[0].parameter.parameter.chain_actions,
+        "the offered default leaves the flag clear"
+    );
 }
 
 fn visibility_editor() -> (OpenCADStudio, crate::ui::window::block_visibility::Target) {

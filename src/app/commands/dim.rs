@@ -1131,69 +1131,8 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
             }
 
-            "EXPLODE" => {
-                use crate::modules::draw::modify::explode::{
-                    apply_explode_replacements, plan_explode_in_context,
-                };
-                let selected: Vec<_> = self.tabs[i]
-                    .scene
-                    .selected_entities()
-                    .into_iter()
-                    .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
-                    .collect();
-                if selected.is_empty() {
-                    use crate::modules::draw::select::SelectObjectsCommand;
-                    let cmd = SelectObjectsCommand::new("EXPLODE");
-                    self.command_line.push_info(&cmd.prompt());
-                    self.tabs[i].active_cmd = Some(Box::new(cmd));
-                } else {
-                    // EXPLMODE 0 keeps references that are not uniformly and
-                    // positively scaled whole.
-                    let selected: Vec<_> =
-                        if super::blockvars::explmode(&self.tabs[i].scene.document) == 0 {
-                            selected
-                                .into_iter()
-                                .filter(|(_, entity)| match entity {
-                                    document::EntityType::Insert(ins) => {
-                                        let (x, y, z) =
-                                            (ins.x_scale(), ins.y_scale(), ins.z_scale());
-                                        let uniform = x > 0.0
-                                            && (x - y).abs() <= 1e-10
-                                            && (x - z).abs() <= 1e-10;
-                                        if !uniform {
-                                            self.command_line.push_output(
-                                            "The object is not uniformly and positively scaled.",
-                                        );
-                                        }
-                                        uniform
-                                    }
-                                    _ => true,
-                                })
-                                .collect()
-                        } else {
-                            selected
-                        };
-                    let replacements = plan_explode_in_context(
-                        &selected,
-                        &self.tabs[i].scene.document,
-                        self.tabs[i].scene.displayed_annotation_scale_handle(),
-                    );
-                    let exploded = replacements.len();
-                    if exploded > 0 {
-                        self.push_undo_snapshot(i, "EXPLODE");
-                    }
-                    apply_explode_replacements(&mut self.tabs[i].scene, replacements);
-                    if exploded > 0 {
-                        self.tabs[i].dirty = true;
-                        self.refresh_properties();
-                        self.command_line
-                            .push_output(crate::tf!("{exploded} object(s) exploded.").as_ref());
-                    } else {
-                        self.command_line.push_info(
-                            crate::t!("EXPLODE: no explodable objects selected.").as_ref(),
-                        );
-                    }
-                }
+            "EXPLODE" | "BURST" => {
+                self.explode_selection(i, cmd == "BURST");
             }
 
             // TXTEXP — text becomes the polylines of its character outlines.
@@ -1881,6 +1820,81 @@ impl OpenCADStudio {
             _ => return None,
         }
         Some(self.finish_dispatch(cmd))
+    }
+
+    /// EXPLODE and BURST: break the selection into simple entities. BURST
+    /// keeps a block reference's attribute values as text.
+    fn explode_selection(&mut self, i: usize, keep_attributes: bool) {
+        use crate::modules::draw::modify::explode::{
+            apply_explode_replacements, plan_burst, plan_explode_in_context,
+        };
+        let selected: Vec<_> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        if selected.is_empty() {
+            use crate::modules::draw::select::SelectObjectsCommand;
+            let cmd = SelectObjectsCommand::new(if keep_attributes { "BURST" } else { "EXPLODE" });
+            self.command_line.push_info(&cmd.prompt());
+            self.tabs[i].active_cmd = Some(Box::new(cmd));
+            return;
+        }
+        // EXPLMODE 0 keeps references that are not uniformly and positively
+        // scaled whole.
+        let selected: Vec<_> = if super::blockvars::explmode(&self.tabs[i].scene.document) == 0 {
+            selected
+                .into_iter()
+                .filter(|(_, entity)| match entity {
+                    document::EntityType::Insert(ins) => {
+                        let (x, y, z) = (ins.x_scale(), ins.y_scale(), ins.z_scale());
+                        let uniform =
+                            x > 0.0 && (x - y).abs() <= 1e-10 && (x - z).abs() <= 1e-10;
+                        if !uniform {
+                            self.command_line.push_output(
+                                "The object is not uniformly and positively scaled.",
+                            );
+                        }
+                        uniform
+                    }
+                    _ => true,
+                })
+                .collect()
+        } else {
+            selected
+        };
+        let replacements = if keep_attributes {
+            plan_burst(&selected, &self.tabs[i].scene.document)
+        } else {
+            plan_explode_in_context(
+                &selected,
+                &self.tabs[i].scene.document,
+                self.tabs[i].scene.displayed_annotation_scale_handle(),
+            )
+        };
+        let exploded = replacements.len();
+        if exploded > 0 {
+            self.push_undo_snapshot(i, if keep_attributes { "BURST" } else { "EXPLODE" });
+        }
+        apply_explode_replacements(&mut self.tabs[i].scene, replacements);
+        if exploded > 0 {
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+            self.command_line.push_output(
+                crate::tf!(
+                    "{exploded} object(s) {}.",
+                    if keep_attributes { "burst" } else { "exploded" }
+                )
+                .as_ref(),
+            );
+        } else if keep_attributes {
+            self.command_line
+                .push_info(crate::t!("BURST: no explodable objects selected.").as_ref());
+        } else {
+            self.command_line
+                .push_info(crate::t!("EXPLODE: no explodable objects selected.").as_ref());
+        }
     }
 
     /// The selected dimensions that are not on a locked layer.

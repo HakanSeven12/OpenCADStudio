@@ -19,21 +19,40 @@ pub(crate) fn parse_value(raw: &str) -> Option<f64> {
 }
 
 impl OpenCADStudio {
-    fn batch_block_definition(&self, i: usize, handles: &[Handle]) -> Option<Handle> {
+    pub(super) fn nested_block_property_session(&self, i: usize, insert: Handle) -> Option<u64> {
         let tab = &self.tabs[i];
-        if handles.len() < 2
-            || tab.active_block_edit_session().is_some()
-            || tab.block_test.is_some()
-        {
+        let session = tab.active_block_edit_session()?;
+        let entity = tab.scene.document.get_entity(insert)?;
+        let document::EntityType::Insert(reference) = entity else { return None };
+        let definition = tab.scene.document.dynamic_definition_for_insert(insert)?;
+        if reference.common.owner_handle != session.br_handle || definition == session.br_handle {
             return None;
         }
+        Some(tab.block_edit_history.as_ref()?.id)
+    }
+
+    fn batch_block_scope(&self, i: usize, handles: &[Handle]) -> Option<(Handle, Option<u64>)> {
+        let tab = &self.tabs[i];
+        if handles.len() < 2 || tab.block_test.is_some() {
+            return None;
+        }
+        let editor_session = if tab.active_block_edit_session().is_some() {
+            Some(self.nested_block_property_session(i, handles[0])?)
+        } else {
+            None
+        };
         let definition =
             |handle| crate::scene::block_actions::instance::definition(&tab.scene.document, handle);
         let first = definition(handles[0])?;
         handles
             .iter()
-            .all(|&handle| !tab.scene.is_layer_locked(handle) && definition(handle) == Some(first))
-            .then_some(first)
+            .all(|&handle| {
+                !tab.scene.is_layer_locked(handle)
+                    && definition(handle) == Some(first)
+                    && (editor_session.is_none()
+                        || self.nested_block_property_session(i, handle) == editor_session)
+            })
+            .then_some((first, editor_session))
     }
 
     pub(super) fn batch_block_property_section(
@@ -42,12 +61,12 @@ impl OpenCADStudio {
         handles: &[Handle],
         generation: u64,
     ) -> Option<PropSection> {
-        self.batch_block_definition(i, handles)?;
+        let (_, editor_session) = self.batch_block_scope(i, handles)?;
         let tab = &self.tabs[i];
         let rows = |insert| {
             let doc = &tab.scene.document;
             let mut rows = native::properties(doc, None, tab.id, insert);
-            rows.extend(Self::batch_visibility_property(doc, tab.id, insert));
+            rows.extend(Self::indexed_visibility_property(doc, tab.id, insert));
             rows
         };
         let key = |value: &PropValue| match value {
@@ -102,6 +121,7 @@ impl OpenCADStudio {
                 PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => {
                     key.insert = Handle::NULL;
                     key.batch_generation = Some(generation);
+                    key.editor_session = editor_session;
                 }
                 _ => unreachable!(),
             }
@@ -115,11 +135,7 @@ impl OpenCADStudio {
     pub(super) fn block_property_target_is_current(&self, key: BlockParameterKey) -> bool {
         let i = self.active_tab;
         let tab = &self.tabs[i];
-        if tab.id != key.document
-            || tab.active_block_edit_session().is_some()
-            || tab.active_cmd.is_some()
-            || tab.active_grip.is_some()
-        {
+        if tab.id != key.document || tab.active_cmd.is_some() || tab.active_grip.is_some() {
             return false;
         }
         if let Some(generation) = key.batch_generation {
@@ -127,16 +143,31 @@ impl OpenCADStudio {
             return self.property_target_override.is_none()
                 && tab.properties.block_batch_generation == generation
                 && tab.scene.selected_entities().iter().map(|(handle, _)| handle).eq(handles)
-                && self.batch_block_definition(i, handles) == Some(key.definition)
+                && self.batch_block_scope(i, handles) == Some((key.definition, key.editor_session))
                 && tab.properties.sections.iter().flat_map(|section| &section.props).any(|row| {
                     matches!(&row.value,
                         PropValue::BlockNumber { key: shown, .. } | PropValue::BlockChoice { key: shown, .. }
                         if *shown == key)
                 });
         }
+        if tab.active_block_edit_session().is_some() {
+            if key.editor_session.is_none()
+                || key.editor_session != self.nested_block_property_session(i, key.insert)
+                || self.property_target_override.is_some()
+                || tab.scene.selected_entities().iter().map(|(handle, _)| *handle).ne([key.insert])
+            {
+                return false;
+            }
+        } else if key.editor_session.is_some() {
+            return false;
+        }
+        let definition = if matches!(key.component, BlockParameterComponent::Visibility(_)) {
+            tab.scene.document.dynamic_visibility_for_insert(key.insert).map(|(definition, _)| definition)
+        } else {
+            crate::scene::block_actions::instance::definition(&tab.scene.document, key.insert)
+        };
         self.property_target_handles(i).as_slice() == [key.insert]
-            && crate::scene::block_actions::instance::definition(&tab.scene.document, key.insert)
-                == Some(key.definition)
+            && definition == Some(key.definition)
     }
     pub(super) fn commit_block_parameter_property(
         &mut self,
@@ -195,7 +226,12 @@ impl OpenCADStudio {
                 })
                 .map(|()| staged)
         } else {
-            native::evaluate(&tab.scene.document, baseline, key, input)
+            match (key.component, input) {
+                (BlockParameterComponent::Visibility(_), Input::Choice(state)) => {
+                    Self::stage_visibility_property(&tab.scene.document, key, state)
+                }
+                _ => native::evaluate(&tab.scene.document, baseline, key, input),
+            }
         };
         match result {
             Ok(staged) => {

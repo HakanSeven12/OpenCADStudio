@@ -487,11 +487,12 @@ impl OpenCADStudio {
         let panel = &mut self.tabs[i].parameters_panel;
         panel.editing = None;
         panel.edit_buf.clear();
+        panel.edit_original.clear();
     }
 
-    /// Apply the number typed in the open cell. `keep_open` is set when the cell
+    /// Apply the text typed in the open cell. `keep_open` is set when the cell
     /// itself asked for the commit (Enter); a commit driven by the field moving
-    /// away holds a refused number back, because there is no field left to fix it
+    /// away holds a refused value back, because there is no field left to fix it
     /// in.
     pub(super) fn commit_parameters_manager(&mut self, keep_open: bool) -> Task<Message> {
         use crate::scene::block_parameters_manager as manager;
@@ -500,9 +501,12 @@ impl OpenCADStudio {
             return Task::none();
         };
         let typed = self.tabs[i].parameters_panel.edit_buf.clone();
-        // Opening a cell and leaving it alone writes nothing; an empty field is
-        // the sign that nothing was typed into it.
-        if typed.trim().is_empty() {
+        let editing_description =
+            edit.cell == crate::ui::window::parameters_manager::Cell::Description;
+        // Opening a numeric cell and leaving it alone writes nothing; an empty
+        // field is the sign that nothing was typed into it. A description cell
+        // opens on its text, so an emptied field is a text to write.
+        if !editing_description && typed.trim().is_empty() {
             self.clear_parameters_manager_cell(i);
             return Task::none();
         }
@@ -521,30 +525,43 @@ impl OpenCADStudio {
                 .push_error(crate::t!("The Block Editor session is no longer active.").as_ref());
             return Task::none();
         }
-        // The cells print in the drawing's units, so a typed value is read back
-        // in them too.
-        crate::entities::common::set_unit_context(
-            crate::entities::common::UnitContext::from_header(&self.tabs[i].scene.document.header),
-        );
-        let Some(value) = crate::app::block_parameter_properties::parse_value(&typed) else {
-            // A refusal from the cell itself leaves the field open with what was
-            // typed in it, so the number only has to be corrected, not retyped.
-            // A refusal after the field has gone away has nothing left to correct.
-            if !keep_open {
-                self.clear_parameters_manager_cell(i);
-            }
-            self.command_line
-                .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
-            return Task::none();
-        };
         let mut staged = self.tabs[i].scene.document.clone();
-        let written = manager::write_number(
-            &mut staged,
-            definition,
-            edit.parameter,
-            edit.component,
-            value,
-        );
+        let written = if editing_description {
+            manager::write_description(
+                &mut staged,
+                definition,
+                edit.parameter,
+                edit.component,
+                &typed,
+            )
+        } else {
+            // The cells print in the drawing's units, so a typed value is read
+            // back in them too.
+            crate::entities::common::set_unit_context(
+                crate::entities::common::UnitContext::from_header(
+                    &self.tabs[i].scene.document.header,
+                ),
+            );
+            let Some(value) = crate::app::block_parameter_properties::parse_value(&typed) else {
+                // A refusal from the cell itself leaves the field open with what
+                // was typed in it, so the number only has to be corrected, not
+                // retyped. A refusal after the field has gone away has nothing
+                // left to correct.
+                if !keep_open {
+                    self.clear_parameters_manager_cell(i);
+                }
+                self.command_line
+                    .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
+                return Task::none();
+            };
+            manager::write_number(
+                &mut staged,
+                definition,
+                edit.parameter,
+                edit.component,
+                value,
+            )
+        };
         match written {
             Ok(true) => {
                 let staged = match crate::scene::block_actions::instance::refresh_after_edit(

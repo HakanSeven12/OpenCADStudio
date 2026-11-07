@@ -415,6 +415,9 @@ pub struct LayerPanel {
     /// they were counted for, so they are counted again only after a change.
     pub counts: std::collections::HashMap<String, (usize, usize)>,
     pub counts_key: Option<(u64, u64)>,
+    /// What the filter tree was last worked out from: the selection, the
+    /// layer table and the filters.
+    pub tree_key: Option<u64>,
     /// The last click was in the table, so ↑/↓, Ctrl+A, Del, F2 and Esc act
     /// on its rows. A click in the drawing or typing a command ends it.
     pub keys_active: bool,
@@ -471,6 +474,7 @@ impl Default for LayerPanel {
             description_edit: None,
             counts: Default::default(),
             counts_key: None,
+            tree_key: None,
             keys_active: false,
             current_layer: "0".to_string(),
             linetype_items: vec![LinetypeItem {
@@ -1238,6 +1242,13 @@ impl LayerPanel {
                     crate::ui::icons::UNDO,
                     t!("Previous"),
                     Message::Command("LAYERP".into()),
+                    compact,
+                ),
+                // Layers from another drawing (#2610).
+                toolbar_btn(
+                    crate::ui::icons::IMPORT,
+                    t!("Import..."),
+                    Message::LayerImport(crate::app::layer_import::LayerImportMsg::Pick),
                     compact,
                 ),
                 node_picker,

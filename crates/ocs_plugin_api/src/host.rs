@@ -24,6 +24,8 @@ use crate::ribbon::CadModule;
 // dependency (which would risk an ABI-mismatching version).
 pub use document;
 pub use document as acadrust;
+// The name plugins used before the crate was renamed to document.
+pub use document as codec;
 pub use document::objects::{
     DictionaryCloningFlags, KnownXRecordKind, ProxyObjectReference, ProxyReferenceKind, XRecord,
     XRecordEntry, XRecordSection, XRecordValue, XRecordValueType,

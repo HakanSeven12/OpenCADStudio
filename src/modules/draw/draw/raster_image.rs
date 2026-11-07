@@ -236,7 +236,6 @@ impl CadCommand for ImageCommand {
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: "image_preview".into(),
             points: vec![p0, p1, p2, p3, p0],

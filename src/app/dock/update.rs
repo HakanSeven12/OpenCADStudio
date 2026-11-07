@@ -912,29 +912,20 @@ impl OpenCADStudio {
         &self,
         side: crate::app::config::DockSide,
     ) -> (Vec<crate::ui::dock::StripGroup>, f32) {
-        let groups: Vec<(usize, usize)> = self
+        let labelled = self.dock.strip_labels;
+        let groups: Vec<(usize, Vec<f32>)> = self
             .dock_visible_groups(side)
             .into_iter()
-            .map(|gi| (gi, self.dock_group_visible(side, gi).len()))
+            .map(|gi| {
+                let cells = self
+                    .dock_group_visible(side, gi)
+                    .into_iter()
+                    .map(|id| crate::ui::dock::strip_tab_h(&crate::t!(id.title()), labelled))
+                    .collect();
+                (gi, cells)
+            })
             .collect();
-        crate::ui::dock::strip_layout(&groups, self.dock_strip_cell_h(&groups))
-    }
-
-    /// Height of a pallet cell in an icon strip holding `groups`: fixed for
-    /// icons only; labelled, the edge's height shared between the pallets.
-    fn dock_strip_cell_h(&self, groups: &[(usize, usize)]) -> f32 {
-        use crate::ui::dock::{
-            STRIP_CELL_H, STRIP_DIVIDER_H, STRIP_LABEL_MIN_H, STRIP_PAD, STRIP_PLUS_GAP, STRIP_PLUS_H,
-        };
-        if !self.dock.strip_labels {
-            return STRIP_CELL_H;
-        }
-        let pallets: usize = groups.iter().map(|&(_, icons)| icons).sum();
-        let fixed = groups.len() as f32 * (2.0 * STRIP_PAD + STRIP_DIVIDER_H)
-            + STRIP_PLUS_GAP
-            + STRIP_PLUS_H
-            + STRIP_PAD;
-        ((self.dock_workspace_size().1 - fixed) / pallets.max(1) as f32).max(STRIP_LABEL_MIN_H)
+        crate::ui::dock::strip_layout(&groups)
     }
 
     /// The open pallets of `side`'s shown group, each as (position in the

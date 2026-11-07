@@ -343,7 +343,11 @@ impl OpenCADStudio {
         }
         // A dialog owns the keyboard: typing while one is open (an open list
         // in it included) must not land in the command line behind it.
-        if self.active_modal.is_some() || self.qselect.is_some() || self.filter_dialog.is_some() {
+        if self.active_modal.is_some()
+            || self.qselect.is_some()
+            || self.filter_dialog.is_some()
+            || self.layer_import.is_some()
+        {
             return Task::none();
         }
         // Filter out control characters — only push the typed
@@ -1493,15 +1497,13 @@ impl OpenCADStudio {
         }
         // Cancel layout rename first, then fall through.
         let i_e = self.active_tab;
-        if let Some(state) = self.qselect.take() {
-            self.qselect_settings = Some((&state).into());
-            self.reset_modal_geometry();
-            if self.block_definition.is_some() {
-                self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
-            } else if self.wblock.is_some() {
-                self.active_modal = Some(crate::app::ModalKind::WriteBlock);
-            }
-            return Task::none();
+        // Quick Select and FILTER close as their Cancel does: the preview
+        // goes and a parked 'QSELECT / 'FILTER command comes back.
+        if self.qselect.is_some() {
+            return self.update(Message::QSelectClose);
+        }
+        if self.filter_dialog.is_some() {
+            return self.on_filter_message(crate::app::filter_dialog::FilterMsg::Close);
         }
         {
             let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
@@ -1655,6 +1657,8 @@ impl OpenCADStudio {
         // unique handle; the non-advancing `next_handle` getter hands
         // out the same value twice and the later object overwrites it.
         dl.handle = self.tabs[i].scene.document.allocate_handle();
+        // Viewports made later freeze it too.
+        dl.flags.frozen_in_new_viewport = frozen_in_viewports;
         let layer_handle = dl.handle;
         let _ = self.tabs[i].scene.document.layers.add(dl);
         if frozen_in_viewports {
@@ -2014,6 +2018,10 @@ impl OpenCADStudio {
         {
             return None;
         }
+        // A running command keeps Esc and Delete for itself.
+        if self.tabs[i].active_cmd.is_some() && matches!(key, "ESCAPE" | "DELETE") {
+            return None;
+        }
         match key {
             "CTRL+A" => {
                 let panel = &mut self.tabs[i].layers;
@@ -2302,6 +2310,26 @@ impl OpenCADStudio {
     /// The filter tree's live parts: the layers of the selected objects and
     /// what each LAYERFILTER filter matches. Set only when they changed.
     fn refresh_layer_tree(&mut self, i: usize) {
+        use std::hash::{Hash, Hasher};
+        let scene = &self.tabs[i].scene;
+        // This runs on every message while the panel shows: work the tree
+        // out again only when what it reads has changed.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        scene.selected.len().hash(&mut hasher);
+        scene
+            .selected
+            .iter()
+            .fold(0u64, |acc, h| acc ^ h.value().wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .hash(&mut hasher);
+        for layer in scene.document.layers.iter() {
+            format!("{layer:?}").hash(&mut hasher);
+        }
+        format!("{:?}", self.layer_filters).hash(&mut hasher);
+        let key = hasher.finish();
+        if self.tabs[i].layers.tree_key == Some(key) {
+            return;
+        }
+        self.tabs[i].layers.tree_key = Some(key);
         let scene = &self.tabs[i].scene;
         let mut selected: Vec<String> = scene
             .selected
@@ -3167,7 +3195,7 @@ impl OpenCADStudio {
         ))
     }
 
-    pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
+    pub(in crate::app) fn on_qselect_open(&mut self) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.selection.borrow_mut().menu.close();
         let remembered = self.qselect_settings.clone();

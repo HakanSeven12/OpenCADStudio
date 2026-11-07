@@ -516,6 +516,7 @@ pub fn clip_wires(wires: &mut Vec<WireModel>, poly: &[[f64; 2]]) {
             }
             w.points = hi;
             w.points_low = lo;
+            w.dash_closure = Default::default();
             if let Some(source_length) = source_length {
                 w.pattern_stations = encode_pattern_stations(
                     clipped_stations,
@@ -643,7 +644,6 @@ pub fn frame_wire(
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         points: hi,

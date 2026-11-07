@@ -573,6 +573,7 @@ pub(crate) enum HatchLoopSource {
 pub(crate) fn new_hatch_paths(
     rings: &[Vec<[f64; 2]>],
     source_of: impl Fn(usize) -> HatchLoopSource,
+    selection_order: &[Handle],
     sources: &rustc_hash::FxHashMap<Handle, BoundarySource>,
     tolerance: f64,
 ) -> Vec<document::entities::BoundaryPath> {
@@ -580,22 +581,83 @@ pub(crate) fn new_hatch_paths(
     let depths = kernel::geom2d::ring_nesting_depths(rings);
     let exterior: Vec<bool> = depths.iter().map(|depth| *depth == 0).collect();
     let paths = exact_hatch_paths_by_ring(rings, &exterior, sources, tolerance);
-    let circles: Vec<Option<([f64; 2], f64)>> = paths
-        .iter()
-        .map(|path| match path.as_ref().map(|path| path.edges.as_slice()) {
-            Some([document::entities::BoundaryEdge::CircularArc(arc)])
-                if (arc.end_angle - arc.start_angle).abs() >= std::f64::consts::TAU - 1.0e-9 =>
-            {
-                Some(([arc.center.x, arc.center.y], arc.radius))
-            }
-            _ => None,
-        })
-        .collect();
     let base = |depth: usize| match depth {
         0 => BoundaryPathFlags::EXTERNAL.bits(),
         1 => BoundaryPathFlags::OUTERMOST.bits(),
         _ => 0,
     };
+    // The one source object a loop comes from, when it has exactly one.
+    let sole_curves = |index: usize| -> Option<&Vec<Curve>> {
+        match paths[index].as_ref()?.boundary_handles.as_slice() {
+            [handle] => sources.get(handle).map(|source| &source.curves),
+            _ => None,
+        }
+    };
+    // A CIRCLE object's centre; its start (seam) lies at angle 0.
+    let circle_centre = |index: usize| match sole_curves(index)?.as_slice() {
+        [Curve::Circle(circle)] => Some(circle.centre),
+        _ => None,
+    };
+    // Where the loop starts: the start of its first selected object — a
+    // circle at angle 0, an ellipse or spline at its start, a polyline at
+    // its first vertex, a line or arc at its start point.
+    let start_point = |index: usize| {
+        let handles = &paths[index].as_ref()?.boundary_handles;
+        let first = handles.iter().min_by_key(|handle| {
+            selection_order
+                .iter()
+                .position(|selected| selected == *handle)
+                .unwrap_or(usize::MAX)
+        })?;
+        Some(sources.get(first)?.curves.first()?.point_at(0.0))
+    };
+    let bounds = |ring: &Vec<[f64; 2]>| {
+        ring.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
+            [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]
+        })
+    };
+    let boxes: Vec<[f64; 4]> = rings.iter().map(bounds).collect();
+    let area = |b: &[f64; 4]| (b[2] - b[0]) * (b[3] - b[1]);
+    // The loop one level up that holds this one.
+    let container = |index: usize| -> Option<usize> {
+        let depth = *depths.get(index)?;
+        let inner = boxes[index];
+        (0..rings.len())
+            .filter(|other| {
+                depth > 0
+                    && depths.get(*other) == Some(&(depth - 1))
+                    && boxes[*other][0] <= inner[0]
+                    && boxes[*other][1] <= inner[1]
+                    && boxes[*other][2] >= inner[2]
+                    && boxes[*other][3] >= inner[3]
+            })
+            .min_by(|a, b| area(&boxes[*a]).total_cmp(&area(&boxes[*b])))
+    };
+    // Selected loops (measured): an island whose start lies level with the
+    // start of the CIRCLE object holding it takes the flags of one level up
+    // plus the outermost bit (17 for a first island, 16 deeper), and the
+    // islands inside it count their depth from that level. Any other
+    // island reads 16 at the first level and 0 deeper.
+    let mut order: Vec<usize> = (0..rings.len()).collect();
+    order.sort_by_key(|index| depths.get(*index).copied().unwrap_or(0));
+    let mut level = vec![0usize; rings.len()];
+    let mut selected_bits = vec![None; rings.len()];
+    for index in order {
+        let depth = depths.get(index).copied().unwrap_or(0);
+        let holder = container(index);
+        let shifted = depth > 0
+            && source_of(index) == HatchLoopSource::Selected
+            && holder.and_then(circle_centre).zip(start_point(index)).is_some_and(
+                |(centre, start)| (start[1] - centre[1]).abs() <= 1.0e-9 * centre[1].abs().max(1.0),
+            );
+        if shifted {
+            level[index] = depth - 1;
+            selected_bits[index] = Some(base(depth - 1) | BoundaryPathFlags::OUTERMOST.bits());
+        } else {
+            level[index] = holder.map_or(depth, |holder| level[holder] + 1);
+            selected_bits[index] = Some(base(level[index]));
+        }
+    }
     paths
         .into_iter()
         .enumerate()
@@ -603,24 +665,11 @@ pub(crate) fn new_hatch_paths(
             let mut path = path?;
             let depth = depths.get(index).copied().unwrap_or(0);
             let picked = source_of(index) == HatchLoopSource::Picked;
-            let mut bits = base(depth);
-            // A selected circle directly inside a selected circle takes the
-            // flags of one level up plus the outermost bit (circle in circle
-            // 17, deeper 16), where any other island reads 16 then 0.
-            let circle_in_circle = !picked
-                && depth > 0
-                && circles[index].is_some_and(|(centre, radius)| {
-                    circles.iter().enumerate().any(|(other, circle)| {
-                        depths.get(other) == Some(&(depth - 1))
-                            && circle.is_some_and(|(outer, outer_radius)| {
-                                (centre[0] - outer[0]).hypot(centre[1] - outer[1]) + radius
-                                    <= outer_radius + 1.0e-9
-                            })
-                    })
-                });
-            if circle_in_circle {
-                bits = base(depth - 1) | BoundaryPathFlags::OUTERMOST.bits();
-            }
+            let mut bits = if picked {
+                base(depth)
+            } else {
+                selected_bits[index].unwrap_or_else(|| base(depth))
+            };
             if picked {
                 if let Some(edges) = polyline_form(&path.edges) {
                     path.edges = edges;

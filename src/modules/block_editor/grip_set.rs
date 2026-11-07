@@ -164,29 +164,23 @@ impl CadCommand for GripSetCommand {
         let Some(context) = self.context else {
             return CmdResult::ReportError(crate::t!("Enter a parameter name.").into_owned());
         };
-        let screen = |p| {
-            crate::scene::pick::hit_test::world_to_screen(
-                p,
-                context.view,
-                context.eye,
-                context.bounds,
-            )
-        };
-        let click = screen(point);
-        let closest = self
-            .candidates
-            .iter()
-            .enumerate()
-            .flat_map(|(index, (item, _))| {
-                item.grips
-                    .iter()
-                    .map(move |(_, p)| (screen(DVec3::new(p.x, p.y, p.z)).distance(click), index))
-            })
-            .filter(|(distance, _)| {
-                distance.is_finite() && *distance <= context.aperture_px.max(10.0)
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0));
-        if let Some((_, index)) = closest {
+        let picked = crate::scene::view::projection::nearest_in_aperture(
+            context.view,
+            context.eye,
+            context.bounds,
+            point,
+            context.aperture_px,
+            self.candidates
+                .iter()
+                .enumerate()
+                .flat_map(|(index, (item, _))| {
+                    item.grips
+                        .iter()
+                        .map(move |(_, p)| (index, DVec3::new(p.x, p.y, p.z)))
+                }),
+            |candidate| candidate.1,
+        );
+        if let Some((index, _)) = picked {
             self.selected = Some(index);
             CmdResult::NeedPoint
         } else {

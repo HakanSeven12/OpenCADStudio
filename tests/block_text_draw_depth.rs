@@ -122,6 +122,7 @@ fn block_text_depth_composes_through_the_instance_path() {
         1.0,
         OpenCADStudio::scene::BlockScalePolicy::FromInsert,
         false,
+        1.0,
     )
     .expect("block defn cached");
 

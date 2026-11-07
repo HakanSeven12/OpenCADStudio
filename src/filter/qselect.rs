@@ -77,6 +77,83 @@ pub fn filter_from_conditions(conditions: &[QSelectCondition]) -> Filter {
     }
 }
 
+/// First whitespace-delimited word and the trimmed remainder.
+fn split_word(text: &str) -> (&str, &str) {
+    let text = text.trim();
+    match text.find(char::is_whitespace) {
+        Some(at) => (&text[..at], text[at..].trim()),
+        None => (text, ""),
+    }
+}
+
+/// Property names as typed on the command line to the engine's ids.
+fn property_id(name: &str) -> String {
+    match name.to_ascii_uppercase().as_str() {
+        "TYPE" => "type",
+        "LAYER" => "layer",
+        "COLOR" => "color",
+        "LINETYPE" => "linetype",
+        "LINEWEIGHT" => "lineweight",
+        "LINETYPESCALE" | "LTSCALE" => "linetype_scale",
+        "PLOTSTYLE" => "plot_style",
+        "TRANSPARENCY" => "transparency",
+        "MATERIAL" => "material",
+        "HYPERLINK" => "hyperlink",
+        "HANDLE" => "handle",
+        other => return other.to_ascii_lowercase(),
+    }
+    .to_string()
+}
+
+fn parse_op(word: &str) -> Option<Op> {
+    Some(match word {
+        "=" | "==" => Op::Eq,
+        "!=" | "<>" => Op::Ne,
+        "<" => Op::Lt,
+        "<=" => Op::Le,
+        ">" => Op::Gt,
+        ">=" => Op::Ge,
+        _ => return None,
+    })
+}
+
+/// The command line's Quick Select: `PROPERTY [OP] VALUE`, optionally led by
+/// `NOT`. Without an operator the value is matched with `=`, so wildcards
+/// work everywhere; `NOT` turns the whole test around.
+pub fn parse_command_line(rest: &str) -> Result<Filter, &'static str> {
+    let rest = rest.trim();
+    if rest.is_empty() {
+        return Err("Usage: QSELECT [NOT] <PROPERTY> [=|!=|<|<=|>|>=] <VALUE>");
+    }
+    let mut negate = false;
+    let (mut property, mut tail) = split_word(rest);
+    if property.eq_ignore_ascii_case("NOT") {
+        negate = true;
+        (property, tail) = split_word(tail);
+        if property.is_empty() {
+            return Err("QSELECT: NOT needs a property and a value.");
+        }
+    }
+    let (op, value) = match parse_op(split_word(tail).0) {
+        Some(op) => (op, split_word(tail).1),
+        None => (Op::Eq, tail),
+    };
+    let value = value.trim().trim_matches('"').to_string();
+    if value.is_empty() {
+        return Err("QSELECT: a value is needed.");
+    }
+    Ok(Filter {
+        root: Match::All,
+        items: vec![Item::Condition(Condition {
+            negate,
+            type_filter: None,
+            property: Some(property_id(property)),
+            op,
+            value,
+        })],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +204,53 @@ mod tests {
             })
             .collect();
         assert_eq!(groups, [(Some("Line"), 3), (Some("Circle"), 2)]);
+    }
+
+    fn parsed(rest: &str) -> Condition {
+        let filter = parse_command_line(rest).expect(rest);
+        assert_eq!(filter.root, Match::All);
+        match filter.items.as_slice() {
+            [Item::Condition(condition)] => condition.clone(),
+            other => panic!("one condition expected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_line_reads_equality_wildcards_and_comparisons() {
+        let equals = parsed("LAYER FAL*");
+        assert_eq!(equals.property.as_deref(), Some("layer"));
+        assert_eq!(equals.op, Op::Eq);
+        assert_eq!(equals.value, "FAL*");
+        assert!(!equals.negate);
+
+        let greater = parsed("RADIUS >= 10");
+        assert_eq!(greater.property.as_deref(), Some("radius"));
+        assert_eq!(greater.op, Op::Ge);
+        assert_eq!(greater.value, "10");
+
+        let not_equal = parsed("LINETYPE <> HIDDEN");
+        assert_eq!(not_equal.property.as_deref(), Some("linetype"));
+        assert_eq!(not_equal.op, Op::Ne);
+        assert_eq!(not_equal.value, "HIDDEN");
+    }
+
+    #[test]
+    fn command_line_reads_not_and_quoted_values() {
+        let negated = parsed("NOT TYPE LINE");
+        assert!(negated.negate);
+        assert_eq!(negated.property.as_deref(), Some("type"));
+        assert_eq!(negated.value, "LINE");
+
+        let quoted = parsed("LAYER \"My Layer\"");
+        assert_eq!(quoted.property.as_deref(), Some("layer"));
+        assert_eq!(quoted.value, "My Layer");
+    }
+
+    #[test]
+    fn command_line_refuses_an_empty_property_or_value() {
+        assert!(parse_command_line("").is_err());
+        assert!(parse_command_line("NOT").is_err());
+        assert!(parse_command_line("LAYER").is_err());
+        assert!(parse_command_line("RADIUS >").is_err());
     }
 }

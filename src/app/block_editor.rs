@@ -25,6 +25,7 @@ pub(super) struct BlockEditCheckpoint {
 
 pub(super) struct BlockEditHistory {
     pub main: HistoryState,
+    pub id: u64,
     checkpoint: BlockEditCheckpoint,
     return_isolation: crate::scene::ObjectIsolationState,
 }
@@ -128,12 +129,15 @@ impl OpenCADStudio {
     }
 
     pub(super) fn begin_block_edit_history(&mut self, i: usize) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
         self.finish_pending_history(i);
         let checkpoint = self.block_edit_checkpoint(i);
         let main = std::mem::take(&mut self.tabs[i].history);
         let return_isolation = self.tabs[i].scene.object_isolation.clone();
         self.tabs[i].block_edit_history = Some(BlockEditHistory {
             main,
+            id: NEXT_SESSION.fetch_add(1, Ordering::Relaxed),
             checkpoint,
             return_isolation,
         });
@@ -177,16 +181,29 @@ impl OpenCADStudio {
                 candidate_handles.insert(record.block_end_handle);
             }
         }
-        // Action-set edits can rebuild anonymous references outside the editor
-        // definition. Include their entities in the single drawing save delta.
+        if for_save {
+            // Save As can add both a definition and previously unsaved nested
+            // representations. The structure snapshot carries their records;
+            // the entity delta must carry their bodies and markers.
+            let prior: FxHashSet<_> = before_doc.block_records.iter().map(|b| b.handle).collect();
+            for record in tab.scene.document.block_records.iter().filter(|b| !prior.contains(&b.handle)) {
+                candidate_handles.extend(record.entity_handles.iter().copied());
+                candidate_handles.insert(record.block_entity_handle);
+                candidate_handles.insert(record.block_end_handle);
+            }
+        }
+        // Action-set edits can rebuild external references to this definition,
+        // and nested property edits can rebuild a child representation.
         for document in [before_doc, &tab.scene.document] {
             for entity in document.entities() {
                 if let EntityType::Insert(insert) = entity {
-                    if document.dynamic_definition_for_insert(insert.common.handle)
-                        == Some(session.br_handle)
-                    {
+                    let definition = document.dynamic_definition_for_insert(insert.common.handle);
+                    let record = document.block_records.get(&insert.block_name);
+                    let nested_representation = insert.common.owner_handle == session.br_handle
+                        && record.is_some_and(|record| definition.is_some_and(|def| def != record.handle));
+                    if definition == Some(session.br_handle) || nested_representation {
                         candidate_handles.insert(insert.common.handle);
-                        if let Some(record) = document.block_records.get(&insert.block_name) {
+                        if let Some(record) = record {
                             candidate_handles.extend(record.entity_handles.iter().copied());
                             candidate_handles.insert(record.block_entity_handle);
                             candidate_handles.insert(record.block_end_handle);

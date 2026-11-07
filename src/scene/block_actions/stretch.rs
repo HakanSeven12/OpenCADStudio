@@ -29,6 +29,15 @@ pub(crate) fn control_points(e: &EntityType) -> Result<Vec<DVec3>, &'static str>
                 .map(|v| DVec3::new(v.location.x, v.location.y, p.elevation))
                 .collect()
         }
+        EntityType::Polyline2D(p) if supported(e) => p
+            .vertices
+            .iter()
+            .map(|v| DVec3::new(v.location.x, v.location.y, p.elevation))
+            .collect(),
+        EntityType::Solid(s) if supported(e) => crate::entities::solid::wcs_corners(s)
+            .into_iter()
+            .map(DVec3::from_array)
+            .collect(),
         _ => return Err("Select a supported Stretch object."),
     };
     if points.is_empty() || points.iter().any(|p| !p.is_finite()) {
@@ -210,6 +219,7 @@ pub(crate) fn validate_options(a: &BlockStretchAction) -> Result<(), &'static st
 
 pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchAction) -> Result<(), &'static str> {
     validate_options(a)?;
+    basepoint_target(doc, definition, a)?;
     if a.points.len() < 2
         || a.points
             .iter()
@@ -249,6 +259,27 @@ pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchActio
         )?;
     }
     Ok(())
+}
+
+fn basepoint_target(
+    doc: &Document,
+    definition: Handle,
+    action: &BlockStretchAction,
+) -> Result<Option<Handle>, &'static str> {
+    let Some((handle, basepoint)) = super::super::block_basepoint::parameter(doc, definition)
+        .filter(|(handle, _)| action.action.dependencies.contains(handle))
+    else {
+        return Ok(None);
+    };
+    let node = basepoint.parameter.parameter.element.eval.node_id;
+    let mut bindings = action.codes.iter().filter(|binding| binding.code == node);
+    if !action.action.action_ids.contains(&node)
+        || !bindings.next().is_some_and(|binding| binding.indexes == [0])
+        || bindings.next().is_some()
+    {
+        return Err("The Stretch action has an invalid Base Point binding.");
+    }
+    Ok(Some(handle))
 }
 
 pub(crate) fn polar_key_point(a: &BlockPolarStretchAction) -> Result<XyKeyPoint, &'static str> {
@@ -404,6 +435,55 @@ pub(crate) fn apply(
                 );
             }
             *p = world;
+        }
+        EntityType::Polyline2D(p) => {
+            let before = p
+                .vertices
+                .iter()
+                .map(|v| [v.location.x, v.location.y])
+                .collect::<Vec<_>>();
+            for &index in &binding.indexes {
+                let vertex = p
+                    .vertices
+                    .get_mut(index as usize)
+                    .ok_or("Invalid Stretch polyline vertex.")?;
+                vertex.location.x += delta.x;
+                vertex.location.y += delta.y;
+            }
+            let after = p
+                .vertices
+                .iter()
+                .map(|v| [v.location.x, v.location.y])
+                .collect::<Vec<_>>();
+            let closed = p.is_closed();
+            for (index, vertex) in p.vertices.iter_mut().enumerate() {
+                vertex.bulge = crate::modules::draw::modify::stretch::held_bulge(
+                    vertex.bulge,
+                    &before,
+                    &after,
+                    index,
+                    closed,
+                );
+            }
+        }
+        EntityType::Solid(s) => {
+            let triangle = s.is_triangle();
+            let last_corner_moves = binding.indexes.contains(&2) || binding.indexes.contains(&3);
+            for (index, corner) in [
+                &mut s.first_corner,
+                &mut s.second_corner,
+                &mut s.third_corner,
+                &mut s.fourth_corner,
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                if binding.indexes.contains(&(index as i32))
+                    || (triangle && index >= 2 && last_corner_moves)
+                {
+                    *corner = *corner + native(delta);
+                }
+            }
         }
         _ => return Err("Unsupported Stretch target."),
     }

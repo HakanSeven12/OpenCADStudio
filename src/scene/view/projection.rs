@@ -43,6 +43,31 @@ pub(crate) fn project_screen(
     (screen.x.is_finite() && screen.y.is_finite()).then_some(screen)
 }
 
+/// The candidate whose own screen position is nearest `click` within
+/// `aperture_px`, skipping candidates on or behind the perspective eye plane.
+/// One rule for every grip pick, so a mirrored point can never win a click.
+pub(crate) fn nearest_in_aperture<T>(
+    view_rot: Mat4,
+    eye: DVec3,
+    bounds: Rectangle,
+    click: DVec3,
+    aperture_px: f32,
+    candidates: impl IntoIterator<Item = T>,
+    at: impl Fn(&T) -> DVec3,
+) -> Option<T> {
+    let click = project_screen(view_rot, eye, bounds, click)?;
+    candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let screen = project_screen(view_rot, eye, bounds, at(&candidate))?;
+            let distance = screen.distance(click);
+            (distance.is_finite() && distance <= aperture_px.max(10.0))
+                .then_some((distance, candidate))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, candidate)| candidate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -80,5 +105,76 @@ mod tests {
         ] {
             assert!(project_screen(view, eye, bounds, world).is_some());
         }
+    }
+
+    #[test]
+    fn a_pick_skips_points_behind_the_eye_and_keeps_the_nearest_in_front() {
+        let bounds = Rectangle::with_size(iced::Size::new(400.0, 400.0));
+        let (view, eye) = perspective(DVec3::ZERO);
+        let click = DVec3::new(0.0, 0.0, -100.0);
+        let picked = nearest_in_aperture(
+            view,
+            eye,
+            bounds,
+            click,
+            100.0,
+            [("behind", DVec3::new(0.0, 0.0, 100.0)), ("front", click)],
+            |(_, at)| *at,
+        );
+        assert_eq!(
+            picked.map(|(name, _)| name),
+            Some("front"),
+            "the point behind the eye never shadows the one in front"
+        );
+        let near = DVec3::new(10.0, 0.0, -100.0);
+        let picked = nearest_in_aperture(
+            view,
+            eye,
+            bounds,
+            click,
+            100.0,
+            [("far", DVec3::new(20.0, 0.0, -100.0)), ("near", near)],
+            |(_, at)| *at,
+        );
+        assert_eq!(picked.map(|(name, _)| name), Some("near"));
+        let inside_floor = nearest_in_aperture(
+            view,
+            eye,
+            bounds,
+            click,
+            0.0,
+            [("near", DVec3::new(1.0, 0.0, -100.0))],
+            |(_, at)| *at,
+        );
+        assert!(
+            inside_floor.is_some(),
+            "the aperture never falls below ten pixels"
+        );
+        let outside = nearest_in_aperture(
+            view,
+            eye,
+            bounds,
+            click,
+            10.0,
+            [("far", DVec3::new(200.0, 0.0, -100.0))],
+            |(_, at)| *at,
+        );
+        assert!(
+            outside.is_none(),
+            "a point beyond the aperture is not picked"
+        );
+        assert!(
+            nearest_in_aperture(
+                view,
+                eye,
+                bounds,
+                DVec3::new(0.0, 0.0, 100.0),
+                100.0,
+                [("front", click)],
+                |(_, at)| *at,
+            )
+            .is_none(),
+            "a click that does not project finds nothing"
+        );
     }
 }

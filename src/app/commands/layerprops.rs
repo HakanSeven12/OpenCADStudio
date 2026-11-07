@@ -1036,9 +1036,44 @@ impl OpenCADStudio {
                             }
                         }
                     }
+                    "SET" | "S" => {
+                        let name = parts.get(1).copied().unwrap_or("").to_string();
+                        if name.is_empty() {
+                            self.command_line
+                                .push_error(crate::t!("Usage: TABLESTYLE SET <name>").as_ref());
+                        } else {
+                            let doc = &self.tabs[i].scene.document;
+                            let style = doc.objects.values().find_map(|o| {
+                                if let ObjectType::TableStyle(s) = o {
+                                    if s.name.eq_ignore_ascii_case(&name) {
+                                        Some(s.name.clone())
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            });
+                            match style {
+                                Some(name) => {
+                                    let doc = &mut self.tabs[i].scene.document;
+                                    doc.header.current_table_style_name = name.clone();
+                                    self.push_undo_snapshot(i, "TABLESTYLE SET");
+                                    self.tabs[i].dirty = true;
+                                    self.command_line
+                                        .push_output(&crate::tf!("Table style set to '{name}'.").as_ref());
+                                }
+                                None => {
+                                    self.command_line.push_error(
+                                        crate::tf!("TABLESTYLE: no table style named '{name}'.").as_ref(),
+                                    );
+                                }
+                            }
+                        }
+                    }
                     _ => {
                         self.command_line
-                            .push_error(crate::t!("Usage: TABLESTYLE [LIST|NEW <name>]").as_ref());
+                            .push_error(crate::t!("Usage: TABLESTYLE [LIST|NEW <name>|SET <name>]").as_ref());
                     }
                 }
             }

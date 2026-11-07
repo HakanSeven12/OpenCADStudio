@@ -481,6 +481,39 @@ fn tessellate_polyline2d(pl: &Polyline2D, fill_mode: bool) -> RenderEntity {
                 crate::entities::common::tapered_band_points(band_verts, pl.is_closed(), &to_wcs);
             RenderObject::TaperedLines(pts, widths)
         }
+        // PLINEGEN off: the linetype pattern restarts at every drawn vertex.
+        None if pl.flags.bits() & document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+            == 0 =>
+        {
+            let mut points: Vec<[f64; 3]> = Vec::new();
+            for i in 0..seg_count {
+                let v0 = &verts[i];
+                let v1 = &verts[(i + 1) % count];
+                if i > 0 {
+                    points.push([f64::NAN; 3]);
+                }
+                points.push(to_pt(v0));
+                match crate::entities::common::BulgeArc::from_bulge(
+                    [v0.location.x, v0.location.y],
+                    [v1.location.x, v1.location.y],
+                    v0.bulge,
+                )
+                .filter(|_| v0.bulge.abs() >= 1e-9)
+                {
+                    Some(arc) => points.extend(
+                        arc.tessellate_angle(kernel::tessellation::DEFAULT_ANGLE)
+                            .into_iter()
+                            .skip(1)
+                            .map(|sample| {
+                                let (x, y, z) = to_wcs(sample[0], sample[1]);
+                                [x, y, z]
+                            }),
+                    ),
+                    None => points.push(to_pt(v1)),
+                }
+            }
+            RenderObject::SegmentedLines(points)
+        }
         None => RenderObject::Lines(
             crate::entities::curve::polyline2d_curve(pl)
                 .map(|planar| crate::entities::curve::curve_points(&planar))

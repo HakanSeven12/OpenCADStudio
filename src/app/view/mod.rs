@@ -3474,9 +3474,14 @@ bg={bg_ms:.1}ms n={view_count}"
             Some(state) => self.filter_overlay(state),
             None => iced::widget::Space::new().width(0).height(0).into(),
         };
+        let layer_import_layer: Element<'_, Message> = match &self.layer_import {
+            Some(state) => self.layer_import_overlay(state),
+            None => iced::widget::Space::new().width(0).height(0).into(),
+        };
         let qselect_layer: Element<'_, Message> = if let Some(state) = &self.qselect {
             qselect_overlay(
                 state,
+                self.transparent_select.as_deref(),
                 &state.available_types,
                 &state.available_properties,
                 state.candidate_count,
@@ -3561,6 +3566,7 @@ bg={bg_ms:.1}ms n={view_count}"
             ribbon_menu_layer,
             qselect_layer,
             filter_layer,
+            layer_import_layer,
             snap_override_layer,
             open_progress_layer,
             keytip_layer,
@@ -5475,7 +5481,7 @@ mod tests {
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
-                None,
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
             ),
         )
         .expect("headless renderer");

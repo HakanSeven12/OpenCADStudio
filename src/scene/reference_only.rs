@@ -172,7 +172,7 @@ mod tests {
                 Some(&context),
                 None,
                 None,
-                false,
+                None,
                 designated,
             );
             assert!(!wires.is_empty());

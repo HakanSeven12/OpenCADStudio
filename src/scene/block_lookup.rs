@@ -98,7 +98,7 @@ pub(crate) fn create(
     let parameter = BlockLookupParameter {
         parameter: BlockOnePointParameter {
             parameter: BlockParameter {
-                element: element(0, "Lookup"),
+                element: element(0, &name),
                 show_properties: true,
                 chain_actions: false,
             },

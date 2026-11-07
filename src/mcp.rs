@@ -45,8 +45,9 @@ const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
 /// `table_cell_warning`, `table_cell_tab` and `command_submit`.
 /// `set_properties` lists its `name` selector and takes a colour as a
 /// number or `{"rgb":[r,g,b]}`, which its example shows on a layer.
+/// `command_escape` presses Esc once, where `cancel` ends the command.
 #[cfg(test)]
-const TOOL_SCHEMA_DIGEST: &str = "e14ffa99803b6accae026e588ea9b2678fd4ae901b8103b53469d6de3996b392";
+const TOOL_SCHEMA_DIGEST: &str = "17d979c9f8c462c674a989524d080ec03e8ca1b420b04e53538d9d55727ba08c";
 const MAX_REQUEST: usize = 1_048_576;
 const MAX_RESPONSE: u64 = 16 * 1024 * 1024;
 const CACHE_TTL_MS: u64 = 3_600_000;

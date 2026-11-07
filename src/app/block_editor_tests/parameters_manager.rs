@@ -87,6 +87,10 @@ fn a_visibility_row_names_the_parameter_and_prints_no_number() {
         found.order.is_empty() && found.description.is_empty(),
         "and the row leaves the two cells no rule is measured for empty: {found:?}"
     );
+    assert!(
+        !found.description_writable,
+        "a visibility row names no parameter component whose text it could write"
+    );
 }
 
 #[test]
@@ -157,6 +161,273 @@ fn an_angle_is_typed_in_degrees_and_leaves_the_distance_alone() {
         printed(&app, tab, definition, "Angle1").value,
         "90",
         "the angle reads back at the drawing's angular precision"
+    );
+}
+
+#[test]
+fn the_description_cell_writes_the_text_it_shows() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "a freshly authored parameter has no description"
+    );
+    let before = endpoints(&app, tab, definition);
+    answer(&mut app, "Distance1", Cell::Description, "Left edge");
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "Left edge",
+        "the text typed in the cell is what the definition stores"
+    );
+    assert_eq!(
+        endpoints(&app, tab, definition),
+        before,
+        "writing text moves no geometry"
+    );
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Description,
+    ));
+    assert_eq!(
+        app.tabs[tab].parameters_panel.edit_buf, "Left edge",
+        "the field opens on the text it replaces, as an in-place edit does"
+    );
+    let _ = app.update(Message::ParametersManagerCommit);
+    let _ = app.update(Message::Undo);
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "a commit that changes no text adds no undo step"
+    );
+}
+
+#[test]
+fn every_parameter_kind_writes_the_description_of_the_row_it_prints() {
+    use crate::scene::block_authoring::metadata;
+    use crate::scene::block_distance_parameter as distance;
+    use crate::scene::block_orientation_parameter as orientation;
+    use crate::scene::block_point_parameter as point;
+    let (mut app, tab, definition) = open(&[], &[]);
+    let doc = &mut app.tabs[tab].scene.document;
+    let xy = distance::create(
+        doc,
+        definition,
+        distance::Kind::XY,
+        Vector3::ZERO,
+        Vector3::new(10., 5., 0.),
+        Vector3::new(3., 3., 0.),
+    )
+    .unwrap();
+    let rotation = orientation::create(
+        doc,
+        definition,
+        orientation::Kind::Rotation,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::new(0., 10., 0.),
+    )
+    .unwrap();
+    let flip = orientation::create(
+        doc,
+        definition,
+        orientation::Kind::Flip,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::new(5., 5., 0.),
+    )
+    .unwrap();
+    let point = point::create(doc, definition, Vector3::ZERO, Vector3::new(5., 5., 0.)).unwrap();
+    let ends: Vec<_> = crate::scene::block_actions::all_parameters(doc, definition)
+        .into_iter()
+        .map(|parameter| (parameter.handle, parameter.end))
+        .collect();
+    for (parameter, component, text) in [
+        (xy, Component::X, "Pin"),
+        (xy, Component::Y, "Height"),
+        (rotation, Component::Angle, "Turn"),
+        (flip, Component::Flip, "Mirror"),
+        (point, Component::X, "Anchor"),
+    ] {
+        assert!(
+            manager::write_description(doc, definition, parameter, component, text).unwrap(),
+            "the description of the {component:?} row is written"
+        );
+    }
+    let text = |parameter, field| {
+        metadata::read(doc, definition, parameter)
+            .unwrap()
+            .text
+            .into_iter()
+            .find(|text| text.field == field)
+            .map(|text| text.value)
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        text(xy, metadata::Field::Description),
+        "Pin",
+        "an XY parameter's X row writes the horizontal label's own text"
+    );
+    assert_eq!(
+        text(xy, metadata::Field::SecondaryDescription),
+        "Height",
+        "and its Y row writes the vertical label's own text"
+    );
+    assert_eq!(text(rotation, metadata::Field::Description), "Turn");
+    assert_eq!(text(flip, metadata::Field::Description), "Mirror");
+    assert_eq!(
+        text(point, metadata::Field::Description),
+        "Anchor",
+        "a point parameter's rows share the position text"
+    );
+    assert_eq!(
+        crate::scene::block_actions::all_parameters(doc, definition)
+            .into_iter()
+            .map(|parameter| (parameter.handle, parameter.end))
+            .collect::<Vec<_>>(),
+        ends,
+        "and no parameter's endpoint moves"
+    );
+}
+
+#[test]
+fn an_emptied_description_cell_clears_the_text() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Description, "Left edge");
+    answer(&mut app, "Distance1", Cell::Description, "");
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "an emptied cell writes the empty text"
+    );
+    let _ = app.update(Message::Undo);
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "Left edge",
+        "and one undo step brings the text back"
+    );
+}
+
+#[test]
+fn an_emptied_description_commits_when_the_click_moves_away() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Description, "Left edge");
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Description,
+    ));
+    let _ = app.update(Message::ParametersManagerInput(String::new()));
+    let _ = app.update(Message::ParametersManagerFocus(None));
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_none(),
+        "the field closes with the click"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "an emptied description is a text to write, so moving the click away commits it"
+    );
+}
+
+#[test]
+fn an_untouched_description_waits_for_its_own_field() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Description, "Left edge");
+    let field = crate::ui::window::parameters_manager::edit_input_id();
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Description,
+    ));
+    let _ = app.update(Message::ParametersManagerFocus(None));
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_some(),
+        "a field that has not been typed into stays open with the text it shows"
+    );
+    let _ = app.update(Message::ParametersManagerInput("Right edge".to_owned()));
+    let _ = app.update(Message::ParametersManagerFocus(Some(field)));
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_some(),
+        "focus moving onto the field itself commits nothing"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "Left edge",
+        "and writes none of what was typed so far"
+    );
+    let _ = app.update(Message::ParametersManagerCommit);
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "Right edge",
+        "Enter still writes the typed text"
+    );
+}
+
+#[test]
+fn a_description_undone_under_the_open_field_is_not_written_back() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Description, "Left edge");
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Description,
+    ));
+    let _ = app.update(Message::Undo);
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "the undo takes the text back under the field that shows it"
+    );
+    let _ = app.update(Message::ParametersManagerFocus(None));
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "leaving the field alone writes nothing back"
+    );
+}
+
+#[test]
+fn a_polar_parameters_two_rows_keep_their_own_descriptions() {
+    let (mut app, tab, definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    answer(&mut app, "Angle1", Cell::Description, "Swing");
+    assert_eq!(
+        printed(&app, tab, definition, "Angle1").description,
+        "Swing"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "",
+        "the angle text does not land on the distance row"
+    );
+    answer(&mut app, "Distance1", Cell::Description, "Reach");
+    assert_eq!(
+        printed(&app, tab, definition, "Angle1").description,
+        "Swing"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").description,
+        "Reach"
+    );
+}
+
+#[test]
+fn an_attribute_row_opens_no_description_field() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &["TAG1"]);
+    let before = manager::rows(&app.tabs[tab].scene.document, definition);
+    assert!(
+        !row(&before, "TAG1").description_writable,
+        "an attribute row names no parameter text"
+    );
+    assert!(
+        row(&before, "Distance1").description_writable,
+        "a parameter row names text the manager writes"
+    );
+    answer(&mut app, "TAG1", Cell::Description, "note");
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_none(),
+        "an attribute's row names no parameter text the manager writes"
+    );
+    assert_eq!(
+        manager::rows(&app.tabs[tab].scene.document, definition),
+        before,
+        "and nothing is written"
     );
 }
 
@@ -541,20 +812,20 @@ fn the_filter_and_search_narrow_the_rows_and_the_footer_counts_them() {
         &["TAG1"],
     );
     assert_eq!(
-        manager::displayed(&rows, "*", "").len(),
+        manager::displayed(&rows, manager::FilterMode::All, "*", "").len(),
         4,
         "the default filter lists every row"
     );
     assert_eq!(
-        manager::displayed(&rows, "*1", "").len(),
+        manager::displayed(&rows, manager::FilterMode::All, "*1", "").len(),
         3,
         "Angle1, Distance1 and TAG1 end in 1"
     );
-    assert_eq!(manager::displayed(&rows, "Distance*", "").len(), 2);
-    assert_eq!(manager::displayed(&rows, "*", "angle").len(), 1);
-    assert_eq!(manager::displayed(&rows, "Angle*", "distance").len(), 0);
+    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "Distance*", "").len(), 2);
+    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "*", "angle").len(), 1);
+    assert_eq!(manager::displayed(&rows, manager::FilterMode::All, "Angle*", "distance").len(), 0);
     assert_eq!(
-        manager::footer(rows.len(), manager::displayed(&rows, "Angle*", "").len()),
+        manager::footer(manager::FilterMode::All, rows.len(), manager::displayed(&rows, manager::FilterMode::All, "Angle*", "").len()),
         "All: 1 of 4 parameters displayed"
     );
 }
@@ -587,6 +858,32 @@ fn bparameters_opens_the_manager_panel_inside_the_block_editor() {
 }
 
 #[test]
+fn a_renamed_lookup_row_shows_the_parameter_name() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LOOKUP 3,3"], &[]);
+    let lookup = crate::scene::block_lookup::parameters(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .next()
+        .map(|(handle, _)| handle)
+        .expect("one lookup parameter");
+    crate::scene::block_authoring::metadata::set_parameter_name(
+        &mut app.tabs[tab].scene.document,
+        definition,
+        lookup,
+        "Grip9",
+    )
+    .expect("the lookup takes a name");
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    let row = rows
+        .iter()
+        .find(|row| row.type_name == "Lookup")
+        .expect("the lookup still lists a row");
+    assert_eq!(
+        row.name, "Grip9",
+        "the row shows the parameter's own name, not its lookup label"
+    );
+}
+
+#[test]
 fn a_lookup_parameter_lists_one_row_typed_lookup() {
     let rows = edited(
         &["BPARAMETER POLAR 0,0 10,0 5,2", "BPARAMETER LOOKUP 3,3"],
@@ -613,6 +910,10 @@ fn a_lookup_parameter_lists_one_row_typed_lookup() {
     assert!(
         lookup.expression.is_empty() && lookup.value.is_empty(),
         "a lookup parameter has no number of its own to print"
+    );
+    assert!(
+        !lookup.description_writable,
+        "and no parameter component whose text its description cell could write"
     );
     assert_eq!(
         rows.iter().filter(|row| row.name == lookup.name).count(),
@@ -982,6 +1283,32 @@ fn a_cell_the_pane_does_not_own_closes_without_a_refusal() {
 }
 
 #[test]
+fn the_funnel_menu_opens_and_a_choice_sets_the_filter_and_closes_it() {
+    let (mut app, tab, _definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    assert!(
+        !app.tabs[tab].parameters_panel.filter_menu,
+        "the menu starts closed"
+    );
+    let _ = app.update(Message::ParametersManagerFilterMenu);
+    assert!(
+        app.tabs[tab].parameters_panel.filter_menu,
+        "the funnel opens it"
+    );
+    let _ = app.update(Message::ParametersManagerFilterMode(
+        manager::FilterMode::UsedInExpressions,
+    ));
+    assert_eq!(
+        app.tabs[tab].parameters_panel.mode,
+        manager::FilterMode::UsedInExpressions
+    );
+    assert!(
+        !app.tabs[tab].parameters_panel.filter_menu,
+        "choosing an entry closes the menu"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
 fn the_two_fields_narrow_the_list_and_the_count_follows() {
     let (mut app, tab, definition) = open(
         &[
@@ -993,8 +1320,8 @@ fn the_two_fields_narrow_the_list_and_the_count_follows() {
     let count = |app: &OpenCADStudio| {
         let panel = &app.tabs[tab].parameters_panel;
         let rows = manager::rows(&app.tabs[tab].scene.document, definition);
-        let shown = manager::displayed(&rows, &panel.filter, &panel.search);
-        manager::footer(rows.len(), shown.len())
+        let shown = manager::displayed(&rows, manager::FilterMode::All, &panel.filter, &panel.search);
+        manager::footer(manager::FilterMode::All, rows.len(), shown.len())
     };
     assert_eq!(
         app.tabs[tab].parameters_panel.filter, "*",

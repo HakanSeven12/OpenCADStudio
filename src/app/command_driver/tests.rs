@@ -5460,3 +5460,433 @@ mod menu_keyboard_tests {
         }
     }
 }
+
+/// Batch 4: behaviour that still failed against current HEAD.
+#[cfg(test)]
+mod batch4_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    fn lines(app: &mut OpenCADStudio) -> Vec<(f64, f64, f64, f64)> {
+        let q = app.automation_op(r#"{"op":"query","type":"Line","detail":"full"}"#);
+        q["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                (
+                    e["start"][0].as_f64().unwrap(),
+                    e["start"][1].as_f64().unwrap(),
+                    e["end"][0].as_f64().unwrap(),
+                    e["end"][1].as_f64().unwrap(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn scale_copy_keeps_the_source_and_adds_a_scaled_duplicate() {
+        let mut app = new_app();
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("SELECTALL");
+        let _ = app.run_command_line("SCALE 0,0 C 2");
+        let mut got = lines(&mut app);
+        got.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!((got[0].2 - 10.0).abs() < 1e-9, "{got:?}");
+        assert!((got[1].2 - 20.0).abs() < 1e-9, "{got:?}");
+    }
+
+    #[test]
+    fn rotate_copy_keeps_the_source_and_adds_a_rotated_duplicate() {
+        let mut app = new_app();
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("SELECTALL");
+        let _ = app.run_command_line("ROTATE 0,0 C 90");
+        let mut got = lines(&mut app);
+        got.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!((got[0].2 - 0.0).abs() < 1e-6 && (got[0].3 - 10.0).abs() < 1e-6, "{got:?}");
+        assert!((got[1].2 - 10.0).abs() < 1e-6, "{got:?}");
+    }
+
+    fn out(app: &OpenCADStudio) -> String {
+        app.command_line
+            .history_plain_text()
+            .trim()
+            .to_string()
+    }
+
+    fn enter_layout(app: &mut OpenCADStudio) {
+        let i = app.active_tab;
+        let name = app.tabs[i]
+            .scene
+            .layout_names()
+            .into_iter()
+            .find(|name| name != "Model")
+            .expect("a paper layout");
+        app.tabs[i].scene.set_current_layout(name);
+        app.tabs[i].scene.load_current_layout_state();
+    }
+
+    fn layout_viewport_handles(app: &OpenCADStudio) -> Vec<document::Handle> {
+        let i = app.active_tab;
+        let layout_block = app.tabs[i].scene.current_layout_block_handle_pub();
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|e| match e {
+                document::EntityType::Viewport(vp)
+                    if vp.id > 1 && vp.common.owner_handle == layout_block =>
+                {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn vp(app: &OpenCADStudio, handle: document::Handle) -> &document::entities::Viewport {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
+            Some(document::EntityType::Viewport(vp)) => vp,
+            _ => panic!("viewport missing"),
+        }
+    }
+
+    fn effective_scale(app: &OpenCADStudio, handle: document::Handle) -> f64 {
+        let vp = vp(app, handle);
+        crate::scene::vp_effective_scale(vp.custom_scale, vp.view_height, vp.height)
+    }
+
+    #[test]
+    fn vpscale_sets_the_viewport_plot_scale_and_reports_it() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+
+        assert!(app.command_line.last_error.is_none());
+        let _ = app.run_command_line("VPSCALE 1:50");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let eff = effective_scale(&app, handles[0]);
+        assert!((eff - 0.02).abs() < 1e-9, "the viewport is not at 1:50");
+
+        let text = out(&app);
+        assert!(text.contains("VPSCALE"), "{text}");
+
+        assert!(app.command_line.last_error.is_none());
+        let _ = app.run_command_line("VPSCALE ?");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let text = out(&app);
+        assert!(text.contains("1:50"), "{text}");
+    }
+
+    #[test]
+    fn vp_lock_toggles_the_viewport_display_lock() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        enter_layout(&mut app);
+        let _ = app.run_command_line("VPORTS SINGLE");
+        let handles = layout_viewport_handles(&app);
+        assert_eq!(handles.len(), 1, "{}", out(&app));
+
+        let _ = app.run_command_line("VPLOCK ON");
+        assert!(!app.command_line.last_error.is_some(), "{}", out(&app));
+        assert!(vp(&app, handles[0]).status.locked);
+
+        let _ = app.run_command_line("VPLOCK TOGGLE");
+        assert!(!app.command_line.last_error.is_some(), "{}", out(&app));
+        assert!(!vp(&app, handles[0]).status.locked);
+
+        let _ = app.run_command_line("VPLOCK OFF");
+        assert!(!app.command_line.last_error.is_some(), "{}", out(&app));
+        assert!(!vp(&app, handles[0]).status.locked);
+    }
+
+    #[test]
+    fn vpscale_in_model_space_is_refused() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+
+        let _ = app.run_command_line("VPSCALE 1:50");
+        assert!(
+            app.command_line
+                .last_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("switch to a paper layout first"),
+            "{:?}",
+            app.command_line.last_error
+        );
+    }
+
+    #[test]
+    fn objectscale_adds_an_explicit_scale_and_delete_removes_it() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("TEXT 0,0 2 0 hello");
+        let _ = app.run_command_line("SELECTALL");
+        let i = app.active_tab;
+        let handle = app.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .next()
+            .expect("the text is selected");
+
+        let _ = app.run_command_line("OBJECTSCALE ADD 1:100");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let after_add = crate::scene::annotative::object_scale_memberships(
+            &app.tabs[i].scene.document,
+            handle,
+        );
+        assert!(
+            after_add.iter().any(|(name, _)| name == "1:100"),
+            "{after_add:?}"
+        );
+
+        let _ = app.run_command_line("OBJECTSCALE DELETE 1:100");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let after_del = crate::scene::annotative::object_scale_memberships(
+            &app.tabs[i].scene.document,
+            handle,
+        );
+        assert!(
+            !after_del.iter().any(|(name, _)| name == "1:100"),
+            "{after_del:?}"
+        );
+    }
+
+    #[test]
+    fn tablestyle_set_applies_an_existing_style() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("TABLESTYLE NEW MYPAPER");
+        let _ = app.run_command_line("TABLESTYLE SET MYPAPER");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let current = app.tabs[app.active_tab]
+            .scene
+            .document
+            .header
+            .current_table_style_name
+            .clone();
+        assert_eq!(current, "MYPAPER");
+    }
+
+    fn model_lines(app: &OpenCADStudio) -> Vec<document::Handle> {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.common.handle),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn group_rename_add_and_remove_edit_an_existing_group() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("LINE 0,5 10,5");
+        let _ = app.run_command_line("LINE 0,9 10,9");
+        let i = app.active_tab;
+        let lines = model_lines(&app);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        app.tabs[i]
+            .scene
+            .create_group("MYGROUP".to_string(), vec![lines[0], lines[1]]);
+
+        let _ = app.run_command_line("GROUP RENAME MYGROUP TEAM");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let names: Vec<String> = app.tabs[i].scene.groups().map(|g| g.name.clone()).collect();
+        assert_eq!(names, vec!["TEAM".to_string()], "{names:?}");
+        let renamed = app.tabs[i]
+            .scene
+            .groups()
+            .find(|g| g.name == "TEAM")
+            .cloned()
+            .expect("the renamed group");
+        assert_eq!(renamed.entities.len(), 2, "{:?}", renamed.entities);
+        let keyed = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                document::objects::ObjectType::Dictionary(dict) => {
+                    dict.entries.iter().find(|(key, _)| key == "TEAM").map(|_| ())
+                }
+                _ => None,
+            });
+        assert!(keyed.is_some(), "the group dictionary lost the new name");
+
+        let add = format!("GROUP ADD TEAM {:X}", lines[2].value());
+        let _ = app.run_command_line(&add);
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let group = app.tabs[i]
+            .scene
+            .groups()
+            .find(|g| g.name == "TEAM")
+            .cloned()
+            .expect("the group");
+        assert!(group.contains(lines[2]), "{:?}", group.entities);
+
+        let remove = format!("GROUP REMOVE TEAM {:X}", lines[0].value());
+        let _ = app.run_command_line(&remove);
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let group = app.tabs[i]
+            .scene
+            .groups()
+            .find(|g| g.name == "TEAM")
+            .cloned()
+            .expect("the group");
+        assert!(!group.contains(lines[0]), "{:?}", group.entities);
+        assert!(group.contains(lines[1]), "{:?}", group.entities);
+
+        let _ = app.run_command_line("GROUP RENAME NOSUCH OTHER");
+        assert!(
+            app.command_line
+                .last_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no group named"),
+            "{:?}",
+            app.command_line.last_error
+        );
+    }
+
+    #[test]
+    fn qselect_command_line_compares_negates_and_matches_wildcards() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("LINE 0,5 40,5");
+        let _ = app.run_command_line("CIRCLE 100,100 5");
+        let count = |app: &OpenCADStudio| app.tabs[app.active_tab].scene.selected_entities().len();
+
+        // Numeric comparison: only the 40-long line.
+        let _ = app.run_command_line("QSELECT LENGTH > 20");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        assert_eq!(count(&app), 1, "{}", out(&app));
+
+        // Type equality ignores case.
+        let _ = app.run_command_line("QSELECT TYPE line");
+        assert_eq!(count(&app), 2, "{}", out(&app));
+
+        // Wildcards work on the type name too.
+        let _ = app.run_command_line("QSELECT TYPE L*");
+        assert_eq!(count(&app), 2, "{}", out(&app));
+
+        // NOT turns the test around: everything that is not a line.
+        let _ = app.run_command_line("QSELECT NOT TYPE LINE");
+        assert_eq!(count(&app), 1, "{}", out(&app));
+        let selected = app.tabs[app.active_tab].scene.selected_entities();
+        assert!(
+            matches!(selected[0].1, document::EntityType::Circle(_)),
+            "the circle should be the only match"
+        );
+
+        // A malformed line keeps the selection and states the form.
+        let _ = app.run_command_line("QSELECT LENGTH >");
+        assert_eq!(count(&app), 1, "{}", out(&app));
+        assert!(out(&app).contains("a value is needed"), "{}", out(&app));
+    }
+
+    #[test]
+    fn burst_explodes_a_block_and_keeps_attribute_values_as_text() {
+        use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+        use document::types::Vector3;
+
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+
+        let mut record = document::tables::BlockRecord::new("TAGBLOCK");
+        record.handle = doc.allocate_handle();
+        let owner = record.handle;
+        doc.block_records.add(record).unwrap();
+
+        let mut line = document::entities::Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.owner_handle = owner;
+        let line_handle = doc.add_entity(document::EntityType::Line(line)).unwrap();
+
+        let mut variable =
+            AttributeDefinition::new("STATUS".into(), "Status".into(), "DEFAULT".into());
+        variable.insertion_point = Vector3::new(1.0, 1.0, 0.0);
+        variable.alignment_point = variable.insertion_point;
+        variable.height = 2.5;
+        variable.common.owner_handle = owner;
+        let variable_handle = doc
+            .add_entity(document::EntityType::AttributeDefinition(variable.clone()))
+            .unwrap();
+
+        let mut constant =
+            AttributeDefinition::new("SHEET".into(), String::new(), "A-101".into());
+        constant.insertion_point = Vector3::new(1.0, 4.0, 0.0);
+        constant.alignment_point = constant.insertion_point;
+        constant.flags.constant = true;
+        constant.common.owner_handle = owner;
+        let constant_handle = doc
+            .add_entity(document::EntityType::AttributeDefinition(constant))
+            .unwrap();
+
+        let record = doc.block_records.get_mut("TAGBLOCK").unwrap();
+        record.entity_handles = vec![line_handle, variable_handle, constant_handle];
+
+        let mut insert = Insert::new("TAGBLOCK", Vector3::new(100.0, 50.0, 0.0));
+        let mut attribute = AttributeEntity::from_definition(&variable, Some("ACTIVE".into()));
+        attribute.insertion_point = Vector3::new(101.0, 51.0, 0.0);
+        attribute.alignment_point = attribute.insertion_point;
+        insert.attributes.push(attribute);
+        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+
+        let _ = app.run_command_line("SELECTALL");
+        let _ = app.run_command_line("BURST");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        let doc = &app.tabs[i].scene.document;
+        assert!(
+            doc.get_entity(insert_handle).is_none(),
+            "the reference itself must be gone"
+        );
+        let texts: Vec<(String, f64, f64)> = doc
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Text(text) => {
+                    Some((text.value.clone(), text.insertion_point.x, text.insertion_point.y))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts.contains(&("ACTIVE".to_string(), 101.0, 51.0)),
+            "the reference's value must survive as text: {texts:?}"
+        );
+        assert!(
+            texts.contains(&("A-101".to_string(), 101.0, 54.0)),
+            "a constant attribute's value must survive at its placed point: {texts:?}"
+        );
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(
+            !doc.entities()
+                .any(|entity| matches!(entity, document::EntityType::AttributeEntity(_))),
+            "no attribute instance may remain"
+        );
+    }
+}

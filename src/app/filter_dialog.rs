@@ -105,6 +105,11 @@ pub struct FilterDialogState {
     /// Editing a layer filter for the Layer manager (#2610): the name it is
     /// saved under. Rows read layer properties, and there is no type.
     pub layer_filter: Option<String>,
+    /// The layer filter's name when the editor opened, so a renamed filter
+    /// replaces the one it was.
+    pub layer_filter_from: Option<String>,
+    /// Opened with 'FILTER inside this command's "Select objects:".
+    pub for_command: Option<String>,
 }
 
 impl FilterDialogState {
@@ -183,9 +188,19 @@ impl OpenCADStudio {
                 return Task::none();
             }
             FilterMsg::Close => {
-                self.filter_dialog = None;
+                let layers = self
+                    .filter_dialog
+                    .take()
+                    .is_some_and(|state| state.layer_filter.is_some());
                 self.reset_modal_geometry();
                 self.filter_refresh_live();
+                if layers {
+                    return Task::none();
+                }
+                if self.transparent_select.is_some() {
+                    return self.finish_transparent_select(None);
+                }
+                self.return_to_block_dialog(false);
                 return Task::none();
             }
             FilterMsg::Apply => return self.filter_apply(),
@@ -335,14 +350,24 @@ impl OpenCADStudio {
                 state.scope = scope;
                 state.properties.clear();
             }
-            FilterMsg::Result(result) => state.result = result,
+            // Neither changes what matches: nothing to count again.
+            FilterMsg::Result(result) => {
+                state.result = result;
+                return Task::none();
+            }
             FilterMsg::Invert(on) => state.invert = on,
             FilterMsg::Show(on) => state.show = on,
             FilterMsg::Focus(bucket) => {
                 state.focus = if state.focus == bucket { None } else { bucket };
             }
-            FilterMsg::SaveAs(name) => state.save_as = name,
-            FilterMsg::LayerName(name) => state.layer_filter = Some(name),
+            FilterMsg::SaveAs(name) => {
+                state.save_as = name;
+                return Task::none();
+            }
+            FilterMsg::LayerName(name) => {
+                state.layer_filter = Some(name);
+                return Task::none();
+            }
             FilterMsg::Open(_)
             | FilterMsg::Close
             | FilterMsg::Apply
@@ -391,6 +416,8 @@ impl OpenCADStudio {
             saved_name: None,
             save_as: None,
             layer_filter: None,
+            layer_filter_from: None,
+            for_command: self.transparent_select.clone(),
         });
         self.reset_modal_geometry();
         self.filter_refresh_scope();
@@ -454,7 +481,10 @@ impl OpenCADStudio {
             show: false,
         }));
         if let Some(state) = self.filter_dialog.as_mut() {
+            state.layer_filter_from = Some(name.clone()).filter(|name| !name.is_empty());
             state.layer_filter = Some(name);
+            // Layers, not the objects a parked command asks for.
+            state.for_command = None;
         }
         self.filter_refresh_scope();
         self.filter_refresh_live();
@@ -508,19 +538,36 @@ impl OpenCADStudio {
         else {
             return;
         };
-        let filter = super::layer_filters::LayerFilter {
-            name: name.clone(),
-            conditions: Some(state.filter.clone()),
-            ..Default::default()
-        };
+        let conditions = Some(state.filter.clone());
+        let from = state.layer_filter_from.clone();
         let matches = state.live_count;
-        match self
-            .layer_filters
-            .iter()
-            .position(|f| f.name.eq_ignore_ascii_case(&name))
-        {
-            Some(at) => self.layer_filters[at] = filter,
-            None => self.layer_filters.push(filter),
+        let position = |filters: &[super::layer_filters::LayerFilter], name: &str| {
+            filters
+                .iter()
+                .position(|f| f.name.eq_ignore_ascii_case(name))
+        };
+        // A renamed filter replaces the one it was, keeping its nested
+        // filters; another filter of the new name gives way.
+        let at = from
+            .as_deref()
+            .and_then(|from| position(&self.layer_filters, from))
+            .or_else(|| position(&self.layer_filters, &name));
+        match at {
+            Some(at) => {
+                let filter = &mut self.layer_filters[at];
+                filter.name = name.clone();
+                filter.conditions = conditions;
+                let mut index = 0;
+                self.layer_filters.retain(|f| {
+                    index += 1;
+                    index - 1 == at || !f.name.eq_ignore_ascii_case(&name)
+                });
+            }
+            None => self.layer_filters.push(super::layer_filters::LayerFilter {
+                name: name.clone(),
+                conditions,
+                ..Default::default()
+            }),
         }
         self.filter_dialog = None;
         self.reset_modal_geometry();
@@ -721,10 +768,112 @@ impl OpenCADStudio {
             .scene
             .filter_matches(state.scope, &state.filter, state.invert);
         let selected = self.tabs[i].scene.apply_found(found, state.result);
+        if self.transparent_select.is_some() {
+            return self.finish_transparent_select(Some(selected));
+        }
         self.command_line
             .push_output(crate::tf!("FILTER: {} object(s) selected.", selected).as_ref());
         self.refresh_properties();
+        if self.return_to_block_dialog(true) {
+            return Task::none();
+        }
         self.unfocus_widgets()
+    }
+
+    /// The Block Definition or Write Block dialog Quick Select or FILTER
+    /// was opened from comes back; with `take_selection` it takes the
+    /// selection they made. False when neither waits.
+    pub(super) fn return_to_block_dialog(&mut self, take_selection: bool) -> bool {
+        let i = self.active_tab;
+        let selected = || -> Vec<Handle> {
+            self.tabs[i]
+                .scene
+                .selected_entities()
+                .into_iter()
+                .map(|(h, _)| h)
+                .collect()
+        };
+        if self.block_definition.is_some() {
+            if take_selection {
+                let handles = selected();
+                if let Some(block_def) = self.block_definition.as_mut() {
+                    block_def.selected_handles = handles;
+                    block_def.error_message = None;
+                }
+                self.refresh_block_definition_preview();
+            }
+            self.active_modal = Some(super::ModalKind::BlockDefinition);
+            return true;
+        }
+        if self.wblock.is_some() {
+            if take_selection {
+                let handles = selected();
+                if let Some(wblock) = self.wblock.as_mut() {
+                    wblock.selected_handles = handles;
+                    wblock.error_message = None;
+                }
+            }
+            self.active_modal = Some(super::ModalKind::WriteBlock);
+            return true;
+        }
+        false
+    }
+
+    /// 'FILTER / 'QSELECT: open the dialog for the command asking for
+    /// objects, parked until the dialog closes. Anywhere else it says why
+    /// not.
+    pub(super) fn start_transparent_select(&mut self, i: usize, cmd: &str) -> Task<Message> {
+        let asking = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .filter(|running| running.is_selection_gathering())
+            .map(|running| {
+                // The name the user knows is the one its prompt starts with
+                // ("ERASE  Select objects:"); a shared picker's own name is
+                // only SELECT.
+                running
+                    .prompt()
+                    .split_whitespace()
+                    .next()
+                    .filter(|word| word.chars().all(|c| c.is_ascii_uppercase() || c == '-'))
+                    .map_or_else(|| running.name().to_string(), str::to_owned)
+            });
+        let Some(asking) = asking else {
+            self.command_line.push_error(
+                crate::tf!("'{} works only while a command asks for objects.", cmd).as_ref(),
+            );
+            return Task::none();
+        };
+        self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
+        self.tabs[i].transparent_resume = true;
+        self.tabs[i].scene.clear_preview_wire();
+        self.transparent_select = Some(asking);
+        if cmd == "FILTER" {
+            self.filter_open(None);
+            Task::none()
+        } else {
+            self.on_qselect_open()
+        }
+    }
+
+    /// The dialog closed: the parked command comes back and, after Select,
+    /// takes the selection it now has; after Cancel it goes on as it was.
+    pub(super) fn finish_transparent_select(&mut self, found: Option<usize>) -> Task<Message> {
+        let i = self.active_tab;
+        self.transparent_select = None;
+        self.resume_transparent_parent(i);
+        let Some(found) = found else {
+            return Task::none();
+        };
+        self.command_line
+            .push_output(crate::tf!("{} found", found).as_ref());
+        let selected: Vec<Handle> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .map(|(h, _)| h)
+            .collect();
+        self.feed_command(crate::command::StepInput::SelectionComplete(selected))
     }
 
     /// Quick Select's "Advanced…": FILTER with the same conditions (one
@@ -897,6 +1046,49 @@ mod tests {
         filter(&mut app, FilterMsg::Saved("Circles".into()));
         filter(&mut app, FilterMsg::DeleteSaved);
         assert!(app.saved_filter_names(i).is_empty());
+    }
+
+    /// #2611: 'FILTER inside ERASE's "Select objects:" works for ERASE, hands
+    /// it what it finds, and Cancel leaves ERASE as it was.
+    #[test]
+    fn transparent_filter_works_for_the_running_command() {
+        let (mut app, handles) = app_with_objects();
+        let i = app.active_tab;
+        app.command_line.last_error = None;
+        let _ = app.run_command_line("'FILTER");
+        assert!(app.filter_dialog.is_none());
+        assert!(
+            app.command_line.last_error.is_some(),
+            "no command asks for objects"
+        );
+
+        let _ = app.run_command_line("ERASE");
+        assert!(app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|cmd| cmd.is_selection_gathering()));
+        let _ = app.run_command_line("'FILTER");
+        let state = app.filter_dialog.as_ref().expect("FILTER opens for ERASE");
+        assert_eq!(state.for_command.as_deref(), Some("ERASE"));
+        assert!(app.tabs[i].active_cmd.is_none(), "ERASE waits");
+        // Cancel: ERASE goes on with nothing picked.
+        filter(&mut app, FilterMsg::Close);
+        assert!(app.tabs[i].active_cmd.is_some());
+        assert!(app.tabs[i].scene.selected.is_empty());
+
+        let _ = app.run_command_line("'FILTER");
+        let row = FilterRow::Root(0);
+        filter(
+            &mut app,
+            FilterMsg::Edit(row, FilterRowEdit::Type(Some("Circle".into()))),
+        );
+        filter(&mut app, FilterMsg::Apply);
+        assert!(app.filter_dialog.is_none());
+        assert!(app.tabs[i].active_cmd.is_some(), "ERASE is back");
+        let _ = app.update(Message::CommandFinalize);
+        let doc = &app.tabs[i].scene.document;
+        assert!(doc.get_entity(handles[1]).is_none(), "the circle is erased");
+        assert!(doc.get_entity(handles[0]).is_some() && doc.get_entity(handles[2]).is_some());
     }
 
     #[test]
@@ -1161,6 +1353,11 @@ mod view {
         }
         let scope_row = scope_row
             .push(Space::new().width(Fill))
+            .push(match &state.for_command {
+                // Who the result goes to (#2611).
+                Some(command) => muted(crate::tf!("for {}", command)),
+                None => muted(String::new()),
+            })
             .push(muted(crate::tf!(
                 "{} candidate object(s)",
                 state.candidate_count
@@ -1427,7 +1624,10 @@ mod view {
         }
         let problem = state.problem();
         let select = dialog_button_styled_opt(
-            crate::tf!("Select {}", state.live_count),
+            match &state.for_command {
+                Some(command) => crate::tf!("Use {} in {}", state.live_count, command),
+                None => crate::tf!("Select {}", state.live_count),
+            },
             (problem.is_none() && state.live_count > 0).then_some(msg(FilterMsg::Apply)),
             button::primary,
         );

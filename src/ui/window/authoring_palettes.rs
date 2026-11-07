@@ -265,8 +265,8 @@ fn catalog(
             base
         };
         let message = enabled.then(|| Message::RibbonToolClick {
-            tool_id: if parameter_set.is_some() { format!("BPARAMETERSET_{}", label.to_ascii_uppercase().replace(' ', "_")) } else if geometry_action {format!("BACTION_{}",label.to_ascii_uppercase())}else if lookup_action {"BLOOKUPTABLE".into()}else if properties_table_action {"BPROPERTIESTABLE".into()}else{format!("BPARAMETER_{}", label.to_ascii_uppercase())},
-            event: crate::modules::ModuleEvent::Command(if parameter_set.is_some() { format!("BPARAMETERSET {label}") } else if geometry_action {format!("BACTION {}",label.to_ascii_uppercase())}else if lookup_action {"BLOOKUPTABLE".into()}else if properties_table_action {"BPROPERTIESTABLE".into()}else{format!("BPARAMETER {}", label.to_ascii_uppercase())}),
+            tool_id: if parameter_set.is_some() { format!("BPARAMETERSET_{}", label.to_ascii_uppercase().replace(' ', "_")) } else if geometry_action || lookup_action {format!("BACTION_{}",label.to_ascii_uppercase())}else if properties_table_action {"BPROPERTIESTABLE".into()}else{format!("BPARAMETER_{}", label.to_ascii_uppercase())},
+            event: crate::modules::ModuleEvent::Command(if parameter_set.is_some() { format!("BPARAMETERSET {label}") } else if geometry_action || lookup_action {format!("BACTION {}",label.to_ascii_uppercase())}else if properties_table_action {"BPROPERTIESTABLE".into()}else{format!("BPARAMETER {}", label.to_ascii_uppercase())}),
         });
         let description = if visibility {
             crate::t!(visibility_error
@@ -288,7 +288,7 @@ fn catalog(
         } else if geometry_action {
             crate::t!(action_error.unwrap_or(if *label=="Stretch" {"Select a parameter endpoint, define the stretch frame, select its objects, then place the action marker."}else if *label=="Array" {"Select a parameter endpoint, select the objects to array, specify the column offset, then place the action marker."}else{"Select a parameter endpoint, select the objects it controls, then place the action marker. Use the reference parameter grip in the drawing or Test Block."})).into_owned()
         } else if lookup_action {
-            crate::t!(lookup_error.unwrap_or("Create or edit property Lookup tables for this block.")).into_owned()
+            crate::t!(lookup_error.unwrap_or("Choose a Lookup parameter, then create or edit its property table.")).into_owned()
         } else if properties_table_action {
             crate::t!(properties_table_error.unwrap_or("Create or edit this block's properties table; rows bind Linear and Polar parameters.")).into_owned()
         } else if parameter_set.is_some() {

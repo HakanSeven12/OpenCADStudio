@@ -424,7 +424,7 @@ impl FieldKey {
     pub fn widget_id(&self) -> iced::widget::Id {
         match self {
             FieldKey::Geom(field) => prop_geom_field_id(field),
-            FieldKey::BlockParameter(key) => iced::widget::Id::from(format!("props-block-{}-{}-{}-{}-{:?}-{:?}", key.document, key.definition, key.insert, key.parameter, key.component, key.batch_generation)),
+            FieldKey::BlockParameter(key) => iced::widget::Id::from(format!("props-block-{}-{}-{}-{}-{:?}-{:?}-{:?}", key.document, key.definition, key.insert, key.parameter, key.component, key.batch_generation, key.editor_session)),
             FieldKey::Attr(tag) => prop_attr_field_id(tag),
             FieldKey::PluginParam(name) => prop_plugin_param_field_id(name),
             FieldKey::Param(index, field) => prop_param_field_id(*index, *field),

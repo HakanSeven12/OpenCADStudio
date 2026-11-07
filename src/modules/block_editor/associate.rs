@@ -184,25 +184,17 @@ impl CadCommand for AssociateCommand {
                 crate::t!("Enter an action or parameter name.").into_owned(),
             );
         };
-        let screen = |p| {
-            crate::scene::pick::hit_test::world_to_screen(
-                p,
+        if self.action.is_none() {
+            let chosen = crate::scene::view::projection::nearest_in_aperture(
                 context.view,
                 context.eye,
                 context.bounds,
-            )
-        };
-        let click = screen(point);
-        let aperture = context.aperture_px.max(10.0);
-        if self.action.is_none() {
-            let chosen = self
-                .candidates
-                .iter()
-                .enumerate()
-                .map(|(index, c)| (screen(c.at).distance(click), index))
-                .filter(|(distance, _)| distance.is_finite() && *distance <= aperture)
-                .min_by(|a, b| a.0.total_cmp(&b.0));
-            return if let Some((_, index)) = chosen {
+                point,
+                context.aperture_px,
+                self.candidates.iter().enumerate().map(|(index, _)| index),
+                |index| self.candidates[*index].at,
+            );
+            return if let Some(index) = chosen {
                 self.action = Some(index);
                 CmdResult::NeedPoint
             } else {
@@ -212,27 +204,33 @@ impl CadCommand for AssociateCommand {
             };
         }
         let kind = self.candidates[self.action.unwrap()].kind;
-        let chosen = self
-            .parameters
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| actions::compatible(p, kind))
-            .flat_map(|(index, p)| {
-                let mut points = vec![(p.base, XyKeyPoint::Base), (p.end, XyKeyPoint::End)];
-                if p.xy {
-                    points.extend([
-                        (DVec3::new(p.end.x, p.base.y, p.end.z), XyKeyPoint::X),
-                        (DVec3::new(p.base.x, p.end.y, p.end.z), XyKeyPoint::Y),
-                    ]);
-                }
-                points
-                    .into_iter()
-                    .map(move |(point, key)| (screen(point).distance(click), index, key))
-            })
-            .filter(|(distance, _, _)| distance.is_finite() && *distance <= aperture)
-            .min_by(|a, b| a.0.total_cmp(&b.0));
+        let chosen = crate::scene::view::projection::nearest_in_aperture(
+            context.view,
+            context.eye,
+            context.bounds,
+            point,
+            context.aperture_px,
+            self.parameters
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| actions::compatible(p, kind))
+                .flat_map(|(index, p)| {
+                    let mut points = vec![
+                        (index, XyKeyPoint::Base, p.base),
+                        (index, XyKeyPoint::End, p.end),
+                    ];
+                    if p.xy {
+                        points.extend([
+                            (index, XyKeyPoint::X, DVec3::new(p.end.x, p.base.y, p.end.z)),
+                            (index, XyKeyPoint::Y, DVec3::new(p.base.x, p.end.y, p.end.z)),
+                        ]);
+                    }
+                    points
+                }),
+            |candidate| candidate.2,
+        );
         chosen
-            .map(|(_, index, key)| self.choose_parameter(index, Some(key)))
+            .map(|(index, key, _)| self.choose_parameter(index, Some(key)))
             .unwrap_or_else(|| {
                 CmdResult::ReportError(
                     crate::t!("Pick a compatible parameter key point.").into_owned(),

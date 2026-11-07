@@ -5454,6 +5454,8 @@ impl OpenCADStudio {
 
             Message::LayerNew => self.on_layer_new(),
 
+            Message::LayerImport(msg) => self.on_layer_import(msg),
+
             Message::LayerNewVpFrozen => self.on_layer_new_with(true),
 
             Message::LayerMenu(name, action) => self.on_layer_menu(name, action),
@@ -8987,15 +8989,18 @@ impl OpenCADStudio {
 
             Message::QSelectClose => {
                 self.qselect_clear_preview();
+                if self.transparent_select.is_some() {
+                    if let Some(state) = self.qselect.take() {
+                        self.qselect_settings = Some((&state).into());
+                    }
+                    self.reset_modal_geometry();
+                    return self.finish_transparent_select(None);
+                }
                 if let Some(state) = self.qselect.take() {
                     self.qselect_settings = Some((&state).into());
                 }
                 self.reset_modal_geometry();
-                if self.block_definition.is_some() {
-                    self.active_modal = Some(super::ModalKind::BlockDefinition);
-                } else if self.wblock.is_some() {
-                    self.active_modal = Some(super::ModalKind::WriteBlock);
-                }
+                self.return_to_block_dialog(false);
                 Task::none()
             }
 
@@ -9246,35 +9251,19 @@ impl OpenCADStudio {
                     state.mode,
                     state.result,
                 );
+                if self.transparent_select.is_some() {
+                    return self.finish_transparent_select(Some(matched));
+                }
                 self.command_line
                     .push_output(crate::tf!("QSELECT: {} object(s) selected.", matched).as_ref());
                 self.refresh_properties();
-                if let Some(ref mut block_def) = self.block_definition {
-                    block_def.selected_handles = self.tabs[i]
-                        .scene
-                        .selected_entities()
-                        .into_iter()
-                        .map(|(h, _)| h)
-                        .collect();
-                    block_def.error_message = None;
-                    self.active_modal = Some(super::ModalKind::BlockDefinition);
-                    self.refresh_block_definition_preview();
-                } else if let Some(ref mut wblock) = self.wblock {
-                    wblock.selected_handles = self.tabs[i]
-                        .scene
-                        .selected_entities()
-                        .into_iter()
-                        .map(|(h, _)| h)
-                        .collect();
-                    wblock.error_message = None;
-                    self.active_modal = Some(super::ModalKind::WriteBlock);
-                } else {
-                    // FILTER may be opened from a still-focused command input.
-                    // Release text focus so Delete and clipboard shortcuts act
-                    // on the resulting pick-first selection, not on that input.
-                    return self.unfocus_widgets();
+                if self.return_to_block_dialog(true) {
+                    return Task::none();
                 }
-                Task::none()
+                // FILTER may be opened from a still-focused command input.
+                // Release text focus so Delete and clipboard shortcuts act
+                // on the resulting pick-first selection, not on that input.
+                self.unfocus_widgets()
             }
 
             // ── Properties panel messages ─────────────────────────────────
@@ -12308,11 +12297,6 @@ impl OpenCADStudio {
                 self.ribbon.layer_filter = f;
                 Task::none()
             }
-            Message::LayerGroupShow(group) => {
-                let i = self.active_tab;
-                self.tabs[i].layers.set_group(group);
-                Task::none()
-            }
             Message::LayerShow(node) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.view = node;
@@ -13044,7 +13028,14 @@ impl OpenCADStudio {
                 );
                 let Some(row) = rows
                     .iter()
-                    .find(|row| row.numeric && row.name.eq_ignore_ascii_case(&name))
+                    .find(|row| row.name.eq_ignore_ascii_case(&name))
+                    .filter(|row| {
+                        if cell == crate::ui::window::parameters_manager::Cell::Description {
+                            row.description_writable
+                        } else {
+                            row.numeric
+                        }
+                    })
                 else {
                     // Nothing to open here, so nothing stays open: a cell left on
                     // another row would take whatever is typed next.
@@ -13061,6 +13052,7 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let name = row.name.clone();
+                let description = row.description.clone();
                 let panel = &mut self.tabs[i].parameters_panel;
                 panel.editing = Some(crate::ui::window::parameters_manager::Edit {
                     definition,
@@ -13069,7 +13061,16 @@ impl OpenCADStudio {
                     name,
                     cell,
                 });
-                panel.edit_buf.clear();
+                // A description field opens on the text it replaces, as an
+                // in-place edit does; a numeric field starts empty so a typed
+                // number replaces the printed one without first deleting it.
+                if cell == crate::ui::window::parameters_manager::Cell::Description {
+                    panel.edit_buf = description.clone();
+                    panel.edit_original = description;
+                } else {
+                    panel.edit_buf.clear();
+                    panel.edit_original.clear();
+                }
                 iced::widget::operation::focus(
                     crate::ui::window::parameters_manager::edit_input_id(),
                 )
@@ -13087,6 +13088,16 @@ impl OpenCADStudio {
                 self.tabs[self.active_tab].parameters_panel.filter = value;
                 Task::none()
             }
+            Message::ParametersManagerFilterMode(mode) => {
+                self.tabs[self.active_tab].parameters_panel.mode = mode;
+                self.tabs[self.active_tab].parameters_panel.filter_menu = false;
+                Task::none()
+            }
+            Message::ParametersManagerFilterMenu => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                panel.filter_menu = !panel.filter_menu;
+                Task::none()
+            }
             Message::ParametersManagerSearch(value) => {
                 self.tabs[self.active_tab].parameters_panel.search = value;
                 Task::none()
@@ -13097,13 +13108,23 @@ impl OpenCADStudio {
                 self.toggle_parameters_manager_show(&name)
             }
             // A click moved focus off the open cell: keep what was typed, as
-            // Enter would. An untouched field stays open.
+            // Enter would. An untouched numeric field stays open, an untouched
+            // description keeps the text it opened on, and an emptied
+            // description is a text to write.
             Message::ParametersManagerFocus(focused) => {
                 let commit = {
                     let panel = &self.tabs[self.active_tab].parameters_panel;
-                    !panel.edit_buf.trim().is_empty()
-                        && focused
-                            != Some(crate::ui::window::parameters_manager::edit_input_id())
+                    let Some(edit) = panel.editing.as_ref() else {
+                        return Task::none();
+                    };
+                    let description =
+                        edit.cell == crate::ui::window::parameters_manager::Cell::Description;
+                    let typed = if description {
+                        panel.edit_buf != panel.edit_original
+                    } else {
+                        !panel.edit_buf.trim().is_empty()
+                    };
+                    typed && focused != Some(crate::ui::window::parameters_manager::edit_input_id())
                 };
                 if commit {
                     return self.commit_parameters_manager(false);
@@ -15339,7 +15360,6 @@ mod free_text_entry_tests {
     }
 }
 
-/// Set or clear one bit of `SELECTIONPREVIEW`.
 /// Focus the layer-name field with its whole text selected, so typing
 /// replaces the name instead of reaching the command line (#2610).
 fn focus_layer_name_field() -> Task<Message> {
@@ -15350,6 +15370,7 @@ fn focus_layer_name_field() -> Task<Message> {
     ])
 }
 
+/// Set or clear one bit of `SELECTIONPREVIEW`.
 fn set_preview_bit(current: u8, bit: u8, enabled: bool) -> u8 {
     if enabled {
         current | bit

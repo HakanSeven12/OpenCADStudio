@@ -483,6 +483,12 @@ fn parameters_at(doc: &Document, definition: Handle, kind: Kind, graph: Handle) 
 }
 
 pub(crate) fn supported(e: &EntityType) -> bool {
+    let in_xy = |normal: Vector3| normal.x == 0. && normal.y == 0. && normal.z == 1.;
+    match e {
+        EntityType::Polyline2D(p) => return in_xy(p.normal),
+        EntityType::Solid(s) => return in_xy(s.normal),
+        _ => {}
+    }
     matches!(
         e,
         EntityType::Line(_)
@@ -1713,7 +1719,8 @@ fn evaluate_impl(
         });
     }
     let all = actions(baseline, definition);
-    let (order, successors) = action_schedule(baseline, definition, &all)?;
+    let (mut order, successors) = action_schedule(baseline, definition, &all)?;
+    flip_graph::order_linked_scales(baseline, definition, &all, evaluation.managed_flips, &mut order);
     let ordered_arrays = array::Sequence::new(&all, &successors);
     let mut affected = std::collections::BTreeSet::new();
     let mut geometric_targets = std::collections::BTreeMap::new();
@@ -1880,6 +1887,36 @@ fn evaluate_impl(
             }
         }
         prepared.insert(*action_handle, (q, base, end, transform));
+    }
+    if let Some((handle, baseline_point)) = super::block_basepoint::parameter(baseline, definition) {
+        let node = baseline_point.parameter.parameter.element.eval.node_id;
+        let mut point = v(baseline_point.point);
+        for &index in &order {
+            let (action, binding, kind, _) = all[index];
+            if !matches!(kind, Kind::Stretch | Kind::Flip)
+                || !binding.dependencies.contains(&handle)
+                || !binding.action_ids.contains(&node)
+            {
+                continue;
+            }
+            match &prepared[&action].3 {
+                crate::command::EntityTransform::Translate(delta) => point += *delta,
+                crate::command::EntityTransform::Mirror { p1, p2, working_normal } => {
+                    point = super::view::transform::reflected_point(point, *p1, *p2, *working_normal);
+                }
+                _ => unreachable!(),
+            }
+        }
+        let Some(ObjectType::DynamicBlock(object)) = staged.objects.get_mut(&handle) else {
+            unreachable!()
+        };
+        let DynamicBlockData::BasePointParameter(basepoint) = &mut object.data else {
+            unreachable!()
+        };
+        if !point.is_finite() {
+            return Err("The parameter value produces non-finite geometry.");
+        }
+        basepoint.point = native(point);
     }
     ordered_arrays.reserve_nested(
         &all, &order, &geometric_targets, &array_plans, &mut remaining_array_entities,

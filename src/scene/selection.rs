@@ -1059,6 +1059,10 @@ impl Scene {
         use crate::entities::traits::EntityTypeOps;
         use crate::scene::model::object::PropValue;
         match field {
+            // The type test as a property, so a command-line filter can match
+            // type names with the same wildcards and comparisons as any other
+            // value. The dialog keeps using `Condition::type_filter` directly.
+            "type" => Some(crate::entities::traits::entity_type_name(entity).to_string()),
             "handle" => Some(entity.common().handle.value().to_string()),
             "layer" => Some(entity.common().layer.clone()),
             "color" => Some(

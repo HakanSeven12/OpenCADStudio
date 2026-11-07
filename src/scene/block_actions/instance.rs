@@ -3,7 +3,7 @@
 use super::*;
 use document::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
 
-fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
+pub(super) fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
     let Some(ObjectType::Dictionary(d)) = doc.objects.get(&owner) else {
         return Err("The reference contains an invalid parameter dictionary.");
     };
@@ -1049,43 +1049,47 @@ fn clear_table_history(
         if let Some(ObjectType::Dictionary(dictionary)) = result.objects.get_mut(&owner) {
             dictionary.entries.retain(|(_, h)| *h != history);
         }
-        let mut owned = std::collections::BTreeSet::from([history]);
-        loop {
-            let children = result
-                .objects
-                .keys()
-                .copied()
-                .filter(|h| {
-                    !owned.contains(h)
-                        && result
-                            .object_owner(*h)
-                            .is_some_and(|owner| owned.contains(&owner))
-                })
-                .collect::<Vec<_>>();
-            if children.is_empty() {
-                break;
-            }
-            owned.extend(children);
-        }
-        for handle in owned {
-            let applications = result
-                .object_xdata(handle)
-                .map(|data| {
-                    data.records()
-                        .iter()
-                        .map(|record| record.application_name.clone())
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            for application in applications {
-                result.remove_object_xdata_record(handle, &application);
-            }
-            result.block_representations.remove(&handle);
-            result.block_visibility_params.remove(&handle);
-            result.objects.remove(&handle);
-        }
+        remove_owned_cache(result, history);
     }
     Ok(())
+}
+
+pub(super) fn remove_owned_cache(result: &mut Document, root: Handle) {
+    let mut owned = std::collections::BTreeSet::from([root]);
+    loop {
+        let children = result
+            .objects
+            .keys()
+            .copied()
+            .filter(|h| {
+                !owned.contains(h)
+                    && result
+                        .object_owner(*h)
+                        .is_some_and(|owner| owned.contains(&owner))
+            })
+            .collect::<Vec<_>>();
+        if children.is_empty() {
+            break;
+        }
+        owned.extend(children);
+    }
+    for handle in owned {
+        let applications = result
+            .object_xdata(handle)
+            .map(|data| {
+                data.records()
+                    .iter()
+                    .map(|record| record.application_name.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        for application in applications {
+            result.remove_object_xdata_record(handle, &application);
+        }
+        result.block_representations.remove(&handle);
+        result.block_visibility_params.remove(&handle);
+        result.objects.remove(&handle);
+    }
 }
 
 fn table_history_owner(doc: &Document, insert: Handle) -> Result<Option<Handle>, &'static str> {
@@ -1375,6 +1379,51 @@ pub(crate) fn materialize(
         return Err("Could not isolate the dynamic block reference.");
     }
     super::representation::reconcile(&mut scene, def, &name, evaluated)?;
+    if let Some((_, basepoint)) = crate::scene::block_basepoint::parameter(evaluated, def)
+        .filter(|(handle, basepoint)| {
+            let id = basepoint.parameter.parameter.element.eval.node_id;
+            super::actions(evaluated, def).iter().any(|(_, action, kind, _)| {
+                matches!(kind, Kind::Stretch | Kind::Flip)
+                    && action.dependencies.contains(handle)
+                    && action.action_ids.contains(&id)
+            })
+        })
+    {
+        let Some(EntityType::Insert(original)) = doc.get_entity(insert) else {
+            unreachable!()
+        };
+        let old = crate::scene::render_graph::block_base_point(doc, &original.block_name);
+        let location = basepoint.point;
+        let delta = v(location - old);
+        let scale = DVec3::new(original.x_scale(), original.y_scale(), original.z_scale());
+        // The INSERT point is stored in its own OCS. Moving it with the
+        // evaluated origin keeps the transformed block geometry in place.
+        let position = v(original.insert_point)
+            + glam::DQuat::from_rotation_z(original.rotation) * (scale * delta);
+        if !position.is_finite() {
+            return Err("The parameter value produces non-finite geometry.");
+        }
+        let Some(EntityType::Insert(reference)) = scene.document.get_entity_mut(insert) else {
+            unreachable!()
+        };
+        reference.insert_point = native(position);
+        let id = basepoint.parameter.parameter.element.eval.node_id;
+        if let Some(handle) = cache(&scene.document, insert, id)? {
+            let Some(ObjectType::XRecord(record)) = scene.document.objects.get_mut(&handle) else {
+                return Err("The reference contains an invalid parameter record.");
+            };
+            let mut points = record.entries.iter_mut()
+                .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)));
+            let point = points.next().filter(|_| record.entries_complete && points.next().is_none())
+                .ok_or("The reference parameter cache has no finite endpoint.")?;
+            let value = XRecordValue::Point3D(location.x, location.y, location.z);
+            if point.value != value {
+                point.value = value;
+                record.raw_data.clear();
+                record.raw_dwg_data = None;
+            }
+        }
+    }
     Ok(scene.document)
 }
 

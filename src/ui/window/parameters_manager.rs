@@ -22,8 +22,9 @@ const SPACING: f32 = 2.0;
 /// the same cells in the same places as one with a glyph.
 const GLYPH_WIDTH: f32 = 16.0;
 
-/// The row kinds whose leading glyph was read off the pane. Every other kind
-/// (a point's axes, a flip, a rotation) keeps the empty column rather than a
+/// The shapes the pane draws in its fixed-width leading cell: a group header's
+/// box, a row kind's glyph, and the toolbar's funnel. Every other row kind (a
+/// point's axes, a flip, a rotation) keeps the empty column rather than a
 /// guessed shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GlyphKind {
@@ -31,6 +32,7 @@ enum GlyphKind {
     Polar,
     Xy,
     Tag,
+    Funnel,
 }
 
 impl GlyphKind {
@@ -128,6 +130,18 @@ impl<Message> canvas::Program<Message> for Glyph {
                     line,
                 );
             }
+            GlyphKind::Funnel => {
+                let funnel = canvas::Path::new(|p| {
+                    p.move_to(Point::new(centre.x - reach, centre.y - reach * 0.6));
+                    p.line_to(Point::new(centre.x + reach, centre.y - reach * 0.6));
+                    p.line_to(Point::new(centre.x + reach * 0.25, centre.y + reach * 0.15));
+                    p.line_to(Point::new(centre.x + reach * 0.25, centre.y + reach * 0.8));
+                    p.line_to(Point::new(centre.x - reach * 0.25, centre.y + reach * 0.8));
+                    p.line_to(Point::new(centre.x - reach * 0.25, centre.y + reach * 0.15));
+                    p.close();
+                });
+                frame.stroke(&funnel, stroke);
+            }
         }
         vec![frame.into_geometry()]
     }
@@ -152,12 +166,14 @@ fn glyph_spacer() -> Element<'static, Message> {
         .into()
 }
 
-/// The two numeric cells of a row. They print the same quantity at two
-/// precisions, so typing into either writes the same number.
+/// The cells of a row that open a field. The two numeric cells print the same
+/// quantity at two precisions, so typing into either writes the same number;
+/// the description cell edits the text the row prints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Cell {
     Expression,
     Value,
+    Description,
 }
 
 /// The cell a manager edit is open on, and the parameter it writes. The panel is
@@ -183,8 +199,14 @@ pub struct Edit {
 pub struct Panel {
     pub editing: Option<Edit>,
     pub edit_buf: String,
+    pub edit_original: String,
     pub filter: String,
     pub search: String,
+    /// Which rows the funnel filter keeps: every row, or the ones another
+    /// parameter's expression names.
+    pub mode: manager::FilterMode,
+    /// Whether the funnel's two-entry menu is open.
+    pub filter_menu: bool,
 }
 
 impl Default for Panel {
@@ -192,8 +214,11 @@ impl Default for Panel {
         Self {
             editing: None,
             edit_buf: String::new(),
+            edit_original: String::new(),
             filter: "*".to_owned(),
             search: String::new(),
+            mode: manager::FilterMode::All,
+            filter_menu: false,
         }
     }
 }
@@ -255,6 +280,45 @@ fn number_cell(
     .into()
 }
 
+/// A description cell: a row that names parameter text opens an in-place field
+/// carrying the text it will replace; a row that names none keeps the printed
+/// cell. The writable cell fills the flexible Description column, so the click
+/// target stays the whole cell as the pane grows.
+fn description_cell(
+    definition: document::Handle,
+    name: &str,
+    value: &str,
+    writable: bool,
+    panel: &Panel,
+    width: f32,
+) -> Element<'static, Message> {
+    if !writable {
+        return cell(value, width);
+    }
+    if panel.is_open(definition, name, Cell::Description) {
+        return container(
+            text_input(" ", &panel.edit_buf)
+                .id(edit_input_id())
+                .on_input(Message::ParametersManagerInput)
+                .on_submit(Message::ParametersManagerCommit)
+                .size(11),
+        )
+        .width(Fill)
+        .into();
+    }
+    container(
+        button(text(if value.is_empty() { " " } else { value }.to_owned()).size(11))
+            .width(Fill)
+            .clip(true)
+            .on_press(Message::ParametersManagerEdit(
+                name.to_owned(),
+                Cell::Description,
+            )),
+    )
+    .width(Fill)
+    .into()
+}
+
 fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
     container(
         button(text(crate::t!(if show { "Yes" } else { "No" }).into_owned()).size(11))
@@ -294,13 +358,23 @@ fn group_line(group: Group) -> Element<'static, Message> {
     .into()
 }
 
-/// The two fields the list is narrowed with. Their effect is on the rows below
-/// and on the count in the footer, not on any parameter. What has been read off
-/// the pane is that the filter field carries `*` and that the search field says
-/// what it searches for; this filter placeholder word and the width it is given
-/// are layout, not measurement.
+/// The filter menu entry the funnel offers, beside the two fields that narrow
+/// the list. Their effect is on the rows below and on the count in the footer,
+/// not on any parameter.
 fn toolbar(panel: &Panel) -> Element<'static, Message> {
     row(vec![
+        container(
+            button(
+                canvas(Glyph(GlyphKind::Funnel))
+                    .width(Length::Fixed(12.0))
+                    .height(Length::Fixed(12.0)),
+            )
+            .on_press(Message::ParametersManagerFilterMenu)
+            .padding([2, 4]),
+        )
+        .width(Length::Fixed(24.0))
+        .id(iced::widget::Id::from("parameters-manager-funnel"))
+        .into(),
         container(
             text_input(&crate::tr!("parameters-manager", "filter"), &panel.filter)
                 .on_input(Message::ParametersManagerFilter)
@@ -318,6 +392,40 @@ fn toolbar(panel: &Panel) -> Element<'static, Message> {
     ])
     .spacing(SPACING)
     .into()
+}
+
+/// The funnel's menu: the two filters it names, the active one ticked. An
+/// entry is what sets the filter; the menu then closes. Only the active entry
+/// carries the tick's id, so a test can tell which one is marked.
+fn filter_menu(panel: &Panel) -> Element<'static, Message> {
+    let mut list = column![].spacing(2);
+    for mode in manager::FilterMode::ALL {
+        let active = mode == panel.mode;
+        let tick = container(crate::ui::icons::themed_check_cell::<Message>(active));
+        let tick = if active {
+            tick.id(iced::widget::Id::from(format!(
+                "parameters-manager-filter-check-{mode:?}"
+            )))
+        } else {
+            tick
+        };
+        list = list.push(
+            button(
+                row![tick, text(mode.menu_label()).size(11)]
+                    .spacing(4)
+                    .align_y(iced::Center),
+            )
+            .on_press(Message::ParametersManagerFilterMode(mode))
+            .style(button::text)
+            .padding([2, 4])
+            .width(Fill),
+        );
+    }
+    container(list)
+        .style(container::bordered_box)
+        .padding(4)
+        .width(Fill)
+        .into()
 }
 
 fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element<'static, Message> {
@@ -364,7 +472,14 @@ fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element
         }, COLUMNS[3].0),
         show_cell(name, entry.show, COLUMNS[4].0),
         cell(&entry.order, COLUMNS[5].0),
-        cell(&entry.description, COLUMNS[6].0),
+        description_cell(
+            definition,
+            name,
+            &entry.description,
+            entry.description_writable,
+            panel,
+            COLUMNS[6].0,
+        ),
     ])
     .spacing(SPACING)
     .into()
@@ -377,7 +492,7 @@ pub fn view(
     width: f32,
     chrome: Chrome,
 ) -> Element<'static, Message> {
-    let listed = manager::displayed(rows, &panel.filter, &panel.search);
+    let listed = manager::displayed(rows, panel.mode, &panel.filter, &panel.search);
     let mut lines: Vec<Element<'static, Message>> = vec![header_line()];
     for group in Group::ALL {
         let group_rows: Vec<&Row> = listed
@@ -393,27 +508,27 @@ pub fn view(
             lines.push(row_line(row, panel, definition));
         }
     }
-    let footer = crate::tr!("parameters-manager", "footer", shown = listed.len().to_string(), total = rows.len().to_string());
+    let footer = manager::footer(panel.mode, rows.len(), listed.len());
+    let mut body = column![container(toolbar(panel)).width(Fill).padding([2, 2])].spacing(2);
+    if panel.filter_menu {
+        body = body.push(container(filter_menu(panel)).width(Fill).padding([0, 2]));
+    }
     dock::frame(
         dock::title_bar(
             PanelId::ParametersManager,
             crate::t!("Parameters Manager").into_owned(),
             chrome,
         ),
-        column![
-            container(toolbar(panel)).width(Fill).padding([2, 2]),
+        body.push(
             container(
                 scrollable(column(lines.into_iter()).spacing(2))
                     .width(Fill)
-                    .height(Fill)
+                    .height(Fill),
             )
             .width(Fill)
             .height(Fill),
-            container(text(footer).size(11))
-                .width(Fill)
-                .padding([2, 2]),
-        ]
-        .spacing(2)
+        )
+        .push(container(text(footer).size(11)).width(Fill).padding([2, 2]))
         .height(Fill),
         width,
     )
@@ -443,7 +558,8 @@ mod tests {
                 numeric: true,
                 show: true,
                 order: String::new(),
-                description: String::new(),
+                description: "Left edge".into(),
+                description_writable: true,
             },
             Row {
                 group: Group::ActionParameters,
@@ -455,6 +571,7 @@ mod tests {
                 show: true,
                 order: String::new(),
                 description: String::new(),
+                description_writable: true,
             },
             Row {
                 group: Group::Attributes,
@@ -466,6 +583,7 @@ mod tests {
                 show: true,
                 order: String::new(),
                 description: String::new(),
+                description_writable: false,
             },
         ]
     }
@@ -508,7 +626,152 @@ mod tests {
             [Group::ActionParameters.name(), Group::Attributes.name()],
             ["Action Parameters", "Attributes"]
         );
-        assert_eq!(manager::footer(2, 2), "All: 2 of 2 parameters displayed");
+        assert_eq!(
+            manager::footer(manager::FilterMode::All, 2, 2),
+            "All: 2 of 2 parameters displayed"
+        );
+    }
+
+    #[test]
+    fn the_used_filter_keeps_rows_another_expression_names_and_names_itself_in_the_footer() {
+        let mut rows = sample();
+        rows[0].expression = "Point1*2".to_owned();
+        let listed = manager::displayed(&rows, manager::FilterMode::UsedInExpressions, "*", "");
+        assert_eq!(
+            listed
+                .iter()
+                .map(|row| row.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Point1"],
+            "only the row another expression names is listed"
+        );
+        assert_eq!(
+            manager::footer(
+                manager::FilterMode::UsedInExpressions,
+                rows.len(),
+                listed.len()
+            ),
+            "All Used in Expressions: 1 of 3 parameters displayed"
+        );
+        assert_eq!(
+            manager::footer(manager::FilterMode::All, 3, 3),
+            "All: 3 of 3 parameters displayed"
+        );
+    }
+
+    #[test]
+    fn the_pane_names_the_used_filter_in_its_footer() {
+        let used = Panel {
+            mode: manager::FilterMode::UsedInExpressions,
+            ..Panel::default()
+        };
+        assert!(
+            locate(
+                &used,
+                &manager::footer(manager::FilterMode::UsedInExpressions, 3, 0)
+            )
+            .is_some(),
+            "the footer names the filter it is showing"
+        );
+        for name in ["Angle1", "Point1", "TAG1"] {
+            assert!(
+                locate(&used, name).is_none(),
+                "{name} is not used in an expression"
+            );
+        }
+    }
+
+    #[test]
+    fn the_funnel_opens_the_two_named_entries() {
+        let closed = Panel::default();
+        assert!(
+            locate(&closed, "Display All Parameters").is_none(),
+            "the menu starts closed"
+        );
+        let open = Panel {
+            filter_menu: true,
+            ..Panel::default()
+        };
+        assert!(
+            locate(&open, "Display All Parameters").is_some(),
+            "the first entry lists every parameter"
+        );
+        assert!(
+            locate(&open, "Display Parameters Used in Expressions").is_some(),
+            "the second entry lists the parameters an expression names"
+        );
+    }
+
+    #[test]
+    fn the_funnel_button_toggles_the_menu_and_the_active_entry_carries_the_tick() {
+        let width = PanelId::ParametersManager.default_width();
+        let build = |panel: &Panel| {
+            iced_test::simulator::Simulator::with_size(
+                Default::default(),
+                iced::Size::new(width, 800.0),
+                view(&sample(), panel, document::Handle::new(1), width, chrome()),
+            )
+        };
+        let mut ui = build(&Panel::default());
+        let funnel = ui
+            .find(iced::widget::Id::new("parameters-manager-funnel"))
+            .expect("the toolbar draws the funnel");
+        let centre = funnel
+            .visible_bounds()
+            .expect("the funnel is visible")
+            .center();
+        ui.point_at(centre);
+        ui.simulate([
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            )),
+        ]);
+        let published = ui
+            .into_messages()
+            .filter(|message| matches!(message, Message::ParametersManagerFilterMenu))
+            .count();
+        assert_eq!(
+            published, 1,
+            "pressing the funnel publishes the toggle once"
+        );
+
+        let all = Panel {
+            filter_menu: true,
+            ..Panel::default()
+        };
+        let mut ui = build(&all);
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-filter-check-All"))
+                .is_ok(),
+            "the entry that is in force carries the tick"
+        );
+        assert!(
+            ui.find(iced::widget::Id::new(
+                "parameters-manager-filter-check-UsedInExpressions"
+            ))
+            .is_err(),
+            "the entry that is not in force carries none"
+        );
+
+        let used = Panel {
+            mode: manager::FilterMode::UsedInExpressions,
+            filter_menu: true,
+            ..Panel::default()
+        };
+        let mut ui = build(&used);
+        assert!(
+            ui.find(iced::widget::Id::new(
+                "parameters-manager-filter-check-UsedInExpressions"
+            ))
+            .is_ok(),
+            "the tick follows the filter that is in force"
+        );
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-filter-check-All"))
+                .is_err(),
+            "and leaves the other entry unmarked"
+        );
     }
 
     #[test]
@@ -521,7 +784,8 @@ mod tests {
         );
         assert_eq!(panel.search, "", "and the search field is empty");
         assert_eq!(
-            manager::displayed(&rows, &panel.filter, &panel.search).len(),
+            manager::displayed(&rows, manager::FilterMode::All, &panel.filter, &panel.search)
+                .len(),
             rows.len(),
             "which lists every row"
         );
@@ -530,7 +794,12 @@ mod tests {
             search: "point".to_owned(),
             ..Panel::default()
         };
-        let shown = manager::displayed(&rows, &filtered.filter, &filtered.search);
+        let shown = manager::displayed(
+            &rows,
+            manager::FilterMode::All,
+            &filtered.filter,
+            &filtered.search,
+        );
         assert_eq!(
             shown
                 .iter()
@@ -547,7 +816,7 @@ mod tests {
             chrome(),
         );
         assert_eq!(
-            manager::footer(rows.len(), shown.len()),
+            manager::footer(manager::FilterMode::All, rows.len(), shown.len()),
             "All: 1 of 3 parameters displayed",
             "which is what the pane's footer prints"
         );
@@ -563,7 +832,7 @@ mod tests {
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
-                None,
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
             ),
         )
         .expect("headless renderer");
@@ -606,7 +875,11 @@ mod tests {
             );
         }
         assert!(
-            locate(&both_empty, &crate::tr!("parameters-manager", "footer", shown = "3", total = "3")).is_some(),
+            locate(
+                &both_empty,
+                &manager::footer(manager::FilterMode::All, 3, 3)
+            )
+            .is_some(),
             "and the footer says so"
         );
 
@@ -629,7 +902,11 @@ mod tests {
             "and a group with no row left has no header either"
         );
         assert!(
-            locate(&angle_only, &crate::tr!("parameters-manager", "footer", shown = "1", total = "3")).is_some(),
+            locate(
+                &angle_only,
+                &manager::footer(manager::FilterMode::All, 3, 1)
+            )
+            .is_some(),
             "the footer counts what is left out of what there is"
         );
     }
@@ -650,6 +927,7 @@ mod tests {
             show: true,
             order: String::new(),
             description: String::new(),
+            description_writable: true,
         });
         let width = PanelId::ParametersManager.default_width();
         let mut ui = iced_test::simulator::Simulator::with_size(
@@ -679,6 +957,50 @@ mod tests {
             ui.find(iced::widget::Id::new("parameters-manager-glyph-Point1"))
                 .is_err(),
             "a row kind that was never read keeps no glyph"
+        );
+    }
+
+    #[test]
+    fn the_description_field_opens_only_on_a_row_that_can_write_one() {
+        // `locate` draws the pane on this definition, so the open cell names it.
+        let definition = document::Handle::new(1);
+        let width = PanelId::ParametersManager.default_width();
+        let open = |name: &str| Panel {
+            editing: Some(Edit {
+                definition,
+                parameter: document::Handle::new(9),
+                component: crate::scene::model::object::BlockParameterComponent::Distance,
+                name: name.to_owned(),
+                cell: Cell::Description,
+            }),
+            edit_buf: "typed note".to_owned(),
+            ..Panel::default()
+        };
+        let mut parameter = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), &open("Angle1"), definition, width, chrome()),
+        );
+        assert!(
+            parameter.find(edit_input_id()).is_ok(),
+            "the description cell of a parameter opens its own field"
+        );
+        assert!(
+            locate(&Panel::default(), "Left edge").is_some(),
+            "a closed description cell prints the stored text"
+        );
+        assert!(
+            locate(&open("Angle1"), "Left edge").is_none(),
+            "and the open field replaces the text it is editing"
+        );
+        let mut attribute = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), &open("TAG1"), definition, width, chrome()),
+        );
+        assert!(
+            attribute.find(edit_input_id()).is_err(),
+            "an attribute row has no parameter text to edit"
         );
     }
 

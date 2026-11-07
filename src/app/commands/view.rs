@@ -527,6 +527,160 @@ impl OpenCADStudio {
                 }
             }
 
+            // ── VPSCALE / VPLOCK — per-viewport plot scale and lock ──────
+            // A layout viewport is the only place a repeatable plot scale can
+            // live, so both commands refuse to run in model space.
+            "VPSCALE" | "-VPSCALE" => {
+                if self.tabs[i].scene.current_layout == "Model" {
+                    self.command_line
+                        .push_error(crate::t!("VPSCALE: switch to a paper layout first.").as_ref());
+                } else {
+                    use crate::command::ValuePromptCommand;
+                    let c = ValuePromptCommand::new(
+                        "VPSCALE",
+                        "VPSCALE  Enter scale (1:50, 0.02 or ? to list) <current>:",
+                    );
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                }
+            }
+            cmd if cmd.starts_with("VPSCALE ") => {
+                let value = cmd
+                    .strip_prefix("VPSCALE")
+                    .map(|rest| rest.trim().to_string())
+                    .unwrap_or_default();
+                let scene = &self.tabs[i].scene;
+                if scene.current_layout == "Model" {
+                    self.command_line
+                        .push_error(crate::t!("VPSCALE: switch to a paper layout first.").as_ref());
+                } else {
+                    let target = scene
+                        .selected
+                        .iter()
+                        .copied()
+                        .find(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(document::EntityType::Viewport(vp)) if vp.id > 1
+                            )
+                        })
+                        .or_else(|| scene.layout_viewport_handles().into_iter().next());
+                    let Some(target) = target else {
+                        self.command_line.push_error(
+                            crate::t!("VPSCALE: no layout viewport to scale.").as_ref(),
+                        );
+                        return Some(Task::none());
+                    };
+                    if value.is_empty() || value == "?" {
+                        let report = describe_viewport_scale(&self.tabs[i].scene, target);
+                        self.command_line.push_output(&report);
+                        return Some(Task::none());
+                    }
+                    // A named scale in the drawing's own list wins; otherwise
+                    // accept a ratio (1:50) or a bare paper/model factor. The
+                    // explicit factor goes through the same path ZOOM nXP uses,
+                    // so a named ratio and a bare factor land identically.
+                    let factor = parse_viewport_scale(&value)
+                        .or_else(|| scene.scale_ratio(&value).map(|(paper, drawing)| paper / drawing));
+                    let applied = factor
+                        .and_then(|factor| {
+                            Some(self.tabs[i]
+                                .scene
+                                .set_viewport_scale_factor_for(target, factor))
+                        })
+                        .unwrap_or(false);
+                    if applied {
+                        self.push_undo_snapshot(i, "VPSCALE");
+                        self.tabs[i].dirty = true;
+                        let report = describe_viewport_scale(&self.tabs[i].scene, target);
+                        self.command_line.push_output(&report);
+                    } else {
+                        self.command_line.push_error(
+                            crate::tf!("VPSCALE: cannot apply '{value}' (locked viewport or unknown scale).")
+                                .as_ref(),
+                        );
+                    }
+                }
+            }
+
+            "VPLOCK" | "-VPLOCK" => {
+                if self.tabs[i].scene.current_layout == "Model" {
+                    self.command_line
+                        .push_error(crate::t!("VPLOCK: switch to a paper layout first.").as_ref());
+                } else {
+                    use crate::command::ValuePromptCommand;
+                    let c = ValuePromptCommand::new(
+                        "VPLOCK",
+                        "VPLOCK  Enter ON/OFF/TOGGLE <toggle>:",
+                    );
+                    self.command_line.push_info(&c.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(c));
+                }
+            }
+            cmd if cmd.starts_with("VPLOCK ") => {
+                let value = cmd
+                    .strip_prefix("VPLOCK")
+                    .map(|rest| rest.trim().to_ascii_uppercase())
+                    .unwrap_or_default();
+                let scene = &self.tabs[i].scene;
+                if scene.current_layout == "Model" {
+                    self.command_line
+                        .push_error(crate::t!("VPLOCK: switch to a paper layout first.").as_ref());
+                } else {
+                    let target = scene
+                        .selected
+                        .iter()
+                        .copied()
+                        .find(|handle| {
+                            matches!(
+                                scene.document.get_entity(*handle),
+                                Some(document::EntityType::Viewport(vp)) if vp.id > 1
+                            )
+                        })
+                        .or_else(|| scene.layout_viewport_handles().into_iter().next());
+                    let Some(target) = target else {
+                        self.command_line.push_error(
+                            crate::t!("VPLOCK: no layout viewport to lock.").as_ref(),
+                        );
+                        return Some(Task::none());
+                    };
+                    let current = matches!(
+                        scene.document.get_entity(target),
+                        Some(document::EntityType::Viewport(vp)) if vp.status.locked
+                    );
+                    let next = match value.as_str() {
+                        "" | "TOGGLE" => Some(!current),
+                        "ON" | "YES" | "1" => Some(true),
+                        "OFF" | "NO" | "0" => Some(false),
+                        "?" => None,
+                        _ => {
+                            self.command_line.push_error(
+                                crate::t!("VPLOCK: expected ON, OFF or TOGGLE.").as_ref(),
+                            );
+                            return Some(Task::none());
+                        }
+                    };
+                    if let Some(next) = next {
+                        self.push_undo_snapshot(i, "VPLOCK");
+                        if let Some(document::EntityType::Viewport(vp)) =
+                            self.tabs[i].scene.document.get_entity_mut(target)
+                        {
+                            vp.status.locked = next;
+                        }
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(&crate::tf!(
+                            "VPLOCK: viewport display {}.",
+                            if next { "locked" } else { "unlocked" }
+                        ));
+                    } else {
+                        self.command_line.push_output(&crate::tf!(
+                            "VPLOCK: viewport is {}.",
+                            if current { "locked" } else { "unlocked" }
+                        ));
+                    }
+                }
+            }
+
             // MVSETUP — sheet border in model space, viewports on a layout.
             "MVSETUP" => {
                 let scene = &mut self.tabs[i].scene;
@@ -1643,6 +1797,50 @@ fn parse_vport_rects(value: &str) -> Vec<(f64, f64, f64, f64)> {    value
             (rect.2 > 0.0 && rect.3 > 0.0).then_some(rect)
         })
         .collect()
+}
+
+/// Parse a `VPSCALE` value into a paper-to-model factor (paper units per
+/// model unit). Accepts named ratios (`1:50`, `2:1`) and bare factors (`0.02`).
+fn parse_viewport_scale(value: &str) -> Option<f64> {
+    let text = value.trim();
+    if text.is_empty() || text.eq_ignore_ascii_case("?") {
+        return None;
+    }
+    if let Some((paper, drawing)) = crate::scene::Scene::parse_scale_name_ratio(text) {
+        if paper > 0.0 && drawing > 0.0 {
+            let factor = paper / drawing;
+            if factor.is_finite() && factor > 0.0 {
+                return Some(factor);
+            }
+        }
+    }
+    let factor = text.parse::<f64>().ok()?;
+    if factor.is_finite() && factor > 0.0 {
+        Some(factor)
+    } else {
+        None
+    }
+}
+
+/// Human-facing report of the scale a viewport is currently displaying at.
+fn describe_viewport_scale(scene: &crate::scene::Scene, handle: document::Handle) -> String {
+    let Some(factor) = scene.viewport_effective_scale(handle) else {
+        return crate::t!("VPSCALE: the viewport is gone.").to_string();
+    };
+    let named = scene
+        .scale_list()
+        .into_iter()
+        .min_by(|a, b| {
+            (a.2 - factor)
+                .abs()
+                .partial_cmp(&(b.2 - factor).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(name, _, _)| name);
+    let at = named
+        .map(|name| format!("{name} ({})", viewport_scale_text(factor)))
+        .unwrap_or_else(|| format!("custom {}", viewport_scale_text(factor)));
+    crate::tf!("VPSCALE: viewport at {at}.").to_string()
 }
 
 // ── Draw Order: interactive command ──────────────────────────

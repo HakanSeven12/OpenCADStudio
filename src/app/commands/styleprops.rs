@@ -1031,6 +1031,7 @@ impl OpenCADStudio {
                     | "LOGFILEON"
                     | "LOGFILEOFF"
                     | "LOGFILEPATH"
+                    | "SAVEFILEPATH"
                     | "DISPSILH"
                     | "WORLDVIEW"
                     | "LIMCHECK"
@@ -1222,6 +1223,10 @@ impl OpenCADStudio {
                     }
                     if name == "LOGFILEPATH" {
                         self.log_file_path_setvar(value.as_deref());
+                        return Some(self.finish_dispatch(cmd));
+                    }
+                    if name == "SAVEFILEPATH" {
+                        self.save_file_path_setvar(value.as_deref());
                         return Some(self.finish_dispatch(cmd));
                     }
                     if name == "OFFSETGAPTYPE" {

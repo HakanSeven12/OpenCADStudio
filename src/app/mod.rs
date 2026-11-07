@@ -59,6 +59,7 @@ pub(crate) mod helpers;
 mod history;
 mod layer_filters;
 pub(crate) mod layer_groups;
+pub(crate) mod layer_import;
 mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
@@ -1254,6 +1255,8 @@ pub(super) struct OpenCADStudio {
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
+    /// SAVEFILEPATH: the folder recovery copies go to; empty for the default.
+    pub save_file_path: String,
     /// SCRIPTCOMMANDS: scripts may run OCS commands (see `UserSettings`).
     pub script_commands: bool,
     /// Persisted default viewport background, restored from settings and applied
@@ -1454,6 +1457,11 @@ pub(super) struct OpenCADStudio {
     filter_dialog: Option<filter_dialog::FilterDialogState>,
     /// LAYERP is putting layers back; that change is not one to return to.
     restoring_layer_previous: bool,
+    /// The Layer manager's import dialog while it is open.
+    layer_import: Option<layer_import::LayerImportState>,
+    /// 'FILTER or 'QSELECT opened inside this command's "Select objects:";
+    /// the dialogs hand their result to it (#2611).
+    transparent_select: Option<String>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -2384,7 +2392,7 @@ impl PendingConversionSave {
     pub(super) fn format_name(&self) -> String {
         let (ext, version) = match self {
             #[cfg(target_arch = "wasm32")]
-            Self::WebSaveAll { .. } => ("ifcx".to_string(), document::DxfVersion::AC1032),
+            Self::WebSaveAll { .. } => ("ifccad".to_string(), document::DxfVersion::AC1032),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Native(save) => (
                 save.path
@@ -3985,6 +3993,10 @@ pub enum Message {
     ParametersManagerEdit(String, crate::ui::window::parameters_manager::Cell),
     ParametersManagerInput(String),
     ParametersManagerFilter(String),
+    /// The funnel menu entry: which rows the list keeps.
+    ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
+    /// Toggles the funnel's two-entry menu.
+    ParametersManagerFilterMenu,
     ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click
@@ -4340,6 +4352,8 @@ pub enum Message {
         crate::ui::window::layers::TreeNode,
         crate::ui::window::layers::TreeAction,
     ),
+    /// Import layers from another drawing.
+    LayerImport(layer_import::LayerImportMsg),
     /// A new layer, frozen in every layout viewport.
     LayerNewVpFrozen,
     /// A layer row's right-click menu: (the row's layer, what to do).
@@ -4797,8 +4811,6 @@ pub enum Message {
     RibbonLayerFilterChanged(String),
     /// Live text of the Layer Manager's search box (#343).
     LayerManagerFilterChanged(String),
-    /// Show only this layer group's layers (`None`: every layer).
-    LayerGroupShow(Option<String>),
     /// A new layer group from the selected layers.
     LayerGroupNew,
     /// Add the selected layers to this group.
@@ -6259,6 +6271,7 @@ impl OpenCADStudio {
             plugin_request_active: false,
             constraint_bar_mode: 4095,
             savetime_min: 10,
+            save_file_path: String::new(),
             script_commands: true,
             default_bg_color: None,
             default_paper_bg_color: None,
@@ -6327,6 +6340,8 @@ impl OpenCADStudio {
             qselect: None,
             filter_dialog: None,
             restoring_layer_previous: false,
+            layer_import: None,
+            transparent_select: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,

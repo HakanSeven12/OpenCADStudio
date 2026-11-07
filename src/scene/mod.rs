@@ -138,7 +138,7 @@ pub(crate) fn tessellate_entity(
     block_cache: Option<&cache::block_cache::BlockCache>,
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
-    paper_space: bool,
+    viewport_lt: Option<f32>,
     reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = convert::tess::tessellate_entity(
@@ -152,7 +152,7 @@ pub(crate) fn tessellate_entity(
         block_cache,
         view_aabb,
         world_per_pixel,
-        paper_space,
+        viewport_lt,
         reference_only,
     );
     if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
@@ -204,7 +204,7 @@ pub(crate) fn tessellate_entity(
                     block_cache,
                     view_aabb,
                     world_per_pixel,
-                    paper_space,
+                    viewport_lt,
                     reference_only,
                 )
             };
@@ -625,6 +625,33 @@ fn drop_stale_text(
                 .is_some_and(|hit| hit.wires().iter().all(|w| w.text_verts.is_empty()))
         });
         cell.set(now);
+    }
+}
+
+/// A complex linetype bakes the viewport's PSLTSCALE factor into its wires, so
+/// a new factor stales the memoized runs the dependency index files under
+/// annotation geometry (complex-linetype users among them), not every entity.
+fn drop_stale_complex_lt(
+    scene: &Scene,
+    memo: &mut HashMap<Handle, MemoRun>,
+    cell: &std::cell::Cell<u64>,
+) {
+    let now = scene.viewport_complex_lt_guard();
+    if cell.get() == now {
+        return;
+    }
+    cell.set(now);
+    if memo.is_empty() {
+        return;
+    }
+    if scene.dependency_index_cache.borrow().is_none() {
+        let index = scene.rebuild_dependency_index();
+        *scene.dependency_index_cache.borrow_mut() = Some(index);
+    }
+    if let Some(index) = scene.dependency_index_cache.borrow().as_ref() {
+        for handle in &index.annotation_geometry.render_handles {
+            memo.remove(handle);
+        }
     }
 }
 
@@ -3207,12 +3234,23 @@ pub struct Scene {
     /// Set while `resident_wires_for` assembles a set that will become the
     /// memo's backing; new runs then go straight into it (`Pending`).
     building_resident_set: std::cell::Cell<bool>,
+    /// The factor on complex linetypes in the viewport whose resident set is
+    /// being read or built. `None` outside one, or where nothing depends on it.
+    viewport_complex_lt: std::cell::Cell<Option<f32>>,
+    /// The factor each viewport's complex linetypes are baked at. It stays put
+    /// while the view moves, so a wheel tick doesn't rebuild the resident set.
+    viewport_complex_lt_baked: RefCell<HashMap<Handle, f32>>,
     /// Annotation, background and viewport signature.
     resident_tess_guard: std::cell::Cell<u64>,
     /// The SDF atlas generation the resident memo's text was built under.
     resident_tess_atlas: std::cell::Cell<u64>,
     /// The same for `tess_memo`.
     tess_memo_atlas: std::cell::Cell<u64>,
+    /// The complex-linetype factor ([`Scene::viewport_complex_lt_guard`]) the
+    /// resident memo's complex-linetype runs were built under.
+    resident_tess_complex_lt: std::cell::Cell<u64>,
+    /// The same for `tess_memo`.
+    tess_memo_complex_lt: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
     /// bump. Bounded ring ([`GEOMETRY_JOURNAL_CAP`]); a derived cache replays the
     /// entries past its last-synced epoch and patches per-handle instead of
@@ -3520,9 +3558,13 @@ impl Scene {
             resident_tess_memo: RefCell::new(HashMap::default()),
             resident_memo_backing: RefCell::new(MemoBacking::default()),
             building_resident_set: std::cell::Cell::new(false),
+            viewport_complex_lt: std::cell::Cell::new(None),
+            viewport_complex_lt_baked: RefCell::new(HashMap::default()),
             resident_tess_guard: std::cell::Cell::new(0),
             resident_tess_atlas: std::cell::Cell::new(0),
             tess_memo_atlas: std::cell::Cell::new(0),
+            resident_tess_complex_lt: std::cell::Cell::new(0),
+            tess_memo_complex_lt: std::cell::Cell::new(0),
             geometry_deltas: RefCell::new(std::collections::VecDeque::new()),
             pending_removed_categories: RefCell::new(HashMap::default()),
             geometry_journal_floor: std::cell::Cell::new(0),
@@ -3656,6 +3698,10 @@ impl Scene {
         }
         key = key.rotate_left(13) ^ all_visible as u64;
         key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
+        // Loading a linetype does not move the block epoch, and a cache built
+        // before the drawing had a complex one kept no path for its children.
+        key = key.rotate_left(13)
+            ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {
@@ -3735,6 +3781,8 @@ impl Scene {
             *self.resident_memo_backing.borrow_mut() = prepared.tess_memo_backing;
             self.resident_tess_guard.set(prepared.tess_guard);
             self.resident_tess_atlas.set(prepared.tess_atlas);
+            // The loader tessellates model space, outside any viewport.
+            self.resident_tess_complex_lt.set(0);
         }
         // Reuse the loader's draw-order map with this scene's epoch.
         if let Some(mut depths) = prepared.draw_depths {
@@ -7915,6 +7963,44 @@ impl Scene {
             .unwrap_or_else(|| "1:1".to_string())
     }
 
+    /// The viewport(s) of the current paper layout, excluding the layout's
+    /// own sheet viewport (id 1). Used by commands that act on a layout
+    /// viewport without the user picking one.
+    pub fn layout_viewport_handles(&self) -> Vec<Handle> {
+        let layout_block = self.current_layout_block_handle();
+        self.document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Viewport(vp) if vp.id > 1 && vp.common.owner_handle == layout_block => {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The effective paper-to-model scale (paper units per model unit) that
+    /// `viewport` is displaying at right now.
+    pub fn viewport_effective_scale(&self, viewport: Handle) -> Option<f64> {
+        let EntityType::Viewport(vp) = self.document.get_entity(viewport)? else {
+            return None;
+        };
+        Some(crate::scene::vp_effective_scale(
+            vp.custom_scale,
+            vp.view_height,
+            vp.height,
+        ))
+    }
+
+    /// Display name of the named scale object driving `viewport`, if any.
+    pub fn viewport_display_scale_name(&self, viewport: Handle) -> Option<String> {
+        let scale_handle = self.viewport_scale_handle(viewport)?;
+        match self.document.objects.get(&scale_handle) {
+            Some(ObjectType::Scale(scale)) => Some(scale.name.clone()),
+            _ => None,
+        }
+    }
+
     pub fn set_viewport_scale_named(&mut self, name: &str) -> Option<Handle> {
         let viewport = self.scale_target_viewport()?;
         self.set_viewport_scale_named_for(viewport, name)
@@ -8503,6 +8589,10 @@ impl Scene {
             .unwrap_or(0));
         mix(all_visible as u64);
         mix(self.viewport_style_key(style_viewport));
+        mix(self
+            .viewport_complex_lt
+            .get()
+            .map_or(u64::MAX, |factor| factor.to_bits() as u64));
         // quantized_wpp removed: GPU analytical rendering for circles/arcs/
         // ellipses makes tessellation zoom-independent, so the resident set is
         // shared across all zoom levels.
@@ -8832,7 +8922,8 @@ impl Scene {
         let avp = style_viewport.or(self.active_viewport);
         let memo_ok = self.resident_tess_guard.get()
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
-            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation();
+            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation()
+            && self.resident_tess_complex_lt.get() == self.viewport_complex_lt_guard();
         for (h, kind) in &deltas {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
@@ -8881,7 +8972,7 @@ impl Scene {
                 Some(&blk),
                 None,
                 None,
-                anno_scale_override.is_some(),
+                self.viewport_lt_for(anno_scale_override),
                 self.reference_only.handles(),
             );
             // Solid B-rep corners snap via the mesh edge list (their wire
@@ -14136,9 +14227,10 @@ impl Scene {
         } else {
             1.0
         };
-        // Content shown inside a paper-space viewport carries a scale override;
-        // only there does PSLTSCALE resize linetypes by the viewport scale.
-        let paper = anno_scale_override.is_some();
+        // Content shown inside a paper-space viewport carries a scale override
+        // or the PSLTSCALE factor; only there do complex linetypes ignore the
+        // annotation scale.
+        let paper = self.viewport_lt_for(anno_scale_override);
         let t_blk = perf.then(iced::time::Instant::now);
         let blk_cache =
             self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
@@ -14187,11 +14279,25 @@ impl Scene {
                 all_visible,
                 bg,
                 avp,
-            ) ^ if self.constraint_shading_active() { 0xC057_A705_0000_0001 } else { 0 };
-            let (memo_cell, guard_cell, atlas_cell) = if resident {
-                (&self.resident_tess_memo, &self.resident_tess_guard, &self.resident_tess_atlas)
+            ) ^ if self.constraint_shading_active() {
+                0xC057_A705_0000_0001
             } else {
-                (&self.tess_memo, &self.tess_memo_guard, &self.tess_memo_atlas)
+                0
+            };
+            let (memo_cell, guard_cell, atlas_cell, complex_lt_cell) = if resident {
+                (
+                    &self.resident_tess_memo,
+                    &self.resident_tess_guard,
+                    &self.resident_tess_atlas,
+                    &self.resident_tess_complex_lt,
+                )
+            } else {
+                (
+                    &self.tess_memo,
+                    &self.tess_memo_guard,
+                    &self.tess_memo_atlas,
+                    &self.tess_memo_complex_lt,
+                )
             };
             guard_dbg = guard;
             guard_was_stale = guard_cell.get() != guard;
@@ -14200,6 +14306,7 @@ impl Scene {
                 guard_cell.set(guard);
             }
             drop_stale_text(self, &mut memo_cell.borrow_mut(), atlas_cell);
+            drop_stale_complex_lt(self, &mut memo_cell.borrow_mut(), complex_lt_cell);
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
             let t_classify = perf.then(iced::time::Instant::now);
             let mut hit_arcs: Vec<MemoHit> = Vec::new();
@@ -14804,6 +14911,7 @@ vis_index={:.1} visible_probe={:.1}",
         index.signatures.reserve(self.document.entity_count());
         let mut normalized_layers: HashMap<&str, String> = HashMap::default();
         let mut complex_linetypes: HashMap<&str, bool> = HashMap::default();
+        let defines_complex = crate::io::linetypes::defines_complex_lt(&self.document);
         for entity in self.document.entities() {
             let common = entity.common();
             let owner = if common.owner_handle.is_null() {
@@ -14854,11 +14962,42 @@ vis_index={:.1} visible_probe={:.1}",
             }
             // A complex linetype bakes the annotation scale into its wires, so
             // changing the scale has to re-tessellate it like annotative content.
+            let mut is_complex = |name| {
+                *complex_linetypes.entry(name).or_insert_with(|| {
+                    crate::io::linetypes::resolve_complex_lt(&self.document, name).is_some()
+                })
+            };
             let lt_name = view::render::linetype_name_for_viewport(&self.document, entity, None);
-            let complex_linetype = *complex_linetypes.entry(lt_name).or_insert_with(|| {
-                crate::io::linetypes::resolve_complex_lt(&self.document, lt_name).is_some()
-            });
+            let complex_linetype = is_complex(lt_name);
+            // An MLINE draws its elements' linetypes, read off its style; a style
+            // without elements draws two ByLayer lines.
+            let complex_mline = defines_complex
+                && match entity {
+                    EntityType::MLine(mline) => {
+                        let layer = mline.common.layer.as_str();
+                        match crate::entities::mline::resolved_mline_style(mline, &self.document)
+                            .filter(|style| !style.elements.is_empty())
+                        {
+                            Some(style) => style.elements.iter().any(|element| {
+                                is_complex(crate::entities::mline::element_linetype_name(
+                                    &self.document,
+                                    layer,
+                                    &element.linetype,
+                                    None,
+                                ))
+                            }),
+                            None => is_complex(crate::entities::mline::element_linetype_name(
+                                &self.document,
+                                layer,
+                                "ByLayer",
+                                None,
+                            )),
+                        }
+                    }
+                    _ => false,
+                };
             if complex_linetype
+                || complex_mline
                 || matches!(entity, EntityType::Hatch(_))
                 || crate::scene::annotative::is_annotative(&self.document, entity)
             {
@@ -15404,7 +15543,7 @@ vis_index={:.1} visible_probe={:.1}",
             Some(&blk_cache),
             None,
             None,
-            paper,
+            paper.then_some(1.0),
             self.reference_only.handles(),
         );
         // Same solid-corner snaps as the resident paths, so one-off consumers

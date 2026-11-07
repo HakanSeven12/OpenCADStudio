@@ -4,6 +4,7 @@
 //! for DOM `dragover`/`drop` events, reads each dropped drawing's bytes, and
 //! queues them for the 50 ms control poll to open through the web-picker flow.
 
+use ocs_save::is_drawing_name;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -262,21 +263,6 @@ pub fn install() {
         INSTALLED.store(false, Ordering::SeqCst);
     }
 }
-
-fn is_drawing_name(name: &str) -> bool {
-    // Same convention as the worker's reader dispatch (`rsplit('.').next()`):
-    // a dot-less name is its own extension, so a file literally named
-    // "DWG"/"dxf" parses and must not be filtered out here.
-    matches!(
-        name.rsplit('.')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "dwg" | "dxf"
-    )
-}
-
 /// The decodable raster set matches the IMAGE picker's filter (and the `image`
 /// crate features the app builds with: png/jpeg/bmp/tiff/webp/gif) — anything
 /// else would queue bytes that can only ever fail to decode.

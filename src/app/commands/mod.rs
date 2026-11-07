@@ -168,17 +168,6 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
-        if cmd.eq_ignore_ascii_case("BLOOKUPTABLE")
-            && self.block_editor_preferences.action_bars
-            && self.tabs[self.active_tab]
-                .active_block_edit_session()
-                .is_some()
-        {
-            // The palette's Lookup tool is the action bar's own affordance, so
-            // the refusal meant for the typed verb would silence it: open the
-            // table editor instead.
-            return self.open_lookup_table("");
-        }
         if !cmd.contains(';') {
             return self.dispatch_command(cmd);
         }
@@ -509,6 +498,11 @@ impl OpenCADStudio {
         // (#677) A quoted navigation command does the same; an interactive
         // one (ZOOM Window) parks the running command and resumes it when the
         // zoom ends, as does a ZOOM the zoom prompt itself hands off to.
+        // 'FILTER and 'QSELECT work for the command asking for objects; they
+        // park it and hand it what they find (#2611).
+        if quoted && matches!(cmd, "FILTER" | "QSELECT") {
+            return Some(self.start_transparent_select(i, cmd));
+        }
         let transparent = is_transparent(cmd)
             || (cmd == "PARAMETERS" && self.tabs[i].active_block_edit_session().is_some())
             || (quoted && is_transparent_capable(cmd))
@@ -880,6 +874,9 @@ pub fn is_transparent(cmd: &str) -> bool {
                 | "BPARAMETERS"
                 | "BPARAMETERSCLOSE"
                 | "PARAMETERSCLOSE"
+                | "TOOLPALETTES"
+                | "TOOLPALETTESCLOSE"
+                | "TP"
         )
 }
 
@@ -970,6 +967,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "DSETTINGS",
         "PARAMETERS",
         "PARAMETERSCLOSE",
+        "TOOLPALETTES",
+        "TOOLPALETTESCLOSE",
         "BTABLE",
         "GRID",
         "GRAPHICATTRIBUTES",
@@ -1181,6 +1180,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "LOGFILEON",
         "LOGFILEOFF",
         "LOGFILEPATH",
+        "SAVEFILEPATH",
         // Plot preferences and the current-layout variables (commands/plotvars.rs).
         "PLOTOFFSET",
         "PAPERUPDATE",
@@ -1470,6 +1470,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELSIM",
         // Draw a new object of the same type as the selected one. (#239)
         "ADDSELECTED",
+        // Explode a block reference and keep its attribute values as text.
+        "BURST",
         // Outline of origin planes, open sketch and solid bodies.
         "BROWSER",
         // Open and close a sketch: a drawing plane, a square-on view and
@@ -1500,6 +1502,7 @@ inventory::submit!(crate::command::CommandRegistration {
         "BPARAMETERS",
         "BPARAMETERSCLOSE",
         "TOOLPALETTES",
+        "TOOLPALETTESCLOSE",
         "TP",
         "TS",
         "U",

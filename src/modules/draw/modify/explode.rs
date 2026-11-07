@@ -1,7 +1,11 @@
-// Explode tool — ribbon definition + command implementation.
+// Explode tools — ribbon definition + command implementation.
 //
 // Command:  EXPLODE (X)
 //   EXPLODE: Breaks compound objects into their constituent simple entities.
+//
+// Command:  BURST
+//   BURST: EXPLODE for a block reference, but its attribute values stay as
+//   text instead of disappearing with the reference.
 //
 //   Supported:
 //     LwPolyline  → Lines (straight segments) + Arcs (bulge segments)
@@ -21,8 +25,8 @@ use super::geom::normalize_angle as norm_angle;
 
 use document::entities::EntityCommon;
 use document::entities::{
-    Arc as ArcEnt, Block, BlockEnd, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline,
-    MLine,
+    Arc as ArcEnt, AttributeDefinition, AttributeEntity, Block, BlockEnd, Circle as CircleEnt,
+    Dimension, Line as LineEnt, LwPolyline, MLine, Text,
 };
 use document::entities::{Polyline, Polyline2D};
 use document::tables::BlockRecord;
@@ -186,6 +190,196 @@ pub fn plan_explode_in_context(
         .collect()
 }
 
+/// Plan BURST: EXPLODE the selection, but a block reference's attribute
+/// values become text instead of disappearing with the reference.
+pub fn plan_burst(
+    selected: &[(Handle, &EntityType)],
+    doc: &Document,
+) -> Vec<(Handle, Vec<EntityType>)> {
+    selected
+        .iter()
+        .filter_map(|(handle, entity)| {
+            let pieces = explode_entity(entity, doc);
+            if pieces.is_empty() {
+                return None;
+            }
+            let pieces = match entity {
+                EntityType::Insert(insert) => burst_block_attributes(insert, pieces),
+                _ => pieces,
+            };
+            Some((*handle, pieces))
+        })
+        .collect()
+}
+
+/// Replace a block reference's attribute definitions and values with text.
+fn burst_block_attributes(
+    insert: &document::entities::Insert,
+    pieces: Vec<EntityType>,
+) -> Vec<EntityType> {
+    let mut out: Vec<EntityType> = pieces
+        .into_iter()
+        .filter_map(|piece| match piece {
+            // A constant definition draws its own value, so it becomes text.
+            // A variable definition is drawn by the reference's attribute
+            // instances below, not by its (unused) default value.
+            EntityType::AttributeDefinition(definition) if definition.flags.constant => {
+                attribute_definition_as_text(insert, &definition)
+            }
+            EntityType::AttributeDefinition(_) => None,
+            other => Some(other),
+        })
+        .collect();
+    out.extend(
+        insert
+            .attributes
+            .iter()
+            .map(|attribute| attribute_as_text(insert, attribute)),
+    );
+    out
+}
+
+/// A detached text holding one attribute value. A multi-line attribute keeps
+/// its embedded MTEXT payload so every line survives.
+fn attribute_as_text(
+    insert: &document::entities::Insert,
+    attribute: &AttributeEntity,
+) -> EntityType {
+    if attribute.is_multiline {
+        if let Some(mtext) = &attribute.embedded_mtext {
+            let mut text = (**mtext).clone();
+            text.common = attribute.common.clone();
+            finish_attribute_common(insert, &mut text.common);
+            return EntityType::MText(Box::new(text));
+        }
+    }
+    let mut text = Text::new();
+    text.common = attribute.common.clone();
+    finish_attribute_common(insert, &mut text.common);
+    text.value = attribute.value.clone();
+    text.insertion_point = attribute.insertion_point;
+    text.alignment_point = justified_alignment(
+        attribute.horizontal_alignment,
+        attribute.vertical_alignment,
+        attribute.alignment_point,
+    );
+    text.height = attribute.height;
+    text.rotation = attribute.rotation;
+    text.width_factor = attribute.width_factor;
+    text.oblique_angle = attribute.oblique_angle;
+    text.style = attribute.text_style.clone();
+    text.horizontal_alignment = text_horizontal_alignment(attribute.horizontal_alignment);
+    text.vertical_alignment = text_vertical_alignment(attribute.vertical_alignment);
+    text.normal = attribute.normal;
+    text.generation_flags = attribute.text_generation_flags;
+    EntityType::Text(text)
+}
+
+/// A constant attribute definition's default value as text. The definition
+/// piece has already been moved into the reference's plane by EXPLODE.
+fn attribute_definition_as_text(
+    insert: &document::entities::Insert,
+    definition: &AttributeDefinition,
+) -> Option<EntityType> {
+    if definition.is_multiline {
+        if let Some(mtext) = &definition.embedded_mtext {
+            let mut text = (**mtext).clone();
+            text.common = definition.common.clone();
+            finish_attribute_common(insert, &mut text.common);
+            return Some(EntityType::MText(Box::new(text)));
+        }
+    }
+    let mut text = Text::new();
+    text.common = definition.common.clone();
+    finish_attribute_common(insert, &mut text.common);
+    text.value = definition.default_value.clone();
+    text.insertion_point = definition.insertion_point;
+    text.alignment_point = justified_alignment(
+        definition.horizontal_alignment,
+        definition.vertical_alignment,
+        definition.alignment_point,
+    );
+    text.height = definition.height;
+    text.rotation = definition.rotation;
+    text.width_factor = definition.width_factor;
+    text.oblique_angle = definition.oblique_angle;
+    text.style = definition.text_style.clone();
+    text.horizontal_alignment = text_horizontal_alignment(definition.horizontal_alignment);
+    text.vertical_alignment = text_vertical_alignment(definition.vertical_alignment);
+    text.normal = definition.normal;
+    text.generation_flags = definition.text_generation_flags;
+    Some(EntityType::Text(text))
+}
+
+/// The block reference owns the attribute, so its layer/colour inheritance has
+/// to be resolved before the text stands on its own.
+fn finish_attribute_common(
+    insert: &document::entities::Insert,
+    common: &mut EntityCommon,
+) {
+    if common.layer == "0" {
+        common.layer = insert.common.layer.clone();
+        common.layer_handle = insert.common.layer_handle;
+    }
+    if common.color == document::types::Color::ByBlock {
+        common.color = insert.common.color;
+        common.color_name = insert.common.color_name.clone();
+        common.color_book_handle = insert.common.color_book_handle;
+    }
+    if common.line_weight == document::types::LineWeight::ByBlock {
+        common.line_weight = insert.common.line_weight;
+    }
+    if common.transparency.is_by_block() {
+        common.transparency = insert.common.transparency;
+    }
+    if common.linetype.eq_ignore_ascii_case("byblock") {
+        common.linetype = insert.common.linetype.clone();
+        common.linetype_handle = insert.common.linetype_handle;
+    }
+    common.handle = Handle::NULL;
+    common.owner_handle = Handle::NULL;
+    common.xdictionary_handle = None;
+    common.reactors.clear();
+}
+
+fn justified_alignment(
+    horizontal: document::entities::attribute_definition::HorizontalAlignment,
+    vertical: document::entities::attribute_definition::VerticalAlignment,
+    point: Vector3,
+) -> Option<Vector3> {
+    use document::entities::attribute_definition::{HorizontalAlignment, VerticalAlignment};
+    (horizontal != HorizontalAlignment::Left || vertical != VerticalAlignment::Baseline)
+        .then_some(point)
+}
+
+fn text_horizontal_alignment(
+    alignment: document::entities::attribute_definition::HorizontalAlignment,
+) -> document::entities::TextHorizontalAlignment {
+    use document::entities::attribute_definition::HorizontalAlignment as A;
+    use document::entities::TextHorizontalAlignment as T;
+    match alignment {
+        A::Left => T::Left,
+        A::Center => T::Center,
+        A::Right => T::Right,
+        A::Aligned => T::Aligned,
+        A::Middle => T::Middle,
+        A::Fit => T::Fit,
+    }
+}
+
+fn text_vertical_alignment(
+    alignment: document::entities::attribute_definition::VerticalAlignment,
+) -> document::entities::TextVerticalAlignment {
+    use document::entities::attribute_definition::VerticalAlignment as A;
+    use document::entities::TextVerticalAlignment as T;
+    match alignment {
+        A::Baseline => T::Baseline,
+        A::Bottom => T::Bottom,
+        A::Middle => T::Middle,
+        A::Top => T::Top,
+    }
+}
+
 /// Apply precomputed EXPLODE replacements, erasing only sources with pieces.
 /// Linked annotations or leaders without their own replacements stay intact.
 /// Returns the number of exploded sources.
@@ -283,6 +477,7 @@ fn explode_multileader(
             None,
             None,
             [0.0; 4],
+            1.0,
         )
     };
     let models = tessellate(&geometry);
@@ -799,28 +994,12 @@ fn bulge_to_arc(
 /// `mline_lines` the renderer uses, so they keep the style's elements and
 /// offsets, the justification, MLEDIT breaks, joints and end caps (#2538).
 fn explode_mline(ml: &MLine, doc: &Document) -> Vec<EntityType> {
-    use document::types::Color;
-
     let mut result = Vec::new();
     for element in crate::entities::mline::mline_lines(ml, doc) {
-        let mut common = ml.common.clone();
-        common.handle = Handle::NULL;
-        // ByLayer / ByBlock elements show in the multiline's own colour and
-        // linetype; an explicit element value carries over to its lines.
-        if !matches!(element.color, Color::ByLayer | Color::ByBlock) {
-            common.color = element.color;
-            common.color_name = None;
-            common.color_book_handle = None;
-        }
-        let linetype = element.linetype.as_str();
-        if !linetype.eq_ignore_ascii_case("ByLayer") && !linetype.eq_ignore_ascii_case("ByBlock") {
-            common.linetype = element.linetype.clone();
-            common.linetype_handle = doc
-                .line_types
-                .iter()
-                .find(|line_type| line_type.name.eq_ignore_ascii_case(linetype))
-                .map(|line_type| line_type.handle);
-        }
+        // Each line takes its element's colour and linetype as they are,
+        // ByLayer and ByBlock included: the multiline's own are not part of it.
+        let common =
+            crate::entities::mline::element_common(ml, element.color, &element.linetype, doc);
         // A NaN point separates the drawn runs of one element (MLEDIT cuts).
         for pair in element.points.windows(2) {
             let (a, b) = (pair[0], pair[1]);
@@ -2463,7 +2642,8 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut Document) -> Vec<Han
     pending
 }
 
-/// Remove `*D` pictures no dimension or insert names any more: a rotated
+/// Remove `*D` pictures no dimension, insert or scale representation refers to
+/// any more: a rotated
 /// or mirrored dimension detaches its old one (kept in the open drawing so an
 /// undo can point back to it), which a saved file should not carry.
 fn drop_detached_dimension_blocks(doc: &mut Document) {
@@ -2481,14 +2661,29 @@ fn drop_detached_dimension_blocks(doc: &mut Document) {
             _ => None,
         })
         .collect();
+    // An annotative dimension draws each scale representation from a block of
+    // its own, which only the representation refers to.
+    let represented: std::collections::HashSet<Handle> = doc
+        .objects
+        .values()
+        .filter_map(|object| match object {
+            document::objects::ObjectType::ObjectContextData(leaf) => match &leaf.kind {
+                document::objects::ObjectContextKind::Dim(context) => Some(context.block),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
     let detached: Vec<String> = doc
         .block_records
         .iter()
-        .map(|record| record.name.clone())
-        .filter(|name| {
-            let upper = name.to_ascii_uppercase();
-            upper.starts_with("*D") && !named.contains(&upper)
+        .filter(|record| {
+            let upper = record.name.to_ascii_uppercase();
+            upper.starts_with("*D")
+                && !named.contains(&upper)
+                && !represented.contains(&record.handle)
         })
+        .map(|record| record.name.clone())
         .collect();
     for name in detached {
         if let Some(record) = doc.block_records.remove(&name) {
@@ -2859,6 +3054,81 @@ mod tests {
             before,
             "a dimension that already owns a block must not be re-baked"
         );
+    }
+
+    /// A dimension with a scale representation drawn by a block nothing else
+    /// names, as a second annotation scale of a saved drawing has.
+    fn dimension_with_represented_block(doc: &mut Document) -> Handle {
+        let mut d = DimensionLinear::new(Vector3::new(0.0, 0.0, 0.0), Vector3::new(10.0, 0.0, 0.0));
+        d.definition_point = Vector3::new(0.0, 5.0, 0.0);
+        d.base.text_middle_point = Vector3::new(5.0, 5.0, 0.0);
+        let handle = doc
+            .add_entity(EntityType::Dimension(Box::new(Dimension::Linear(d))))
+            .unwrap();
+        bake_dimension_blocks(doc);
+
+        let block = doc.allocate_handle();
+        let mut record = document::tables::BlockRecord::new("*D2");
+        record.handle = block;
+        doc.block_records.add(record).unwrap();
+
+        let scale = doc.allocate_handle();
+        let mut scale_object = document::objects::Scale::new("1:100", 1.0, 100.0);
+        scale_object.handle = scale;
+        doc.objects
+            .insert(scale, document::objects::ObjectType::Scale(scale_object));
+        assert!(crate::scene::annotative::create_annotation_context(
+            doc, handle, scale
+        ));
+        for object in doc.objects.values_mut() {
+            if let document::objects::ObjectType::ObjectContextData(leaf) = object {
+                if let document::objects::ObjectContextKind::Dim(context) = &mut leaf.kind {
+                    if leaf.scale == scale {
+                        context.block = block;
+                    }
+                }
+            }
+        }
+        handle
+    }
+
+    #[test]
+    fn baking_keeps_the_block_of_a_scale_representation() {
+        let mut doc = Document::new();
+        dimension_with_represented_block(&mut doc);
+        bake_dimension_blocks(&mut doc);
+        assert!(doc.block_records.get("*D2").is_some());
+    }
+
+    #[test]
+    fn a_saved_scale_representation_names_its_block() {
+        let mut doc = Document::new();
+        dimension_with_represented_block(&mut doc);
+        let bytes = crate::io::save_to_bytes(&doc, "dxf", doc.version).unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        let lines: Vec<&str> = text.lines().map(str::trim).collect();
+        let names: Vec<&str> = (1..lines.len())
+            .filter(|&at| lines[at].ends_with("OBJECTCONTEXTDATA_CLASS") && lines[at - 1] == "0")
+            .filter_map(|start| {
+                (start + 1..lines.len() - 1)
+                    .step_by(2)
+                    .take_while(|&code| lines[code] != "0")
+                    .find(|&code| lines[code] == "2")
+                    .map(|code| lines[code + 1])
+            })
+            .collect();
+        assert!(names.contains(&"*D2"), "{names:?}");
+    }
+
+    #[test]
+    fn baking_still_drops_a_dimension_block_nothing_refers_to() {
+        let mut doc = Document::new();
+        dimension_with_represented_block(&mut doc);
+        let mut record = document::tables::BlockRecord::new("*D3");
+        record.handle = doc.allocate_handle();
+        doc.block_records.add(record).unwrap();
+        bake_dimension_blocks(&mut doc);
+        assert!(doc.block_records.get("*D3").is_none());
     }
 
     #[test]
@@ -4075,9 +4345,58 @@ mod mline_tests {
         assert_eq!(
             styles,
             vec![
-                (Color::from_index(3), "ByLayer".to_string()),
+                (Color::ByLayer, "ByLayer".to_string()),
                 (Color::from_index(1), "DASHED".to_string()),
             ]
+        );
+    }
+
+    /// One element of `color` and `linetype`, exploded from a multiline with a
+    /// colour and a linetype of its own.
+    fn exploded_element_style(color: Color, linetype: &str, own_linetype: &str) -> (Color, String) {
+        let mut doc = Document::new();
+        let mut style = MLineStyle::new("ONE");
+        let mut element = MLineStyleElement::new(0.0);
+        element.color = color;
+        element.linetype = linetype.into();
+        style.add_element(element);
+        let mut mline = mline_in(
+            &mut doc,
+            style,
+            &[(0.0, 0.0), (10.0, 0.0)],
+            MLineJustification::Zero,
+        );
+        mline.common.color = Color::from_index(5);
+        mline.common.linetype = own_linetype.into();
+        let out = explode_entity(&EntityType::MLine(mline), &doc);
+        assert_eq!(out.len(), 1, "{out:?}");
+        let common = out[0].common();
+        (common.color, common.linetype.clone())
+    }
+
+    #[test]
+    fn exploding_a_mline_drops_its_own_style_for_a_bylayer_element() {
+        assert_eq!(
+            exploded_element_style(Color::ByLayer, "BYLAYER", "LT_L"),
+            (Color::ByLayer, "ByLayer".to_string())
+        );
+    }
+
+    #[test]
+    fn exploding_a_mline_keeps_a_byblock_element_byblock() {
+        for own_linetype in ["LT_L", "ByLayer"] {
+            assert_eq!(
+                exploded_element_style(Color::ByBlock, "BYBLOCK", own_linetype),
+                (Color::ByBlock, "ByBlock".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn exploding_a_mline_keeps_a_named_element_linetype() {
+        assert_eq!(
+            exploded_element_style(Color::from_index(1), "DASHED", "LT_L"),
+            (Color::from_index(1), "DASHED".to_string())
         );
     }
 }

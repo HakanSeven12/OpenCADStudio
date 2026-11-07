@@ -868,6 +868,7 @@ impl OpenCADStudio {
             group_display_mode: crate::app::commands::group_display_mode(),
             log_file_mode: crate::app::commands::log_file_mode(),
             log_file_path: crate::app::commands::log_file_folder_setting(),
+            save_file_path: self.save_file_path.clone(),
             offset_gap_type: crate::modules::draw::modify::offset::gap_type(),
             trim_extend_quick: crate::modules::draw::modify::trim::quick_mode(),
             match_mode: crate::entities::match_props::match_mode(),
@@ -1075,8 +1076,12 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::app::commands::set_group_display_mode(s.group_display_mode);
-        crate::app::commands::set_log_file_folder(&s.log_file_path);
-        crate::app::commands::set_log_file_mode(s.log_file_mode);
+        // The log's folder and mode are process-wide, and every test that builds
+        // an app comes through here beside the one test that turns the log on.
+        if !cfg!(test) {
+            crate::app::commands::set_log_file_folder(&s.log_file_path);
+            crate::app::commands::set_log_file_mode(s.log_file_mode);
+        }
         crate::modules::draw::modify::offset::set_gap_type(s.offset_gap_type);
         crate::modules::draw::modify::trim::set_quick_mode(s.trim_extend_quick);
         crate::entities::match_props::set_match_mode(s.match_mode);
@@ -1174,6 +1179,7 @@ impl OpenCADStudio {
         self.constraint_bar_display = s.constraint_bar_display.clamp(0, 3);
         self.constraint_bar_mode = s.constraint_bar_mode.clamp(0, 4095);
         self.savetime_min = s.savetime_min;
+        self.save_file_path = s.save_file_path.clone();
         self.script_commands = s.script_commands;
         self.default_save_format =
             crate::io::canonical_save_format(&s.default_save_format).to_string();
@@ -4731,7 +4737,7 @@ impl OpenCADStudio {
 
     fn needs_ifccad_alpha_consent(&self, i: usize, ext: &str) -> bool {
         (cfg!(target_arch = "wasm32") || self.main_window.is_some())
-            && ext.eq_ignore_ascii_case("ifcx")
+            && (ext.eq_ignore_ascii_case("ifccad") || ext.eq_ignore_ascii_case("ifcx"))
             && !self.tabs[i].ifccad_alpha_acknowledged
     }
 
@@ -4833,14 +4839,19 @@ impl OpenCADStudio {
     /// says where it is.
     #[cfg(not(target_arch = "wasm32"))]
     fn notice_newer_autosave(&mut self, i: usize, path: &std::path::Path) {
-        let copy = self.autosave_target(i);
         let modified = |p: &std::path::Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-        if !modified(&copy)
-            .zip(modified(path))
-            .is_some_and(|(copy_time, file_time)| copy_time > file_time)
-        {
+        // Earlier versions kept the copy beside the drawing.
+        let beside = path.with_file_name(format!(
+            "{}.ocs-autosave.sv$",
+            path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()
+        ));
+        let Some(copy) = [self.autosave_target(i), beside].into_iter().find(|copy| {
+            modified(copy)
+                .zip(modified(path))
+                .is_some_and(|(copy_time, file_time)| copy_time > file_time)
+        }) else {
             return;
-        }
+        };
         let name = copy.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kept = copy.with_file_name(name.replace(".ocs-autosave.sv$", ".ocs-recovered.sv$"));
         let file = if kept != copy && std::fs::rename(&copy, &kept).is_ok() { kept } else { copy };
@@ -4851,16 +4862,38 @@ impl OpenCADStudio {
         ));
     }
 
-    /// Where the autosave recovery copy for tab `i` lives.
+    /// SAVEFILEPATH: the folder recovery copies go to, `autosave` in the
+    /// settings folder unless one was set.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(in crate::app) fn save_file_folder(&self) -> std::path::PathBuf {
+        let set = self.save_file_path.trim();
+        if !set.is_empty() {
+            return std::path::PathBuf::from(set);
+        }
+        crate::config::config_dir()
+            .map(|dir| dir.join("autosave"))
+            .unwrap_or_else(std::env::temp_dir)
+    }
+
+    /// Where the autosave recovery copy for tab `i` lives: in the
+    /// SAVEFILEPATH folder, named after the drawing and its full path so two
+    /// drawings of one name in different folders keep their own copy.
     #[cfg(not(target_arch = "wasm32"))]
     pub(in crate::app) fn autosave_target(&self, i: usize) -> std::path::PathBuf {
+        let folder = self.save_file_folder();
+        let _ = std::fs::create_dir_all(&folder);
         match &self.tabs[i].current_path {
             Some(p) => {
                 let name = p
                     .file_name()
                     .map(|value| value.to_string_lossy().into_owned())
                     .unwrap_or_else(|| "drawing".to_string());
-                p.with_file_name(format!("{name}.ocs-autosave.sv$"))
+                // FNV-1a: the same name in every build, so a copy from before
+                // a crash is found after an update.
+                let hash = p.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| {
+                    (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+                });
+                folder.join(format!("{name}.{:08x}.ocs-autosave.sv$", hash as u32))
             }
             None => {
                 let safe: String = self.tabs[i]
@@ -4868,7 +4901,7 @@ impl OpenCADStudio {
                     .chars()
                     .map(|c| if c.is_alphanumeric() { c } else { '_' })
                     .collect();
-                std::env::temp_dir().join(format!("OpenCADStudio_{safe}_{}.sv$", self.tabs[i].id))
+                folder.join(format!("OpenCADStudio_{safe}_{}.sv$", self.tabs[i].id))
             }
         }
     }

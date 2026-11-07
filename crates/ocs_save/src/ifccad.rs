@@ -1,10 +1,32 @@
-//! Context for a failed production IFCX read. This inspection never accepts a file.
+//! IFCCAD filename aliases and context for failed production IFCX reads.
+//! Diagnostic inspection never accepts a file.
 
 use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
-use document::{Document, Format};
+use document::{Document, Error, Format, Loss};
 use serde_json::Value;
+
+/// Application filenames; the underlying IFCX codec and file contents stay unchanged.
+pub(super) struct IfccadFormat;
+
+impl Format for IfccadFormat {
+    fn name(&self) -> &str {
+        document::Ifcx.name()
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["ifccad", "ifcx"]
+    }
+
+    fn read(&self, bytes: &[u8]) -> Result<(Document, Vec<Loss>), Error> {
+        document::Ifcx.read(bytes)
+    }
+
+    fn write(&self, document: &Document) -> Result<(Vec<u8>, Vec<Loss>), Error> {
+        document::Ifcx.write(document)
+    }
+}
 
 // Ask the pinned writer for its profile instead of maintaining a second version constant.
 static SUPPORTED_PROFILE: LazyLock<Option<String>> = LazyLock::new(|| {
@@ -43,7 +65,7 @@ pub(super) fn read_error(bytes: &[u8], detail: &str) -> String {
         let drawings = drawing_values(&value)?;
         if drawings.is_empty() {
             return Some(
-                "This file does not contain an IFCCAD drawing that Open CAD Studio can open. OCS currently supports IFCX files containing CAD drawing data in the experimental IFCCAD profile. Opening BIM models or generating drawings from BIM geometry is not yet supported. To try this feature, save a supported drawing as IFCCAD (.ifcx) and reopen it with the same OCS version."
+                "This file does not contain an IFCCAD drawing that Open CAD Studio can open. OCS currently supports IFCX files containing CAD drawing data in the experimental IFCCAD profile. Opening BIM models or generating drawings from BIM geometry is not yet supported. To try this feature, save a supported drawing as IFCCAD (.ifccad) and reopen it with the same OCS version."
                     .to_string(),
             );
         }

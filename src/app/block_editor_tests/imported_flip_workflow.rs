@@ -38,15 +38,15 @@ fn imported_coupled_flip_reference_workflow() {
             let def = actions::instance::definition(&doc, reference.common.handle)?;
             (actions::all_parameters(&doc, def)
                 .iter()
-                .filter(|p| p.flip)
+                .filter(|p| p.flip && actions::has_action(&doc, def, p.handle))
                 .count()
                 >= 2)
                 .then_some((reference.common.handle, def))
         })
-        .expect("fixture must contain a reference with at least two Flip parameters");
+        .expect("fixture must contain a reference with at least two actionable Flip parameters");
     let flips: Vec<_> = actions::all_parameters(&doc, def)
         .into_iter()
-        .filter(|p| p.flip)
+        .filter(|p| p.flip && actions::has_action(&doc, def, p.handle))
         .collect();
     for mask in 1..4 {
         for reverse in [false, true] {
@@ -89,6 +89,15 @@ fn imported_coupled_flip_reference_workflow() {
                     actions::instance::value(&app.tabs[i].scene.document, insert, p).unwrap(),
                     actions::Value::Flip(true)
                 );
+                let current = &app.tabs[i].scene.document;
+                let EntityType::Insert(reference) = current.get_entity(insert).unwrap() else {
+                    panic!()
+                };
+                let record = current.block_records.get(&reference.block_name).unwrap();
+                let Some(EntityType::Block(marker)) = current.get_entity(record.block_entity_handle) else {
+                    panic!("The evaluated block must retain its BLOCK marker");
+                };
+                assert_eq!(marker.base_point, record.base_point);
                 select(&mut app);
                 let reversed = app.tabs[i]
                     .selected_grips

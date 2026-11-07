@@ -495,6 +495,81 @@ impl BlockCache {
         )
     }
 
+    /// This cache with the definitions named in `changed` rebuilt from `doc`
+    /// and the rest shared, for an edit that can only change those (a layer
+    /// switched on or off). The metrics of every definition that nests a
+    /// rebuilt one are worked out again.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_rebuilt_blocks(
+        &self,
+        doc: &Document,
+        changed: &HashSet<String>,
+        anno_scale: f32,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        bg_color: [f32; 4],
+        viewport: Option<Handle>,
+        depth_map: &HashMap<u64, [f32; 2]>,
+        solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
+    ) -> Self {
+        use crate::par::prelude::*;
+        let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
+        let mut cache = Self::new();
+        cache.complex_possible = self.complex_possible;
+        cache.viewport = self.viewport;
+        cache.prototype_blocks = self.prototype_blocks.clone();
+        cache.defns = self.defns.clone();
+        let rebuilt: Vec<String> = cache
+            .defns
+            .keys()
+            .filter(|name| changed.iter().any(|c| c.eq_ignore_ascii_case(name)))
+            .cloned()
+            .collect();
+        let defns: Vec<(String, Arc<BlockDefn>)> = rebuilt
+            .par_iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    Arc::new(build_defn(
+                        doc,
+                        name,
+                        anno_scale,
+                        annotation_scale_handle,
+                        all_visible,
+                        bg_color,
+                        viewport,
+                        depth_map,
+                        solid_snaps,
+                        &HashSet::default(),
+                    )),
+                )
+            })
+            .collect();
+        cache.defns.extend(defns);
+        // Every definition that reaches a rebuilt one through its nesting.
+        let mut affected: HashSet<String> = rebuilt.into_iter().collect();
+        loop {
+            let more: Vec<String> = cache
+                .defns
+                .iter()
+                .filter(|(name, defn)| {
+                    !affected.contains(*name)
+                        && defn.subs.iter().any(|sub| {
+                            matches!(sub, LocalSub::Nested(nref) if affected.contains(&nref.block_name))
+                        })
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            affected.extend(more);
+        }
+        let affected: Vec<String> = affected.into_iter().collect();
+        cache.compute_block_metrics(&affected);
+        cache
+    }
+
     /// Build an isolated preview of a picture without the specified members.
     /// The resident cache and the document remain unchanged.
     #[allow(clippy::too_many_arguments)]

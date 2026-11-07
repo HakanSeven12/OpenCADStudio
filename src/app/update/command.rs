@@ -2351,9 +2351,6 @@ impl OpenCADStudio {
         self.layers_dialog_to_front()
     }
 
-    /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
-    /// filter, or switch all of a node's layers at once (one undo step; the
-    /// current layer is never frozen).
     /// Save as filter: the search text as a property filter on the name,
     /// shown in the tree (#2610 LM-22a).
     pub(super) fn on_layer_save_search(&mut self) -> Task<Message> {
@@ -2373,11 +2370,7 @@ impl OpenCADStudio {
         };
         let mut name = search.clone();
         let mut n = 2;
-        while self
-            .layer_filters
-            .iter()
-            .any(|f| f.name.eq_ignore_ascii_case(&name))
-        {
+        while crate::app::layer_filters::find_filter_mut(&mut self.layer_filters, &name).is_some() {
             name = format!("{search} ({n})");
             n += 1;
         }
@@ -2429,17 +2422,14 @@ impl OpenCADStudio {
             }
             TreeNode::Filter(old) if !new.is_empty() && new != old => {
                 self.load_layer_filters(i);
-                let taken = self
-                    .layer_filters
-                    .iter()
-                    .any(|f| f.name.eq_ignore_ascii_case(&new) && !f.name.eq_ignore_ascii_case(&old));
+                let taken = !new.eq_ignore_ascii_case(&old)
+                    && crate::app::layer_filters::find_filter_mut(&mut self.layer_filters, &new)
+                        .is_some();
                 if taken {
                     self.command_line
                         .push_error(&crate::tf!("A filter named \"{}\" already exists.", new));
-                } else if let Some(filter) = self
-                    .layer_filters
-                    .iter_mut()
-                    .find(|f| f.name.eq_ignore_ascii_case(&old))
+                } else if let Some(filter) =
+                    crate::app::layer_filters::find_filter_mut(&mut self.layer_filters, &old)
                 {
                     filter.name = new.clone();
                     self.persist_layer_filters(i, "LAYERFILTER RENAME");
@@ -2454,6 +2444,9 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
+    /// filter, or switch all of a node's layers at once (one undo step; the
+    /// current layer is never frozen).
     pub(super) fn on_layer_tree_action(
         &mut self,
         node: crate::ui::window::layers::TreeNode,
@@ -2467,8 +2460,7 @@ impl OpenCADStudio {
             }
             (TreeNode::Filter(name), A::Delete) => {
                 self.load_layer_filters(i);
-                self.layer_filters
-                    .retain(|f| !f.name.eq_ignore_ascii_case(name));
+                crate::app::layer_filters::remove_filter(&mut self.layer_filters, name);
                 self.persist_layer_filters(i, "LAYERFILTER DELETE");
                 if self.tabs[i].layers.view == node {
                     self.tabs[i].layers.view = TreeNode::All;

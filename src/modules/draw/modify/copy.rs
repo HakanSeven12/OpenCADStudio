@@ -205,7 +205,7 @@ impl CadCommand for CopyCommand {
             }
             Step::Placing(base) => {
                 let delta = pt - *base;
-                if let Some(n) = self.array_count {
+                if self.array_count.is_some() {
                     // Array: place n-1 copies at delta, 2·delta, … so the result
                     // is n evenly spaced items including the original. Ends here.
                     let transforms: Vec<EntityTransform> = self

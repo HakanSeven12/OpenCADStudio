@@ -69,7 +69,7 @@ impl crate::filter::PropertySource for LayerProperties {
 impl LayerFilter {
     /// The name pattern and the predicates as one all-filter.
     pub(in crate::app) fn to_filter(&self) -> crate::filter::Filter {
-        use crate::filter::{Condition, Filter, Group, Item, Match, Op};
+        use crate::filter::{Filter, Group, Item, Match};
         // Conditions from the editor (or read back from the drawing), with a
         // name pattern or predicates LAYERFILTER SET added since (#2610).
         if let Some(conditions) = &self.conditions {
@@ -144,6 +144,30 @@ impl LayerFilter {
             return false;
         }
         self.children.is_empty() || self.children.iter().any(|child| child.matches(layer))
+    }
+}
+
+/// The filter named `name` anywhere in the tree, nested ones included.
+pub(in crate::app) fn find_filter_mut<'a>(
+    list: &'a mut [LayerFilter],
+    name: &str,
+) -> Option<&'a mut LayerFilter> {
+    for filter in list {
+        if filter.name.eq_ignore_ascii_case(name) {
+            return Some(filter);
+        }
+        if let Some(found) = find_filter_mut(&mut filter.children, name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Take the filter named `name` (and the filters under it) out of the tree.
+pub(in crate::app) fn remove_filter(list: &mut Vec<LayerFilter>, name: &str) {
+    list.retain(|filter| !filter.name.eq_ignore_ascii_case(name));
+    for filter in list {
+        remove_filter(&mut filter.children, name);
     }
 }
 

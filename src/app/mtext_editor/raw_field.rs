@@ -248,8 +248,7 @@ impl FieldHost {
         host
     }
 
-    /// Replace the host's field tree by one with a FIELD for every span: the
-    /// existing fields from their codes, the inserted ones as made.
+    /// Store the field tree for a table cell, as `rebuild` does for a text.
     pub(in crate::app) fn save_table_cell(
         &self, doc: &mut document::Document, table: Handle, row: usize, column: usize, value: &str,
     ) {
@@ -258,6 +257,8 @@ impl FieldHost {
         }
     }
 
+    /// Replace the host's field tree by one with a FIELD for every span: the
+    /// existing fields from their codes, the inserted ones as made.
     fn rebuild(&self, doc: &mut document::Document, host: Handle, value: &str) {
         if let Some((template, children)) = self.field_parts(doc, value) {
             doc.set_text_field(host, &template, children);

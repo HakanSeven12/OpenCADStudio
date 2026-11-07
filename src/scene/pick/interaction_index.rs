@@ -2861,9 +2861,6 @@ mod area_query_tests {
         );
     }
 
-    // World (x,y) → screen ((x+1)*100, (1-y)*100) over a 200×200 viewport, the
-    // same identity ortho view the hit-test tests use.
-    #[test]
     /// `Scene::materialize_stubs_cached` serves a repeated unrestricted query
     /// by handing a stored expansion to `with_materialized` instead of
     /// expanding again. That substitution is only sound if it produces the
@@ -2944,6 +2941,8 @@ mod area_query_tests {
         );
     }
 
+    // World (x,y) → screen ((x+1)*100, (1-y)*100) over a 200×200 viewport, the
+    // same identity ortho view the hit-test tests use.
     #[test]
     fn box_selection_picks_the_same_handles_from_either_query() {
         let wires = sample();

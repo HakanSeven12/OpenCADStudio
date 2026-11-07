@@ -2736,6 +2736,10 @@ pub struct Scene {
     /// entity/insert) re-tessellate only the visible wires (~baseline cost)
     /// instead of rebuilding every block defn (the edit-time spike).
     pub block_epoch: u64,
+    /// Layer visibility changes since a `block_epoch` (`from`, `to`, and the
+    /// definitions they touched): a cache built at `from` is brought to `to`
+    /// by rebuilding only those definitions, not all of them (#2696).
+    block_visibility_edits: Option<(u64, u64, HashSet<String>)>,
     /// Incremented when the selection / hover-highlight set changes WITHOUT a
     /// geometry change. The wire tessellation is selection-independent, so a
     /// pick only refreshes the GPU xray overlay (cheap) instead of bumping
@@ -3457,6 +3461,7 @@ impl Scene {
             geometry_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             projection_bounds_epoch: std::cell::Cell::new(0),
             block_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
+            block_visibility_edits: None,
             selection_generation: 0,
             #[cfg(any(test, not(target_arch = "wasm32")))]
             selection_fingerprint_cache: 0,
@@ -3740,12 +3745,45 @@ impl Scene {
         // before the drawing had a complex one kept no path for its children.
         key = key.rotate_left(13)
             ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
-        {
+        let stale = {
             let cache = self.block_defn_cache.borrow();
-            if let Some((epoch, arc)) = cache.get(&key) {
-                if *epoch == self.block_epoch {
-                    return Arc::clone(arc);
+            match cache.get(&key) {
+                Some((epoch, arc)) if *epoch == self.block_epoch => return Arc::clone(arc),
+                Some((epoch, arc)) => Some((*epoch, Arc::clone(arc))),
+                None => None,
+            }
+        };
+        // Only layers were switched since this cache was built: rebuild the
+        // definitions that hold their objects, keep the rest.
+        if let (Some((epoch, old)), Some((from, to, names))) =
+            (stale, self.block_visibility_edits.as_ref())
+        {
+            if epoch == *from && *to == self.block_epoch {
+                let solid_snaps: HashMap<Handle, _> = self
+                    .block_meshes
+                    .keys()
+                    .map(|handle| (*handle, self.solid_snap_points(*handle)))
+                    .filter(|(_, points)| !points.is_empty())
+                    .collect();
+                let mut built = old.with_rebuilt_blocks(
+                    &self.document,
+                    names,
+                    1.0,
+                    annotation_scale_handle,
+                    all_visible,
+                    bg,
+                    viewport,
+                    &self.draw_depth_map(),
+                    &solid_snaps,
+                );
+                if self.constraint_shading_active() {
+                    built.disable_prototypes();
                 }
+                let arc = Arc::new(built);
+                self.block_defn_cache
+                    .borrow_mut()
+                    .insert(key, (self.block_epoch, Arc::clone(&arc)));
+                return arc;
             }
         }
         // Block definitions are cached at block-local size (annotation scale
@@ -15458,7 +15496,28 @@ vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
             return;
         }
         if targets.touches_block_definition {
+            let from = self.block_epoch;
             self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+            let records: HashMap<Handle, &str> = self
+                .document
+                .block_records
+                .iter()
+                .map(|record| (record.handle, record.name.as_str()))
+                .collect();
+            let touched: HashSet<String> = targets
+                .source_handles
+                .iter()
+                .filter_map(|handle| self.document.get_entity(*handle))
+                .filter_map(|entity| records.get(&entity.common().owner_handle))
+                .map(|name| name.to_string())
+                .collect();
+            self.block_visibility_edits = match self.block_visibility_edits.take() {
+                Some((base, to, mut names)) if to == from => {
+                    names.extend(touched);
+                    Some((base, self.block_epoch, names))
+                }
+                _ => Some((from, self.block_epoch, touched)),
+            };
         }
         let kept: Vec<_> = {
             let mut tm = self.tess_memo.borrow_mut();

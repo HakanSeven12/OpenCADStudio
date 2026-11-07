@@ -50,8 +50,6 @@ impl OpenCADStudio {
         self.accepted_snaps.clear();
     }
 
-    /// The active command is at a point prompt (keywords allowed) and not
-    /// picking an object: where MTP and typed snap overrides apply.
     /// A hot grip is waiting for its placement point. Grip editing is not a
     /// command, so this is the point prompt MTP / M2P serve there.
     pub(crate) fn grip_point_prompt(&self, i: usize) -> bool {
@@ -66,6 +64,8 @@ impl OpenCADStudio {
             })
     }
 
+    /// The active command is at a point prompt (keywords allowed) and not
+    /// picking an object: where MTP and typed snap overrides apply.
     pub(crate) fn point_modifier_step(&self, i: usize) -> bool {
         self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
             (!c.input_kind().wants_text() || c.point_step_accepts_keywords())

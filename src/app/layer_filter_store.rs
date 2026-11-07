@@ -1,19 +1,22 @@
-//! Layer property filters kept in the drawing (#2610): one `AcLyLayerFilter`
-//! XRECORD per filter under anonymous `*A<n>` keys in the layer table's
-//! `ACLYDICTIONARY`, beside the layer groups. A record carries the filter's
-//! name (`300`), its expression in the form other programs read (`301`,
-//! `NAME=="A*" AND PLOTTABLE=="False"`), the filter it sits under (`302`),
-//! and the exact filter as JSON in `3` chunks. A record without the JSON is
-//! read from its expression; one that can't be read is left as it is.
+//! Layer property filters kept in the drawing (#2610), the way DWG keeps
+//! them: one `AcLyLayerFilter` XRECORD per filter (`300` name, `301`
+//! expression such as `( NAME== "A*" AND PLOTTABLE== "False" )`) under
+//! anonymous `*A<n>` keys in the layer table's `ACLYDICTIONARY`, beside the
+//! layer groups. A nested filter sits in the `ACLYDICTIONARY` of its parent
+//! record's extension dictionary. A record whose expression can't be read is
+//! left as it is.
 
-use crate::filter::{Condition, Filter, Item, Match, Op};
-use document::objects::{DictionaryCloningFlags, ObjectType, XRecord, XRecordEntry, XRecordValue};
+use crate::filter::{Condition, Filter, Group, Item, Match, Op};
+use document::objects::{
+    Dictionary, DictionaryCloningFlags, ObjectType, XRecord, XRecordEntry, XRecordValue,
+};
 use document::{Document, Handle};
 
 const KIND: &str = "AcLyLayerFilter";
 const VERSION: i32 = 1;
-/// A string of an XRECORD stays under 255 bytes as an older DXF writes it.
-const CHUNK: usize = 240;
+const DICTIONARY: &str = "ACLYDICTIONARY";
+/// Nesting deeper than this is taken as a broken (cyclic) drawing.
+const MAX_DEPTH: usize = 16;
 
 /// A filter as the drawing keeps it.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,50 +27,79 @@ pub(crate) struct StoredLayerFilter {
     pub filter: Filter,
 }
 
-fn parse(xrecord: &XRecord) -> Option<StoredLayerFilter> {
+fn parse(xrecord: &XRecord) -> Option<(String, Filter)> {
     let mut entries = xrecord.entries.iter();
     let kind = entries.next()?;
     if kind.code != 1 || kind.value.as_string() != Some(KIND) {
         return None;
     }
-    let (mut name, mut expression, mut parent, mut json) = (None, None, None, String::new());
+    let (mut name, mut expression) = (None, None);
     for entry in entries {
         match (entry.code, &entry.value) {
             (300, XRecordValue::String(v)) if name.is_none() => name = Some(v.clone()),
-            (301, XRecordValue::String(v)) => expression = Some(v.clone()),
-            (302, XRecordValue::String(v)) if !v.is_empty() => parent = Some(v.clone()),
-            (3, XRecordValue::String(part)) => json.push_str(part),
+            (301, XRecordValue::String(v)) if expression.is_none() => expression = Some(v.clone()),
             _ => {}
         }
     }
-    let filter = if json.is_empty() {
-        from_expression(expression.as_deref()?)?
-    } else {
-        serde_json::from_str(&json).ok()?
+    Some((name?, from_expression(expression.as_deref().unwrap_or(""))?))
+}
+
+/// The `ACLYDICTIONARY` of a record's extension dictionary: its nested filters.
+fn nested_dictionary(document: &Document, xrecord: &XRecord) -> Option<Handle> {
+    let Some(ObjectType::Dictionary(extension)) = document.objects.get(&xrecord.xdictionary_handle?)
+    else {
+        return None;
     };
-    Some(StoredLayerFilter {
-        name: name?,
-        parent,
-        filter,
-    })
+    extension
+        .entries
+        .iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(DICTIONARY))
+        .map(|(_, handle)| *handle)
+        .filter(|handle| matches!(document.objects.get(handle), Some(ObjectType::Dictionary(_))))
+}
+
+/// The filter records under `dictionary`, each before the ones nested in it.
+fn walk(
+    document: &Document,
+    dictionary: Handle,
+    parent: Option<&str>,
+    depth: usize,
+    out: &mut Vec<(Handle, StoredLayerFilter)>,
+) {
+    let Some(ObjectType::Dictionary(entries)) = document.objects.get(&dictionary) else {
+        return;
+    };
+    if depth > MAX_DEPTH {
+        return;
+    }
+    for (_, handle) in &entries.entries {
+        let Some(ObjectType::XRecord(xrecord)) = document.objects.get(handle) else {
+            continue;
+        };
+        let Some((name, filter)) = parse(xrecord) else {
+            continue;
+        };
+        out.push((
+            *handle,
+            StoredLayerFilter {
+                name: name.clone(),
+                parent: parent.map(str::to_owned),
+                filter,
+            },
+        ));
+        if let Some(nested) = nested_dictionary(document, xrecord) {
+            walk(document, nested, Some(&name), depth + 1, out);
+        }
+    }
 }
 
 /// The filter records of the drawing, with their handles, in order.
 fn records(document: &Document) -> Vec<(Handle, StoredLayerFilter)> {
-    let Some(dictionary) = super::layer_groups::filter_dictionary(document) else {
-        return Vec::new();
-    };
-    let Some(ObjectType::Dictionary(dictionary)) = document.objects.get(&dictionary) else {
-        return Vec::new();
-    };
-    dictionary
-        .entries
-        .iter()
-        .filter_map(|(_, handle)| match document.objects.get(handle) {
-            Some(ObjectType::XRecord(xrecord)) => parse(xrecord).map(|f| (*handle, f)),
-            _ => None,
-        })
-        .collect()
+    let mut out = Vec::new();
+    if let Some(dictionary) = super::layer_groups::filter_dictionary(document) {
+        walk(document, dictionary, None, 0, &mut out);
+    }
+    out
 }
 
 /// The drawing's layer property filters.
@@ -75,33 +107,92 @@ pub(crate) fn stored_layer_filters(document: &Document) -> Vec<StoredLayerFilter
     records(document).into_iter().map(|(_, f)| f).collect()
 }
 
+/// Take a filter record out of its dictionary, with the extension
+/// dictionary that held its nested filters.
+fn remove_record(document: &mut Document, handle: Handle) {
+    let Some(ObjectType::XRecord(xrecord)) = document.objects.remove(&handle) else {
+        return;
+    };
+    if let Some(ObjectType::Dictionary(owner)) = document.objects.get_mut(&xrecord.owner) {
+        owner.entries.retain(|(_, h)| *h != handle);
+    }
+    if let Some(extension) = xrecord.xdictionary_handle {
+        if let Some(ObjectType::Dictionary(extension)) = document.objects.remove(&extension) {
+            for (_, nested) in extension.entries {
+                document.objects.remove(&nested);
+            }
+        }
+    }
+}
+
+fn new_dictionary(document: &mut Document, owner: Handle, hard_owner: bool) -> Handle {
+    let handle = document.allocate_handle();
+    let mut dictionary = Dictionary::new();
+    dictionary.handle = handle;
+    dictionary.owner = owner;
+    dictionary.hard_owner = hard_owner;
+    if !hard_owner {
+        dictionary.reactors = vec![owner];
+        dictionary.duplicate_cloning = 1;
+    }
+    document.objects.insert(handle, ObjectType::Dictionary(dictionary));
+    handle
+}
+
+/// The dictionary that holds the filters nested in record `parent`, made
+/// when it is missing.
+fn ensure_nested_dictionary(document: &mut Document, parent: Handle) -> Handle {
+    if let Some(ObjectType::XRecord(xrecord)) = document.objects.get(&parent) {
+        if let Some(found) = nested_dictionary(document, xrecord) {
+            return found;
+        }
+    }
+    let extension = new_dictionary(document, parent, true);
+    if let Some(ObjectType::XRecord(xrecord)) = document.objects.get_mut(&parent) {
+        xrecord.xdictionary_handle = Some(extension);
+    }
+    let nested = new_dictionary(document, extension, false);
+    if let Some(ObjectType::Dictionary(extension)) = document.objects.get_mut(&extension) {
+        extension.entries.push((DICTIONARY.to_string(), nested));
+    }
+    nested
+}
+
 /// Put `filters` in the drawing in place of the ones it has; records it
 /// can't read stay untouched.
 pub(crate) fn write_layer_filters(document: &mut Document, filters: &[StoredLayerFilter]) {
-    let old: Vec<Handle> = records(document).into_iter().map(|(h, _)| h).collect();
-    if let Some(dictionary) = super::layer_groups::filter_dictionary(document) {
-        if let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary) {
-            dictionary.entries.retain(|(_, h)| !old.contains(h));
-        }
-    }
-    for handle in old {
-        document.objects.remove(&handle);
+    for (handle, _) in records(document).into_iter().rev() {
+        remove_record(document, handle);
     }
     if filters.is_empty() {
         return;
     }
-    let dictionary = super::layer_groups::ensure_filter_dictionary(document);
+    let root = super::layer_groups::ensure_filter_dictionary(document);
+    let mut placed: Vec<(String, Handle)> = Vec::new();
     for stored in filters {
+        let parent = stored.parent.as_deref().and_then(|parent| {
+            placed
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(parent))
+                .map(|(_, handle)| *handle)
+        });
+        let dictionary = match parent {
+            Some(parent) => ensure_nested_dictionary(document, parent),
+            None => root,
+        };
         let handle = document.allocate_handle();
         let mut xrecord = XRecord::new();
         xrecord.handle = handle;
         xrecord.owner = dictionary;
         xrecord.reactors = vec![dictionary];
         xrecord.cloning_flags = DictionaryCloningFlags::KeepExisting;
-        xrecord.entries = entries(stored);
-        document
-            .objects
-            .insert(handle, ObjectType::XRecord(xrecord));
+        xrecord.entries = vec![
+            XRecordEntry::string(1, KIND),
+            XRecordEntry::new(90, XRecordValue::Int32(VERSION)),
+            XRecordEntry::string(300, &stored.name),
+            XRecordEntry::string(301, &to_expression(&stored.filter)),
+        ];
+        document.objects.insert(handle, ObjectType::XRecord(xrecord));
         if let Some(ObjectType::Dictionary(dictionary)) = document.objects.get_mut(&dictionary) {
             let next = (1..)
                 .map(|n| format!("*A{n}"))
@@ -114,47 +205,8 @@ pub(crate) fn write_layer_filters(document: &mut Document, filters: &[StoredLaye
                 .unwrap_or_default();
             dictionary.entries.push((next, handle));
         }
+        placed.push((stored.name.clone(), handle));
     }
-}
-
-fn entries(stored: &StoredLayerFilter) -> Vec<XRecordEntry> {
-    let mut entries = vec![
-        XRecordEntry::string(1, KIND),
-        XRecordEntry::new(90, XRecordValue::Int32(VERSION)),
-        XRecordEntry::string(300, &stored.name),
-        XRecordEntry::string(301, &cut(&to_expression(&stored.filter))),
-        XRecordEntry::string(302, stored.parent.as_deref().unwrap_or("")),
-    ];
-    let json = serde_json::to_string(&stored.filter).unwrap_or_default();
-    let mut part = String::new();
-    let mut length = 0;
-    for c in json.chars() {
-        let width = c.len_utf8();
-        if length + width > CHUNK {
-            entries.push(XRecordEntry::string(3, &part));
-            part.clear();
-            length = 0;
-        }
-        part.push(c);
-        length += width;
-    }
-    if !part.is_empty() {
-        entries.push(XRecordEntry::string(3, &part));
-    }
-    entries
-}
-
-/// An expression longer than a record's string is cut; the JSON beside it
-/// keeps the whole filter.
-fn cut(expression: &str) -> String {
-    let mut out = String::new();
-    for c in expression.chars() {
-        if out.len() + c.len_utf8() > CHUNK {
-            break;
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// Our property ids and the keys of the expression other programs write.
@@ -195,7 +247,7 @@ fn condition_expression(condition: &Condition) -> Option<String> {
     } else {
         condition.value.replace('"', "")
     };
-    let body = format!("{key}{op}\"{value}\"");
+    let body = format!("{key}{op} \"{value}\"");
     Some(if condition.negate {
         format!("NOT {body}")
     } else {
@@ -203,10 +255,10 @@ fn condition_expression(condition: &Condition) -> Option<String> {
     })
 }
 
-/// The filter in the expression form: `NAME=="A*" AND (COLOR=="1" OR …)`.
+/// The filter in the expression form: `( NAME== "A*" AND ( COLOR== "1" OR … ) )`.
 pub(crate) fn to_expression(filter: &Filter) -> String {
     let join = |mode: Match| if mode == Match::All { " AND " } else { " OR " };
-    filter
+    let body = filter
         .items
         .iter()
         .filter_map(|item| match item {
@@ -217,39 +269,100 @@ pub(crate) fn to_expression(filter: &Filter) -> String {
                     .iter()
                     .filter_map(condition_expression)
                     .collect();
-                (!parts.is_empty()).then(|| format!("({})", parts.join(join(g.mode))))
+                (!parts.is_empty()).then(|| format!("( {} )", parts.join(join(g.mode))))
             }
         })
         .collect::<Vec<_>>()
-        .join(join(filter.root))
+        .join(join(filter.root));
+    if body.is_empty() {
+        body
+    } else {
+        format!("( {body} )")
+    }
 }
 
-/// Read an expression another program wrote: conditions joined by AND or
-/// OR (one kind at the top), each `KEY=="value"` or `KEY!="value"`,
-/// optionally led by NOT. Anything else gives `None`.
+/// `text` without parentheses that enclose all of it.
+fn strip_parens(mut text: &str) -> &str {
+    loop {
+        text = text.trim();
+        let Some(inner) = text.strip_prefix('(').and_then(|t| t.strip_suffix(')')) else {
+            return text;
+        };
+        // `(a) AND (b)` starts and ends with parentheses that are not a pair.
+        let mut depth = 0i32;
+        let mut quoted = false;
+        for c in inner.chars() {
+            match c {
+                '"' => quoted = !quoted,
+                '(' if !quoted => depth += 1,
+                ')' if !quoted => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return text;
+                    }
+                }
+                _ => {}
+            }
+        }
+        text = inner;
+    }
+}
+
+/// `text` split at its outermost AND or OR (outside quotes and
+/// parentheses), with which of them joins it; `None` when both do.
+fn split_top(text: &str) -> Option<(Match, Vec<&str>)> {
+    let (bytes, upper) = (text.as_bytes(), text.to_ascii_uppercase());
+    let (mut depth, mut quoted, mut mode) = (0i32, false, None);
+    let (mut parts, mut from, mut at) = (Vec::new(), 0, 0);
+    while at < bytes.len() {
+        match bytes[at] {
+            b'"' => quoted = !quoted,
+            b'(' if !quoted => depth += 1,
+            b')' if !quoted => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && !quoted {
+            let joiner = [(" AND ", Match::All), (" OR ", Match::Any)]
+                .into_iter()
+                .find(|(word, _)| upper.as_bytes()[at..].starts_with(word.as_bytes()));
+            if let Some((word, kind)) = joiner {
+                if mode.is_some_and(|m| m != kind) {
+                    return None;
+                }
+                mode = Some(kind);
+                parts.push(&text[from..at]);
+                at += word.len();
+                from = at;
+                continue;
+            }
+        }
+        at += 1;
+    }
+    parts.push(&text[from..]);
+    Some((mode.unwrap_or(Match::All), parts))
+}
+
+/// Read an expression another program wrote: conditions `KEY== "value"` or
+/// `KEY!= "value"`, optionally led by NOT, joined by AND or OR, one level of
+/// parentheses grouping them. Anything else gives `None`.
 pub(crate) fn from_expression(expression: &str) -> Option<Filter> {
-    let text = expression.trim();
+    let text = strip_parens(expression);
     if text.is_empty() {
         return Some(Filter::default());
     }
-    let upper = text.to_ascii_uppercase();
-    let (root, separator) = if upper.contains(" OR ") && !upper.contains(" AND ") {
-        (Match::Any, " OR ")
-    } else {
-        (Match::All, " AND ")
-    };
+    let (root, parts) = split_top(text)?;
     let mut items = Vec::new();
-    let mut rest = text;
-    loop {
-        let at = rest.to_ascii_uppercase().find(separator);
-        let (part, next) = match at {
-            Some(at) => (&rest[..at], Some(&rest[at + separator.len()..])),
-            None => (rest, None),
-        };
-        items.push(Item::Condition(parse_condition(part.trim())?));
-        match next {
-            Some(next) => rest = next,
-            None => break,
+    for part in parts {
+        let part = strip_parens(part);
+        let (mode, inner) = split_top(part)?;
+        if inner.len() > 1 {
+            let conditions = inner
+                .into_iter()
+                .map(|c| parse_condition(strip_parens(c)))
+                .collect::<Option<Vec<_>>>()?;
+            items.push(Item::Group(Group { mode, conditions }));
+        } else {
+            items.push(Item::Condition(parse_condition(part)?));
         }
     }
     Some(Filter { root, items })
@@ -351,8 +464,14 @@ mod tests {
         };
         assert_eq!(
             to_expression(&filter),
-            "NAME==\"A-*\" AND PLOTTABLE==\"False\""
+            "( NAME== \"A-*\" AND PLOTTABLE== \"False\" )"
         );
+        // As the reference writes one, and with a group.
+        let read = from_expression("( NAME== \"*1-*\" )").unwrap();
+        assert!(matches!(&read.items[..], [Item::Condition(c)] if c.value == "*1-*"));
+        let grouped = from_expression("NAME==\"A*\" AND (COLOR==\"1\" OR COLOR==\"2\")").unwrap();
+        assert!(matches!(&grouped.items[1], Item::Group(g) if g.mode == Match::Any && g.conditions.len() == 2));
+        assert_eq!(from_expression(&to_expression(&grouped)), Some(grouped));
         assert_eq!(from_expression(&to_expression(&filter)), Some(filter));
         let any = from_expression("COLOR==\"1\" OR NOT LOCKED==\"True\"").unwrap();
         assert_eq!(any.root, Match::Any);

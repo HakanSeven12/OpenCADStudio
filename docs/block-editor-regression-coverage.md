@@ -1,6 +1,6 @@
 # Block Editor regression coverage
 
-Updated: 2026-11-07. Reviewed through `884cb96a7`.
+Updated: 2026-11-07. Integration reviewed through `b0ef6af8f`.
 
 The current DWG control and persistence checks pass. Full-drawing DXF conversion remains open. This document records regression coverage and its limits; it does not certify completion of the entire Block Editor roadmap.
 
@@ -74,17 +74,36 @@ Supplementary checks exercised eight dynamic references, all 20 exposed Properti
 
 An edited state spanning all eight references and two active Flips passed same-version DWG audit and verified save with no dropped records. Reopening restored property values, world grip positions, reference positions and queried geometry. Another grip edit on every reference passed after reopening. An unflip/reflip cycle restored the saved geometry. These observations establish the tested workflows, not every retained graph or possible edit sequence.
 
-## Resolved DXF reference integrity milestone
+## DXF reference integrity integration
 
-Synthetic supported-object DWG/DXF lifecycle tests pass. The DXF reference-integrity milestone for acknowledged lossy export of drawings carrying DWG-only unsupported objects is resolved:
+Synthetic coverage now includes acknowledged lossy export with DWG-only unsupported objects. Full-drawing verification on the integrated build remains a separate gate:
 
 - Same-version DWG preserves raw unsupported objects (including `DIMCONTAINER2`) and dynamic block graphs without loss.
 - DXF export preserves the loss warning when unacknowledged (`allow_lossy: false`), reporting dropped record counts and refusing to write corrupt data.
-- When lossy export is explicitly acknowledged (`allow_lossy: true`), reference-integrity pruning removes dangling handle references to omitted objects and transitively un-emitted child records across dictionary entries, reactors, extension dictionaries, proxy references, and handle fields, ensuring emitted DXF files pass structural verification.
+- When lossy export is explicitly acknowledged (`allow_lossy: true`), reference-integrity pruning removes dangling handle references to omitted objects and transitively un-emitted child records across dictionary entries, reactors, extension dictionaries, proxy references, and handle fields. The synthetic acknowledged outputs pass structural verification; malformed essential references still cause refusal.
 - Structural verification continues to reject broken essential references on surviving native objects (such as corrupt dynamic block evaluation graph node expressions).
-- Upstream reviewable dependency changes are isolated on branch `codex/dxf-reference-integrity` in `acadrust`.
+- The application cleanup uses the pinned codec; it does not depend on an unpublished codec revision. Its omission policy matches that writer. Supported associative dependencies and their owned bodies are retained, as are image reactors whose targets are entities. A removed dictionary default becomes null rather than selecting another entry.
+- `save_as_retained_constraints_clone_connections_runtime_and_history` checks both original and cloned constraint graphs before DXF writing and after DWG/DXF reopening. This caught an overly broad cleanup rule during integration.
 
 Remaining limitations: unsupported DWG-only objects (`DIMCONTAINER2`) remain lossy on DXF export and are not synthesized into native DXF entities. Full semantic decoding of proprietary third-party container schemas remains outside scope.
+
+## Tool Palettes integration
+
+The dockable panel now supports tabs, search, capture from a selected reference or block definition, tool ordering/removal, insertion, persistence and undo/redo. Captured tools carry definition geometry and dependencies into another drawing, including supported dynamic action graphs. Insertion preserves signed per-axis scales and rotation. Synthetic tests evaluate imported dynamic target geometry, rather than checking only a dynamic flag.
+
+Failed imports and recursive insertion are guarded. Dynamic block redefinition is refused before mutation until safe graph/reference migration is implemented. Insertion uses current drawing styling; source reference layer and color are not captured. Cancellation clears the active placement highlight. All 23 locales have Fluent labels and feedback; native-speaker review remains open.
+
+Remaining palette scope: rename tabs, direct viewport drag/drop, editable tool properties, safe dynamic redefinition, optional source-style capture and shared catalogs. This integration does not close those items.
+
+## Integration validation
+
+After review corrections: 328 Block Editor application tests, 78 Dock tests, 265 scene Block-related tests, 108 automation tests, 16 i18n tests and 15 save-crate tests passed. These tests are self-contained; no external drawing dependency was introduced. The initial integrated Block Editor run exposed the constraint-dependency cleanup regression; the corrected full suite passes.
+
+Native build and wasm library check passed for the integrated runtime. A separately launched GUI executable reported `b0ef6af8f689-dirty` (the pending change was this coverage document); its process/session descriptor confirmed the executable identity. The Tool Palettes panel opened and was inspected visually.
+
+Full-drawing DXF verification remains open on that executable: audit reported 200 omitted records, export without acknowledgement refused, and acknowledged export failed with 194 dangling handles and 1,797 orphaned objects (no duplicates). One inspected case is a surviving dictionary whose entity owner is already absent from the loaded document. The output is diagnostic only. Next, reduce missing-owner dictionaries and cascading metadata to a synthetic regression, distinguish safe metadata cleanup from essential graph corruption, and retain loss acknowledgement and structural verification. The original source hash remained unchanged.
+
+The earlier 325-test and all-grip application-session evidence above remains historical evidence for that executable. No new all-grip pass is claimed for the integrated GUI.
 
 ## Reproducing the relevant checks
 
@@ -95,8 +114,11 @@ $env:RUST_MIN_STACK = '67108864'
 $env:ICED_TEST_BACKEND = 'tiny-skia'
 cargo test --lib app::block_editor_tests
 cargo test --lib scene::block_
+cargo test --locked -p ocs_save
+cargo test --lib app::dock::tests
+cargo test --lib i18n
 cargo build --locked --bin OpenCADStudio
 cargo check --locked --target wasm32-unknown-unknown --lib
 ```
 
-Broader roadmap gates remain: retained/native bindings and transform combinations, construction interoperability, Constraint Status, retained constraints in Save Block As, Lookup/property-table options and performance, Tool Palettes implementation, and remaining GUI/localization/performance checks. Existing XY compatibility and provenance holds remain in force. This coverage record does not close those items.
+Broader roadmap gates remain: retained/native bindings and transform combinations, construction interoperability, Constraint Status, retained constraints in Save Block As, Lookup/property-table options and performance, remaining Tool Palettes scope above, and remaining GUI/localization/performance checks. Existing XY compatibility and provenance holds remain in force. This coverage record does not close those items.

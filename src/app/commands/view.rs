@@ -1115,16 +1115,40 @@ impl OpenCADStudio {
                     }
                     // Model space: split the tiled viewport layout via pane_grid.
                     use iced::widget::pane_grid::{Axis, Configuration as C};
-                    let split = |axis, a, b| C::Split {
+                    let split_at = |axis, ratio, a, b| C::Split {
                         axis,
-                        ratio: 0.5,
+                        ratio,
                         a: Box::new(a),
                         b: Box::new(b),
+                    };
+                    let split = |axis, a, b| split_at(axis, 0.5, a, b);
+                    // Three equal bands: a third, then half of the rest.
+                    let thirds = |axis| {
+                        split_at(axis, 1.0 / 3.0, C::Pane(0), split(axis, C::Pane(1), C::Pane(2)))
                     };
                     let config: Option<(C<usize>, usize)> = match sub.as_str() {
                         "SINGLE" | "SI" | "1" => Some((C::Pane(0), 1)),
                         "2H" | "2" => Some((split(Axis::Horizontal, C::Pane(0), C::Pane(1)), 2)),
                         "2V" => Some((split(Axis::Vertical, C::Pane(0), C::Pane(1)), 2)),
+                        // Three: the big one on the named side.
+                        "3R" | "3" => Some((
+                            split(Axis::Vertical, split(Axis::Horizontal, C::Pane(0), C::Pane(1)), C::Pane(2)),
+                            3,
+                        )),
+                        "3L" => Some((
+                            split(Axis::Vertical, C::Pane(0), split(Axis::Horizontal, C::Pane(1), C::Pane(2))),
+                            3,
+                        )),
+                        "3A" => Some((
+                            split(Axis::Horizontal, C::Pane(0), split(Axis::Vertical, C::Pane(1), C::Pane(2))),
+                            3,
+                        )),
+                        "3B" => Some((
+                            split(Axis::Horizontal, split(Axis::Vertical, C::Pane(0), C::Pane(1)), C::Pane(2)),
+                            3,
+                        )),
+                        "3V" => Some((thirds(Axis::Vertical), 3)),
+                        "3H" => Some((thirds(Axis::Horizontal), 3)),
                         "4" => Some((
                             split(
                                 Axis::Vertical,
@@ -3789,5 +3813,32 @@ impl OpenCADStudio {
             }
             .as_ref(),
         );
+    }
+}
+
+#[cfg(test)]
+mod vports_dropdown_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use crate::modules::RibbonItem;
+
+    #[test]
+    fn each_viewport_configuration_in_the_dropdown_tiles_the_model_view() {
+        let RibbonItem::LargeDropdown { items, .. } = crate::modules::view::vports_config::dropdown() else {
+            panic!("a dropdown");
+        };
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        for (cmd, label, _) in items {
+            let want = match label.split(':').next().unwrap() {
+                "Single" => 1,
+                "Two" => 2,
+                "Three" => 3,
+                "Four" => 4,
+                other => panic!("{other}"),
+            };
+            let _ = app.update(Message::DropdownSelectItem { dropdown_id: "VPORTS_CONFIG", cmd });
+            assert_eq!(app.tabs[i].scene.model_tiles.borrow().len(), want, "{label}");
+        }
     }
 }

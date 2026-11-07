@@ -76,7 +76,7 @@ impl CadModule for ViewModule {
                 RibbonGroup {
                     title: "Model Viewports",
                     tools: vec![
-                        RibbonItem::LargeTool(vports_config::tool()),
+                        vports_config::dropdown(),
                         RibbonItem::Tool(vports_named::tool()),
                         RibbonItem::Tool(vports_join::tool()),
                         RibbonItem::Tool(vports_restore::tool()),

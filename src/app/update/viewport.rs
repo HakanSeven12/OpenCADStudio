@@ -2871,8 +2871,33 @@ impl OpenCADStudio {
                 }
             }
             for (handle, grip_id, apply) in actions {
+                let fill_point = match &apply {
+                    GripApply::Absolute(point) => Some(*point),
+                    _ => None,
+                };
                 if !rebuilt_arcs.contains(&handle) {
                     self.tabs[i].scene.apply_grip(handle, grip_id, apply);
+                }
+                // A fill shows the cells it reaches, filled or empty.
+                if let (true, Some(point), Some(range)) = (
+                    grip_id == crate::entities::table::CELL_GRIP_FILL
+                        && table_targets.contains(&handle),
+                    fill_point,
+                    crate::entities::table::prop_cell_range(),
+                ) {
+                    if let Some((_, document::EntityType::Table(original))) = self
+                        .grip_originals
+                        .iter()
+                        .find(|(original_handle, _)| *original_handle == handle)
+                    {
+                        let (r0, c0, r1, c1) =
+                            crate::entities::table::fill_span(original, range, point);
+                        self.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+                            table: handle,
+                            anchor: (r0, c0),
+                            end: (r1, c1),
+                        });
+                    }
                 }
             }
             for (handle, vertex_id, original_bulge) in refit_arc_targets {

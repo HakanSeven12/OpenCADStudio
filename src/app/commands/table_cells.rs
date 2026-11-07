@@ -58,8 +58,21 @@ fn insert_columns_like(t: &mut Table, source: usize, at: usize, n: usize) {
     }
 }
 
+/// Empties the picked cells; locked contents stay.
+fn clear_cells(t: &mut Table, (r0, c0, r1, c1): (usize, usize, usize, usize)) {
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            if let Some(cell) = t.cell_mut(r, c) {
+                if !cell.state.intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY) {
+                    cell.set_text("");
+                }
+            }
+        }
+    }
+}
+
 impl OpenCADStudio {
-    pub(super) fn dispatch_table_cells(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+    pub(in crate::app) fn dispatch_table_cells(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         if !cmd.starts_with("_TCELL") {
             return None;
         }
@@ -195,6 +208,14 @@ impl OpenCADStudio {
                                 }
                             }
                         }
+                        Some((r0, c0, r1, c1))
+                    }),
+                ),
+                // Delete with cells picked: their contents go, the table stays.
+                "_TCELLCLEAR" => (
+                    "TABLE CLEAR CELLS",
+                    Box::new(move |t| {
+                        clear_cells(t, (r0, c0, r1, c1));
                         Some((r0, c0, r1, c1))
                     }),
                 ),
@@ -1718,6 +1739,34 @@ impl OpenCADStudio {
 mod tests {
     use super::*;
     use document::types::Vector3;
+
+    #[test]
+    fn delete_with_cells_picked_empties_them_and_keeps_the_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut t = Table::new(Vector3::ZERO, 3, 3);
+        for r in 0..3 {
+            for c in 0..3 {
+                t.set_cell_text(r, c, "x");
+            }
+        }
+        t.cell_mut(1, 1).unwrap().state.insert(CellStateFlags::CONTENT_LOCKED);
+        let i = app.active_tab;
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Table(Box::new(t)));
+        app.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+            table: handle,
+            anchor: (1, 0),
+            end: (2, 1),
+        });
+        let _ = app.update(Message::DeleteSelected);
+        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle) else {
+            panic!("Delete on picked cells must keep the table");
+        };
+        let text = |r: usize, c: usize| t.cell(r, c).unwrap().text_value().to_string();
+        assert_eq!((text(1, 0), text(2, 0), text(2, 1)), (String::new(), String::new(), String::new()));
+        assert_eq!(text(1, 1), "x", "a locked cell keeps its contents");
+        assert_eq!((text(0, 0), text(1, 2)), ("x".into(), "x".into()), "cells outside the pick stay");
+    }
 
     fn table() -> Table {
         // 4 rows x 5 columns, column widths 1..5, each cell names itself

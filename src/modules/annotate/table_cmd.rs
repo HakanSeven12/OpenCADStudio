@@ -700,18 +700,20 @@ impl TableCommand {
                 .as_vec3()
                 .to_array()
         };
-        let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 2);
+        let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 3);
         let mut x = 0.0;
         for column in std::iter::once(0.0).chain(widths.iter().copied()) {
             x += column;
             points.push(world(x, 0.0));
             points.push(world(x, -height));
+            points.push([f32::NAN; 3]); // each line on its own
         }
         let mut y = 0.0;
         for row in std::iter::once(0.0).chain(heights.iter().copied()) {
             y -= row;
             points.push(world(0.0, y));
             points.push(world(width, y));
+            points.push([f32::NAN; 3]);
         }
         WireModel {
             name: "table_preview".into(),
@@ -1582,6 +1584,20 @@ mod tabledit_tests {
                 .expect("neighbour resolves")
                 .locked
         );
+    }
+
+    #[test]
+    fn table_preview_draws_only_the_grid_lines() {
+        let names = ["Title", "Header", "Data"];
+        let cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
+        let wire = cmd.preview_grid(DVec3::ZERO, None);
+        // Every line is two points closed by a break: no line joins the next.
+        assert_eq!(wire.points.len() % 3, 0);
+        for line in wire.points.chunks(3) {
+            assert!(line[0][0].is_finite() && line[1][0].is_finite());
+            assert!(line[2][0].is_nan(), "lines must not join: {line:?}");
+            assert!(line[0][0] == line[1][0] || line[0][1] == line[1][1], "diagonal {line:?}");
+        }
     }
 
     #[test]

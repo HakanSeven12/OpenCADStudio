@@ -8255,6 +8255,12 @@ impl OpenCADStudio {
                     }
                     return Task::none();
                 }
+                // Picked table cells: Delete empties them, not the table.
+                if self.tabs[i].scene.table_cells.is_some() {
+                    if let Some(task) = self.dispatch_table_cells("_TCELLCLEAR", i) {
+                        return task;
+                    }
+                }
                 let handles: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if !handles.is_empty() {
                     // Erase is delta-safe unless a target is in a group (group

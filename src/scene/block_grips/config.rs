@@ -1116,6 +1116,74 @@ mod tests {
         }
     }
 
+    #[test]
+    fn block_grip_counts_reloaded_two_grip_linear_parameter_cycles_and_roundtrips() {
+        let (mut doc, definition, parameter) = fixture(1);
+        let target = doc.block_records.get("GRIPS").unwrap().entity_handles[0];
+        actions::create_with_options(
+            &mut doc,
+            definition,
+            actions::Kind::Move,
+            parameter,
+            Some(actions::XyKeyPoint::Base),
+            &[target],
+            glam::DVec3::ZERO,
+            None,
+            None,
+        )
+        .unwrap();
+        set(&mut doc, definition, parameter, Some(2)).unwrap();
+        let mut doc = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read()
+            .unwrap();
+        let found = doc
+            .objects
+            .iter()
+            .find_map(|(handle, object)| match object {
+                ObjectType::DynamicBlock(object) => match &object.data {
+                    DynamicBlockData::LinearParameter(p)
+                        if p.parameter.property_states[0] > 0
+                            && p.parameter.property_states[1] > 0 =>
+                    {
+                        Some((*handle, object.owner))
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .expect("reloaded two-grip Linear parameter");
+        assert_eq!(found.0, parameter);
+        assert_eq!(
+            authoring::graph(&doc, definition).ok().flatten(),
+            Some(found.1)
+        );
+        assert_eq!(count(&doc, definition, parameter), Some(2));
+        let actions_before = actions::actions(&doc, definition)
+            .into_iter()
+            .map(|(handle, ..)| (handle, doc.objects[&handle].clone()))
+            .collect::<Vec<_>>();
+        for desired in [1, 0, 2] {
+            set(&mut doc, definition, parameter, Some(desired)).unwrap();
+            assert_eq!(count(&doc, definition, parameter), Some(desired));
+            check_graph(&doc, definition);
+            assert!(actions_before
+                .iter()
+                .all(|(handle, object)| &doc.objects[handle] == object));
+        }
+        for saved in [
+            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+                .read()
+                .unwrap(),
+            DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap()))
+                .unwrap()
+                .read()
+                .unwrap(),
+        ] {
+            assert_eq!(count(&saved, definition, parameter), Some(2));
+            check_graph(&saved, definition);
+        }
+    }
+
 
 
     #[test]

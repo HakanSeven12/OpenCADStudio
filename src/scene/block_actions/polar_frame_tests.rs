@@ -313,6 +313,105 @@ fn block_polar_stretch_key_point_overrides_do_not_displace_rotate_only_targets()
     }
 }
 
+#[test]
+fn block_polar_stretch_end_connection_parameter_dependency_and_reversed_line_roundtrip() {
+    let mut scene = Scene::new();
+    let base = DVec3::new(2., 3., 0.);
+    let end = DVec3::new(12., 3., 0.);
+    scene.define_block_raw(
+        "POLAR_END_TARGET",
+        Vector3::ZERO,
+        vec![
+            // Vertex 0 is the driven end; vertex 1 is the fixed base.
+            EntityType::Line(Line::from_points(
+                Vector3::new(end.x, end.y, 0.),
+                Vector3::new(base.x, base.y, 0.),
+            )),
+            EntityType::Line(Line::from_points(
+                Vector3::new(11., 3., 0.),
+                Vector3::new(12., 4., 0.),
+            )),
+        ],
+    );
+    let record = scene.document.block_records.get("POLAR_END_TARGET").unwrap();
+    let (definition, targets) = (record.handle, record.entity_handles.clone());
+    let mut doc = scene.document;
+    let parameter = distance::create(
+        &mut doc,
+        definition,
+        distance::Kind::Polar,
+        Vector3::new(base.x, base.y, 0.),
+        Vector3::new(end.x, end.y, 0.),
+        Vector3::new(7., 5., 0.),
+    )
+    .unwrap();
+    let action_handle = create_with_options(
+        &mut doc,
+        definition,
+        Kind::PolarStretch,
+        parameter,
+        Some(XyKeyPoint::End),
+        &targets,
+        DVec3::new(20., 0., 0.),
+        Some([DVec3::new(10., 2., 0.), DVec3::new(13., 5., 0.)]),
+        None,
+    )
+    .unwrap();
+    if let Some(ObjectType::DynamicBlock(object)) = doc.objects.get_mut(&action_handle) {
+        if let DynamicBlockData::PolarStretchAction(action) = &mut object.data {
+            action.action.dependencies.push(parameter);
+        }
+    }
+    let expected = polar(&doc, action_handle).clone();
+    assert_eq!(stretch::polar_key_point(&expected).unwrap(), XyKeyPoint::End);
+    assert_eq!(expected.action.dependencies.len(), 3);
+    let geometric = super::targets::geometry(
+        &doc,
+        definition,
+        Kind::PolarStretch,
+        expected.connections[0].code,
+        &expected.action.dependencies,
+    )
+    .unwrap();
+    assert_eq!(geometric, targets);
+    assert_eq!(
+        expected
+            .bindings
+            .iter()
+            .find(|b| b.handle == targets[0])
+            .unwrap()
+            .indexes,
+        vec![0]
+    );
+    let mut entity = doc.get_entity(targets[0]).unwrap().clone();
+    let points_before = stretch::control_points(&entity).unwrap();
+    assert!(points_before[0].distance(end) < 1e-8);
+    assert!(points_before[1].distance(base) < 1e-8);
+    stretch::apply_polar_frame(&mut entity, &expected, base, end, base, end + DVec3::Y).unwrap();
+    let points_after = stretch::control_points(&entity).unwrap();
+    assert!(points_after[0].distance(end + DVec3::Y) < 1e-8);
+    assert!(points_after[1].distance(base) < 1e-8);
+
+    for saved in [
+        DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read()
+            .unwrap(),
+        DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap()))
+            .unwrap()
+            .read()
+            .unwrap(),
+    ] {
+        let actual = polar(&saved, action_handle);
+        assert_eq!(actual.connections, expected.connections);
+        assert_eq!(actual.bindings, expected.bindings);
+        assert_eq!(actual.handles, expected.handles);
+        assert_eq!(actual.points, expected.points);
+        assert_eq!(actual.distance_multiplier, expected.distance_multiplier);
+        assert_eq!(actual.angle_offset, expected.angle_offset);
+    }
+}
+
+
 
 
 #[test]

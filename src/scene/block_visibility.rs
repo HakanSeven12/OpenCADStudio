@@ -1019,10 +1019,39 @@ mod placement_fixtures {
     fn visibility_parameter_in_multiblock_document_roundtrips() {
         let mut scene = Scene::new();
         scene.define_block_raw("BLOCK_A", Vector3::ZERO, vec![EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_X))]);
+        let a = scene.document.block_records.get("BLOCK_A").unwrap().handle;
+        crate::scene::block_point_parameter::create(
+            &mut scene.document,
+            a,
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        )
+        .unwrap();
+        let a_graph = super::super::block_authoring::graph(&scene.document, a)
+            .unwrap()
+            .unwrap();
+        if let Some(ObjectType::DynamicBlock(object)) = scene.document.objects.get_mut(&a_graph) {
+            if let DynamicBlockData::EvaluationGraph(graph) = &mut object.data {
+                graph.first_node_id = i32::MAX;
+            }
+        }
+        assert!(parameter(&scene.document, a).is_none());
+        assert!(placement_error(&scene.document, a).is_some());
+        let before = scene.document.clone();
+        assert!(create(&mut scene.document, a, Vector3::ZERO).is_none());
+        assert_eq!(scene.document, before, "existing graphs remain untouched");
+
         scene.define_block_raw("BLOCK_B", Vector3::ZERO, vec![EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_Y))]);
         let b = scene.document.block_records.get("BLOCK_B").unwrap().handle;
         let loc = Vector3::new(3.25, -4.5, 0.0);
         create(&mut scene.document, b, loc).unwrap();
+        for (handle, object) in &before.objects {
+            assert_eq!(
+                scene.document.objects.get(handle),
+                Some(object),
+                "preserved object {handle}"
+            );
+        }
         for ext in ["dwg", "dxf"] {
             let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version).unwrap();
             let read = crate::io::load_bytes(&format!("multi.{ext}"), bytes).unwrap();

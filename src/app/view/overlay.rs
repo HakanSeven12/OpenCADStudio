@@ -328,13 +328,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
                 .is_some_and(|p| self.on_handle(p));
         if grabbing {
             iced::mouse::Interaction::ResizingHorizontally
-        } else if self
-            .cell
-            .zip(cursor.position_in(bounds))
-            .is_some_and(|(cell, p)| cell.contains(p))
-        {
-            iced::mouse::Interaction::Text
         } else {
+            // No pointer of its own over a cell: any would hide the drawing
+            // under it from the wheel, so zooming there would stop.
             iced::mouse::Interaction::default()
         }
     }
@@ -2700,6 +2696,47 @@ mod measurement_tests {
                 "the list stays between the top edge and the command line: {bounds:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cell_editor_wheel_tests {
+    use super::*;
+    #[test]
+    fn wheel_over_the_typed_in_cell_still_zooms_the_drawing() {
+        let p = |x, y| iced::Point::new(x, y);
+        let cell = crate::app::table_cell_edit::CellCanvas {
+            origin: p(100.0, 100.0),
+            x: iced::Vector::new(1.0, 0.0),
+            y: iced::Vector::new(0.0, 1.0),
+            corners: [p(100.0, 100.0), p(300.0, 100.0), p(300.0, 160.0), p(100.0, 160.0)],
+            height: 60.0,
+        };
+        let editor = MTextPreview {
+            segments: Vec::new(),
+            boxes: Vec::new(),
+            sel: None,
+            caret: 0,
+            caret_on: true,
+            minx: 0.0,
+            miny: 0.0,
+            scale: 1.0,
+            content_h: 600.0,
+            ruler: None,
+            rotation: (1.0, 0.0),
+            cell: Some(cell),
+        };
+        let drawing = mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(800.0, 600.0),
+            stack![drawing, iced::widget::canvas(editor).width(Fill).height(Fill)],
+        );
+        ui.point_at(p(200.0, 130.0));
+        ui.simulate([Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        })]);
+        assert!(ui.into_messages().any(|m| matches!(m, Message::ViewportScroll(_))));
     }
 }
 

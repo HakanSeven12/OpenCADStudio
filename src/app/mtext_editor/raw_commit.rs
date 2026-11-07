@@ -60,7 +60,7 @@ impl MTextEditorState {
     }
 
     /// Why the draft cannot be saved yet: a field that is not a valid number.
-    fn draft_error(&self) -> Option<&'static str> {
+    pub(in crate::app) fn draft_error(&self) -> Option<&'static str> {
         let positive = |s: &str| {
             s.trim()
                 .replace(',', ".")
@@ -220,6 +220,9 @@ impl crate::app::OpenCADStudio {
     /// it was not, the editor and its draft stay as they were, except that
     /// closing an empty new text discards it.
     pub(super) fn commit_mtext_draft(&mut self, keep_open: bool) -> bool {
+        if self.table_cell_editor.is_some() {
+            return self.commit_table_cell_editor();
+        }
         let i = self.active_tab;
         let Some(ed) = self.mtext_editor.as_ref() else {
             return false;

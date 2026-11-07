@@ -958,6 +958,9 @@ impl OpenCADStudio {
         // Close the document-level first-touch transaction started by
         // push_undo_snapshot at this message boundary.
         self.finish_all_pending_history();
+        if self.tabs[self.active_tab].active_cmd.is_none() {
+            self.tool_palettes.placing = None;
+        }
         // After every message, mirror the active command step's prompt so
         // its history line stays pinned (non-fading) until the step changes.
         // A pending client pick (`user_select` / `getpoint`) pins its labeled

@@ -36,6 +36,8 @@ pub struct BlockTool {
     pub annotative: bool,
     /// Uniform scale factor applied when inserting this tool.
     pub scale: f64,
+    /// Captured signed axis scales; absent for older saved tools.
+    pub scale_xyz: Option<[f64; 3]>,
     /// Rotation angle in degrees applied when inserting this tool.
     pub rotation_deg: f64,
     /// Whether to explode the block reference upon insertion.
@@ -59,6 +61,7 @@ impl Default for BlockTool {
             dynamic: false,
             annotative: false,
             scale: 1.0,
+            scale_xyz: None,
             rotation_deg: 0.0,
             explode: false,
             captured: None,
@@ -76,6 +79,7 @@ impl PartialEq for BlockTool {
             && self.dynamic == other.dynamic
             && self.annotative == other.annotative
             && self.scale == other.scale
+            && self.scale_xyz == other.scale_xyz
             && self.rotation_deg == other.rotation_deg
             && self.explode == other.explode
             && self.captured == other.captured
@@ -93,7 +97,7 @@ pub struct ToolPaletteTab {
 impl Default for ToolPaletteTab {
     fn default() -> Self {
         Self {
-            name: "Blocks".to_string(),
+            name: crate::tr!("tool-palettes", "default-tab"),
             tools: Vec::new(),
         }
     }
@@ -327,14 +331,15 @@ pub fn view<'a>(
 
     // Tool list for the active palette
     let pattern = state.search.trim();
+    let filter = format!("*{pattern}*");
     let active_tab = state.active_tab();
     let mut tool_rows: Vec<Element<'a, Message>> = Vec::new();
     let total_tools = active_tab.tools.len();
 
     for (idx, tool) in active_tab.tools.iter().enumerate() {
         if !pattern.is_empty()
-            && !crate::io::xref_model::wildcard_match(&tool.label, pattern)
-            && !crate::io::xref_model::wildcard_match(&tool.name, pattern)
+            && !crate::io::xref_model::wildcard_match(&tool.label, &filter)
+            && !crate::io::xref_model::wildcard_match(&tool.name, &filter)
         {
             continue;
         }

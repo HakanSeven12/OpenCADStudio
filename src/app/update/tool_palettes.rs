@@ -112,6 +112,7 @@ impl OpenCADStudio {
             dynamic,
             annotative,
             scale: 1.0,
+            scale_xyz: None,
             rotation_deg: 0.0,
             explode: false,
             captured: Some(captured),
@@ -177,7 +178,7 @@ impl OpenCADStudio {
     pub(in crate::app) fn add_selected_blocks_to_tool_palette(&mut self) -> usize {
         let i = self.active_tab;
         let handles = self.tabs[i].scene.selected_handles_in_order();
-        let mut specs: Vec<(String, f64, f64)> = Vec::new();
+        let mut specs: Vec<(String, [f64; 3], f64)> = Vec::new();
         for h in handles {
             let Some(EntityType::Insert(ins)) = self.tabs[i].scene.document.get_entity(h) else {
                 continue;
@@ -199,13 +200,11 @@ impl OpenCADStudio {
             if canonical_name.starts_with('*') {
                 continue;
             }
-            let scale_val = ins.x_scale();
-            let scale = if scale_val.is_finite() && scale_val.abs() > 1e-9 {
-                scale_val.abs()
-            } else {
-                1.0
-            };
+            let scale = [ins.x_scale(), ins.y_scale(), ins.z_scale()];
             let rotation_deg = ins.rotation.to_degrees();
+            if scale.iter().any(|v| !v.is_finite() || v.abs() <= 1e-9) || !rotation_deg.is_finite() {
+                continue;
+            }
             if !specs
                 .iter()
                 .any(|(n, _, _)| n.eq_ignore_ascii_case(&canonical_name))
@@ -228,7 +227,8 @@ impl OpenCADStudio {
                     .iter_mut()
                     .find(|t| t.name.eq_ignore_ascii_case(&name))
                 {
-                    tool.scale = scale;
+                    tool.scale = scale[0].abs();
+                    tool.scale_xyz = Some(scale);
                     tool.rotation_deg = rotation_deg;
                 }
                 added += 1;
@@ -271,8 +271,14 @@ impl OpenCADStudio {
                 crate::app::command_driver::clipboard::remap_eed_apps(entity, &apps);
             }
             if redefine && def.name.eq_ignore_ascii_case(&tool.name) {
-                let _ = scene.redefine_block_raw(&def.name, def.base_point, entities);
+                if scene.redefine_block_raw(&def.name, def.base_point, entities).is_err() {
+                    return false;
+                }
             } else if scene.document.block_records.get(&def.name).is_none() {
+                if entities.iter().any(|entity| matches!(entity, EntityType::Insert(reference)
+                    if crate::scene::block_service::would_create_cycle(&scene.document, &def.name, &reference.block_name))) {
+                    return false;
+                }
                 scene.define_block_raw(&def.name, def.base_point, entities);
                 created.push(def);
             }
@@ -326,6 +332,25 @@ impl OpenCADStudio {
             return Task::none();
         };
 
+        // Refuse unsupported redefinition before changing definitions or tables.
+        if self.block_redefine_mode == 2 {
+            if let Some(record) = self.tabs[i].scene.document.block_records.get(&tool.name) {
+                if tool.dynamic || crate::scene::block_authoring::export_graph(&self.tabs[i].scene.document, record.handle).is_some() {
+                    self.command_line.push_error(&crate::tr!("tool-palettes", "redefine-dynamic"));
+                    return Task::none();
+                }
+            }
+        }
+        if let Some(container) = self.tabs[i].scene.block_edit_block.and_then(|handle|
+            self.tabs[i].scene.document.block_records.iter().find(|r| r.handle == handle).map(|r| r.name.clone())) {
+            let captured_cycle = tool.captured.as_ref().is_some_and(|deps|
+                deps.blocks.iter().any(|def| def.name.eq_ignore_ascii_case(&container)));
+            if captured_cycle || crate::scene::block_service::would_create_cycle(&self.tabs[i].scene.document, &container, &tool.name) {
+                self.command_line.push_error(&crate::scene::block_service::circular_dependency_error(&container, &tool.name));
+                return Task::none();
+            }
+        }
+
         let needs_import = self.tabs[i]
             .scene
             .document
@@ -334,6 +359,8 @@ impl OpenCADStudio {
             .is_none()
             || self.block_redefine_mode == 2;
 
+        let before_import = needs_import.then(|| self.tabs[i].scene.document.clone());
+        let before_dirty = self.tabs[i].dirty;
         if needs_import && tool.captured.is_some() {
             // Open an undo snapshot before importing the block definition so
             // that the imported definition, dynamic BlockGraph, and placed
@@ -342,6 +369,11 @@ impl OpenCADStudio {
         }
 
         if !self.ensure_tool_block_in_drawing(i, &tool, self.block_redefine_mode == 2) {
+            if let Some(before) = before_import {
+                self.tabs[i].scene.document = before;
+                self.tabs[i].scene.populate_meshes_from_document();
+                self.tabs[i].dirty = before_dirty;
+            }
             self.drop_unchanged_pending_history(i);
             self.command_line.push_error(&crate::tr!(
                 "tool-palettes",
@@ -358,6 +390,11 @@ impl OpenCADStudio {
             .get(&tool.name)
             .map(|br| br.name.clone())
         else {
+            if let Some(before) = before_import {
+                self.tabs[i].scene.document = before;
+                self.tabs[i].scene.populate_meshes_from_document();
+                self.tabs[i].dirty = before_dirty;
+            }
             self.drop_unchanged_pending_history(i);
             return Task::none();
         };
@@ -376,6 +413,11 @@ impl OpenCADStudio {
                     &container,
                     &canonical_name,
                 ) {
+                    if let Some(before) = before_import {
+                        self.tabs[i].scene.document = before;
+                        self.tabs[i].scene.populate_meshes_from_document();
+                        self.tabs[i].dirty = before_dirty;
+                    }
                     self.drop_unchanged_pending_history(i);
                     self.command_line.push_error(
                         &crate::scene::block_service::circular_dependency_error(
@@ -395,13 +437,14 @@ impl OpenCADStudio {
             opts.rotation = false;
             opts.repeat = false;
         }
-        if (tool.scale - 1.0).abs() > 1e-9 && !opts.scale {
-            opts.x = tool.scale;
-            opts.y = tool.scale;
-            opts.z = tool.scale;
-            opts.uniform = true;
+        if !opts.scale {
+            let [x, y, z] = tool.scale_xyz.unwrap_or([tool.scale; 3]);
+            opts.x = x;
+            opts.y = y;
+            opts.z = z;
+            opts.uniform = x == y && y == z;
         }
-        if tool.rotation_deg.abs() > 1e-9 && !opts.rotation {
+        if !opts.rotation {
             opts.angle = tool.rotation_deg;
         }
         if tool.explode {
@@ -465,7 +508,7 @@ impl OpenCADStudio {
                 let name = if raw.is_empty() {
                     let mut n = self.tool_palettes.palettes.len() + 1;
                     loop {
-                        let candidate = format!("Palette {n}");
+                        let candidate = crate::tr!("tool-palettes", "new-tab-name", number = n);
                         if !self
                             .tool_palettes
                             .palettes
@@ -493,6 +536,9 @@ impl OpenCADStudio {
                     && idx < self.tool_palettes.palettes.len()
                 {
                     self.tool_palettes.palettes.remove(idx);
+                    if idx < self.tool_palettes.active_palette {
+                        self.tool_palettes.active_palette -= 1;
+                    }
                     self.tool_palettes.ensure_non_empty();
                     self.save_config();
                 }

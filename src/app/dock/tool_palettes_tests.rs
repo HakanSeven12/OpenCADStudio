@@ -33,6 +33,11 @@ fn fixture_dynamic_block(app: &mut crate::app::OpenCADStudio) -> String {
         .unwrap();
     let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
     let _ = app.run_command_line("BPARAMETER LINEAR 0,0 6,2 3,2");
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let doc = &mut app.tabs[i].scene.document;
+    let p = crate::scene::block_actions::all_parameters(doc, definition)[0].handle;
+    let target = doc.block_records.get(name).unwrap().entity_handles[0];
+    crate::scene::block_actions::create(doc, definition, crate::scene::block_actions::Kind::Move, p, &[target], glam::DVec3::ZERO).unwrap();
     let _ = app.dispatch_command("BEDIT_SAVE");
     let _ = app.dispatch_command("BCLOSE");
     name.to_string()
@@ -450,6 +455,7 @@ fn tool_palettes_persistence_roundtrip() {
                 dynamic: true,
                 annotative: false,
                 scale: 1.5,
+                scale_xyz: None,
                 rotation_deg: 90.0,
                 explode: false,
                 captured: None,
@@ -463,6 +469,7 @@ fn tool_palettes_persistence_roundtrip() {
                 dynamic: false,
                 annotative: true,
                 scale: 2.0,
+                scale_xyz: None,
                 rotation_deg: 0.0,
                 explode: true,
                 captured: None,
@@ -504,4 +511,106 @@ fn tool_palettes_persistence_roundtrip() {
     state.apply_persisted(deserialized);
     assert_eq!(state.active_palette, 1);
     assert_eq!(state.active_tab().tools.len(), 2);
+}
+
+#[test]
+fn selected_tool_preserves_mirrored_axis_scales_on_insertion() {
+    let mut app = fresh();
+    define_block(&mut app, "MIRRORED_TOOL");
+    let i = app.active_tab;
+    let mut source = Insert::new("MIRRORED_TOOL", Vector3::ZERO);
+    source.set_x_scale(-2.);
+    source.set_y_scale(3.);
+    source.set_z_scale(4.);
+    source.rotation = 0.5;
+    let handle = app.tabs[i].scene.document.add_entity(EntityType::Insert(source)).unwrap();
+    app.tabs[i].scene.select_entity(handle, true);
+    assert_eq!(app.add_selected_blocks_to_tool_palette(), 1);
+    let _ = app.update(Message::TabNew);
+    let j = app.active_tab;
+    let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::new(20., 30., 0.)));
+    let inserted = app.tabs[j].scene.document.entities().find_map(|e| if let EntityType::Insert(i) = e { Some(i) } else { None }).unwrap();
+    assert_eq!([inserted.x_scale(), inserted.y_scale(), inserted.z_scale()], [-2., 3., 4.]);
+    assert!((inserted.rotation - 0.5).abs() < 1e-9);
+}
+
+#[test]
+fn dynamic_tool_redefinition_is_refused_without_mutation() {
+    let mut app = fresh();
+    let name = fixture_dynamic_block(&mut app);
+    assert!(app.add_block_to_tool_palette(&name));
+    app.block_redefine_mode = 2;
+    let i = app.active_tab;
+    let before = app.tabs[i].scene.document.clone();
+    let depth = app.tabs[i].history.undo_stack.len();
+    let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::ZERO));
+    assert_eq!(app.tabs[i].scene.document, before);
+    assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
+    assert!(app.command_line.last_error.is_some());
+}
+
+#[test]
+fn recursive_tool_import_is_refused_before_creating_dependencies() {
+    let mut app = fresh();
+    define_block(&mut app, "CONTAINER");
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw("OUTER_TOOL", Vector3::ZERO,
+        vec![EntityType::Insert(Insert::new("CONTAINER", Vector3::ZERO))]);
+    assert!(app.add_block_to_tool_palette("OUTER_TOOL"));
+    let _ = app.update(Message::TabNew);
+    let j = app.active_tab;
+    define_block(&mut app, "CONTAINER");
+    app.tabs[j].scene.block_edit_block = Some(app.tabs[j].scene.document.block_records.get("CONTAINER").unwrap().handle);
+    let before = app.tabs[j].scene.document.clone();
+    let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::ZERO));
+    assert_eq!(app.tabs[j].scene.document, before);
+    assert!(app.command_line.last_error.is_some());
+}
+
+#[test]
+fn imported_dynamic_tool_evaluates_its_remapped_action_targets() {
+    use crate::scene::block_actions as actions;
+    let mut app = fresh();
+    let name = fixture_dynamic_block(&mut app);
+    assert!(app.add_block_to_tool_palette(&name));
+    let _ = app.update(Message::TabNew);
+    let j = app.active_tab;
+    let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::ZERO));
+    let doc = &app.tabs[j].scene.document;
+    let definition = doc.block_records.get(&name).unwrap().handle;
+    let insert = doc.entities().find_map(|e| match e { EntityType::Insert(i) if i.block_name == name => Some(i.common.handle), _ => None }).unwrap();
+    let parameter = &actions::all_parameters(doc, definition)[0];
+    let evaluated = actions::instance::evaluate(doc, insert, parameter.handle, parameter.end * 2.).unwrap().unwrap();
+    let EntityType::Insert(reference) = evaluated.get_entity(insert).unwrap() else { panic!() };
+    let line = evaluated.entities_in_block(&reference.block_name).find_map(|e| if let EntityType::Line(l) = e { Some(l) } else { None }).unwrap();
+    assert!(line.start.distance(&Vector3::new(6., 2., 0.)) < 1e-8);
+    assert!(line.end.distance(&Vector3::new(16., 2., 0.)) < 1e-8);
+}
+
+#[test]
+fn removing_an_earlier_palette_keeps_the_active_palette_selected() {
+    let mut app = fresh();
+    for name in ["First", "Second", "Third"] {
+        let _ = app.on_tool_palettes(ToolPalettesMsg::NewPaletteNameChanged(name.into()));
+        let _ = app.on_tool_palettes(ToolPalettesMsg::NewPalette);
+    }
+    assert_eq!(app.tool_palettes.active_tab().name, "Third");
+    let _ = app.on_tool_palettes(ToolPalettesMsg::DeletePalette(0));
+    assert_eq!(app.tool_palettes.active_tab().name, "Third");
+}
+
+#[test]
+fn cancelled_tool_placement_clears_the_palette_highlight() {
+    let mut app = fresh();
+    define_block(&mut app, "CANCEL_TOOL");
+    assert!(app.add_block_to_tool_palette("CANCEL_TOOL"));
+    let i = app.active_tab;
+    let before = app.tabs[i].scene.document.clone();
+    let _ = app.insert_from_tool_palette(0, None);
+    assert!(app.tabs[i].active_cmd.is_some());
+    assert!(app.tool_palettes.placing.is_some());
+    let _ = app.update(Message::CommandEscape);
+    assert!(app.tabs[i].active_cmd.is_none());
+    assert!(app.tool_palettes.placing.is_none());
+    assert_eq!(app.tabs[i].scene.document, before);
 }

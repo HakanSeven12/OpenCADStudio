@@ -1161,6 +1161,9 @@ impl OpenCADStudio {
             // LAYERFILTER takes its whole argument list on one line, and
             // FILTER the name of a saved filter.
             || tokens[0].eq_ignore_ascii_case("FILTER")
+            // QSELECT takes its property, operator and value on one line; a
+            // bare QSELECT still opens the dialog.
+            || tokens[0].eq_ignore_ascii_case("QSELECT")
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("LAYERGROUP")

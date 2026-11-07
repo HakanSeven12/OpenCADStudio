@@ -5767,4 +5767,41 @@ mod batch4_tests {
             app.command_line.last_error
         );
     }
+
+    #[test]
+    fn qselect_command_line_compares_negates_and_matches_wildcards() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("LINE 0,5 40,5");
+        let _ = app.run_command_line("CIRCLE 100,100 5");
+        let count = |app: &OpenCADStudio| app.tabs[app.active_tab].scene.selected_entities().len();
+
+        // Numeric comparison: only the 40-long line.
+        let _ = app.run_command_line("QSELECT LENGTH > 20");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        assert_eq!(count(&app), 1, "{}", out(&app));
+
+        // Type equality ignores case.
+        let _ = app.run_command_line("QSELECT TYPE line");
+        assert_eq!(count(&app), 2, "{}", out(&app));
+
+        // Wildcards work on the type name too.
+        let _ = app.run_command_line("QSELECT TYPE L*");
+        assert_eq!(count(&app), 2, "{}", out(&app));
+
+        // NOT turns the test around: everything that is not a line.
+        let _ = app.run_command_line("QSELECT NOT TYPE LINE");
+        assert_eq!(count(&app), 1, "{}", out(&app));
+        let selected = app.tabs[app.active_tab].scene.selected_entities();
+        assert!(
+            matches!(selected[0].1, document::EntityType::Circle(_)),
+            "the circle should be the only match"
+        );
+
+        // A malformed line keeps the selection and states the form.
+        let _ = app.run_command_line("QSELECT LENGTH >");
+        assert_eq!(count(&app), 1, "{}", out(&app));
+        assert!(out(&app).contains("a value is needed"), "{}", out(&app));
+    }
 }

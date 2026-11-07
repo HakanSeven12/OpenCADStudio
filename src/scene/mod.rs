@@ -6879,11 +6879,20 @@ impl Scene {
         use document::objects::ObjectType;
         let stored = self.document.objects.values().find_map(|o| match o {
             ObjectType::Scale(s) if !s.is_temporary && s.name.eq_ignore_ascii_case(name) => {
-                Some((s.paper_units, s.drawing_units))
+                // Command-line named ratios use the same effective factor
+                // as the scale picker, including legacy unconverted defaults.
+                let factor = self.effective_scale_factor(s);
+                Some((s.paper_units, s.paper_units / factor))
             }
             _ => None,
         });
+        let standard = self
+            .default_scales()
+            .iter()
+            .find(|(label, _)| label.eq_ignore_ascii_case(name))
+            .map(|&(_, base)| (1.0, 1.0 / (base * self.default_scale_unit_factor())));
         stored
+            .or(standard)
             .or_else(|| Self::parse_scale_name_ratio(name))
             .filter(|(paper, drawing)| *paper > 0.0 && *drawing > 0.0)
     }

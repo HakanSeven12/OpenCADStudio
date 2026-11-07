@@ -53,7 +53,7 @@ mod dock;
 mod tab_document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
-mod filter_dialog;
+pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
@@ -351,6 +351,10 @@ pub enum QSelectResult {
     Remove,
 }
 
+/// A picked object's properties ticked from the start: what describes it,
+/// not where it sits (#2611).
+pub(crate) const SAMPLE_TICKED_FIELDS: &[&str] = &["layer", "color", "linetype"];
+
 /// The properties of a picked object, each ticked to become a condition.
 #[derive(Clone, Debug)]
 pub struct QSelectSample {
@@ -483,6 +487,8 @@ pub struct QSelectState {
     pub error: Option<String>,
     /// Objects the conditions find right now.
     pub live_count: usize,
+    /// What the conditions find, by object type, most first.
+    pub live_by_type: Vec<(String, usize)>,
     /// The matches are highlighted in the drawing.
     pub show: bool,
     /// Values of the chosen property in the scope, most frequent first.
@@ -5466,6 +5472,9 @@ pub enum Message {
     QSelectAddCondition,
     /// Hide the filter and sample an object's filterable properties.
     QSelectPickObject,
+    /// Window…: step aside, pick the objects to search in, come back with
+    /// them as the selection.
+    QSelectWindow,
     QSelectEditCondition(usize),
     QSelectRemoveCondition(usize),
     QSelectClearConditions,

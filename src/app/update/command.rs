@@ -3363,6 +3363,7 @@ impl OpenCADStudio {
             result,
             error: None,
             live_count: 0,
+            live_by_type: Vec::new(),
             show,
             value_counts: Vec::new(),
             sample: None,

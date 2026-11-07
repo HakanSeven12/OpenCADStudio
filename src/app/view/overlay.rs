@@ -1842,13 +1842,16 @@ pub(super) fn qselect_overlay<'a>(
     let content = crate::ui::modal::intrinsic(
         measurement,
         content,
-        iced::Size::new(720.0, f32::INFINITY),
+        iced::Size::new(480.0, f32::INFINITY),
         modal_resize,
     );
 
     crate::ui::modal::modal(
         Space::new().width(Fill).height(Fill),
-        t!("Quick Select"),
+        match transparent_for {
+            Some(command) => crate::tf!("Quick Select · for {}", command),
+            None => t!("Quick Select"),
+        },
         content,
         Message::QSelectClose,
         modal_offset,
@@ -1920,7 +1923,10 @@ fn qselect_content<'a>(
         row![
             heading(t!("Search in")),
             Space::new().width(flex_width),
-            muted(crate::tf!("{} candidate object(s)", candidate_count)),
+            muted(crate::tf!(
+                "{} objects",
+                crate::ui::live_result::fmt_count(candidate_count)
+            )),
         ]
         .align_y(iced::Alignment::Center)
         .width(sizing.width),
@@ -1931,12 +1937,29 @@ fn qselect_content<'a>(
                 .map(|scope| {
                     (
                         Message::QSelectSetScope(*scope),
-                        std::borrow::Cow::Owned(scope.to_string()),
+                        match scope {
+                            QSelectScope::CurrentSelection => t!("Selection"),
+                            _ => std::borrow::Cow::Owned(scope.to_string()),
+                        },
                         state.scope == *scope,
                     )
                 })
+                // Window…: pick the objects to search in (#2611 mockup).
+                .chain(std::iter::once((
+                    Message::QSelectWindow,
+                    t!("Window…"),
+                    false,
+                )))
                 .collect()
         ),
+        if state.scope == QSelectScope::CurrentSelection {
+            crate::ui::live_result::selection_note(
+                candidate_count,
+                Message::QSelectSetScope(QSelectScope::CurrentSpace),
+            )
+        } else {
+            Element::from(Space::new().height(0))
+        },
     ];
 
     // ── Object type · Property · Value ─────────────────────────────────
@@ -1951,7 +1974,11 @@ fn qselect_content<'a>(
         crate::ui::dropdown_list::pick_list(Some(type_sel), type_options, move |name| match counts
             .get(name)
         {
-            Some(count) => format!("{}  ({count})", qselect_type_label(name)),
+            Some(count) => format!(
+                "{}   {}",
+                qselect_type_label(name),
+                crate::ui::live_result::fmt_count(*count)
+            ),
             None => t!(QSELECT_ANY_TYPE).into_owned(),
         })
         .on_select(|s: String| {
@@ -1961,6 +1988,7 @@ fn qselect_content<'a>(
                 Message::QSelectSetType(Some(s))
             }
         })
+        .text_size(12)
         .width(field_width);
 
     let any_property = crate::app::QSelectPropertyChoice {
@@ -1982,6 +2010,7 @@ fn qselect_content<'a>(
                 Message::QSelectSetProperty(Some(p))
             }
         })
+        .text_size(12)
         .width(field_width);
 
     let number_property = state
@@ -1998,7 +2027,8 @@ fn qselect_content<'a>(
             value.to_string()
         })
         .on_select(Message::QSelectSetOperator)
-        .width(iced::Length::Fixed(150.0));
+        .text_size(12)
+        .width(iced::Length::Fixed(120.0));
 
     let value_enabled = state.property.is_some() && !matches!(state.operator, QSelectOp::Any);
     let value_editor: Element<'a, Message> = match state.property.as_ref() {
@@ -2017,14 +2047,27 @@ fn qselect_content<'a>(
                 }
             }
             QSelectValueEditor::Text | QSelectValueEditor::Number => {
-                let mut input = text_input("", &state.value).size(12).width(field_width);
+                // Room to type even in the dialog's natural size.
+                let width = if fill {
+                    Fill
+                } else {
+                    iced::Length::Fixed(150.0)
+                };
+                let mut input = text_input("", &state.value).size(12).width(width);
                 if value_enabled {
                     input = input.on_input(Message::QSelectSetValue);
                 }
                 input.into()
             }
         },
-        None => text_input("", "").size(12).width(field_width).into(),
+        None => text_input("", "")
+            .size(12)
+            .width(if fill {
+                Fill
+            } else {
+                iced::Length::Fixed(150.0)
+            })
+            .into(),
     };
     // The most frequent values in the scope, one click each.
     let mut shortcuts = row![].spacing(4);
@@ -2039,8 +2082,55 @@ fn qselect_content<'a>(
         }
     }
 
+    // Conditions from a picked object (#2611 mockup: the pipette).
+    let pipette = iced::widget::tooltip(
+        button(crate::ui::icons::themed(crate::ui::icons::EYEDROPPER, 13.0))
+            .on_press_maybe(
+                (state.editing_condition.is_none() && state.sample.is_none())
+                    .then_some(Message::QSelectPickObject),
+            )
+            .style(button::secondary)
+            .padding([5, 7]),
+        container(text(t!("Select object")).size(11)).padding([3, 7]),
+        iced::widget::tooltip::Position::Bottom,
+    );
+    let draft_ready = state.type_filter.is_some() || state.property.is_some();
+    let add_draft = button(
+        text(if state.editing_condition.is_some() {
+            t!("Update")
+        } else {
+            t!("Add")
+        })
+        .size(12),
+    )
+    .on_press_maybe(
+        (draft_ready
+            && state.sample.is_none()
+            && crate::app::QSelectCondition::validation_error_for(
+                state.type_filter.as_deref(),
+                state.property.as_ref(),
+                state.operator,
+                &state.value,
+            )
+            .is_none())
+        .then_some(Message::QSelectAddCondition),
+    )
+    .style(button::secondary)
+    .padding([5, 10]);
+    // A value typed that is not one (a word where a number goes): said under
+    // the field, not at the bottom.
+    let inline_error = (!state.value.is_empty())
+        .then(|| {
+            crate::app::QSelectCondition::validation_error_for(
+                state.type_filter.as_deref(),
+                state.property.as_ref(),
+                state.operator,
+                &state.value,
+            )
+        })
+        .flatten();
     let fields = column![
-        row![label(t!("Object type")), type_picker]
+        row![label(t!("Object type")), type_picker, pipette]
             .align_y(iced::Alignment::Center)
             .spacing(8)
             .width(sizing.width),
@@ -2050,25 +2140,33 @@ fn qselect_content<'a>(
             .spacing(8)
             .width(sizing.width),
         Space::new().height(6),
-        row![label(t!("Value")), op_picker, value_editor]
-            .align_y(iced::Alignment::Center)
-            .spacing(8)
-            .width(sizing.width),
+        row![
+            label(t!("Value")),
+            op_picker,
+            value_editor,
+            crate::ui::live_result::pattern_help(),
+            add_draft
+        ]
+        .align_y(iced::Alignment::Center)
+        .spacing(6)
+        .width(sizing.width),
+        // What is wrong with the value, right under it (mockup, States).
+        match (&inline_error, value_enabled) {
+            (Some(problem), true) => Element::from(row![
+                Space::new().width(iced::Length::Fixed(104.0)),
+                text(problem.clone()).size(11).style(|theme: &Theme| {
+                    iced::widget::text::Style {
+                        color: Some(theme.palette().danger.base.color),
+                    }
+                })
+            ]),
+            _ => Element::from(Space::new().height(0)),
+        },
         Space::new().height(4),
         row![Space::new().width(iced::Length::Fixed(104.0)), shortcuts],
     ];
 
     // ── Conditions, or the picked object's properties to tick ─────────
-    let draft_error = if state.type_filter.is_none() && state.property.is_none() {
-        None
-    } else {
-        crate::app::QSelectCondition::validation_error_for(
-            state.type_filter.as_deref(),
-            state.property.as_ref(),
-            state.operator,
-            &state.value,
-        )
-    };
     let conditions_block: Element<'a, Message> = if let Some(sample) = &state.sample {
         let mut rows = column![].spacing(4);
         for (index, (condition, ticked)) in sample.rows.iter().enumerate() {
@@ -2098,98 +2196,153 @@ fn qselect_content<'a>(
         ]
         .into()
     } else {
-        let add = dialog_button_styled_opt(
-            if state.editing_condition.is_some() {
-                t!("Update condition")
-            } else {
-                t!("Add condition")
-            },
-            (draft_error.is_none() && (state.type_filter.is_some() || state.property.is_some()))
-                .then_some(Message::QSelectAddCondition),
-            button::secondary,
-        );
-        let pick = dialog_button_styled_opt(
-            t!("Select object"),
-            state
-                .editing_condition
-                .is_none()
-                .then_some(Message::QSelectPickObject),
-            button::secondary,
-        );
-        let mut actions = row![add, pick].spacing(6);
-        if state.editing_condition.is_some() {
-            actions = actions.push(dialog_button(
-                t!("Cancel edit"),
-                Message::QSelectCancelEdit,
-                false,
-            ));
-        }
-        if !state.conditions.is_empty() {
-            actions = actions.push(dialog_button(
-                t!("Clear conditions"),
-                Message::QSelectClearConditions,
-                false,
-            ));
-        }
-        let mut rows = column![].spacing(4);
+        let mut rows = column![].spacing(2);
         if state.conditions.is_empty() {
             rows = rows.push(muted(t!("No conditions added.")));
         }
-        for (index, condition) in state.conditions.iter().enumerate() {
-            let editing = state.editing_condition == Some(index);
+        // One block per object type, its count from the live result (#2611
+        // mockup: "Line · Layer = FAL* · 312").
+        let mut types_in_order: Vec<Option<String>> = Vec::new();
+        for condition in &state.conditions {
+            if !types_in_order.contains(&condition.type_filter) {
+                types_in_order.push(condition.type_filter.clone());
+            }
+        }
+        for type_filter in types_in_order {
+            let count = type_filter.as_ref().and_then(|t| {
+                state
+                    .live_by_type
+                    .iter()
+                    .find(|(name, _)| name == t)
+                    .map(|(_, n)| *n)
+            });
             rows = rows.push(
                 row![
-                    text(qselect_condition_summary(condition))
-                        .size(12)
-                        .width(flex_width)
-                        .style(move |theme: &Theme| iced::widget::text::Style {
-                            color: editing.then_some(theme.palette().primary.base.color),
-                        }),
-                    dialog_button(t!("Edit"), Message::QSelectEditCondition(index), false),
-                    dialog_button(t!("Delete"), Message::QSelectRemoveCondition(index), false),
+                    text(
+                        type_filter
+                            .as_deref()
+                            .map(qselect_type_label)
+                            .unwrap_or_else(|| t!(QSELECT_ANY_TYPE).into_owned())
+                    )
+                    .size(12)
+                    .width(flex_width),
+                    muted(std::borrow::Cow::Owned(
+                        count
+                            .map(crate::ui::live_result::fmt_count)
+                            .unwrap_or_default()
+                    )),
                 ]
-                .spacing(6)
                 .align_y(iced::Alignment::Center),
+            );
+            for (index, condition) in state
+                .conditions
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| c.type_filter == type_filter)
+            {
+                if condition.property.is_none() {
+                    continue;
+                }
+                let editing = state.editing_condition == Some(index);
+                let mut summary = qselect_condition_summary(condition);
+                if let Some((_, rest)) = summary.split_once(" · ") {
+                    summary = rest.to_string();
+                }
+                rows = rows.push(
+                    row![
+                        Space::new().width(14),
+                        text(summary)
+                            .size(12)
+                            .width(flex_width)
+                            .style(move |theme: &Theme| iced::widget::text::Style {
+                                color: editing.then_some(theme.palette().primary.base.color),
+                            }),
+                        button(text(t!("Edit")).size(11))
+                            .on_press(Message::QSelectEditCondition(index))
+                            .style(button::text)
+                            .padding([2, 6]),
+                        button(crate::ui::icons::themed(crate::ui::icons::TRASH, 12.0))
+                            .on_press(Message::QSelectRemoveCondition(index))
+                            .style(button::text)
+                            .padding([2, 6]),
+                    ]
+                    .spacing(4)
+                    .align_y(iced::Alignment::Center),
+                );
+            }
+        }
+        let mut heading_row =
+            row![heading(t!("Conditions (all of an object's type must match)")).width(flex_width)]
+                .align_y(iced::Alignment::Center);
+        if state.editing_condition.is_some() {
+            heading_row = heading_row.push(
+                button(text(t!("Cancel edit")).size(11))
+                    .on_press(Message::QSelectCancelEdit)
+                    .style(button::text)
+                    .padding([2, 6]),
+            );
+        }
+        if !state.conditions.is_empty() {
+            heading_row = heading_row.push(
+                button(text(t!("Clear")).size(11))
+                    .on_press(Message::QSelectClearConditions)
+                    .style(button::text)
+                    .padding([2, 6]),
             );
         }
         column![
-            heading(t!("Conditions (all of an object's type must match)")),
+            heading_row,
             Space::new().height(5),
             iced::widget::scrollable(rows)
-                .height(110)
+                .height(if fill { Fill } else { iced::Length::Shrink })
                 .width(sizing.width),
-            Space::new().height(6),
-            actions,
         ]
         .into()
     };
 
     // ── Live result ────────────────────────────────────────────────────
-    let show_icon = if state.show {
-        crate::ui::icons::EYE
+    // The count large; with samples of several types, how many of each.
+    let of_scope = match state.scope {
+        QSelectScope::CurrentSelection => crate::tf!(
+            "of {} in the selection",
+            crate::ui::live_result::fmt_count(candidate_count)
+        ),
+        _ => crate::tf!(
+            "of {} in current space",
+            crate::ui::live_result::fmt_count(candidate_count)
+        ),
+    };
+    let first = if state.live_by_type.len() > 1 {
+        state
+            .live_by_type
+            .iter()
+            .map(|(name, n)| {
+                format!(
+                    "{} {}",
+                    crate::ui::live_result::fmt_count(*n),
+                    qselect_type_label(name)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ")
+    } else if state.live_count == 0 {
+        t!("No match").into_owned()
     } else {
-        crate::ui::icons::EYE_OFF
+        t!("objects match").into_owned()
     };
     let live = container(
         row![
-            text(crate::tf!(
-                "{} of {} objects match",
+            container(crate::ui::live_result::big_count_two_lines(
                 state.live_count,
-                candidate_count
+                first,
+                of_scope,
             ))
-            .size(13)
             .width(flex_width),
-            button(
-                row![
-                    crate::ui::icons::themed(show_icon, 13.0),
-                    text(t!("Show")).size(12)
-                ]
-                .spacing(5)
-                .align_y(iced::Alignment::Center),
-            )
-            .on_press(Message::QSelectSetShow(!state.show))
-            .style(button_style(state.show))
-            .padding([4, 10]),
+            crate::ui::live_result::show_toggle(
+                state.show,
+                t!("Show").into_owned(),
+                Message::QSelectSetShow(!state.show),
+            ),
         ]
         .align_y(iced::Alignment::Center)
         .spacing(8)
@@ -2246,15 +2399,36 @@ fn qselect_content<'a>(
     ];
 
     // ── Footer ─────────────────────────────────────────────────────────
+    // A half-made draft beside finished conditions is no error: Add stays
+    // off until it is complete (#2611 mockup, States).
     let error = state.error.clone().or(if candidate_count == 0 {
         Some(t!("No objects are available in this scope.").into_owned())
     } else {
-        draft_error
+        // A value's problem shows under the value; a missing value is said
+        // by the Select button.
+        None
     });
-    let can_select =
-        state.sample.is_none() && state.editing_condition.is_none() && state.live_count > 0;
+    // Numbers compare as numbers: say so where it matters (mockup Sample).
+    let numeric = state.conditions.iter().any(|c| {
+        c.property
+            .as_ref()
+            .is_some_and(|p| matches!(p.editor, QSelectValueEditor::Number))
+    });
+    let can_select = state.sample.is_none()
+        && state.editing_condition.is_none()
+        && state.live_count > 0
+        && !(state.conditions.is_empty()
+            && state.property.is_some()
+            && state.value.is_empty()
+            && !matches!(state.operator, QSelectOp::Any));
+    // A property chosen and no value yet, nothing else to go on (mockup).
+    let waiting_for_value = state.conditions.is_empty()
+        && state.property.is_some()
+        && state.value.is_empty()
+        && !matches!(state.operator, QSelectOp::Any);
     let select = dialog_button_styled_opt(
         match transparent_for {
+            _ if waiting_for_value => t!("Choose a value first"),
             Some(command) => crate::tf!("Use {} in {}", state.live_count, command),
             None => crate::tf!("Select {}", state.live_count),
         },
@@ -2293,6 +2467,13 @@ fn qselect_content<'a>(
         conditions_block,
         Space::new().height(10),
         live,
+        if numeric {
+            Element::from(
+                muted(t!("Numbers compare as numbers: 3 also finds 3.0000.")).width(sizing.width),
+            )
+        } else {
+            Element::from(Space::new().height(0))
+        },
         Space::new().height(10),
         result,
         Space::new().height(8),

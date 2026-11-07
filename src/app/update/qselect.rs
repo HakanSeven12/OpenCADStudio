@@ -178,8 +178,19 @@ impl OpenCADStudio {
         self.tabs[i]
             .scene
             .set_filter_preview_highlights(if show { &matches } else { &[] });
+        let mut by_type = std::collections::BTreeMap::<String, usize>::new();
+        for h in &matches {
+            if let Some(entity) = self.tabs[i].scene.document.get_entity(*h) {
+                *by_type
+                    .entry(crate::entities::traits::entity_type_name(entity).to_string())
+                    .or_default() += 1;
+            }
+        }
+        let mut by_type: Vec<(String, usize)> = by_type.into_iter().collect();
+        by_type.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         if let Some(state) = self.qselect.as_mut() {
             state.live_count = matches.len();
+            state.live_by_type = by_type;
         }
     }
 
@@ -213,7 +224,7 @@ impl OpenCADStudio {
 
 /// Properties of a picked object ticked by default: what it is and how it
 /// looks, not its geometry.
-const SAMPLE_TICKED_FIELDS: &[&str] = &["layer", "color", "linetype"];
+use crate::app::SAMPLE_TICKED_FIELDS;
 
 /// How many distinct values the value list offers.
 const QSELECT_VALUE_LIMIT: usize = 50;
@@ -239,6 +250,7 @@ mod tests {
             result: crate::app::QSelectResult::New,
             error: None,
             live_count: 0,
+            live_by_type: Vec::new(),
             show: false,
             value_counts: Vec::new(),
             sample: None,

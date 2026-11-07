@@ -68,6 +68,26 @@ pub enum FilterMsg {
     LayerName(String),
     /// Layer mode: keep the filter as a LAYERFILTER filter.
     SaveLayerFilter,
+    /// Hide the dialog and pick an object to take rows from.
+    PickObject,
+    /// Layer mode: rows from this layer's properties, to tick.
+    FromLayer(String),
+    /// Window…: pick the objects to search in.
+    Window,
+    /// Write the drawing's saved filters to a file / read them from one.
+    Export,
+    Import,
+    #[cfg(not(target_arch = "wasm32"))]
+    ExportTo(std::path::PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
+    ImportFrom(std::path::PathBuf),
+    /// Layer mode: FILTER for the objects on the layers found.
+    ObjectsOnLayers,
+    /// Tick or untick a picked object's property.
+    SampleToggle(usize),
+    /// The ticked properties become rows.
+    SampleAdd,
+    SampleCancel,
 }
 
 /// What Quick Select hands over to FILTER.
@@ -110,6 +130,12 @@ pub struct FilterDialogState {
     pub layer_filter_from: Option<String>,
     /// Opened with 'FILTER inside this command's "Select objects:".
     pub for_command: Option<String>,
+    /// A picked object's properties, each ticked to become a row.
+    pub sample: Option<super::QSelectSample>,
+    /// Layer mode: what makes each found layer match, beside it.
+    pub layer_reasons: Vec<String>,
+    /// Layer mode: every layer, for From layer.
+    pub all_layers: Vec<String>,
 }
 
 impl FilterDialogState {
@@ -177,12 +203,328 @@ impl FilterDialogState {
     }
 }
 
+/// A new row: over objects, any type; over layers there is no type, so it
+/// starts on the name (#2610 mockup).
+fn new_row(state: &FilterDialogState) -> Condition {
+    if state.layer_filter.is_some() {
+        Condition {
+            property: Some("name".into()),
+            ..Default::default()
+        }
+    } else {
+        Condition::default()
+    }
+}
+
 /// Live result lines shown per kind.
 const RESULT_LINES: usize = 6;
+
+/// The types a filter's rows name, each once.
+fn sample_type_of(filter: &Filter) -> Vec<String> {
+    let mut types: Vec<String> = Vec::new();
+    let mut note = |c: &Condition| {
+        if let Some(t) = &c.type_filter {
+            if !types.contains(t) {
+                types.push(t.clone());
+            }
+        }
+    };
+    for item in &filter.items {
+        match item {
+            Item::Condition(c) => note(c),
+            Item::Group(g) => g.conditions.iter().for_each(&mut note),
+        }
+    }
+    types
+}
+
+/// Rows from a picked object go into `filter` (#2611): into an empty filter
+/// as its rows; beside rows of the same type (or none) as more rows; next
+/// to rows of another type as a group of their own, the rows already there
+/// becoming a group too and the filter matching any of them.
+pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
+    if rows.is_empty() {
+        return;
+    }
+    let blank = |c: &Condition| c.property.is_none() && c.type_filter.is_none() && !c.negate;
+    let empty = filter.items.iter().all(|item| match item {
+        Item::Condition(c) => blank(c),
+        Item::Group(g) => g.conditions.iter().all(blank),
+    });
+    if empty {
+        filter.root = Match::All;
+        filter.items = rows.into_iter().map(Item::Condition).collect();
+        return;
+    }
+    let sample_type = rows.iter().find_map(|c| c.type_filter.clone());
+    let has_groups = filter
+        .items
+        .iter()
+        .any(|item| matches!(item, Item::Group(_)));
+    let types = sample_type_of(filter);
+    let same_type = types.iter().all(|t| Some(t) == sample_type.as_ref());
+    if filter.root == Match::All && !has_groups && same_type {
+        for row in rows {
+            if !filter
+                .items
+                .iter()
+                .any(|item| matches!(item, Item::Condition(c) if *c == row))
+            {
+                filter.items.push(Item::Condition(row));
+            }
+        }
+        return;
+    }
+    if filter.root == Match::All && !has_groups {
+        let before: Vec<Condition> = filter
+            .items
+            .drain(..)
+            .filter_map(|item| match item {
+                Item::Condition(c) if !blank(&c) => Some(c),
+                _ => None,
+            })
+            .collect();
+        filter.items.push(Item::Group(Group {
+            mode: Match::All,
+            conditions: before,
+        }));
+        filter.root = Match::Any;
+    }
+    filter.items.push(Item::Group(Group {
+        mode: Match::All,
+        conditions: rows,
+    }));
+}
+
+/// Window…: Quick Select or FILTER steps aside while the objects to search
+/// in are picked (a window, a crossing, picks); Enter brings the dialog
+/// back with them as the selection and "Selection" as the scope (#2611
+/// mockup: "Searching only the N selected objects").
+struct ScopeWindowCommand {
+    qselect: Option<Box<super::QSelectState>>,
+    filter: Option<Box<FilterDialogState>>,
+    tab_id: u64,
+    picked: bool,
+}
+
+impl ScopeWindowCommand {
+    fn finish(&mut self) -> crate::command::CmdResult {
+        use crate::command::CmdResult;
+        let picked = self.picked;
+        if let Some(mut state) = self.qselect.take() {
+            if picked {
+                state.scope = QSelectScope::CurrentSelection;
+            }
+            return CmdResult::QSelectSample {
+                state,
+                tab_id: self.tab_id,
+                handle: None,
+            };
+        }
+        if let Some(mut state) = self.filter.take() {
+            if picked {
+                state.scope = QSelectScope::CurrentSelection;
+            }
+            return CmdResult::FilterSample {
+                state,
+                tab_id: self.tab_id,
+                handle: None,
+            };
+        }
+        CmdResult::Cancel
+    }
+}
+
+impl crate::command::CadCommand for ScopeWindowCommand {
+    fn name(&self) -> &'static str {
+        if self.qselect.is_some() {
+            "QSELECT"
+        } else {
+            "FILTER"
+        }
+    }
+    fn prompt(&self) -> String {
+        format!("{}  {}", self.name(), crate::t!("Select objects:"))
+    }
+    fn is_selection_gathering(&self) -> bool {
+        true
+    }
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> crate::command::CmdResult {
+        if handles.is_empty() {
+            return crate::command::CmdResult::NeedPoint;
+        }
+        self.picked = true;
+        self.finish()
+    }
+    fn on_point(&mut self, _point: glam::DVec3) -> crate::command::CmdResult {
+        crate::command::CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        self.finish()
+    }
+    fn on_escape(&mut self) -> crate::command::CmdResult {
+        self.picked = false;
+        self.finish()
+    }
+}
+
+/// Export / Import: the file to write the saved filters to, or read from.
+fn pick_filters_file(save: bool) -> Task<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Task::perform(
+            crate::io::pick_selection_filters_path(save),
+            move |path| match path {
+                Some(path) if save => Message::FilterDialog(FilterMsg::ExportTo(path)),
+                Some(path) => Message::FilterDialog(FilterMsg::ImportFrom(path)),
+                None => Message::Noop,
+            },
+        )
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = save;
+        Task::none()
+    }
+}
+
+/// The pick behind FILTER's From object: the dialog waits in the command
+/// and comes back with the object, or without one on Enter or Esc.
+struct FilterSampleCommand {
+    state: Option<Box<FilterDialogState>>,
+    tab_id: u64,
+}
+
+impl FilterSampleCommand {
+    fn finish(&mut self, handle: Option<Handle>) -> crate::command::CmdResult {
+        match self.state.take() {
+            Some(state) => crate::command::CmdResult::FilterSample {
+                state,
+                tab_id: self.tab_id,
+                handle,
+            },
+            None => crate::command::CmdResult::Cancel,
+        }
+    }
+}
+
+impl crate::command::CadCommand for FilterSampleCommand {
+    fn name(&self) -> &'static str {
+        "FILTER"
+    }
+    fn prompt(&self) -> String {
+        format!("FILTER  {}", crate::t!("Select object:"))
+    }
+    fn needs_entity_pick(&self) -> bool {
+        true
+    }
+    fn entity_pick_includes_fills(&self) -> bool {
+        true
+    }
+    fn entity_pick_highlights_hover(&self) -> bool {
+        true
+    }
+    fn on_entity_pick(&mut self, handle: Handle, _point: glam::DVec3) -> crate::command::CmdResult {
+        if handle.is_null() {
+            crate::command::CmdResult::NeedPoint
+        } else {
+            self.finish(Some(handle))
+        }
+    }
+    fn on_point(&mut self, _point: glam::DVec3) -> crate::command::CmdResult {
+        crate::command::CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        self.finish(None)
+    }
+    fn on_escape(&mut self) -> crate::command::CmdResult {
+        self.finish(None)
+    }
+}
 
 impl OpenCADStudio {
     pub(super) fn on_filter_message(&mut self, msg: FilterMsg) -> Task<Message> {
         match msg {
+            FilterMsg::PickObject => return self.filter_pick_object(),
+            FilterMsg::Window => return self.scope_window_pick(false),
+            FilterMsg::Export => return pick_filters_file(true),
+            FilterMsg::Import => return pick_filters_file(false),
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ExportTo(path) => {
+                self.export_saved_filters(&path);
+                return Task::none();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ImportFrom(path) => {
+                self.import_saved_filters(&path);
+                return Task::none();
+            }
+            FilterMsg::FromLayer(name) => {
+                self.filter_sample_layer(&name);
+                return Task::none();
+            }
+            FilterMsg::ObjectsOnLayers => {
+                let names: Vec<String> = self
+                    .filter_dialog
+                    .as_ref()
+                    .map(|state| state.by_layer.iter().map(|(n, _)| n.clone()).collect())
+                    .unwrap_or_default();
+                self.filter_dialog = None;
+                self.filter_open(Some(FilterSeed {
+                    filter: Filter {
+                        root: Match::All,
+                        items: vec![Item::Condition(Condition {
+                            property: Some("layer".into()),
+                            value: names.join(","),
+                            ..Default::default()
+                        })],
+                    },
+                    scope: QSelectScope::CurrentSpace,
+                    result: QSelectResult::New,
+                    invert: false,
+                    show: false,
+                }));
+                return Task::none();
+            }
+            FilterMsg::SampleToggle(index) => {
+                if let Some(row) = self
+                    .filter_dialog
+                    .as_mut()
+                    .and_then(|state| state.sample.as_mut())
+                    .and_then(|sample| sample.rows.get_mut(index))
+                {
+                    row.1 = !row.1;
+                }
+                return Task::none();
+            }
+            FilterMsg::SampleCancel => {
+                if let Some(state) = self.filter_dialog.as_mut() {
+                    state.sample = None;
+                }
+                return Task::none();
+            }
+            FilterMsg::SampleAdd => {
+                let types_now = if let Some(state) = self.filter_dialog.as_mut() {
+                    if let Some(sample) = state.sample.take() {
+                        let ticked: Vec<Condition> = sample
+                            .rows
+                            .iter()
+                            .filter(|(_, ticked)| *ticked)
+                            .map(|(condition, _)| Condition::from(condition))
+                            .collect();
+                        add_sample(&mut state.filter, ticked);
+                    }
+                    Some(sample_type_of(&state.filter))
+                } else {
+                    None
+                };
+                for t in types_now.into_iter().flatten() {
+                    self.filter_load_properties(Some(t));
+                }
+                self.filter_refresh_scope();
+                self.filter_refresh_live();
+                return Task::none();
+            }
             FilterMsg::Open(seed) => {
                 self.filter_open(seed.map(|seed| *seed));
                 return Task::none();
@@ -293,20 +635,22 @@ impl OpenCADStudio {
                 }
             }
             FilterMsg::AddCondition(None) => {
-                state
-                    .filter
-                    .items
-                    .push(Item::Condition(Condition::default()));
+                let row = new_row(state);
+                state.filter.items.push(Item::Condition(row));
             }
             FilterMsg::AddCondition(Some(g)) => {
+                let row = new_row(state);
                 if let Some(Item::Group(group)) = state.filter.items.get_mut(g) {
-                    group.conditions.push(Condition::default());
+                    group.conditions.push(row);
                 }
             }
-            FilterMsg::AddGroup => state.filter.items.push(Item::Group(Group {
-                mode: Match::Any,
-                conditions: vec![Condition::default()],
-            })),
+            FilterMsg::AddGroup => {
+                let row = new_row(state);
+                state.filter.items.push(Item::Group(Group {
+                    mode: Match::Any,
+                    conditions: vec![row],
+                }))
+            }
             FilterMsg::Edit(row, FilterRowEdit::Remove) => match row {
                 FilterRow::Root(i) if i < state.filter.items.len() => {
                     state.filter.items.remove(i);
@@ -376,7 +720,19 @@ impl OpenCADStudio {
             | FilterMsg::SaveAsCommit
             | FilterMsg::DeleteSaved
             | FilterMsg::SaveLayerFilter
-            | FilterMsg::ShowLayers => {}
+            | FilterMsg::ShowLayers
+            | FilterMsg::PickObject
+            | FilterMsg::FromLayer(_)
+            | FilterMsg::Window
+            | FilterMsg::Export
+            | FilterMsg::Import
+            | FilterMsg::ObjectsOnLayers
+            | FilterMsg::SampleToggle(_)
+            | FilterMsg::SampleAdd
+            | FilterMsg::SampleCancel => {}
+            // Files only on the desktop.
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ExportTo(_) | FilterMsg::ImportFrom(_) => {}
         }
         if let Some(t) = types_changed {
             self.filter_load_properties(t);
@@ -384,6 +740,167 @@ impl OpenCADStudio {
         self.filter_refresh_scope();
         self.filter_refresh_live();
         Task::none()
+    }
+
+    /// Window…: the open Quick Select (`qselect`) or FILTER steps aside while
+    /// the objects to search in are picked.
+    pub(in crate::app) fn scope_window_pick(&mut self, qselect: bool) -> Task<Message> {
+        let i = self.active_tab;
+        let (qselect, filter) = if qselect {
+            match self.qselect.take() {
+                Some(state) => (Some(Box::new(state)), None),
+                None => return Task::none(),
+            }
+        } else {
+            match self.filter_dialog.take() {
+                Some(state) if state.layer_filter.is_none() => (None, Some(Box::new(state))),
+                Some(state) => {
+                    self.filter_dialog = Some(state);
+                    return Task::none();
+                }
+                None => return Task::none(),
+            }
+        };
+        self.tabs[i].scene.set_filter_preview_highlights(&[]);
+        // The objects picked now are the ones searched.
+        self.tabs[i].scene.deselect_all();
+        let command = ScopeWindowCommand {
+            qselect,
+            filter,
+            tab_id: self.tabs[i].id,
+            picked: false,
+        };
+        use crate::command::CadCommand;
+        self.active_modal = None;
+        self.command_line.input.clear();
+        self.command_line.set_step_options(Vec::new());
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].scene.selection.borrow_mut().menu.close();
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        Task::none()
+    }
+
+    /// Export: the drawing's saved filters into a file, to bring into
+    /// another drawing with Import.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_saved_filters(&mut self, path: &std::path::Path) {
+        let i = self.active_tab;
+        let filters: Vec<serde_json::Value> =
+            super::saved_filters::saved_filters(&self.tabs[i].scene.document)
+                .into_iter()
+                .map(|(name, filter)| serde_json::json!({ "name": name, "filter": filter }))
+                .collect();
+        let text = serde_json::to_string_pretty(&serde_json::json!({ "filters": filters }))
+            .unwrap_or_default();
+        match std::fs::write(path, text) {
+            Ok(()) => self
+                .command_line
+                .push_output(crate::tf!("{} saved filter(s) exported.", filters.len()).as_ref()),
+            Err(why) => self
+                .command_line
+                .push_error(crate::tf!("Export saved filters: {}.", why).as_ref()),
+        }
+    }
+
+    /// Import: saved filters from a file into the drawing, one undo step; a
+    /// filter of the same name is replaced.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn import_saved_filters(&mut self, path: &std::path::Path) {
+        let i = self.active_tab;
+        let parsed: Option<Vec<(String, Filter)>> = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| {
+                value.get("filters")?.as_array().map(|list| {
+                    list.iter()
+                        .filter_map(|item| {
+                            let name = item.get("name")?.as_str()?.to_string();
+                            let filter =
+                                serde_json::from_value(item.get("filter")?.clone()).ok()?;
+                            Some((name, filter))
+                        })
+                        .collect()
+                })
+            });
+        let Some(filters) = parsed.filter(|f| !f.is_empty()) else {
+            self.command_line
+                .push_error(crate::t!("No saved filters found in that file.").as_ref());
+            return;
+        };
+        let count = filters.len();
+        self.edit_saved_filters(i, "FILTER IMPORT", |document| {
+            for (name, filter) in &filters {
+                super::saved_filters::store_saved_filter(document, name, filter);
+            }
+        });
+        let names = self.saved_filter_names(i);
+        if let Some(state) = self.filter_dialog.as_mut() {
+            state.saved = names;
+        }
+        self.command_line
+            .push_output(crate::tf!("{} saved filter(s) imported.", count).as_ref());
+    }
+
+    /// From object: the dialog steps aside while an object is picked.
+    fn filter_pick_object(&mut self) -> Task<Message> {
+        if self
+            .filter_dialog
+            .as_ref()
+            .is_none_or(|state| state.layer_filter.is_some())
+        {
+            return Task::none();
+        }
+        let state = self.filter_dialog.take().expect("checked open dialog");
+        let i = self.active_tab;
+        self.tabs[i].scene.set_filter_preview_highlights(&[]);
+        let command = FilterSampleCommand {
+            state: Some(Box::new(state)),
+            tab_id: self.tabs[i].id,
+        };
+        use crate::command::CadCommand;
+        self.command_line.input.clear();
+        self.command_line.set_step_options(Vec::new());
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].scene.selection.borrow_mut().menu.close();
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        Task::none()
+    }
+
+    /// The pick ended: the dialog is back, with the object's properties to
+    /// tick when one was picked.
+    pub(in crate::app) fn finish_filter_sample(
+        &mut self,
+        mut state: FilterDialogState,
+        tab_id: u64,
+        handle: Option<Handle>,
+    ) {
+        let i = self.active_tab;
+        if self.tabs[i].id != tab_id {
+            return;
+        }
+        self.tabs[i].active_cmd = None;
+        self.tabs[i].snap_result = None;
+        self.tabs[i].scene.clear_preview_wire();
+        if let Some(handle) = handle {
+            let conditions = self.tabs[i].scene.qselect_conditions_from_entity(handle);
+            let type_name = conditions
+                .first()
+                .and_then(|condition| condition.type_filter.clone())
+                .unwrap_or_default();
+            let rows = conditions
+                .into_iter()
+                .map(|condition| {
+                    let ticked = condition.property.as_ref().is_none_or(|property| {
+                        super::SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
+                    });
+                    (condition, ticked)
+                })
+                .collect();
+            state.sample = Some(super::QSelectSample { type_name, rows });
+        }
+        self.filter_dialog = Some(state);
+        self.filter_refresh_scope();
+        self.filter_refresh_live();
     }
 
     fn filter_open(&mut self, seed: Option<FilterSeed>) {
@@ -418,6 +935,9 @@ impl OpenCADStudio {
             layer_filter: None,
             layer_filter_from: None,
             for_command: self.transparent_select.clone(),
+            sample: None,
+            layer_reasons: Vec::new(),
+            all_layers: Vec::new(),
         });
         self.reset_modal_geometry();
         self.filter_refresh_scope();
@@ -490,6 +1010,14 @@ impl OpenCADStudio {
             state.layer_filter = Some(name);
             // Layers, not the objects a parked command asks for.
             state.for_command = None;
+            // Layers have no type: a blank row reads the name.
+            for item in &mut state.filter.items {
+                if let Item::Condition(c) = item {
+                    if c.property.is_none() && c.type_filter.is_none() {
+                        c.property = Some("name".into());
+                    }
+                }
+            }
         }
         self.filter_refresh_scope();
         self.filter_refresh_live();
@@ -507,7 +1035,12 @@ impl OpenCADStudio {
                 .line_types
                 .iter()
                 .map(|lt| lt.name.clone())
-                .filter(|name| !name.eq_ignore_ascii_case("Continuous")),
+                .filter(|name| {
+                    // A layer's linetype is never ByLayer / ByBlock.
+                    !["Continuous", "ByLayer", "ByBlock"]
+                        .iter()
+                        .any(|n| name.eq_ignore_ascii_case(n))
+                }),
         );
         let yes_no = || Editor::Choice(vec!["1".into(), "0".into()]);
         let choice = |field: &str, label: Cow<'static, str>, editor| QSelectPropertyChoice {
@@ -524,7 +1057,49 @@ impl OpenCADStudio {
             choice("frozen", crate::t!("Freeze"), yes_no()),
             choice("locked", crate::t!("Lock"), yes_no()),
             choice("plot", crate::t!("Plot"), yes_no()),
+            choice("xref", crate::t!("Xref-dependent"), yes_no()),
         ]
+    }
+
+    /// From layer: the layer's properties as rows to tick, its name and
+    /// colour ticked (#2610 spec LM-22).
+    fn filter_sample_layer(&mut self, name: &str) {
+        use crate::filter::PropertySource;
+        let i = self.active_tab;
+        let Some(layer) = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(name))
+            .cloned()
+        else {
+            return;
+        };
+        let source = super::layer_filters::LayerProperties;
+        let rows = self
+            .layer_filter_properties()
+            .into_iter()
+            .filter_map(|property| {
+                let value = source.value(&layer, &property.field)?;
+                let ticked = matches!(property.field.as_str(), "name" | "color");
+                Some((
+                    super::QSelectCondition {
+                        type_filter: None,
+                        property: Some(property),
+                        operator: super::QSelectOp::Eq,
+                        value,
+                    },
+                    ticked,
+                ))
+            })
+            .collect();
+        if let Some(state) = self.filter_dialog.as_mut() {
+            state.sample = Some(super::QSelectSample {
+                type_name: layer.name.clone(),
+                rows,
+            });
+        }
     }
 
     /// Keep the edited filter as a LAYERFILTER filter and show it in the
@@ -683,11 +1258,61 @@ impl OpenCADStudio {
                     (layer.name.clone(), objects)
                 })
                 .collect();
+            let all_layers: Vec<String> = self.tabs[i]
+                .scene
+                .document
+                .layers
+                .iter()
+                .filter(|layer| !layer.name.starts_with('*'))
+                .map(|layer| layer.name.clone())
+                .collect();
+            // Why each one is in: the first condition that is not the name,
+            // as "Plot: No" (mockup), else its object count.
+            let reason_field = state.filter.items.iter().find_map(|item| match item {
+                Item::Condition(c) => c.property.clone().filter(|p| p != "name"),
+                Item::Group(g) => g
+                    .conditions
+                    .iter()
+                    .find_map(|c| c.property.clone().filter(|p| p != "name")),
+            });
+            let label = reason_field.as_ref().and_then(|field| {
+                state
+                    .properties_for(None)
+                    .iter()
+                    .find(|p| &p.field == field)
+                    .map(|p| p.label.clone())
+            });
+            let reasons: Vec<String> = layers
+                .iter()
+                .map(|(name, objects)| {
+                    let layer = self.tabs[i]
+                        .scene
+                        .document
+                        .layers
+                        .iter()
+                        .find(|l| &l.name == name);
+                    match (&reason_field, &label, layer) {
+                        (Some(field), Some(label), Some(layer)) => {
+                            use crate::filter::PropertySource;
+                            let value = source.value(layer, field).unwrap_or_default();
+                            let value = match value.as_str() {
+                                "1" if field != "color" => crate::t!("Yes").into_owned(),
+                                "0" if field != "color" => crate::t!("No").into_owned(),
+                                _ => value,
+                            };
+                            format!("{label}: {value}")
+                        }
+                        _ => crate::tf!("{} objects", objects).into_owned(),
+                    }
+                })
+                .collect();
             self.tabs[i].scene.set_filter_preview_highlights(&[]);
             if let Some(state) = self.filter_dialog.as_mut() {
                 state.live_count = layers.len();
                 state.by_type.clear();
                 state.by_layer = layers;
+                state.layer_reasons = reasons;
+                state.all_layers = all_layers;
             }
             return;
         }
@@ -987,6 +1612,238 @@ mod tests {
         assert!(app.tabs[i].scene.selected.contains(&handles[0]));
     }
 
+    /// #2611: From object hides the dialog for a pick; the object's ticked
+    /// properties become rows, and a second type goes into its own group.
+    #[test]
+    fn from_object_rows_and_a_second_type_as_a_group() {
+        let (mut app, handles) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        let pick = |app: &mut OpenCADStudio, handle| {
+            filter(app, FilterMsg::PickObject);
+            assert!(app.filter_dialog.is_none(), "the dialog steps aside");
+            let result = app.tabs[i]
+                .active_cmd
+                .as_mut()
+                .expect("picking")
+                .on_entity_pick(handle, glam::DVec3::ZERO);
+            let _ = app.apply_cmd_result(result);
+            assert!(app.tabs[i].active_cmd.is_none());
+        };
+        // The line on FAL-KULSO: type, layer, colour, linetype ticked.
+        pick(&mut app, handles[0]);
+        let sample = app.filter_dialog.as_ref().unwrap().sample.as_ref().unwrap();
+        assert_eq!(sample.type_name, "Line");
+        let ticked = sample.rows.iter().filter(|(_, t)| *t).count();
+        assert_eq!(ticked, 1 + crate::app::SAMPLE_TICKED_FIELDS.len());
+        filter(&mut app, FilterMsg::SampleAdd);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert!(state.sample.is_none());
+        assert_eq!(state.filter.root, Match::All);
+        assert_eq!(state.filter.items.len(), ticked);
+        assert_eq!(state.live_count, 1, "the line on FAL-KULSO");
+        // The circle: its own group, the filter now any of the two.
+        pick(&mut app, handles[1]);
+        filter(&mut app, FilterMsg::SampleAdd);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert_eq!(state.filter.root, Match::Any);
+        assert_eq!(state.filter.items.len(), 2);
+        assert!(state
+            .filter
+            .items
+            .iter()
+            .all(|item| matches!(item, Item::Group(_))));
+        assert_eq!(state.live_count, 2);
+        // Esc during a pick brings the dialog back as it was.
+        filter(&mut app, FilterMsg::PickObject);
+        let result = app.tabs[i].active_cmd.as_mut().unwrap().on_escape();
+        let _ = app.apply_cmd_result(result);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert!(state.sample.is_none());
+        assert_eq!(state.live_count, 2);
+    }
+
+    #[test]
+    fn a_sample_of_the_same_type_adds_rows_without_repeats() {
+        let row = |field: &str, value: &str| Condition {
+            type_filter: Some("Line".into()),
+            property: Some(field.into()),
+            value: value.into(),
+            ..Default::default()
+        };
+        let mut filter = Filter {
+            root: Match::All,
+            items: vec![Item::Condition(row("layer", "A"))],
+        };
+        add_sample(&mut filter, vec![row("layer", "A"), row("color", "1")]);
+        assert_eq!(filter.root, Match::All);
+        assert_eq!(filter.items.len(), 2);
+        // An untyped row of the user's stays beside a typed sample.
+        let mut filter = Filter {
+            root: Match::All,
+            items: vec![Item::Condition(Condition {
+                property: Some("layer".into()),
+                value: "A*".into(),
+                ..Default::default()
+            })],
+        };
+        add_sample(&mut filter, vec![row("color", "1")]);
+        assert_eq!(filter.items.len(), 2);
+        assert_eq!(filter.root, Match::All);
+    }
+
+    /// #2610 (F2): the layer filter editor works on layer properties only:
+    /// rows start on the name, the linetype list has no ByLayer, From layer
+    /// ticks the name and the colour, each layer found says why, and its
+    /// layers open in FILTER for their objects.
+    #[test]
+    fn layer_filter_editor_as_in_the_mockup() {
+        let (mut app, _) = app_with_objects();
+        app.filter_open_layers(
+            String::new(),
+            Filter {
+                root: Match::All,
+                items: vec![Item::Condition(Condition::default())],
+            },
+        );
+        let state = app.filter_dialog.as_ref().unwrap();
+        let first = state.condition(FilterRow::Root(0)).unwrap();
+        assert_eq!(
+            first.property.as_deref(),
+            Some("name"),
+            "no type row over layers"
+        );
+        let linetypes = state
+            .properties_for(None)
+            .iter()
+            .find_map(|p| match &p.editor {
+                crate::app::QSelectValueEditor::Choice(o) if p.field == "linetype" => {
+                    Some(o.clone())
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert!(!linetypes.iter().any(|l| l.eq_ignore_ascii_case("ByLayer")));
+        filter(&mut app, FilterMsg::AddCondition(None));
+        let added = app
+            .filter_dialog
+            .as_ref()
+            .unwrap()
+            .condition(FilterRow::Root(1))
+            .cloned();
+        assert_eq!(added.unwrap().property.as_deref(), Some("name"));
+        filter(
+            &mut app,
+            FilterMsg::Edit(FilterRow::Root(1), FilterRowEdit::Remove),
+        );
+        // From layer: name and colour ticked.
+        filter(&mut app, FilterMsg::FromLayer("FAL-KULSO".into()));
+        let sample = app.filter_dialog.as_ref().unwrap().sample.as_ref().unwrap();
+        let ticked: Vec<&str> = sample
+            .rows
+            .iter()
+            .filter(|(_, t)| *t)
+            .filter_map(|(c, _)| c.property.as_ref().map(|p| p.field.as_str()))
+            .collect();
+        assert_eq!(ticked, ["name", "color"]);
+        filter(&mut app, FilterMsg::SampleCancel);
+        // Plot = Yes: each layer found says so.
+        filter(
+            &mut app,
+            FilterMsg::Edit(
+                FilterRow::Root(0),
+                FilterRowEdit::Property(Some("plot".into())),
+            ),
+        );
+        filter(
+            &mut app,
+            FilterMsg::Edit(FilterRow::Root(0), FilterRowEdit::Value("1".into())),
+        );
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert!(state.live_count >= 2);
+        assert!(state.layer_reasons.iter().all(|r| r.contains(':')));
+        // Their objects in FILTER.
+        filter(&mut app, FilterMsg::ObjectsOnLayers);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert!(state.layer_filter.is_none());
+        assert_eq!(state.live_count, 3, "every object sits on a plotted layer");
+    }
+
+    #[test]
+    fn counts_keep_their_thousands_apart() {
+        use crate::ui::live_result::fmt_count;
+        assert_eq!(fmt_count(312), "312");
+        assert_eq!(fmt_count(3997), "3\u{2009}997");
+        assert_eq!(fmt_count(1234567), "1\u{2009}234\u{2009}567");
+    }
+
+    /// #2611 (J5): Window… steps aside for a pick; the objects picked become
+    /// the selection searched; Esc brings the dialog back as it was.
+    #[test]
+    fn window_scope_in_quick_select_and_filter() {
+        let (mut app, handles) = app_with_objects();
+        let i = app.active_tab;
+        let pick = |app: &mut OpenCADStudio, picked: &[Handle]| {
+            for h in picked {
+                app.tabs[i].scene.select_entity(*h, false);
+            }
+            let result = app.tabs[i]
+                .active_cmd
+                .as_mut()
+                .expect("picking")
+                .on_selection_complete(picked.to_vec());
+            let _ = app.apply_cmd_result(result);
+        };
+        let _ = app.update(Message::QSelectOpen);
+        let _ = app.update(Message::QSelectWindow);
+        assert!(app.qselect.is_none(), "Quick Select steps aside");
+        pick(&mut app, &handles[..2]);
+        let state = app.qselect.as_ref().expect("back");
+        assert_eq!(state.scope, QSelectScope::CurrentSelection);
+        let _ = app.update(Message::QSelectClose);
+        // FILTER: Esc leaves the scope alone.
+        app.tabs[i].scene.deselect_all();
+        filter(&mut app, FilterMsg::Open(None));
+        filter(&mut app, FilterMsg::Window);
+        assert!(app.filter_dialog.is_none());
+        let result = app.tabs[i].active_cmd.as_mut().unwrap().on_escape();
+        let _ = app.apply_cmd_result(result);
+        assert_eq!(
+            app.filter_dialog.as_ref().unwrap().scope,
+            QSelectScope::CurrentSpace
+        );
+        filter(&mut app, FilterMsg::Window);
+        pick(&mut app, &handles[2..]);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert_eq!(state.scope, QSelectScope::CurrentSelection);
+        assert_eq!(state.candidate_count, 1);
+    }
+
+    /// #2611 (J5): saved filters go to a file and come back into a drawing.
+    #[test]
+    fn saved_filters_export_and_import() {
+        let (mut app, _) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        filter(
+            &mut app,
+            FilterMsg::Edit(
+                FilterRow::Root(0),
+                FilterRowEdit::Type(Some("Circle".into())),
+            ),
+        );
+        filter(&mut app, FilterMsg::SaveAs(Some("Circles".into())));
+        filter(&mut app, FilterMsg::SaveAsCommit);
+        let path =
+            std::env::temp_dir().join(format!("ocs-filters-{}.ocsfilter", std::process::id()));
+        filter(&mut app, FilterMsg::ExportTo(path.clone()));
+        filter(&mut app, FilterMsg::DeleteSaved);
+        assert!(app.saved_filter_names(i).is_empty());
+        filter(&mut app, FilterMsg::ImportFrom(path.clone()));
+        assert_eq!(app.saved_filter_names(i), ["Circles"]);
+        let _ = std::fs::remove_file(path);
+    }
+
     /// Quick Select's "Advanced…" carries its conditions over: two types
     /// become two groups under "any", and the count is the same.
     #[test]
@@ -1000,6 +1857,10 @@ mod tests {
         let _ = app.update(Message::QSelectAddCondition);
         let _ = app.update(Message::QSelectSetMode(QSelectMode::Include));
         let quick = app.qselect.as_ref().unwrap().live_count;
+        // Quick Select's live line counts each type (#2611 mockup).
+        let by_type = &app.qselect.as_ref().unwrap().live_by_type;
+        assert_eq!(by_type.len(), 2);
+        assert_eq!(by_type.iter().map(|(_, n)| n).sum::<usize>(), quick);
         let _ = app.update(Message::QSelectAdvanced);
         assert!(app.qselect.is_none());
         let state = app.filter_dialog.as_ref().unwrap();
@@ -1166,6 +2027,52 @@ mod view {
         }
     }
 
+    /// A group's frame: a border, the dialog's own background (mockup).
+    fn frame_style(theme: &Theme) -> container::Style {
+        container::Style {
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 4.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+
+    /// The NOT toggle's width, shared with the column header.
+    const NOT_W: f32 = 48.0;
+
+    /// NOT: on, an accent border and text; off, a quiet button (mockup).
+    fn not_style(on: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+        move |theme: &Theme, status| {
+            let palette = theme.palette();
+            button::Style {
+                background: Some(Background::Color(
+                    if matches!(status, button::Status::Hovered) {
+                        palette.background.strong.color
+                    } else {
+                        palette.background.weak.color
+                    },
+                )),
+                text_color: if on {
+                    palette.primary.base.color
+                } else {
+                    palette.background.base.text.scale_alpha(0.7)
+                },
+                border: Border {
+                    color: if on {
+                        palette.primary.base.color
+                    } else {
+                        palette.background.neutral.color
+                    },
+                    width: 1.0,
+                    radius: 3.0.into(),
+                },
+                ..Default::default()
+            }
+        }
+    }
+
     fn msg(m: FilterMsg) -> Message {
         Message::FilterDialog(m)
     }
@@ -1220,9 +2127,9 @@ mod view {
         let edit = move |e: FilterRowEdit| msg(FilterMsg::Edit(row_id, e));
         let not = button(text(t!("Not")).size(11).align_x(iced::Center))
             .on_press(edit(FilterRowEdit::Not(!condition.negate)))
-            .style(button_style(condition.negate))
+            .style(not_style(condition.negate))
             .padding([4, 6])
-            .width(Length::Fixed(44.0));
+            .width(Length::Fixed(NOT_W));
 
         let mut type_options = vec![ANY_TYPE.to_string()];
         type_options.extend(state.types.iter().map(|(t, _)| t.clone()));
@@ -1254,7 +2161,11 @@ mod view {
         .width(Length::Fixed(150.0));
 
         let properties = state.properties_for(condition.type_filter.as_deref());
-        let mut property_options = vec![(String::new(), t!(TYPE_ONLY).into_owned())];
+        let mut property_options = if state.layer_filter.is_some() {
+            Vec::new()
+        } else {
+            vec![(String::new(), t!(TYPE_ONLY).into_owned())]
+        };
         property_options.extend(
             properties
                 .iter()
@@ -1349,24 +2260,24 @@ mod view {
             .spacing(4)
             .align_y(iced::Alignment::Center);
         for scope in [QSelectScope::CurrentSpace, QSelectScope::CurrentSelection] {
+            let caption = match scope {
+                QSelectScope::CurrentSelection => t!("Selection"),
+                _ => Cow::Owned(scope.to_string()),
+            };
             scope_row = scope_row.push(
-                button(text(scope.to_string()).size(12))
+                button(text(caption).size(12))
                     .on_press(msg(FilterMsg::Scope(scope)))
                     .style(button_style(state.scope == scope))
                     .padding([4, 10]),
             );
         }
-        let scope_row = scope_row
-            .push(Space::new().width(Fill))
-            .push(match &state.for_command {
-                // Who the result goes to (#2611).
-                Some(command) => muted(crate::tf!("for {}", command)),
-                None => muted(String::new()),
-            })
-            .push(muted(crate::tf!(
-                "{} candidate object(s)",
-                state.candidate_count
-            )));
+        // Window…: pick the objects to search in (#2611 mockup).
+        let scope_row = scope_row.push(
+            button(text(t!("Window…")).size(12))
+                .on_press(msg(FilterMsg::Window))
+                .style(button_style(false))
+                .padding([4, 10]),
+        );
 
         // ── Saved filters (kept in the drawing) ────────────────────────────
         let icon_button = |icon: &'static [u8], tip: Cow<'static, str>, on: Option<Message>| {
@@ -1413,6 +2324,22 @@ mod view {
                     .is_some()
                     .then_some(msg(FilterMsg::DeleteSaved)),
             ));
+        // Saved filters to and from a file, for another drawing (#2611).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            saved_row = saved_row
+                .push(Space::new().width(6))
+                .push(icon_button(
+                    crate::ui::icons::IMPORT,
+                    t!("Import"),
+                    Some(msg(FilterMsg::Import)),
+                ))
+                .push(icon_button(
+                    crate::ui::icons::FILE_EXPORT,
+                    t!("Export"),
+                    (!state.saved.is_empty()).then_some(msg(FilterMsg::Export)),
+                ));
+        }
         if let Some(typed) = &state.save_as {
             saved_row = saved_row
                 .push(
@@ -1429,24 +2356,54 @@ mod view {
                     false,
                 ));
         }
-        // Where they are kept, said quietly (#2611: no popup).
+        // Where they are kept, said quietly (#2611: no popup); Search in on
+        // the same bar, as in the mockup.
         let saved_row = saved_row
+            .push(muted(t!("Saved in this drawing")))
             .push(Space::new().width(Fill))
-            .push(muted(t!("Saved in this drawing")));
+            .push(scope_row);
 
         // ── Rows ──────────────────────────────────────────────────────────
         let layers_mode = state.layer_filter.is_some();
         let intro = if layers_mode {
-            t!("Layers that match")
+            t!("Show layers that match")
         } else {
             t!("Select objects that match")
         };
-        let mut rows = column![row![
-            text(intro).size(12),
-            match_picker(state.filter.root, |m| msg(FilterMsg::Root(m))),
+        let head = |label: Cow<'static, str>, w: Length| -> Element<'a, Message> {
+            muted(label).width(w).into()
+        };
+        let mut header = row![head(t!("NOT"), Length::Fixed(NOT_W))]
+            .spacing(6)
+            .align_y(iced::Alignment::Center);
+        if !layers_mode {
+            header = header.push(head(t!("Type"), Length::Fixed(150.0)));
+        }
+        let header = header
+            .push(head(
+                if layers_mode {
+                    t!("Layer property")
+                } else {
+                    t!("Property")
+                },
+                Length::Fixed(150.0),
+            ))
+            .push(head(t!("Op"), Length::Fixed(140.0)))
+            .push(
+                row![muted(t!("Value")), crate::ui::live_result::pattern_help()]
+                    .spacing(2)
+                    .align_y(iced::Alignment::Center)
+                    .width(Fill),
+            );
+        let mut rows = column![
+            row![
+                text(intro).size(12),
+                match_picker(state.filter.root, |m| msg(FilterMsg::Root(m))),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            header,
         ]
-        .spacing(8)
-        .align_y(iced::Alignment::Center)]
         .spacing(6);
         for (index, item) in state.filter.items.iter().enumerate() {
             match item {
@@ -1475,15 +2432,42 @@ mod view {
                         msg(FilterMsg::AddCondition(Some(index))),
                     ));
                     // A frame, no colour of its own (#2611).
-                    rows = rows.push(container(inner).padding(8).width(Fill).style(panel_style));
+                    rows = rows.push(container(inner).padding(8).width(Fill).style(frame_style));
                 }
             }
         }
-        let add_buttons = row![
+        let mut add_buttons = row![
             add_button(t!("Condition"), msg(FilterMsg::AddCondition(None))),
             add_button(t!("Group"), msg(FilterMsg::AddGroup)),
         ]
         .spacing(6);
+        if layers_mode {
+            // Rows from a layer's properties (#2610 mockup: From layer).
+            let names: Vec<String> = state.all_layers.clone();
+            add_buttons = add_buttons.push(
+                crate::ui::dropdown_list::pick_list(None::<String>, names, |n: &String| n.clone())
+                    .on_select(|n| msg(FilterMsg::FromLayer(n)))
+                    .placeholder(t!("From layer").into_owned())
+                    .text_size(12)
+                    .width(Length::Fixed(170.0)),
+            );
+        }
+        if !layers_mode {
+            // Rows from a picked object's properties (#2611).
+            add_buttons = add_buttons.push(
+                button(
+                    row![
+                        crate::ui::icons::themed(crate::ui::icons::EYEDROPPER, 12.0),
+                        text(t!("From object")).size(12)
+                    ]
+                    .spacing(5)
+                    .align_y(iced::Alignment::Center),
+                )
+                .on_press(msg(FilterMsg::PickObject))
+                .style(button_style(false))
+                .padding([4, 10]),
+            );
+        }
 
         // ── Read back ─────────────────────────────────────────────────────
         let property_label = |id: &str| -> String {
@@ -1504,79 +2488,122 @@ mod view {
             },
         );
         let reads = container(
-            row![muted(t!("Reads:")), text(sentence).size(12).width(Fill)]
-                .spacing(6)
-                .align_y(iced::Alignment::Start),
+            row![
+                muted(t!("Reads:")),
+                crate::ui::live_result::reads(
+                    sentence,
+                    &[
+                        t!("and").into_owned(),
+                        t!("or").into_owned(),
+                        t!("not").into_owned(),
+                    ],
+                ),
+            ]
+            .spacing(6)
+            .align_y(iced::Alignment::Start),
         )
         .padding([6, 8])
         .width(Fill)
         .style(panel_style);
 
-        let editor = column![
-            scrollable(rows.padding(iced::Padding {
-                right: 12.0,
-                ..Default::default()
-            }))
-            .height(Length::Fixed(300.0)),
-            add_buttons,
-            reads,
-        ]
-        .spacing(8)
-        .width(Fill);
+        // After From object: the picked object's properties to tick, in
+        // place of the rows until they are added or dropped.
+        let rows_area: Element<'a, Message> = match &state.sample {
+            Some(sample) => {
+                let mut ticks = column![].spacing(4);
+                for (index, (condition, ticked)) in sample.rows.iter().enumerate() {
+                    let label = match &condition.property {
+                        None => type_label(&sample.type_name),
+                        Some(property) => format!("{} = {}", property.label, condition.value),
+                    };
+                    ticks = ticks.push(
+                        checkbox(*ticked)
+                            .label(label)
+                            .text_size(12)
+                            .size(14)
+                            .on_toggle(move |_| msg(FilterMsg::SampleToggle(index))),
+                    );
+                }
+                column![
+                    text(crate::tf!(
+                        "Properties of the picked {}",
+                        type_label(&sample.type_name)
+                    ))
+                    .size(12),
+                    scrollable(ticks).height(Length::Fixed(240.0)),
+                    row![
+                        dialog_button(t!("Add ticked conditions"), msg(FilterMsg::SampleAdd), true),
+                        dialog_button(t!("Cancel"), msg(FilterMsg::SampleCancel), false),
+                    ]
+                    .spacing(6),
+                ]
+                .spacing(8)
+                .into()
+            }
+            // As tall as the rows (B3: the dialog fits its content), up to a
+            // limit; a dialog the user made taller gives them the room.
+            None => {
+                let list = scrollable(rows.padding(iced::Padding {
+                    right: 12.0,
+                    ..Default::default()
+                }));
+                if sizing.height == Length::Fill {
+                    list.height(Fill).into()
+                } else {
+                    list.height(Length::Shrink).into()
+                }
+            }
+        };
+        let editor = column![rows_area, add_buttons, reads,]
+            .spacing(8)
+            .width(Fill);
 
         // ── Live result ───────────────────────────────────────────────────
-        let show_icon = if state.show {
-            crate::ui::icons::EYE
-        } else {
-            crate::ui::icons::EYE_OFF
-        };
+        // A line per type or layer: a click shows only those, again shows
+        // all of them.
         let bucket_line =
             |label: String, count: usize, bucket: FilterBucket| -> Element<'a, Message> {
                 let on = state.focus.as_ref() == Some(&bucket);
-                button(
-                    row![
-                        text(label).size(11).width(Fill),
-                        text(count.to_string()).size(11)
-                    ]
-                    .spacing(6),
+                let next = (!on).then_some(bucket);
+                crate::ui::live_result::bucket(
+                    label,
+                    count,
+                    state.live_count,
+                    on,
+                    msg(FilterMsg::Focus(next)),
                 )
-                .on_press(msg(FilterMsg::Focus(Some(bucket))))
-                .style(button_style(on))
-                .padding([2, 6])
-                .width(Fill)
-                .into()
             };
         let mut live = column![
             row![
                 text(t!("Live result")).size(12).width(Fill),
-                button(
-                    row![
-                        crate::ui::icons::themed(show_icon, 12.0),
-                        text(t!("Show")).size(11)
-                    ]
-                    .spacing(4)
-                    .align_y(iced::Alignment::Center),
-                )
-                .on_press(msg(FilterMsg::Show(!state.show)))
-                .style(button_style(state.show))
-                .padding([3, 8]),
+                crate::ui::live_result::show_toggle(
+                    state.show,
+                    t!("Show").into_owned(),
+                    msg(FilterMsg::Show(!state.show)),
+                ),
             ]
             .align_y(iced::Alignment::Center),
-            text(if layers_mode {
-                crate::tf!(
-                    "{} of {} layers shown",
-                    state.live_count,
-                    state.candidate_count
-                )
-            } else {
-                crate::tf!(
-                    "{} of {} objects match",
-                    state.live_count,
-                    state.candidate_count
-                )
-            })
-            .size(13),
+            crate::ui::live_result::big_count(
+                state.live_count,
+                if layers_mode {
+                    crate::tf!(
+                        "of {} layers",
+                        crate::ui::live_result::fmt_count(state.candidate_count)
+                    )
+                } else {
+                    crate::tf!(
+                        "of {}",
+                        crate::ui::live_result::fmt_count(state.candidate_count)
+                    )
+                },
+            ),
+            crate::ui::live_result::track(state.live_count, state.candidate_count, true),
         ]
+        .push(if state.live_count == 0 {
+            Element::from(muted(t!("No match")))
+        } else {
+            Element::from(Space::new().height(0))
+        })
         .spacing(6)
         .width(Length::Fixed(240.0));
         if !layers_mode {
@@ -1590,14 +2617,32 @@ mod view {
             ));
         }
         if layers_mode {
-            // The layers themselves, with their object counts.
+            // The layers themselves, each with why it is in (mockup).
+            live = live.push(muted(t!("Matching layers")));
             let mut names = column![].spacing(2);
-            for (l, n) in &state.by_layer {
+            for (at, (l, _)) in state.by_layer.iter().enumerate() {
+                let reason = state.layer_reasons.get(at).cloned().unwrap_or_default();
                 names = names.push(
-                    row![text(l.clone()).size(11).width(Fill), muted(n.to_string())].spacing(6),
+                    row![
+                        text(crate::ui::text_util::elide(l, 18))
+                            .size(11)
+                            .width(Fill)
+                            .wrapping(iced::widget::text::Wrapping::None),
+                        muted(reason)
+                    ]
+                    .spacing(6),
                 );
             }
-            live = live.push(scrollable(names).height(Length::Fixed(260.0)));
+            live = live.push(scrollable(names).height(Length::Shrink));
+            live = live.push(
+                text(t!(
+                    "The filter stays live: a new layer that matches shows up in it on its own."
+                ))
+                .size(11)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                }),
+            );
         } else {
             live = live.push(muted(t!("By layer")));
             for (l, n) in &state.by_layer {
@@ -1610,8 +2655,24 @@ mod view {
                     .style(button::secondary)
                     .padding([3, 8]),
             );
+            live = live.push(
+                text(t!(
+                    "Click a row to show only that type or layer in the drawing."
+                ))
+                .size(11)
+                .style(|theme: &Theme| iced::widget::text::Style {
+                    color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                }),
+            );
         }
-        let live = container(live).padding(10).style(panel_style);
+        let live = container(live)
+            .padding(10)
+            .height(if sizing.height == Length::Fill {
+                Fill
+            } else {
+                Length::Shrink
+            })
+            .style(panel_style);
 
         // ── Footer ────────────────────────────────────────────────────────
         let mut result_row = row![].spacing(2);
@@ -1653,12 +2714,12 @@ mod view {
         // Layer mode: the filter's name and Save filter instead.
         let footer: Element<'a, Message> = match &state.layer_filter {
             Some(name) => row![
-                text(t!("Filter name")).size(12),
-                text_input("", name)
-                    .on_input(|v| msg(FilterMsg::LayerName(v)))
-                    .on_submit(msg(FilterMsg::SaveLayerFilter))
-                    .size(12)
-                    .width(Length::Fixed(220.0)),
+                button(text(t!("Filter objects on these layers…")).size(12))
+                    .on_press_maybe(
+                        (state.live_count > 0).then_some(msg(FilterMsg::ObjectsOnLayers))
+                    )
+                    .style(button::secondary)
+                    .padding([4, 10]),
                 Space::new().width(Fill),
                 dialog_button(t!("Cancel"), msg(FilterMsg::Close), false),
                 dialog_button_styled_opt(
@@ -1675,7 +2736,31 @@ mod view {
         };
         let mut body = column![].spacing(10);
         if !layers_mode {
-            body = body.push(saved_row).push(scope_row);
+            body = body.push(saved_row);
+            if state.scope == QSelectScope::CurrentSelection {
+                body = body.push(crate::ui::live_result::selection_note(
+                    state.candidate_count,
+                    msg(FilterMsg::Scope(QSelectScope::CurrentSpace)),
+                ));
+            }
+        }
+        if let Some(name) = &state.layer_filter {
+            // The name on top, as in the mockup; without one it can't be
+            // saved, and says so.
+            let mut name_row = row![
+                text(t!("Name")).size(12),
+                text_input("", name)
+                    .on_input(|v| msg(FilterMsg::LayerName(v)))
+                    .on_submit(msg(FilterMsg::SaveLayerFilter))
+                    .size(12)
+                    .width(Length::Fixed(260.0)),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center);
+            if name.trim().is_empty() {
+                name_row = name_row.push(muted(t!("A name is needed to save the filter.")));
+            }
+            body = body.push(name_row);
         }
         let body = body
             .extend([
@@ -1726,14 +2811,19 @@ impl OpenCADStudio {
         let content = crate::ui::modal::intrinsic(
             measurement,
             content,
-            iced::Size::new(1100.0, f32::INFINITY),
+            iced::Size::new(1000.0, f32::INFINITY),
             self.modal_resize,
         );
         crate::ui::modal::modal(
             iced::widget::Space::new()
                 .width(iced::Fill)
                 .height(iced::Fill),
-            crate::t!("Filter"),
+            match (&state.layer_filter, &state.for_command) {
+                (Some(_), _) => crate::t!("Layer Filter"),
+                // Who it works for (#2611 mockup, Transparent).
+                (None, Some(command)) => crate::tf!("Filter · for {}", command),
+                (None, None) => crate::t!("Filter"),
+            },
             content,
             Message::FilterDialog(FilterMsg::Close),
             self.modal_offset,

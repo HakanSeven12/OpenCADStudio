@@ -2604,6 +2604,107 @@ fn authoring_clean_screen(open: &str, close: &str, manager: bool) {
     }
 }
 
+/// #2610: a filter tree node's right-click menu, driven through the real
+/// view as the runtime does: the item clicked does its job.
+#[test]
+fn layer_tree_node_menu_items_act() {
+    use crate::ui::dock::{FloatPanel, PanelId};
+    use iced_test::core::{mouse, shell, widget, window};
+    use iced_test::runtime::user_interface::{Cache, UserInterface};
+    use iced_test::Selector;
+    let mut app = dock_app();
+    let i = app.active_tab;
+    let _ = app.run_command_line("-LAYER N ZULU ");
+    let _ = app.run_command_line("LAYERGROUP NEW GRP ZULU");
+    app.show_layers = true;
+    app.dock
+        .float(FloatPanel::new(PanelId::Layers, 50.0, 50.0, 1300.0, 700.0));
+    app.refresh_layer_counts();
+    let mut renderer = headless_renderer();
+    let mut cache = Cache::default();
+    let mut step =
+        |app: &mut OpenCADStudio, at: iced::Point, events: &[iced::Event], find: Option<&str>| {
+            let cursor = mouse::Cursor::Available(at);
+            let mut found = None;
+            for event in events {
+                let mut messages = Vec::new();
+                {
+                    let mut ui = UserInterface::build(
+                        app.view_main(),
+                        VIEW_SIZE,
+                        std::mem::take(&mut cache),
+                        &mut renderer,
+                    );
+                    let _ = ui.update(
+                        &window::Headless,
+                        &shell::Waker::noop(),
+                        std::slice::from_ref(event),
+                        cursor,
+                        &mut renderer,
+                        &mut messages,
+                    );
+                    cache = ui.into_cache();
+                }
+                for message in messages {
+                    let _ = app.update(message);
+                }
+            }
+            if let Some(label) = find {
+                let mut ui = UserInterface::build(
+                    app.view_main(),
+                    VIEW_SIZE,
+                    std::mem::take(&mut cache),
+                    &mut renderer,
+                );
+                let mut sel = Selector::find(label);
+                ui.operate(&renderer, &mut widget::operation::black_box(&mut sel));
+                if let widget::operation::Outcome::Some(Some(t)) = widget::Operation::finish(&sel) {
+                    found = t.visible_bounds().map(|b| b.center());
+                }
+                cache = ui.into_cache();
+            }
+            found
+        };
+    let node = find_in_view(&app, "GRP");
+    // The pointer comes onto the pallet first, as a real one does.
+    step(
+        &mut app,
+        node,
+        &[iced::Event::Mouse(mouse::Event::CursorMoved {
+            position: node,
+        })],
+        None,
+    );
+    // Over the pallet it may move (hover), so look again.
+    let node = find_in_view(&app, "GRP");
+    let right = [
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: node }),
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+    ];
+    // The menu opens at the pointer; "Freeze all" is its fourth line
+    // after "Delete group", "Turn All Layers On", "Turn all off".
+    let item = step(&mut app, node, &right, Some("Freeze all")).unwrap_or(iced::Point::new(
+        node.x + 60.0,
+        node.y + 4.0 + 3.0 * 23.3 + 11.0,
+    ));
+    let left = [
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: item }),
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+    ];
+    step(&mut app, item, &left, None);
+    let zulu = app.tabs[i]
+        .scene
+        .document
+        .layers
+        .iter()
+        .find(|l| l.name == "ZULU")
+        .unwrap()
+        .is_frozen();
+    assert!(zulu, "Freeze all froze the group's layer");
+}
+
 #[test]
 fn toolpalettes_commands_transparency_and_distinct_from_authoring_palettes() {
     let mut app = authoring_app();

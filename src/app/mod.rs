@@ -1455,6 +1455,8 @@ pub(super) struct OpenCADStudio {
     qselect: Option<QSelectState>,
     /// The FILTER dialog while it is open.
     filter_dialog: Option<filter_dialog::FilterDialogState>,
+    /// LAYERP is putting layers back; that change is not one to return to.
+    restoring_layer_previous: bool,
     /// The Layer manager's import dialog while it is open.
     layer_import: Option<layer_import::LayerImportState>,
     /// 'FILTER or 'QSELECT opened inside this command's "Select objects:";
@@ -4336,8 +4338,30 @@ pub enum Message {
     LayerNew,
     /// Show a node of the Layer manager's filter tree.
     LayerShow(crate::ui::window::layers::TreeNode),
+    /// The Layer manager tree's rename field: typed, Enter, Esc.
+    LayerTreeRenameEdit(String),
+    LayerTreeRenameCommit,
+    LayerTreeRenameCancel,
+    /// A tree node's eye: all its layers lit, or none of them.
+    LayerNodeEye(crate::ui::window::layers::TreeNode),
+    /// The compact Layer manager toolbar's "…" menu open or closed.
+    LayerMoreMenu(bool),
+    /// An item of that menu: close it, then do this.
+    LayerMoreRun(Box<Message>),
+    /// The compact toolbar's search field open or closed.
+    LayerSearchOpen(bool),
+    /// Pressed rows released somewhere that takes no drop.
+    LayerDragEnd,
+    /// The dragged rows are over this group (`None`: off it).
+    LayerDragOver(Option<String>),
+    /// The dragged rows dropped onto this group.
+    LayerDrop(String),
+    /// Open or close a section of the Layer manager's filter tree.
+    LayerTreeSection(crate::ui::window::layers::TreeSection),
     /// Show the layers the node leaves out instead.
     LayerInvert(bool),
+    /// Turn a layer's eye on or off: its objects highlighted in the drawing.
+    LayerEye(String),
     /// Open FILTER over the layers: a new filter from the search text
     /// (`None`), or the LAYERFILTER filter named.
     LayerFilterEdit(Option<String>),
@@ -6333,6 +6357,7 @@ impl OpenCADStudio {
             grip_text_slide: false,
             qselect: None,
             filter_dialog: None,
+            restoring_layer_previous: false,
             layer_import: None,
             transparent_select: None,
             qselect_settings: None,

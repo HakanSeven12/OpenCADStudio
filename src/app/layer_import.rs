@@ -24,6 +24,9 @@ pub struct ImportRow {
     pub ticked: bool,
     /// The drawing has a layer of this name.
     pub exists: bool,
+    /// What differs from the drawing's layer of that name (colour,
+    /// linetype, lineweight), empty when it is the same.
+    pub differs: Vec<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +39,10 @@ pub struct LayerImportState {
     pub linetype_styles: Vec<document::tables::TextStyle>,
     pub on_conflict: OnConflict,
     pub search: String,
+    /// The source's layer groups, by layer name.
+    pub groups: Vec<(String, Vec<String>)>,
+    /// Bring the groups whose layers come in.
+    pub bring_groups: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -48,6 +55,9 @@ pub enum LayerImportMsg {
     PickedWeb(Result<Option<(String, Box<Document>)>, String>),
     Toggle(usize),
     All(bool),
+    /// Tick only the layers the drawing hasn't got.
+    OnlyNew,
+    BringGroups(bool),
     Search(String),
     OnConflict(OnConflict),
     Import,
@@ -163,11 +173,9 @@ impl OpenCADStudio {
             #[cfg(not(target_arch = "wasm32"))]
             LayerImportMsg::Picked(path) => match crate::io::load_file(&path) {
                 Ok(document) => {
-                    let name = path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    self.layer_import_open(name, &document);
+                    // The whole path, as the mockup's Source field shows it.
+                    self.layer_import_open(path.display().to_string(), &document);
+                    return self.layers_dialog_to_front();
                 }
                 Err(why) => self
                     .command_line
@@ -205,6 +213,12 @@ impl OpenCADStudio {
                             }
                         }
                     }
+                    LayerImportMsg::OnlyNew => {
+                        for row in &mut state.rows {
+                            row.ticked = !row.exists;
+                        }
+                    }
+                    LayerImportMsg::BringGroups(on) => state.bring_groups = on,
                     LayerImportMsg::Search(text) => state.search = text,
                     LayerImportMsg::OnConflict(choice) => state.on_conflict = choice,
                     _ => {}
@@ -219,11 +233,43 @@ impl OpenCADStudio {
         let here = &self.tabs[i].scene.document;
         let rows: Vec<ImportRow> = offered_layers(document)
             .into_iter()
-            .map(|layer| ImportRow {
-                // New layers are ticked; same-named ones wait to be chosen.
-                exists: here.layers.contains(&layer.name),
-                ticked: !here.layers.contains(&layer.name),
-                layer,
+            .map(|layer| {
+                let mine = here
+                    .layers
+                    .iter()
+                    .find(|l| l.name.eq_ignore_ascii_case(&layer.name));
+                let mut differs = Vec::new();
+                if let Some(mine) = mine {
+                    if mine.color != layer.color {
+                        differs.push("color");
+                    }
+                    if !mine.line_type.eq_ignore_ascii_case(&layer.line_type) {
+                        differs.push("linetype");
+                    }
+                    if mine.line_weight != layer.line_weight {
+                        differs.push("lineweight");
+                    }
+                }
+                ImportRow {
+                    // New layers are ticked; same-named ones wait to be chosen.
+                    exists: mine.is_some(),
+                    ticked: mine.is_none(),
+                    differs,
+                    layer,
+                }
+            })
+            .collect();
+        // The source's groups, by layer name, to bring with their layers.
+        let groups: Vec<(String, Vec<String>)> = super::layer_groups::layer_groups(document)
+            .into_iter()
+            .map(|group| {
+                let names = group
+                    .layers
+                    .iter()
+                    .filter_map(|h| document.layers.iter().find(|l| l.handle == *h))
+                    .map(|l| l.name.clone())
+                    .collect();
+                (group.name, names)
             })
             .collect();
         if rows.is_empty() {
@@ -238,6 +284,8 @@ impl OpenCADStudio {
             linetype_styles: document.text_styles.iter().cloned().collect(),
             on_conflict: OnConflict::Skip,
             search: String::new(),
+            bring_groups: !groups.is_empty(),
+            groups,
         });
         self.reset_modal_geometry();
     }
@@ -253,6 +301,41 @@ impl OpenCADStudio {
         }
         self.push_undo_snapshot(i, "LAYER IMPORT");
         let report = import_layers(&mut self.tabs[i].scene.document, &state);
+        if state.bring_groups {
+            let ticked: Vec<&str> = state
+                .rows
+                .iter()
+                .filter(|row| row.ticked)
+                .map(|row| row.layer.name.as_str())
+                .collect();
+            let document = &mut self.tabs[i].scene.document;
+            for (group, names) in &state.groups {
+                let mut members: Vec<Handle> = super::layer_groups::layer_groups(document)
+                    .into_iter()
+                    .find(|g| g.name.eq_ignore_ascii_case(group))
+                    .map(|g| g.layers)
+                    .unwrap_or_default();
+                let mut added = false;
+                for name in names
+                    .iter()
+                    .filter(|n| ticked.iter().any(|t| t.eq_ignore_ascii_case(n)))
+                {
+                    if let Some(layer) = document
+                        .layers
+                        .iter()
+                        .find(|l| l.name.eq_ignore_ascii_case(name))
+                    {
+                        if !members.contains(&layer.handle) {
+                            members.push(layer.handle);
+                            added = true;
+                        }
+                    }
+                }
+                if added {
+                    super::layer_groups::store_layer_group(document, group, &members);
+                }
+            }
+        }
         if report.imported + report.overwritten == 0 {
             self.discard_last_undo_entry(i);
         } else {
@@ -308,7 +391,7 @@ fn pick() -> Task<Message> {
 mod view {
     use super::*;
     use crate::t;
-    use crate::ui::style::form::{button_style, dialog_button, dialog_button_styled_opt};
+    use crate::ui::style::form::{dialog_button, dialog_button_styled_opt};
     use iced::widget::{
         button, checkbox, column, container, row, scrollable, text, text_input, Space,
     };
@@ -329,71 +412,248 @@ mod view {
                     color: Some(theme.palette().background.base.text.scale_alpha(0.7)),
                 })
         };
+        // As in the mockup: Source with Browse…; All · None · Only new and
+        // the search; a table of the source's layers with what the drawing
+        // has of each; what a same-named layer does and what else comes
+        // along; a summary line over Cancel and Import.
+        const W_CHECK: f32 = 28.0;
+        const W_NAME: f32 = 170.0;
+        const W_COLOR: f32 = 100.0;
+        const W_LT: f32 = 110.0;
+        const W_LW: f32 = 80.0;
+        let header_cell =
+            |label: std::borrow::Cow<'static, str>, w: Length| -> Element<'a, Message> {
+                muted(label.into_owned()).width(w).into()
+            };
+        let header = container(
+            row![
+                Space::new().width(W_CHECK),
+                header_cell(t!("Name"), Length::Fixed(W_NAME)),
+                header_cell(t!("Color"), Length::Fixed(W_COLOR)),
+                header_cell(t!("Linetype"), Length::Fixed(W_LT)),
+                header_cell(t!("Lineweight"), Length::Fixed(W_LW)),
+                header_cell(t!("In this drawing"), Fill),
+            ]
+            .align_y(iced::Alignment::Center),
+        )
+        .padding([4, 8]);
         let search = state.search.to_lowercase();
-        let mut list = column![].spacing(2);
+        let mut list = column![].spacing(0);
+        let mut shown = 0usize;
         for (at, row) in state.rows.iter().enumerate() {
             if !search.is_empty() && !row.layer.name.to_lowercase().contains(&search) {
                 continue;
             }
             let swatch = container(Space::new().width(12).height(12)).style({
                 let color = crate::ui::window::layers::iced_color_from_acad(&row.layer.color);
-                move |_: &Theme| container::Style {
+                move |theme: &Theme| container::Style {
                     background: Some(Background::Color(color)),
+                    border: Border {
+                        color: theme.palette().background.base.text.scale_alpha(0.5),
+                        width: 1.0,
+                        radius: 2.0.into(),
+                    },
                     ..Default::default()
                 }
             });
-            let mut line = row![
-                checkbox(row.ticked)
-                    .label(row.layer.name.clone())
-                    .text_size(12)
-                    .size(14)
-                    .on_toggle(move |_| msg(LayerImportMsg::Toggle(at)))
-                    .width(Fill),
-                swatch,
-                text(row.layer.line_type.clone())
+            let state_cell: Element<'a, Message> = if !row.exists {
+                text(t!("New")).size(11).into()
+            } else if row.differs.is_empty() {
+                muted(t!("Exists, identical").into_owned()).into()
+            } else {
+                let what = row
+                    .differs
+                    .iter()
+                    .map(|d| match *d {
+                        "color" => t!("color").into_owned(),
+                        "linetype" => t!("linetype").into_owned(),
+                        _ => t!("lineweight").into_owned(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                row![
+                    crate::ui::icons::themed_warning(crate::ui::icons::WARNING, 12.0),
+                    text(crate::tf!("Exists, {} differs", what)).size(11),
+                ]
+                .spacing(5)
+                .align_y(iced::Alignment::Center)
+                .into()
+            };
+            let dim = !row.ticked;
+            let cell = move |s: String, w: f32| {
+                text(s)
                     .size(11)
-                    .width(Length::Fixed(110.0)),
+                    .width(Length::Fixed(w))
+                    .wrapping(iced::widget::text::Wrapping::None)
+                    .style(move |theme: &Theme| iced::widget::text::Style {
+                        color: dim.then(|| theme.palette().background.base.text.scale_alpha(0.55)),
+                    })
+            };
+            let line = row![
+                container(
+                    checkbox(row.ticked)
+                        .size(14)
+                        .on_toggle(move |_| msg(LayerImportMsg::Toggle(at)))
+                )
+                .width(W_CHECK),
+                cell(row.layer.name.clone(), W_NAME),
+                row![
+                    swatch,
+                    cell(
+                        crate::ui::color_select::color_display_name(row.layer.color),
+                        W_COLOR - 18.0
+                    )
+                ]
+                .spacing(6)
+                .align_y(iced::Alignment::Center)
+                .width(Length::Fixed(W_COLOR)),
+                cell(row.layer.line_type.clone(), W_LT),
+                cell(
+                    crate::ui::properties::LwItem(row.layer.line_weight).to_string(),
+                    W_LW
+                ),
+                state_cell,
             ]
-            .spacing(8)
-            .align_y(iced::Alignment::Center);
-            if row.exists {
-                line = line.push(muted(t!("Already in this drawing").into_owned()));
-            }
-            list = list.push(line);
+            .align_y(iced::Alignment::Center)
+            .height(26);
+            let stripe = shown % 2 == 1;
+            shown += 1;
+            list = list.push(container(line).padding([0, 8]).width(Fill).style(
+                move |theme: &Theme| container::Style {
+                    background:
+                        stripe.then(|| Background::Color(theme.palette().background.weak.color)),
+                    ..Default::default()
+                },
+            ));
         }
         let ticked = state.rows.iter().filter(|row| row.ticked).count();
-        let mut conflict = row![text(t!("Same name:")).size(12)]
-            .spacing(4)
-            .align_y(iced::Alignment::Center);
+        let new = state
+            .rows
+            .iter()
+            .filter(|row| row.ticked && !row.exists)
+            .count();
+        let skipped = match state.on_conflict {
+            OnConflict::Skip => state
+                .rows
+                .iter()
+                .filter(|row| row.ticked && row.exists)
+                .count(),
+            _ => 0,
+        };
+        let fieldset = |title: std::borrow::Cow<'static, str>,
+                        content: Element<'a, Message>|
+         -> Element<'a, Message> {
+            container(column![text(title).size(12), content].spacing(6))
+                .padding(10)
+                .width(Fill)
+                .style(|theme: &Theme| container::Style {
+                    border: Border {
+                        color: theme.palette().background.neutral.color,
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into()
+        };
+        let example = state
+            .rows
+            .iter()
+            .find(|row| row.exists && row.layer.name != "0")
+            .map_or_else(|| "A-WALL".to_string(), |row| row.layer.name.clone());
+        let mut conflict = column![].spacing(4);
         for (choice, caption) in [
-            (OnConflict::Skip, t!("Skip")),
-            (OnConflict::Overwrite, t!("Overwrite")),
-            (OnConflict::Rename, t!("Rename")),
+            (OnConflict::Skip, t!("Skip it").into_owned()),
+            (
+                OnConflict::Overwrite,
+                t!("Overwrite its properties").into_owned(),
+            ),
+            (
+                OnConflict::Rename,
+                crate::tf!("Import with a suffix, e.g. “{} (2)”", example).into_owned(),
+            ),
         ] {
             conflict = conflict.push(
-                button(text(caption).size(12))
-                    .on_press(msg(LayerImportMsg::OnConflict(choice)))
-                    .style(button_style(state.on_conflict == choice))
-                    .padding([4, 10]),
+                iced::widget::radio(caption, choice, Some(state.on_conflict), |c| {
+                    msg(LayerImportMsg::OnConflict(c))
+                })
+                .text_size(12)
+                .size(14),
             );
         }
+        let missing_lt: Vec<String> = {
+            let mut names: Vec<String> = state
+                .rows
+                .iter()
+                .filter(|row| row.ticked)
+                .map(|row| row.layer.line_type.clone())
+                .filter(|lt| {
+                    !lt.eq_ignore_ascii_case("Continuous")
+                        && !lt.eq_ignore_ascii_case("ByLayer")
+                        && !lt.eq_ignore_ascii_case("ByBlock")
+                })
+                .collect();
+            names.sort();
+            names.dedup();
+            names
+        };
+        let bring = column![
+            checkbox(true)
+                .label(if missing_lt.is_empty() {
+                    t!("Missing linetypes").into_owned()
+                } else {
+                    format!("{} ({})", t!("Missing linetypes"), missing_lt.join(", "))
+                })
+                .text_size(12)
+                .size(14),
+            checkbox(state.bring_groups && !state.groups.is_empty())
+                .label(crate::tf!("Groups ({})", state.groups.len()))
+                .text_size(12)
+                .size(14)
+                .on_toggle_maybe(
+                    (!state.groups.is_empty()).then_some(|on| msg(LayerImportMsg::BringGroups(on)))
+                ),
+        ]
+        .spacing(4);
         let body = column![
             row![
-                text(crate::tf!("Layers in {}", state.source))
-                    .size(12)
-                    .width(Fill),
+                text(t!("Source")).size(12).width(Length::Fixed(50.0)),
+                container(
+                    text(state.source.clone())
+                        .size(12)
+                        .wrapping(iced::widget::text::Wrapping::None)
+                )
+                .clip(true)
+                .padding([4, 8])
+                .width(Fill)
+                .style(|theme: &Theme| container::Style {
+                    background: Some(Background::Color(theme.palette().background.base.color)),
+                    border: Border {
+                        color: theme.palette().background.neutral.color,
+                        width: 1.0,
+                        radius: 3.0.into(),
+                    },
+                    ..Default::default()
+                }),
+                dialog_button(t!("Browse..."), msg(LayerImportMsg::Pick), false),
+            ]
+            .spacing(8)
+            .align_y(iced::Alignment::Center),
+            row![
+                dialog_button(t!("All"), msg(LayerImportMsg::All(true)), false),
+                dialog_button(t!("None"), msg(LayerImportMsg::All(false)), false),
+                dialog_button(t!("Only new"), msg(LayerImportMsg::OnlyNew), false),
+                Space::new().width(Fill),
                 text_input(&t!("Search…"), &state.search)
                     .on_input(|v| msg(LayerImportMsg::Search(v)))
                     .size(12)
                     .width(Length::Fixed(180.0)),
-                dialog_button(t!("All"), msg(LayerImportMsg::All(true)), false),
-                dialog_button(t!("None"), msg(LayerImportMsg::All(false)), false),
             ]
             .spacing(6)
             .align_y(iced::Alignment::Center),
-            container(scrollable(list).height(Length::Fixed(320.0)))
-                .padding(8)
+            container(column![header, scrollable(list).height(Fill)])
                 .width(Fill)
+                .height(Fill)
                 .style(|theme: &Theme| container::Style {
                     background: Some(Background::Color(theme.palette().background.base.color)),
                     border: Border {
@@ -403,12 +663,25 @@ mod view {
                     },
                     ..Default::default()
                 }),
-            conflict,
             row![
+                fieldset(t!("When a name already exists"), conflict.into()),
+                fieldset(t!("Also bring"), bring.into()),
+            ]
+            .spacing(10),
+            row![
+                muted(
+                    crate::tf!(
+                        "{} selected · {} new, {} skipped · one undo step",
+                        ticked,
+                        new,
+                        skipped
+                    )
+                    .into_owned()
+                ),
                 Space::new().width(Fill),
                 dialog_button(t!("Cancel"), msg(LayerImportMsg::Close), false),
                 dialog_button_styled_opt(
-                    crate::tf!("Import {}", ticked),
+                    t!("Import"),
                     (ticked > 0).then_some(msg(LayerImportMsg::Import)),
                     button::primary,
                 ),
@@ -493,6 +766,7 @@ mod tests {
                 .map(|layer| ImportRow {
                     exists: here.layers.contains(&layer.name),
                     ticked: layer.name != "0",
+                    differs: Vec::new(),
                     layer,
                 })
                 .collect(),
@@ -500,6 +774,8 @@ mod tests {
             linetype_styles: from.text_styles.iter().cloned().collect(),
             on_conflict,
             search: String::new(),
+            groups: Vec::new(),
+            bring_groups: false,
         }
     }
 
@@ -577,5 +853,50 @@ mod tests {
         assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
         app.undo_active_tab();
         assert!(!app.tabs[i].scene.document.layers.contains("Walls"));
+    }
+
+    /// #2610 (F1): a same-named layer says what differs; Only new ticks the
+    /// new ones; the source's groups come along with their layers.
+    #[test]
+    fn import_differences_only_new_and_groups() {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let mut from = source();
+        let walls = from
+            .layers
+            .iter()
+            .find(|l| l.name == "Walls")
+            .unwrap()
+            .handle;
+        super::super::layer_groups::store_layer_group(&mut from, "Shell", &[walls]);
+        // The drawing has its own, red "Doors".
+        let mut doors = DocLayer::with_color("Doors", document::types::Color::Index(1));
+        doors.handle = app.tabs[i].scene.document.allocate_handle();
+        let _ = app.tabs[i].scene.document.layers.add(doors);
+        app.layer_import_open("standard.dwg".into(), &from);
+        let state = app.layer_import.as_ref().unwrap();
+        let row = state.rows.iter().find(|r| r.layer.name == "Doors").unwrap();
+        assert!(row.exists && row.differs.contains(&"color"));
+        assert_eq!(state.groups.len(), 1);
+        let _ = app.update(Message::LayerImport(LayerImportMsg::All(true)));
+        let _ = app.update(Message::LayerImport(LayerImportMsg::OnlyNew));
+        let state = app.layer_import.as_ref().unwrap();
+        assert!(state.rows.iter().all(|r| r.ticked != r.exists));
+        let _ = app.update(Message::LayerImport(LayerImportMsg::Import));
+        let groups = super::super::layer_groups::layer_groups(&app.tabs[i].scene.document);
+        let shell = groups
+            .iter()
+            .find(|g| g.name == "Shell")
+            .expect("the group came along");
+        let walls_here = app.tabs[i]
+            .scene
+            .document
+            .layers
+            .iter()
+            .find(|l| l.name == "Walls")
+            .unwrap()
+            .handle;
+        assert_eq!(shell.layers, [walls_here]);
     }
 }

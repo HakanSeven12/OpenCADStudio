@@ -455,6 +455,19 @@ impl OpenCADStudio {
         self.float_pallet_centred(id);
     }
 
+    /// A dialog opened from the Layer manager draws in the main window; with
+    /// the manager in a window of its own, bring the main window to the
+    /// front, or the dialog opens behind the pallet (#2610).
+    pub(crate) fn layers_dialog_to_front(&self) -> Task<Message> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.dock.is_separate(crate::ui::dock::PanelId::Layers) {
+            if let Some(id) = self.main_window {
+                return iced::window::gain_focus(id);
+            }
+        }
+        Task::none()
+    }
+
     /// Float pallet `id` over the middle of the drawing (where it floated
     /// last, when it did), out of the dock.
     #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]

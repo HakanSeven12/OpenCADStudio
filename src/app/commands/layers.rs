@@ -713,6 +713,7 @@ impl OpenCADStudio {
 
             // LAYISO — isolate the layers used by the selected entities.
             "LAYISO" => self.start_layiso(i),
+            "LAYERP" => self.layer_previous(i),
 
             // LAYISO Settings is kept as a command-line subcommand so it is
             // available both from the selection prompt and from scripts.

@@ -290,6 +290,8 @@ pub(super) fn viewport_controls<'a>(
             let outline = mouse_area(container(outline_icon).padding([4, 6]))
                 .interaction(iced::mouse::Interaction::Pointer)
                 .on_press(Message::ViewportHighlightToggle)
+                .on_enter(Message::ViewportOutlineSwitchHover(true))
+                .on_exit(Message::ViewportOutlineSwitchHover(false))
                 .on_scroll(move |delta| {
                     Message::ViewportHighlightOpacity(outline_opacity_step(outline_opacity, delta))
                 });
@@ -338,7 +340,7 @@ fn outline_tooltip(on: bool, opacity: u8) -> String {
     format!(
         "{} {state}\n{}",
         crate::t!("Hover outline:"),
-        crate::t!("Click: on/off. Wheel: strength.")
+        crate::t!("Click: on/off. Mouse wheel: intensity.")
     )
 }
 

@@ -1604,15 +1604,10 @@ bg={bg_ms:.1}ms n={view_count}"
 
             // VPHIGHLIGHT: faint outline of the Model viewport under the
             // pointer (only with several viewports; none while it is away).
-            let pane_hover = if !is_paper && self.model_space.viewport_hover_highlight {
-                let (vw, vh) = sel_ref.view.vp_size;
-                let input = &sel_ref.input;
-                let cursor = (!input.pointer_away).then_some(input.last_move_pos).flatten();
-                tab.scene.hovered_model_pane_px(vw, vh, cursor).map(|r| {
-                    (r, f32::from(self.model_space.viewport_hover_opacity.min(100)) / 100.0)
-                })
-            } else {
+            let pane_hover = if is_paper {
                 None
+            } else {
+                self.model_viewport_outline(tab)
             };
             let hover_locked = tab
                 .scene
@@ -5670,5 +5665,30 @@ impl OpenCADStudio {
             && !interactive_value_grip)
             || self.mtext_editor.as_ref().is_some_and(|e| e.show_preview)
             || self.text_inline.is_some()
+    }
+}
+
+impl OpenCADStudio {
+    /// VPHIGHLIGHT: the Model viewport to outline and the outline's alpha.
+    /// The one under the pointer (only with several viewports; none while
+    /// the pointer is away), or the active one while the pointer is on the
+    /// chip's outline switch, so each wheel step shows on it at once.
+    pub(in crate::app) fn model_viewport_outline(
+        &self,
+        tab: &DocumentTab,
+    ) -> Option<(iced::Rectangle, f32)> {
+        if !self.model_space.viewport_hover_highlight {
+            return None;
+        }
+        let selection = tab.scene.selection.borrow();
+        let (vw, vh) = selection.view.vp_size;
+        let input = &selection.input;
+        let cursor = (!input.pointer_away).then_some(input.last_move_pos).flatten();
+        let rect = if self.outline_switch_hover && tab.scene.model_tiles.borrow().len() > 1 {
+            Some(tab.scene.active_model_tile_bounds(vw, vh))
+        } else {
+            tab.scene.hovered_model_pane_px(vw, vh, cursor)
+        };
+        rect.map(|r| (r, f32::from(self.model_space.viewport_hover_opacity.min(100)) / 100.0))
     }
 }

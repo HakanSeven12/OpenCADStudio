@@ -5782,6 +5782,10 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::ViewportOutlineSwitchHover(on) => {
+                self.outline_switch_hover = on;
+                Task::none()
+            }
             Message::PaneMoveStart => {
                 let i = self.active_tab;
                 self.pane_move_from = Some(self.tabs[i].scene.active_model_tile.get());

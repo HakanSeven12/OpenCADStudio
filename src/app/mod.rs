@@ -1075,6 +1075,9 @@ pub(super) struct OpenCADStudio {
     /// seTtings showed the Hatch panel for the running HATCH / GRADIENT,
     /// even with HPDLGMODE 0.
     hatch_panel_shown: bool,
+    /// The pointer is on the viewport chip's outline switch: the active
+    /// viewport keeps its outline there, so a wheel step shows at once.
+    outline_switch_hover: bool,
     /// The Hatch boundary warning window.
     hatch_boundary_warning: Option<crate::ui::window::hatch_dialogs::BoundaryWarningState>,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
@@ -4528,6 +4531,8 @@ pub enum Message {
     /// Viewport chip: wheel over the outline switch sets its strength
     /// (VPHIGHLIGHTOPACITY, percent).
     ViewportHighlightOpacity(u8),
+    /// The pointer entered (true) or left the viewport chip's outline switch.
+    ViewportOutlineSwitchHover(bool),
     ViewCubeSnap(CubeRegion),
     /// World-frame view snap from a compass cardinal (N/E/S/W), bypassing the
     /// UCS so the compass stays world-aligned.
@@ -6259,6 +6264,7 @@ impl OpenCADStudio {
             hatch_prefs: Default::default(),
             hatch_boundary_warning_off: false,
             hatch_panel_shown: false,
+            outline_switch_hover: false,
             hatch_boundary_warning: None,
             show_menu_bar: false,
             ribbon_closed: false,

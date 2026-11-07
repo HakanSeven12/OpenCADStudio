@@ -3861,6 +3861,33 @@ mod viewport_highlight_tests {
             .expect("a hover-outline switch in View > Model Viewports")
     }
 
+    /// On the chip's outline switch the active viewport keeps its outline
+    /// (the pointer is off the drawing there), and a wheel step changes it
+    /// at once.
+    #[test]
+    fn the_outline_switch_keeps_the_active_viewport_outlined_while_its_wheel_turns() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.update(Message::DropdownSelectItem { dropdown_id: "VPORTS_CONFIG", cmd: "VPORTS 2V".into() });
+        assert_eq!(app.tabs[i].scene.model_tiles.borrow().len(), 2);
+        app.tabs[i].scene.selection.borrow_mut().input.pointer_away = true;
+        assert!(app.model_viewport_outline(&app.tabs[i]).is_none(), "pointer away: no outline");
+
+        let _ = app.update(Message::ViewportOutlineSwitchHover(true));
+        let active = app.tabs[i].scene.active_model_tile_bounds(800.0, 600.0);
+        let (rect, alpha) = app.model_viewport_outline(&app.tabs[i]).expect("outline on the switch");
+        assert_eq!(rect, active);
+        assert!((alpha - 0.5).abs() < 1e-6);
+        let _ = app.update(Message::ViewportHighlightOpacity(70));
+        let (_, alpha) = app.model_viewport_outline(&app.tabs[i]).unwrap();
+        assert!((alpha - 0.7).abs() < 1e-6, "the wheel step shows at once");
+
+        let _ = app.update(Message::ViewportOutlineSwitchHover(false));
+        assert!(app.model_viewport_outline(&app.tabs[i]).is_none(), "gone once the pointer leaves");
+    }
+
     #[test]
     fn the_ribbon_switch_and_the_variables_control_the_hover_outline() {
         let mut app = OpenCADStudio::new_for_test();

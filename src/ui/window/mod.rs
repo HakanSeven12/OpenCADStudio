@@ -62,6 +62,7 @@ pub mod pdf_password_dialog;
 pub mod refedit_dialog;
 pub mod sheet_set;
 pub mod shortcuts;
+pub mod tool_palettes;
 pub mod update_notice;
 pub mod wblock;
 pub mod xref_attach;

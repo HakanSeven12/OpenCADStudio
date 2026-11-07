@@ -277,6 +277,27 @@ impl OpenCADStudio {
         });
     }
 
+    /// Delete group `name` (its layers stay), straight, not through the
+    /// command line where a name with a space would split.
+    pub(in crate::app) fn delete_layer_group_named(&mut self, i: usize, name: &str) {
+        let name = name.to_string();
+        self.edit_layer_groups(i, "LAYERGROUP", |document| {
+            delete_layer_group(document, &name);
+        });
+        self.command_line
+            .push_output(&crate::tr!("layer-groups", "deleted", name = name));
+    }
+
+    /// Rename group `old` to `new`.
+    pub(in crate::app) fn rename_layer_group_named(&mut self, i: usize, old: &str, new: &str) {
+        let (old, new) = (old.to_string(), new.to_string());
+        self.edit_layer_groups(i, "LAYERGROUP", |document| {
+            rename_layer_group(document, &old, &new);
+        });
+        self.command_line
+            .push_output(&crate::tr!("layer-groups", "updated", name = new));
+    }
+
     /// A free "Group <n>" name.
     pub(in crate::app) fn next_layer_group_name(&self, i: usize) -> String {
         let taken = self.layer_group_names(i);

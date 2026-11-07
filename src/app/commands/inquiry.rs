@@ -153,10 +153,19 @@ impl OpenCADStudio {
                 return Some(self.cmd_add_selected(i));
             }
 
-            // QSELECT builds a selection set by object type / property; FILTER is
-            // the same criteria-based selection.
-            "QSELECT" | "FILTER" => {
+            // QSELECT builds a selection set from one or a few conditions;
+            // FILTER is the advanced one, with groups and NOT (#2611).
+            "QSELECT" => {
                 return Some(Task::done(Message::QSelectOpen));
+            }
+            "FILTER" => {
+                return Some(Task::done(Message::FilterDialog(
+                    crate::app::filter_dialog::FilterMsg::Open(None),
+                )));
+            }
+            // FILTER <name>: a saved filter, applied without the dialog.
+            other if other.starts_with("FILTER ") => {
+                return Some(self.apply_saved_filter(&cmd["FILTER ".len()..]));
             }
 
             // CAL <expression> — evaluate an expression on the
@@ -941,42 +950,28 @@ impl OpenCADStudio {
             }
 
             // ── QSELECT — quick-select entities by property ───────────────────
-            // QSELECT TYPE <type>          — select all entities of given type
-            // QSELECT LAYER <name>         — select all entities on layer
-            // QSELECT COLOR <n>            — select all entities with color index n
-            // QSELECT LINETYPE <name>      — select all entities with linetype
+            // QSELECT TYPE <type>            — select all entities of a type
+            // QSELECT LAYER <name>           — equality on any property
+            // QSELECT RADIUS >= 10           — compare a numeric property
+            // QSELECT NOT LINETYPE Hidden    — turn the whole test around
+            // Values take the dialog's wildcards (`*`, `?`, `#`, `~`, a
+            // comma-separated list). Bare QSELECT opens the dialog above.
             cmd if cmd == "QSELECT" || cmd.starts_with("QSELECT ") => {
                 let rest = cmd.split_once(' ').map(|(_, r)| r.trim()).unwrap_or("");
-                let parts: Vec<&str> = rest.splitn(2, ' ').collect();
-                let prop = parts.first().map(|s| s.to_uppercase()).unwrap_or_default();
-                let val = parts.get(1).map(|s| s.trim()).unwrap_or("").to_uppercase();
+                let filter = match crate::filter::qselect::parse_command_line(rest) {
+                    Ok(filter) => filter,
+                    Err(message) => {
+                        self.command_line.push_info(message);
+                        return Some(Task::none());
+                    }
+                };
+                let matched = self.tabs[i].scene.filter_matches(
+                    crate::app::QSelectScope::CurrentSpace,
+                    &filter,
+                    false,
+                );
 
-                let matched: Vec<document::Handle> = self.tabs[i]
-                    .scene
-                    .document
-                    .entities()
-                    .filter(|e| {
-                        let c = e.common();
-                        match prop.as_str() {
-                            "TYPE" => crate::entities::names::dxf_name(e).to_uppercase() == val,
-                            "LAYER" => c.layer.to_uppercase() == val,
-                            "COLOR" => c
-                                .color
-                                .index()
-                                .map(|n| n.to_string() == val)
-                                .unwrap_or(val == "BYLAYER"),
-                            "LINETYPE" => c.linetype.to_uppercase() == val,
-                            _ => false,
-                        }
-                    })
-                    .map(|e| e.common().handle)
-                    .collect();
-
-                if prop.is_empty() {
-                    self.command_line.push_info(
-                        crate::t!("Usage: QSELECT TYPE|LAYER|COLOR|LINETYPE <value>").as_ref(),
-                    );
-                } else if matched.is_empty() {
+                if matched.is_empty() {
                     self.command_line
                         .push_output(crate::t!("QSELECT: no matching entities.").as_ref());
                 } else {

@@ -378,7 +378,8 @@ fn loops_flagged_not_closed_stay_out_of_the_extents() {
 
 // The island style picks loops by their path flags: Outer keeps loops flagged
 // external (bit 0) or outermost (bit 4), Ignore only those flagged external,
-// Normal all of them. The kept loops fill even-odd. Squares of 40, 24 and 10
+// Normal those plus any first-level island (a deeper one only when
+// flagged). The kept loops fill even-odd. Squares of 40, 24 and 10
 // (two loops: 40 and 20), each centred in the one before.
 #[test]
 fn island_style_keeps_loops_by_their_flags() {
@@ -414,7 +415,9 @@ fn island_style_keeps_loops_by_their_flags() {
         ("outer 1 16 0", area(Outer, three(1, 16, 0)), 1024.0),
         ("outer 17 16 0", area(Outer, three(17, 16, 0)), 1024.0),
         ("outer 1 0 1", area(Outer, three(1, 0, 1)), 1500.0),
-        ("normal 1 0 0", area(Normal, three(1, 0, 0)), 1124.0),
+        ("normal 1 0 0", area(Normal, three(1, 0, 0)), 1024.0),
+        ("normal 1 16 0", area(Normal, three(1, 16, 0)), 1024.0),
+        ("normal 1 16 4", area(Normal, three(1, 16, 4)), 1124.0),
         ("normal 0 0", area(Normal, two(0, 0)), 1200.0),
     ];
     for (name, area, expected) in cases {

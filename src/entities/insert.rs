@@ -741,6 +741,7 @@ mod tests {
                 1.0,
                 crate::scene::BlockScalePolicy::FromInsert,
                 false,
+                1.0,
             )
             .expect("the block expands");
             wires

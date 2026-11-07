@@ -1364,6 +1364,25 @@ impl HostApi for V4PluginHostApi {
             }
         }
     }
+
+    fn validate_parametric_chain(
+        &self,
+        chain: &crate::host::ParametricChain,
+        tolerance: f64,
+    ) -> Result<(), String> {
+        // Pure validation: no document snapshot invalidation.
+        match self.request(PluginRequest::ValidateParametricChain {
+            chain: chain.clone(),
+            tolerance,
+        }) {
+            Ok(PluginResponse::ValidateParametricChainResult(result)) => result,
+            Ok(PluginResponse::Error(error)) => Err(error),
+            Ok(other) => Err(format!(
+                "unexpected parametric validation response: {other:?}"
+            )),
+            Err(error) => Err(error.to_string()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1476,6 +1495,53 @@ mod tests {
 
         let mut api = client.plugin_host_api(0, Rc::new(RefCell::new(HashMap::new())));
         api.push_info("hello host");
+        runner.join().unwrap();
+    }
+
+    #[test]
+    fn v4_client_validate_parametric_chain_roundtrip() {
+        let (host_stream, mut runner_stream) = connect_pair();
+        let client = V4Client::from_stream_for_test(host_stream);
+        let chain = crate::host::ParametricChain {
+            plane: crate::host::ParametricPlane::Plan,
+            segments: Vec::new(),
+            layer: String::new(),
+        };
+
+        let runner = thread::spawn(move || {
+            for result in [Ok(()), Err("hard-corner seam".to_owned())] {
+                match recv::<PluginToHostV4>(&mut runner_stream).unwrap() {
+                    PluginToHostV4::Request {
+                        id,
+                        payload:
+                            PluginRequest::ValidateParametricChain {
+                                chain: decoded,
+                                tolerance,
+                            },
+                        ..
+                    } => {
+                        assert!(decoded.segments.is_empty());
+                        assert_eq!(tolerance, 1e-3);
+                        send(
+                            &mut runner_stream,
+                            &HostToPluginV4::Response {
+                                id,
+                                payload: PluginResponse::ValidateParametricChainResult(result),
+                            },
+                        )
+                        .unwrap();
+                    }
+                    other => panic!("unexpected: {other:?}"),
+                }
+            }
+        });
+
+        let api = client.plugin_host_api(0, Rc::new(RefCell::new(HashMap::new())));
+        assert_eq!(api.validate_parametric_chain(&chain, 1e-3), Ok(()));
+        assert_eq!(
+            api.validate_parametric_chain(&chain, 1e-3),
+            Err("hard-corner seam".to_owned())
+        );
         runner.join().unwrap();
     }
 

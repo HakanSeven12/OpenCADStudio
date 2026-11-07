@@ -182,8 +182,8 @@ impl OpenCADStudio {
         point: DVec3,
     ) -> Task<Message> {
         if let Some(active) = self.tabs[i].active_plugin_grip.as_mut() {
+            active.moved |= point != active.last_world;
             active.last_world = point;
-            active.moved = true;
         }
         self.plugin_grip_deliveries.park_move(point);
         self.pump_plugin_grips()
@@ -700,6 +700,10 @@ impl OpenCADStudio {
         self.plugin_grip_deliveries = Default::default();
         self.plugin_grip_live_originals = Vec::new();
         self.plugin_grip_descriptor_drag = None;
+        // The drag's snap and tracking state ends with it.
+        self.snapper.from_point = None;
+        self.otrack_active = None;
+        self.tabs[tab].snap_result = None;
         self.tabs[tab].scene.set_preview_wires(Vec::new());
         self.tabs[tab].dirty = true;
     }

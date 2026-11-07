@@ -53,11 +53,13 @@ mod dock;
 mod tab_document;
 mod drafting_settings;
 pub(crate) mod expr_eval;
+pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
 mod layer_filters;
 pub(crate) mod layer_groups;
+pub(crate) mod layer_import;
 mod layer_walk;
 #[cfg(test)]
 mod layer_walk_tests;
@@ -86,6 +88,7 @@ mod quick_calc;
 mod qselect_tests;
 mod recent;
 mod record_api;
+mod saved_filters;
 pub(crate) mod settings;
 pub(crate) mod tool_windows;
 mod shortcuts;
@@ -300,7 +303,16 @@ pub enum QSelectOp {
     Eq,
     Neq,
     Gt,
+    Ge,
     Lt,
+    Le,
+}
+
+impl QSelectOp {
+    /// Operators that order numbers, only offered for numeric properties.
+    pub fn needs_number(self) -> bool {
+        matches!(self, Self::Gt | Self::Ge | Self::Lt | Self::Le)
+    }
 }
 
 /// Candidate set searched by Quick Select.
@@ -327,6 +339,29 @@ pub enum QSelectMode {
     Exclude,
 }
 
+/// What Quick Select does with the objects it finds.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QSelectResult {
+    /// They become the selection.
+    #[default]
+    New,
+    /// They join the selection.
+    Add,
+    /// They leave the selection.
+    Remove,
+}
+
+/// A picked object's properties ticked from the start: what describes it,
+/// not where it sits (#2611).
+pub(crate) const SAMPLE_TICKED_FIELDS: &[&str] = &["layer", "color", "linetype"];
+
+/// The properties of a picked object, each ticked to become a condition.
+#[derive(Clone, Debug)]
+pub struct QSelectSample {
+    pub type_name: String,
+    pub rows: Vec<(QSelectCondition, bool)>,
+}
+
 /// Editor used by the Quick Select value field.
 #[derive(Clone, Debug)]
 pub enum QSelectValueEditor {
@@ -342,7 +377,9 @@ impl std::fmt::Display for QSelectOp {
             QSelectOp::Eq => "= Equals",
             QSelectOp::Neq => "!= Not equal",
             QSelectOp::Gt => "> Greater than",
+            QSelectOp::Ge => ">= Greater or equal",
             QSelectOp::Lt => "< Less than",
+            QSelectOp::Le => "<= Less or equal",
         };
         f.write_str(crate::t!(s).as_ref())
     }
@@ -402,9 +439,7 @@ impl QSelectCondition {
         if matches!(operator, QSelectOp::Any) {
             return None;
         }
-        if matches!(operator, QSelectOp::Gt | QSelectOp::Lt)
-            && !matches!(property.editor, QSelectValueEditor::Number)
-        {
+        if operator.needs_number() && !matches!(property.editor, QSelectValueEditor::Number) {
             return Some(crate::t!("This operator requires a numeric property.").into_owned());
         }
         match &property.editor {
@@ -437,7 +472,8 @@ pub struct QSelectState {
     pub conditions: Vec<QSelectCondition>,
     pub editing_condition: Option<usize>,
     pub scope: QSelectScope,
-    pub available_types: Vec<String>,
+    /// Object types in the scope with how many of each.
+    pub available_types: Vec<(String, usize)>,
     pub available_properties: Vec<QSelectPropertyChoice>,
     pub candidate_count: usize,
     /// `None` = "(Any type)".
@@ -447,13 +483,35 @@ pub struct QSelectState {
     pub operator: QSelectOp,
     pub value: String,
     pub mode: QSelectMode,
-    pub append: bool,
+    pub result: QSelectResult,
     pub error: Option<String>,
+    /// Objects the conditions find right now.
+    pub live_count: usize,
+    /// What the conditions find, by object type, most first.
+    pub live_by_type: Vec<(String, usize)>,
+    /// The matches are highlighted in the drawing.
+    pub show: bool,
+    /// Values of the chosen property in the scope, most frequent first.
+    pub value_counts: Vec<(String, usize)>,
+    /// A picked object's properties waiting to be ticked.
+    pub sample: Option<QSelectSample>,
 }
 
 impl QSelectState {
+    /// The conditions Select would apply: the list, or the draft while the
+    /// list is empty and the draft is complete.
+    pub fn effective_conditions(&self) -> Option<Vec<QSelectCondition>> {
+        if !self.conditions.is_empty() {
+            return Some(self.conditions.clone());
+        }
+        let draft = self.draft_condition();
+        ((draft.type_filter.is_some() || draft.property.is_some())
+            && draft.validation_error().is_none())
+        .then(|| vec![draft])
+    }
+
     pub fn normalize_operator(&mut self) {
-        if matches!(self.operator, QSelectOp::Gt | QSelectOp::Lt)
+        if self.operator.needs_number()
             && !self
                 .property
                 .as_ref()
@@ -502,7 +560,8 @@ struct QSelectSettings {
     operator: QSelectOp,
     value: String,
     mode: QSelectMode,
-    append: bool,
+    result: QSelectResult,
+    show: bool,
 }
 
 impl From<&QSelectState> for QSelectSettings {
@@ -518,7 +577,8 @@ impl From<&QSelectState> for QSelectSettings {
             operator: state.operator,
             value: state.value.clone(),
             mode: state.mode,
-            append: state.append,
+            result: state.result,
+            show: state.show,
         }
     }
 }
@@ -781,6 +841,7 @@ pub(super) struct OpenCADStudio {
     clean_screen_properties: bool,
     clean_screen_parameters_manager: bool,
     clean_screen_authoring_palettes: bool,
+    clean_screen_tool_palettes: bool,
     /// A property list closed itself a moment ago. The overlay reports Escape
     /// before the global shortcut repeats it, so the repeat is dropped instead
     /// of clearing the selection the list was opened for.
@@ -1201,6 +1262,8 @@ pub(super) struct OpenCADStudio {
     /// Minutes between autosaves to a `.sv$` recovery file (SAVETIME command);
     /// 0 disables autosave.
     pub savetime_min: i32,
+    /// SAVEFILEPATH: the folder recovery copies go to; empty for the default.
+    pub save_file_path: String,
     /// SCRIPTCOMMANDS: scripts may run OCS commands (see `UserSettings`).
     pub script_commands: bool,
     /// Persisted default viewport background, restored from settings and applied
@@ -1397,6 +1460,15 @@ pub(super) struct OpenCADStudio {
     /// applied via `Message::QSelectApply`; the panel is dismissed on
     /// Apply / Cancel / Esc / outside-click.
     qselect: Option<QSelectState>,
+    /// The FILTER dialog while it is open.
+    filter_dialog: Option<filter_dialog::FilterDialogState>,
+    /// LAYERP is putting layers back; that change is not one to return to.
+    restoring_layer_previous: bool,
+    /// The Layer manager's import dialog while it is open.
+    layer_import: Option<layer_import::LayerImportState>,
+    /// 'FILTER or 'QSELECT opened inside this command's "Select objects:";
+    /// the dialogs hand their result to it (#2611).
+    transparent_select: Option<String>,
     qselect_settings: Option<QSelectSettings>,
     /// Show the UCS icon in the bottom-left corner of model space (UCSICON).
     show_ucs_icon: bool,
@@ -1426,6 +1498,10 @@ pub(super) struct OpenCADStudio {
     graphic_attributes: crate::ui::window::graphic_attributes::GraphicAttributesState,
     /// Docked Insert Block panel visibility.
     pub(crate) show_block_palette: bool,
+    /// Docked Tool Palettes panel visibility (TOOLPALETTES / TP).
+    pub(crate) show_tool_palettes: bool,
+    /// Reusable block tools and palette tabs shown in Tool Palettes.
+    pub(crate) tool_palettes: crate::ui::window::tool_palettes::ToolPalettesState,
     /// Authoring palette preference, visible only in a Block Editor session.
     show_authoring_palettes: bool,
     show_parameters_manager: bool,
@@ -2327,7 +2403,7 @@ impl PendingConversionSave {
     pub(super) fn format_name(&self) -> String {
         let (ext, version) = match self {
             #[cfg(target_arch = "wasm32")]
-            Self::WebSaveAll { .. } => ("ifcx".to_string(), document::DxfVersion::AC1032),
+            Self::WebSaveAll { .. } => ("ifccad".to_string(), document::DxfVersion::AC1032),
             #[cfg(not(target_arch = "wasm32"))]
             Self::Native(save) => (
                 save.path
@@ -2480,7 +2556,8 @@ pub enum ColorPickTarget {
 /// drawing at copy time. On paste into a drawing that lacks any of them, the
 /// missing records are recreated (with a fresh handle) so the entities keep
 /// their layer / linetype / style instead of dangling. See #129.
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ClipboardDeps {
     pub layers: Vec<document::tables::Layer>,
     pub linetypes: Vec<document::tables::LineType>,
@@ -2526,13 +2603,43 @@ pub struct ClipboardDeps {
     /// handle (text style, linetypes, arrow blocks), keyed by source handle.
     /// A paste re-points each recreated style at this drawing's records of
     /// the same name, so it never names an object of the source drawing.
+    #[serde(with = "dim_style_refs_serde", default)]
     pub dim_style_refs: rustc_hash::FxHashMap<document::Handle, String>,
+}
+
+mod dim_style_refs_serde {
+    use document::Handle;
+    use rustc_hash::FxHashMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(
+        map: &FxHashMap<Handle, String>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut pairs: Vec<(Handle, String)> =
+            map.iter().map(|(k, v)| (*k, v.clone())).collect();
+        pairs.sort_by_key(|(h, _)| h.value());
+        pairs.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<FxHashMap<Handle, String>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let pairs = Vec::<(Handle, String)>::deserialize(deserializer)?;
+        Ok(pairs.into_iter().collect())
+    }
 }
 
 /// A captured block definition: its base point and the entities it owns
 /// (in block-local coordinates), minus the structural Block/BlockEnd
 /// markers which are rebuilt on paste.
-#[derive(Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct BlockDef {
     pub name: String,
     pub base_point: document::types::Vector3,
@@ -2540,7 +2647,18 @@ pub struct BlockDef {
     /// The source drawing's record, which other captured graphs name.
     pub source: document::Handle,
     /// The record's object graph: a dynamic block's parameters and states.
+    #[serde(skip)]
     pub graph: Option<document::BlockGraph>,
+}
+
+impl PartialEq for BlockDef {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.base_point == other.base_point
+            && self.entities == other.entities
+            && self.source == other.source
+            && self.graph.is_some() == other.graph.is_some()
+    }
 }
 
 /// The extension-dictionary object graph captured for one copied entity.
@@ -2548,7 +2666,7 @@ pub struct BlockDef {
 /// (dictionaries + their leaf objects), keyed by their source handles; `root`
 /// is the xdictionary handle. On paste the whole set is cloned into the target
 /// document with fresh handles and the references are remapped.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ClipExtObjects {
     pub entity_index: usize,
     pub src_entity_handle: document::Handle,
@@ -3928,6 +4046,10 @@ pub enum Message {
     ParametersManagerEdit(String, crate::ui::window::parameters_manager::Cell),
     ParametersManagerInput(String),
     ParametersManagerFilter(String),
+    /// The funnel menu entry: which rows the list keeps.
+    ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
+    /// Toggles the funnel's two-entry menu.
+    ParametersManagerFilterMenu,
     ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click
@@ -4267,6 +4389,46 @@ pub enum Message {
     /// Toggle per-viewport freeze: (layer_name, vp_col_index)
     LayerToggleVpFreeze(String, usize),
     LayerNew,
+    /// Show a node of the Layer manager's filter tree.
+    LayerShow(crate::ui::window::layers::TreeNode),
+    /// The Layer manager tree's rename field: typed, Enter, Esc.
+    LayerTreeRenameEdit(String),
+    LayerTreeRenameCommit,
+    LayerTreeRenameCancel,
+    /// A tree node's eye: all its layers lit, or none of them.
+    LayerNodeEye(crate::ui::window::layers::TreeNode),
+    /// The compact Layer manager toolbar's "…" menu open or closed.
+    LayerMoreMenu(bool),
+    /// An item of that menu: close it, then do this.
+    LayerMoreRun(Box<Message>),
+    /// The compact toolbar's search field open or closed.
+    LayerSearchOpen(bool),
+    /// Pressed rows released somewhere that takes no drop.
+    LayerDragEnd,
+    /// The dragged rows are over this group (`None`: off it).
+    LayerDragOver(Option<String>),
+    /// The dragged rows dropped onto this group.
+    LayerDrop(String),
+    /// Open or close a section of the Layer manager's filter tree.
+    LayerTreeSection(crate::ui::window::layers::TreeSection),
+    /// Show the layers the node leaves out instead.
+    LayerInvert(bool),
+    /// Turn a layer's eye on or off: its objects highlighted in the drawing.
+    LayerEye(String),
+    /// Open FILTER over the layers: a new filter from the search text
+    /// (`None`), or the LAYERFILTER filter named.
+    LayerFilterEdit(Option<String>),
+    /// A filter tree node's right-click menu.
+    LayerTreeAction(
+        crate::ui::window::layers::TreeNode,
+        crate::ui::window::layers::TreeAction,
+    ),
+    /// Import layers from another drawing.
+    LayerImport(layer_import::LayerImportMsg),
+    /// A new layer, frozen in every layout viewport.
+    LayerNewVpFrozen,
+    /// A layer row's right-click menu: (the row's layer, what to do).
+    LayerMenu(String, crate::ui::window::layers::LayerMenuAction),
     LayerDelete,
     /// Confirm deleting a non-empty layer (erases its objects too).
     LayerDeleteConfirm,
@@ -4279,7 +4441,17 @@ pub enum Message {
     LayerColorSet(document::types::Color),
     LayerLinetypeSet(String),
     LayerLineweightSet(LineWeight),
+    /// Typing in a layer's transparency field: (layer name, text).
     LayerTransparencyEdit(String, String),
+    /// Enter in the transparency field applies the typed value.
+    LayerTransparencyCommit,
+    /// Typing in a layer's description: (layer name, text).
+    LayerDescriptionEdit(String, String),
+    LayerDescriptionCommit,
+    /// The widget focused after a click while a description is being typed.
+    LayerDescriptionFocus(Option<iced::advanced::widget::Id>),
+    /// The widget focused after a click while a transparency is being typed.
+    LayerTransparencyFocus(Option<iced::advanced::widget::Id>),
     LayerRenameCommit,
     /// The widget focused after a click while a layer rename is open.
     LayerRenameFocus(Option<iced::advanced::widget::Id>),
@@ -4710,8 +4882,6 @@ pub enum Message {
     RibbonLayerFilterChanged(String),
     /// Live text of the Layer Manager's search box (#343).
     LayerManagerFilterChanged(String),
-    /// Show only this layer group's layers (`None`: every layer).
-    LayerGroupShow(Option<String>),
     /// A new layer group from the selected layers.
     LayerGroupNew,
     /// Add the selected layers to this group.
@@ -5337,17 +5507,30 @@ pub enum Message {
     QSelectSetValue(String),
     /// Include or exclude objects matching the filter.
     QSelectSetMode(QSelectMode),
-    /// Append-to-current-selection toggle.
-    QSelectSetAppend(bool),
+    QSelectSetResult(QSelectResult),
+    /// Highlight the matches in the drawing.
+    QSelectSetShow(bool),
+    /// Tick or untick a picked object's property.
+    QSelectSampleToggle(usize),
+    /// Add the ticked properties as conditions.
+    QSelectSampleAdd,
+    QSelectSampleCancel,
     /// Apply the current filter and close the panel.
     QSelectAddCondition,
     /// Hide the filter and sample an object's filterable properties.
     QSelectPickObject,
+    /// Window…: step aside, pick the objects to search in, come back with
+    /// them as the selection.
+    QSelectWindow,
     QSelectEditCondition(usize),
     QSelectRemoveCondition(usize),
     QSelectClearConditions,
     QSelectCancelEdit,
     QSelectApply,
+    /// Quick Select's conditions, scope and result, carried over to FILTER.
+    QSelectAdvanced,
+    /// The FILTER dialog.
+    FilterDialog(filter_dialog::FilterMsg),
     /// The user clicked the title-bar ✕ (fires before the window closes).
     WindowCloseRequested(window::Id),
     /// A window was fully closed (fires after `window::close()` is called).
@@ -5746,6 +5929,7 @@ pub enum Message {
     /// The QuickCalc pallet.
     QuickCalc(crate::ui::window::quick_calc::QuickCalcMsg),
     SheetSet(crate::ui::window::sheet_set::SheetSetMsg),
+    ToolPalettes(crate::ui::window::tool_palettes::ToolPalettesMsg),
     PdfImportPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
     /// Result of the PDFATTACH file picker.
     PdfAttachPickResult(Result<(std::path::PathBuf, std::sync::Arc<Vec<u8>>), String>),
@@ -5965,6 +6149,7 @@ impl OpenCADStudio {
             clean_screen_properties: false,
             clean_screen_parameters_manager: false,
             clean_screen_authoring_palettes: false,
+            clean_screen_tool_palettes: false,
             block_picker_dismissed: false,
             quick_properties: false,
             quick_properties_anchor: Point::new(12.0, 12.0),
@@ -6162,6 +6347,7 @@ impl OpenCADStudio {
             plugin_request_active: false,
             constraint_bar_mode: 4095,
             savetime_min: 10,
+            save_file_path: String::new(),
             script_commands: true,
             default_bg_color: None,
             default_paper_bg_color: None,
@@ -6228,6 +6414,10 @@ impl OpenCADStudio {
             grip_text_verts: Vec::new(),
             grip_text_slide: false,
             qselect: None,
+            filter_dialog: None,
+            restoring_layer_previous: false,
+            layer_import: None,
+            transparent_select: None,
             qselect_settings: None,
             show_ucs_icon: true,
             ucs_icon_at_origin: true,
@@ -6241,6 +6431,8 @@ impl OpenCADStudio {
             show_command_history: false,
             graphic_attributes: Default::default(),
             show_block_palette: false,
+            show_tool_palettes: false,
+            tool_palettes: Default::default(),
             show_authoring_palettes: false,
             show_parameters_manager: false,
             authoring_palette_tab: Default::default(),

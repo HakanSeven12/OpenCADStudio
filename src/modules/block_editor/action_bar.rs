@@ -145,23 +145,19 @@ impl CadCommand for ActionBarCommand {
                 crate::t!("Enter a parameter name or choose All.").into_owned(),
             );
         };
-        let screen = |point| {
-            crate::scene::pick::hit_test::world_to_screen(
-                point,
-                context.view,
-                context.eye,
-                context.bounds,
-            )
-        };
-        let click = screen(point);
-        self.groups
-            .iter()
-            .map(|group| (screen(group.anchor).distance(click), group.parameter))
-            .filter(|(distance, _)| {
-                distance.is_finite() && *distance <= context.aperture_px.max(10.0)
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, handle)| self.finish(vec![handle]))
+        let picked = crate::scene::view::projection::nearest_in_aperture(
+            context.view,
+            context.eye,
+            context.bounds,
+            point,
+            context.aperture_px,
+            self.groups
+                .iter()
+                .map(|group| (group.parameter, group.anchor)),
+            |candidate| candidate.1,
+        );
+        picked
+            .map(|(handle, _)| self.finish(vec![handle]))
             .unwrap_or_else(|| {
                 CmdResult::ReportError(
                     crate::t!("Pick a parameter endpoint or choose All.").into_owned(),

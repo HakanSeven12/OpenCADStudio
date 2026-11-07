@@ -349,6 +349,7 @@ pub struct Ribbon {
     pub show_sheet_set: bool,
     /// Graphic Attributes panel visibility — drives its ribbon button highlight.
     pub show_graphic_attributes: bool,
+    pub show_tool_palettes: bool,
     pub show_authoring_palettes: bool,
     /// Parameters Manager visibility — drives its ribbon button highlight.
     pub show_parameters_manager: bool,
@@ -539,6 +540,7 @@ impl Ribbon {
             show_count_palette: false,
             show_sheet_set: false,
             show_graphic_attributes: false,
+            show_tool_palettes: false,
             show_authoring_palettes: false,
             show_parameters_manager: false,
             show_file_tabs: true,
@@ -971,6 +973,7 @@ impl Ribbon {
             show_properties: self.show_properties,
             show_count_palette: self.show_count_palette,
             show_graphic_attributes: self.show_graphic_attributes,
+            show_tool_palettes: self.show_tool_palettes,
             show_authoring_palettes: self.show_authoring_palettes,
             show_parameters_manager: self.show_parameters_manager,
             show_block_palette,

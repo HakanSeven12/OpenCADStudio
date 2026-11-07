@@ -49,6 +49,7 @@ pub enum SubmenuId {
     DrawOrder,
     Isolate,
     SnapOverrides,
+    SavedFilters,
     /// A submenu of a menu-bar menu opened from the keyboard.
     MenuBar(u16),
 }
@@ -434,6 +435,8 @@ pub enum MenuContext {
         undo_label: Option<String>,
         redo_label: Option<String>,
         props_open: bool,
+        /// The drawing's saved selection filters, by name.
+        saved_filters: Vec<String>,
     },
     /// A grip is hot / being dragged.
     Grip(GripMenuContext),
@@ -458,6 +461,7 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
             undo_label,
             redo_label,
             props_open,
+            saved_filters,
         } => idle_rows(
             *has_selection,
             *single_hatch,
@@ -469,6 +473,7 @@ pub fn build_context_menu(ctx: &MenuContext, open_submenu: Option<SubmenuId>) ->
             undo_label.as_deref(),
             redo_label.as_deref(),
             *props_open,
+            saved_filters,
             open_submenu,
         ),
         MenuContext::Grip(grip) => grip_rows(grip),
@@ -681,6 +686,7 @@ fn idle_rows(
     undo_label: Option<&str>,
     redo_label: Option<&str>,
     props_open: bool,
+    saved_filters: &[String],
     open_submenu: Option<SubmenuId>,
 ) -> Vec<MenuRow> {
     let cmd = |label: String, name: &str| {
@@ -868,6 +874,21 @@ fn idle_rows(
         t!("Quick Select...").into_owned(),
         MenuAction::QuickSelect,
     )));
+    rows.push(MenuRow::Item(cmd(t!("Filter...").into_owned(), "FILTER")));
+    // The drawing's saved filters open below the row, in the menu (#2611):
+    // one click applies one, no dialog.
+    if !saved_filters.is_empty() {
+        rows.push(MenuRow::Submenu {
+            id: SubmenuId::SavedFilters,
+            label: t!("Apply saved filter").into_owned(),
+            icon: None,
+            items: saved_filters
+                .iter()
+                .map(|name| cmd(name.clone(), &format!("FILTER {name}")))
+                .collect(),
+            open: open_submenu == Some(SubmenuId::SavedFilters),
+        });
+    }
     // Count the selected objects, or start a count.
     rows.push(MenuRow::Item(if has_selection {
         cmd(t!("Count Selection").into_owned(), "COUNT _C")
@@ -1127,6 +1148,7 @@ mod tests {
             undo_label: Some("LINE".into()),
             redo_label: None,
             props_open: false,
+            saved_filters: Vec::new(),
         }
     }
 
@@ -1262,8 +1284,9 @@ mod tests {
         assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
         let menu = build_context_menu(&idle_ctx(false), None);
         assert_eq!(menu.default_row_y(), MENU_PAD_TOP);
-        // 11 items + 3 submenu headers + 6 separators, plus panel padding.
-        let expected = MENU_PAD_TOP * 2.0 + 14.0 * MENU_ROW_H + 6.0 * MENU_SEP_H;
+        // 12 items (Filter... among them) + 3 submenu headers + 6
+        // separators, plus panel padding. No saved filters: no submenu.
+        let expected = MENU_PAD_TOP * 2.0 + 15.0 * MENU_ROW_H + 6.0 * MENU_SEP_H;
         assert_eq!(menu.height(), expected);
     }
 
@@ -1396,6 +1419,7 @@ mod customization_tests {
             undo_label: None,
             redo_label: None,
             props_open: false,
+            saved_filters: Vec::new(),
         }
     }
 

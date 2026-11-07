@@ -59,6 +59,8 @@ pub struct ScaleCommand {
     wire_models: Vec<WireModel>,
     step: Step,
     default_factor: f64,
+    /// The Copy option: transform a duplicate and leave the source in place.
+    copy: bool,
 }
 
 impl ScaleCommand {
@@ -68,19 +70,22 @@ impl ScaleCommand {
             wire_models,
             step: Step::Base,
             default_factor: defaults::get_scale_factor(),
+            copy: false,
         }
     }
 
     /// Commit a uniform scale about `base` and end the command.
     fn commit(&self, base: DVec3, factor: f64) -> CmdResult {
         defaults::set_scale_factor(factor);
-        CmdResult::TransformSelected(
-            self.handles.clone(),
-            EntityTransform::Scale {
-                center: base,
-                factor,
-            },
-        )
+        let transform = EntityTransform::Scale {
+            center: base,
+            factor,
+        };
+        if self.copy {
+            CmdResult::CopySelectedAndExit(self.handles.clone(), transform)
+        } else {
+            CmdResult::TransformSelected(self.handles.clone(), transform)
+        }
     }
 }
 
@@ -98,7 +103,11 @@ impl CadCommand for ScaleCommand {
             .into_owned(),
             Step::Factor { .. } => {
                 let f = format!("{:.4}", self.default_factor);
-                t!("SCALE  Specify scale factor  <%{f}>:", f = f).into_owned()
+                t!(
+                    "SCALE  Specify scale factor or [Copy/Reference]  <%{f}>:",
+                    f = f
+                )
+                .into_owned()
             }
             Step::RefFirst { .. } => {
                 t!("SCALE  Specify first reference point or type reference length:").into_owned()
@@ -118,8 +127,11 @@ impl CadCommand for ScaleCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         use crate::command::CmdOption;
         match &self.step {
-            // The reference-scaling keyword is only offered at the factor step.
-            Step::Factor { .. } => vec![CmdOption::new(t!("Reference").as_ref(), "R")],
+            // Copy and reference scaling are offered at the factor step.
+            Step::Factor { .. } => vec![
+                CmdOption::new(t!("Copy").as_ref(), "C"),
+                CmdOption::new(t!("Reference").as_ref(), "R"),
+            ],
             _ => vec![],
         }
     }
@@ -180,8 +192,14 @@ impl CadCommand for ScaleCommand {
         match &self.step {
             Step::Factor { base } => {
                 let base = *base;
+                // `C` / `Copy` keeps the source and scales a duplicate; the
+                // prompt stays at the factor step so the value follows.
                 // `R` / `Reference` switches to reference scaling.
                 let low = t.to_ascii_lowercase();
+                if low == "c" || low == "copy" {
+                    self.copy = true;
+                    return Some(CmdResult::NeedPoint);
+                }
                 if low == "r" || low == "reference" {
                     self.step = Step::RefFirst { base };
                     return Some(CmdResult::NeedPoint);

@@ -691,6 +691,21 @@ pub struct BgAdaptInputs {
     pub preserve_color: bool,
 }
 
+/// How a dash pattern closes around a closed path. A closed path holds a whole
+/// number of periods, each stretched to fit, where an open one keeps its period
+/// and aligns its ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum DashClosure {
+    /// An open path, or a closed one that aligns its ends like an open one.
+    #[default]
+    Open,
+    /// A CIRCLE or a full ELLIPSE: the pattern starts at the first point.
+    Curve,
+    /// A closed polyline with PLINEGEN: the pattern starts at the point holding
+    /// the polyline's second vertex.
+    Polyline { start: u32 },
+}
+
 #[derive(Clone, Debug)]
 pub struct WireModel {
     /// Unique identifier — the handle value as a decimal string.
@@ -757,13 +772,14 @@ pub struct WireModel {
     /// from the START vertex with continuous phase and no A-type end forcing —
     /// DGN line styles are not end-aligned.
     pub dash_from_start: bool,
-    /// Shared "A"-type end-dash length for MLINE elements. `Some(len)` makes the
-    /// dash shader use `len` as the begin/end solid-dash length for EVERY
-    /// parallel element (derived once from the multiline's centre-line length),
-    /// while `align_total` stays each element's own length — so all elements
-    /// share one interior phase (perpendicular dashes line up) yet each still
-    /// ends on a dash. `None` (the default) = per-wire A-type / from-start.
-    pub dash_align_end: Option<f32>,
+    /// An MLINE element's linetype as its style names it, for whoever walks a
+    /// complex one or inherits a ByBlock one. `None` on any other wire.
+    pub element_linetype: Option<String>,
+    /// An MLINE element's colour as its style names it, for whoever resolves it
+    /// in a viewport or block context. `None` on any other wire.
+    pub element_color: Option<document::types::Color>,
+    /// How the pattern closes around a closed path.
+    pub dash_closure: DashClosure,
     /// Pre-triangulated solid fill: flat vertex list, 3 per triangle (world-offset applied).
     /// Non-empty only for PolyfaceMesh / PolygonMesh entities.
     pub fill_tris: Vec<[f32; 3]>,
@@ -945,7 +961,9 @@ impl WireModel {
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
             dash_from_start: false,
-            dash_align_end: None,
+            element_linetype: None,
+            element_color: None,
+            dash_closure: DashClosure::Open,
             fill_tris: vec![],
             fill_tris_low: Vec::new(),
         }
@@ -1384,7 +1402,9 @@ impl Default for WireModel {
             aabb: Self::UNBOUNDED_AABB,
             plinegen: true,
             dash_from_start: false,
-            dash_align_end: None,
+            element_linetype: None,
+            element_color: None,
+            dash_closure: DashClosure::Open,
             fill_tris: Vec::new(),
             fill_tris_low: Vec::new(),
             depth_override: None,

@@ -175,6 +175,43 @@ fn declared(grip_id: u64, point: [f64; 3]) -> PluginGrip {
     }
 }
 
+fn canvas_screen_of(app: &OpenCADStudio, world: [f64; 3]) -> iced::Point {
+    let i = tab(app);
+    let screen = screen_of(app, world);
+    let (vw, vh) = app.tabs[i].scene.selection.borrow().view.vp_size;
+    let tile = app.tabs[i].scene.active_model_tile_bounds(vw, vh);
+    iced::Point::new(screen.x + tile.x, screen.y + tile.y)
+}
+
+fn left_press_at(app: &mut OpenCADStudio, point: iced::Point) {
+    let i = tab(app);
+    {
+        let mut selection = app.tabs[i].scene.selection.borrow_mut();
+        selection.input.last_move_pos = Some(point);
+        selection.input.left_down = true;
+        selection.input.left_press_pos = Some(point);
+        selection.input.left_dragging = false;
+    }
+    let _ = app.on_viewport_left_press();
+}
+
+fn left_release_at(app: &mut OpenCADStudio, point: iced::Point, dragged: bool) {
+    let i = tab(app);
+    {
+        let mut selection = app.tabs[i].scene.selection.borrow_mut();
+        selection.input.last_move_pos = Some(point);
+        selection.input.left_down = false;
+        selection.input.left_press_pos = Some(point);
+        selection.input.left_dragging = dragged;
+    }
+    let _ = app.on_viewport_left_release();
+}
+
+fn left_click_at(app: &mut OpenCADStudio, point: iced::Point) {
+    left_press_at(app, point);
+    left_release_at(app, point, false);
+}
+
 /// A sink that records every event and can settle-write like the motivating
 /// consumer (one push_undo scope + one entity update from inside the
 /// callback).
@@ -574,6 +611,315 @@ fn custom_grips_declare_read_and_hover() {
 
     grip_points::remove_in_process_sink(TEST_PLUGIN);
     let _ = state;
+}
+
+#[test]
+fn custom_grip_bare_click_stays_hot_and_second_click_settles_once() {
+    let mut app = app();
+    app.dyn_input = true;
+    let state = install_sink(TEST_PLUGIN);
+    declare(&mut app, TEST_PLUGIN, vec![declared(71, [3.0, 3.0, 0.0])]);
+    let i = tab(&app);
+    let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+    let end = canvas_screen_of(&app, [9.0, 9.0, 0.0]);
+
+    left_click_at(&mut app, start);
+    assert!(app.tabs[i].active_plugin_grip.is_some());
+    assert!(!app.tabs[i].active_plugin_grip.as_ref().unwrap().moved);
+    assert_eq!(state.events.borrow().len(), 1, "bare click must not settle");
+    assert_eq!(state.events.borrow()[0].phase, CustomGripPhase::Begin);
+    assert_eq!(app.tabs[i].dyn_anchor, Some(glam::DVec3::new(3.0, 3.0, 0.0)));
+    assert_eq!(app.tabs[i].dyn_fields.len(), 2, "native polar fields stay visible");
+
+    let _ = app.on_viewport_move(end);
+    left_click_at(&mut app, end);
+    let events = state.events.borrow();
+    assert_eq!(
+        events.iter().filter(|event| event.phase == CustomGripPhase::Begin).count(),
+        1,
+        "the placement press must not restart the drag"
+    );
+    assert_eq!(events.last().map(|event| event.phase), Some(CustomGripPhase::Settle));
+    drop(events);
+    assert!(app.active_plugin_grip().is_none());
+    assert!(app.tabs[i].dyn_fields.is_empty());
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+#[test]
+fn a_redundant_origin_move_does_not_cancel_click_move_click() {
+    let mut app = app();
+    app.dyn_input = true;
+    let state = install_sink(TEST_PLUGIN);
+    declare(&mut app, TEST_PLUGIN, vec![declared(77, [3.0, 3.0, 0.0])]);
+    let i = tab(&app);
+    let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+    left_press_at(&mut app, start);
+    app.move_plugin_grip_drag(i, glam::DVec3::new(3.0, 3.0, 0.0));
+    left_release_at(&mut app, start, false);
+    let active = app.tabs[i]
+        .active_plugin_grip
+        .as_ref()
+        .expect("an unchanged move leaves click-move-click hot");
+    assert!(!active.moved, "an unchanged point is not a drag");
+    let events = state.events.borrow();
+    assert_eq!(events.len(), 2, "Begin plus one redundant Move, no Settle: {:?}", *events);
+    assert!(matches!(
+        events[0].phase,
+        ocs_plugin_api::host::CustomGripPhase::Begin
+    ));
+    assert!(matches!(
+        events[1].phase,
+        ocs_plugin_api::host::CustomGripPhase::Move
+    ));
+    drop(events);
+    drop(state);
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+#[test]
+fn custom_grip_second_press_at_uses_event_point_without_a_preceding_move() {
+    let mut app = app();
+    app.snapper.snap_enabled = false;
+    app.snapper.grid_snap_on = false;
+    let state = install_sink(TEST_PLUGIN);
+    declare(&mut app, TEST_PLUGIN, vec![declared(76, [3.0, 3.0, 0.0])]);
+    let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+    let expected = [9.0, 7.0, 0.0];
+    let end = canvas_screen_of(&app, expected);
+
+    left_click_at(&mut app, start);
+    assert!(app.active_plugin_grip().is_some());
+    assert_eq!(state.events.borrow().len(), 1, "only Begin so far");
+
+    // Deliberately do not send ViewportMove: ViewportLeftPressAt owns the
+    // event-time cursor position and must refresh the drag before release.
+    let _ = app.update(Message::ViewportLeftPressAt(end));
+    let _ = app.update(Message::ViewportLeftRelease);
+
+    let events = state.events.borrow();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| event.phase == CustomGripPhase::Move)
+            .count(),
+        1,
+        "the placement press emits exactly one Move: {:?}",
+        events.iter().map(|event| event.phase).collect::<Vec<_>>()
+    );
+    let settle = events
+        .iter()
+        .rev()
+        .find(|event| event.phase == CustomGripPhase::Settle)
+        .expect("second click settles");
+    for axis in 0..3 {
+        assert!(
+            (settle.point[axis] - expected[axis]).abs() < 1e-5,
+            "Settle must use the second press point: {settle:?}"
+        );
+    }
+    drop(events);
+    assert!(app.active_plugin_grip().is_none());
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+#[test]
+fn custom_grip_press_drag_release_still_settles() {
+    let mut app = app();
+    let state = install_sink(TEST_PLUGIN);
+    declare(&mut app, TEST_PLUGIN, vec![declared(72, [3.0, 3.0, 0.0])]);
+    let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+    // Even a real drag inside the click threshold settles when moved=true.
+    let end = canvas_screen_of(&app, [3.25, 3.25, 0.0]);
+
+    left_press_at(&mut app, start);
+    let _ = app.on_viewport_move(end);
+    assert!(app.tabs[tab(&app)].active_plugin_grip.as_ref().unwrap().moved);
+    left_release_at(&mut app, end, true);
+    assert_eq!(state.events.borrow().last().map(|event| event.phase), Some(CustomGripPhase::Settle));
+    assert!(app.active_plugin_grip().is_none());
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+#[test]
+fn enter_settles_custom_grip_instead_of_repeating_last_command() {
+    for message in [Message::CommandFinalize, Message::CommandSubmit] {
+        let mut app = app();
+        let state = install_sink(TEST_PLUGIN);
+        let expected = [3.0, 3.0, 0.0];
+        declare(&mut app, TEST_PLUGIN, vec![declared(73, expected)]);
+        let i = tab(&app);
+        app.tabs[i].last_cmd = Some("LINE".to_string());
+        let start = canvas_screen_of(&app, expected);
+        left_click_at(&mut app, start);
+        assert!(app.tabs[i].active_plugin_grip.is_some());
+
+        let _ = app.update(message);
+        let events = state.events.borrow();
+        let settle = events
+            .iter()
+            .rev()
+            .find(|event| event.phase == CustomGripPhase::Settle)
+            .expect("empty Enter settles the hot grip");
+        assert_eq!(settle.point, expected, "empty Enter keeps the current point");
+        assert!(
+            !events
+                .iter()
+                .any(|event| event.phase == CustomGripPhase::Move),
+            "empty Enter needs no synthetic Move"
+        );
+        drop(events);
+        assert!(app.tabs[i].active_cmd.is_none(), "Enter must not start LINE");
+        assert!(app.active_plugin_grip().is_none());
+        grip_points::remove_in_process_sink(TEST_PLUGIN);
+    }
+}
+
+#[test]
+fn enter_applies_typed_dynamic_distance_and_angle_to_custom_grip() {
+    for message in [Message::CommandFinalize, Message::CommandSubmit] {
+        let mut app = app();
+        app.dyn_input = true;
+        let state = install_sink(TEST_PLUGIN);
+        declare(&mut app, TEST_PLUGIN, vec![declared(77, [3.0, 3.0, 0.0])]);
+        let i = tab(&app);
+        let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+        left_click_at(&mut app, start);
+        assert!(app.tabs[i].active_plugin_grip.is_some());
+        assert_eq!(app.tabs[i].dyn_fields.len(), 2);
+        app.tabs[i].last_cursor_world = glam::DVec3::new(7.0, 7.0, 0.0);
+        app.tabs[i].dyn_fields[0].buffer = Some("10".to_string());
+        app.tabs[i].dyn_fields[1].buffer = Some("+30".to_string());
+
+        let _ = app.update(message);
+
+        let events = state.events.borrow();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.phase == CustomGripPhase::Move)
+                .count(),
+            1,
+            "typed displacement is delivered as one Move"
+        );
+        let settle = events
+            .iter()
+            .rev()
+            .find(|event| event.phase == CustomGripPhase::Settle)
+            .expect("typed Dynamic Input settles");
+        let expected = [3.0 + 10.0 * 30f64.to_radians().cos(), 8.0, 0.0];
+        for axis in 0..3 {
+            assert!(
+                (settle.point[axis] - expected[axis]).abs() < 1e-8,
+                "Distance/Angle must determine Settle: {settle:?}"
+            );
+        }
+        drop(events);
+        assert!(app.active_plugin_grip().is_none());
+        grip_points::remove_in_process_sink(TEST_PLUGIN);
+    }
+}
+
+#[test]
+fn enter_applies_direct_distance_and_reapplies_custom_grip_axis() {
+    for message in [Message::CommandFinalize, Message::CommandSubmit] {
+        let mut app = app();
+        app.dyn_input = false;
+        let state = install_sink(TEST_PLUGIN);
+        let mut grip = declared(78, [3.0, 3.0, 0.0]);
+        grip.axis = Some([1.0, 0.0, 0.0]);
+        declare(&mut app, TEST_PLUGIN, vec![grip]);
+        let i = tab(&app);
+        let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
+        left_click_at(&mut app, start);
+        assert!(app.tabs[i].active_plugin_grip.is_some());
+        // Native direct-distance uses the current origin-to-cursor direction:
+        // 10 along (4, 3) is (8, 6), then the declared X axis removes Y.
+        app.tabs[i].last_cursor_world = glam::DVec3::new(7.0, 6.0, 0.0);
+        app.command_line.input = "10".to_string();
+
+        let _ = app.update(message);
+
+        let events = state.events.borrow();
+        let settle = events
+            .iter()
+            .rev()
+            .find(|event| event.phase == CustomGripPhase::Settle)
+            .expect("direct distance settles");
+        for (axis, expected) in [11.0, 3.0, 0.0].into_iter().enumerate() {
+            assert!(
+                (settle.point[axis] - expected).abs() < 1e-8,
+                "direct distance and hard axis must determine Settle: {settle:?}"
+            );
+        }
+        drop(events);
+        assert!(app.command_line.input.is_empty());
+        assert!(app.active_plugin_grip().is_none());
+        grip_points::remove_in_process_sink(TEST_PLUGIN);
+    }
+}
+
+#[test]
+fn custom_grip_drag_uses_native_endpoint_snap_and_marker() {
+    let mut app = app();
+    let state = install_sink(TEST_PLUGIN);
+    add(&mut app, line([15.0, 0.0, 0.0], [20.0, 0.0, 0.0]));
+    declare(&mut app, TEST_PLUGIN, vec![declared(74, [0.0, 0.0, 0.0])]);
+    app.snapper.snap_enabled = true;
+    app.snapper.enabled.clear();
+    app.snapper.enabled.insert(crate::snap::SnapType::Endpoint);
+    app.snapper.grid_snap_on = false;
+    let start = screen_of(&app, [0.0, 0.0, 0.0]);
+    let endpoint = canvas_screen_of(&app, [20.0, 0.0, 0.0]);
+    let near = iced::Point::new(endpoint.x + 2.0, endpoint.y + 2.0);
+
+    let i = tab(&app);
+    let candidate = app.hit_plugin_grip(i, start).expect("custom grip is hittable");
+    let _ = app.begin_plugin_grip_drag(i, &candidate);
+    let _ = app.on_viewport_move(near);
+    let events = state.events.borrow();
+    let moved = events.iter().rev().find(|event| event.phase == CustomGripPhase::Move).unwrap();
+    assert!((moved.point[0] - 20.0).abs() < 1e-6, "native endpoint snap supplies X");
+    assert!(moved.point[1].abs() < 1e-6 && moved.point[2].abs() < 1e-6);
+    drop(events);
+    let hit = app.tabs[i].snap_result.expect("the native snap marker stays live");
+    assert_eq!(hit.snap_type, crate::snap::SnapType::Endpoint);
+    assert!((hit.screen.x - endpoint.x).abs() < 1e-3);
+    assert!((hit.screen.y - endpoint.y).abs() < 1e-3);
+    let _ = app.settle_plugin_grip_drag();
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
+}
+
+#[test]
+fn custom_grip_drag_uses_native_polar_and_grid_constraints() {
+    let mut app = app();
+    let state = install_sink(TEST_PLUGIN);
+    declare(&mut app, TEST_PLUGIN, vec![declared(75, [0.0, 0.0, 0.0])]);
+    app.snapper.snap_enabled = false;
+    app.snapper.grid_snap_on = false;
+    app.polar_mode = true;
+    app.polar_increment_deg = 45.0;
+    let start = screen_of(&app, [0.0, 0.0, 0.0]);
+    let end = canvas_screen_of(&app, [20.0, 0.1, 0.0]);
+    let candidate = app.hit_plugin_grip(tab(&app), start).expect("custom grip is hittable");
+    let _ = app.begin_plugin_grip_drag(tab(&app), &candidate);
+    let _ = app.on_viewport_move(end);
+    let moved = state.events.borrow().iter().rev().find(|event| event.phase == CustomGripPhase::Move).unwrap().clone();
+    assert!(moved.point[1].abs() < 1e-6, "polar constrains to the native 0-degree ray: {:?}", moved.point);
+
+    app.polar_mode = false;
+    app.snapper.grid_snap_on = true;
+    app.snapper.snap_spacing_x = 1.0;
+    app.snapper.snap_spacing_y = 1.0;
+    let grid_end = canvas_screen_of(&app, [10.2, 10.2, 0.0]);
+    let _ = app.on_viewport_move(grid_end);
+    let i = tab(&app);
+    assert_eq!(app.tabs[i].snap_result.map(|hit| hit.snap_type), Some(crate::snap::SnapType::Grid));
+    let moved = state.events.borrow().iter().rev().find(|event| event.phase == CustomGripPhase::Move).unwrap().clone();
+    assert!((moved.point[0] - 10.0).abs() < 1e-6, "grid snap supplies X: {:?}", moved.point);
+    assert!((moved.point[1] - 10.0).abs() < 1e-6, "grid snap supplies Y: {:?}", moved.point);
+    let _ = app.settle_plugin_grip_drag();
+    grip_points::remove_in_process_sink(TEST_PLUGIN);
 }
 
 #[test]
@@ -1566,6 +1912,7 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
         .expect("bond");
         app.finish_pending_history(i);
     }
+    let bonded_a = serialized(&app, a);
     let bonded_b = serialized(&app, b);
 
     // A drag whose live answer moves ONLY entity `a` (the plugin's choice â€”
@@ -1602,8 +1949,9 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
     );
 
     // Esc discards the visual phase byte-identically.
+    // The bond may have moved `a` onto `b`; Esc returns to the drag's start.
     assert!(app.cancel_active_grip_edit());
-    assert_eq!(serialized(&app, a), before_a);
+    assert_eq!(serialized(&app, a), bonded_a);
     assert_eq!(serialized(&app, b), bonded_b);
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }

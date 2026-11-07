@@ -3584,6 +3584,21 @@ impl<'a> HostSession<'a> {
         Ok(handles)
     }
 
+    /// Validate a declared parametric chain without staging it (additive).
+    /// Runs the complete display build audit and immediately discards the
+    /// entities and carriers. Pure: no document, undo, publish, dirty or
+    /// cache state changes.
+    pub fn validate_parametric_chain(
+        &self,
+        chain: &ocs_plugin_api::host::ParametricChain,
+        tolerance: f64,
+    ) -> Result<(), String> {
+        if chain.segments.is_empty() {
+            return Err("a parametric chain needs at least one segment".to_owned());
+        }
+        crate::parametric::build_display_entities(chain, tolerance).map(|_| ())
+    }
+
     /// Evaluate a declared parametric chain at chain position `s` (API v14,
     /// additive): a pure read — no document state, no undo, no publish.
     pub fn sample_parametric(
@@ -4901,6 +4916,13 @@ impl HostApi for HostSession<'_> {
     }
     fn unregister_quad_panels(&mut self, plugin_id: &str, panel_ids: &[&str]) -> Vec<bool> {
         self.unregister_quad_panels(plugin_id, panel_ids)
+    }
+    fn validate_parametric_chain(
+        &self,
+        chain: &ocs_plugin_api::host::ParametricChain,
+        tolerance: f64,
+    ) -> Result<(), String> {
+        self.validate_parametric_chain(chain, tolerance)
     }
 }
 
@@ -16673,6 +16695,56 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
             assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
         }
         assert_eq!(app.tabs[0].history.undo_stack.len(), 0, "the sample records nothing");
+    }
+
+    #[test]
+    fn parametric_validation_is_pure_and_rejects_a_hard_corner() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let chain = staging_profile_chain();
+        let mut hard_corner = chain.clone();
+        hard_corner.segments.push(ocs_plugin_api::host::ParametricSegment {
+            def: ocs_plugin_api::host::CurveSegmentDef {
+                length: 20.0,
+                ramp: ocs_plugin_api::host::Ramp::Polynomial {
+                    degree: 0,
+                    coeffs: [0.25, 0.0, 0.0, 0.0],
+                },
+                cross_slope: None,
+            },
+            // The first segment ends at (80, 104) with gradient 0.1: the
+            // point seam is welded, but the 0.25 gradient is a hard corner.
+            start_point: [80.0, 104.0],
+            start_direction: 0.25f64.atan(),
+        });
+
+        let host = HostSession::new(&mut app, 0);
+        let epoch_before = host.app.tabs[0].scene.geometry_epoch;
+        let document_before = host.document().clone();
+        let undo_before = host.app.tabs[0].history.undo_stack.len();
+        let dirty_before = host.app.tabs[0].dirty;
+        let published_before = host.app.last_plugin_document;
+        let had_document_view = host.doc_store.is_some();
+
+        HostApi::validate_parametric_chain(&host, &chain, 1e-3)
+            .expect("the valid chain passes the complete audit");
+        let err = HostApi::validate_parametric_chain(&host, &hard_corner, 1e-3).unwrap_err();
+        assert!(err.contains("seam segment 0 to 1"), "{err}");
+        assert!(err.contains("declared start gradient"), "{err}");
+        let empty = ocs_plugin_api::host::ParametricChain {
+            segments: Vec::new(),
+            ..chain.clone()
+        };
+        assert!(HostApi::validate_parametric_chain(&host, &empty, 1e-3)
+            .unwrap_err()
+            .contains("at least one segment"));
+
+        assert_eq!(host.app.tabs[0].scene.geometry_epoch, epoch_before);
+        assert_eq!(host.document(), &document_before);
+        assert_eq!(host.app.tabs[0].history.undo_stack.len(), undo_before);
+        assert_eq!(host.app.tabs[0].dirty, dirty_before);
+        assert_eq!(host.app.last_plugin_document, published_before);
+        assert_eq!(host.doc_store.is_some(), had_document_view);
     }
 
     #[test]

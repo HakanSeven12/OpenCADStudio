@@ -938,6 +938,9 @@ pub struct UserSettings {
     pub log_file_mode: bool,
     /// LOGFILEPATH: the folder log files go to; empty for the default.
     pub log_file_path: String,
+    /// SAVEFILEPATH: the folder recovery copies (`.sv$`) go to; empty for
+    /// the default.
+    pub save_file_path: String,
     /// OFFSETGAPTYPE: how a polyline offset outward closes its corners
     /// (0 extend, 1 fillet, 2 chamfer).
     pub offset_gap_type: u8,
@@ -1240,6 +1243,9 @@ pub struct UserSettings {
     /// QuickCalc: the global variables, the open sections and the angle mode.
     #[serde(default)]
     pub quick_calc: crate::ui::window::quick_calc::QuickCalcSettings,
+    /// Tool Palettes: reusable block tools, tabs and placement options.
+    #[serde(default)]
+    pub tool_palettes: crate::ui::window::tool_palettes::ToolPalettesData,
 }
 
 /// A block the Blocks palette lists from outside the current drawing (a
@@ -1501,6 +1507,7 @@ impl Default for UserSettings {
             group_display_mode: 2,
             log_file_mode: false,
             log_file_path: String::new(),
+            save_file_path: String::new(),
             offset_gap_type: 0,
             trim_extend_quick: true,
             match_mode: crate::entities::match_props::MatchOpts::DEFAULT_MODE,
@@ -1600,6 +1607,7 @@ impl Default for UserSettings {
             count_invalid_area: 0,
             sheet_set: Default::default(),
             quick_calc: Default::default(),
+            tool_palettes: Default::default(),
         }
     }
 }

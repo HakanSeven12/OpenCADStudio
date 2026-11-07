@@ -138,7 +138,7 @@ pub(crate) fn tessellate_entity(
     block_cache: Option<&cache::block_cache::BlockCache>,
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
-    paper_space: bool,
+    viewport_lt: Option<f32>,
     reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = convert::tess::tessellate_entity(
@@ -152,7 +152,7 @@ pub(crate) fn tessellate_entity(
         block_cache,
         view_aabb,
         world_per_pixel,
-        paper_space,
+        viewport_lt,
         reference_only,
     );
     if matches!(entity, EntityType::Solid3D(_) | EntityType::Surface(_)) {
@@ -204,7 +204,7 @@ pub(crate) fn tessellate_entity(
                     block_cache,
                     view_aabb,
                     world_per_pixel,
-                    paper_space,
+                    viewport_lt,
                     reference_only,
                 )
             };
@@ -625,6 +625,33 @@ fn drop_stale_text(
                 .is_some_and(|hit| hit.wires().iter().all(|w| w.text_verts.is_empty()))
         });
         cell.set(now);
+    }
+}
+
+/// A complex linetype bakes the viewport's PSLTSCALE factor into its wires, so
+/// a new factor stales the memoized runs the dependency index files under
+/// annotation geometry (complex-linetype users among them), not every entity.
+fn drop_stale_complex_lt(
+    scene: &Scene,
+    memo: &mut HashMap<Handle, MemoRun>,
+    cell: &std::cell::Cell<u64>,
+) {
+    let now = scene.viewport_complex_lt_guard();
+    if cell.get() == now {
+        return;
+    }
+    cell.set(now);
+    if memo.is_empty() {
+        return;
+    }
+    if scene.dependency_index_cache.borrow().is_none() {
+        let index = scene.rebuild_dependency_index();
+        *scene.dependency_index_cache.borrow_mut() = Some(index);
+    }
+    if let Some(index) = scene.dependency_index_cache.borrow().as_ref() {
+        for handle in &index.annotation_geometry.render_handles {
+            memo.remove(handle);
+        }
     }
 }
 
@@ -2650,6 +2677,8 @@ pub struct Scene {
     /// Entities a selection box still being drawn would catch on release
     /// (SELECTIONPREVIEW), expanded to their selectable groups.
     box_hover_highlights: HashSet<Handle>,
+    /// Objects a selection filter would find, shown before it is applied.
+    filter_preview_highlights: HashSet<Handle>,
     /// Sub-entity references related to that indicator. Polyline segments are
     /// drawn separately so hovering one constraint does not light the whole chain.
     constraint_hover_refs: Vec<crate::scene::parametric_constraints::ParametricRef>,
@@ -3205,12 +3234,23 @@ pub struct Scene {
     /// Set while `resident_wires_for` assembles a set that will become the
     /// memo's backing; new runs then go straight into it (`Pending`).
     building_resident_set: std::cell::Cell<bool>,
+    /// The factor on complex linetypes in the viewport whose resident set is
+    /// being read or built. `None` outside one, or where nothing depends on it.
+    viewport_complex_lt: std::cell::Cell<Option<f32>>,
+    /// The factor each viewport's complex linetypes are baked at. It stays put
+    /// while the view moves, so a wheel tick doesn't rebuild the resident set.
+    viewport_complex_lt_baked: RefCell<HashMap<Handle, f32>>,
     /// Annotation, background and viewport signature.
     resident_tess_guard: std::cell::Cell<u64>,
     /// The SDF atlas generation the resident memo's text was built under.
     resident_tess_atlas: std::cell::Cell<u64>,
     /// The same for `tess_memo`.
     tess_memo_atlas: std::cell::Cell<u64>,
+    /// The complex-linetype factor ([`Scene::viewport_complex_lt_guard`]) the
+    /// resident memo's complex-linetype runs were built under.
+    resident_tess_complex_lt: std::cell::Cell<u64>,
+    /// The same for `tess_memo`.
+    tess_memo_complex_lt: std::cell::Cell<u64>,
     /// Per-mutation delta journal: which handles changed on each `geometry_epoch`
     /// bump. Bounded ring ([`GEOMETRY_JOURNAL_CAP`]); a derived cache replays the
     /// entries past its last-synced epoch and patches per-handle instead of
@@ -3370,6 +3410,7 @@ impl Scene {
             hover_highlight: None,
             constraint_hover_highlights: HashSet::default(),
             box_hover_highlights: HashSet::default(),
+            filter_preview_highlights: HashSet::default(),
             constraint_hover_refs: Vec::new(),
             constraint_hover_wires: Vec::new(),
             selection_color: crate::scene::model::wire_model::WireModel::SELECTED,
@@ -3517,9 +3558,13 @@ impl Scene {
             resident_tess_memo: RefCell::new(HashMap::default()),
             resident_memo_backing: RefCell::new(MemoBacking::default()),
             building_resident_set: std::cell::Cell::new(false),
+            viewport_complex_lt: std::cell::Cell::new(None),
+            viewport_complex_lt_baked: RefCell::new(HashMap::default()),
             resident_tess_guard: std::cell::Cell::new(0),
             resident_tess_atlas: std::cell::Cell::new(0),
             tess_memo_atlas: std::cell::Cell::new(0),
+            resident_tess_complex_lt: std::cell::Cell::new(0),
+            tess_memo_complex_lt: std::cell::Cell::new(0),
             geometry_deltas: RefCell::new(std::collections::VecDeque::new()),
             pending_removed_categories: RefCell::new(HashMap::default()),
             geometry_journal_floor: std::cell::Cell::new(0),
@@ -3602,6 +3647,16 @@ impl Scene {
         if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
     }
 
+    /// The drawing's geographic location (GEODATA), when it has one.
+    pub(crate) fn geo_data(&self) -> Option<&document::objects::GeoData> {
+        crate::entities::object_data::geo_objects(&self.object_data_cache)
+            .iter()
+            .find_map(|handle| match self.document.objects.get(handle) {
+                Some(document::objects::ObjectType::GeoData(geo)) => Some(geo),
+                _ => None,
+            })
+    }
+
     pub(super) fn world_per_pixel(&self) -> Option<f32> {
         if self.current_layout != "Model" {
             return None;
@@ -3653,6 +3708,10 @@ impl Scene {
         }
         key = key.rotate_left(13) ^ all_visible as u64;
         key = key.rotate_left(13) ^ viewport.map(|handle| handle.value()).unwrap_or(0);
+        // Loading a linetype does not move the block epoch, and a cache built
+        // before the drawing had a complex one kept no path for its children.
+        key = key.rotate_left(13)
+            ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
         {
             let cache = self.block_defn_cache.borrow();
             if let Some((epoch, arc)) = cache.get(&key) {
@@ -3732,6 +3791,8 @@ impl Scene {
             *self.resident_memo_backing.borrow_mut() = prepared.tess_memo_backing;
             self.resident_tess_guard.set(prepared.tess_guard);
             self.resident_tess_atlas.set(prepared.tess_atlas);
+            // The loader tessellates model space, outside any viewport.
+            self.resident_tess_complex_lt.set(0);
         }
         // Reuse the loader's draw-order map with this scene's epoch.
         if let Some(mut depths) = prepared.draw_depths {
@@ -6558,7 +6619,13 @@ impl Scene {
     /// (#2354). A template whose scales are stored already converted (a
     /// metre drawing's 1:50 as 1 = 0.05) gets its conversion from them.
     pub(crate) fn sync_annotation_scale_from_header(&mut self) {
-        let cannoscale_value = self.document.header.annotation_scale_value;
+        let cannoscale_value = self
+            .scale_object_handle(&self.document.header.current_annotation_scale)
+            .and_then(|handle| match self.document.objects.get(&handle) {
+                Some(ObjectType::Scale(scale)) => Some(self.effective_scale_factor(scale)),
+                _ => None,
+            })
+            .unwrap_or(self.document.header.annotation_scale_value);
         self.annotation_scale = if cannoscale_value > 1e-9 {
             (1.0 / cannoscale_value) as f32
         } else {
@@ -6583,6 +6650,26 @@ impl Scene {
         )
         .filter(|factor| factor.is_finite() && *factor > 0.0)
         .unwrap_or(1.0)
+    }
+
+    /// A standard scale ("1:200") means a physical paper-to-model ratio,
+    /// even in older DWGs that store its unconverted 1/200 definition.
+    ///
+    /// Newer DWGs may already store the paper units converted to the model
+    /// unit (1 paper = 0.2 drawing for a metre-based "1:200"). A custom
+    /// scale, including "1:100 m", always keeps its own stored ratio.
+    /// Normalize only exact standard names with exact legacy ratios.
+    fn effective_scale_factor(&self, scale: &document::objects::Scale) -> f64 {
+        let stored = scale.factor();
+        let legacy_standard = self.default_scales().iter().any(|&(name, base)| {
+            scale.name.eq_ignore_ascii_case(name)
+                && (stored - base).abs() <= 1.0e-9 * base.max(1.0)
+        });
+        if legacy_standard {
+            stored * self.default_scale_unit_factor()
+        } else {
+            stored
+        }
     }
 
     fn is_architectural_scale_name(name: &str) -> bool {
@@ -6659,7 +6746,8 @@ impl Scene {
                         && !s.name.contains('|')
                         && !s.name.to_ascii_uppercase().ends_with("_XREF") =>
                 {
-                    Some((s.name.clone(), s.inverse_factor() as f32, s.factor()))
+                    let factor = self.effective_scale_factor(s);
+                    Some((s.name.clone(), (1.0 / factor) as f32, factor))
                 }
                 _ => None,
             })
@@ -6927,7 +7015,8 @@ impl Scene {
                 return None;
             };
 
-            (scale.name.clone(), scale.factor(), scale.inverse_factor())
+            let factor = self.effective_scale_factor(scale);
+            (scale.name.clone(), factor, 1.0 / factor)
         };
 
         self.annotation_scale = multiplier as f32;
@@ -7139,7 +7228,7 @@ impl Scene {
         let scale = self.displayed_annotation_scale_handle();
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
-                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
+                Some(ObjectType::Scale(scale)) => Some(1.0 / self.effective_scale_factor(scale)),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale as f64);
@@ -7526,6 +7615,7 @@ impl Scene {
             .unwrap_or_default();
         handles.extend(self.constraint_hover_highlights.iter().copied());
         handles.extend(self.box_hover_highlights.iter().copied());
+        handles.extend(self.filter_preview_highlights.iter().copied());
         handles
     }
 
@@ -7539,6 +7629,16 @@ impl Scene {
         };
         if handles != self.box_hover_highlights {
             self.box_hover_highlights = handles;
+            self.bump_selection();
+        }
+    }
+
+    /// Highlight what a selection filter would find (#2611). Unlike the box
+    /// preview, pointer moves don't clear it; an empty slice does.
+    pub fn set_filter_preview_highlights(&mut self, handles: &[Handle]) {
+        let handles: HashSet<Handle> = handles.iter().copied().collect();
+        if handles != self.filter_preview_highlights {
+            self.filter_preview_highlights = handles;
             self.bump_selection();
         }
     }
@@ -7848,7 +7948,7 @@ impl Scene {
             .iter()
             .filter_map(|(handle, object)| match object {
                 ObjectType::Scale(scale) if !scale.is_temporary => {
-                    Some((*handle, (scale.factor() - factor).abs()))
+                    Some((*handle, (self.effective_scale_factor(scale) - factor).abs()))
                 }
                 _ => None,
             })
@@ -7868,7 +7968,9 @@ impl Scene {
     fn viewport_annotation_multiplier(&self, viewport: Handle) -> f32 {
         self.viewport_scale_handle(viewport)
             .and_then(|handle| match self.document.objects.get(&handle) {
-                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor() as f32),
+                Some(ObjectType::Scale(scale)) => {
+                    Some((1.0 / self.effective_scale_factor(scale)) as f32)
+                },
                 _ => None,
             })
             .unwrap_or(self.annotation_scale)
@@ -7901,6 +8003,44 @@ impl Scene {
             .unwrap_or_else(|| "1:1".to_string())
     }
 
+    /// The viewport(s) of the current paper layout, excluding the layout's
+    /// own sheet viewport (id 1). Used by commands that act on a layout
+    /// viewport without the user picking one.
+    pub fn layout_viewport_handles(&self) -> Vec<Handle> {
+        let layout_block = self.current_layout_block_handle();
+        self.document
+            .entities()
+            .filter_map(|entity| match entity {
+                EntityType::Viewport(vp) if vp.id > 1 && vp.common.owner_handle == layout_block => {
+                    Some(vp.common.handle)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The effective paper-to-model scale (paper units per model unit) that
+    /// `viewport` is displaying at right now.
+    pub fn viewport_effective_scale(&self, viewport: Handle) -> Option<f64> {
+        let EntityType::Viewport(vp) = self.document.get_entity(viewport)? else {
+            return None;
+        };
+        Some(crate::scene::vp_effective_scale(
+            vp.custom_scale,
+            vp.view_height,
+            vp.height,
+        ))
+    }
+
+    /// Display name of the named scale object driving `viewport`, if any.
+    pub fn viewport_display_scale_name(&self, viewport: Handle) -> Option<String> {
+        let scale_handle = self.viewport_scale_handle(viewport)?;
+        match self.document.objects.get(&scale_handle) {
+            Some(ObjectType::Scale(scale)) => Some(scale.name.clone()),
+            _ => None,
+        }
+    }
+
     pub fn set_viewport_scale_named(&mut self, name: &str) -> Option<Handle> {
         let viewport = self.scale_target_viewport()?;
         self.set_viewport_scale_named_for(viewport, name)
@@ -7930,9 +8070,9 @@ impl Scene {
     pub fn set_viewport_scale_named_for(&mut self, viewport: Handle, name: &str) -> Option<Handle> {
         let scale_handle = self.scale_handle_ensuring(name)?;
 
-        // The scale's own paper : drawing ratio, as stored.
+        // Honor legacy standard ratios without converting custom/file ratios twice.
         let factor = match self.document.objects.get(&scale_handle) {
-            Some(ObjectType::Scale(scale)) => scale.factor(),
+            Some(ObjectType::Scale(scale)) => self.effective_scale_factor(scale),
             _ => return None,
         };
 
@@ -7985,7 +8125,7 @@ impl Scene {
             .find_map(|object| match object {
                 ObjectType::Scale(scale)
                     if !scale.is_temporary
-                        && (scale.factor() - factor).abs()
+                        && (self.effective_scale_factor(scale) - factor).abs()
                             <= 1.0e-9 * factor.max(1.0) =>
                 {
                     Some(scale.name.clone())
@@ -8022,7 +8162,7 @@ impl Scene {
 
         let effective = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
 
-        let expected = scale.factor();
+        let expected = self.effective_scale_factor(scale);
 
         Some((effective - expected).abs() <= 1.0e-6 * expected.max(1.0))
     }
@@ -8034,7 +8174,7 @@ impl Scene {
             return false;
         };
         let factor = match self.document.objects.get(&scale_handle) {
-            Some(ObjectType::Scale(scale)) => scale.factor(),
+            Some(ObjectType::Scale(scale)) => self.effective_scale_factor(scale),
             _ => return false,
         };
         let Some(EntityType::Viewport(vp)) = self.document.get_entity_mut(viewport) else {
@@ -8489,6 +8629,10 @@ impl Scene {
             .unwrap_or(0));
         mix(all_visible as u64);
         mix(self.viewport_style_key(style_viewport));
+        mix(self
+            .viewport_complex_lt
+            .get()
+            .map_or(u64::MAX, |factor| factor.to_bits() as u64));
         // quantized_wpp removed: GPU analytical rendering for circles/arcs/
         // ellipses makes tessellation zoom-independent, so the resident set is
         // shared across all zoom levels.
@@ -8818,7 +8962,8 @@ impl Scene {
         let avp = style_viewport.or(self.active_viewport);
         let memo_ok = self.resident_tess_guard.get()
             == tess_memo_guard(None, anno, annotation_scale_handle, all_visible, bg, avp)
-            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation();
+            && self.resident_tess_atlas.get() == crate::scene::text::sdf_atlas::generation()
+            && self.resident_tess_complex_lt.get() == self.viewport_complex_lt_guard();
         for (h, kind) in &deltas {
             if matches!(kind, ChangeKind::Removed) {
                 continue;
@@ -8867,7 +9012,7 @@ impl Scene {
                 Some(&blk),
                 None,
                 None,
-                anno_scale_override.is_some(),
+                self.viewport_lt_for(anno_scale_override),
                 self.reference_only.handles(),
             );
             // Solid B-rep corners snap via the mesh edge list (their wire
@@ -14122,9 +14267,10 @@ impl Scene {
         } else {
             1.0
         };
-        // Content shown inside a paper-space viewport carries a scale override;
-        // only there does PSLTSCALE resize linetypes by the viewport scale.
-        let paper = anno_scale_override.is_some();
+        // Content shown inside a paper-space viewport carries a scale override
+        // or the PSLTSCALE factor; only there do complex linetypes ignore the
+        // annotation scale.
+        let paper = self.viewport_lt_for(anno_scale_override);
         let t_blk = perf.then(iced::time::Instant::now);
         let blk_cache =
             self.block_cache_arc_for(annotation_scale_handle, all_visible, style_viewport);
@@ -14173,11 +14319,25 @@ impl Scene {
                 all_visible,
                 bg,
                 avp,
-            ) ^ if self.constraint_shading_active() { 0xC057_A705_0000_0001 } else { 0 };
-            let (memo_cell, guard_cell, atlas_cell) = if resident {
-                (&self.resident_tess_memo, &self.resident_tess_guard, &self.resident_tess_atlas)
+            ) ^ if self.constraint_shading_active() {
+                0xC057_A705_0000_0001
             } else {
-                (&self.tess_memo, &self.tess_memo_guard, &self.tess_memo_atlas)
+                0
+            };
+            let (memo_cell, guard_cell, atlas_cell, complex_lt_cell) = if resident {
+                (
+                    &self.resident_tess_memo,
+                    &self.resident_tess_guard,
+                    &self.resident_tess_atlas,
+                    &self.resident_tess_complex_lt,
+                )
+            } else {
+                (
+                    &self.tess_memo,
+                    &self.tess_memo_guard,
+                    &self.tess_memo_atlas,
+                    &self.tess_memo_complex_lt,
+                )
             };
             guard_dbg = guard;
             guard_was_stale = guard_cell.get() != guard;
@@ -14186,6 +14346,7 @@ impl Scene {
                 guard_cell.set(guard);
             }
             drop_stale_text(self, &mut memo_cell.borrow_mut(), atlas_cell);
+            drop_stale_complex_lt(self, &mut memo_cell.borrow_mut(), complex_lt_cell);
             // Classify (serial, cheap): reuse memoized Arcs, collect misses.
             let t_classify = perf.then(iced::time::Instant::now);
             let mut hit_arcs: Vec<MemoHit> = Vec::new();
@@ -14790,6 +14951,7 @@ vis_index={:.1} visible_probe={:.1}",
         index.signatures.reserve(self.document.entity_count());
         let mut normalized_layers: HashMap<&str, String> = HashMap::default();
         let mut complex_linetypes: HashMap<&str, bool> = HashMap::default();
+        let defines_complex = crate::io::linetypes::defines_complex_lt(&self.document);
         for entity in self.document.entities() {
             let common = entity.common();
             let owner = if common.owner_handle.is_null() {
@@ -14840,11 +15002,42 @@ vis_index={:.1} visible_probe={:.1}",
             }
             // A complex linetype bakes the annotation scale into its wires, so
             // changing the scale has to re-tessellate it like annotative content.
+            let mut is_complex = |name| {
+                *complex_linetypes.entry(name).or_insert_with(|| {
+                    crate::io::linetypes::resolve_complex_lt(&self.document, name).is_some()
+                })
+            };
             let lt_name = view::render::linetype_name_for_viewport(&self.document, entity, None);
-            let complex_linetype = *complex_linetypes.entry(lt_name).or_insert_with(|| {
-                crate::io::linetypes::resolve_complex_lt(&self.document, lt_name).is_some()
-            });
+            let complex_linetype = is_complex(lt_name);
+            // An MLINE draws its elements' linetypes, read off its style; a style
+            // without elements draws two ByLayer lines.
+            let complex_mline = defines_complex
+                && match entity {
+                    EntityType::MLine(mline) => {
+                        let layer = mline.common.layer.as_str();
+                        match crate::entities::mline::resolved_mline_style(mline, &self.document)
+                            .filter(|style| !style.elements.is_empty())
+                        {
+                            Some(style) => style.elements.iter().any(|element| {
+                                is_complex(crate::entities::mline::element_linetype_name(
+                                    &self.document,
+                                    layer,
+                                    &element.linetype,
+                                    None,
+                                ))
+                            }),
+                            None => is_complex(crate::entities::mline::element_linetype_name(
+                                &self.document,
+                                layer,
+                                "ByLayer",
+                                None,
+                            )),
+                        }
+                    }
+                    _ => false,
+                };
             if complex_linetype
+                || complex_mline
                 || matches!(entity, EntityType::Hatch(_))
                 || crate::scene::annotative::is_annotative(&self.document, entity)
             {
@@ -15390,7 +15583,7 @@ vis_index={:.1} visible_probe={:.1}",
             Some(&blk_cache),
             None,
             None,
-            paper,
+            paper.then_some(1.0),
             self.reference_only.handles(),
         );
         // Same solid-corner snaps as the resident paths, so one-off consumers
@@ -18345,11 +18538,113 @@ mod layout_cache_tests {
         assert!((paper / drawing - 10.0).abs() < 1e-9, "{paper} = {drawing}");
     }
 
+    /// A physical 10 m line measures 100/50/20 mm at 1:100/1:200/1:500.
+    /// Legacy files keep bare ratios; newer files may store converted ratios.
+    /// Both must behave the same, including after the viewport is synchronized.
+    #[test]
+    fn standard_viewport_scales_use_physical_paper_units_without_double_conversion() {
+        for (units, mm_per_model_unit) in [(4, 1.0), (5, 10.0), (6, 1000.0)] {
+            for (name, denominator) in [("1:100", 100.0), ("1:200", 200.0), ("1:500", 500.0)] {
+                for stored_converted in [false, true] {
+                    let mut scene = Scene::new();
+                    scene.document.header.insertion_units = units;
+                    scene.add_layout("P1").unwrap();
+                    scene.current_layout = "P1".to_string();
+
+                    let drawing_units = if stored_converted {
+                        denominator / mm_per_model_unit
+                    } else {
+                        denominator
+                    };
+                    assert!(scene.add_scale(name, 1.0, drawing_units));
+
+                    let mut vp = document::entities::Viewport::new();
+                    vp.width = 200.0;
+                    vp.height = 100.0;
+                    let viewport = scene
+                        .document
+                        .add_entity_to_layout(
+                            document::EntityType::Viewport(Box::new(vp)),
+                            "P1",
+                        )
+                        .unwrap();
+
+                    assert!(scene.set_viewport_scale_named_for(viewport, name).is_some());
+                    let expected_factor = mm_per_model_unit / denominator;
+                    let actual = scene.viewport_effective_scale(viewport).unwrap();
+                    assert!(
+                        (actual - expected_factor).abs() < 1.0e-9,
+                        "{name}: INSUNITS={units}, stored_converted={stored_converted}, got {actual}, expected {expected_factor}"
+                    );
+                    let model_length_10m = 10000.0 / mm_per_model_unit;
+                    let expected_length_mm = 10000.0 / denominator;
+                    assert!(
+                        (model_length_10m * actual - expected_length_mm).abs() < 1.0e-7
+                    );
+                    assert_eq!(scene.viewport_annotation_scale_synced(), Some(true));
+                    assert!(scene.scale_list().iter().any(|(label, _, factor)| {
+                        label == name && (factor - expected_factor).abs() < 1.0e-9
+                    }));
+                    // Stored SCALE object remains untouched, while the picker
+                    // and viewport apply the physically correct effective ratio.
+                    let (paper, drawing) = scene.scale_ratio(name).unwrap();
+                    assert!((paper / drawing - 1.0 / drawing_units).abs() < 1.0e-9);
+                    assert!(scene.set_annotation_scale_named(name).is_some());
+                    assert!(
+                        ((scene.annotation_scale as f64) - 1.0 / expected_factor).abs() < 1.0e-5
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn virtual_standard_scale_in_metre_drawing_is_unit_aware() {
+        let mut scene = Scene::new();
+        scene.document.header.insertion_units = 6;
+        // scale_ratio intentionally exposes literal stored/name ratios for
+        // plot settings; scale_list is the unit-aware viewport picker.
+        let (paper, drawing) = scene.scale_ratio("1:200").unwrap();
+        assert!((paper / drawing - 0.005).abs() < 1.0e-9);
+        let (_, _, fallback) = scene
+            .scale_list()
+            .into_iter()
+            .find(|(name, _, _)| name == "1:200")
+            .unwrap();
+        assert!((fallback - 5.0).abs() < 1.0e-9);
+        assert!(scene.ensure_real_scale_list());
+        let (_, _, stored) = scene
+            .scale_list()
+            .into_iter()
+            .find(|(name, _, _)| name == "1:200")
+            .unwrap();
+        assert!((stored - 5.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn custom_metre_scale_keeps_its_exact_stored_paper_to_drawing_ratio() {
+        let mut scene = Scene::new();
+        scene.document.header.insertion_units = 6;
+        scene.add_layout("P1").unwrap();
+        scene.current_layout = "P1".to_string();
+        assert!(scene.add_scale("1:200 m", 1000.0, 200.0));
+        let mut vp = document::entities::Viewport::new();
+        vp.width = 200.0;
+        vp.height = 100.0;
+        let viewport = scene
+            .document
+            .add_entity_to_layout(document::EntityType::Viewport(Box::new(vp)), "P1")
+            .unwrap();
+        assert!(scene.set_viewport_scale_named_for(viewport, "1:200 m").is_some());
+        assert!((scene.viewport_effective_scale(viewport).unwrap() - 5.0).abs() < 1.0e-9);
+    }
+
     /// #2626: with nothing selected, a layout's only viewport takes the scale
     /// picked from the list; with two, neither changes until one is picked.
     #[test]
     fn a_picked_scale_reaches_the_layouts_only_viewport() {
         let mut scene = Scene::new();
+        scene.document.header.insertion_units = 4; // The existing 0.02 assertion is in mm.
         scene.add_layout("P1").unwrap();
         scene.current_layout = "P1".to_string();
         assert!(scene.add_scale("1:50", 1.0, 50.0));

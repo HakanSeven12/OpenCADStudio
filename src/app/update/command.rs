@@ -343,7 +343,11 @@ impl OpenCADStudio {
         }
         // A dialog owns the keyboard: typing while one is open (an open list
         // in it included) must not land in the command line behind it.
-        if self.active_modal.is_some() || self.qselect.is_some() {
+        if self.active_modal.is_some()
+            || self.qselect.is_some()
+            || self.filter_dialog.is_some()
+            || self.layer_import.is_some()
+        {
             return Task::none();
         }
         // Filter out control characters — only push the typed
@@ -661,6 +665,13 @@ impl OpenCADStudio {
             self.refresh_selected_grips();
             self.refresh_properties();
             return Task::none();
+        }
+
+        // Enter settles a custom grip at its current point. In particular it
+        // must never reach the empty-submit repeat-last-command shortcut.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.tabs[self.active_tab].active_plugin_grip.is_some() {
+            return self.settle_plugin_grip_from_enter();
         }
 
         // Numeric entry while a normal grip stretch is active.
@@ -1267,6 +1278,56 @@ impl OpenCADStudio {
         Some(task)
     }
 
+    /// Shared Enter commit for a hot custom grip. Typed Dynamic Input and the
+    /// native direct-distance form both become one ordinary drag Move before
+    /// Settle, so the plugin sees the same lifecycle as a pointer placement.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn settle_plugin_grip_from_enter(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(active) = self.tabs[i].active_plugin_grip.clone() else {
+            return Task::none();
+        };
+        let dyn_locked = self.dyn_input
+            && self.tabs[i]
+                .dyn_fields
+                .iter()
+                .any(|field| field.locked());
+        let target = if dyn_locked {
+            self.dyn_resolve_point()
+        } else {
+            // Mirror native grip Stretch's direct-distance entry, including
+            // its tracking-ray behavior. No custom-grip scalar/radius mode is
+            // introduced here: this is only a displacement from the origin.
+            let text = crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
+            crate::app::expr_eval::eval_number(text.trim()).map(|dist| {
+                if let Some((base, dir)) = self.active_distance_ray(i) {
+                    base + dir * dist
+                } else {
+                    let direction = self.tabs[i].last_cursor_world - active.origin_world;
+                    let len = direction.length();
+                    if len <= 1e-12 {
+                        active.origin_world
+                    } else {
+                        active.origin_world + direction / len * dist
+                    }
+                }
+            })
+        };
+        self.command_line.input.clear();
+
+        let mut move_task = Task::none();
+        if let Some(mut point) = target {
+            // Typed input must not bypass the declaration's hard axis.
+            if let Some(axis) = active.axis.and_then(|axis| axis.try_normalize()) {
+                point = active.origin_world + axis * (point - active.origin_world).dot(axis);
+            }
+            move_task = self.move_plugin_grip_drag(i, point);
+        }
+        let settle_task = self.settle_plugin_grip_drag();
+        self.sync_dyn_fields();
+        Task::batch([move_task, settle_task])
+    }
+
     /// The active command's current step collects free-form prose from the
     /// command line. Single decision point for the routes that type into
     /// the buffer (CommandInput, Shift+Enter, the view's on_submit wiring).
@@ -1323,6 +1384,10 @@ impl OpenCADStudio {
         // fields use the same keyboard path. Route Enter through CommandSubmit,
         // whose grip branch resolves Distance / Angle and finalizes the edit.
         let i = self.active_tab;
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.tabs[i].active_plugin_grip.is_some() && self.tabs[i].active_cmd.is_none() {
+            return self.settle_plugin_grip_from_enter();
+        }
         let grip_dyn_locked = self.tabs[i].active_grip.is_some()
             && self.dyn_input
             && self.tabs[i].dyn_fields.iter().any(|field| field.locked());
@@ -1489,19 +1554,18 @@ impl OpenCADStudio {
         // A hot grip (click-move-click placement in progress) rolls
         // back to its pre-drag image on Escape.
         if self.cancel_active_grip_edit() {
+            self.sync_dyn_fields();
             return Task::none();
         }
         // Cancel layout rename first, then fall through.
         let i_e = self.active_tab;
-        if let Some(state) = self.qselect.take() {
-            self.qselect_settings = Some((&state).into());
-            self.reset_modal_geometry();
-            if self.block_definition.is_some() {
-                self.active_modal = Some(crate::app::ModalKind::BlockDefinition);
-            } else if self.wblock.is_some() {
-                self.active_modal = Some(crate::app::ModalKind::WriteBlock);
-            }
-            return Task::none();
+        // Quick Select and FILTER close as their Cancel does: the preview
+        // goes and a parked 'QSELECT / 'FILTER command comes back.
+        if self.qselect.is_some() {
+            return self.update(Message::QSelectClose);
+        }
+        if self.filter_dialog.is_some() {
+            return self.on_filter_message(crate::app::filter_dialog::FilterMsg::Close);
         }
         {
             let mut sel = self.tabs[i_e].scene.selection.borrow_mut();
@@ -1614,7 +1678,21 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_layer_new(&mut self) -> Task<Message> {
+        self.on_layer_new_with(false)
+    }
+
+    /// A new layer, taking its look from the selected layer (colour,
+    /// linetype, lineweight, transparency, plot) or the defaults without one
+    /// (#2610); `frozen_in_viewports` also freezes it in every layout
+    /// viewport. One undo step either way.
+    pub(super) fn on_layer_new_with(&mut self, frozen_in_viewports: bool) -> Task<Message> {
         let i = self.active_tab;
+        let template = self.tabs[i]
+            .layers
+            .selected
+            .and_then(|row| self.tabs[i].layers.layers.get(row))
+            .and_then(|row| self.tabs[i].scene.document.layers.get(&row.name))
+            .cloned();
         let mut n = 1;
         let new_name = loop {
             let candidate = format!("Layer{}", n);
@@ -1628,11 +1706,35 @@ impl OpenCADStudio {
         // A layer needs a real handle or it is dropped on a DWG save
         // (the format is handle-based; issue #67).
         let mut dl = DocLayer::new(&new_name);
+        if let Some(template) = template {
+            dl.color = template.color;
+            dl.color_name = template.color_name.clone();
+            dl.book_name = template.book_name.clone();
+            dl.line_type = template.line_type.clone();
+            dl.line_weight = template.line_weight;
+            dl.transparency = template.transparency;
+            dl.is_plottable = template.is_plottable;
+        }
         // `allocate_handle` advances the seed so the layer gets a
         // unique handle; the non-advancing `next_handle` getter hands
         // out the same value twice and the later object overwrites it.
         dl.handle = self.tabs[i].scene.document.allocate_handle();
+        // Viewports made later freeze it too.
+        dl.flags.frozen_in_new_viewport = frozen_in_viewports;
+        let layer_handle = dl.handle;
         let _ = self.tabs[i].scene.document.layers.add(dl);
+        if frozen_in_viewports {
+            for entity in self.tabs[i].scene.document.entities_mut() {
+                if let document::EntityType::Viewport(vp) = entity {
+                    if !vp.frozen_layers.contains(&layer_handle) {
+                        vp.frozen_layers.push(layer_handle);
+                    }
+                }
+            }
+            self.tabs[i]
+                .scene
+                .invalidate_layer_visibility(&[new_name.clone()]);
+        }
         self.tabs[i].dirty = true;
         let doc_layers = self.tabs[i].scene.document.layers.clone();
         let vp_info = self.tabs[i].scene.viewport_list();
@@ -1669,7 +1771,7 @@ impl OpenCADStudio {
                         y: idx as f32 * crate::ui::ROW_H,
                     },
                 ),
-                iced::widget::operation::focus(crate::ui::window::layers::rename_input_id()),
+                super::focus_layer_name_field(),
             ]),
             None => Task::none(),
         }
@@ -1846,27 +1948,634 @@ impl OpenCADStudio {
     }
 
     pub(super) fn on_layer_rename_commit(&mut self) -> Task<Message> {
+        self.commit_layer_rename(true)
+    }
+
+    /// Apply the typed layer name. A name that can't be used says why (#2610).
+    /// On Enter (`refocus`) the field stays open with what was typed and
+    /// takes the keyboard again; a click elsewhere keeps the old name.
+    pub(super) fn commit_layer_rename(&mut self, refocus: bool) -> Task<Message> {
         let i = self.active_tab;
-        let editing_name = self.tabs[i].layers.editing.take();
-        if let Some(old_name) = editing_name {
-            let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
-            // The name was captured at RenameStart; look it up fresh so
-            // a sort/sync/filter in between cannot retarget the rename.
-            // Deleted meanwhile → clear and no-op.
-            let still_there = self.tabs[i]
-                .layers
-                .layers
-                .iter()
-                .any(|l| l.name == old_name);
-            if !new_name.is_empty() && new_name != old_name && still_there {
-                self.push_undo_snapshot(i, "LAYER RENAME");
-                if !self.tabs[i].rename_layer(&old_name, &new_name) {
-                    self.discard_last_undo_entry(i);
+        let Some(old_name) = self.tabs[i].layers.editing.take() else {
+            return Task::none();
+        };
+        let new_name = self.tabs[i].layers.edit_buf.trim().to_string();
+        // The name was captured at RenameStart; look it up fresh so a
+        // sort/sync/filter in between cannot retarget the rename. Deleted
+        // meanwhile → clear and no-op.
+        let still_there = self.tabs[i]
+            .layers
+            .layers
+            .iter()
+            .any(|l| l.name == old_name);
+        if !new_name.is_empty() && new_name != old_name && still_there {
+            if let Some(problem) =
+                layer_rename_problem(&self.tabs[i].scene.document, &old_name, &new_name)
+            {
+                self.command_line.push_error(&problem);
+                if refocus {
+                    self.tabs[i].layers.editing = Some(old_name);
+                    return super::focus_layer_name_field();
+                }
+                // A click elsewhere moves on; the old name stays.
+                self.tabs[i].layers.edit_buf.clear();
+                return Task::none();
+            }
+            self.push_undo_snapshot(i, "LAYER RENAME");
+            if !self.tabs[i].rename_layer(&old_name, &new_name) {
+                self.discard_last_undo_entry(i);
+            }
+        }
+        self.tabs[i].layers.edit_buf.clear();
+        self.refresh_layer_panel();
+        Task::none()
+    }
+
+    /// A layer row's right-click menu. A row outside the selection becomes
+    /// the selection first, as a click would.
+    pub(super) fn on_layer_menu(
+        &mut self,
+        name: String,
+        action: crate::ui::window::layers::LayerMenuAction,
+    ) -> Task<Message> {
+        use crate::ui::window::layers::LayerMenuAction as A;
+        let i = self.active_tab;
+        let Some(idx) = self.layer_panel_index(i, &name) else {
+            return Task::none();
+        };
+        // Merging into this row keeps the selection it merges.
+        let merge_sources = self.tabs[i].layers.selected_names();
+        let panel = &mut self.tabs[i].layers;
+        panel.keys_active = true;
+        if action == A::MergeHere {
+            // The selection stays as it is.
+        } else if !panel.selected_multi.contains(&idx) {
+            panel.selected_multi = vec![idx];
+        }
+        panel.selected = Some(idx);
+        match action {
+            A::SetCurrent => self.on_layer_set_current(),
+            A::New => self.on_layer_new(),
+            A::Rename => self.update(Message::LayerRenameStart(name)),
+            A::Delete => self.on_layer_delete(),
+            A::SelectObjects => {
+                let layers = self.tabs[i].layers.selected_names();
+                let count = self.tabs[i].scene.select_objects_on_layers(&layers);
+                self.command_line.push_output(
+                    crate::tf!("{} object(s) on the selected layers are selected.", count).as_ref(),
+                );
+                self.refresh_properties();
+                Task::none()
+            }
+            A::NewGroup => self.update(Message::LayerGroupNew),
+            // A ticked group: the selected layers are all in it, so the
+            // item takes them out.
+            A::AddToGroup(group) => {
+                let panel = &self.tabs[i].layers;
+                let selected = panel.selected_names();
+                let all_in = panel.groups.iter().any(|(g, members)| {
+                    g == &group
+                        && selected
+                            .iter()
+                            .all(|s| members.iter().any(|m| m.eq_ignore_ascii_case(s)))
+                });
+                self.set_layer_group(i, &group, &selected, !all_in);
+                Task::none()
+            }
+            A::RemoveFromGroup => self.update(Message::LayerGroupRemove),
+            A::FilterObjects => {
+                let layers = self.tabs[i].layers.selected_names().join(",");
+                self.filter_open_for_layers(layers);
+                self.layers_dialog_to_front()
+            }
+            A::MergeHere => {
+                let sources: Vec<String> = merge_sources
+                    .into_iter()
+                    .filter(|source| !source.eq_ignore_ascii_case(&name))
+                    .collect();
+                if sources.is_empty() {
+                    self.command_line.push_info(
+                        crate::t!(
+                            "Select the layers to merge, then right-click the one they go into."
+                        )
+                        .as_ref(),
+                    );
+                } else {
+                    self.merge_layers(i, sources, name);
+                }
+                Task::none()
+            }
+        }
+    }
+
+    /// Keys for the Layer manager's table after a click in it: ↑/↓ move
+    /// (Shift extends), Ctrl+A selects all, Del deletes, F2 renames and Esc
+    /// clears the selection. `None` leaves the key to the rest of the app.
+    pub(super) fn layer_manager_key(&mut self, key: &str) -> Option<Task<Message>> {
+        use crate::ui::window::layers::{TreeAction, TreeNode};
+        let i = self.active_tab;
+        if key == "ESCAPE" && self.tabs[i].layers.tree_rename.is_some() {
+            self.tabs[i].layers.tree_rename = None;
+            return Some(Task::none());
+        }
+        let panel = &self.tabs[i].layers;
+        if panel.tree_rename.is_some() {
+            return None;
+        }
+        if !panel.keys_active
+            || panel.editing.is_some()
+            || panel.transparency_edit.is_some()
+            || panel.description_edit.is_some()
+            || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
+        {
+            return None;
+        }
+        // A running command keeps Esc and Delete for itself.
+        if self.tabs[i].active_cmd.is_some() && matches!(key, "ESCAPE" | "DELETE") {
+            return None;
+        }
+        match key {
+            "CTRL+A" => {
+                let panel = &mut self.tabs[i].layers;
+                panel.selected_multi = panel.visible_indices();
+                Some(Task::none())
+            }
+            "DELETE"
+                if panel.tree_focus
+                    && matches!(panel.view, TreeNode::Group(_) | TreeNode::Filter(_)) =>
+            {
+                let node = panel.view.clone();
+                Some(self.update(Message::LayerTreeAction(node, TreeAction::Delete)))
+            }
+            "DELETE" => Some(self.on_layer_delete()),
+            "F2" if panel.tree_focus
+                && matches!(panel.view, TreeNode::Group(_) | TreeNode::Filter(_)) =>
+            {
+                let node = panel.view.clone();
+                Some(self.update(Message::LayerTreeAction(node, TreeAction::Rename)))
+            }
+            "F2" => {
+                let name = panel
+                    .selected
+                    .and_then(|row| panel.layers.get(row))?
+                    .name
+                    .clone();
+                Some(self.update(Message::LayerRenameStart(name)))
+            }
+            "ESCAPE" => {
+                let panel = &mut self.tabs[i].layers;
+                panel.selected = None;
+                panel.selected_multi.clear();
+                panel.keys_active = false;
+                Some(Task::none())
+            }
+            _ => None,
+        }
+    }
+
+    /// ↑/↓ in the Layer manager's table: the row above or below the anchor
+    /// among the rows shown; Shift extends the selection to it.
+    pub(super) fn layer_manager_arrow(&mut self, down: bool, extend: bool) -> bool {
+        let i = self.active_tab;
+        let panel = &self.tabs[i].layers;
+        if !panel.keys_active
+            || panel.editing.is_some()
+            || panel.transparency_edit.is_some()
+            || panel.description_edit.is_some()
+            || !self.dock_panel_visible(crate::ui::dock::PanelId::Layers)
+        {
+            return false;
+        }
+        let rows = panel.visible_indices();
+        if rows.is_empty() {
+            return true;
+        }
+        let at = panel
+            .selected
+            .and_then(|row| rows.iter().position(|r| *r == row));
+        let next = match at {
+            Some(at) if down => rows[(at + 1).min(rows.len() - 1)],
+            Some(at) => rows[at.saturating_sub(1)],
+            None if down => rows[0],
+            None => rows[rows.len() - 1],
+        };
+        let panel = &mut self.tabs[i].layers;
+        if extend {
+            if !panel.selected_multi.contains(&next) {
+                panel.selected_multi.push(next);
+            }
+        } else {
+            panel.selected_multi = vec![next];
+        }
+        panel.selected = Some(next);
+        true
+    }
+
+    /// Esc while the Layer manager is typing a name or a transparency drops
+    /// what was typed. Returns whether there was something to drop.
+    pub(super) fn cancel_layer_manager_edit(&mut self) -> bool {
+        let layers = &mut self.tabs[self.active_tab].layers;
+        if layers.editing.take().is_some() {
+            layers.edit_buf.clear();
+            return true;
+        }
+        layers.description_edit.take().is_some() || layers.transparency_edit.take().is_some()
+    }
+
+    /// Apply the typed description to the layer as one undo step (#2610).
+    pub(super) fn on_layer_description_commit(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some((name, typed)) = self.tabs[i].layers.description_edit.take() else {
+            return Task::none();
+        };
+        let typed = typed.trim().to_string();
+        let unchanged = self.tabs[i]
+            .scene
+            .document
+            .layers
+            .get(&name)
+            .is_none_or(|layer| layer.description == typed);
+        if unchanged {
+            return Task::none();
+        }
+        let undo = self.begin_layer_undo(i, "LAYER DESCRIPTION", std::slice::from_ref(&name));
+        if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(&name) {
+            layer.description = typed.clone();
+        }
+        if let Some(row) = self.tabs[i]
+            .layers
+            .layers
+            .iter_mut()
+            .find(|l| l.name == name)
+        {
+            row.description = typed;
+        }
+        self.tabs[i].dirty = true;
+        self.commit_layer_undo(i, undo);
+        Task::none()
+    }
+
+    /// Count the objects on each layer for the Layer manager's Objects column
+    /// and status, again only when the drawing or its layers changed and the
+    /// manager is open. Objects inside block definitions count too, apart.
+    pub(in crate::app) fn refresh_layer_counts(&mut self) {
+        use std::hash::{Hash, Hasher};
+        if self.tabs.get(self.active_tab).is_none() {
+            return;
+        }
+        if !self.dock_panel_visible(crate::ui::dock::PanelId::Layers) {
+            let i = self.active_tab;
+            if !self.tabs[i].layers.eye_layers.is_empty() {
+                self.tabs[i].layers.eye_layers.clear();
+                self.tabs[i].layers.highlighted = 0;
+                self.tabs[i].layers.highlight_key = None;
+                self.tabs[i].scene.set_filter_preview_highlights(&[]);
+            }
+            return;
+        }
+        let i = self.active_tab;
+        self.refresh_layer_tree(i);
+        self.refresh_layer_highlight(i);
+        let scene = &self.tabs[i].scene;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for layer in scene.document.layers.iter() {
+            layer.name.hash(&mut hasher);
+        }
+        let key = (scene.geometry_epoch, hasher.finish());
+        if self.tabs[i].layers.counts_key == Some(key) {
+            return;
+        }
+        let mut counts: std::collections::HashMap<String, (usize, usize)> = Default::default();
+        for record in scene.document.block_records.iter() {
+            let in_block = !record.is_layout();
+            for handle in &record.entity_handles {
+                if let Some(entity) = scene.document.get_entity(*handle) {
+                    let entry = counts
+                        .entry(entity.common().layer.to_lowercase())
+                        .or_default();
+                    entry.0 += 1;
+                    if in_block {
+                        entry.1 += 1;
+                    }
                 }
             }
-            self.tabs[i].layers.edit_buf.clear();
-            self.refresh_layer_panel();
         }
+        self.tabs[i].layers.set_counts(counts, key);
+    }
+
+    /// FILTER over the layers: the LAYERFILTER filter `name`, or a new one
+    /// starting from what the search box holds (#2610).
+    pub(super) fn on_layer_filter_edit(&mut self, name: Option<String>) -> Task<Message> {
+        use crate::filter::{Condition, Filter, Item, Match, Op};
+        let i = self.active_tab;
+        // `Some("")`: a new, empty filter (the toolbar's New Filter); `None`
+        // starts from the search text (Advanced…).
+        let blank = name.as_deref() == Some("");
+        let (name, filter) = match name.and_then(|name| {
+            self.layer_filters
+                .iter()
+                .find(|f| f.name.eq_ignore_ascii_case(&name))
+                .map(|f| (f.name.clone(), f.to_filter()))
+        }) {
+            Some(found) => found,
+            None => {
+                let search = if blank {
+                    String::new()
+                } else {
+                    self.tabs[i].layers.filter.trim().to_string()
+                };
+                let condition = if search.is_empty() {
+                    Condition::default()
+                } else {
+                    // The search box finds names containing the text.
+                    let value = if search.contains(['*', '?', ',']) {
+                        search
+                    } else {
+                        format!("*{search}*")
+                    };
+                    Condition {
+                        property: Some("name".into()),
+                        op: Op::Eq,
+                        value,
+                        ..Default::default()
+                    }
+                };
+                (
+                    String::new(),
+                    Filter {
+                        root: Match::All,
+                        items: vec![Item::Condition(condition)],
+                    },
+                )
+            }
+        };
+        self.filter_open_layers(name, filter);
+        self.layers_dialog_to_front()
+    }
+
+    /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
+    /// filter, or switch all of a node's layers at once (one undo step; the
+    /// current layer is never frozen).
+    /// The tree's rename field: Enter. A group is renamed in the drawing, a
+    /// filter in the list; an empty or taken name leaves it as it was.
+    pub(super) fn on_layer_tree_rename_commit(&mut self) -> Task<Message> {
+        use crate::ui::window::layers::TreeNode;
+        let i = self.active_tab;
+        let Some((node, typed)) = self.tabs[i].layers.tree_rename.take() else {
+            return Task::none();
+        };
+        let new = typed.trim().to_string();
+        match node {
+            TreeNode::Group(old) if !new.is_empty() && new != old => {
+                let taken = self.tabs[i]
+                    .layers
+                    .groups
+                    .iter()
+                    .any(|(g, _)| g.eq_ignore_ascii_case(&new) && !g.eq_ignore_ascii_case(&old));
+                if taken {
+                    self.command_line
+                        .push_error(&crate::tr!("layer-groups", "exists", name = new));
+                } else {
+                    self.rename_layer_group_named(i, &old, &new);
+                    self.tabs[i].layers.view = TreeNode::Group(new);
+                }
+            }
+            TreeNode::Filter(old) if !new.is_empty() && new != old => {
+                let taken = self
+                    .layer_filters
+                    .iter()
+                    .any(|f| f.name.eq_ignore_ascii_case(&new) && !f.name.eq_ignore_ascii_case(&old));
+                if taken {
+                    self.command_line
+                        .push_error(&crate::tf!("A filter named \"{}\" already exists.", new));
+                } else if let Some(filter) = self
+                    .layer_filters
+                    .iter_mut()
+                    .find(|f| f.name.eq_ignore_ascii_case(&old))
+                {
+                    filter.name = new.clone();
+                    if self.tabs[i].layers.view == TreeNode::Filter(old) {
+                        self.tabs[i].layers.view = TreeNode::Filter(new);
+                    }
+                    self.refresh_layer_counts();
+                }
+            }
+            _ => {}
+        }
+        Task::none()
+    }
+
+    pub(super) fn on_layer_tree_action(
+        &mut self,
+        node: crate::ui::window::layers::TreeNode,
+        action: crate::ui::window::layers::TreeAction,
+    ) -> Task<Message> {
+        use crate::ui::window::layers::{TreeAction as A, TreeNode};
+        let i = self.active_tab;
+        match (&node, action) {
+            (TreeNode::Filter(name), A::Edit) => {
+                return self.on_layer_filter_edit(Some(name.clone()));
+            }
+            (TreeNode::Filter(name), A::Delete) => {
+                self.layer_filters
+                    .retain(|f| !f.name.eq_ignore_ascii_case(name));
+                if self.tabs[i].layers.view == node {
+                    self.tabs[i].layers.view = TreeNode::All;
+                }
+                self.refresh_layer_counts();
+                return Task::none();
+            }
+            // A group goes from the tree's menu; its layers stay. Called
+            // directly: a name with a space would not survive the command
+            // line.
+            (TreeNode::Group(name), A::Delete) => {
+                let name = name.clone();
+                if self.tabs[i].layers.view == node {
+                    self.tabs[i].layers.set_group(None);
+                }
+                self.delete_layer_group_named(i, &name);
+                return Task::none();
+            }
+            (TreeNode::Group(name) | TreeNode::Filter(name), A::Rename) => {
+                let panel = &mut self.tabs[i].layers;
+                panel.tree_rename = Some((node.clone(), name.clone()));
+                return iced::widget::operation::focus(crate::ui::window::layers::tree_rename_input_id())
+                    .chain(iced::widget::operation::select_all(
+                        crate::ui::window::layers::tree_rename_input_id(),
+                    ));
+            }
+            (TreeNode::Unused, A::Purge) => {
+                let unused = self.tabs[i].layers.node_layers(&TreeNode::Unused);
+                self.open_purge_dialog();
+                if let Some(state) = self.purge_dialog.as_mut() {
+                    for (name, ticked) in &mut state.items[0] {
+                        *ticked = unused.iter().any(|u| u.eq_ignore_ascii_case(name));
+                    }
+                }
+                return self.layers_dialog_to_front();
+            }
+            (_, A::Edit | A::Delete | A::Rename | A::Purge) => return Task::none(),
+            _ => {}
+        }
+        let mut names = self.tabs[i].layers.node_layers(&node);
+        let current = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_layer_name
+            .clone();
+        if action == A::Freeze {
+            names.retain(|name| !name.eq_ignore_ascii_case(&current));
+        }
+        let label = format!("LAYER {action:?}").to_uppercase();
+        match action {
+            A::On => self.edit_layers(i, &label, &names, |layer| layer.turn_on()),
+            A::Off => self.edit_layers(i, &label, &names, |layer| layer.turn_off()),
+            A::Freeze => self.edit_layers(i, &label, &names, |layer| layer.freeze()),
+            A::Thaw => self.edit_layers(i, &label, &names, |layer| layer.thaw()),
+            A::Lock => self.edit_layers(i, &label, &names, |layer| layer.lock()),
+            A::Unlock => self.edit_layers(i, &label, &names, |layer| layer.unlock()),
+            A::Edit | A::Delete | A::Rename | A::Purge => {}
+        }
+        self.refresh_layer_panel();
+        Task::none()
+    }
+
+    /// With Show on and no selection dialog open, light the selected layers'
+    /// objects in the drawing; again only when the layers or the drawing
+    /// changed.
+    fn refresh_layer_highlight(&mut self, i: usize) {
+        if self.tabs[i].layers.eye_layers.is_empty()
+            || self.filter_dialog.is_some()
+            || self.qselect.is_some()
+        {
+            // The dialog owns the highlight now; recompute once it closes.
+            self.tabs[i].layers.highlight_key = None;
+            return;
+        }
+        let names = self.tabs[i].layers.eye_layers.clone();
+        let key = (self.tabs[i].scene.geometry_epoch, names.clone());
+        if self.tabs[i].layers.highlight_key.as_ref() == Some(&key) {
+            return;
+        }
+        let handles = self.tabs[i].scene.objects_on_layers(&names);
+        self.tabs[i].scene.set_filter_preview_highlights(&handles);
+        self.tabs[i].layers.highlighted = handles.len();
+        self.tabs[i].layers.highlight_key = Some(key);
+    }
+
+    /// The filter tree's live parts: the layers of the selected objects and
+    /// what each LAYERFILTER filter matches. Set only when they changed.
+    fn refresh_layer_tree(&mut self, i: usize) {
+        use std::hash::{Hash, Hasher};
+        let scene = &self.tabs[i].scene;
+        // This runs on every message while the panel shows: work the tree
+        // out again only when what it reads has changed.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        scene.selected.len().hash(&mut hasher);
+        scene
+            .selected
+            .iter()
+            .fold(0u64, |acc, h| acc ^ h.value().wrapping_mul(0x9E37_79B9_7F4A_7C15))
+            .hash(&mut hasher);
+        for layer in scene.document.layers.iter() {
+            format!("{layer:?}").hash(&mut hasher);
+        }
+        format!("{:?}", self.layer_filters).hash(&mut hasher);
+        let key = hasher.finish();
+        if self.tabs[i].layers.tree_key == Some(key) {
+            return;
+        }
+        self.tabs[i].layers.tree_key = Some(key);
+        let scene = &self.tabs[i].scene;
+        let mut selected: Vec<String> = scene
+            .selected
+            .iter()
+            .filter_map(|h| scene.document.get_entity(*h))
+            .map(|e| e.common().layer.to_lowercase())
+            .collect();
+        selected.sort();
+        selected.dedup();
+        let filters: Vec<(String, Vec<String>)> = self
+            .layer_filters
+            .iter()
+            .map(|filter| {
+                let members = scene
+                    .document
+                    .layers
+                    .iter()
+                    .filter(|layer| filter.matches(layer))
+                    .map(|layer| layer.name.clone())
+                    .collect();
+                (filter.name.clone(), members)
+            })
+            .collect();
+        let panel = &mut self.tabs[i].layers;
+        if panel.selected_object_layers != selected {
+            panel.selected_object_layers = selected;
+        }
+        if panel.filters != filters {
+            if let crate::ui::window::layers::TreeNode::Filter(name) = &panel.view {
+                if !filters.iter().any(|(f, _)| f.eq_ignore_ascii_case(name)) {
+                    panel.view = crate::ui::window::layers::TreeNode::All;
+                }
+            }
+            panel.filters = filters;
+        }
+    }
+
+    /// Apply the typed transparency to the layer (and the selection it is
+    /// part of) as one undo step. A value that isn't a whole number from 0 to
+    /// 90 says so and the field shows the layer's value again (#2610).
+    pub(super) fn on_layer_transparency_commit(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some((name, typed)) = self.tabs[i].layers.transparency_edit.take() else {
+            return Task::none();
+        };
+        let Some(idx) = self.layer_panel_index(i, &name) else {
+            return Task::none();
+        };
+        let typed = typed.trim();
+        if typed.is_empty() {
+            return Task::none();
+        }
+        let Some(value) = typed.parse::<i32>().ok().filter(|v| (0..=90).contains(v)) else {
+            self.command_line
+                .push_error(crate::t!("Transparency is a whole number from 0 to 90.").as_ref());
+            return Task::none();
+        };
+        let targets: Vec<String> = self
+            .layer_row_action_targets(i, idx)
+            .into_iter()
+            .filter(|target| {
+                self.tabs[i]
+                    .layers
+                    .layers
+                    .iter()
+                    .any(|l| &l.name == target && l.transparency != value)
+            })
+            .collect();
+        if targets.is_empty() {
+            return Task::none();
+        }
+        let undo = self.begin_layer_undo(i, "LAYER TRANSPARENCY", &targets);
+        for target in &targets {
+            if let Some(layer) = self.tabs[i].scene.document.layers.get_mut(target) {
+                layer.transparency =
+                    document::types::Transparency::from_percent(value as f64 / 100.0);
+            }
+            if let Some(pl) = self.tabs[i]
+                .layers
+                .layers
+                .iter_mut()
+                .find(|l| &l.name == target)
+            {
+                pl.transparency = value;
+            }
+        }
+        self.tabs[i].scene.invalidate_layer_dependencies(&targets);
+        self.tabs[i].dirty = true;
+        self.commit_layer_undo(i, undo);
         Task::none()
     }
 
@@ -2643,7 +3352,7 @@ impl OpenCADStudio {
         ))
     }
 
-    pub(super) fn on_qselect_open(&mut self) -> Task<Message> {
+    pub(in crate::app) fn on_qselect_open(&mut self) -> Task<Message> {
         let i = self.active_tab;
         self.tabs[i].scene.selection.borrow_mut().menu.close();
         let remembered = self.qselect_settings.clone();
@@ -2652,12 +3361,12 @@ impl OpenCADStudio {
             .map_or(crate::app::QSelectScope::CurrentSpace, |settings| {
                 settings.scope
             });
-        let available_types = self.tabs[i].scene.qselect_entity_type_names(scope);
+        let available_types = self.tabs[i].scene.qselect_type_counts(scope);
         let type_filter = if let Some(settings) = remembered.as_ref() {
             settings
                 .type_filter
                 .as_ref()
-                .filter(|selected| available_types.iter().any(|item| item == *selected))
+                .filter(|selected| available_types.iter().any(|(item, _)| item == *selected))
                 .cloned()
         } else {
             self.tabs[i]
@@ -2685,12 +3394,11 @@ impl OpenCADStudio {
         let mut operator = remembered
             .as_ref()
             .map_or(crate::app::QSelectOp::Eq, |settings| settings.operator);
-        if matches!(
-            operator,
-            crate::app::QSelectOp::Gt | crate::app::QSelectOp::Lt
-        ) && !property.as_ref().is_some_and(|property| {
-            matches!(property.editor, crate::app::QSelectValueEditor::Number)
-        }) {
+        if operator.needs_number()
+            && !property.as_ref().is_some_and(|property| {
+                matches!(property.editor, crate::app::QSelectValueEditor::Number)
+            })
+        {
             operator = crate::app::QSelectOp::Eq;
         }
         let value = remembered.as_ref().map_or_else(String::new, |settings| {
@@ -2703,8 +3411,12 @@ impl OpenCADStudio {
         let mode = remembered
             .as_ref()
             .map_or(crate::app::QSelectMode::Include, |settings| settings.mode);
-        let append = matches!(scope, crate::app::QSelectScope::CurrentSpace)
-            && remembered.as_ref().is_some_and(|settings| settings.append);
+        let result = remembered
+            .as_ref()
+            .map_or_else(Default::default, |settings| settings.result);
+        // Highlighting the matches starts off until it is turned on, then
+        // stays as it was left (#2611).
+        let show = remembered.as_ref().is_some_and(|settings| settings.show);
         self.qselect = Some(crate::app::QSelectState {
             conditions: remembered
                 .as_ref()
@@ -2719,10 +3431,17 @@ impl OpenCADStudio {
             operator,
             value,
             mode,
-            append,
+            result,
             error: None,
+            live_count: 0,
+            live_by_type: Vec::new(),
+            show,
+            value_counts: Vec::new(),
+            sample: None,
         });
         self.reset_modal_geometry();
+        self.qselect_refresh_values();
+        self.qselect_refresh_live();
         Task::none()
     }
 
@@ -6100,38 +6819,849 @@ mod layer_name_target_tests {
         assert_eq!(before, after, "unknown name must change nothing");
     }
 
+    fn panel_transparency(app: &OpenCADStudio, name: &str) -> i32 {
+        app.tabs[app.active_tab]
+            .layers
+            .layers
+            .iter()
+            .find(|l| l.name == name)
+            .expect("layer in panel")
+            .transparency
+    }
+
     #[test]
-    fn layer_transparency_edit_pushes_undo() {
-        // #43: every sibling layer arm pushes an undo entry; transparency must too.
+    fn layer_transparency_edit_is_one_undo_step_on_enter() {
+        // #43 / #2610: typing fills the field only; Enter applies it as one
+        // undo step, however many keys were typed.
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         app.finish_pending_history(i);
         let before = app.tabs[i].history.undo_stack.len();
-        let _ = app.update(Message::LayerTransparencyEdit(
-            "0".to_string(),
-            "50".to_string(),
-        ));
+        for typed in ["5", "50"] {
+            let _ = app.update(Message::LayerTransparencyEdit(
+                "0".to_string(),
+                typed.into(),
+            ));
+        }
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before,
+            "typing alone changes nothing"
+        );
+        assert_eq!(panel_transparency(&app, "0"), 0);
+        let _ = app.update(Message::LayerTransparencyCommit);
         assert_eq!(
             app.tabs[i].history.undo_stack.len(),
             before + 1,
-            "transparency edit must push an undo entry like its siblings"
+            "one undo step"
         );
-        let panel = app.tabs[i]
-            .layers
-            .layers
-            .iter()
-            .find(|l| l.name == "0")
-            .expect("layer 0 in panel");
-        assert_eq!(panel.transparency, 50);
+        assert_eq!(panel_transparency(&app, "0"), 50);
+        assert!(app.tabs[i].layers.transparency_edit.is_none());
         app.undo_active_tab();
-        let panel = app.tabs[i]
+        assert_eq!(
+            panel_transparency(&app, "0"),
+            0,
+            "undo must restore transparency"
+        );
+    }
+
+    #[test]
+    fn layer_transparency_out_of_range_says_so_and_keeps_the_value() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        for typed in ["95", "x"] {
+            app.command_line.last_error = None;
+            let _ = app.update(Message::LayerTransparencyEdit(
+                "0".to_string(),
+                typed.into(),
+            ));
+            let _ = app.update(Message::LayerTransparencyCommit);
+            assert!(
+                app.command_line.last_error.is_some(),
+                "{typed} is refused with a message"
+            );
+        }
+        assert_eq!(panel_transparency(&app, "0"), 0);
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before);
+        // Leaving the field applies like Enter; Esc drops what was typed.
+        let _ = app.update(Message::LayerTransparencyEdit("0".to_string(), "30".into()));
+        let _ = app.update(Message::LayerTransparencyFocus(None));
+        assert_eq!(panel_transparency(&app, "0"), 30);
+        let _ = app.update(Message::LayerTransparencyEdit("0".to_string(), "60".into()));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(app.tabs[i].layers.transparency_edit.is_none());
+        assert_eq!(panel_transparency(&app, "0"), 30);
+    }
+
+    #[test]
+    fn layer_rename_to_a_taken_name_says_why_and_stays_open() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerRenameStart("ZULU".to_string()));
+        let _ = app.update(Message::LayerRenameEdit("alpha".to_string()));
+        app.command_line.last_error = None;
+        let _ = app.update(Message::LayerRenameCommit);
+        assert!(app.command_line.last_error.is_some(), "the reason is shown");
+        assert_eq!(
+            app.tabs[i].layers.editing.as_deref(),
+            Some("ZULU"),
+            "field stays open"
+        );
+        assert_eq!(app.tabs[i].layers.edit_buf, "alpha", "with what was typed");
+        assert!(app.tabs[i].scene.document.layers.contains("ZULU"));
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before, "no undo step");
+        // Esc gives up: the old name stays and the field closes.
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(app.tabs[i].layers.editing.is_none());
+        assert!(app.tabs[i].layers.edit_buf.is_empty());
+        // Invalid characters and protected layers are refused the same way.
+        for (layer, typed) in [("ZULU", "A*B"), ("0", "ZERO")] {
+            let _ = app.update(Message::LayerRenameStart(layer.to_string()));
+            let _ = app.update(Message::LayerRenameEdit(typed.to_string()));
+            app.command_line.last_error = None;
+            let _ = app.update(Message::LayerRenameCommit);
+            assert!(
+                app.command_line.last_error.is_some(),
+                "{layer} → {typed} refused"
+            );
+            assert!(app.tabs[i].scene.document.layers.contains(layer));
+            let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        }
+        // A click elsewhere after a refused name keeps the old one and moves on.
+        let _ = app.update(Message::LayerRenameStart("ZULU".to_string()));
+        let _ = app.update(Message::LayerRenameEdit("ALPHA".to_string()));
+        let _ = app.update(Message::LayerRenameFocus(None));
+        assert!(app.tabs[i].layers.editing.is_none());
+        assert!(app.tabs[i].scene.document.layers.contains("ZULU"));
+    }
+
+    #[test]
+    fn ctrl_click_on_a_layer_name_extends_the_selection() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerSelect("ALPHA".to_string()));
+        app.ctrl_down = true;
+        let _ = app.update(Message::LayerRenameStart("ZULU".to_string()));
+        app.ctrl_down = false;
+        assert!(app.tabs[i].layers.editing.is_none(), "no rename starts");
+        let selected: Vec<String> = app.tabs[i]
+            .layers
+            .selected_multi
+            .iter()
+            .map(|&idx| app.tabs[i].layers.layers[idx].name.clone())
+            .collect();
+        assert!(selected.contains(&"ALPHA".to_string()) && selected.contains(&"ZULU".to_string()));
+    }
+
+    fn selected(app: &OpenCADStudio) -> Vec<String> {
+        let mut names = app.tabs[app.active_tab].layers.selected_names();
+        names.sort();
+        names
+    }
+
+    /// #2610: a click on a name selects; the keys then work the table until a
+    /// click in the drawing.
+    #[test]
+    fn layer_table_keys_after_a_click() {
+        use crate::app::ArrowKey;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        // Name order, ascending (the default): 0, ALPHA, ZULU.
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.update(Message::LayerSelect("0".into()));
+        assert!(app.tabs[i].layers.keys_active);
+        assert!(
+            app.tabs[i].layers.editing.is_none(),
+            "a click doesn't rename"
+        );
+        let arrow = |direction, extend_selection| Message::ArrowKeyPressed {
+            direction,
+            shortcut: String::new(),
+            extend_selection,
+        };
+        let _ = app.update(arrow(ArrowKey::Down, false));
+        assert_eq!(selected(&app), ["ALPHA"]);
+        let _ = app.update(arrow(ArrowKey::Down, true));
+        assert_eq!(selected(&app), ["ALPHA", "ZULU"]);
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert!(selected(&app).is_empty());
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::ShortcutPressed("CTRL+A".into()));
+        assert_eq!(selected(&app).len(), 3);
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::ShortcutPressed("F2".into()));
+        assert_eq!(app.tabs[i].layers.editing.as_deref(), Some("ZULU"));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        // A click in the drawing hands the keys back.
+        let _ = app.update(Message::ViewportLeftPress);
+        assert!(!app.tabs[i].layers.keys_active);
+        let _ = app.update(arrow(ArrowKey::Up, false));
+        assert_eq!(
+            selected(&app),
+            ["ZULU"],
+            "the arrow no longer moves the rows"
+        );
+    }
+
+    #[test]
+    fn layer_row_menu_acts_on_the_row_or_the_selection_it_is_in() {
+        use crate::ui::window::layers::LayerMenuAction;
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.layer = "ZULU".into();
+        let on_zulu = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        let _ = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(2.0, 0.0, 0.0),
+            )));
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        // A row outside the selection becomes the selection first.
+        let _ = app.update(Message::LayerMenu(
+            "ZULU".into(),
+            LayerMenuAction::SelectObjects,
+        ));
+        assert_eq!(selected(&app), ["ZULU"]);
+        assert_eq!(app.tabs[i].scene.selected.len(), 1);
+        assert!(app.tabs[i].scene.selected.contains(&on_zulu));
+        // Select All / Deselect All left the menu (Ctrl+A and Esc do them).
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::SetCurrent,
+        ));
+        assert_eq!(
+            app.tabs[i].scene.document.header.current_layer_name,
+            "ALPHA"
+        );
+    }
+
+    #[test]
+    fn a_new_layer_takes_the_selected_layers_look() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        {
+            let zulu = app.tabs[i].scene.document.layers.get_mut("ZULU").unwrap();
+            zulu.color = document::types::Color::Index(3);
+            zulu.line_type = "HIDDEN".into();
+            zulu.is_plottable = false;
+        }
+        app.sync_layer_panel(i);
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.on_layer_new();
+        let name = app.tabs[i].layers.edit_buf.clone();
+        let layer = app.tabs[i].scene.document.layers.get(&name).unwrap();
+        assert_eq!(layer.color, document::types::Color::Index(3));
+        assert_eq!(layer.line_type, "HIDDEN");
+        assert!(!layer.is_plottable);
+    }
+
+    #[test]
+    fn a_new_layer_can_start_frozen_in_every_viewport() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let viewport = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Viewport(Box::new(
+                document::entities::Viewport::new(),
+            )));
+        app.tabs[i].layers.selected = None;
+        app.tabs[i].layers.selected_multi.clear();
+        let _ = app.update(Message::LayerNewVpFrozen);
+        let name = app.tabs[i].layers.edit_buf.clone();
+        let handle = app.tabs[i].scene.document.layers.get(&name).unwrap().handle;
+        let Some(document::EntityType::Viewport(vp)) =
+            app.tabs[i].scene.document.get_entity(viewport)
+        else {
+            panic!("the viewport stays");
+        };
+        assert!(vp.frozen_layers.contains(&handle));
+        app.undo_active_tab();
+        assert!(
+            !app.tabs[i].scene.document.layers.contains(&name),
+            "one undo step"
+        );
+    }
+
+    fn row(app: &OpenCADStudio, name: &str) -> crate::ui::window::layers::Layer {
+        app.tabs[app.active_tab]
             .layers
             .layers
             .iter()
-            .find(|l| l.name == "0")
-            .expect("layer 0 in panel");
-        assert_eq!(panel.transparency, 0, "undo must restore transparency");
+            .find(|l| l.name == name)
+            .expect("layer in panel")
+            .clone()
+    }
+
+    /// #2610: the Objects column counts the layer's objects, block contents
+    /// apart, and follows the drawing.
+    #[test]
+    fn layer_object_counts_follow_the_drawing() {
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let line_on = |layer: &str| {
+            let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+            line.common.layer = layer.into();
+            document::EntityType::Line(line)
+        };
+        let first = app.tabs[i].scene.add_entity(line_on("ZULU"));
+        let _ = app.tabs[i].scene.add_entity(line_on("zulu"));
+        // One more inside a block definition.
+        let mut block = document::tables::BlockRecord::new("DOOR");
+        block.handle = app.tabs[i].scene.document.allocate_handle();
+        let owner = block.handle;
+        let _ = app.tabs[i].scene.document.block_records.add(block);
+        let mut inside = line_on("ZULU");
+        inside.common_mut().owner_handle = owner;
+        let _ = app.tabs[i].scene.document.add_entity(inside);
+        app.tabs[i].scene.bump_geometry();
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        assert_eq!(
+            (row(&app, "ZULU").objects, row(&app, "ZULU").in_blocks),
+            (3, 1)
+        );
+        assert_eq!(row(&app, "ALPHA").objects, 0);
+        let _ = app.tabs[i].scene.document.remove_entity(first);
+        app.tabs[i].scene.bump_geometry();
+        let _ = app.update(Message::LayerSort(LayerSortCol::Name));
+        assert_eq!(
+            row(&app, "ZULU").objects,
+            2,
+            "counted again after the change"
+        );
+    }
+
+    fn shown(app: &OpenCADStudio) -> Vec<String> {
+        let panel = &app.tabs[app.active_tab].layers;
+        let mut names: Vec<String> = panel
+            .visible_indices()
+            .into_iter()
+            .map(|row| panel.layers[row].name.clone())
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// #2610: the filter tree's nodes pick the layers the table shows.
+    #[test]
+    fn filter_tree_nodes_choose_the_rows() {
+        use crate::ui::window::layers::TreeNode;
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.layer = "ZULU".into();
+        let on_zulu = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        app.tabs[i].scene.bump_geometry();
+        let mut xref = document::tables::Layer::new("SITE|ROAD");
+        xref.handle = app.tabs[i].scene.document.allocate_handle();
+        let _ = app.tabs[i].scene.document.layers.add(xref);
+        app.sync_layer_panel(i);
+        let _ = app.update(Message::LayerShow(TreeNode::Used));
+        assert_eq!(shown(&app), ["ZULU"]);
+        let _ = app.update(Message::LayerInvert(true));
+        assert_eq!(shown(&app), ["0", "ALPHA", "SITE|ROAD"]);
+        let _ = app.update(Message::LayerInvert(false));
+        let _ = app.update(Message::LayerShow(TreeNode::Unused));
+        assert_eq!(shown(&app), ["0", "ALPHA", "SITE|ROAD"]);
+        assert!(app.tabs[i]
+            .layers
+            .tree_nodes()
+            .iter()
+            .any(|(n, _)| *n == TreeNode::Xref("SITE".into())));
+        let _ = app.update(Message::LayerShow(TreeNode::Xref("site".into())));
+        assert_eq!(shown(&app), ["SITE|ROAD"]);
+        // Layers of the selected objects follow the selection.
+        app.tabs[i].scene.select_entity(on_zulu, false);
+        let _ = app.update(Message::LayerShow(TreeNode::Selected));
+        assert_eq!(shown(&app), ["ZULU"]);
+        // A LAYERFILTER filter is a node too.
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        let _ = app.update(Message::LayerShow(TreeNode::Filter("LETTERS".into())));
+        assert_eq!(shown(&app), ["ALPHA", "ZULU"]);
+        let _ = app.update(Message::LayerShow(TreeNode::All));
+        assert_eq!(shown(&app).len(), 4);
+    }
+
+    /// #2610 (F1): a group with a space in its name is renamed in place and
+    /// deleted from the tree's menu; a filter is renamed too, and a taken
+    /// name is refused.
+    #[test]
+    fn tree_rename_and_delete_with_spaces() {
+        use crate::ui::window::layers::{TreeAction, TreeNode};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::LayerGroupNew);
+        let group = app.tabs[i].layers.groups[0].0.clone();
+        assert!(
+            group.contains(' '),
+            "a default name like `Group 1` has a space"
+        );
+        let node = TreeNode::Group(group.clone());
+        let _ = app.update(Message::LayerTreeAction(node.clone(), TreeAction::Rename));
+        assert_eq!(app.tabs[i].layers.tree_rename, Some((node, group.clone())));
+        let _ = app.update(Message::LayerTreeRenameEdit("1. csoport".into()));
+        let _ = app.update(Message::LayerTreeRenameCommit);
+        assert_eq!(app.tabs[i].layers.groups[0].0, "1. csoport");
+        assert_eq!(app.tabs[i].layers.groups[0].1, ["ZULU"]);
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Group("1. csoport".into()),
+            TreeAction::Delete,
+        ));
+        assert!(
+            app.tabs[i].layers.groups.is_empty(),
+            "deleted despite the space"
+        );
+        // A filter: renamed; a second one may not take its name.
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        let _ = app.run_command_line("LAYERFILTER NEW OTHERS O*");
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Filter("LETTERS".into()),
+            TreeAction::Rename,
+        ));
+        let _ = app.update(Message::LayerTreeRenameEdit("Letters A-Z".into()));
+        let _ = app.update(Message::LayerTreeRenameCommit);
+        assert!(app.layer_filters.iter().any(|f| f.name == "Letters A-Z"));
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Filter("OTHERS".into()),
+            TreeAction::Rename,
+        ));
+        let _ = app.update(Message::LayerTreeRenameEdit("letters a-z".into()));
+        let _ = app.update(Message::LayerTreeRenameCommit);
+        assert!(app.layer_filters.iter().any(|f| f.name == "OTHERS"));
+    }
+
+    /// #2610 (F1): the row menu's group ticks add and take out; rows dropped
+    /// on a group join it; a node's eye lights all its layers; "Unused
+    /// layers" opens Purge with them ticked.
+    #[test]
+    fn groups_from_menu_and_drop_node_eye_and_purge() {
+        use crate::ui::window::layers::{LayerMenuAction, TreeAction, TreeNode};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.run_command_line("LAYERGROUP NEW WALLS ZULU");
+        let members = |app: &OpenCADStudio| app.tabs[app.active_tab].layers.groups[0].1.clone();
+        // ALPHA in by the menu, out again by its tick.
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::AddToGroup("WALLS".into()),
+        ));
+        assert_eq!(members(&app).len(), 2);
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::AddToGroup("WALLS".into()),
+        ));
+        assert_eq!(members(&app), ["ZULU"]);
+        // A press on ALPHA, released on the group: it joins.
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        let _ = app.update(Message::LayerDragOver(Some("WALLS".into())));
+        assert_eq!(app.tabs[i].layers.drag_over.as_deref(), Some("WALLS"));
+        let _ = app.update(Message::LayerDrop("WALLS".into()));
+        assert_eq!(members(&app).len(), 2);
+        // Released on the row instead: no drop afterwards.
+        let _ = app.run_command_line("LAYERGROUP REMOVE WALLS ALPHA");
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        let _ = app.update(Message::LayerDragEnd);
+        let _ = app.update(Message::LayerDrop("WALLS".into()));
+        assert_eq!(members(&app), ["ZULU"]);
+        // The group's eye lights ZULU only; again, off.
+        let node = TreeNode::Group("WALLS".into());
+        let _ = app.update(Message::LayerNodeEye(node.clone()));
+        assert_eq!(app.tabs[i].layers.eye_layers, ["ZULU"]);
+        let _ = app.update(Message::LayerNodeEye(node));
+        assert!(app.tabs[i].layers.eye_layers.is_empty());
+        // Purge with the unused layers ticked (no objects anywhere).
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Unused,
+            TreeAction::Purge,
+        ));
+        let state = app.purge_dialog.as_ref().expect("Purge opens");
+        let ticked: Vec<&str> = state.items[0]
+            .iter()
+            .filter(|(_, t)| *t)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(ticked.contains(&"ZULU") && ticked.contains(&"ALPHA"));
+    }
+
+    /// #2610 (F1): FILTER's "Open in Layer manager" opens the pallet the way
+    /// LAYERS does, and after closing it LAYERS opens it again (it stayed
+    /// "open" with no window and could not be opened).
+    #[test]
+    fn open_in_layer_manager_then_layers_again() {
+        use crate::app::filter_dialog::FilterMsg;
+        let mut app = app_with_zulu_alpha();
+        app.show_layers = false;
+        let _ = app.update(Message::FilterDialog(FilterMsg::Open(None)));
+        let _ = app.update(Message::FilterDialog(FilterMsg::ShowLayers));
+        assert!(app.show_layers);
+        assert!(app.dock_panel_visible(crate::ui::dock::PanelId::Layers));
+        let _ = app.update(Message::ToggleLayers);
+        assert!(!app.show_layers);
+        let _ = app.update(Message::ToggleLayers);
+        assert!(app.show_layers);
+        assert!(app.dock_panel_visible(crate::ui::dock::PanelId::Layers));
+    }
+
+    /// #2610: the tree as in the mockup: "All" with its count, Groups and
+    /// Property filters as sections that close, a group deleted from its
+    /// node's menu, and New Filter starting empty whatever the search says.
+    #[test]
+    fn layer_tree_sections_counts_and_group_delete() {
+        use crate::ui::window::layers::{TreeAction, TreeNode, TreeRow, TreeSection};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.run_command_line("LAYERGROUP NEW WALLS ZULU");
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        app.sync_layer_panel(i);
+        app.refresh_layer_counts();
+        let rows = app.tabs[i].layers.tree_rows();
+        let group = TreeRow::Node(TreeNode::Group("WALLS".into()), 2);
+        let filter = TreeRow::Node(TreeNode::Filter("LETTERS".into()), 2);
+        assert_eq!(rows[0], TreeRow::Section(TreeSection::All, 0));
+        assert!(rows.contains(&TreeRow::Section(TreeSection::Groups, 1)));
+        assert!(rows.contains(&group));
+        assert!(rows.contains(&filter));
+        let panel = &app.tabs[i].layers;
+        assert_eq!(panel.node_count(&TreeNode::Group("WALLS".into())), 1);
+        assert_eq!(panel.node_count(&TreeNode::Filter("LETTERS".into())), 2);
+        // A closed section hides its nodes, "All" closed hides the rest.
+        let _ = app.update(Message::LayerTreeSection(TreeSection::Groups));
+        let rows = app.tabs[i].layers.tree_rows();
+        assert!(!rows.contains(&group) && rows.contains(&filter));
+        let _ = app.update(Message::LayerTreeSection(TreeSection::All));
+        assert_eq!(app.tabs[i].layers.tree_rows().len(), 1);
+        let _ = app.update(Message::LayerTreeSection(TreeSection::All));
+        let _ = app.update(Message::LayerTreeSection(TreeSection::Groups));
+        assert!(app.tabs[i].layers.tree_rows().contains(&group));
+        // The group goes from its node's menu; the node shown falls back.
+        let _ = app.update(Message::LayerShow(TreeNode::Group("WALLS".into())));
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Group("WALLS".into()),
+            TreeAction::Delete,
+        ));
+        app.sync_layer_panel(i);
+        assert_eq!(app.tabs[i].layers.view, TreeNode::All);
+        assert!(app.tabs[i].layers.groups.is_empty());
+        assert!(app.tabs[i].layers.layers.iter().any(|l| l.name == "ZULU"));
+        // New Filter: no first row from the search text.
+        app.tabs[i].layers.filter = "LU".into();
+        let _ = app.update(Message::LayerFilterEdit(Some(String::new())));
+        let state = app.filter_dialog.as_ref().expect("FILTER over the layers");
+        assert_eq!(state.live_count, 3, "an empty row finds every layer");
+    }
+
+    /// #2610: a layer filter made with FILTER's rows over layer properties,
+    /// then switched as a whole from its tree node.
+    #[test]
+    fn layer_filter_from_the_editor_and_the_node_menu() {
+        use crate::app::filter_dialog::{FilterMsg, FilterRow, FilterRowEdit};
+        use crate::ui::window::layers::{TreeAction, TreeNode};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        // The search text becomes the first row.
+        app.tabs[i].layers.filter = "LU".into();
+        let _ = app.update(Message::LayerFilterEdit(None));
+        let state = app.filter_dialog.as_ref().expect("FILTER over the layers");
+        assert_eq!(state.layer_filter.as_deref(), Some(""));
+        assert_eq!(state.live_count, 1, "*LU* finds ZULU");
+        assert!(state
+            .properties_for(None)
+            .iter()
+            .any(|p| p.field == "frozen"));
+        // Or: not frozen and named A* or Z*.
+        let edit = |app: &mut OpenCADStudio, row, e| {
+            let _ = app.update(Message::FilterDialog(FilterMsg::Edit(row, e)));
+        };
+        edit(
+            &mut app,
+            FilterRow::Root(0),
+            FilterRowEdit::Value("A*,Z*".into()),
+        );
+        assert_eq!(app.filter_dialog.as_ref().unwrap().live_count, 2);
+        let _ = app.update(Message::FilterDialog(FilterMsg::LayerName(
+            "Letters".into(),
+        )));
+        let _ = app.update(Message::FilterDialog(FilterMsg::SaveLayerFilter));
+        assert!(app.filter_dialog.is_none());
+        let node = TreeNode::Filter("Letters".into());
+        assert_eq!(app.tabs[i].layers.view, node);
+        assert_eq!(app.tabs[i].layers.node_layers(&node).len(), 2);
+        // The node's menu freezes both at once, one undo step.
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        let _ = app.update(Message::LayerTreeAction(node.clone(), TreeAction::Freeze));
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ALPHA")
+            .unwrap()
+            .is_frozen());
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        // Edit opens it again; Delete removes it, the layers stay.
+        let _ = app.update(Message::LayerTreeAction(node.clone(), TreeAction::Edit));
+        assert_eq!(
+            app.filter_dialog.as_ref().unwrap().layer_filter.as_deref(),
+            Some("Letters")
+        );
+        let _ = app.update(Message::FilterDialog(FilterMsg::Close));
+        let _ = app.update(Message::LayerTreeAction(node, TreeAction::Delete));
+        assert!(app.layer_filters.is_empty());
+        assert_eq!(app.tabs[i].layers.view, TreeNode::All);
+    }
+
+    /// #2610: LAYERP undoes layer-property changes only, newest first, and
+    /// says so when there is nothing left.
+    #[test]
+    fn layerp_steps_back_through_layer_changes() {
+        use document::entities::Line;
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerToggleFreeze("ZULU".into()));
+        let _ = app.update(Message::LayerToggleLock("ALPHA".into()));
+        // A drawing change in between is not LAYERP's.
+        let line = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(1.0, 0.0, 0.0),
+            )));
+        let _ = app.run_command_line("LAYERP");
+        assert!(!app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ALPHA")
+            .unwrap()
+            .is_locked());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+        let _ = app.run_command_line("LAYERP");
+        assert!(!app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+        assert!(app.tabs[i].scene.document.get_entity(line).is_some());
+        app.command_line.last_error = None;
+        let before = app.command_line.history.len();
+        let _ = app.run_command_line("LAYERP");
+        assert!(
+            app.command_line.history.len() > before,
+            "it says there is nothing left"
+        );
+        // LAYERP itself is one ordinary undo step.
+        app.undo_active_tab();
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .is_frozen());
+    }
+
+    /// #2610: Show lights the selected layers' objects; FILTER's result can
+    /// open in the manager; a row can start FILTER and take merges.
+    #[test]
+    fn layer_manager_and_drawing_work_together() {
+        use crate::app::filter_dialog::{FilterMsg, FilterRow, FilterRowEdit};
+        use crate::ui::window::layers::{LayerMenuAction, TreeNode};
+        use document::entities::{Circle, Line};
+        use document::types::Vector3;
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let mut line = Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        line.common.layer = "ZULU".into();
+        let on_zulu = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
+        let mut circle = Circle::new();
+        circle.common.layer = "ALPHA".into();
+        let on_alpha = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Circle(circle));
+        app.tabs[i].scene.bump_geometry();
+
+        let _ = app.update(Message::LayerEye("ZULU".into()));
+        let lit = app.tabs[i].scene.hover_highlight_handles();
+        assert!(lit.contains(&on_zulu) && !lit.contains(&on_alpha));
+        assert_eq!(app.tabs[i].layers.highlighted, 1);
+        assert!(
+            app.tabs[i].scene.selected.is_empty(),
+            "showing doesn't select"
+        );
+        // Two eyes light both layers; the eye of ZULU off leaves ALPHA.
+        let _ = app.update(Message::LayerEye("alpha".into()));
+        assert_eq!(app.tabs[i].layers.highlighted, 2);
+        let _ = app.update(Message::LayerEye("zulu".into()));
+        let lit = app.tabs[i].scene.hover_highlight_handles();
+        assert!(!lit.contains(&on_zulu) && lit.contains(&on_alpha));
+        let _ = app.update(Message::LayerEye("ALPHA".into()));
+        assert!(app.tabs[i].scene.hover_highlight_handles().is_empty());
+
+        // A row's "Filter objects..." starts FILTER on its layer.
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::FilterObjects,
+        ));
+        assert_eq!(app.filter_dialog.as_ref().unwrap().live_count, 1);
+        // FILTER's result opens in the manager as its own node.
+        let _ = app.update(Message::FilterDialog(FilterMsg::Edit(
+            FilterRow::Root(0),
+            FilterRowEdit::Value("*".into()),
+        )));
+        let _ = app.update(Message::FilterDialog(FilterMsg::ShowLayers));
+        assert!(app.filter_dialog.is_none());
+        assert_eq!(app.tabs[i].layers.view, TreeNode::Found);
+        assert_eq!(
+            app.tabs[i].layers.node_layers(&TreeNode::Found),
+            ["ALPHA", "ZULU"]
+        );
+
+        // Merge: ZULU selected, right-click ALPHA.
+        let _ = app.update(Message::LayerShow(TreeNode::All));
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::MergeHere,
+        ));
+        assert!(!app.tabs[i].scene.document.layers.contains("ZULU"));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .get_entity(on_zulu)
+                .unwrap()
+                .common()
+                .layer,
+            "ALPHA"
+        );
+    }
+
+    #[test]
+    fn layer_description_is_typed_and_applied_in_one_step() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.finish_pending_history(i);
+        let before = app.tabs[i].history.undo_stack.len();
+        for typed in ["W", "Walls"] {
+            let _ = app.update(Message::LayerDescriptionEdit("ZULU".into(), typed.into()));
+        }
+        assert_eq!(
+            app.tabs[i].history.undo_stack.len(),
+            before,
+            "typing alone changes nothing"
+        );
+        let _ = app.update(Message::LayerDescriptionFocus(None));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ZULU")
+                .unwrap()
+                .description,
+            "Walls"
+        );
+        assert_eq!(row(&app, "ZULU").description, "Walls");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), before + 1);
+        let _ = app.update(Message::LayerDescriptionEdit("ZULU".into(), "Doors".into()));
+        let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+        assert_eq!(
+            app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ZULU")
+                .unwrap()
+                .description,
+            "Walls"
+        );
+        app.undo_active_tab();
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("ZULU")
+            .unwrap()
+            .description
+            .is_empty());
+    }
+
+    #[test]
+    fn plot_toggle_keeps_the_row_order_like_the_other_toggles() {
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        let _ = app.update(Message::LayerSort(LayerSortCol::Plot));
+        let order = |app: &OpenCADStudio| -> Vec<String> {
+            app.tabs[i]
+                .layers
+                .layers
+                .iter()
+                .map(|l| l.name.clone())
+                .collect()
+        };
+        let before = order(&app);
+        let _ = app.update(Message::LayerTogglePlot("ZULU".to_string()));
+        assert_eq!(order(&app), before);
+        assert!(
+            !app.tabs[i]
+                .scene
+                .document
+                .layers
+                .get("ZULU")
+                .unwrap()
+                .is_plottable
+        );
     }
 }
 
@@ -6677,11 +8207,30 @@ mod grip_ctrl_cycle_tests {
     }
 }
 
-/// Layers the Layer manager never deletes: "0", Defpoints, the current layer
-/// and a layer that belongs to an xref (`XREF|name`).
+/// Why `new` can't be the name of layer `old`, or `None` when the rename can
+/// go ahead. The same rules the document applies, said in the user's words.
+pub(super) fn layer_rename_problem(
+    document: &document::Document,
+    old: &str,
+    new: &str,
+) -> Option<String> {
+    if old == "0" || old.eq_ignore_ascii_case("Defpoints") || old.contains('|') {
+        return Some(crate::tf!("Layer \"{old}\" can't be renamed.").into_owned());
+    }
+    if !crate::scene::valid_block_name(new) {
+        return Some(
+            crate::tf!("\"{new}\" isn't a valid layer name (no < > / \\ \" : ; ? * | , = `).")
+                .into_owned(),
+        );
+    }
+    // A case-only change finds the layer itself, which is fine.
+    if document.layers.get(new).is_some_and(|taken| taken.name != old) {
+        return Some(crate::tf!("A layer named \"{new}\" already exists.").into_owned());
+    }
+    None
+}
+
+/// Layers the Layer manager never deletes; the rule lives with the table.
 pub(super) fn layer_is_protected(name: &str, current: &str) -> bool {
-    name == "0"
-        || name.eq_ignore_ascii_case("Defpoints")
-        || name.eq_ignore_ascii_case(current)
-        || name.contains('|')
+    crate::ui::window::layers::layer_is_protected(name, current)
 }

@@ -204,6 +204,7 @@ pub async fn pick_open_path() -> Option<(PathBuf, u64)> {
             crate::t!("CAD Files").as_ref(),
             &[
                 "dwg", "dxf", "dwt", "bak", "sv$", "DWG", "DXF", "DWT", "BAK",
+                "ifccad", "ifcx", "IFCCAD", "IFCX",
             ],
         )
         .add_filter(crate::t!("DWG Files").as_ref(), &["dwg", "DWG"])
@@ -241,6 +242,30 @@ pub async fn pick_layer_standard_path() -> Option<PathBuf> {
         .add_filter(crate::t!("All Files").as_ref(), &["*"])
         .pick_file()
         .await?;
+    Some(crate::sys::handle_path(&handle))
+}
+
+/// Pick where saved selection filters are written, or read back from.
+pub async fn pick_selection_filters_path(save: bool) -> Option<PathBuf> {
+    let dialog = crate::sys::file_dialog()
+        .set_title(
+            crate::t!(if save {
+                "Export saved filters"
+            } else {
+                "Import saved filters"
+            })
+            .as_ref(),
+        )
+        .add_filter(crate::t!("Selection filters").as_ref(), &["ocsfilter"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+    let handle = if save {
+        dialog
+            .set_file_name("filters.ocsfilter")
+            .save_file()
+            .await?
+    } else {
+        dialog.pick_file().await?
+    };
     Some(crate::sys::handle_path(&handle))
 }
 
@@ -620,7 +645,7 @@ pub async fn pick_and_load_web(progress: Arc<OpenProgressState>) -> WebOpenOutco
         .set_title(crate::t!("Open CAD file").as_ref())
         .add_filter(
             crate::t!("CAD Files").as_ref(),
-            &["dwg", "dxf", "dwt", "DWG", "DXF", "DWT"],
+            &["dwg", "dxf", "dwt", "DWG", "DXF", "DWT", "ifccad", "ifcx", "IFCCAD", "IFCX"],
         )
         .add_filter(
             crate::t!("Drawing Template (*.dwt)").as_ref(),
@@ -1429,10 +1454,24 @@ fn normalize_block_origins(doc: &mut Document) {
     use document::types::Vector3;
     use document::EntityType;
 
+    // Evaluated dynamic origins share coordinates with reference parameter
+    // caches and authoring frames. Translating only their bodies would move
+    // grips on reopen and change the next evaluation's coordinate basis.
+    let dynamic_origins: std::collections::BTreeSet<_> = doc.entities()
+        .filter_map(|entity| match entity {
+            EntityType::Insert(reference) => doc.dynamic_definition_for_insert(reference.common.handle)
+                .filter(|definition| crate::scene::block_basepoint::parameter(doc, *definition).is_some())
+                .map(|_| reference.block_name.to_ascii_lowercase()),
+            _ => None,
+        }).collect();
+
     let blocks: Vec<_> = doc
         .block_records
         .iter()
         .filter_map(|record| {
+            if dynamic_origins.contains(&record.name.to_ascii_lowercase()) {
+                return None;
+            }
             let marker_point = match doc.get_entity(record.block_entity_handle) {
                 Some(EntityType::Block(block)) => block.base_point,
                 _ => Vector3::ZERO,
@@ -2420,6 +2459,7 @@ where
     let write_started = iced::time::Instant::now();
     if ext == "dxf" {
         crate::entities::spline::complete_nurbs_for_dxf(&mut doc);
+        ocs_save::prune_omitted_dxf_records(&mut doc);
     }
     let result = match ext.as_str() {
         "dxf" => DxfWriter::new(&doc)

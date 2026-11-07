@@ -1511,6 +1511,22 @@ mod tests {
     }
 
     #[test]
+    fn pure_validation_accepts_a_valid_chain_and_refuses_a_hard_corner() {
+        let chain = demo_plan_chain();
+        assert!(build_display_entities(&chain, 1e-3).map(|_| ()).is_ok());
+
+        let mut hard_corner = chain;
+        // Keep the point seam welded but turn the closing line 0.5 rad away
+        // from the spiral's evaluated tangent.
+        hard_corner.segments[2].start_direction += 0.5;
+        let err = build_display_entities(&hard_corner, 1e-3)
+            .map(|_| ())
+            .unwrap_err();
+        assert!(err.contains("seam segment 1 to 2"), "{err}");
+        assert!(err.contains("tangentially continuous"), "{err}");
+    }
+
+    #[test]
     fn seam_refusal_names_the_pair() {
         let mut chain = demo_plan_chain();
         // Break the seam: the closing line starts 1e-4 m away from the

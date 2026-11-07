@@ -162,19 +162,18 @@ impl Plane {
 /// and the drawing size of one pixel there.
 fn surface_hit(clouds: &Clouds, context: &PointPickContext, pt: DVec3) -> Option<(DVec3, f64)> {
     let screen = |p: DVec3| {
-        crate::scene::pick::hit_test::world_to_screen(p, context.view, context.eye, context.bounds)
+        crate::scene::view::projection::project_screen(context.view, context.eye, context.bounds, p)
     };
-    let cursor = screen(pt);
+    let cursor = screen(pt)?;
     let radius = context.aperture_px.max(4.0);
-    let hit = clouds
+    let (hit_at, hit) = clouds
         .points()
-        .filter(|p| {
-            let s = screen(*p);
-            (s.x - cursor.x).hypot(s.y - cursor.y) <= radius
-        })
+        // A point on or behind the eye plane has no screen position to compare.
+        .filter_map(|p| screen(p).map(|s| (s, p)))
+        .filter(|(at, _)| at.distance(cursor) <= radius)
         .min_by(|a, b| {
-            a.distance_squared(context.eye)
-                .total_cmp(&b.distance_squared(context.eye))
+            a.1.distance_squared(context.eye)
+                .total_cmp(&b.1.distance_squared(context.eye))
         })?;
     let right = context
         .view
@@ -182,7 +181,7 @@ fn surface_hit(clouds: &Clouds, context: &PointPickContext, pt: DVec3) -> Option
         .truncate()
         .as_dvec3()
         .normalize_or(DVec3::X);
-    let (a, b) = (screen(hit), screen(hit + right));
+    let (a, b) = (hit_at, screen(hit + right)?);
     let px_per_unit = (b.x - a.x).hypot(b.y - a.y) as f64;
     (px_per_unit > 0.0).then(|| (hit, 1.0 / px_per_unit))
 }
@@ -1329,3 +1328,57 @@ inventory::submit!(crate::command::CommandRegistration {
         "-PCEXTRACTSECTION"
     ]
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::scene::model::point_cloud::PointInstance;
+
+    fn perspective_context() -> PointPickContext {
+        PointPickContext {
+            view: glam::camera::rh::proj::directx::perspective(
+                45.0_f32.to_radians(),
+                1.0,
+                0.1,
+                2000.0,
+            ),
+            eye: DVec3::ZERO,
+            bounds: iced::Rectangle {
+                x: 0.,
+                y: 0.,
+                width: 400.,
+                height: 400.,
+            },
+            aperture_px: 100.,
+        }
+    }
+
+    fn clouds(points: &[DVec3]) -> Clouds {
+        let instances = points
+            .iter()
+            .map(|at| PointInstance {
+                pos: at.as_vec3().to_array(),
+                pos_low: [0.0; 3],
+                color: [255; 4],
+                normal: [0; 4],
+            })
+            .collect();
+        Clouds(vec![(
+            Handle::new(1),
+            Arc::new(PlacedCloud { key: 0, instances }),
+        )])
+    }
+
+    #[test]
+    fn a_cloud_point_behind_the_eye_is_not_picked() {
+        let context = perspective_context();
+        let click = DVec3::new(0.0, 0.0, -100.0);
+        let behind = DVec3::new(0.0, 0.0, 50.0);
+        let picked = surface_hit(&clouds(&[behind, click]), &context, click).map(|(at, _)| at);
+        assert_eq!(picked, Some(click), "the point behind the eye never wins");
+        assert!(
+            surface_hit(&clouds(&[behind, click]), &context, behind).is_none(),
+            "a pick that does not project finds nothing"
+        );
+    }
+}

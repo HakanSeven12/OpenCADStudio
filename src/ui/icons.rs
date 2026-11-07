@@ -24,7 +24,7 @@ static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
 static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
 static TRI_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/tri_left.svg");
 static HOME: &[u8] = include_bytes!("../../assets/icons/ui/home.svg");
-static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
+pub static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
 static REDO: &[u8] = include_bytes!("../../assets/icons/ui/redo.svg");
 
 // OSNAP marker symbols. Rendered as SVG (not Unicode glyphs) so the snap menu
@@ -65,6 +65,7 @@ pub static CHECK: &[u8] = include_bytes!("../../assets/icons/ui/check.svg");
 pub static CLOSE: &[u8] = include_bytes!("../../assets/icons/ui/close.svg");
 pub static EYEDROPPER: &[u8] = include_bytes!("../../assets/icons/ui/eyedropper.svg");
 pub static PLUS: &[u8] = include_bytes!("../../assets/icons/ui/plus.svg");
+pub static IMPORT: &[u8] = include_bytes!("../../assets/icons/ui/import.svg");
 pub static REFRESH: &[u8] = include_bytes!("../../assets/icons/ui/refresh.svg");
 pub static SWAP: &[u8] = include_bytes!("../../assets/icons/ui/swap.svg");
 pub static MINUS: &[u8] = include_bytes!("../../assets/icons/ui/minus.svg");

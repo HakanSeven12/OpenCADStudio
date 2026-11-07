@@ -277,6 +277,16 @@ pub fn to_pathtype(path: &str, host: &std::path::Path, pathtype: Pathtype) -> St
 /// Case-insensitive name match: `*` matches any run (including empty),
 /// `?` matches exactly one char.
 pub fn wildcard_match(name: &str, pattern: &str) -> bool {
+    wildcard_match_inner(name, pattern, false)
+}
+
+/// [`wildcard_match`] where `#` also matches one digit (or a literal `#`), as
+/// the selection filters read it.
+pub fn wildcard_match_with_digits(name: &str, pattern: &str) -> bool {
+    wildcard_match_inner(name, pattern, true)
+}
+
+fn wildcard_match_inner(name: &str, pattern: &str, digits: bool) -> bool {
     let n: Vec<char> = name.chars().flat_map(|c| c.to_lowercase()).collect();
     let p: Vec<char> = pattern.chars().flat_map(|c| c.to_lowercase()).collect();
     let mut si = 0usize;
@@ -289,7 +299,11 @@ pub fn wildcard_match(name: &str, pattern: &str) -> bool {
             star = Some(pi);
             match_idx = si;
             pi += 1;
-        } else if pi < p.len() && (p[pi] == '?' || p[pi] == n[si]) {
+        } else if pi < p.len()
+            && (p[pi] == '?'
+                || p[pi] == n[si]
+                || (digits && p[pi] == '#' && n[si].is_ascii_digit()))
+        {
             si += 1;
             pi += 1;
         } else if let Some(s) = star {
@@ -572,6 +586,7 @@ impl RefStatCache {
 
 #[cfg(test)]
 mod tests {
+    use super::wildcard_match_with_digits;
     use super::{bind_symbol, bind_symbol_taken, RefKind, ReferenceEntry};
     use super::{child_key, decide_status, RefStatCache, RefStatus, UnloadSet};
     use super::{
@@ -879,6 +894,10 @@ mod tests {
     #[test]
     fn wildcard_name_match_case_insensitive() {
         assert!(wildcard_match("PLAN-East", "plan-*"));
+        // `#` is a digit only for the selection filters; names keep it literal.
+        assert!(wildcard_match("A#", "A#") && !wildcard_match("A1", "A#"));
+        assert!(wildcard_match_with_digits("A1", "A#") && wildcard_match_with_digits("A#", "A#"));
+        assert!(!wildcard_match_with_digits("AB", "A#"));
         assert!(wildcard_match("A1", "a?"));
         assert!(!wildcard_match("A12", "a?"));
     }

@@ -861,6 +861,7 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "MSLTSCALE",
     "LOGFILEMODE",
     "LOGFILEPATH",
+    "SAVEFILEPATH",
     "MSOLESCALE",
     "OLEFRAME",
     "OLEHIDE",

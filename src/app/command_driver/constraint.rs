@@ -2009,12 +2009,17 @@ impl OpenCADStudio {
             .copied()
             .map(|handle| (handle, crate::scene::ChangeKind::Modified))
             .collect();
-        self.tabs[i].scene.bump_entities_after_constraint_added(
-            &changes,
-            &[first_ref],
-            self.constraint_solve_mode,
-            &[],
-        );
+        // Constraint creation is not an active drag. Preserve the
+        // first-picked reference and let an already satisfied chain take
+        // the fixpoint/no-op path instead of reprojecting fresh geometry.
+        self.tabs[i]
+            .scene
+            .bump_entities_with_initial_parametric_policy(
+                &changes,
+                &[first_ref],
+                self.constraint_solve_mode,
+                &[],
+            );
         self.tabs[i].dirty = true;
         self.tabs[i].snap_result = None;
         if !multiple {

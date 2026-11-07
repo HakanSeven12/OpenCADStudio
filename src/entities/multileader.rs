@@ -1937,6 +1937,18 @@ pub(crate) fn block_content_insert(
             .iter()
             .find(|record| record.handle == handle)
     })?;
+    // The entity keeps the style's block scale; drawn, it is scaled by the
+    // context's overall scale as well (a 0.5 balloon at 1:30 is 15 units).
+    let factor = if ml.context.scale_factor.abs() > 1.0e-12 {
+        ml.context.scale_factor
+    } else {
+        1.0
+    };
+    let scale = document::types::Vector3::new(
+        ml.block_scale.x * factor,
+        ml.block_scale.y * factor,
+        ml.block_scale.z * factor,
+    );
     let mut insertion = ml.context.block_content_location;
     if ml.block_connection_type == BlockContentConnectionType::BlockExtents {
         // Other writers store the block's insertion point in the block content
@@ -1945,7 +1957,12 @@ pub(crate) fn block_content_insert(
         insertion = ml.context.content_base_point;
         let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
         for handle in &record.entity_handles {
-            if let Some(entity) = document.get_entity(*handle) {
+            // An attribute definition is replaced by its value, so its tag
+            // does not count toward the extents.
+            if let Some(entity) = document
+                .get_entity(*handle)
+                .filter(|entity| !matches!(entity, document::EntityType::AttributeDefinition(_)))
+            {
                 let aabb = crate::scene::convert::tess::entity_aabb(entity);
                 if aabb != crate::scene::model::wire_model::WireModel::UNBOUNDED_AABB {
                     bounds[0] = bounds[0].min(aabb[0]);
@@ -1962,23 +1979,63 @@ pub(crate) fn block_content_insert(
             });
             let anchor_x = if from_left { bounds[0] } else { bounds[2] } as f64;
             let anchor_y = ((bounds[1] + bounds[3]) * 0.5) as f64;
-            let local_x = (anchor_x - record.base_point.x) * ml.block_scale.x;
-            let local_y = (anchor_y - record.base_point.y) * ml.block_scale.y;
+            let local_x = (anchor_x - record.base_point.x) * scale.x;
+            let local_y = (anchor_y - record.base_point.y) * scale.y;
             let rotated = Transform::rotation(ml.block_rotation).apply_vector([local_x, local_y]);
             insertion.x -= rotated[0];
             insertion.y -= rotated[1];
         }
     }
     let mut insert = document::entities::Insert::new(record.name.clone(), insertion);
-    insert.set_x_scale(ml.block_scale.x);
-    insert.set_y_scale(ml.block_scale.y);
-    insert.set_z_scale(ml.block_scale.z);
+    insert.set_x_scale(scale.x);
+    insert.set_y_scale(scale.y);
+    insert.set_z_scale(scale.z);
     insert.rotation = ml.block_rotation;
     insert.normal = ml.context.block_content_normal;
     insert.common = ml.common.clone();
     insert.common.color = ml.block_content_color.clone();
     insert.common.color_name = None;
     insert.common.color_book_handle = None;
+    // Each attribute definition shows the value the leader stores for it,
+    // matched by definition handle, else by position.
+    let transform = crate::scene::render_graph::insert_transform(document, &insert);
+    let definitions = record
+        .entity_handles
+        .iter()
+        .filter_map(|handle| match document.get_entity(*handle) {
+            Some(document::EntityType::AttributeDefinition(definition)) => Some(definition),
+            _ => None,
+        });
+    for (index, definition) in definitions.enumerate() {
+        let value = ml
+            .block_attributes
+            .iter()
+            .find(|a| a.attribute_definition_handle == Some(definition.common.handle))
+            .or_else(|| {
+                ml.block_attributes.iter().find(|a| {
+                    a.attribute_definition_handle.is_none() && a.index as usize == index
+                })
+            })
+            .map(|a| a.text.clone());
+        // A justified definition stores the start of its tag; the value
+        // starts elsewhere.
+        let mut shown = definition.clone();
+        if !matches!(
+            (shown.horizontal_alignment, shown.vertical_alignment),
+            (
+                document::entities::attribute_definition::HorizontalAlignment::Left,
+                document::entities::attribute_definition::VerticalAlignment::Baseline
+            )
+        ) {
+            if let Some(value) = &value {
+                shown.tag.clone_from(value);
+            }
+            shown.insertion_point = crate::entities::attribute::definition_text_start(&shown);
+        }
+        let mut attribute = document::entities::AttributeEntity::from_definition(&shown, value);
+        document::Entity::apply_transform(&mut attribute, &transform);
+        insert.attributes.push(attribute);
+    }
     Some(insert)
 }
 
@@ -2001,6 +2058,7 @@ pub trait MultiLeaderTess {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> Vec<crate::scene::model::wire_model::WireModel>;
 }
 
@@ -2019,6 +2077,7 @@ impl MultiLeaderTess for MultiLeader {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> Vec<crate::scene::model::wire_model::WireModel> {
         // The leader, text and mask are laid out in f32. At large absolute
         // coordinates (survey drawings far from the origin) f32 steps grow to
@@ -2044,6 +2103,7 @@ impl MultiLeaderTess for MultiLeader {
             view_aabb,
             world_per_pixel,
             bg_color,
+            complex_lt_anno,
         );
         for (i, wire) in wires.iter_mut().enumerate() {
             if !world_wires.contains(&i) {
@@ -2126,6 +2186,7 @@ trait MultiLeaderFrameTess {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> (
         Vec<crate::scene::model::wire_model::WireModel>,
         std::ops::Range<usize>,
@@ -2148,6 +2209,7 @@ impl MultiLeaderFrameTess for MultiLeader {
         view_aabb: Option<[f32; 4]>,
         world_per_pixel: Option<f32>,
         bg_color: [f32; 4],
+        complex_lt_anno: f32,
     ) -> (
         Vec<crate::scene::model::wire_model::WireModel>,
         std::ops::Range<usize>,
@@ -2448,7 +2510,6 @@ impl MultiLeaderFrameTess for MultiLeader {
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: name.clone(),
             points,
@@ -2484,26 +2545,44 @@ impl MultiLeaderFrameTess for MultiLeader {
                     && block_use.role == crate::scene::render_graph::BlockRole::MultiLeaderContent
             })
         {
-            wires.extend(
-                crate::scene::convert::tess::expand_block_object(
-                    document,
-                    &block_use.insert,
-                    handle,
-                    selected,
-                    active_viewport,
-                    bg_color,
-                    1.0,
-                    annotation_scale_handle,
-                    block_cache,
-                    view_aabb,
-                    world_per_pixel,
-                    1.0,
-                    crate::scene::convert::tess::BlockObjectOptions {
-                        scale_policy: block_use.scale_policy,
-                        ..crate::scene::convert::tess::BlockObjectOptions::default()
-                    },
-                )
-                .wires,
+            let expanded = crate::scene::convert::tess::expand_block_object(
+                document,
+                &block_use.insert,
+                handle,
+                selected,
+                active_viewport,
+                bg_color,
+                1.0,
+                annotation_scale_handle,
+                block_cache,
+                view_aabb,
+                world_per_pixel,
+                1.0,
+                crate::scene::convert::tess::BlockObjectOptions {
+                    scale_policy: block_use.scale_policy,
+                    complex_lt_anno: Some(complex_lt_anno),
+                    ..crate::scene::convert::tess::BlockObjectOptions::default()
+                },
+            );
+            let style = expanded.style;
+            wires.extend(expanded.wires);
+            crate::entities::insert::append_insert_attribute_wires(
+                &mut wires,
+                document,
+                &block_use.insert,
+                handle,
+                selected,
+                style.color,
+                style.pattern_length,
+                style.pattern,
+                style.line_weight_px,
+                style.layer,
+                style.layer_plottable,
+                bg_color,
+                expanded.is_xref,
+                1.0,
+                1.0,
+                annotation_scale_handle,
             );
         }
         let world_wires = world_start..wires.len();
@@ -2789,7 +2868,9 @@ impl MultiLeaderFrameTess for MultiLeader {
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
+                        element_linetype: None,
+                        element_color: None,
+                        dash_closure: Default::default(),
                         text_verts: sdf_verts,
                         searchable_text: searchable,
                         name: name.clone(),
@@ -2855,7 +2936,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                     pick_tris: Vec::new(),
                     pick_tris_low: Vec::new(),
                     dash_from_start: false,
-                    dash_align_end: None,
                     text_verts: Vec::new(),
                     name: name.clone(),
                     points: pts,
@@ -2949,7 +3029,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name: name.clone(),
                         points: vec![],
@@ -2997,7 +3076,6 @@ impl MultiLeaderFrameTess for MultiLeader {
                         pick_tris: Vec::new(),
                         pick_tris_low: Vec::new(),
                         dash_from_start: false,
-                        dash_align_end: None,
                         text_verts: Vec::new(),
                         name,
                         points: frame_points,
@@ -3053,6 +3131,7 @@ mod tests {
             None,
             None,
             [0.0, 0.0, 0.0, 1.0],
+            1.0,
         );
 
         // Find the text wire model:
@@ -3103,6 +3182,7 @@ mod tests {
             None,
             None,
             bg_color,
+            1.0,
         );
         let mask = wires
             .iter()
@@ -3139,6 +3219,7 @@ mod tests {
                 None,
                 None,
                 [0.1, 0.2, 0.3, 1.0],
+                1.0,
             );
             wires
                 .iter()
@@ -3223,6 +3304,7 @@ mod tests {
                 None,
                 None,
                 [0.0, 0.0, 0.0, 1.0],
+                1.0,
             ))
         };
 
@@ -3296,6 +3378,7 @@ mod tests {
             None,
             None,
             [0.0, 0.0, 0.0, 1.0],
+            1.0,
         );
         let leader_top = wires[0]
             .points
@@ -3360,6 +3443,7 @@ mod tests {
             None,
             None,
             [0.0, 0.0, 0.0, 1.0],
+            1.0,
         )
     }
 
@@ -3678,3 +3762,4 @@ pub(crate) fn set_mleader_text_side(ml: &mut MultiLeader, to_right: bool) {
         ml.text_alignment = alignment;
     }
 }
+

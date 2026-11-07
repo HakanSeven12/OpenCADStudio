@@ -2,7 +2,7 @@
 
 use crate::app::{Message, OpenCADStudio};
 
-fn fresh() -> OpenCADStudio {
+pub(super) fn fresh() -> OpenCADStudio {
     let mut app = OpenCADStudio::new_for_test();
     app.automation_op(r#"{"op":"new"}"#);
     // These tests drive dock controls, not the hardware warning dialog.
@@ -834,7 +834,7 @@ fn headless_renderer() -> iced::Renderer {
     iced_test::futures::futures::executor::block_on(
         <iced::Renderer as iced_test::core::renderer::Headless>::new(
             iced_test::core::renderer::Settings::default(),
-            None,
+            std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
         ),
     )
     .expect("headless renderer")
@@ -1453,7 +1453,7 @@ fn orientation_parameter_batch_starts_from_actual_palette_rows() {
     });
 }
 
-fn authoring_app() -> OpenCADStudio {
+pub(super) fn authoring_app() -> OpenCADStudio {
     use document::{
         entities::{Insert, Line},
         types::Vector3,
@@ -1732,6 +1732,76 @@ fn block_actions_array_palette_requires_distance_parameter() {
     });
 }
 
+/// The Actions tab's Lookup row asks which lookup parameter to edit and opens
+/// that parameter's table only once the choice is made.
+#[test]
+fn block_actions_lookup_palette_asks_for_the_parameter_before_the_table() {
+    with_stack(|| {
+        use crate::ui::window::authoring_palettes::Tab;
+        let mut app = authoring_app();
+        let _ = app.dispatch_command("BAUTHORPALETTE");
+        app.authoring_palette_tab = Tab::Actions;
+        let _ = app.run_command_line("BPARAMETER LOOKUP 0,0");
+        let i = app.active_tab;
+        let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        let placed = |app: &OpenCADStudio| {
+            crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+                .into_iter()
+                .map(|(handle, _)| handle)
+                .collect::<Vec<_>>()
+        };
+        let first = placed(&app)[0];
+        let _ = app.run_command_line("BPARAMETER LOOKUP 4,0");
+        let all = placed(&app);
+        assert_eq!(all.len(), 2, "the fixture places two lookup parameters");
+        let second = *all.iter().find(|handle| **handle != first).unwrap();
+        let name = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .find(|(handle, _)| *handle == second)
+            .map(|(_, parameter)| parameter.lookup_name.clone())
+            .expect("the second lookup parameter");
+        let _ = app.dispatch_command("BACTIONBARMODE 1");
+        let point = authoring_control(&app, "authoring-tool-lookup-table");
+        authoring_click(&mut app, point);
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "with action bars on the row defers to the bar"
+        );
+        let _ = app.dispatch_command("BACTIONBARMODE 0");
+        let point = authoring_control(&app, "authoring-tool-lookup-table");
+        authoring_click(&mut app, point);
+        assert!(
+            app.command_line.last_error.is_none(),
+            "the row is not refused: {:?}",
+            app.command_line.last_error
+        );
+        assert!(
+            app.block_lookup.is_none(),
+            "the row asks for the parameter first"
+        );
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the row waits for a parameter");
+        assert!(
+            command.prompt().contains("Select a parameter"),
+            "{}",
+            command.prompt()
+        );
+        let _ = app.update(Message::CommandInput(name));
+        let _ = app.update(Message::CommandSubmit);
+        let state = app
+            .block_lookup
+            .as_ref()
+            .expect("the chosen parameter's table opens");
+        assert_eq!(state.drafts.len(), 2, "both tables are listed");
+        assert_eq!(
+            state.drafts[state.selected].parameter, second,
+            "the table of the parameter that was named"
+        );
+    });
+}
+
 #[test]
 fn block_actions_rotate_flip_palette_requires_matching_parameters() {
     with_stack(|| {
@@ -1862,6 +1932,15 @@ fn lookup_basepoint_palette_and_table_dialog_real_controls() {
         authoring_click(&mut app, point);
         let point = authoring_control(&app, "authoring-tool-lookup-table");
         authoring_click(&mut app, point);
+        let i = app.active_tab;
+        let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        let name = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .next()
+            .map(|(_, parameter)| parameter.lookup_name.clone())
+            .expect("the placed lookup parameter");
+        let _ = app.update(Message::CommandInput(name));
+        let _ = app.update(Message::CommandSubmit);
         assert_eq!(app.active_modal, Some(crate::app::ModalKind::BlockLookup));
         let _ = app.update(Message::BlockLookup(A::Property(0)));
         let point = find_in_view(&app, "Add Property");
@@ -2365,22 +2444,21 @@ fn visibility_parameter_placement_starts_from_the_actual_palette_row() {
 }
 
 #[test]
-fn labelled_strip_shares_the_edge_height_between_pallets() {
+fn labelled_strip_tabs_are_as_long_as_their_names() {
     use crate::app::config::DockSide;
-    use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H, STRIP_LABEL_MIN_H};
+    use crate::ui::dock::{DockMsg, PanelId, STRIP_CELL_H};
     let mut app = dock_app();
     app.show_browser = false;
     let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
     let (icons, _) = app.dock_strip_layout(DockSide::Left);
-    assert!(icons.iter().all(|g| g.cell_h == STRIP_CELL_H));
+    assert!(icons.iter().flat_map(|g| &g.cells).all(|&h| h == STRIP_CELL_H));
     let _ = app.on_dock(DockMsg::StripLabels(true));
     let (labelled, plus_top) = app.dock_strip_layout(DockSide::Left);
-    let height = app.dock_workspace_size().1;
-    assert!(labelled[0].cell_h >= STRIP_LABEL_MIN_H);
-    // The pallets fill the edge, leaving room for the + button.
-    if labelled[0].cell_h > STRIP_LABEL_MIN_H {
-        assert!(plus_top < height && plus_top > height - 60.0, "{plus_top} of {height}");
-    }
+    // A tab holds its icon and name, stacked like a tab bar: a short strip,
+    // not one that stretches down the whole edge.
+    let tabs: Vec<f32> = labelled.iter().flat_map(|g| g.cells.clone()).collect();
+    assert!(tabs.iter().all(|&h| h > STRIP_CELL_H && h < 200.0), "{tabs:?}");
+    assert!(plus_top < app.dock_workspace_size().1 / 2.0, "{plus_top}");
     let _ = app.on_dock(DockMsg::StripLabels(false));
     assert_eq!(app.dock_strip_layout(DockSide::Left).0, icons);
 }
@@ -2526,6 +2604,107 @@ fn authoring_clean_screen(open: &str, close: &str, manager: bool) {
     }
 }
 
+/// #2610: a filter tree node's right-click menu, driven through the real
+/// view as the runtime does: the item clicked does its job.
+#[test]
+fn layer_tree_node_menu_items_act() {
+    use crate::ui::dock::{FloatPanel, PanelId};
+    use iced_test::core::{mouse, shell, widget, window};
+    use iced_test::runtime::user_interface::{Cache, UserInterface};
+    use iced_test::Selector;
+    let mut app = dock_app();
+    let i = app.active_tab;
+    let _ = app.run_command_line("-LAYER N ZULU ");
+    let _ = app.run_command_line("LAYERGROUP NEW GRP ZULU");
+    app.show_layers = true;
+    app.dock
+        .float(FloatPanel::new(PanelId::Layers, 50.0, 50.0, 1300.0, 700.0));
+    app.refresh_layer_counts();
+    let mut renderer = headless_renderer();
+    let mut cache = Cache::default();
+    let mut step =
+        |app: &mut OpenCADStudio, at: iced::Point, events: &[iced::Event], find: Option<&str>| {
+            let cursor = mouse::Cursor::Available(at);
+            let mut found = None;
+            for event in events {
+                let mut messages = Vec::new();
+                {
+                    let mut ui = UserInterface::build(
+                        app.view_main(),
+                        VIEW_SIZE,
+                        std::mem::take(&mut cache),
+                        &mut renderer,
+                    );
+                    let _ = ui.update(
+                        &window::Headless,
+                        &shell::Waker::noop(),
+                        std::slice::from_ref(event),
+                        cursor,
+                        &mut renderer,
+                        &mut messages,
+                    );
+                    cache = ui.into_cache();
+                }
+                for message in messages {
+                    let _ = app.update(message);
+                }
+            }
+            if let Some(label) = find {
+                let mut ui = UserInterface::build(
+                    app.view_main(),
+                    VIEW_SIZE,
+                    std::mem::take(&mut cache),
+                    &mut renderer,
+                );
+                let mut sel = Selector::find(label);
+                ui.operate(&renderer, &mut widget::operation::black_box(&mut sel));
+                if let widget::operation::Outcome::Some(Some(t)) = widget::Operation::finish(&sel) {
+                    found = t.visible_bounds().map(|b| b.center());
+                }
+                cache = ui.into_cache();
+            }
+            found
+        };
+    let node = find_in_view(&app, "GRP");
+    // The pointer comes onto the pallet first, as a real one does.
+    step(
+        &mut app,
+        node,
+        &[iced::Event::Mouse(mouse::Event::CursorMoved {
+            position: node,
+        })],
+        None,
+    );
+    // Over the pallet it may move (hover), so look again.
+    let node = find_in_view(&app, "GRP");
+    let right = [
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: node }),
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Right)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Right)),
+    ];
+    // The menu opens at the pointer; "Freeze all" is its fourth line
+    // after "Delete group", "Turn All Layers On", "Turn all off".
+    let item = step(&mut app, node, &right, Some("Freeze all")).unwrap_or(iced::Point::new(
+        node.x + 60.0,
+        node.y + 4.0 + 3.0 * 23.3 + 11.0,
+    ));
+    let left = [
+        iced::Event::Mouse(mouse::Event::CursorMoved { position: item }),
+        iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)),
+        iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)),
+    ];
+    step(&mut app, item, &left, None);
+    let zulu = app.tabs[i]
+        .scene
+        .document
+        .layers
+        .iter()
+        .find(|l| l.name == "ZULU")
+        .unwrap()
+        .is_frozen();
+    assert!(zulu, "Freeze all froze the group's layer");
+}
+
 #[test]
 fn toolpalettes_commands_transparency_and_distinct_from_authoring_palettes() {
     let mut app = authoring_app();
@@ -2543,25 +2722,32 @@ fn toolpalettes_commands_transparency_and_distinct_from_authoring_palettes() {
     assert!(crate::app::commands::is_transparent("TP"));
 
     // Dispatch TOOLPALETTES, TOOLPALETTESCLOSE and alias TP
-    for cmd in ["TOOLPALETTES", "TOOLPALETTESCLOSE", "TP"] {
-        let history_len_before = app.command_line.history.len();
-        let _ = app.dispatch_command(cmd);
-        // Active command must remain LINE
-        assert_eq!(
-            app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
-            Some("LINE"),
-            "{cmd} must be transparent and preserve running command"
-        );
-        // An info message must have been output reporting that it is not yet implemented
-        let last_msg = app.command_line.history[history_len_before..]
-            .iter()
-            .map(|l| &l.text)
-            .find(|text| text.contains("TOOLPALETTES: Tool Palettes not yet implemented."));
-        assert!(
-            last_msg.is_some(),
-            "{cmd} must output placeholder message"
-        );
-    }
+    let _ = app.dispatch_command("TOOLPALETTES");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE"),
+        "TOOLPALETTES must be transparent and preserve running command"
+    );
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
+
+    let _ = app.dispatch_command("TOOLPALETTESCLOSE");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE"),
+        "TOOLPALETTESCLOSE must be transparent and preserve running command"
+    );
+    assert!(!app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
+
+    let _ = app.dispatch_command("TP");
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE"),
+        "TP must be transparent and preserve running command"
+    );
+    assert!(app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
+
+    let _ = app.dispatch_command("TOOLPALETTESCLOSE");
+    assert!(!app.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes));
 
     // Cancel LINE command
     let _ = app.update(Message::CommandEscape);

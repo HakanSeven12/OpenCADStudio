@@ -119,6 +119,14 @@ impl OpenCADStudio {
                     (grip.origin_world, None)
                 }
             });
+        // A plugin grip drags like a native stretch grip.
+        #[cfg(not(target_arch = "wasm32"))]
+        let grip_input = grip_input.or_else(|| {
+            self.tabs[i]
+                .active_plugin_grip
+                .as_ref()
+                .map(|grip| (grip.origin_world, None))
+        });
 
         if let Some((origin, scalar_role)) = grip_input {
             let wanted_roles: Vec<crate::command::DynRole> = if rectangle_frame.is_some() {

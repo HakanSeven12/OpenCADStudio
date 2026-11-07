@@ -881,7 +881,6 @@ fn preview_wire(pts: &[Vec3]) -> WireModel {
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name: "mleader_edit_preview".into(),
         points: pts.iter().map(|p| [p.x, p.y, p.z]).collect(),

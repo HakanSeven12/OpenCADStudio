@@ -290,6 +290,18 @@ pub struct BlockPreview {
     gallery_cache: canvas::Cache,
 }
 
+impl Default for BlockPreview {
+    fn default() -> Self {
+        Self::pending()
+    }
+}
+
+impl std::fmt::Debug for BlockPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockPreview").finish_non_exhaustive()
+    }
+}
+
 impl BlockPreview {
     /// A preview whose wires are not worked out yet.
     pub fn pending() -> Self {
@@ -1554,7 +1566,7 @@ mod tests {
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
-                None,
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
             ),
         )
         .expect("headless renderer");
@@ -1672,7 +1684,7 @@ mod tests {
         let renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
-                None,
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
             ),
         )
         .expect("headless renderer");

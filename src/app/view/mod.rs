@@ -1261,7 +1261,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 (vec![], vec![])
             };
             // API v11: plugin-declared custom grips render in the same overlay
-            // layer with a distinct accent (always-visible display state of a
+            // layer with native grip paint (always-visible display state of a
             // live declaring plugin; hover highlighting through the same
             // pipeline; the dragged grip is hot). Culling is the per-tab
             // uniform grid's view-rect query, not a scan of every grip.
@@ -2047,8 +2047,12 @@ bg={bg_ms:.1}ms n={view_count}"
             .as_ref()
             .map(|c| c.needs_entity_pick() || c.needs_structure_point_pick())
             .unwrap_or(false);
+        #[cfg(not(target_arch = "wasm32"))]
+        let plugin_grip_active = tab.active_plugin_grip.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let plugin_grip_active = false;
         let dyn_input_overlay: Option<Element<'_, Message>> = if self.dyn_input
-            && (tab.active_cmd.is_some() || tab.active_grip.is_some())
+            && (tab.active_cmd.is_some() || tab.active_grip.is_some() || plugin_grip_active)
             && (!tab.dyn_fields.is_empty() || dyn_picks_object)
         {
             let w = tab.last_cursor_world;
@@ -3356,6 +3360,7 @@ bg={bg_ms:.1}ms n={view_count}"
                             viewport_locked: tab.scene.viewports_display_locked(),
                             lineweight_display: tab.scene.document.header.lineweight_display,
                             constraint_status: tab.active_block_edit_session().map(|_| tab.scene.block_constraint_status_mode),
+                            geo_system: tab.scene.geo_data().map(crate::entities::object_data::geo_system_label),
                         },
                         crate::ui::statusbar::StatusBarModes {
                             ortho_mode: self.ortho_mode,
@@ -3470,9 +3475,18 @@ bg={bg_ms:.1}ms n={view_count}"
             iced::widget::Space::new().width(0).height(0).into()
         };
 
+        let filter_layer: Element<'_, Message> = match &self.filter_dialog {
+            Some(state) => self.filter_overlay(state),
+            None => iced::widget::Space::new().width(0).height(0).into(),
+        };
+        let layer_import_layer: Element<'_, Message> = match &self.layer_import {
+            Some(state) => self.layer_import_overlay(state),
+            None => iced::widget::Space::new().width(0).height(0).into(),
+        };
         let qselect_layer: Element<'_, Message> = if let Some(state) = &self.qselect {
             qselect_overlay(
                 state,
+                self.transparent_select.as_deref(),
                 &state.available_types,
                 &state.available_properties,
                 state.candidate_count,
@@ -3556,6 +3570,8 @@ bg={bg_ms:.1}ms n={view_count}"
             search_layer,
             ribbon_menu_layer,
             qselect_layer,
+            filter_layer,
+            layer_import_layer,
             snap_override_layer,
             open_progress_layer,
             keytip_layer,
@@ -5470,7 +5486,7 @@ mod tests {
         let mut renderer = iced_test::futures::futures::executor::block_on(
             <iced::Renderer as iced_test::core::renderer::Headless>::new(
                 iced_test::core::renderer::Settings::default(),
-                None,
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
             ),
         )
         .expect("headless renderer");

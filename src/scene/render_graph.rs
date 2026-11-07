@@ -701,6 +701,22 @@ fn single_scale_picture(document: &Document, handle: Handle, block: &str) -> boo
         )
 }
 
+/// An unedited dimension whose definition points measure something other than
+/// the measurement it stores (group 42) cannot be rebuilt: a dimension copied
+/// into a block can keep some points in world coordinates, so one stored as 65
+/// rebuilds as 6570. The source application draws the scale's picture, and so
+/// do we. Saving refreshes the measurement of every dimension it re-bakes, so
+/// a picture an edit left behind is never chosen this way.
+fn rebuild_disagrees_with_picture(document: &Document, handle: Handle) -> bool {
+    let Some(EntityType::Dimension(stored)) = document.get_entity(handle) else {
+        return false;
+    };
+    let measured = stored.stored_measurement();
+    let kept = stored.base().actual_measurement;
+    !stored.base().block_name.trim().is_empty()
+        && (measured - kept).abs() > 1e-6 * measured.abs().max(kept.abs()).max(1.0)
+}
+
 /// The block reference that places a dimension's picture block: at the
 /// dimension's insertion point, with its insertion rotation and scale. The
 /// point is stored in the dimension's OCS; the picture's sub-entities are in
@@ -948,7 +964,8 @@ fn entity_owned_block_uses(
                 let mut insert = dimension_picture_insert(base, record.name.clone());
                 insert.common = base.common.clone();
                 let picture = !crate::scene::annotative::is_annotative(document, entity)
-                    || single_scale_picture(document, base.common.handle, &record.name);
+                    || single_scale_picture(document, base.common.handle, &record.name)
+                    || rebuild_disagrees_with_picture(document, base.common.handle);
                 vec![block_use(
                     document,
                     insert,

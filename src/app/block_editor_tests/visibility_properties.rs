@@ -248,3 +248,287 @@ fn block_visibility_reference_description_survives_state_history_and_drawing_rel
         assert!(OpenCADStudio::visibility_property(&app.tabs[i].scene.document, insert).is_none());
     }
 }
+
+#[test]
+fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
+    use crate::scene::{
+        block_actions as actions, block_distance_parameter as distance, block_lookup as lookup,
+        block_orientation_parameter as orientation, block_parameter_properties as properties,
+        block_point_parameter as point,
+    };
+    use document::objects::ObjectType;
+    use glam::DVec3;
+
+    let (mut app, plain_dynamic) = fixture();
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw(
+        "STATIC_PART",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_Y,
+        ))],
+    );
+    app.tabs[i]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(Insert::new(
+            "STATIC_PART",
+            Vector3::new(-50., 0., 0.),
+        )))
+        .unwrap();
+
+    begin(&mut app, plain_dynamic);
+    circle(&mut app, 4.);
+    let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let targets = members(&app);
+    let doc = &mut app.tabs[i].scene.document;
+
+    let pt = point::create(doc, def, Vector3::new(1., 1., 0.), Vector3::new(2., 2., 0.)).unwrap();
+    actions::create(doc, def, actions::Kind::Move, pt, &[targets[0]], DVec3::ZERO).unwrap();
+
+    let lin = distance::create(
+        doc,
+        def,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::new(5., -2., 0.),
+    )
+    .unwrap();
+    actions::create(doc, def, actions::Kind::Move, lin, &[targets[0]], DVec3::ZERO).unwrap();
+
+    let pol = distance::create(
+        doc,
+        def,
+        distance::Kind::Polar,
+        Vector3::ZERO,
+        Vector3::new(0., 8., 0.),
+        Vector3::new(2., 4., 0.),
+    )
+    .unwrap();
+    actions::create(doc, def, actions::Kind::Move, pol, &[targets[1]], DVec3::ZERO).unwrap();
+
+    let xy = distance::create(
+        doc,
+        def,
+        distance::Kind::XY,
+        Vector3::ZERO,
+        Vector3::new(6., 8., 0.),
+        Vector3::new(3., 9., 0.),
+    )
+    .unwrap();
+    actions::create(doc, def, actions::Kind::Move, xy, &[targets[1]], DVec3::ZERO).unwrap();
+
+    let rot = orientation::create(
+        doc,
+        def,
+        orientation::Kind::Rotation,
+        Vector3::ZERO,
+        Vector3::new(5., 0., 0.),
+        Vector3::new(5., 0., 0.),
+    )
+    .unwrap();
+    actions::create(doc, def, actions::Kind::Rotate, rot, &[targets[0]], DVec3::ZERO).unwrap();
+
+    let flp = orientation::create(
+        doc,
+        def,
+        orientation::Kind::Flip,
+        Vector3::ZERO,
+        Vector3::new(0., 10., 0.),
+        Vector3::new(2., 5., 0.),
+    )
+    .unwrap();
+    actions::create(doc, def, actions::Kind::Flip, flp, &[targets[0]], DVec3::ZERO).unwrap();
+
+    let vis = block_visibility::create(doc, def, Vector3::new(-4., 4., 0.)).unwrap();
+    block_visibility::add_state(doc, vis, "Alternate", 0).unwrap();
+    block_visibility::set_visible(doc, vis, 1, &[targets[1]], false);
+
+    let lkp = lookup::create(doc, def, Vector3::new(-4., -4., 0.)).unwrap();
+    let lin_id = actions::all_parameters(doc, def)
+        .into_iter()
+        .find(|p| p.handle == lin)
+        .unwrap()
+        .id;
+    let input_col = lookup::properties(doc, def)
+        .into_iter()
+        .find(|prop| prop.column.node_id == lin_id)
+        .unwrap()
+        .column;
+    let mut table = lookup::empty_table(
+        lookup::parameters(doc, def)
+            .into_iter()
+            .find(|(h, _)| *h == lkp)
+            .unwrap()
+            .1,
+    );
+    table.columns.insert(0, input_col);
+    table.column_count = 2;
+    table.row_count = 2;
+    table.expressions = ["10", "Compact", "20", "Extended"]
+        .map(String::from)
+        .to_vec();
+    lookup::apply_table(doc, def, lkp, table).unwrap();
+
+    let _ = app.dispatch_command("BSAVE");
+    let _ = app.dispatch_command("BCLOSE");
+
+    let mut scaled = Insert::new("EDIT_ME", Vector3::new(150., 50., 0.));
+    scaled.set_x_scale(-2.);
+    scaled.set_y_scale(2.);
+    scaled.set_z_scale(2.);
+    app.tabs[i]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(scaled))
+        .unwrap();
+
+    let doc = app.tabs[i].scene.document.clone();
+    let mut failures = Vec::new();
+    let mut total = 0;
+    let mut static_references = 0;
+    let mut controls = 0;
+
+    for entity in doc.entities() {
+        let EntityType::Insert(reference) = entity else {
+            continue;
+        };
+        let handle = reference.common.handle;
+        assert!(
+            doc.block_records.get(&reference.block_name).is_some(),
+            "reference {handle:?} has no block record"
+        );
+        let Some(definition) = doc.dynamic_definition_for_insert(handle) else {
+            static_references += 1;
+            continue;
+        };
+        let Some(ObjectType::Dictionary(dictionary)) = doc
+            .extension_dictionary_handle(definition)
+            .and_then(|h| doc.objects.get(&h))
+        else {
+            static_references += 1;
+            continue;
+        };
+        if dictionary.get("ACAD_ENHANCEDBLOCK").is_none() {
+            static_references += 1;
+            continue;
+        }
+        total += 1;
+        let previous_controls = controls;
+        let context = format!(
+            "{handle:?} ({:?}, scale {:?})",
+            reference.block_name,
+            reference.x_scale()
+        );
+        let mut fail = |control: &str, error: &str| {
+            failures.push(format!("{context} {control}: {error}"));
+        };
+        if actions::instance::definition(&doc, handle).is_none() {
+            fail("definition", "reference is unavailable");
+            continue;
+        }
+        app.tabs[i].scene.document = doc.clone();
+        app.tabs[i].scene.selected.clear();
+        app.tabs[i].scene.select_entity(handle, true);
+        app.tabs[i].selected_handle = Some(handle);
+        app.refresh_properties();
+        let grips = app.tabs[i].selected_grips.clone();
+        let visibility = OpenCADStudio::indexed_visibility_property(&doc, 0, handle);
+        for prop in properties::properties(&doc, None, 0, handle)
+            .into_iter()
+            .chain(visibility)
+        {
+            match prop.value {
+                PropValue::ReadOnlyWithTooltip { tooltip, .. } => fail(&prop.label, &tooltip),
+                PropValue::BlockNumber { key, value, .. } => {
+                    controls += 1;
+                    if let Some(number) =
+                        crate::app::block_parameter_properties::parse_value(&value)
+                    {
+                        for next in [number + 1., number + 10.] {
+                            let result = properties::evaluate(
+                                &doc,
+                                None,
+                                key,
+                                properties::Input::Number(next),
+                            );
+                            match result {
+                                Ok(Some(_)) => {},
+                                Ok(None) => fail(&prop.label, "different value produced no edit"),
+                                Err(err) => { fail(&prop.label, err); break; },
+                            }
+                        }
+                    } else {
+                        fail(&prop.label, "failed to parse BlockNumber value");
+                    }
+                }
+                PropValue::BlockChoice {
+                    key,
+                    options,
+                    selected,
+                    ..
+                } => {
+                    for next in (0..options.len()).filter(|&next| next != selected) {
+                        controls += 1;
+                        let result = if prop.field == "dyn_visibility" {
+                            OpenCADStudio::stage_visibility_property(&doc, key, next)
+                        } else {
+                            properties::evaluate(&doc, None, key, properties::Input::Choice(next))
+                        };
+                        match result {
+                            Ok(Some(_)) => {},
+                            Ok(None) => fail(&prop.label, "different choice produced no edit"),
+                            Err(err) => fail(&format!("{} -> {next}", prop.label), err),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        for grip in &grips {
+            let Some((node, role)) = crate::scene::block_grips::runtime::decode(grip.id) else {
+                continue;
+            };
+            controls += 1;
+            app.tabs[i].scene.document = doc.clone();
+            app.tabs[i].scene.selected.clear();
+            app.tabs[i].scene.select_entity(handle, true);
+            app.tabs[i].selected_handle = Some(handle);
+            app.refresh_properties();
+            app.command_line.last_error = None;
+            if !app.start_test_action_grip(handle, grip.id) {
+                fail(
+                    &format!("grip {node}/{role}"),
+                    app.command_line
+                        .last_error
+                        .as_deref()
+                        .unwrap_or("did not start"),
+                );
+                continue;
+            }
+            if app.tabs[i].active_cmd.is_some() {
+                let direction = grip.dir.unwrap_or(DVec3::new(1., 1., 0.));
+                let _ = app.feed_command(crate::command::StepInput::Point(
+                    grip.world + direction * 3.,
+                ));
+                assert!(app.tabs[i].active_cmd.is_none(), "grip input must finish the command");
+            }
+            if app.tabs[i].scene.document == doc {
+                fail(&format!("grip {node}/{role}"), "grip produced no edit");
+            }
+            if let Some(error) = app.command_line.last_error.as_deref() {
+                fail(&format!("grip {node}/{role}"), error);
+            }
+        }
+        if controls == previous_controls {
+            fail("controls", "no grip or editable property was exercised");
+        }
+    }
+    assert_eq!(static_references, 1);
+    assert_eq!(total, 2);
+    assert!(controls >= 20, "exercised {controls} controls");
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+

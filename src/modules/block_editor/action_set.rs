@@ -430,17 +430,16 @@ impl CadCommand for ActionSetCommand {
             let Some(c) = self.context else {
                 return CmdResult::ReportError(crate::t!("Enter the action name.").into_owned());
             };
-            let project =
-                |p| crate::scene::pick::hit_test::world_to_screen(p, c.view, c.eye, c.bounds);
-            let at = project(point);
-            if let Some((i, _)) = self
-                .candidates
-                .iter()
-                .enumerate()
-                .map(|(i, a)| (i, project(a.at).distance(at)))
-                .filter(|(_, d)| d.is_finite() && *d <= c.aperture_px.max(10.))
-                .min_by(|(_, a), (_, b)| a.total_cmp(b))
-            {
+            let picked = crate::scene::view::projection::nearest_in_aperture(
+                c.view,
+                c.eye,
+                c.bounds,
+                point,
+                c.aperture_px,
+                self.candidates.iter().enumerate().map(|(i, _)| i),
+                |i| self.candidates[*i].at,
+            );
+            if let Some(i) = picked {
                 self.chosen = Some(i);
                 return CmdResult::NeedPoint;
             }

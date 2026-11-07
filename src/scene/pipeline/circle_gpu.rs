@@ -601,7 +601,7 @@ mod tests {
             None,
             None,
             None,
-            false,
+            None,
             &reference_only,
         );
         assert_eq!(

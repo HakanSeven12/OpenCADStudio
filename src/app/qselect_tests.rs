@@ -50,7 +50,7 @@ fn state(
         conditions,
         editing_condition,
         scope: QSelectScope::CurrentSpace,
-        available_types: vec!["Line".into()],
+        available_types: vec![("Line".into(), 5)],
         available_properties: Vec::new(),
         candidate_count: 5,
         type_filter: Some("Line".into()),
@@ -58,8 +58,13 @@ fn state(
         operator,
         value: value.into(),
         mode: QSelectMode::Include,
-        append: false,
+        result: crate::app::QSelectResult::New,
         error: None,
+        live_count: 0,
+            live_by_type: Vec::new(),
+        show: false,
+        value_counts: Vec::new(),
+        sample: None,
     }
 }
 

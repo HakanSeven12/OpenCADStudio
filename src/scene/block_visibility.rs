@@ -1013,93 +1013,50 @@ mod tests {
 #[cfg(test)]
 mod placement_fixtures {
     use super::*;
-    use sha2::{Digest, Sha256};
+    use document::entities::Line;
 
     #[test]
-    #[ignore = "requires OCS_DYNAMIC_BLOCK_FIXTURES with local DWG fixtures"]
-    fn visibility_parameter_placement_fixture_roundtrips() {
-        let directory = std::env::var_os("OCS_DYNAMIC_BLOCK_FIXTURES").expect("fixture directory");
-        let mut paths = std::fs::read_dir(directory)
+    fn visibility_parameter_in_multiblock_document_roundtrips() {
+        let mut scene = Scene::new();
+        scene.define_block_raw("BLOCK_A", Vector3::ZERO, vec![EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_X))]);
+        let a = scene.document.block_records.get("BLOCK_A").unwrap().handle;
+        crate::scene::block_point_parameter::create(
+            &mut scene.document,
+            a,
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        )
+        .unwrap();
+        let a_graph = super::super::block_authoring::graph(&scene.document, a)
             .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| {
-                path.extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("dwg"))
-            })
-            .collect::<Vec<_>>();
-        paths.sort();
-        assert!(!paths.is_empty(), "no DWG fixtures found");
-        for path in paths {
-            let original = std::fs::read(&path).unwrap();
-            let digest = Sha256::digest(&original);
-            let filename = path.file_name().unwrap().to_string_lossy();
-            let document = crate::io::load_bytes(&filename, original).expect(&filename);
-            let before = document.clone();
-            let mut scene = Scene::new();
-            scene.document = document;
-            let protected = scene
-                .document
-                .block_records
-                .iter()
-                .map(|record| record.handle)
-                .filter(|definition| {
-                    parameter(&scene.document, *definition).is_none()
-                        && placement_error(&scene.document, *definition).is_some()
-                })
-                .collect::<Vec<_>>();
-            for definition in &protected {
-                assert!(create(&mut scene.document, *definition, Vector3::ZERO).is_none());
+            .unwrap();
+        if let Some(ObjectType::DynamicBlock(object)) = scene.document.objects.get_mut(&a_graph) {
+            if let DynamicBlockData::EvaluationGraph(graph) = &mut object.data {
+                graph.first_node_id = i32::MAX;
             }
+        }
+        assert!(parameter(&scene.document, a).is_none());
+        assert!(placement_error(&scene.document, a).is_some());
+        let before = scene.document.clone();
+        assert!(create(&mut scene.document, a, Vector3::ZERO).is_none());
+        assert_eq!(scene.document, before, "existing graphs remain untouched");
+
+        scene.define_block_raw("BLOCK_B", Vector3::ZERO, vec![EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_Y))]);
+        let b = scene.document.block_records.get("BLOCK_B").unwrap().handle;
+        let loc = Vector3::new(3.25, -4.5, 0.0);
+        create(&mut scene.document, b, loc).unwrap();
+        for (handle, object) in &before.objects {
             assert_eq!(
-                scene.document, before,
-                "{filename}: existing graphs remain untouched"
+                scene.document.objects.get(handle),
+                Some(object),
+                "preserved object {handle}"
             );
-            scene.define_block_raw(
-                "PALETTE_VISIBILITY_TEST",
-                Vector3::ZERO,
-                vec![EntityType::Line(document::entities::Line::from_points(
-                    Vector3::ZERO,
-                    Vector3::UNIT_X,
-                ))],
-            );
-            let definition = scene
-                .document
-                .block_records
-                .get("PALETTE_VISIBILITY_TEST")
-                .unwrap()
-                .handle;
-            let location = Vector3::new(3.25, -4.5, 0.0);
-            create(&mut scene.document, definition, location).expect(&filename);
-            for (handle, object) in &before.objects {
-                assert_eq!(
-                    scene.document.objects.get(handle),
-                    Some(object),
-                    "{filename}: preserved object {handle}"
-                );
-            }
-            for extension in ["dwg", "dxf"] {
-                let bytes =
-                    crate::io::save_to_bytes(&scene.document, extension, scene.document.version)
-                        .expect(&filename);
-                let read =
-                    crate::io::load_bytes(&format!("placed.{extension}"), bytes).expect(&filename);
-                let owner = read
-                    .block_records
-                    .get("PALETTE_VISIBILITY_TEST")
-                    .unwrap()
-                    .handle;
-                assert_eq!(
-                    parameter(&read, owner).expect(&filename).def_point,
-                    location,
-                    "{filename}: {extension}"
-                );
-            }
-            assert_eq!(
-                Sha256::digest(std::fs::read(&path).unwrap()),
-                digest,
-                "{filename}: source checksum"
-            );
-            eprintln!("{filename}: DWG/DXF placement roundtrips; {} existing graphs protected; source unchanged", protected.len());
+        }
+        for ext in ["dwg", "dxf"] {
+            let bytes = crate::io::save_to_bytes(&scene.document, ext, scene.document.version).unwrap();
+            let read = crate::io::load_bytes(&format!("multi.{ext}"), bytes).unwrap();
+            let owner = read.block_records.get("BLOCK_B").unwrap().handle;
+            assert_eq!(parameter(&read, owner).unwrap().def_point, loc);
         }
     }
 }

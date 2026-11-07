@@ -402,7 +402,7 @@ impl OpenCADStudio {
                 )
                 .and_then(|changed| {
                     if changed && actions::association::orphaned(&staged, definition).is_empty() {
-                        staged = actions::instance::refresh(&staged, definition)?;
+                        staged = actions::instance::refresh_after_edit(&staged, &tab.scene.document, definition)?;
                     }
                     Ok(changed)
                 });

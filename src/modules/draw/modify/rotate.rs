@@ -67,6 +67,8 @@ pub struct RotateCommand {
     spatial: bool,
     /// The plane is the one square to the chosen axis, not the UCS.
     axis_chosen: bool,
+    /// The Copy option: rotate a duplicate and leave the source in place.
+    copy: bool,
 }
 
 impl RotateCommand {
@@ -79,6 +81,7 @@ impl RotateCommand {
             plane: WorkingPlane::default(),
             spatial: false,
             axis_chosen: false,
+            copy: false,
         }
     }
 
@@ -111,14 +114,16 @@ impl RotateCommand {
 
     fn commit(&self, center: DVec3, angle_rad: f64) -> CmdResult {
         defaults::set_rotate_angle(angle_rad.to_degrees());
-        CmdResult::TransformSelected(
-            self.handles.clone(),
-            EntityTransform::Rotate {
-                center,
-                axis: self.plane.z,
-                angle_rad,
-            },
-        )
+        let transform = EntityTransform::Rotate {
+            center,
+            axis: self.plane.z,
+            angle_rad,
+        };
+        if self.copy {
+            CmdResult::CopySelectedAndExit(self.handles.clone(), transform)
+        } else {
+            CmdResult::TransformSelected(self.handles.clone(), transform)
+        }
     }
 
     fn angle_arc(center: [f64; 2], radius: f64, angle: f64) -> Option<(geom2d::Arc, bool)> {
@@ -210,11 +215,19 @@ impl CadCommand for RotateCommand {
             }
             Step::Angle { .. } if self.spatial => {
                 let a = format!("{:.4}", self.default_angle);
-                t!("3DROTATE  Specify rotation angle  <%{a}>:", a = a).into_owned()
+                t!(
+                    "3DROTATE  Specify rotation angle or [Copy/Reference]  <%{a}>:",
+                    a = a
+                )
+                .into_owned()
             }
             Step::Angle { .. } => {
                 let a = format!("{:.4}", self.default_angle);
-                t!("ROTATE  Specify rotation angle  <%{a}>:", a = a).into_owned()
+                t!(
+                    "ROTATE  Specify rotation angle or [Copy/Reference]  <%{a}>:",
+                    a = a
+                )
+                .into_owned()
             }
             Step::RefFirst { .. } => {
                 t!("ROTATE  Specify first reference point or type reference angle:").into_owned()
@@ -233,7 +246,10 @@ impl CadCommand for RotateCommand {
             Step::Axis { .. } => ["X", "Y", "Z"]
                 .map(|axis| CmdOption::new(axis, axis))
                 .to_vec(),
-            Step::Angle { .. } => vec![CmdOption::new(t!("Reference").as_ref(), "R")],
+            Step::Angle { .. } => vec![
+                CmdOption::new(t!("Copy").as_ref(), "C"),
+                CmdOption::new(t!("Reference").as_ref(), "R"),
+            ],
             _ => vec![],
         }
     }
@@ -315,6 +331,10 @@ impl CadCommand for RotateCommand {
             Step::Angle { center } => {
                 let center = *center;
                 let low = t.to_ascii_lowercase();
+                if low == "c" || low == "copy" {
+                    self.copy = true;
+                    return Some(CmdResult::NeedPoint);
+                }
                 if low == "r" || low == "reference" {
                     self.step = Step::RefFirst { center };
                     return Some(CmdResult::NeedPoint);

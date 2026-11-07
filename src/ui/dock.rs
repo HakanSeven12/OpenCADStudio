@@ -113,6 +113,8 @@ pub enum PanelId {
     BlockPalette,
     /// Block Editor authoring tools.
     AuthoringPalettes,
+    /// Reusable block tools (TOOLPALETTES / TP).
+    ToolPalettes,
     /// The Block Editor's Parameters Manager.
     ParametersManager,
     ExternalReferences,
@@ -140,10 +142,11 @@ pub enum PanelId {
 
 impl PanelId {
     /// Every panel, in the order the pallet menu lists them.
-    pub const ALL: [PanelId; 15] = [
+    pub const ALL: [PanelId; 16] = [
         PanelId::Properties,
         PanelId::GraphicAttributes,
         PanelId::BlockPalette,
+        PanelId::ToolPalettes,
         PanelId::AuthoringPalettes,
         PanelId::ParametersManager,
         PanelId::ExternalReferences,
@@ -164,6 +167,7 @@ impl PanelId {
             PanelId::Properties => "Properties",
             PanelId::GraphicAttributes => "Graphic Attributes",
             PanelId::BlockPalette => "Block Palette",
+            PanelId::ToolPalettes => "Tool Palettes",
             PanelId::AuthoringPalettes => "Authoring Palettes",
             PanelId::ParametersManager => "Parameters Manager",
             PanelId::ExternalReferences => "External References",
@@ -188,6 +192,7 @@ impl PanelId {
                 include_bytes!("../../assets/icons/graphic_attributes.svg")
             }
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
+            PanelId::ToolPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
             PanelId::AuthoringPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
             PanelId::ParametersManager => include_bytes!("../../assets/icons/table.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
@@ -210,6 +215,7 @@ impl PanelId {
             PanelId::Properties => 250.0,
             PanelId::GraphicAttributes => 250.0,
             PanelId::BlockPalette => 260.0,
+            PanelId::ToolPalettes => 260.0,
             PanelId::AuthoringPalettes => 260.0,
             PanelId::ParametersManager => 420.0,
             PanelId::ExternalReferences => 460.0,
@@ -1123,8 +1129,10 @@ pub const DOCK_FLOAT_BAR_W: f32 = 28.0;
 pub const DOCK_STRIP_W: f32 = 40.0;
 /// Height of one pallet icon in the strip.
 pub const STRIP_CELL_H: f32 = 32.0;
-/// Shortest pallet cell of a labelled strip.
-pub const STRIP_LABEL_MIN_H: f32 = 96.0;
+/// Text size of a strip tab's name.
+pub const STRIP_LABEL_SIZE: f32 = 13.0;
+/// Space after a strip tab's name.
+const STRIP_LABEL_PAD: f32 = 12.0;
 /// Height of the + button below a strip's groups.
 pub const STRIP_PLUS_H: f32 = 28.0;
 /// Space above and below a group's icons, inside the group.
@@ -1141,7 +1149,7 @@ pub const STRIP_GRIP_W: f32 = 8.0;
 const STRIP_NEW_GROUP_SLOP: f32 = 4.0;
 
 /// Where one group sits in an edge's icon strip, top to bottom.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StripGroup {
     /// Group index on the edge.
     pub group: usize,
@@ -1149,16 +1157,19 @@ pub struct StripGroup {
     pub top: f32,
     /// Top of the group's first icon.
     pub icons_top: f32,
-    /// Number of icons (open pallets).
-    pub icons: usize,
-    /// Height of one pallet's cell.
-    pub cell_h: f32,
+    /// Height of each open pallet's tab, top to bottom.
+    pub cells: Vec<f32>,
 }
 
 impl StripGroup {
+    /// Top of the tab at `index` (the bottom of the last one past the end).
+    pub fn cell_top(&self, index: usize) -> f32 {
+        self.icons_top + self.cells.iter().take(index).sum::<f32>()
+    }
+
     /// Bottom of the group's last icon.
     pub fn icons_bottom(&self) -> f32 {
-        self.icons_top + self.icons as f32 * self.cell_h
+        self.cell_top(self.cells.len())
     }
 
     /// Bottom of the group's row (where its divider starts).
@@ -1167,26 +1178,35 @@ impl StripGroup {
     }
 }
 
-/// Lay out the icon strip for `groups` = (group index, open pallet count)
-/// with `cell_h` tall pallet cells, returning each group's place and the top
-/// of the + button below them.
-pub fn strip_layout(groups: &[(usize, usize)], cell_h: f32) -> (Vec<StripGroup>, f32) {
+/// Lay out the icon strip for `groups` = (group index, tab height of each
+/// open pallet), returning each group's place and the top of the + button
+/// below them.
+pub fn strip_layout(groups: &[(usize, Vec<f32>)]) -> (Vec<StripGroup>, f32) {
     let mut y = 0.0;
     let placed = groups
         .iter()
-        .map(|&(group, icons)| {
+        .map(|(group, cells)| {
             let g = StripGroup {
-                group,
+                group: *group,
                 top: y,
                 icons_top: y + STRIP_PAD,
-                icons,
-                cell_h,
+                cells: cells.clone(),
             };
             y = g.bottom() + STRIP_DIVIDER_H;
             g
         })
         .collect();
     (placed, y + STRIP_PLUS_GAP)
+}
+
+/// Length of a pallet's tab in the strip: the icon alone, or labelled, the
+/// icon followed by its name read upward, as long as the name is.
+pub fn strip_tab_h(title: &str, labelled: bool) -> f32 {
+    if !labelled {
+        return STRIP_CELL_H;
+    }
+    STRIP_CELL_H - 4.0 + crate::ui::style::text_metrics::width(title, STRIP_LABEL_SIZE, false).ceil()
+        + STRIP_LABEL_PAD
 }
 
 /// What a dragged pallet released at height `y` over the icon strip joins.
@@ -1207,7 +1227,12 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
             return StripHit::NewGroup(Some(g.group));
         }
         if y < g.icons_bottom() - STRIP_NEW_GROUP_SLOP {
-            let index = (((y - g.icons_top) / g.cell_h).round().max(0.0) as usize).min(g.icons);
+            // The tab boundary nearest the pointer.
+            let index = (0..=g.cells.len())
+                .min_by(|&a, &b| {
+                    (g.cell_top(a) - y).abs().total_cmp(&(g.cell_top(b) - y).abs())
+                })
+                .unwrap_or(0);
             return StripHit::Join {
                 group: g.group,
                 index,
@@ -1450,7 +1475,7 @@ impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
                 content: self.text.clone(),
                 position: iced::Point::new(start, 0.0),
                 color: crate::ui::style::readable::muted_text(theme),
-                size: iced::Pixels(13.0),
+                size: iced::Pixels(STRIP_LABEL_SIZE),
                 align_x,
                 align_y: iced::alignment::Vertical::Center,
                 shaping: iced::advanced::text::Shaping::Advanced,
@@ -1742,9 +1767,12 @@ mod tests {
     #[test]
     fn strip_hit_maps_dividers_icons_and_the_end() {
         // Two groups: three icons, then one.
-        let (layout, plus_top) = strip_layout(&[(0, 3), (2, 1)], STRIP_CELL_H);
-        let g0 = layout[0];
-        let g1 = layout[1];
+        let (layout, plus_top) = strip_layout(&[
+            (0, vec![STRIP_CELL_H; 3]),
+            (2, vec![STRIP_CELL_H]),
+        ]);
+        let g0 = layout[0].clone();
+        let g1 = layout[1].clone();
         assert_eq!(g0.icons_top, STRIP_PAD);
         assert_eq!(g1.top, g0.bottom() + STRIP_DIVIDER_H);
         assert_eq!(plus_top, g1.bottom() + STRIP_DIVIDER_H + STRIP_PLUS_GAP);

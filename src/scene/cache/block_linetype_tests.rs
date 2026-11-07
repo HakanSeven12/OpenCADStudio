@@ -54,7 +54,7 @@ fn period(document: &Document, insert: Insert) -> f32 {
         None,
         None,
         None,
-        false,
+        None,
         &HashSet::default(),
     );
     let dashed: Vec<f32> = wires

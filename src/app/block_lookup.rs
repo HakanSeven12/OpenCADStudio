@@ -89,7 +89,7 @@ impl OpenCADStudio {
             if let Some(name) = options.name.as_deref() {
                 record(
                     &mut option_error,
-                    metadata::set_text(document, definition, parameter, Field::Name, name),
+                    metadata::set_parameter_name(document, definition, parameter, name),
                 );
             }
             if let Some(description) = options.description.as_deref() {
@@ -102,6 +102,12 @@ impl OpenCADStudio {
                         Field::Description,
                         description,
                     ),
+                );
+            }
+            if let Some(label) = options.label.as_deref() {
+                record(
+                    &mut option_error,
+                    metadata::set_text(document, definition, parameter, Field::Name, label),
                 );
             }
             if let Some(palette) = options.palette {

@@ -713,6 +713,7 @@ impl OpenCADStudio {
 
             // LAYISO — isolate the layers used by the selected entities.
             "LAYISO" => self.start_layiso(i),
+            "LAYERP" => self.layer_previous(i),
 
             // LAYISO Settings is kept as a command-line subcommand so it is
             // available both from the selection prompt and from scripts.
@@ -1057,6 +1058,169 @@ impl OpenCADStudio {
                 self.command_line.push_info(&cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(cmd));
                 self.refresh_active_cmd_preview(i);
+            }
+
+            // Named group editing: rename a group, or add/remove members
+            // without dissolving it. `GROUP` on its own still creates one.
+            cmd if cmd.starts_with("GROUP ") => {
+                let rest = cmd.strip_prefix("GROUP").unwrap_or("").trim();
+                let parts: Vec<&str> = rest.split_whitespace().collect();
+                let sub = parts
+                    .first()
+                    .map(|p| p.to_ascii_uppercase())
+                    .unwrap_or_default();
+                match sub.as_str() {
+                    "LIST" | "?" => {
+                        let mut rows: Vec<String> = self.tabs[i]
+                            .scene
+                            .groups()
+                            .map(|group| format!("{} ({} object(s))", group.name, group.entities.len()))
+                            .collect();
+                        rows.sort();
+                        if rows.is_empty() {
+                            self.command_line
+                                .push_info(crate::t!("GROUP: no groups in this drawing.").as_ref());
+                        } else {
+                            self.command_line.push_output(
+                                &crate::tf!("Groups:\n  {}", rows.join("\n  ")).as_ref(),
+                            );
+                        }
+                    }
+                    "RENAME" | "NAME" => {
+                        let old = parts.get(1).copied().unwrap_or("");
+                        let new = parts.get(2).copied().unwrap_or("");
+                        if old.is_empty() || new.is_empty() {
+                            self.command_line.push_error(
+                                crate::t!("Usage: GROUP RENAME <old name> <new name>").as_ref(),
+                            );
+                        } else if !self.tabs[i]
+                            .scene
+                            .groups()
+                            .any(|group| group.name.eq_ignore_ascii_case(old))
+                        {
+                            self.command_line
+                                .push_error(&crate::tf!("GROUP: no group named '{old}'.").as_ref());
+                        } else if self.tabs[i]
+                            .scene
+                            .groups()
+                            .any(|group| group.name.eq_ignore_ascii_case(new))
+                        {
+                            self.command_line.push_error(
+                                &crate::tf!("GROUP: a group named '{new}' already exists.").as_ref(),
+                            );
+                        } else {
+                            let undo = self.begin_group_undo(i, "GROUP RENAME");
+                            let renamed = self.tabs[i].scene.rename_group_named(old, new);
+                            self.tabs[i].dirty = true;
+                            self.commit_group_undo(i, undo);
+                            if renamed {
+                                self.command_line.push_output(
+                                    &crate::tf!("GROUP: renamed '{old}' to '{new}'.").as_ref(),
+                                );
+                            }
+                        }
+                    }
+                    "ADD" | "REMOVE" => {
+                        let adding = sub == "ADD";
+                        let name = parts.get(1).copied().unwrap_or("");
+                        if name.is_empty() {
+                            self.command_line.push_error(
+                                &crate::tf!(
+                                    "Usage: GROUP {} <group name> [handle ...]",
+                                    if adding { "ADD" } else { "REMOVE" }
+                                )
+                                .as_ref(),
+                            );
+                        } else if !self.tabs[i]
+                            .scene
+                            .groups()
+                            .any(|group| group.name.eq_ignore_ascii_case(name))
+                        {
+                            self.command_line
+                                .push_error(&crate::tf!("GROUP: no group named '{name}'.").as_ref());
+                        } else {
+                            let mut handles: Vec<document::Handle> = parts
+                                .get(2..)
+                                .unwrap_or(&[])
+                                .iter()
+                                .filter_map(|token| {
+                                    u64::from_str_radix(
+                                        token.trim_start_matches(['_', '.']),
+                                        16,
+                                    )
+                                    .ok()
+                                    .map(document::Handle::new)
+                                })
+                                .collect();
+                            if handles.is_empty() {
+                                handles = self.tabs[i]
+                                    .scene
+                                    .selected_entities()
+                                    .into_iter()
+                                    .map(|(handle, _)| handle)
+                                    .collect();
+                            }
+                            let members = self.tabs[i]
+                                .scene
+                                .groups()
+                                .find(|group| group.name.eq_ignore_ascii_case(name))
+                                .map(|group| group.entities.clone())
+                                .unwrap_or_default();
+                            handles.retain(|handle| {
+                                adding != members.contains(handle)
+                                    && self.tabs[i].scene.document.get_entity(*handle).is_some()
+                            });
+                            if handles.is_empty() {
+                                self.command_line.push_info(
+                                    &crate::tf!(
+                                        "GROUP: nothing to {}.",
+                                        if adding { "add" } else { "remove" }
+                                    )
+                                    .as_ref(),
+                                );
+                            } else {
+                                let undo = self.begin_group_undo(
+                                    i,
+                                    if adding { "GROUP ADD" } else { "GROUP REMOVE" },
+                                );
+                                let mut changed = 0usize;
+                                for handle in handles {
+                                    let ok = if adding {
+                                        self.tabs[i]
+                                            .scene
+                                            .add_entity_to_group_named(name, handle)
+                                    } else {
+                                        self.tabs[i]
+                                            .scene
+                                            .remove_entity_from_group_named(name, handle)
+                                    };
+                                    if ok {
+                                        changed += 1;
+                                    }
+                                }
+                                self.tabs[i].dirty = true;
+                                self.commit_group_undo(i, undo);
+                                self.command_line.push_output(
+                                    &crate::tf!(
+                                        "GROUP: {} {} object(s) {} '{name}'.",
+                                        if adding { "added" } else { "removed" },
+                                        changed,
+                                        if adding { "to" } else { "from" }
+                                    )
+                                    .as_ref(),
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        self.command_line.push_error(
+                            crate::t!(
+                                "Usage: GROUP [LIST | RENAME <old> <new> | ADD <name> [handle ...] | REMOVE <name> [handle ...]]"
+                            )
+                            .as_ref(),
+                        );
+                    }
+                }
             }
 
             "GROUP" => {

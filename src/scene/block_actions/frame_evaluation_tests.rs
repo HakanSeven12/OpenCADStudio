@@ -110,7 +110,10 @@ fn block_action_base_offsets_follow_frames_and_survive_native_rebuilds() {
                     },
             };
             let expected = if kind == Kind::Scale {
-                DVec3::X * 2. - offset + base
+                // The dependent pivot includes its authored offset; scale about
+                // that pivot after moving the frame, rather than discarding it.
+                let pivot = base + offset;
+                pivot + (DVec3::X - pivot) * 2.
             } else {
                 offset + DVec3::new(offset.y, 1. - offset.x, 0.) + base
             };
@@ -186,7 +189,12 @@ fn block_action_base_offsets_follow_frames_and_survive_native_rebuilds() {
             let independent = instance::evaluate_frame(&doc, a, p.handle, frame)
                 .unwrap()
                 .unwrap();
-            assert!(v(line(&independent, a).start).distance(expected - base) < 1e-8);
+            let independent_expected = if kind == Kind::Scale {
+                DVec3::X * 2. - offset
+            } else {
+                expected - base
+            };
+            assert!(v(line(&independent, a).start).distance(independent_expected) < 1e-8);
         }
     }
 }
@@ -333,7 +341,7 @@ fn block_frame_scale_and_rotation_map_dependent_pivots_and_keep_independent_pivo
                 }
             };
             let expected = match (kind, independent) {
-                (Kind::Scale, false) => Vector3::new(-3.5, 0., 0.),
+                (Kind::Scale, false) => Vector3::new(4.0, 0., 0.),
                 (Kind::Scale, true) => Vector3::new(0.5, 0., 0.),
                 (Kind::Rotate, false) => Vector3::new(3., 5., 0.),
                 _ => Vector3::new(2., -1., 0.),
@@ -509,7 +517,7 @@ fn block_frames_preserve_other_parameters_flip_states_and_reference_isolation() 
                 );
             }
             for (reference, expected) in [
-                (a, Vector3::new(2., 6.5, 0.)),
+                (a, Vector3::new(9.5, 6.5, 0.)),
                 (b, Vector3::new(11., 11., 0.)),
             ] {
                 let EntityType::Insert(reference) = refreshed.get_entity(reference).unwrap() else {
@@ -587,7 +595,7 @@ fn block_frame_constraints_snap_relative_to_the_updated_base_and_fail_atomically
             ..input
         }
     );
-    assert_eq!(line(&changed, a).start, Vector3::new(-3.5, 0., 0.));
+    assert_eq!(line(&changed, a).start, Vector3::new(4.0, 0., 0.));
     assert!(instance::evaluate_frame(&changed, a, p.handle, input)
         .unwrap()
         .is_none());

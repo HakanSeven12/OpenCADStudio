@@ -43,6 +43,10 @@ pub struct Row {
     pub show: bool,
     pub order: String,
     pub description: String,
+    /// Whether the row's `Description` cell names parameter text the manager
+    /// writes back. A lookup, a visibility parameter and an attribute name no
+    /// parameter component, so their description cell stays as printed.
+    pub description_writable: bool,
 }
 
 fn writable(parameter: &actions::Parameter, component: Component) -> bool {
@@ -112,6 +116,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
                 show: field.show,
                 order: String::new(),
                 description: field.description.to_owned(),
+                description_writable: description_field(p.polar, p.xy, field.component).is_some(),
             });
         }
     }
@@ -124,7 +129,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
                 Data::LookupParameter(p) => Some((
                     "Lookup",
                     p.parameter.parameter.show_properties,
-                    p.lookup_name.clone(),
+                    p.parameter.parameter.element.name.clone(),
                 )),
                 _ => None,
             },
@@ -155,6 +160,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             show,
             order: String::new(),
             description: String::new(),
+            description_writable: false,
         });
     }
     rows
@@ -178,6 +184,7 @@ fn attribute_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             show: true,
             order: String::new(),
             description: String::new(),
+            description_writable: false,
         })
         .collect()
 }
@@ -201,6 +208,40 @@ pub fn rows(doc: &Document, definition: Handle) -> Vec<Row> {
         (a.group.rank(), a.name.to_lowercase()).cmp(&(b.group.rank(), b.name.to_lowercase()))
     });
     rows
+}
+
+/// Which rows the funnel filter keeps. `All` lists everything; the other
+/// keeps the rows another parameter's expression names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilterMode {
+    All,
+    UsedInExpressions,
+}
+
+impl FilterMode {
+    pub const ALL: [Self; 2] = [Self::All, Self::UsedInExpressions];
+
+    /// The name the footer prints for this filter.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All",
+            Self::UsedInExpressions => "All Used in Expressions",
+        }
+    }
+
+    /// The wording the funnel menu gives this filter.
+    pub fn menu_label(self) -> &'static str {
+        match self {
+            Self::All => "Display All Parameters",
+            Self::UsedInExpressions => "Display Parameters Used in Expressions",
+        }
+    }
+}
+
+impl std::fmt::Display for FilterMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 /// Wildcard match for the filter field: `*` stands for any run of characters.
@@ -231,22 +272,55 @@ fn wildcard(pattern: &str, text: &str) -> bool {
     pi == pattern.len()
 }
 
+/// Whether `name` appears in `text` as a whole identifier, so a parameter named
+/// `Distance1` is not found inside `X Distance10`.
+fn names_identifier(text: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let text = text.as_bytes();
+    let name = name.as_bytes();
+    if name.len() > text.len() {
+        return false;
+    }
+    let word = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+    (0..=text.len().saturating_sub(name.len())).any(|at| {
+        let end = at + name.len();
+        text[at..end].eq_ignore_ascii_case(name)
+            && (at == 0 || !word(text[at - 1]))
+            && (end == text.len() || !word(text[end]))
+    })
+}
+
+fn used_in_expressions(row: &Row, rows: &[Row]) -> bool {
+    rows.iter()
+        .filter(|other| other.name != row.name)
+        .any(|other| names_identifier(&other.expression, &row.name))
+}
+
 /// The filter field holds a name pattern (`*` lists all); the search field
-/// narrows the rows that pattern left by a case-insensitive name substring.
+/// narrows the rows that pattern left by a case-insensitive name substring. The
+/// funnel mode narrows either by the other parameters' expressions.
 pub fn matches(row: &Row, filter: &str, search: &str) -> bool {
     let listed = matches!(filter.trim(), "" | "*") || wildcard(filter.trim(), &row.name);
     let query = search.trim().to_lowercase();
     listed && (query.is_empty() || row.name.to_lowercase().contains(&query))
 }
 
-pub(crate) fn displayed<'a>(rows: &'a [Row], filter: &str, search: &str) -> Vec<&'a Row> {
+pub(crate) fn displayed<'a>(
+    rows: &'a [Row],
+    mode: FilterMode,
+    filter: &str,
+    search: &str,
+) -> Vec<&'a Row> {
     rows.iter()
         .filter(|row| matches(row, filter, search))
+        .filter(|row| mode == FilterMode::All || used_in_expressions(row, rows))
         .collect()
 }
 
-pub fn footer(total: usize, shown: usize) -> String {
-    format!("All: {shown} of {total} parameters displayed")
+pub fn footer(mode: FilterMode, total: usize, shown: usize) -> String {
+    format!("{}: {shown} of {total} parameters displayed", mode.label())
 }
 
 /// Where a row points: the parameter object it names, and the component whose
@@ -340,6 +414,46 @@ pub fn write_number(
         Part::End,
         document::types::Vector3::new(at.x, at.y, at.z),
     )
+}
+
+const NO_DESCRIPTION: &str = "This row has no description to edit.";
+
+/// The text field a component prints, or `None` when the component has no
+/// description of its own. The manager's writable flag and the writer both read
+/// this mapping, so a row that offers a field is a row that can write it.
+fn description_field(
+    polar: bool,
+    xy: bool,
+    component: Component,
+) -> Option<super::block_authoring::metadata::Field> {
+    use super::block_authoring::metadata::Field;
+    match component {
+        Component::Angle if polar => Some(Field::SecondaryDescription),
+        Component::Y if xy => Some(Field::SecondaryDescription),
+        Component::X | Component::Y | Component::Distance | Component::Angle | Component::Flip => {
+            Some(Field::Description)
+        }
+        _ => None,
+    }
+}
+
+/// Write a row's description into the parameter text it prints. A polar
+/// parameter keeps its angle text apart from its distance text, and an XY
+/// parameter keeps each axis label apart, so the component selects the field.
+pub fn write_description(
+    doc: &mut Document,
+    definition: Handle,
+    parameter: Handle,
+    component: Component,
+    text: &str,
+) -> Result<bool, &'static str> {
+    use super::block_authoring::metadata;
+    let authored = actions::all_parameters(doc, definition)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+        .ok_or(NO_DESCRIPTION)?;
+    let field = description_field(authored.polar, authored.xy, component).ok_or(NO_DESCRIPTION)?;
+    metadata::set_text(doc, definition, parameter, field, text)
 }
 
 /// Flip whether the parameter shows its own values, as the row's `Show` cell

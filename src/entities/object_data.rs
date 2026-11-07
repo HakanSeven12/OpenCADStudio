@@ -99,6 +99,67 @@ pub fn geo_objects(cache: &ObjectDataCache) -> &[Handle] {
     &cache.geo_objects
 }
 
+/// A GEODATA's coordinate system for the status bar: its name, and the
+/// details its tooltip lists (#2686).
+pub fn geo_system_label(geo: &document::objects::GeoData) -> (String, String) {
+    let name = coordinate_system_name(&geo.coordinate_system_definition)
+        .or_else(|| coordinate_system_name(&geo.coordinate_system_wkt))
+        .unwrap_or_else(|| crate::t!("Unnamed").into_owned());
+    let kind = match geo.coordinate_type {
+        1 => crate::t!("Local grid"),
+        2 => crate::t!("Projected grid"),
+        3 => crate::t!("Geographic"),
+        _ => crate::t!("Unknown"),
+    };
+    let r = geo.reference_point;
+    let d = geo.design_point;
+    let details = format!(
+        "{}\n{}: {name}\n{}: {kind}\n{}: {:.6}, {:.6}\n{}: {:.4}, {:.4}",
+        crate::t!("GIS Coordinates"),
+        crate::t!("Coordinate system"),
+        crate::t!("Type"),
+        crate::t!("Reference point"),
+        r.x,
+        r.y,
+        crate::t!("Design point"),
+        d.x,
+        d.y,
+    );
+    (name, details)
+}
+
+/// The name a coordinate system definition gives itself: the `id` of a
+/// MapGuide XML `...CoordinateSystem` element, else the first quoted name of
+/// a WKT (`PROJCS["name"`, `GEOGCS["name"`).
+fn coordinate_system_name(definition: &str) -> Option<String> {
+    let text = definition.trim();
+    if text.is_empty() {
+        return None;
+    }
+    let quoted = |rest: &str, quote: char| {
+        let rest = rest.strip_prefix(quote)?;
+        let end = rest.find(quote)?;
+        Some(rest[..end].trim().to_string()).filter(|s| !s.is_empty())
+    };
+    if text.starts_with('<') {
+        let mut at = 0;
+        while let Some(found) = text[at..].find("CoordinateSystem") {
+            let start = at + found;
+            let tag_end = text[start..].find('>').map_or(text.len(), |e| start + e);
+            if let Some(id) = text[start..tag_end].find("id=") {
+                let rest = &text[start + id + 3..tag_end];
+                if let Some(name) = quoted(rest, '"').or_else(|| quoted(rest, '\'')) {
+                    return Some(name);
+                }
+            }
+            at = start + "CoordinateSystem".len();
+        }
+        return None;
+    }
+    let open = text.find('[')?;
+    quoted(&text[open + 1..], '"')
+}
+
 pub fn render_environments(cache: &ObjectDataCache) -> &[Handle] {
     &cache.render_environments
 }

@@ -1,4 +1,5 @@
 // Auto-split from scene/mod.rs. Pure text-move; behaviour unchanged.
+use crate::scene::model::wire_model::DashClosure;
 use super::super::*;
 
 /// Dim an already-bg-adapted colour toward the background when the entity's
@@ -21,33 +22,291 @@ fn fade_if_locked(
 /// break wherever its linetype restarts (every vertex when PLINEGEN is off) —
 /// the path `tessellate` splits into one wire per arc segment plus one wire of
 /// the straight segments. `None` for any other entity or render form.
-fn polyline_lt_path(document: &document::Document, e: &EntityType) -> Option<Vec<[f64; 3]>> {
+///
+/// Also says how the pattern closes around that path, and for a wide polyline
+/// gives its band width at each point of the path.
+pub(crate) fn polyline_lt_path(
+    document: &document::Document,
+    e: &EntityType,
+) -> Option<(Vec<[f64; 3]>, DashClosure, Option<Vec<f32>>)> {
     use convert::acad_to_render::RenderObject;
     if !matches!(e, EntityType::LwPolyline(_) | EntityType::Polyline2D(_)) {
         return None;
     }
-    match convert::acad_to_render::convert(e, document)?.object {
-        RenderObject::Lines(points) | RenderObject::SegmentedLines(points) => Some(points),
+    let rendered = convert::acad_to_render::convert(e, document)?;
+    match rendered.object {
+        RenderObject::Lines(points) | RenderObject::SegmentedLines(points) => {
+            let closure = convert::tessellate::dash_closure_of(
+                e,
+                &rendered.key_vertices,
+                points.iter().copied(),
+            );
+            let width = convert::tessellate::polyline_band_width(e, document.header.fill_mode);
+            let band = (width > 0.0).then(|| vec![width; points.len()]);
+            Some((points, closure, band))
+        }
+        RenderObject::TaperedLines(points, widths) => {
+            let plinegen = match e {
+                EntityType::LwPolyline(polyline) => polyline.plinegen,
+                EntityType::Polyline2D(polyline) => {
+                    polyline.flags.bits()
+                        & document::entities::PolylineFlags::LINETYPE_CONTINUOUS.bits()
+                        != 0
+                }
+                _ => false,
+            };
+            let (points, widths) = if plinegen {
+                (points, widths)
+            } else {
+                restart_at_vertices(&points, &widths, &rendered.key_vertices)
+            };
+            // A step in width breaks the band, and no fit goes round a break.
+            let closure = if points.iter().any(|p| p[0].is_nan()) {
+                DashClosure::Open
+            } else {
+                convert::tessellate::dash_closure_of(
+                    e,
+                    &rendered.key_vertices,
+                    points.iter().copied(),
+                )
+            };
+            Some((points, closure, Some(widths)))
+        }
         _ => None,
     }
 }
 
-#[derive(Clone, Copy)]
-struct BlockObjectStyle {
+/// Break a tapered band's path at each interior vertex, where PLINEGEN off
+/// restarts the linetype. A taper draws as one wire, so its path has no break
+/// there unless the width steps.
+fn restart_at_vertices(
+    points: &[[f64; 3]],
+    widths: &[f32],
+    key_vertices: &[[f64; 3]],
+) -> (Vec<[f64; 3]>, Vec<f32>) {
+    let interior = key_vertices
+        .get(1..key_vertices.len().saturating_sub(1))
+        .unwrap_or_default();
+    let mut next = 0;
+    let mut out_points = Vec::with_capacity(points.len() + 2 * interior.len());
+    let mut out_widths = Vec::with_capacity(points.len() + 2 * interior.len());
+    for (index, (&point, &width)) in points.iter().zip(widths).enumerate() {
+        out_points.push(point);
+        out_widths.push(width);
+        let at_vertex = interior
+            .get(next)
+            .is_some_and(|vertex| (0..3).all(|axis| (point[axis] - vertex[axis]).abs() < 1e-6));
+        if at_vertex {
+            next += 1;
+            if points
+                .get(index + 1)
+                .is_some_and(|after| !after[0].is_nan())
+            {
+                out_points.extend([[f64::NAN; 3], point]);
+                out_widths.extend([0.0, width]);
+            }
+        }
+    }
+    (out_points, out_widths)
+}
+
+/// The annotation ratio a complex linetype bakes in. It is walked on the CPU,
+/// so it never sees the wire shader's model-space `linetype_scale` uniform:
+/// outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the Model layout and
+/// 1.0 on a paper sheet, exactly when the shader applies it, and MSLTSCALE turns
+/// it off in both.
+pub(crate) fn complex_linetype_anno(
+    document: &document::Document,
+    anno_scale: f32,
+    viewport_lt: Option<f32>,
+) -> f32 {
+    if let Some(factor) = viewport_lt {
+        return factor;
+    }
+    if anno_scale.is_finite()
+        && anno_scale > 1e-9
+        && crate::scene::annotative::model_linetypes_follow_annotation(document)
+    {
+        anno_scale
+    } else {
+        1.0
+    }
+}
+
+/// Walk a complex linetype along an absolute path. A NaN break starts the
+/// pattern over (PLINEGEN off: at every vertex), and each run is end-aligned on
+/// its own length, the "A" alignment: it begins and ends with a dash, and a run
+/// shorter than one pattern is drawn solid.
+///
+/// `None` when there is nothing to walk (pattern blow-up guard, or a path with
+/// no length): the caller draws the path some other way.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn walk_complex_linetype(
+    name: &str,
+    path: &[[f64; 3]],
+    linetype: &crate::io::linetypes::ComplexLt,
+    scale: f32,
+    closure: DashClosure,
     color: [f32; 4],
-    aci: u8,
-    pattern_length: f32,
-    pattern: [f32; 8],
+    selected: bool,
     line_weight_px: f32,
-    layer: view::render::InheritStyle,
+    band: Option<&[f32]>,
+) -> Option<Vec<WireModel>> {
+    let band = band.filter(|band| band.len() == path.len());
+    // A closed path takes its pattern from its own start: for a polyline the
+    // walk goes round from the second vertex, back to it.
+    let rotated: Vec<[f64; 3]>;
+    let rotated_band: Option<Vec<f32>>;
+    let (path, closed, band) = match closure {
+        DashClosure::Open => (path, false, band),
+        DashClosure::Curve => (path, true, band),
+        DashClosure::Polyline { start } => {
+            let start = (start as usize).min(path.len().saturating_sub(1));
+            rotated = path[start..]
+                .iter()
+                .chain(path.iter().skip(1).take(start))
+                .copied()
+                .collect();
+            rotated_band = band.map(|band| {
+                band[start..]
+                    .iter()
+                    .chain(band.iter().skip(1).take(start))
+                    .copied()
+                    .collect::<Vec<f32>>()
+            });
+            (rotated.as_slice(), true, rotated_band.as_deref())
+        }
+    };
+    let mut wires = Vec::new();
+    let mut next_run = 0;
+    for run in path.split(|p| p[0].is_nan()) {
+        let run_band = band.map(|band| &band[next_run..next_run + run.len()]);
+        next_run += run.len() + 1;
+        let length: f64 = run
+            .windows(2)
+            .map(|w| {
+                let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
+                (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+            })
+            .sum();
+        if length <= 1e-9 {
+            continue;
+        }
+        // Walk the dash / glyph layout in a local frame so `apply_along`'s f32
+        // math stays precise, then lift each wire back to world DS.
+        let origin = run[0];
+        let local: Vec<[f32; 3]> = run
+            .iter()
+            .map(|a| {
+                [
+                    (a[0] - origin[0]) as f32,
+                    (a[1] - origin[1]) as f32,
+                    (a[2] - origin[2]) as f32,
+                ]
+            })
+            .collect();
+        let mut run_wires = if closed {
+            text::complex_lt::apply_closed(
+                name,
+                &local,
+                linetype,
+                scale,
+                color,
+                selected,
+                line_weight_px,
+                run_band,
+            )
+        } else {
+            text::complex_lt::apply_along(
+                name,
+                &local,
+                linetype,
+                scale,
+                color,
+                selected,
+                line_weight_px,
+                Some(length as f32),
+                run_band,
+            )
+        };
+        if run_wires.is_empty() {
+            return None;
+        }
+        for wire in &mut run_wires {
+            convert::tessellate::shift_wire_to_world(wire, origin);
+        }
+        wires.append(&mut run_wires);
+    }
+    (!wires.is_empty()).then_some(wires)
+}
+
+/// An MLINE element's wire as drawn: its complex linetype walked along it, the
+/// wire as it is otherwise.
+fn walk_mline_element(
+    document: &document::Document,
+    layer: &str,
+    wire: WireModel,
+    scale: f32,
+    viewport: Option<Handle>,
+) -> Vec<WireModel> {
+    let linetype = wire.element_linetype.as_deref().and_then(|element| {
+        crate::io::linetypes::resolve_complex_lt(
+            document,
+            crate::entities::mline::element_linetype_name(document, layer, element, viewport),
+        )
+    });
+    let Some(linetype) = linetype else {
+        return vec![wire];
+    };
+    let path: Vec<[f64; 3]> = (0..wire.points.len())
+        .map(|index| {
+            let p = wire.points[index];
+            let low = wire.points_low.get(index).copied().unwrap_or([0.0; 3]);
+            [
+                p[0] as f64 + low[0] as f64,
+                p[1] as f64 + low[1] as f64,
+                p[2] as f64 + low[2] as f64,
+            ]
+        })
+        .collect();
+    let Some(mut pieces) = walk_complex_linetype(
+        &wire.name,
+        &path,
+        &linetype,
+        scale,
+        DashClosure::Open,
+        wire.color,
+        wire.selected,
+        wire.line_weight_px,
+        None,
+    ) else {
+        return vec![wire];
+    };
+    for piece in &mut pieces {
+        piece.aci = wire.aci;
+    }
+    // The element's first wire carries the entity's snaps and vertices.
+    pieces[0].snap_pts = wire.snap_pts;
+    pieces[0].key_vertices = wire.key_vertices;
+    pieces
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct BlockObjectStyle {
+    pub(crate) color: [f32; 4],
+    aci: u8,
+    pub(crate) pattern_length: f32,
+    pub(crate) pattern: [f32; 8],
+    pub(crate) line_weight_px: f32,
+    pub(crate) layer: view::render::InheritStyle,
     layer_aci: u8,
-    layer_plottable: bool,
+    pub(crate) layer_plottable: bool,
 }
 
 pub(crate) struct ExpandedBlockObject {
     pub(crate) wires: Vec<WireModel>,
-    style: BlockObjectStyle,
-    is_xref: bool,
+    pub(crate) style: BlockObjectStyle,
+    pub(crate) is_xref: bool,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -55,6 +314,8 @@ pub(crate) struct BlockObjectOptions {
     pub(crate) suppress_root_points: bool,
     pub(crate) apply_xclip: bool,
     pub(crate) scale_policy: crate::scene::BlockScalePolicy,
+    /// The ratio from [`complex_linetype_anno`]. `None` draws at drawing length.
+    pub(crate) complex_lt_anno: Option<f32>,
 }
 
 fn block_object_style(
@@ -163,6 +424,7 @@ pub(crate) fn expand_block_object(
         anno_scale,
         options.scale_policy,
         options.suppress_root_points,
+        options.complex_lt_anno.unwrap_or(1.0),
     )
     .unwrap_or_default();
 
@@ -675,7 +937,7 @@ pub(crate) fn tessellate_entity_dim_text(
         None,
         view_aabb,
         world_per_pixel,
-        false,
+        None,
         reference_only,
     );
     for w in &mut wires {
@@ -701,7 +963,7 @@ pub(crate) fn tessellate_entity(
     block_cache: Option<&cache::block_cache::BlockCache>,
     view_aabb: Option<[f32; 4]>,
     world_per_pixel: Option<f32>,
-    paper_space: bool,
+    viewport_lt: Option<f32>,
     reference_only: &HashSet<Handle>,
 ) -> Vec<WireModel> {
     let mut wires = tessellate_entity_inner(
@@ -715,7 +977,7 @@ pub(crate) fn tessellate_entity(
         block_cache,
         view_aabb,
         world_per_pixel,
-        paper_space,
+        viewport_lt,
         reference_only,
     );
 
@@ -764,10 +1026,11 @@ fn tessellate_entity_inner(
     view_aabb: Option<[f32; 4]>,
     // World units per screen pixel for LOD culling. `None` = no LOD.
     world_per_pixel: Option<f32>,
-    // True only when tessellating content shown inside a paper-space viewport.
-    // PSLTSCALE itself is applied by the viewport's GPU uniform so it never
-    // changes resident wire content.
-    paper_space: bool,
+    // `Some` only when tessellating content shown inside a paper-space viewport:
+    // the factor on a complex linetype's pattern there. PSLTSCALE reaches plain
+    // dashes through the viewport's GPU uniform, but a complex linetype's dashes
+    // and glyphs are baked, so they take it here.
+    viewport_lt: Option<f32>,
     // The scene's reference-only designation set (API v9): drives the
     // `WireModel::reference_only` stamp for dimensions' synthesis paths that
     // bypass the wrapper's post-stamp.
@@ -781,6 +1044,9 @@ fn tessellate_entity_inner(
     let e = contextual.as_ref();
     let h = e.common().handle;
     let sel = selected.contains(&h);
+    // A linetype follows the annotation scale whether or not its object is
+    // annotative, so it reads the scale as it came in.
+    let linetype_anno = anno_scale;
     // Per-object annotation contexts store each representation relative to the
     // native/default scale. Resolve that ratio once before TEXT/MTEXT,
     // DIMENSION, and MULTILEADER reach their independent tessellation paths.
@@ -1062,7 +1328,6 @@ fn tessellate_entity_inner(
             pick_tris,
             pick_tris_low,
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: h.value().to_string(),
             points,
@@ -1109,6 +1374,11 @@ fn tessellate_entity_inner(
                 BlockObjectOptions {
                     suppress_root_points: block_use.suppress_root_points,
                     scale_policy: block_use.scale_policy,
+                    complex_lt_anno: Some(complex_linetype_anno(
+                        document,
+                        linetype_anno,
+                        viewport_lt,
+                    )),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1172,6 +1442,7 @@ fn tessellate_entity_inner(
             view_aabb,
             world_per_pixel,
             bg_color,
+            complex_linetype_anno(document, linetype_anno, viewport_lt),
         );
         for w in &mut wires {
             w.aci = aci;
@@ -1217,6 +1488,11 @@ fn tessellate_entity_inner(
                 pslt_factor,
                 BlockObjectOptions {
                     scale_policy: block_use.scale_policy,
+                    complex_lt_anno: Some(complex_linetype_anno(
+                        document,
+                        linetype_anno,
+                        viewport_lt,
+                    )),
                     ..BlockObjectOptions::default()
                 },
             )
@@ -1264,6 +1540,11 @@ fn tessellate_entity_inner(
                     pslt_factor,
                     BlockObjectOptions {
                         scale_policy: block_use.scale_policy,
+                        complex_lt_anno: Some(complex_linetype_anno(
+                            document,
+                            linetype_anno,
+                            viewport_lt,
+                        )),
                         ..BlockObjectOptions::default()
                     },
                 )
@@ -1302,7 +1583,6 @@ fn tessellate_entity_inner(
             pick_tris: Vec::new(),
             pick_tris_low: Vec::new(),
             dash_from_start: false,
-            dash_align_end: None,
             text_verts: Vec::new(),
             name: h.value().to_string(),
             points: vec![],
@@ -1339,6 +1619,7 @@ fn tessellate_entity_inner(
             pslt_factor,
             BlockObjectOptions {
                 apply_xclip: true,
+                complex_lt_anno: Some(complex_linetype_anno(document, linetype_anno, viewport_lt)),
                 ..BlockObjectOptions::default()
             },
         );
@@ -1412,6 +1693,33 @@ fn tessellate_entity_inner(
             b.set_fixed_screen_width(2.0);
         }
     }
+    // An MLINE element draws in this viewport as the line it explodes to, on
+    // the background and locked layer the entity's own colour adapts to.
+    if let (EntityType::MLine(mline), false) = (e, sel) {
+        for b in &mut bases {
+            let (Some(color), Some(linetype)) = (b.element_color, b.element_linetype.as_deref())
+            else {
+                continue;
+            };
+            let (color, pattern_length, pattern, element_aci) =
+                crate::entities::mline::element_style(
+                    document,
+                    mline,
+                    color,
+                    linetype,
+                    active_viewport,
+                );
+            b.color = fade_if_locked(
+                document,
+                e,
+                view::render::adapt_to_bg(color, bg_color),
+                bg_color,
+            );
+            b.pattern_length = pattern_length;
+            b.pattern = pattern;
+            b.aci = element_aci;
+        }
+    }
     // PDF underlay geometry: hidden, unplotted wires that object snaps
     // (nearest, intersection, perpendicular, centre) find, beside the page
     // frame — one per segment or circle, so they intersect each other.
@@ -1453,6 +1761,30 @@ fn tessellate_entity_inner(
         }
     }
 
+    // An MLINE's linetypes are its elements': its own plays no part.
+    if let EntityType::MLine(mline) = e {
+        if bases.iter().any(|wire| wire.element_linetype.is_some()) && !sel {
+            let scale = (lt_scale
+                * pslt_factor
+                * complex_linetype_anno(document, linetype_anno, viewport_lt))
+            .max(1e-4);
+            let mut walked = Vec::with_capacity(bases.len());
+            for wire in bases {
+                walked.extend(walk_mline_element(
+                    document,
+                    &mline.common.layer,
+                    wire,
+                    scale,
+                    active_viewport,
+                ));
+            }
+            bases = walked;
+            for wire in &mut bases {
+                set_wire_aabb(wire, aabb);
+            }
+        }
+    }
+
     // A hidden mask frame remains selectable and appears while selected, but
     // contributes no visible line work during normal display. The interior
     // pick triangles remain intact.
@@ -1460,28 +1792,19 @@ fn tessellate_entity_inner(
     // path along its tangent. A polyline with arc segments tessellates to one
     // wire per arc plus one wire of its straight segments, so it walks its own
     // ordered path (`polyline_lt_path`); every other entity is one wire.
-    if let Some(clt) = crate::io::linetypes::resolve_complex_lt(document, lt_name) {
-        // A complex linetype is walked here on the CPU, so it never sees the
-        // wire shader's model-space `linetype_scale` uniform. Bake the same
-        // ratio in: outside a viewport `anno_scale` is 1/CANNOSCALEVALUE in the
-        // Model layout and 1.0 on a paper sheet, exactly when the shader
-        // applies it, and MSLTSCALE turns it off in both.
-        let complex_lt_anno = if !paper_space
-            && anno_scale.is_finite()
-            && anno_scale > 1e-9
-            && crate::scene::annotative::model_linetypes_follow_annotation(document)
-        {
-            anno_scale
-        } else {
-            1.0
-        };
+    let own_complex = (!matches!(e, EntityType::MLine(_)))
+        .then(|| crate::io::linetypes::resolve_complex_lt(document, lt_name))
+        .flatten();
+    if let Some(clt) = own_complex {
+        let complex_lt_anno = complex_linetype_anno(document, linetype_anno, viewport_lt);
         if let Some(base) = bases.first() {
             // `base.points` is the double-single HIGH half; at UTM coordinates
             // (−1.2M) that alone quantises to ~0.1, which jitters the complex
             // linetype's shapes and dashes. Reconstruct the absolute f64 path
             // (high + low).
-            let path = polyline_lt_path(document, e).unwrap_or_else(|| {
-                base.points
+            let (path, closure, band) = polyline_lt_path(document, e).unwrap_or_else(|| {
+                let path = base
+                    .points
                     .iter()
                     .enumerate()
                     .map(|(i, p)| {
@@ -1495,61 +1818,32 @@ fn tessellate_entity_inner(
                             p[2] as f64 + l[2] as f64,
                         ]
                     })
-                    .collect()
-            });
-            // A NaN break starts the pattern over (PLINEGEN off: at every
-            // vertex), and each run is end-aligned on its own length, the
-            // "A" alignment: it begins and ends with a dash, and a run shorter
-            // than one pattern is drawn solid.
-            let mut wires = Vec::new();
-            let mut walked = true;
-            for run in path.split(|p| p[0].is_nan()) {
-                let length: f64 = run
-                    .windows(2)
-                    .map(|w| {
-                        let d = [w[1][0] - w[0][0], w[1][1] - w[0][1], w[1][2] - w[0][2]];
-                        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
-                    })
-                    .sum();
-                if length <= 1e-9 {
-                    continue;
-                }
-                // Walk the dash / glyph layout in a local frame so
-                // `apply_along`'s f32 math stays precise, then lift each wire
-                // back to world DS.
-                let origin = run[0];
-                let local: Vec<[f32; 3]> = run
-                    .iter()
-                    .map(|a| {
-                        [
-                            (a[0] - origin[0]) as f32,
-                            (a[1] - origin[1]) as f32,
-                            (a[2] - origin[2]) as f32,
-                        ]
-                    })
                     .collect();
-                let mut run_wires = text::complex_lt::apply_along(
-                    &base.name,
-                    &local,
-                    &clt,
-                    (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
-                    entity_color,
-                    sel,
-                    base.line_weight_px,
-                    Some(length as f32),
-                );
-                // Nothing to walk (pattern blow-up guard): draw the base wires.
-                if run_wires.is_empty() {
-                    walked = false;
-                    break;
+                (path, base.dash_closure, None)
+            });
+            // Nothing to walk (pattern blow-up guard): draw the base wires.
+            if let Some(mut wires) = walk_complex_linetype(
+                &base.name,
+                &path,
+                &clt,
+                (lt_scale * pslt_factor * complex_lt_anno).max(1e-4),
+                closure,
+                entity_color,
+                sel,
+                base.line_weight_px,
+                band.as_deref(),
+            ) {
+                for wire in &mut wires {
+                    set_wire_aabb(wire, aabb);
                 }
-                for w in &mut run_wires {
-                    convert::tessellate::shift_wire_to_world(w, origin);
-                    set_wire_aabb(w, aabb);
+                // Dashes and gaps don't change where a wide band picks.
+                if let (Some(first), Some(picks)) = (
+                    wires.first_mut(),
+                    bases.iter().find(|wire| !wire.pick_tris.is_empty()),
+                ) {
+                    first.pick_tris = picks.pick_tris.clone();
+                    first.pick_tris_low = picks.pick_tris_low.clone();
                 }
-                wires.append(&mut run_wires);
-            }
-            if walked && !wires.is_empty() {
                 return wires;
             }
         }
@@ -1727,7 +2021,6 @@ fn lod_stub_wire(
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         // Diagonal of the entity's 3D AABB so depth tests against
@@ -1826,7 +2119,6 @@ fn lod_stub_wire_3d(
         pick_tris: Vec::new(),
         pick_tris_low: Vec::new(),
         dash_from_start: false,
-        dash_align_end: None,
         text_verts: Vec::new(),
         name,
         points,
@@ -2097,7 +2389,7 @@ mod viewport_colour_tests {
                     None,
                     None,
                     None,
-                    false,
+                    None,
                     &HashSet::default(),
                 );
                 assert!(!wires.is_empty());

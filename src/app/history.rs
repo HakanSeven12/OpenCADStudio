@@ -590,6 +590,59 @@ impl OpenCADStudio {
         }
     }
 
+    /// LAYERP: put the layers' properties back as they were before the last
+    /// layer-property change. One ordinary undo step itself.
+    pub(super) fn layer_previous(&mut self, i: usize) {
+        let Some(before) = self.tabs[i].layer_previous.pop() else {
+            self.command_line
+                .push_info(crate::t!("No previous layer state.").as_ref());
+            return;
+        };
+        // Matched by handle: a layer renamed since, or a new one that took the
+        // old name, must not get another record's handle. Name and handle
+        // stay as they are now; only the properties go back.
+        let names: Vec<String> = before
+            .iter()
+            .filter_map(|old| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .find(|layer| layer.handle == old.handle)
+                    .map(|layer| layer.name.clone())
+            })
+            .collect();
+        if names.is_empty() {
+            self.command_line
+                .push_info(crate::t!("No previous layer state.").as_ref());
+            return;
+        }
+        let undo = self.begin_layer_undo(i, "LAYERP", &names);
+        for mut old in before {
+            if let Some(current) = self.tabs[i]
+                .scene
+                .document
+                .layers
+                .iter_mut()
+                .find(|layer| layer.handle == old.handle)
+            {
+                old.name = std::mem::take(&mut current.name);
+                *current = old;
+            }
+        }
+        self.tabs[i].scene.invalidate_layer_visibility(&names);
+        self.tabs[i].scene.invalidate_layer_dependencies(&names);
+        self.tabs[i].dirty = true;
+        self.restoring_layer_previous = true;
+        self.commit_layer_undo(i, undo);
+        self.restoring_layer_previous = false;
+        self.refresh_layer_panel();
+        self.sync_ribbon_layers();
+        self.command_line
+            .push_output(crate::tf!("LAYERP: {} layer(s) restored.", names.len()).as_ref());
+    }
+
     pub(super) fn commit_layer_undo(&mut self, i: usize, pending: PendingLayerDelta) {
         let entries: Vec<_> = pending
             .before
@@ -605,6 +658,22 @@ impl OpenCADStudio {
             .collect();
         if entries.is_empty() {
             return;
+        }
+        // LAYERP keeps the layers' properties from before this change; its
+        // own restore doesn't add a step to go back to.
+        if !self.restoring_layer_previous {
+            let before: Vec<document::tables::Layer> = entries
+                .iter()
+                .filter(|entry| entry.after.is_some())
+                .filter_map(|entry| entry.before.clone())
+                .collect();
+            if !before.is_empty() {
+                let history = &mut self.tabs[i].layer_previous;
+                history.push(before);
+                if history.len() > LAYER_PREVIOUS_LIMIT {
+                    history.remove(0);
+                }
+            }
         }
         let selected_after = self.tabs[i].scene.selected.iter().copied().collect();
         let delta = DeltaSnapshot {
@@ -1640,3 +1709,6 @@ pub(super) fn history_dropdown_labels(stack: &[HistorySnapshot]) -> Vec<String> 
         .map(|snapshot| snapshot.display_label().into_owned())
         .collect()
 }
+
+/// How many layer-property changes LAYERP can go back through.
+const LAYER_PREVIOUS_LIMIT: usize = 50;

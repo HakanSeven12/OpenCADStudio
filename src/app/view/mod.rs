@@ -2764,43 +2764,14 @@ bg={bg_ms:.1}ms n={view_count}"
             }
             if let Some(popup) = self.table_popup.as_ref() {
                 if !tab.is_start {
-                    let mut col = column![text(popup.header.clone())
-                        .size(12)
-                        .wrapping(iced::widget::text::Wrapping::None)]
-                    .spacing(2);
-                    for (idx, name) in popup.rows.iter().enumerate() {
-                        let mark: Element<'_, Message> = if popup.current == Some(idx) {
-                            crate::ui::icons::themed_check_cell(true)
-                        } else {
-                            Space::new().width(11).into()
-                        };
-                        col = col.push(
-                            button(
-                                row![container(mark).width(16), text(name).size(12).wrapping(iced::widget::text::Wrapping::None)]
-                                    .spacing(2)
-                                    .align_y(iced::Center),
-                            )
-                            .on_press(Message::TableRowPick(idx))
-                            .padding([3, 10])
-                            .width(Fill),
-                        );
-                    }
-                    let panel = container(
-                        iced::widget::scrollable(col)
-                            .height(iced::Length::Shrink)
-                            .width(iced::Length::Fixed(table_popup_width(
-                                &popup.header,
-                                &popup.rows,
-                            ))),
-                    )
-                    .padding(2);
+                    let panel = value_list_panel(popup);
                     let (cw, ch) = tab.scene.selection.borrow().view.vp_size;
                     let bounds = tab.scene.active_model_tile_bounds(cw, ch);
                     if let Some(anchor) = self.table_popup_anchor(i, bounds) {
                         viewport_stack = viewport_stack.push(position_canvas_overlay_near_cursor(
                             anchor,
                             command_line_inset(self),
-                            panel.into(),
+                            panel,
                         ));
                     }
                 }
@@ -5452,6 +5423,48 @@ pub(super) fn recent_files_panel<'a>(
     .into()
 }
 
+/// The open value list: a heading and one row per table row, the chosen row
+/// marked. Its width comes from the lines it shows, never from the canvas.
+fn value_list_panel(popup: &crate::app::visibility::TablePopup) -> Element<'_, Message> {
+    let mut col = column![text(popup.header.clone())
+        .size(12)
+        .wrapping(iced::widget::text::Wrapping::None)]
+    .spacing(2);
+    for (idx, name) in popup.rows.iter().enumerate() {
+        let mark: Element<'_, Message> = if popup.current == Some(idx) {
+            crate::ui::icons::themed_check_cell(true)
+        } else {
+            Space::new().width(11).into()
+        };
+        col = col.push(
+            button(
+                row![
+                    container(mark).width(16),
+                    text(name)
+                        .size(12)
+                        .wrapping(iced::widget::text::Wrapping::None)
+                ]
+                .spacing(2)
+                .align_y(iced::Center),
+            )
+            .on_press(Message::TableRowPick(idx))
+            .padding([3, 10])
+            .width(Fill),
+        );
+    }
+    container(
+        iced::widget::scrollable(col)
+            .height(iced::Length::Shrink)
+            .width(iced::Length::Fixed(table_popup_width(
+                &popup.header,
+                &popup.rows,
+            ))),
+    )
+    .padding(2)
+    .id(iced::widget::Id::new("value-list"))
+    .into()
+}
+
 /// The value list is as wide as the widest line it shows, plus the marker
 /// column and the padding around it, and it has no opinion about the canvas.
 fn table_popup_width(header: &str, rows: &[String]) -> f32 {
@@ -5491,6 +5504,68 @@ mod tests {
             headered > narrow,
             "the header is one of the lines it shows: {narrow} → {headered}"
         );
+    }
+
+    /// The panel that actually paints for an open value list — heading, rows
+    /// and the chosen row's mark — takes the side of its grip that has room for
+    /// it and stays between the top of the canvas and the command line. A list
+    /// too tall for that band scrolls inside it instead of growing past both
+    /// edges, so its painted rectangle is the safe band at most.
+    #[test]
+    fn the_open_value_list_paints_beside_its_grip_inside_the_canvas() {
+        let short = crate::app::visibility::TablePopup {
+            insert_handle: document::Handle::new(1),
+            header: "Distance1".into(),
+            rows: vec!["5.0000".into(), "25.0000".into()],
+            current: Some(1),
+        };
+        let tall = crate::app::visibility::TablePopup {
+            insert_handle: document::Handle::new(1),
+            header: "Distance1, Distance2".into(),
+            rows: (0..40)
+                .map(|row| format!("{row}: 5.0000, 25.0000"))
+                .collect(),
+            current: Some(7),
+        };
+        for (popup, anchor, on_the_right) in [
+            (&short, iced::Point::new(60.0, 300.0), true),
+            (&short, iced::Point::new(760.0, 300.0), false),
+            (&tall, iced::Point::new(60.0, 300.0), true),
+            (&tall, iced::Point::new(760.0, 300.0), false),
+        ] {
+            let mut ui = iced_test::simulator::Simulator::with_size(
+                Default::default(),
+                iced::Size::new(800.0, 600.0),
+                super::position_canvas_overlay_near_cursor(
+                    anchor,
+                    90.0,
+                    super::value_list_panel(popup),
+                ),
+            );
+            let bounds = ui
+                .find(iced::widget::Id::new("value-list"))
+                .expect("the open value list is painted")
+                .visible_bounds()
+                .expect("the open value list is visible");
+            let width = super::table_popup_width(&popup.header, &popup.rows) + 4.0;
+            assert_eq!(
+                bounds.width, width,
+                "the panel is as wide as its own lines, not the canvas: {bounds:?}"
+            );
+            let expected_x = if on_the_right {
+                anchor.x + 12.0
+            } else {
+                anchor.x - 12.0 - width
+            };
+            assert_eq!(
+                bounds.x, expected_x,
+                "the list takes the side of the grip that has room for it: {bounds:?}"
+            );
+            assert!(
+                bounds.y >= 4.0 && bounds.y + bounds.height <= 506.0,
+                "the list stays between the top edge and the command line: {bounds:?}"
+            );
+        }
     }
 
     /// The visibility dropdown draws its entries in one left-aligned column,

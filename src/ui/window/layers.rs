@@ -2187,22 +2187,42 @@ fn tree_line_style(theme: &Theme, status: button::Status, chosen: bool) -> butto
     }
 }
 
+/// A line of a right-click menu. It acts on the press: the menu's content
+/// is built anew whenever the view is, which drops a button's pressed state
+/// before the release it would act on, so a button there did nothing.
+fn menu_item(label: Cow<'static, str>, msg: Message, indent: f32) -> Element<'static, Message> {
+    let line = move |hot: bool| {
+        container(text(label.clone()).size(FONT_SZ))
+            .width(Fill)
+            .padding(Padding {
+                top: 4.0,
+                bottom: 4.0,
+                left: 12.0 + indent,
+                right: 12.0,
+            })
+            .style(move |theme: &Theme| {
+                let palette = theme.palette();
+                container::Style {
+                    background: hot.then(|| Background::Color(palette.primary.base.color)),
+                    text_color: Some(if hot {
+                        palette.primary.base.text
+                    } else {
+                        palette.background.base.text
+                    }),
+                    ..Default::default()
+                }
+            })
+    };
+    mouse_area(iced::widget::hover(line(false), line(true)))
+        .on_press(msg)
+        .interaction(iced::mouse::Interaction::Pointer)
+        .into()
+}
+
 /// A filter tree node's right-click menu: one level (#2610).
 fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
     let entry = |label: Cow<'static, str>, action: TreeAction| -> Element<'static, Message> {
-        button(text(label).size(FONT_SZ))
-            .width(Fill)
-            .padding([4, 12])
-            .on_press(Message::LayerTreeAction(node.clone(), action))
-            .style(|theme: &Theme, status| {
-                let mut style = button::text(theme, status);
-                if matches!(status, button::Status::Hovered) {
-                    style.background = Some(Background::Color(theme.palette().primary.base.color));
-                    style.text_color = theme.palette().primary.base.text;
-                }
-                style
-            })
-            .into()
+        menu_item(label, Message::LayerTreeAction(node.clone(), action), 0.0)
     };
     let mut items: Vec<Element<'static, Message>> = Vec::new();
     if matches!(node, TreeNode::Filter(_)) {
@@ -2245,24 +2265,7 @@ fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
 /// under their heading, inside the menu.
 fn row_menu(name: &str, groups: &[String], in_group: bool) -> Element<'static, Message> {
     let entry = |label: Cow<'static, str>, action: LayerMenuAction, indent: f32| {
-        button(text(label).size(FONT_SZ))
-            .width(Fill)
-            .padding(Padding {
-                top: 4.0,
-                bottom: 4.0,
-                left: 12.0 + indent,
-                right: 12.0,
-            })
-            .on_press(Message::LayerMenu(name.to_string(), action))
-            .style(|theme: &Theme, status| {
-                let mut style = button::text(theme, status);
-                if matches!(status, button::Status::Hovered) {
-                    style.background = Some(Background::Color(theme.palette().primary.base.color));
-                    style.text_color = theme.palette().primary.base.text;
-                }
-                style
-            })
-            .into()
+        menu_item(label, Message::LayerMenu(name.to_string(), action), indent)
     };
     let separator = || {
         container(iced::widget::Space::new())

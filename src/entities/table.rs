@@ -2501,7 +2501,9 @@ impl Grippable for Table {
         use crate::entities::common::oriented_triangle_grip;
         let (origin, horizontal, down) = grip_frame(self);
         let width = self.total_width();
-        let height = self.total_height();
+        // A broken table shows its grips on the first piece: the break
+        // arrow sits at the break height.
+        let height = first_piece_height(self).unwrap_or_else(|| self.total_height());
         let mut grips = vec![
             square_grip(0, origin),
             oriented_triangle_grip(1, origin + horizontal * width, horizontal),
@@ -2576,7 +2578,7 @@ impl Grippable for Table {
             }
         };
         let scale_rows = |table: &mut Self, height: f64| {
-            let current = table.total_height();
+            let current = first_piece_height(table).unwrap_or_else(|| table.total_height());
             if current > 1.0e-12 {
                 for row in &mut table.rows {
                     row.height *= height.max(1.0e-6) / current;
@@ -2591,10 +2593,16 @@ impl Grippable for Table {
                 scale_rows(self, below);
             }
             // Breaking: the table splits where the arrow is left.
+            // Left at or below the table's bottom, the pieces join again.
             4 => {
                 use document::entities::table::BreakOptionFlags;
-                if below > 1.0e-6 && below < self.total_height() {
+                if below >= self.total_height() {
+                    self.break_options.remove(BreakOptionFlags::ENABLE_BREAKS);
+                    self.break_ranges.clear();
+                } else if below > 1.0e-6 {
                     self.break_options.insert(BreakOptionFlags::ENABLE_BREAKS);
+                    self.break_options
+                        .remove(BreakOptionFlags::ALLOW_MANUAL_HEIGHTS);
                     self.apply_geom_prop("tbl_break_height", &below.to_string());
                 }
             }
@@ -2623,6 +2631,27 @@ impl Grippable for Table {
         // name, just as a cell edit does. A move keeps its authored picture.
         self.block_record_handle = None;
     }
+}
+
+/// Height of the first piece of a broken table: the rows that fit in the
+/// break height (at least one). None when the table is whole.
+fn first_piece_height(table: &Table) -> Option<f64> {
+    use document::entities::table::BreakOptionFlags;
+    if !table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS) {
+        return None;
+    }
+    let limit = table.break_data.first().map(|data| data.height)?;
+    if limit <= 1.0e-6 || limit >= table.total_height() {
+        return None;
+    }
+    let mut height = 0.0;
+    for (index, row) in table.rows.iter().enumerate() {
+        if index > 0 && height + row.height > limit {
+            break;
+        }
+        height += row.height;
+    }
+    Some(height)
 }
 
 /// Insertion point and the table's across and downward directions.
@@ -4483,6 +4512,36 @@ pub fn table_indicator(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn grip_at(table: &Table, id: usize) -> glam::DVec3 {
+        table.grips().into_iter().find(|grip| grip.id == id).expect("grip").world
+    }
+
+    /// The bottom-middle arrow breaks the table where it is left, then sits
+    /// on the first piece's bottom; left below the table it joins it again.
+    #[test]
+    fn break_grip_sits_on_the_first_piece_and_joins_below_the_table() {
+        use document::entities::table::BreakOptionFlags;
+        let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 8, 2);
+        let total = table.total_height();
+        let (origin, _, down) = grip_frame(&table);
+        let depth = |p: glam::DVec3| (p - origin).dot(down);
+        assert!((depth(grip_at(&table, 4)) - total).abs() < 1e-9);
+
+        let row = table.rows[0].height;
+        table.apply_grip(4, GripApply::Absolute(origin + down * (row * 2.4)));
+        assert!(table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS));
+        for id in [2, 3, 4] {
+            assert!((depth(grip_at(&table, id)) - row * 2.0).abs() < 1e-9, "grip {id}");
+        }
+        // dragging it again moves the break instead of doing nothing
+        table.apply_grip(4, GripApply::Translate(down * row));
+        assert!((depth(grip_at(&table, 4)) - row * 3.0).abs() < 1e-9);
+
+        table.apply_grip(4, GripApply::Absolute(origin + down * (total + 1.0)));
+        assert!(!table.break_options.contains(BreakOptionFlags::ENABLE_BREAKS));
+        assert!((depth(grip_at(&table, 4)) - total).abs() < 1e-9);
+    }
 
     fn sample_table() -> Table {
         let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 2, 2);

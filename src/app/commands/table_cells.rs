@@ -26,6 +26,38 @@ fn row_like(source: &TableRow) -> TableRow {
     row
 }
 
+/// `n` rows like row `source` (no content) inserted at `at`: as many rows
+/// as the picked cells span.
+fn insert_rows_like(t: &mut Table, source: usize, at: usize, n: usize) {
+    let row = row_like(&t.rows[source]);
+    for _ in 0..n {
+        t.insert_row(at);
+        t.rows[at] = row.clone();
+    }
+}
+
+/// `n` columns like column `source` (width, style, blank cells) inserted at
+/// `at`: as many columns as the picked cells span.
+fn insert_columns_like(t: &mut Table, source: usize, at: usize, n: usize) {
+    let mut column = t.columns[source].clone();
+    column.name.clear();
+    // Rows read from a file can be short of cells.
+    let cells: Vec<TableCell> = t
+        .rows
+        .iter()
+        .map(|row| row.cells.get(source).map(blank_like).unwrap_or_default())
+        .collect();
+    for _ in 0..n {
+        t.insert_column(at, column.width);
+        t.columns[at] = column.clone();
+        for (row, cell) in t.rows.iter_mut().zip(&cells) {
+            if let Some(slot) = row.cells.get_mut(at) {
+                *slot = cell.clone();
+            }
+        }
+    }
+}
+
 impl OpenCADStudio {
     pub(super) fn dispatch_table_cells(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         if !cmd.starts_with("_TCELL") {
@@ -66,18 +98,15 @@ impl OpenCADStudio {
                 "_TCELLROWABOVE" => (
                     "TABLE INSERT ROW",
                     Box::new(move |t| {
-                        let row = row_like(&t.rows[r0]);
-                        t.insert_row(r0);
-                        t.rows[r0] = row;
-                        Some((r0 + 1, c0, r1 + 1, c1))
+                        let n = r1 - r0 + 1;
+                        insert_rows_like(t, r0, r0, n);
+                        Some((r0 + n, c0, r1 + n, c1))
                     }),
                 ),
                 "_TCELLROWBELOW" => (
                     "TABLE INSERT ROW",
                     Box::new(move |t| {
-                        let row = row_like(&t.rows[r1]);
-                        t.insert_row(r1 + 1);
-                        t.rows[r1 + 1] = row;
+                        insert_rows_like(t, r1, r1 + 1, r1 - r0 + 1);
                         Some((r0, c0, r1, c1))
                     }),
                 ),
@@ -99,23 +128,14 @@ impl OpenCADStudio {
                     (
                         "TABLE INSERT COLUMN",
                         Box::new(move |t| {
-                            let (source, at) = if left { (c0, c0) } else { (c1, c1 + 1) };
-                            let mut column = t.columns[source].clone();
-                            // Rows read from a file can be short of cells.
-                            let cells: Vec<TableCell> = t
-                                .rows
-                                .iter()
-                                .map(|row| row.cells.get(source).map(blank_like).unwrap_or_default())
-                                .collect();
-                            t.insert_column(at, column.width);
-                            column.name.clear();
-                            t.columns[at] = column;
-                            for (row, cell) in t.rows.iter_mut().zip(cells) {
-                                if let Some(slot) = row.cells.get_mut(at) {
-                                    *slot = cell;
-                                }
+                            let n = c1 - c0 + 1;
+                            if left {
+                                insert_columns_like(t, c0, c0, n);
+                                Some((r0, c0 + n, r1, c1 + n))
+                            } else {
+                                insert_columns_like(t, c1, c1 + 1, n);
+                                Some((r0, c0, r1, c1))
                             }
-                            Some(if left { (r0, c0 + 1, r1, c1 + 1) } else { (r0, c0, r1, c1) })
                         }),
                     )
                 }
@@ -1691,5 +1711,59 @@ impl OpenCADStudio {
             }
             changed
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::types::Vector3;
+
+    fn table() -> Table {
+        // 4 rows x 5 columns, column widths 1..5, each cell names itself
+        let mut t = Table::new(Vector3::ZERO, 4, 5);
+        for (c, column) in t.columns.iter_mut().enumerate() {
+            column.width = (c + 1) as f64;
+        }
+        for r in 0..4 {
+            for c in 0..5 {
+                t.set_cell_text(r, c, &format!("{r}{c}"));
+            }
+        }
+        t
+    }
+
+    fn text(t: &Table, r: usize, c: usize) -> String {
+        t.cell(r, c).map(|cell| cell.text_value().to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn insert_right_of_b_to_d_adds_three_columns_after_d() {
+        // picked B1:D2 (columns 1..=3): insert right
+        let mut t = table();
+        insert_columns_like(&mut t, 3, 4, 3);
+        assert_eq!(t.columns.len(), 8);
+        assert_eq!(text(&t, 0, 3), "03");
+        for c in 4..7 {
+            assert_eq!(text(&t, 0, c), "", "column {c} is new and blank");
+            assert_eq!(t.columns[c].width, 4.0, "the new columns are as wide as D");
+        }
+        assert_eq!(text(&t, 0, 7), "04", "E moved after the three new columns");
+        assert!(t.rows.iter().all(|row| row.cells.len() == 8));
+    }
+
+    #[test]
+    fn insert_left_and_rows_above_below_follow_the_picked_span() {
+        let mut t = table();
+        insert_columns_like(&mut t, 1, 1, 3);
+        assert_eq!((text(&t, 0, 0), text(&t, 0, 1), text(&t, 0, 4)), ("00".into(), String::new(), "01".into()));
+        // picked rows 1..=2: two rows below row 2, two above row 1
+        let mut t = table();
+        insert_rows_like(&mut t, 2, 3, 2);
+        assert_eq!(t.rows.len(), 6);
+        assert_eq!((text(&t, 2, 0), text(&t, 3, 0), text(&t, 4, 0), text(&t, 5, 0)), ("20".into(), String::new(), String::new(), "30".into()));
+        let mut t = table();
+        insert_rows_like(&mut t, 1, 1, 2);
+        assert_eq!((text(&t, 0, 0), text(&t, 1, 0), text(&t, 2, 0), text(&t, 3, 0)), ("00".into(), String::new(), String::new(), "10".into()));
     }
 }

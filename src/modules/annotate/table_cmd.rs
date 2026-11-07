@@ -678,8 +678,9 @@ impl TableCommand {
         if self.dash() {
             self.remember();
         }
-        // Like the dialog's table, the new one opens its first cell.
-        CmdResult::CommitAndEditText(self.build_table(first, second))
+        // The table is placed and the command ends; a double click or
+        // TABLEDIT edits a cell when the user wants to.
+        CmdResult::CommitAndExit(self.build_table(first, second))
     }
 
     fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
@@ -1505,7 +1506,7 @@ mod tabledit_tests {
     //! shortcut and the TABLEDIT pick, so its grid math is pinned here.
     //! `Table::new` seeds 2.5-unit columns and 0.25-unit rows with the
     //! default orientation (horizontal +X, flow down).
-    use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableditCommand};
+    use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableCommand, TableditCommand};
     use crate::command::{CadCommand, CmdResult};
     use document::entities::table::CellStateFlags;
     use document::entities::Table;
@@ -1581,6 +1582,21 @@ mod tabledit_tests {
                 .expect("neighbour resolves")
                 .locked
         );
+    }
+
+    #[test]
+    fn placing_a_table_ends_without_opening_a_cell() {
+        let names = ["Title", "Header", "Data"];
+        let mut cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
+        match cmd.on_point(DVec3::new(10.0, 20.0, 0.0)) {
+            CmdResult::CommitAndExit(document::EntityType::Table(t)) => assert_eq!(t.column_count(), 3),
+            CmdResult::CommitAndEditText(_) => panic!("the new table must not open a cell editor"),
+            _ => panic!("expected the table to be committed"),
+        }
+        // the window (two corners) form too
+        let mut cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, true, true, names);
+        let _ = cmd.on_point(DVec3::ZERO);
+        assert!(matches!(cmd.on_point(DVec3::new(9.0, -6.0, 0.0)), CmdResult::CommitAndExit(_)));
     }
 
     #[test]

@@ -18594,9 +18594,26 @@ mod layout_cache_tests {
                     assert!(scene.scale_list().iter().any(|(label, _, factor)| {
                         label == name && (factor - expected_factor).abs() < 1.0e-9
                     }));
+                    let (paper, drawing) = scene.scale_ratio(name).unwrap();
+                    assert!((paper / drawing - expected_factor).abs() < 1.0e-9);
+                    assert!(scene.set_annotation_scale_named(name).is_some());
+                    assert!(
+                        ((scene.annotation_scale as f64) - 1.0 / expected_factor).abs() < 1.0e-5
+                    );
                 }
             }
         }
+    }
+
+    #[test]
+    fn virtual_standard_scale_in_metre_drawing_is_unit_aware() {
+        let mut scene = Scene::new();
+        scene.document.header.insertion_units = 6;
+        let (paper, drawing) = scene.scale_ratio("1:200").unwrap();
+        assert!((paper / drawing - 5.0).abs() < 1.0e-9);
+        assert!(scene.ensure_real_scale_list());
+        let (paper, drawing) = scene.scale_ratio("1:200").unwrap();
+        assert!((paper / drawing - 5.0).abs() < 1.0e-9);
     }
 
     #[test]

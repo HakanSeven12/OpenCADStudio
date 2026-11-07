@@ -6091,3 +6091,51 @@ mod batch4_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod array_zoom_extents_tests {
+    use crate::app::OpenCADStudio;
+    use crate::scene::assoc_array::AssocArraySpec;
+
+    /// Zoom extents (ZOOM E, a double click of the middle button) frames
+    /// every item of an associative array of a rectangle, not only the first:
+    /// the items after the first render as stubs of one prototype, and those
+    /// must count like the wires they stand for.
+    #[test]
+    fn zoom_extents_frames_every_item_of_a_rectangle_array() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let reply = app.automation_op(r#"{"op":"run","cmd":"RECTANG 0,0 10,5"}"#);
+        assert_eq!(reply["status"], "completed", "{reply}");
+        let i = app.active_tab;
+        let rectangle = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .last()
+            .map(|entity| entity.common().handle)
+            .unwrap();
+        app.handle_assoc_array(
+            vec![rectangle],
+            AssocArraySpec::Rectangular {
+                columns: 4,
+                rows: 4,
+                column_spacing: 20.0,
+                row_spacing: 30.0,
+            },
+        );
+
+        app.tabs[i].scene.fit_all();
+        let (min, max) = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .fitted_model_bounds()
+            .expect("zoom extents fitted the drawing");
+        assert!(min.abs_diff_eq(glam::DVec3::ZERO, 1e-9), "min {min:?}");
+        assert!(
+            max.abs_diff_eq(glam::DVec3::new(70.0, 95.0, 0.0), 1e-9),
+            "max {max:?}, want the last item's far corner (70, 95)"
+        );
+    }
+}

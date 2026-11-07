@@ -209,6 +209,130 @@ mod tests {
         format!("#{r:02x}{g:02x}{b:02x}")
     }
 
+    /// Text on the window background and the menu bar.
+    const PAGE_TEXT_MIN: f32 = 10.0;
+    /// Text on any reading surface (also the weak shade, panel title and
+    /// ribbon panel).
+    const READING_TEXT_MIN: f32 = 7.0;
+    /// Text on a hovered, pressed or opened surface.
+    const STATE_TEXT_MIN: f32 = 4.5;
+
+    fn every_theme() -> Vec<Theme> {
+        crate::app::config::all_themes()
+    }
+
+    #[test]
+    fn text_reads_on_every_surface_of_every_theme() {
+        for base in every_theme() {
+            let ui = ui_theme(&base);
+            let text = ui.palette().background.base.text;
+            let [page, _, bar, ..] = reading_surfaces(&ui);
+            for surface in [page, bar] {
+                let ratio = wcag_contrast(text, surface);
+                assert!(
+                    ratio >= PAGE_TEXT_MIN,
+                    "{base}: text {ratio:.1}:1 on the page"
+                );
+            }
+            let reading = worst_contrast_on(text, &reading_surfaces(&ui));
+            assert!(reading >= READING_TEXT_MIN, "{base}: text {reading:.1}:1");
+            let state = worst_contrast_on(text, &state_surfaces(&ui));
+            assert!(
+                state >= STATE_TEXT_MIN,
+                "{base}: text {state:.1}:1 in a state"
+            );
+        }
+    }
+
+    #[test]
+    fn muted_and_hint_text_read_and_stay_opaque() {
+        for base in every_theme() {
+            let ui = ui_theme(&base);
+            let surfaces = reading_surfaces(&ui);
+            let muted = muted_text(&ui);
+            let hint = hint_text(&ui);
+            assert_eq!((muted.a, hint.a), (1.0, 1.0), "{base}");
+            let ratio = worst_contrast_on(muted, &surfaces);
+            assert!(ratio >= MUTED_MIN_CONTRAST, "{base}: muted {ratio:.1}:1");
+            let ratio = worst_contrast_on(hint, &surfaces);
+            assert!(ratio >= HINT_MIN_CONTRAST, "{base}: hint {ratio:.1}:1");
+            // The ribbon's own muted levels are no weaker.
+            for color in [
+                chrome::muted(&ui),
+                chrome::title_text(&ui),
+                chrome::tab_text(&ui),
+            ] {
+                let ratio = worst_contrast_on(color, &surfaces);
+                assert!(ratio >= MUTED_MIN_CONTRAST, "{base}: chrome {ratio:.1}:1");
+            }
+        }
+    }
+
+    #[test]
+    fn icon_accents_read_on_the_ribbon() {
+        for base in every_theme() {
+            let ui = ui_theme(&base);
+            let p = ui.palette();
+            for accent in [
+                p.primary.base.color,
+                p.success.base.color,
+                p.warning.base.color,
+                p.danger.base.color,
+            ] {
+                let ratio = wcag_contrast(icon_accent(accent, &ui), chrome::panel(&ui));
+                assert!(ratio >= ACCENT_MIN_CONTRAST, "{base}: accent {ratio:.1}:1");
+            }
+        }
+    }
+
+    #[test]
+    fn ui_theme_keeps_background_accents_and_name() {
+        for base in every_theme() {
+            let ui = ui_theme(&base);
+            let (before, after) = (base.seed(), ui.seed());
+            assert_eq!(after.background, before.background, "{base}");
+            assert_eq!(after.primary, before.primary, "{base}");
+            assert_eq!(after.success, before.success, "{base}");
+            assert_eq!(after.warning, before.warning, "{base}");
+            assert_eq!(after.danger, before.danger, "{base}");
+            assert_eq!(ui.to_string(), base.to_string());
+            assert_eq!(after.text, text_for(before.background), "{base}");
+        }
+    }
+
+    #[test]
+    fn the_chosen_theme_is_found_again_and_keeps_its_canvas_and_selection() {
+        for base in every_theme() {
+            let ui = ui_theme(&base);
+            assert_eq!(base_theme(&ui), base, "{base}");
+            // Saving keeps the name; loading it gives the same theme.
+            assert_eq!(
+                crate::app::config::builtin_theme(&ui.to_string()),
+                Some(base.clone())
+            );
+            assert_eq!(
+                crate::app::config::theme_canvas_background(&ui),
+                crate::app::config::theme_canvas_background(&base),
+                "{base}"
+            );
+            assert_eq!(
+                crate::ui::overlay::theme_selection_colors(&ui),
+                crate::ui::overlay::theme_selection_colors(&base),
+                "{base}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_users_own_theme_keeps_its_text() {
+        let seed = Seed {
+            text: Color::from_rgb(0.5, 0.2, 0.2),
+            ..Theme::Dark.seed()
+        };
+        let custom = Theme::custom(USER_THEME, seed);
+        assert_eq!(ui_theme(&custom), custom);
+    }
+
     /// Contrast of the new text per surface. Run with `--ignored --nocapture`.
     #[test]
     #[ignore = "prints contrast per surface"]

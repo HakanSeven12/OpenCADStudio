@@ -1318,7 +1318,6 @@ pub static QUAD_ENTITY_COMMANDS: &[(&str, &[&str])] = &[
             "MIRROR",
             "ARRAYRECT",
             "EXPLODE",
-            "BURST",
             "CLIP",
             "BEDIT",
             "REFEDIT",

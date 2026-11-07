@@ -2833,6 +2833,7 @@ command =
     .tcount-starting-number-start = TCOUNT  ຕົວເລກເລີ່ມຕົ້ນ <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  ຄ່າເພີ່ມຂຶ້ນເທື່ອລະ <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  ຕຳແໜ່ງວາງ [Overwrite/Prefix/Suffix] <Overwrite>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .image-over-the-decode-limit-cannot-be-attached = "__ocs_fmt_0__" ມີຂະໜາດ __ocs_fmt_1__×__ocs_fmt_2__ px ແລະ ຈະຖອດລະຫັດເປັນ __ocs_fmt_3__ MB, ເກີນຂີດຈຳກັດຮູບພາບ __ocs_fmt_4__ MB ຂອງລຸ້ນນີ້ — ບໍ່ສາມາດແນບໄດ້. ຮູບພາບທີ່ຢູ່ໃນຂີດຈຳກັດຈະຖືກແນບດ້ວຍຄວາມລະອຽດການສະແດງຜົນທີ່ຫຼຸດລົງເມື່ອຈຳເປັນ.
@@ -6748,6 +6749,15 @@ ui =
     .mid-between-2-points = ເຄິ່ງກາງລະຫວ່າງ 2 ຈຸດ
     .osnap-settings = ການຕັ້ງຄ່າການຈັບຈຸດວັດຖຸ...
     .snap-override-none-next-pick-only = ບັງຄັບຈັບຈຸດ: ບໍ່ມີ (ສະເພາະການຄລິກຄັ້ງຕໍ່ໄປ).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

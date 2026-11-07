@@ -2820,6 +2820,7 @@ command =
     .tcount-starting-number-start = TCOUNT  起始编号 <__ocs_fmt_0__>：
     .tcount-increment-increment = TCOUNT  增量 <__ocs_fmt_0__>：
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  放置方式 [覆盖/前缀/后缀] <覆盖>：
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = “__ocs_fmt_0__”已在另一个选项卡中打开。在网页版中两个选项卡共享同一份存储副本——最后一次保存会覆盖另一份。
@@ -6730,6 +6731,15 @@ ui =
     .mid-between-2-points = 两点之间的中点
     .osnap-settings = 对象捕捉设置...
     .snap-override-none-next-pick-only = 捕捉替代：无（仅下一次拾取）。
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

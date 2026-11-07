@@ -2833,6 +2833,7 @@ command =
     .tcount-starting-number-start = TCOUNT  Numéro de départ <__ocs_fmt_0__> :
     .tcount-increment-increment = TCOUNT  Incrément <__ocs_fmt_0__> :
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  Position [Remplacer/Préfixe/Suffixe] <Remplacer> :
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = « __ocs_fmt_0__ » est déjà ouvert dans un autre onglet. Sur le web, les deux onglets partagent une seule copie enregistrée — le dernier enregistrement écrase l'autre.
@@ -6747,6 +6748,15 @@ ui =
     .mid-between-2-points = Milieu entre 2 points
     .osnap-settings = Paramètres d'accrochage...
     .snap-override-none-next-pick-only = Remplacement d'accrochage : Aucun (prochain point seulement).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

@@ -112,6 +112,9 @@ pub struct TextInlineState {
     pub creation: Option<Text>,
     /// Canvas-space anchor where the field is drawn (the insertion-point click).
     pub screen_anchor: iced::Point,
+    /// The field's font size: the text's height on screen when the editor
+    /// opened, so it reads at the size the drawing shows it.
+    pub font_px: f32,
 }
 pub(super) fn can_edit_text(mut handle: Handle, document: &document::Document) -> bool {
     for _ in 0..8 {
@@ -241,7 +244,14 @@ impl super::OpenCADStudio {
             field,
             creation,
             screen_anchor: iced::Point::new(60.0, 90.0),
+            font_px: 13.0,
         };
+        if let Some(world_per_pixel) = self.tabs[self.active_tab].scene.world_per_pixel() {
+            let on_screen = (state.height / f64::from(world_per_pixel)) as f32;
+            if on_screen.is_finite() {
+                state.font_px = on_screen.clamp(13.0, 72.0);
+            }
+        }
         if let Some(p) = self.tabs[self.active_tab]
             .scene
             .selection

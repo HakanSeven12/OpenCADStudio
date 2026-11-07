@@ -106,6 +106,31 @@ impl OpenCADStudio {
         Task::none()
     }
 
+    /// The picked object's properties, offered ticked or not; only what
+    /// describes it, not where it sits, is ticked (#2611). Quick Select and
+    /// FILTER's From object share it.
+    pub(in crate::app) fn sample_from_entity(
+        &self,
+        i: usize,
+        handle: Handle,
+    ) -> crate::app::QSelectSample {
+        let conditions = self.tabs[i].scene.qselect_conditions_from_entity(handle);
+        let type_name = conditions
+            .first()
+            .and_then(|condition| condition.type_filter.clone())
+            .unwrap_or_default();
+        let rows = conditions
+            .into_iter()
+            .map(|condition| {
+                let ticked = condition.property.as_ref().is_none_or(|property| {
+                    SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
+                });
+                (condition, ticked)
+            })
+            .collect();
+        crate::app::QSelectSample { type_name, rows }
+    }
+
     pub(in crate::app) fn finish_qselect_sample(
         &mut self,
         mut state: QSelectState,
@@ -122,23 +147,7 @@ impl OpenCADStudio {
         self.tabs[i].scene.clear_preview_wire();
         self.restore_pre_cmd_tangent();
         if let Some(handle) = handle {
-            // The picked object's properties are offered ticked or not; only
-            // what describes it, not where it sits, is ticked (#2611).
-            let conditions = self.tabs[i].scene.qselect_conditions_from_entity(handle);
-            let type_name = conditions
-                .first()
-                .and_then(|condition| condition.type_filter.clone())
-                .unwrap_or_default();
-            let rows = conditions
-                .into_iter()
-                .map(|condition| {
-                    let ticked = condition.property.as_ref().is_none_or(|property| {
-                        SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
-                    });
-                    (condition, ticked)
-                })
-                .collect();
-            state.sample = Some(crate::app::QSelectSample { type_name, rows });
+            state.sample = Some(self.sample_from_entity(i, handle));
             state.error = None;
         }
         self.qselect = Some(state);

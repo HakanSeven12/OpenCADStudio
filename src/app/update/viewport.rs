@@ -5847,20 +5847,7 @@ impl OpenCADStudio {
                     .clear_left_selection_gesture();
                 let task = self.begin_plugin_grip_drag(i, &candidate);
                 self.grip_engage_press = Some(p_full);
-                if self.dyn_input {
-                    use crate::app::tab_document::DynFieldEntry;
-                    self.tabs[i].dyn_fields = [
-                        crate::command::DynRole::Distance,
-                        crate::command::DynRole::Angle,
-                    ]
-                    .into_iter()
-                    .map(DynFieldEntry::from_role)
-                    .collect();
-                    self.tabs[i].dyn_active = 0;
-                    self.tabs[i].dyn_guide = crate::command::DynGuide::Polar;
-                    self.tabs[i].dyn_anchor = Some(candidate.point);
-                    self.tabs[i].dyn_ref = None;
-                }
+                self.sync_dyn_fields();
                 return task;
             }
         }

@@ -598,11 +598,37 @@ impl OpenCADStudio {
                 .push_info(crate::t!("No previous layer state.").as_ref());
             return;
         };
-        let names: Vec<String> = before.iter().map(|layer| layer.name.clone()).collect();
+        // Matched by handle: a layer renamed since, or a new one that took the
+        // old name, must not get another record's handle. Name and handle
+        // stay as they are now; only the properties go back.
+        let names: Vec<String> = before
+            .iter()
+            .filter_map(|old| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .layers
+                    .iter()
+                    .find(|layer| layer.handle == old.handle)
+                    .map(|layer| layer.name.clone())
+            })
+            .collect();
+        if names.is_empty() {
+            self.command_line
+                .push_info(crate::t!("No previous layer state.").as_ref());
+            return;
+        }
         let undo = self.begin_layer_undo(i, "LAYERP", &names);
-        for layer in before {
-            if let Some(current) = self.tabs[i].scene.document.layers.get_mut(&layer.name) {
-                *current = layer;
+        for mut old in before {
+            if let Some(current) = self.tabs[i]
+                .scene
+                .document
+                .layers
+                .iter_mut()
+                .find(|layer| layer.handle == old.handle)
+            {
+                old.name = std::mem::take(&mut current.name);
+                *current = old;
             }
         }
         self.tabs[i].scene.invalidate_layer_visibility(&names);

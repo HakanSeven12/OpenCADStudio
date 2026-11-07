@@ -45,13 +45,16 @@ pub(super) fn text_inline_overlay(
     ed: &super::super::text_inline::TextInlineState,
     canvas: (f32, f32),
 ) -> Element<'_, Message> {
+    // The box grows with the text's on-screen size, up to the canvas width.
+    let (cw, ch) = canvas;
+    let field_w = (240.0 * ed.font_px / 13.0).min((cw - 20.0).max(240.0));
     let field = text_input(t!("Text").as_ref(), &ed.value)
         .id(iced::widget::Id::new(TEXT_INLINE_ID))
         .on_input(Message::TextInlineInput)
         .on_submit(Message::TextInlineOk)
         .padding(6)
-        .size(13)
-        .width(iced::Length::Fixed(240.0));
+        .size(ed.font_px)
+        .width(iced::Length::Fixed(field_w));
 
     let panel = container(field)
         .style(move |theme: &Theme| {
@@ -69,12 +72,11 @@ pub(super) fn text_inline_overlay(
         .padding(4);
 
     // Keep the box on-screen so its field stays clickable at the edges.
-    const PANEL_W: f32 = 240.0 + 20.0;
-    const PANEL_H: f32 = 46.0;
-    let (cw, ch) = canvas;
+    let panel_w = field_w + 20.0;
+    let panel_h = ed.font_px * 1.3 + 29.0;
     let anchor = iced::Point::new(
-        (ed.screen_anchor.x - 6.0).clamp(0.0, (cw - PANEL_W).max(0.0)),
-        (ed.screen_anchor.y - 18.0).clamp(0.0, (ch - PANEL_H).max(0.0)),
+        (ed.screen_anchor.x - 6.0).clamp(0.0, (cw - panel_w).max(0.0)),
+        (ed.screen_anchor.y - panel_h * 0.4).clamp(0.0, (ch - panel_h).max(0.0)),
     );
     position_canvas_overlay(anchor, panel.into())
 }
@@ -828,9 +830,11 @@ fn mtext_editor_content<'a>(
             .into()
     } else {
         let segments = mtext_preview_segments(ed);
-        // The preview shows the text at the angle it will have in the drawing.
+        // The preview shows the text at the angle it will have in the drawing,
+        // unless that is steeper than 45°: vertical or upside-down text is
+        // laid out level, so it reads along the caret and the keyboard.
         let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
-        let rotation = if angle == 0.0 {
+        let rotation = if angle == 0.0 || angle.cos() < std::f32::consts::FRAC_1_SQRT_2 {
             (1.0, 0.0)
         } else {
             (angle.cos(), angle.sin())

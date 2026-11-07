@@ -3,6 +3,16 @@
 
 pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static str)> {
     match source {
+        "'{} cannot run while another command is waiting." => Some(("command", "transparent-already-waiting")),
+        "An object of another type cannot join a filter that needs all of its groups. Set the filter to \"any of these\" first." => Some(("ui", "filter-sample-other-type")),
+        "Unnamed" => Some(("ui", "geo-unnamed")),
+        "Local grid" => Some(("ui", "geo-local-grid")),
+        "Projected grid" => Some(("ui", "geo-projected-grid")),
+        "Geographic" => Some(("ui", "geo-geographic")),
+        "GIS Coordinates" => Some(("ui", "geo-gis-coordinates")),
+        "Coordinate system" => Some(("ui", "geo-coordinate-system")),
+        "Reference point" => Some(("ui", "geo-reference-point")),
+        "Design point" => Some(("ui", "geo-design-point")),
         "The viewport's display is locked; unlock it to change its scale." => Some(("command", "viewport-scale-locked")),
         "Select a viewport or double-click into one to set its scale." => Some(("command", "viewport-scale-needs-viewport")),
         "When the list is nonempty, only listed conditions are applied." => Some(("ui", "qselect-list-note")),

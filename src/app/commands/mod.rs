@@ -103,6 +103,8 @@ impl OpenCADStudio {
         // A command parked behind a transparent zoom / MTP goes with it.
         self.tabs[i].suspended_cmd = None;
         self.tabs[i].transparent_resume = false;
+        // So does a 'FILTER / 'QSELECT waiting to hand objects back to it.
+        self.transparent_select = None;
         // Starting any command leaves interactive navigation modes (their own
         // command arms below re-enable the selected one).
         self.tabs[i].pan_mode = false;
@@ -509,6 +511,15 @@ impl OpenCADStudio {
             || (self.tabs[i].transparent_resume && cmd.starts_with("ZOOM"));
         if transparent {
             if zoom_prompts(cmd) && self.tabs[i].active_cmd.is_some() {
+                // One command waits at a time: parking this one too would
+                // drop the one already waiting.
+                if self.tabs[i].suspended_cmd.is_some() {
+                    self.command_line.push_error(
+                        crate::tf!("'{} cannot run while another command is waiting.", cmd)
+                            .as_ref(),
+                    );
+                    return Some(Task::none());
+                }
                 self.tabs[i].suspended_cmd = self.tabs[i].active_cmd.take();
                 self.tabs[i].transparent_resume = true;
                 self.tabs[i].scene.clear_preview_wire();

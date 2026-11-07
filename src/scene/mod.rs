@@ -3647,6 +3647,16 @@ impl Scene {
         if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 }
     }
 
+    /// The drawing's geographic location (GEODATA), when it has one.
+    pub(crate) fn geo_data(&self) -> Option<&document::objects::GeoData> {
+        crate::entities::object_data::geo_objects(&self.object_data_cache)
+            .iter()
+            .find_map(|handle| match self.document.objects.get(handle) {
+                Some(document::objects::ObjectType::GeoData(geo)) => Some(geo),
+                _ => None,
+            })
+    }
+
     pub(super) fn world_per_pixel(&self) -> Option<f32> {
         if self.current_layout != "Model" {
             return None;

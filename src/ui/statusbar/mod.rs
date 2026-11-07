@@ -73,6 +73,9 @@ pub struct StatusBarLayoutState<'a> {
     pub viewport_locked: Option<bool>,
     pub lineweight_display: bool,
     pub constraint_status: Option<bool>,
+    /// A georeferenced drawing's coordinate system: its name and the
+    /// tooltip's details (#2686). `None` hides the pill.
+    pub geo_system: Option<(String, String)>,
 }
 
 /// Drafting modes and document settings represented by status bar controls.
@@ -176,6 +179,7 @@ impl StatusBar {
             viewport_locked,
             lineweight_display,
             constraint_status,
+            geo_system,
         } = layout;
         let StatusBarModes {
             ortho_mode,
@@ -549,6 +553,11 @@ impl StatusBar {
                 )
                 .into(),
             );
+        }
+        if vis(StatusPill::Geo) {
+            if let Some((name, details)) = geo_system {
+                pills.push(tip(popup_pill(name), details.into()).into());
+            }
         }
         if vis(StatusPill::Transparency) {
             pills.push(

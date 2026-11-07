@@ -4338,6 +4338,24 @@ pub enum Message {
     LayerNew,
     /// Show a node of the Layer manager's filter tree.
     LayerShow(crate::ui::window::layers::TreeNode),
+    /// The Layer manager tree's rename field: typed, Enter, Esc.
+    LayerTreeRenameEdit(String),
+    LayerTreeRenameCommit,
+    LayerTreeRenameCancel,
+    /// A tree node's eye: all its layers lit, or none of them.
+    LayerNodeEye(crate::ui::window::layers::TreeNode),
+    /// The compact Layer manager toolbar's "…" menu open or closed.
+    LayerMoreMenu(bool),
+    /// An item of that menu: close it, then do this.
+    LayerMoreRun(Box<Message>),
+    /// The compact toolbar's search field open or closed.
+    LayerSearchOpen(bool),
+    /// Pressed rows released somewhere that takes no drop.
+    LayerDragEnd,
+    /// The dragged rows are over this group (`None`: off it).
+    LayerDragOver(Option<String>),
+    /// The dragged rows dropped onto this group.
+    LayerDrop(String),
     /// Open or close a section of the Layer manager's filter tree.
     LayerTreeSection(crate::ui::window::layers::TreeSection),
     /// Show the layers the node leaves out instead.

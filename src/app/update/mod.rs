@@ -5476,6 +5476,9 @@ impl OpenCADStudio {
                 }
                 let (shift, ctrl) = (self.shift_down, self.ctrl_down);
                 let panel = &mut self.tabs[i].layers;
+                // The press may become a drag onto a group in the tree.
+                panel.dragging = true;
+                panel.tree_focus = false;
                 if ctrl {
                     // Ctrl/Cmd-click toggles this row in the selection.
                     if let Some(pos) = panel.selected_multi.iter().position(|&x| x == idx) {
@@ -12299,7 +12302,86 @@ impl OpenCADStudio {
             }
             Message::LayerShow(node) => {
                 let i = self.active_tab;
-                self.tabs[i].layers.view = node;
+                let panel = &mut self.tabs[i].layers;
+                panel.view = node;
+                panel.tree_focus = true;
+                panel.keys_active = true;
+                Task::none()
+            }
+            Message::LayerTreeRenameEdit(typed) => {
+                let i = self.active_tab;
+                if let Some((_, name)) = self.tabs[i].layers.tree_rename.as_mut() {
+                    *name = typed;
+                }
+                Task::none()
+            }
+            Message::LayerTreeRenameCommit => self.on_layer_tree_rename_commit(),
+            Message::LayerTreeRenameCancel => {
+                let i = self.active_tab;
+                self.tabs[i].layers.tree_rename = None;
+                Task::none()
+            }
+            Message::LayerNodeEye(node) => {
+                let i = self.active_tab;
+                let panel = &mut self.tabs[i].layers;
+                let members = panel.node_layers(&node);
+                let all_on = !members.is_empty() && members.iter().all(|m| panel.eye_on(m));
+                panel
+                    .eye_layers
+                    .retain(|l| !members.iter().any(|m| m.eq_ignore_ascii_case(l)));
+                if !all_on {
+                    panel.eye_layers.extend(members);
+                }
+                panel.highlight_key = None;
+                if panel.eye_layers.is_empty() {
+                    panel.highlighted = 0;
+                    self.tabs[i].scene.set_filter_preview_highlights(&[]);
+                }
+                self.refresh_layer_counts();
+                Task::none()
+            }
+            Message::LayerMoreMenu(open) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.more_menu = open;
+                Task::none()
+            }
+            Message::LayerMoreRun(msg) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.more_menu = false;
+                self.update(*msg)
+            }
+            Message::LayerSearchOpen(open) => {
+                let i = self.active_tab;
+                self.tabs[i].layers.search_open = open;
+                Task::none()
+            }
+            Message::LayerDragEnd => {
+                let i = self.active_tab;
+                let panel = &mut self.tabs[i].layers;
+                panel.dragging = false;
+                panel.drag_over = None;
+                Task::none()
+            }
+            Message::LayerDragOver(group) => {
+                let i = self.active_tab;
+                let panel = &mut self.tabs[i].layers;
+                if panel.dragging {
+                    panel.drag_over = group;
+                }
+                Task::none()
+            }
+            Message::LayerDrop(group) => {
+                let i = self.active_tab;
+                let panel = &mut self.tabs[i].layers;
+                let dropped = panel.dragging;
+                panel.dragging = false;
+                panel.drag_over = None;
+                if dropped {
+                    let layers = panel.selected_names();
+                    if !layers.is_empty() {
+                        self.set_layer_group(i, &group, &layers, true);
+                    }
+                }
                 Task::none()
             }
             Message::LayerTreeSection(section) => {
@@ -12356,7 +12438,7 @@ impl OpenCADStudio {
                 let i = self.active_tab;
                 if let Some(name) = self.tabs[i].layers.shown_group().cloned() {
                     self.tabs[i].layers.set_group(None);
-                    return self.dispatch_command(&format!("LAYERGROUP DELETE {name}"));
+                    self.delete_layer_group_named(i, &name);
                 }
                 Task::none()
             }

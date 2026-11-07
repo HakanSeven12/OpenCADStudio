@@ -295,8 +295,12 @@ pub enum TreeAction {
     Unlock,
     /// A LAYERFILTER filter: open it in FILTER's editor.
     Edit,
-    /// A LAYERFILTER filter: delete it; its layers stay.
+    /// A LAYERFILTER filter or a group: delete it; its layers stay.
     Delete,
+    /// A group or a filter: rename it in the tree.
+    Rename,
+    /// "Unused layers": the Purge window with them ticked.
+    Purge,
 }
 
 /// What a layer row's right-click menu does. The menu has one level: a
@@ -307,11 +311,11 @@ pub enum LayerMenuAction {
     New,
     Rename,
     Delete,
-    SelectAll,
-    DeselectAll,
     /// Select the drawing's objects on the selected layers.
     SelectObjects,
     NewGroup,
+    /// Add the selected layers to the group, or take them out when they
+    /// are all in it already (the item shows a tick then).
     AddToGroup(String),
     RemoveFromGroup,
     /// FILTER with this layer (the selected ones) as its condition.
@@ -460,6 +464,18 @@ pub struct LayerPanel {
     pub highlight_key: Option<(u64, Vec<String>)>,
     /// The tree's sections the user closed.
     pub closed_sections: Vec<TreeSection>,
+    /// A group or filter being renamed in the tree, with the typed name.
+    pub tree_rename: Option<(TreeNode, String)>,
+    /// The last click was in the tree: F2 renames the node shown.
+    pub tree_focus: bool,
+    /// Rows pressed and possibly being dragged onto a group.
+    pub dragging: bool,
+    /// The group the dragged rows are over.
+    pub drag_over: Option<String>,
+    /// The compact toolbar's "…" menu is open.
+    pub more_menu: bool,
+    /// The compact toolbar's search field is open.
+    pub search_open: bool,
 }
 
 impl Default for LayerPanel {
@@ -506,6 +522,12 @@ impl Default for LayerPanel {
             highlighted: 0,
             highlight_key: None,
             closed_sections: Vec::new(),
+            tree_rename: None,
+            tree_focus: false,
+            dragging: false,
+            drag_over: None,
+            more_menu: false,
+            search_open: false,
         }
     }
 }
@@ -774,7 +796,10 @@ impl LayerPanel {
                     .into(),
                 None => iced::widget::Space::new().width(0).into(),
             };
+            let no_selection = matches!(&line, TreeRow::Node(TreeNode::Selected, _))
+                && self.selected_object_layers.is_empty();
             let count: Element<'_, Message> = match count {
+                _ if no_selection => text("—").size(FONT_SZ).style(muted_style).into(),
                 Some(n) => text(n.to_string())
                     .size(FONT_SZ)
                     .style(move |theme: &Theme| text::Style {
@@ -787,12 +812,18 @@ impl LayerPanel {
                     .into(),
                 None => iced::widget::Space::new().width(0).into(),
             };
+            let label = text(label)
+                .size(FONT_SZ)
+                .wrapping(iced::widget::text::Wrapping::None)
+                .width(Fill);
+            let label = if no_selection {
+                label.style(muted_style)
+            } else {
+                label
+            };
             let entry = button(
                 row![
-                    text(label)
-                        .size(FONT_SZ)
-                        .wrapping(iced::widget::text::Wrapping::None)
-                        .width(Fill),
+                    label,
                     count
                 ]
                 .spacing(4)
@@ -803,18 +834,90 @@ impl LayerPanel {
             .padding([3, 4])
             .width(Fill);
             let entry: Element<'_, Message> = match &line {
+                // Renaming in place: a field instead of the line.
+                TreeRow::Node(node, _)
+                    if self.tree_rename.as_ref().is_some_and(|(n, _)| n == node) =>
+                {
+                    let typed = self.tree_rename.as_ref().map_or("", |(_, t)| t.as_str());
+                    text_input("", typed)
+                        .id(tree_rename_input_id())
+                        .on_input(Message::LayerTreeRenameEdit)
+                        .on_submit(Message::LayerTreeRenameCommit)
+                        .size(FONT_SZ)
+                        .padding([2, 4])
+                        .width(Fill)
+                        .style(|theme, status| field_style_with_radius(theme, status, 2.0))
+                        .into()
+                }
                 TreeRow::Node(node, _) => {
-                    let node = node.clone();
-                    iced_aw::ContextMenu::new(entry, move || tree_menu(&node)).into()
+                    let menu_node = node.clone();
+                    let entry = iced_aw::ContextMenu::new(entry, move || tree_menu(&menu_node));
+                    let mut area = mouse_area(entry);
+                    if let TreeNode::Group(group) = node {
+                        // Dragged rows drop onto a group (#2610).
+                        area = area
+                            .on_enter(Message::LayerDragOver(Some(group.clone())))
+                            .on_exit(Message::LayerDragOver(None))
+                            .on_release(Message::LayerDrop(group.clone()));
+                    }
+                    if matches!(node, TreeNode::Group(_) | TreeNode::Filter(_)) {
+                        area = area.on_double_click(Message::LayerTreeAction(
+                            node.clone(),
+                            TreeAction::Rename,
+                        ));
+                    }
+                    let dropping = matches!(node, TreeNode::Group(g)
+                        if self.dragging && self.drag_over.as_deref() == Some(g.as_str()));
+                    container(area)
+                        .style(move |theme: &Theme| container::Style {
+                            border: Border {
+                                color: if dropping {
+                                    theme.palette().primary.base.color
+                                } else {
+                                    Color::TRANSPARENT
+                                },
+                                width: 1.0,
+                                radius: 3.0.into(),
+                            },
+                            ..Default::default()
+                        })
+                        .into()
                 }
                 TreeRow::Section(..) => entry.into(),
+            };
+            // The node's eye: all its layers' objects lit in the drawing.
+            let eye: Element<'_, Message> = match &line {
+                TreeRow::Node(node, _) if self.tree_rename.is_none() => {
+                    let members = self.node_layers(node);
+                    let on = !members.is_empty() && members.iter().all(|m| self.eye_on(m));
+                    let eye = button(if on {
+                        crate::ui::icons::themed_primary(crate::ui::icons::EYE, 11.0)
+                    } else {
+                        crate::ui::icons::themed_secondary(crate::ui::icons::EYE, 11.0)
+                    })
+                    .on_press(Message::LayerNodeEye(node.clone()))
+                    .style(button::text)
+                    .padding([2, 2]);
+                    // Shown while on, or under the pointer: the tree stays
+                    // quiet as in the mockup.
+                    if on {
+                        eye.into()
+                    } else {
+                        iced::widget::hover(
+                            iced::widget::Space::new().width(15).height(15),
+                            eye,
+                        )
+                    }
+                }
+                _ => iced::widget::Space::new().width(15).into(),
             };
             list = list.push(
                 row![
                     iced::widget::Space::new().width(f32::from(depth) * 14.0),
                     arrow,
                     icon,
-                    entry
+                    entry,
+                    eye
                 ]
                 .spacing(2)
                 .align_y(iced::Center),
@@ -1191,87 +1294,12 @@ impl LayerPanel {
         };
 
         // ── Toolbar ───────────────────────────────────────────────────────
-        let toolbar = container(
-            row![
-                toolbar_btn(
-                    crate::ui::icons::PLUS,
-                    t!("New"),
-                    Message::LayerNew,
-                    compact
-                ),
-                new_vp_frozen,
-                toolbar_btn_cond(
-                    crate::ui::icons::TRASH,
-                    t!("Delete"),
-                    Message::LayerDelete,
-                    can_delete,
-                    compact,
-                ),
-                toolbar_btn_cond(
-                    crate::ui::icons::CHECK,
-                    t!("Set Current"),
-                    Message::LayerSetCurrent,
-                    can_set_current,
-                    compact,
-                ),
-                toolbar_divider(),
-                // A property filter, made with FILTER's rows.
-                toolbar_btn(
-                    crate::ui::icons::ST_FILTER,
-                    t!("New Filter"),
-                    Message::LayerFilterEdit(Some(String::new())),
-                    compact,
-                ),
-                // A group from the selected layers.
-                toolbar_btn_cond(
-                    crate::ui::icons::FOLDER_OPEN,
-                    crate::tr!("layer-groups", "new-group").into(),
-                    Message::LayerGroupNew,
-                    has_selection,
-                    compact,
-                ),
-                toolbar_divider(),
-                toolbar_btn(
-                    crate::ui::icons::LIST,
-                    t!("Layer States"),
-                    Message::Command("LAYERSTATE".into()),
-                    compact,
-                ),
-                // LAYERP: the last layer-property change undone (#2610).
-                toolbar_btn(
-                    crate::ui::icons::UNDO,
-                    t!("Previous"),
-                    Message::Command("LAYERP".into()),
-                    compact,
-                ),
-                // Layers from another drawing (#2610).
-                toolbar_btn(
-                    crate::ui::icons::IMPORT,
-                    t!("Import..."),
-                    Message::LayerImport(crate::app::layer_import::LayerImportMsg::Pick),
-                    compact,
-                ),
-                node_picker,
-                iced::widget::Space::new().width(Length::Fill),
-                // Search box: filters rows by name as the user types (#343).
-                text_input(t!("Search…").as_ref(), &self.filter)
-                    .on_input(Message::LayerManagerFilterChanged)
-                    .size(FONT_SZ)
-                    .padding([3, 6])
-                    .width(Length::Fixed(if compact { 120.0 } else { 170.0 }))
-                    .style(|theme, status| field_style_with_radius(theme, status, 2.0)),
-                // The search text as a filter, edited with FILTER's rows.
-                toolbar_text_btn(t!("Advanced…"), Message::LayerFilterEdit(None)),
-            ]
-            .spacing(4)
-            .align_y(iced::Center),
-        )
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(theme.palette().background.weak.color)),
-            ..Default::default()
-        })
-        .width(Length::Fill)
-        .padding([4, 8]);
+        let toolbar: Element<'_, Message> = if compact {
+            self.compact_toolbar(can_delete, can_set_current)
+        } else {
+            self.wide_toolbar(can_delete, can_set_current, has_selection, new_vp_frozen, node_picker)
+        };
+        let _ = has_selection;
 
         // The room the table has: beside the tree on a wide pallet.
         let table_w = if band == WidthBand::Wide && !self.columns_menu {
@@ -1401,7 +1429,10 @@ impl LayerPanel {
                 layer.name.clone(),
                 self.groups
                     .iter()
-                    .map(|(g, _)| g.clone())
+                    .map(|(g, members)| {
+                        let ticked = members.iter().any(|m| m.eq_ignore_ascii_case(&layer.name));
+                        (g.clone(), ticked)
+                    })
                     .collect::<Vec<_>>(),
                 self.shown_group().is_some(),
             );
@@ -1447,11 +1478,234 @@ impl LayerPanel {
             .height(Length::Fill)
             .into()
         } else {
-            column![toolbar, grid, self.tree_footer()]
+            column![toolbar, grid, self.compact_footer()]
                 .height(Length::Fill)
                 .into()
         }
     }
+
+    /// A wide pallet's toolbar: labelled buttons as in the mockup.
+    fn wide_toolbar<'a>(
+        &'a self,
+        can_delete: bool,
+        can_set_current: bool,
+        has_selection: bool,
+        new_vp_frozen: Element<'a, Message>,
+        node_picker: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let compact = false;
+        container(
+            row![
+                toolbar_btn(
+                    crate::ui::icons::PLUS,
+                    t!("New"),
+                    Message::LayerNew,
+                    compact
+                ),
+                new_vp_frozen,
+                toolbar_btn_cond(
+                    crate::ui::icons::TRASH,
+                    t!("Delete"),
+                    Message::LayerDelete,
+                    can_delete,
+                    compact,
+                ),
+                toolbar_btn_cond(
+                    crate::ui::icons::CHECK,
+                    t!("Set Current"),
+                    Message::LayerSetCurrent,
+                    can_set_current,
+                    compact,
+                ),
+                toolbar_divider(),
+                // A property filter, made with FILTER's rows.
+                toolbar_btn(
+                    crate::ui::icons::ST_FILTER,
+                    t!("New Filter"),
+                    Message::LayerFilterEdit(Some(String::new())),
+                    compact,
+                ),
+                // A group from the selected layers.
+                toolbar_btn_cond(
+                    crate::ui::icons::FOLDER_OPEN,
+                    crate::tr!("layer-groups", "new-group").into(),
+                    Message::LayerGroupNew,
+                    has_selection,
+                    compact,
+                ),
+                toolbar_divider(),
+                toolbar_btn(
+                    crate::ui::icons::LIST,
+                    t!("Layer States"),
+                    Message::Command("LAYERSTATE".into()),
+                    compact,
+                ),
+                // LAYERP: the last layer-property change undone (#2610).
+                toolbar_btn(
+                    crate::ui::icons::UNDO,
+                    t!("Previous"),
+                    Message::Command("LAYERP".into()),
+                    compact,
+                ),
+                // Layers from another drawing (#2610).
+                toolbar_btn(
+                    crate::ui::icons::IMPORT,
+                    t!("Import..."),
+                    Message::LayerImport(crate::app::layer_import::LayerImportMsg::Pick),
+                    compact,
+                ),
+                node_picker,
+                iced::widget::Space::new().width(Length::Fill),
+                // Search box: filters rows by name as the user types (#343).
+                text_input(t!("Search…").as_ref(), &self.filter)
+                    .on_input(Message::LayerManagerFilterChanged)
+                    .size(FONT_SZ)
+                    .padding([3, 6])
+                    .width(Length::Fixed(if compact { 120.0 } else { 170.0 }))
+                    .style(|theme, status| field_style_with_radius(theme, status, 2.0)),
+                // The search text as a filter, edited with FILTER's rows.
+                toolbar_text_btn(t!("Advanced…"), Message::LayerFilterEdit(None)),
+            ]
+            .spacing(4)
+            .align_y(iced::Center),
+        )
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.weak.color)),
+            ..Default::default()
+        })
+        .width(Length::Fill)
+        .padding([4, 8])
+        .into()
+    }
+
+    /// A medium or narrow pallet's top (#2610 mockup, Narrow and Docked):
+    /// New, Delete, Set Current, Previous and a "…" menu opening below with
+    /// the rest; a search icon that opens the field; under them the tree as
+    /// a list with the node's count.
+    fn compact_toolbar(&self, can_delete: bool, can_set_current: bool) -> Element<'_, Message> {
+        let more_items: Vec<Element<'_, Message>> = vec![
+            more_item(t!("New Filter"), Message::LayerFilterEdit(Some(String::new()))),
+            more_item(
+                crate::tr!("layer-groups", "new-group").into(),
+                Message::LayerGroupNew,
+            ),
+            more_item(t!("Layer States"), Message::Command("LAYERSTATE".into())),
+            more_item(
+                t!("Import..."),
+                Message::LayerImport(crate::app::layer_import::LayerImportMsg::Pick),
+            ),
+            more_item(t!("Advanced…"), Message::LayerFilterEdit(None)),
+        ];
+        let more_head = button(crate::ui::icons::themed(crate::ui::icons::MORE, 12.0))
+            .on_press(Message::LayerMoreMenu(!self.more_menu))
+            .style(crate::ui::style::form::button_style(self.more_menu))
+            .padding([4, 6]);
+        let more = iced_aw::DropDown::new(
+            more_head,
+            container(iced::widget::Column::with_children(more_items).width(Length::Fixed(190.0)))
+                .padding([4, 0])
+                .style(crate::ui::color_select::popup_panel_style),
+            self.more_menu,
+        )
+        .alignment(iced_aw::drop_down::Alignment::BottomStart)
+        .offset(2.0)
+        .on_dismiss(Message::LayerMoreMenu(false));
+        let search_btn = button(crate::ui::icons::themed(crate::ui::icons::SEARCH, 12.0))
+            .on_press(Message::LayerSearchOpen(!self.search_open))
+            .style(crate::ui::style::form::button_style(self.search_open))
+            .padding([4, 6]);
+        let tools = row![
+            toolbar_btn(crate::ui::icons::PLUS, t!("New"), Message::LayerNew, true),
+            toolbar_btn_cond(crate::ui::icons::TRASH, t!("Delete"), Message::LayerDelete, can_delete, true),
+            toolbar_btn_cond(
+                crate::ui::icons::CHECK,
+                t!("Set Current"),
+                Message::LayerSetCurrent,
+                can_set_current,
+                true,
+            ),
+            toolbar_btn(
+                crate::ui::icons::UNDO,
+                t!("Previous"),
+                Message::Command("LAYERP".into()),
+                true,
+            ),
+            more,
+            iced::widget::Space::new().width(Length::Fill),
+            with_tip(search_btn, t!("Search…"), true),
+        ]
+        .spacing(3)
+        .align_y(iced::Center);
+        // The tree's nodes as a list opening below, each with its count.
+        let nodes: Vec<TreeNode> = self.tree_nodes().into_iter().map(|(n, _)| n).collect();
+        let counts: Vec<(TreeNode, usize)> =
+            nodes.iter().map(|n| (n.clone(), self.node_count(n))).collect();
+        let picker = crate::ui::dropdown_list::pick_list(Some(self.view.clone()), nodes, move |n: &TreeNode| {
+            let count = counts.iter().find(|(c, _)| c == n).map_or(0, |(_, k)| *k);
+            format!("{}  ·  {count}", n.label())
+        })
+        .on_select(Message::LayerShow)
+        .text_size(FONT_SZ)
+        .padding([3, 6])
+        .width(Length::Fill);
+        let mut top = column![tools, picker].spacing(4);
+        if self.search_open || !self.filter.is_empty() {
+            top = top.push(
+                row![
+                    text_input(t!("Search…").as_ref(), &self.filter)
+                        .on_input(Message::LayerManagerFilterChanged)
+                        .size(FONT_SZ)
+                        .padding([3, 6])
+                        .width(Length::Fill)
+                        .style(|theme, status| field_style_with_radius(theme, status, 2.0)),
+                    toolbar_text_btn(t!("Advanced…"), Message::LayerFilterEdit(None)),
+                ]
+                .spacing(4)
+                .align_y(iced::Center),
+            );
+        }
+        container(top)
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.weak.color)),
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .padding([4, 6])
+            .into()
+    }
+
+    /// A compact pallet's footer, one line: the current layer and how many
+    /// layers the node shows.
+    fn compact_footer(&self) -> Element<'_, Message> {
+        container(
+            row![
+                text(format!("{}:", t!("Current layer")))
+                    .size(FONT_SZ)
+                    .style(muted_style),
+                text(self.current_layer.as_str())
+                    .size(FONT_SZ)
+                    .wrapping(iced::widget::text::Wrapping::None),
+                text(format!(
+                    "· {}",
+                    crate::tf!("{} of {} layers shown", self.visible_indices().len(), self.layers.len())
+                ))
+                .size(FONT_SZ)
+                .style(muted_style)
+                .wrapping(iced::widget::text::Wrapping::None),
+            ]
+            .spacing(4)
+            .align_y(iced::Center),
+        )
+        .clip(true)
+        .padding([4, 8])
+        .width(Length::Fill)
+        .into()
+    }
+}
+
+/// A line of the compact toolbar's "…" menu: runs its message and closes.
+fn more_item<'a>(label: Cow<'static, str>, msg: Message) -> Element<'a, Message> {
+    menu_item(label, Message::LayerMoreRun(Box::new(msg)), 0.0, None, false)
 }
 
 /// Every movable column with a tick to show it and arrows to move it; it
@@ -2175,6 +2429,7 @@ fn layer_row<'a>(
             .width(Fill),
     )
     .on_press(Message::LayerSelect(lname))
+    .on_release(Message::LayerDragEnd)
     .into()
 }
 
@@ -2205,6 +2460,11 @@ pub fn selection_colors(theme: &Theme) -> (Color, Color) {
     )
 }
 
+/// The tree's rename field, focused when a rename starts.
+pub fn tree_rename_input_id() -> iced::widget::Id {
+    iced::widget::Id::new("layer-tree-rename")
+}
+
 /// A tree line: flat, the chosen one in the selection colour, a light
 /// hover.
 fn tree_line_style(theme: &Theme, status: button::Status, chosen: bool) -> button::Style {
@@ -2227,12 +2487,35 @@ fn tree_line_style(theme: &Theme, status: button::Status, chosen: bool) -> butto
     }
 }
 
-/// A line of a right-click menu. It acts on the press: the menu's content
-/// is built anew whenever the view is, which drops a button's pressed state
-/// before the release it would act on, so a button there did nothing.
-fn menu_item(label: Cow<'static, str>, msg: Message, indent: f32) -> Element<'static, Message> {
+/// A line of a right-click menu, with its key on the right when it has one.
+/// It acts on the press: the menu's content is built anew whenever the view
+/// is, which drops a button's pressed state before the release it would act
+/// on, so a button there did nothing.
+fn menu_item(
+    label: Cow<'static, str>,
+    msg: Message,
+    indent: f32,
+    key: Option<&'static str>,
+    ticked: bool,
+) -> Element<'static, Message> {
     let line = move |hot: bool| {
-        container(text(label.clone()).size(FONT_SZ))
+        let mut content = row![].spacing(6).align_y(iced::Center);
+        // The tick column, as in the mockup: groups the row is in.
+        if indent > 0.0 {
+            content = content.push(
+                container(if ticked {
+                    crate::ui::icons::themed(crate::ui::icons::CHECK, 11.0)
+                } else {
+                    iced::widget::Space::new().width(11).into()
+                })
+                .width(12),
+            );
+        }
+        content = content.push(text(label.clone()).size(FONT_SZ).width(Fill));
+        if let Some(key) = key {
+            content = content.push(text(key).size(FONT_SZ).style(muted_style));
+        }
+        container(content)
             .width(Fill)
             .padding(Padding {
                 top: 4.0,
@@ -2243,12 +2526,8 @@ fn menu_item(label: Cow<'static, str>, msg: Message, indent: f32) -> Element<'st
             .style(move |theme: &Theme| {
                 let palette = theme.palette();
                 container::Style {
-                    background: hot.then(|| Background::Color(palette.primary.base.color)),
-                    text_color: Some(if hot {
-                        palette.primary.base.text
-                    } else {
-                        palette.background.base.text
-                    }),
+                    background: hot.then(|| Background::Color(palette.background.strong.color)),
+                    text_color: Some(palette.background.base.text),
                     ..Default::default()
                 }
             })
@@ -2259,36 +2538,25 @@ fn menu_item(label: Cow<'static, str>, msg: Message, indent: f32) -> Element<'st
         .into()
 }
 
-/// A filter tree node's right-click menu: one level (#2610).
-fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
-    let entry = |label: Cow<'static, str>, action: TreeAction| -> Element<'static, Message> {
-        menu_item(label, Message::LayerTreeAction(node.clone(), action), 0.0)
-    };
-    let mut items: Vec<Element<'static, Message>> = Vec::new();
-    if matches!(node, TreeNode::Filter(_)) {
-        items.push(entry(t!("Edit..."), TreeAction::Edit));
-        items.push(entry(t!("Delete"), TreeAction::Delete));
-    }
-    if matches!(node, TreeNode::Group(_)) {
-        items.push(entry(
-            crate::tr!("layer-groups", "delete").into(),
-            TreeAction::Delete,
-        ));
-    }
-    items.extend([
-        entry(t!("Turn All Layers On"), TreeAction::On),
-        entry(t!("Turn all off"), TreeAction::Off),
-        entry(t!("Freeze all"), TreeAction::Freeze),
-        entry(t!("Thaw All Layers"), TreeAction::Thaw),
-        entry(t!("Lock all"), TreeAction::Lock),
-        entry(t!("Unlock all"), TreeAction::Unlock),
-    ]);
+fn menu_separator() -> Element<'static, Message> {
+    container(iced::widget::Space::new())
+        .height(1)
+        .width(Fill)
+        .padding([4, 0])
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.neutral.color)),
+            ..Default::default()
+        })
+        .into()
+}
+
+fn menu_frame(items: Vec<Element<'static, Message>>, width: f32) -> Element<'static, Message> {
     container(
         iced::widget::Column::with_children(items)
-            .spacing(1)
-            .width(Length::Fixed(200.0)),
+            .spacing(0)
+            .width(Length::Fixed(width)),
     )
-    .padding(4)
+    .padding([4, 0])
     .style(|theme: &Theme| container::Style {
         background: Some(Background::Color(theme.palette().background.base.color)),
         border: Border {
@@ -2301,87 +2569,109 @@ fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
     .into()
 }
 
-/// A layer row's right-click menu. One level: the groups to add to are listed
-/// under their heading, inside the menu.
-fn row_menu(name: &str, groups: &[String], in_group: bool) -> Element<'static, Message> {
-    let entry = |label: Cow<'static, str>, action: LayerMenuAction, indent: f32| {
-        menu_item(label, Message::LayerMenu(name.to_string(), action), indent)
+/// A filter tree node's right-click menu: one level (#2610).
+fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
+    let entry = |label: Cow<'static, str>, action: TreeAction| -> Element<'static, Message> {
+        menu_item(label, Message::LayerTreeAction(node.clone(), action), 0.0, None, false)
     };
-    let separator = || {
-        container(iced::widget::Space::new())
-            .height(1)
-            .width(Fill)
-            .style(|theme: &Theme| container::Style {
-                background: Some(Background::Color(theme.palette().background.neutral.color)),
-                ..Default::default()
-            })
-            .into()
+    let mut items: Vec<Element<'static, Message>> = Vec::new();
+    match node {
+        TreeNode::Filter(_) => {
+            items.push(entry(t!("Edit..."), TreeAction::Edit));
+            items.push(menu_item(
+                t!("Rename"),
+                Message::LayerTreeAction(node.clone(), TreeAction::Rename),
+                0.0,
+                Some("F2"),
+                false,
+            ));
+            items.push(entry(t!("Delete"), TreeAction::Delete));
+            items.push(menu_separator());
+        }
+        TreeNode::Group(_) => {
+            items.push(menu_item(
+                t!("Rename"),
+                Message::LayerTreeAction(node.clone(), TreeAction::Rename),
+                0.0,
+                Some("F2"),
+                false,
+            ));
+            items.push(entry(
+                crate::tr!("layer-groups", "delete").into(),
+                TreeAction::Delete,
+            ));
+            items.push(menu_separator());
+        }
+        TreeNode::Unused => {
+            items.push(entry(t!("Delete with Purge…"), TreeAction::Purge));
+            items.push(menu_separator());
+        }
+        _ => {}
+    }
+    items.extend([
+        entry(t!("Turn all on"), TreeAction::On),
+        entry(t!("Turn all off"), TreeAction::Off),
+        entry(t!("Freeze all"), TreeAction::Freeze),
+        entry(t!("Thaw all"), TreeAction::Thaw),
+        entry(t!("Lock all"), TreeAction::Lock),
+        entry(t!("Unlock all"), TreeAction::Unlock),
+    ]);
+    menu_frame(items, 200.0)
+}
+
+/// A layer row's right-click menu, as in the mockup. One level: the groups
+/// open under "Add to group", inside the menu, ticked where the layer is in
+/// one; "New group" closes that list.
+fn row_menu(name: &str, groups: &[(String, bool)], in_group: bool) -> Element<'static, Message> {
+    let entry = |label: Cow<'static, str>, action: LayerMenuAction, key: Option<&'static str>| {
+        menu_item(label, Message::LayerMenu(name.to_string(), action), 0.0, key, false)
     };
     let mut items: Vec<Element<'static, Message>> = vec![
-        entry(t!("Set Current"), LayerMenuAction::SetCurrent, 0.0),
-        entry(t!("New"), LayerMenuAction::New, 0.0),
-        entry(t!("Rename"), LayerMenuAction::Rename, 0.0),
-        entry(t!("Delete"), LayerMenuAction::Delete, 0.0),
-        separator(),
-        entry(t!("Select All"), LayerMenuAction::SelectAll, 0.0),
-        entry(t!("Deselect All"), LayerMenuAction::DeselectAll, 0.0),
-        entry(t!("Select Objects"), LayerMenuAction::SelectObjects, 0.0),
-        separator(),
-        entry(
-            crate::tr!("layer-groups", "new-group").into(),
-            LayerMenuAction::NewGroup,
-            0.0,
-        ),
+        entry(t!("Set Current"), LayerMenuAction::SetCurrent, None),
+        entry(t!("New"), LayerMenuAction::New, None),
+        entry(t!("Rename"), LayerMenuAction::Rename, Some("F2")),
+        entry(t!("Delete"), LayerMenuAction::Delete, Some("Del")),
+        menu_separator(),
+        entry(t!("Select Objects"), LayerMenuAction::SelectObjects, None),
+        entry(t!("Filter objects..."), LayerMenuAction::FilterObjects, None),
+        entry(t!("Merge selected layers here"), LayerMenuAction::MergeHere, None),
+        menu_separator(),
+        container(
+            row![
+                text(crate::tr!("layer-groups", "add-to"))
+                    .size(FONT_SZ)
+                    .width(Fill),
+                crate::ui::icons::themed_arrow_down(8.0),
+            ]
+            .align_y(iced::Center),
+        )
+        .padding([4, 12])
+        .into(),
     ];
-    if !groups.is_empty() {
-        items.push(
-            text(crate::tr!("layer-groups", "add-to"))
-                .size(FONT_SZ)
-                .style(muted_style)
-                .into(),
-        );
-        for group in groups {
-            items.push(entry(
-                Cow::Owned(group.clone()),
-                LayerMenuAction::AddToGroup(group.clone()),
-                12.0,
-            ));
-        }
+    for (group, ticked) in groups {
+        items.push(menu_item(
+            Cow::Owned(group.clone()),
+            Message::LayerMenu(name.to_string(), LayerMenuAction::AddToGroup(group.clone())),
+            14.0,
+            None,
+            *ticked,
+        ));
     }
+    items.push(menu_item(
+        crate::tr!("layer-groups", "new-group").into(),
+        Message::LayerMenu(name.to_string(), LayerMenuAction::NewGroup),
+        14.0,
+        None,
+        false,
+    ));
     if in_group {
         items.push(entry(
             crate::tr!("layer-groups", "remove").into(),
             LayerMenuAction::RemoveFromGroup,
-            0.0,
+            None,
         ));
     }
-    items.push(separator());
-    items.push(entry(
-        t!("Filter objects..."),
-        LayerMenuAction::FilterObjects,
-        0.0,
-    ));
-    items.push(entry(
-        t!("Merge selected layers here"),
-        LayerMenuAction::MergeHere,
-        0.0,
-    ));
-    container(
-        iced::widget::Column::with_children(items)
-            .spacing(1)
-            .width(Length::Fixed(220.0)),
-    )
-    .padding(4)
-    .style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.base.color)),
-        border: Border {
-            color: theme.palette().background.neutral.color,
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
-    })
-    .into()
+    menu_frame(items, 230.0)
 }
 
 // ── Display helpers ───────────────────────────────────────────────────────
@@ -2406,7 +2696,7 @@ const COL_LW: f32 = 80.0;
 const COL_TRANS: f32 = 56.0;
 const COL_DESC: f32 = 200.0;
 /// The filter tree beside the table.
-const TREE_W: f32 = 190.0;
+const TREE_W: f32 = 210.0;
 const COL_OBJECTS: f32 = 60.0;
 /// The status column (current, used, empty).
 const COL_STATUS: f32 = 36.0;

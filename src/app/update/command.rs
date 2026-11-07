@@ -1956,17 +1956,6 @@ impl OpenCADStudio {
             A::New => self.on_layer_new(),
             A::Rename => self.update(Message::LayerRenameStart(name)),
             A::Delete => self.on_layer_delete(),
-            A::SelectAll => {
-                let panel = &mut self.tabs[i].layers;
-                panel.selected_multi = panel.visible_indices();
-                Task::none()
-            }
-            A::DeselectAll => {
-                let panel = &mut self.tabs[i].layers;
-                panel.selected = None;
-                panel.selected_multi.clear();
-                Task::none()
-            }
             A::SelectObjects => {
                 let layers = self.tabs[i].layers.selected_names();
                 let count = self.tabs[i].scene.select_objects_on_layers(&layers);
@@ -1977,7 +1966,20 @@ impl OpenCADStudio {
                 Task::none()
             }
             A::NewGroup => self.update(Message::LayerGroupNew),
-            A::AddToGroup(group) => self.update(Message::LayerGroupAdd(group)),
+            // A ticked group: the selected layers are all in it, so the
+            // item takes them out.
+            A::AddToGroup(group) => {
+                let panel = &self.tabs[i].layers;
+                let selected = panel.selected_names();
+                let all_in = panel.groups.iter().any(|(g, members)| {
+                    g == &group
+                        && selected
+                            .iter()
+                            .all(|s| members.iter().any(|m| m.eq_ignore_ascii_case(s)))
+                });
+                self.set_layer_group(i, &group, &selected, !all_in);
+                Task::none()
+            }
             A::RemoveFromGroup => self.update(Message::LayerGroupRemove),
             A::FilterObjects => {
                 let layers = self.tabs[i].layers.selected_names().join(",");
@@ -2008,8 +2010,16 @@ impl OpenCADStudio {
     /// (Shift extends), Ctrl+A selects all, Del deletes, F2 renames and Esc
     /// clears the selection. `None` leaves the key to the rest of the app.
     pub(super) fn layer_manager_key(&mut self, key: &str) -> Option<Task<Message>> {
+        use crate::ui::window::layers::{TreeAction, TreeNode};
         let i = self.active_tab;
+        if key == "ESCAPE" && self.tabs[i].layers.tree_rename.is_some() {
+            self.tabs[i].layers.tree_rename = None;
+            return Some(Task::none());
+        }
         let panel = &self.tabs[i].layers;
+        if panel.tree_rename.is_some() {
+            return None;
+        }
         if !panel.keys_active
             || panel.editing.is_some()
             || panel.transparency_edit.is_some()
@@ -2029,6 +2039,12 @@ impl OpenCADStudio {
                 Some(Task::none())
             }
             "DELETE" => Some(self.on_layer_delete()),
+            "F2" if panel.tree_focus
+                && matches!(panel.view, TreeNode::Group(_) | TreeNode::Filter(_)) =>
+            {
+                let node = panel.view.clone();
+                Some(self.update(Message::LayerTreeAction(node, TreeAction::Rename)))
+            }
             "F2" => {
                 let name = panel
                     .selected
@@ -2231,6 +2247,55 @@ impl OpenCADStudio {
     /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
     /// filter, or switch all of a node's layers at once (one undo step; the
     /// current layer is never frozen).
+    /// The tree's rename field: Enter. A group is renamed in the drawing, a
+    /// filter in the list; an empty or taken name leaves it as it was.
+    pub(super) fn on_layer_tree_rename_commit(&mut self) -> Task<Message> {
+        use crate::ui::window::layers::TreeNode;
+        let i = self.active_tab;
+        let Some((node, typed)) = self.tabs[i].layers.tree_rename.take() else {
+            return Task::none();
+        };
+        let new = typed.trim().to_string();
+        match node {
+            TreeNode::Group(old) if !new.is_empty() && new != old => {
+                let taken = self.tabs[i]
+                    .layers
+                    .groups
+                    .iter()
+                    .any(|(g, _)| g.eq_ignore_ascii_case(&new) && !g.eq_ignore_ascii_case(&old));
+                if taken {
+                    self.command_line
+                        .push_error(&crate::tr!("layer-groups", "exists", name = new));
+                } else {
+                    self.rename_layer_group_named(i, &old, &new);
+                    self.tabs[i].layers.view = TreeNode::Group(new);
+                }
+            }
+            TreeNode::Filter(old) if !new.is_empty() && new != old => {
+                let taken = self
+                    .layer_filters
+                    .iter()
+                    .any(|f| f.name.eq_ignore_ascii_case(&new) && !f.name.eq_ignore_ascii_case(&old));
+                if taken {
+                    self.command_line
+                        .push_error(&crate::tf!("A filter named \"{}\" already exists.", new));
+                } else if let Some(filter) = self
+                    .layer_filters
+                    .iter_mut()
+                    .find(|f| f.name.eq_ignore_ascii_case(&old))
+                {
+                    filter.name = new.clone();
+                    if self.tabs[i].layers.view == TreeNode::Filter(old) {
+                        self.tabs[i].layers.view = TreeNode::Filter(new);
+                    }
+                    self.refresh_layer_counts();
+                }
+            }
+            _ => {}
+        }
+        Task::none()
+    }
+
     pub(super) fn on_layer_tree_action(
         &mut self,
         node: crate::ui::window::layers::TreeNode,
@@ -2251,15 +2316,36 @@ impl OpenCADStudio {
                 self.refresh_layer_counts();
                 return Task::none();
             }
-            // A group goes from the tree's menu; its layers stay.
+            // A group goes from the tree's menu; its layers stay. Called
+            // directly: a name with a space would not survive the command
+            // line.
             (TreeNode::Group(name), A::Delete) => {
                 let name = name.clone();
                 if self.tabs[i].layers.view == node {
                     self.tabs[i].layers.set_group(None);
                 }
-                return self.dispatch_command(&format!("LAYERGROUP DELETE {name}"));
+                self.delete_layer_group_named(i, &name);
+                return Task::none();
             }
-            (_, A::Edit | A::Delete) => return Task::none(),
+            (TreeNode::Group(name) | TreeNode::Filter(name), A::Rename) => {
+                let panel = &mut self.tabs[i].layers;
+                panel.tree_rename = Some((node.clone(), name.clone()));
+                return iced::widget::operation::focus(crate::ui::window::layers::tree_rename_input_id())
+                    .chain(iced::widget::operation::select_all(
+                        crate::ui::window::layers::tree_rename_input_id(),
+                    ));
+            }
+            (TreeNode::Unused, A::Purge) => {
+                let unused = self.tabs[i].layers.node_layers(&TreeNode::Unused);
+                self.open_purge_dialog();
+                if let Some(state) = self.purge_dialog.as_mut() {
+                    for (name, ticked) in &mut state.items[0] {
+                        *ticked = unused.iter().any(|u| u.eq_ignore_ascii_case(name));
+                    }
+                }
+                return Task::none();
+            }
+            (_, A::Edit | A::Delete | A::Rename | A::Purge) => return Task::none(),
             _ => {}
         }
         let mut names = self.tabs[i].layers.node_layers(&node);
@@ -2280,7 +2366,7 @@ impl OpenCADStudio {
             A::Thaw => self.edit_layers(i, &label, &names, |layer| layer.thaw()),
             A::Lock => self.edit_layers(i, &label, &names, |layer| layer.lock()),
             A::Unlock => self.edit_layers(i, &label, &names, |layer| layer.unlock()),
-            A::Edit | A::Delete => {}
+            A::Edit | A::Delete | A::Rename | A::Purge => {}
         }
         self.refresh_layer_panel();
         Task::none()
@@ -6879,16 +6965,7 @@ mod layer_name_target_tests {
         assert_eq!(selected(&app), ["ZULU"]);
         assert_eq!(app.tabs[i].scene.selected.len(), 1);
         assert!(app.tabs[i].scene.selected.contains(&on_zulu));
-        let _ = app.update(Message::LayerMenu(
-            "ZULU".into(),
-            LayerMenuAction::SelectAll,
-        ));
-        assert_eq!(selected(&app).len(), 3);
-        let _ = app.update(Message::LayerMenu(
-            "ZULU".into(),
-            LayerMenuAction::DeselectAll,
-        ));
-        assert!(selected(&app).is_empty());
+        // Select All / Deselect All left the menu (Ctrl+A and Esc do them).
         let _ = app.update(Message::LayerMenu(
             "ALPHA".into(),
             LayerMenuAction::SetCurrent,

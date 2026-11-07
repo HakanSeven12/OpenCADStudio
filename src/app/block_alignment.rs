@@ -18,7 +18,7 @@ impl OpenCADStudio {
                 id: alignment.id,
                 world: alignment.anchor - DVec3::from_array(offset),
                 is_midpoint: false,
-                shape: GripShape::Triangle,
+                shape: GripShape::Alignment,
                 dir: Some(alignment.direction),
                 axis: None,
             })

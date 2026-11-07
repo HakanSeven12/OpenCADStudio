@@ -1540,9 +1540,9 @@ fn idle_grip_color(
         document::types::aci_table::aci_to_rgb(visual.grip_dynamic)
             .map(|(r, g, b)| Color::from_rgb8(r, g, b))
             .unwrap_or(palette.primary.base.color)
-    } else if matches!(grip.shape, GripShape::Diamond) {
-        // The table-cell fill grip is light cyan, apart from the cell range's
-        // square grips.
+    } else if matches!(grip.shape, GripShape::Diamond | GripShape::Alignment) {
+        // The table-cell fill grip and the alignment tag are light cyan, apart
+        // from the cell range's square grips.
         Color::from_rgb8(0, 191, 255)
     } else if visual.grip_color > 0 {
         if let Some((r, g, b)) = document::types::aci_table::aci_to_rgb(visual.grip_color) {
@@ -1553,6 +1553,35 @@ fn idle_grip_color(
     } else {
         palette.primary.base.color
     }
+}
+
+/// The five corners of the alignment tag, clockwise from its top left: 0.72
+/// units wide per unit of height, the straight sides ending 62% of the way
+/// down and the point at the bottom.
+fn alignment_tag_points(centre: Point, h: f32) -> [Point; 5] {
+    let half_width = h * 0.72;
+    [
+        Point::new(centre.x - half_width, centre.y - h),
+        Point::new(centre.x + half_width, centre.y - h),
+        Point::new(centre.x + half_width, centre.y + h * 0.24),
+        Point::new(centre.x, centre.y + h),
+        Point::new(centre.x - half_width, centre.y + h * 0.24),
+    ]
+}
+
+/// True when an idle marker paints in its grip colour rather than the
+/// background: an explicitly filled grip, a dynamic-block grip, and the
+/// selectors that are filled by design.
+fn paints_filled(grip: &GripMarker) -> bool {
+    grip.is_filled
+        || grip.is_dynamic
+        || matches!(
+            grip.shape,
+            GripShape::Dropdown
+                | GripShape::DropdownAdjacent
+                | GripShape::Diamond
+                | GripShape::Alignment
+        )
 }
 
 fn draw_grip_marker(
@@ -1627,6 +1656,14 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::Alignment => canvas::Path::new(|b| {
+            let corners = alignment_tag_points(sp, h);
+            b.move_to(corners[0]);
+            for corner in &corners[1..] {
+                b.line_to(*corner);
+            }
+            b.close();
+        }),
         GripShape::Diamond => canvas::Path::new(|b| {
             let r = h * 1.25;
             b.move_to(Point::new(sp.x, sp.y - r));
@@ -1681,10 +1718,7 @@ fn draw_grip_marker(
         } else {
             idle_grip_color(grip, palette, visual)
         };
-        let fill = if grip.is_filled || grip.is_dynamic || matches!(
-            grip.shape,
-            GripShape::Dropdown | GripShape::DropdownAdjacent | GripShape::Diamond
-        ) {
+        let fill = if paints_filled(grip) {
             color
         } else {
             palette.background.base.color.scale_alpha(0.7)
@@ -6754,6 +6788,62 @@ mod selection_canvas_state_tests {
 #[cfg(test)]
 mod selection_visual_color_tests {
     use super::*;
+
+    #[test]
+    fn alignment_tag_keeps_the_measured_proportions() {
+        let h = 5.0;
+        let corners = alignment_tag_points(Point::new(100.0, 100.0), h);
+        let width = corners[1].x - corners[0].x;
+        let height = corners[3].y - corners[0].y;
+        assert!(
+            (width / height - 0.72).abs() < 1e-6,
+            "0.72 wide per unit tall"
+        );
+        assert!(
+            ((corners[2].y - corners[0].y) / height - 0.62).abs() < 1e-6,
+            "the straight sides end 62% of the way down"
+        );
+        assert_eq!(corners[0].y, corners[1].y, "flat top");
+        assert_eq!(corners[2].y, corners[4].y, "the shoulders share one line");
+        assert!(
+            (corners[3].x - 100.0).abs() < 1e-6,
+            "the point sits on the axis"
+        );
+        assert!(corners[3].y > corners[2].y, "the tag points down");
+    }
+
+    #[test]
+    fn alignment_grip_is_a_filled_cyan_tag() {
+        let tag = GripMarker {
+            pos: Point::ORIGIN,
+            shape: GripShape::Alignment,
+            is_hot: false,
+            is_hovered: false,
+            dir: None,
+            is_plugin: false,
+            is_authoring: false,
+            is_dynamic: false,
+            is_filled: false,
+        };
+        let square = GripMarker {
+            shape: GripShape::Square,
+            ..tag.clone()
+        };
+        let palette = Theme::Dark.palette();
+        let mut visual = SelectionVisualOptions::default();
+        visual.grip_color = 1;
+        assert_eq!(
+            idle_grip_color(&tag, palette, &visual),
+            Color::from_rgb8(0, 191, 255),
+            "the alignment tag keeps its own cyan against a custom grip colour"
+        );
+        assert_eq!(
+            idle_grip_color(&square, palette, &visual),
+            Color::from_rgb8(255, 0, 0)
+        );
+        assert!(paints_filled(&tag), "the tag paints solid, not hollow");
+        assert!(!paints_filled(&square));
+    }
 
     #[test]
     fn idle_plugin_square_matches_native_custom_color_and_square_paint() {

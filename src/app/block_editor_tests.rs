@@ -9403,6 +9403,13 @@ fn block_alignment_runtime_grip_events_preview_history_and_native_roundtrips() {
             select(&mut app);
             let alignment = app.tabs[i].scene.alignment_grips(insert).remove(0);
             assert!(app.tabs[i].selected_grips.iter().any(|grip| grip.id == alignment.id && grip.world.distance(alignment.anchor) < 1e-9));
+            assert!(
+                app.tabs[i].selected_grips.iter().any(|grip| {
+                    grip.id == alignment.id
+                        && grip.shape == crate::scene::model::object::GripShape::Alignment
+                }),
+                "the alignment grip paints as the tag, not a direction triangle"
+            );
             let before = app.tabs[i].scene.document.clone();
             let depth = app.tabs[i].history.undo_stack.len();
             click(&mut app, alignment.anchor);

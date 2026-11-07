@@ -189,6 +189,8 @@ pub enum GripShape {
     Circle,
     /// Diamond (a table cell range's fill handle).
     Diamond,
+    /// Downward-pointing tag: the alignment parameter's anchor grip.
+    Alignment,
     /// Screen-offset menu selector.
     Dropdown,
     /// Menu selector placed immediately beside its anchor grip.

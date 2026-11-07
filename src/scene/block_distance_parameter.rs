@@ -802,18 +802,12 @@ mod tests {
                 assert_eq!(scene.document.objects.get(handle), Some(object));
             }
         }
-        if let (ObjectType::DynamicBlock(old), ObjectType::DynamicBlock(new)) =
-            (&before.objects[&graph], &scene.document.objects[&graph])
-        {
-            if let (
-                DynamicBlockData::EvaluationGraph(old),
-                DynamicBlockData::EvaluationGraph(new),
-            ) = (&old.data, &new.data)
-            {
-                assert_eq!(&new.nodes[..old.nodes.len()], &old.nodes);
-                assert_eq!(&new.edges[..old.edges.len()], &old.edges);
-            }
-        }
+        let (ObjectType::DynamicBlock(old), ObjectType::DynamicBlock(new)) =
+            (&before.objects[&graph], &scene.document.objects[&graph]) else { panic!("Expected authoring graphs") };
+        let (DynamicBlockData::EvaluationGraph(old), DynamicBlockData::EvaluationGraph(new)) =
+            (&old.data, &new.data) else { panic!("Expected evaluation graph data") };
+        assert_eq!(&new.nodes[..old.nodes.len()], &old.nodes);
+        assert_eq!(&new.edges[..old.edges.len()], &old.edges);
         assert_native(&scene.document, &handles);
         for extension in ["dwg", "dxf"] {
             let bytes =

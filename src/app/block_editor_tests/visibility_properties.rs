@@ -448,14 +448,16 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
                         crate::app::block_parameter_properties::parse_value(&value)
                     {
                         for next in [number + 1., number + 10.] {
-                            if let Err(err) = properties::evaluate(
+                            let result = properties::evaluate(
                                 &doc,
                                 None,
                                 key,
                                 properties::Input::Number(next),
-                            ) {
-                                fail(&prop.label, err);
-                                break;
+                            );
+                            match result {
+                                Ok(Some(_)) => {},
+                                Ok(None) => fail(&prop.label, "different value produced no edit"),
+                                Err(err) => { fail(&prop.label, err); break; },
                             }
                         }
                     } else {
@@ -475,8 +477,10 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
                         } else {
                             properties::evaluate(&doc, None, key, properties::Input::Choice(next))
                         };
-                        if let Err(err) = result {
-                            fail(&format!("{} -> {next}", prop.label), err);
+                        match result {
+                            Ok(Some(_)) => {},
+                            Ok(None) => fail(&prop.label, "different choice produced no edit"),
+                            Err(err) => fail(&format!("{} -> {next}", prop.label), err),
                         }
                     }
                 }
@@ -509,7 +513,10 @@ fn synthetic_dynamic_and_static_references_audit_properties_and_grips() {
                 let _ = app.feed_command(crate::command::StepInput::Point(
                     grip.world + direction * 3.,
                 ));
-                app.tabs[i].active_cmd = None;
+                assert!(app.tabs[i].active_cmd.is_none(), "grip input must finish the command");
+            }
+            if app.tabs[i].scene.document == doc {
+                fail(&format!("grip {node}/{role}"), "grip produced no edit");
             }
             if let Some(error) = app.command_line.last_error.as_deref() {
                 fail(&format!("grip {node}/{role}"), error);

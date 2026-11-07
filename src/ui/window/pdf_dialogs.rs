@@ -506,7 +506,7 @@ fn page_tiles<'a>(
                             color: Some(if chosen {
                                 theme.palette().primary.base.color
                             } else {
-                                theme.palette().background.base.text.scale_alpha(0.68)
+                                crate::ui::style::readable::muted_text(theme)
                             }),
                         })
                 ]

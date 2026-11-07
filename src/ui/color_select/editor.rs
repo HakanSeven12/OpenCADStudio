@@ -394,7 +394,7 @@ fn number_box(
         .style(
             |theme: &Theme, _status| iced_aw::style::number_input::Style {
                 button_background: None,
-                icon_color: theme.palette().background.base.text.scale_alpha(0.75),
+                icon_color: crate::ui::style::readable::muted_text(theme),
             },
         );
     match unit {

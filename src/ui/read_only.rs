@@ -36,8 +36,8 @@ fn read_only_style(theme: &Theme, _status: Status) -> text_input::Style {
             radius: 2.0.into(),
         },
         icon: Color::TRANSPARENT,
-        placeholder: palette.background.base.text.scale_alpha(0.48),
-        value: palette.background.base.text.scale_alpha(0.72),
+        placeholder: crate::ui::style::readable::hint_text(theme),
+        value: crate::ui::style::readable::muted_text(theme),
         selection: palette.primary.base.color.scale_alpha(0.5),
     }
 }

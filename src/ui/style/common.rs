@@ -1,8 +1,9 @@
 //! Style helpers shared across the style windows.
 //!
 //! Centralizes `muted_style` (and its alias `muted_text_style`) which were
-//! previously duplicated in 7 style files with byte-identical bodies (alpha
-//! 0.68). A single source ensures a theme change updates one place.
+//! previously duplicated in 7 style files with byte-identical bodies (they
+//! faded text to 0.68 alpha; it is now opaque, see `readable::muted_text`).
+//! A single source ensures a theme change updates one place.
 //!
 //! **`btn_s` is intentionally NOT deduped here.** The two `btn_s` locals
 //! (`plotstyle.rs:41` and `style_manager.rs:299`) have divergent bodies:
@@ -12,11 +13,10 @@
 
 use iced::{Color, Theme};
 
-/// Muted secondary text style — `background.base.text` at 68% opacity.
+/// Muted secondary text style: opaque and readable in every theme (see
+/// [`crate::ui::style::readable::muted_text`]).
 pub(crate) fn muted_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
-    }
+    crate::ui::style::readable::muted_style(theme)
 }
 
 /// Alias for call sites that used `muted_text_style` (e.g. `style_manager`).

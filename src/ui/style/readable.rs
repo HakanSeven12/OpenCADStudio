@@ -85,42 +85,110 @@ pub fn base_theme(theme: &Theme) -> Theme {
     }
 }
 
-/// Every surface interface text is drawn on in `theme`: iced's background
-/// shades and the ribbon, panel and hover surfaces OCS derives from them.
-pub fn text_surfaces(theme: &Theme) -> [Color; 8] {
+/// The least contrast a hint (an input's placeholder, an empty-list note)
+/// keeps: WCAG AA for body text. Lower than [`MUTED_MIN_CONTRAST`] so a
+/// placeholder still looks different from a typed value.
+pub const HINT_MIN_CONTRAST: f32 = 4.5;
+/// How far a hint is mixed towards the background at most: about the 0.48
+/// alpha placeholders used to be drawn at.
+pub const HINT_MAX_FADE: f32 = 0.52;
+
+/// The surfaces interface text is read on in `theme`: the window
+/// background and its weak shade, and the menu bar, panel title and ribbon
+/// panel OCS derives from them.
+pub fn reading_surfaces(theme: &Theme) -> [Color; 5] {
     let background = theme.palette().background;
     [
         background.base.color,
         background.weak.color,
-        background.strong.color,
         chrome::bar(theme),
         chrome::title_bar(theme),
         chrome::panel(theme),
+    ]
+}
+
+/// The surfaces text sits on only in a state: hovered and pressed
+/// controls, an opened panel and the strong background shade.
+pub fn state_surfaces(theme: &Theme) -> [Color; 3] {
+    [
+        theme.palette().background.strong.color,
         chrome::open_panel(theme),
         chrome::hover(theme),
     ]
 }
 
-/// The lowest contrast `color` has on any of `theme`'s [`text_surfaces`].
-pub fn worst_contrast(color: Color, theme: &Theme) -> f32 {
-    text_surfaces(theme)
-        .into_iter()
-        .map(|surface| wcag_contrast(color, surface))
+/// Every surface interface text is drawn on in `theme`:
+/// [`reading_surfaces`] and [`state_surfaces`].
+pub fn text_surfaces(theme: &Theme) -> [Color; 8] {
+    let [a, b, c, d, e] = reading_surfaces(theme);
+    let [f, g, h] = state_surfaces(theme);
+    [a, b, c, d, e, f, g, h]
+}
+
+/// The lowest contrast `color` has on any of `surfaces`.
+pub fn worst_contrast_on(color: Color, surfaces: &[Color]) -> f32 {
+    surfaces
+        .iter()
+        .map(|surface| wcag_contrast(color, *surface))
         .fold(f32::MAX, f32::min)
 }
 
-/// Secondary text: the theme's text mixed towards its background, opaque,
-/// as far as [`MUTED_MAX_FADE`] but never below [`MUTED_MIN_CONTRAST`] on
-/// any surface. Use it instead of fading text with alpha.
-pub fn muted_text(theme: &Theme) -> Color {
+/// The lowest contrast `color` has on any of `theme`'s [`text_surfaces`].
+pub fn worst_contrast(color: Color, theme: &Theme) -> f32 {
+    worst_contrast_on(color, &text_surfaces(theme))
+}
+
+/// The theme's text mixed towards its background, opaque, as far as
+/// `max_fade` but never below `min_contrast` on any reading surface.
+fn faded_text(theme: &Theme, max_fade: f32, min_contrast: f32) -> Color {
     let background = theme.palette().background.base;
+    let surfaces = reading_surfaces(theme);
     const STEPS: u8 = 32;
     (0..=STEPS)
         .rev()
-        .map(|step| MUTED_MAX_FADE * f32::from(step) / f32::from(STEPS))
+        .map(|step| max_fade * f32::from(step) / f32::from(STEPS))
         .map(|fade| chrome::mix(background.text, background.color, fade))
-        .find(|color| worst_contrast(*color, theme) >= MUTED_MIN_CONTRAST)
+        .find(|color| worst_contrast_on(*color, &surfaces) >= min_contrast)
         .unwrap_or(background.text)
+}
+
+/// Secondary text (labels, section headings, values shown but not
+/// edited): the theme's text mixed towards its background, opaque, as far
+/// as [`MUTED_MAX_FADE`] but never below [`MUTED_MIN_CONTRAST`] on any
+/// reading surface. Use it instead of fading text with alpha.
+pub fn muted_text(theme: &Theme) -> Color {
+    faded_text(theme, MUTED_MAX_FADE, MUTED_MIN_CONTRAST)
+}
+
+/// A hint (an input's placeholder, an empty-list note): fainter than
+/// [`muted_text`] but never below [`HINT_MIN_CONTRAST`].
+pub fn hint_text(theme: &Theme) -> Color {
+    faded_text(theme, HINT_MAX_FADE, HINT_MIN_CONTRAST)
+}
+
+/// `color` as secondary text: itself when it already reads at
+/// [`MUTED_MIN_CONTRAST`] on every reading surface, otherwise
+/// [`muted_text`].
+pub fn at_least_muted(color: Color, theme: &Theme) -> Color {
+    if worst_contrast_on(color, &reading_surfaces(theme)) >= MUTED_MIN_CONTRAST {
+        color
+    } else {
+        muted_text(theme)
+    }
+}
+
+/// A text style in [`muted_text`].
+pub fn muted_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(muted_text(theme)),
+    }
+}
+
+/// A text style in [`hint_text`].
+pub fn hint_style(theme: &Theme) -> iced::widget::text::Style {
+    iced::widget::text::Style {
+        color: Some(hint_text(theme)),
+    }
 }
 
 /// `accent` moved towards `text` only as far as it takes to reach `ratio`

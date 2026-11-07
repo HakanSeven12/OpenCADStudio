@@ -1449,7 +1449,7 @@ impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
             frame.fill_text(iced::widget::canvas::Text {
                 content: self.text.clone(),
                 position: iced::Point::new(start, 0.0),
-                color: theme.palette().background.base.text.scale_alpha(0.72),
+                color: crate::ui::style::readable::muted_text(theme),
                 size: iced::Pixels(13.0),
                 align_x,
                 align_y: iced::alignment::Vertical::Center,

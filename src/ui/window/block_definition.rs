@@ -213,7 +213,7 @@ pub(crate) fn group<'a>(
             text(title.into())
                 .size(11)
                 .style(|theme: &Theme| text::Style {
-                    color: Some(theme.palette().background.strongest.text.scale_alpha(0.85)),
+                    color: Some(crate::ui::style::readable::muted_text(theme)),
                 }),
             body.into(),
         ]
@@ -479,7 +479,7 @@ pub fn view_window<'a>(
             text(t!("No objects selected"))
                 .size(10)
                 .style(|theme: &Theme| text::Style {
-                    color: Some(theme.palette().background.strongest.text.scale_alpha(0.75)),
+                    color: Some(crate::ui::style::readable::muted_text(theme)),
                 }),
         ]
         .spacing(5)
@@ -641,7 +641,7 @@ pub fn view_window<'a>(
                     width: 1.0,
                     radius: 3.0.into(),
                 },
-                placeholder: palette.background.base.text.scale_alpha(0.48),
+                placeholder: crate::ui::style::readable::hint_text(theme),
                 value: palette.background.base.text,
                 selection: palette.primary.base.color.scale_alpha(0.5),
             }

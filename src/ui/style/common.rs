@@ -73,9 +73,16 @@ pub(crate) fn accessible_accent(accent: Color, bg: Color, fallback: Color) -> Co
 /// to reach the 4.5:1 of body text (WCAG 1.4.3), so it keeps its hue in a
 /// light and a dark theme alike.
 pub(crate) fn readable_accent(accent: Color, bg: Color, text: Color) -> Color {
+    readable_accent_at(accent, bg, text, 4.5)
+}
+
+/// [`readable_accent`] for a contrast `ratio` of its own: `accent` moved
+/// towards `text` in tenths only as far as it takes to reach `ratio` on
+/// `bg`, or `text` when no mix reaches it.
+pub(crate) fn readable_accent_at(accent: Color, bg: Color, text: Color, ratio: f32) -> Color {
     (0..=10)
         .map(|step| crate::ui::style::chrome::mix(accent, text, step as f32 / 10.0))
-        .find(|color| wcag_contrast(*color, bg) >= 4.5)
+        .find(|color| wcag_contrast(*color, bg) >= ratio)
         .unwrap_or(text)
 }
 

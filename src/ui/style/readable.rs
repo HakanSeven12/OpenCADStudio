@@ -17,7 +17,7 @@ use iced::theme::palette::Seed;
 use iced::{Color, Theme};
 
 use super::chrome;
-use super::common::{wcag_contrast, wcag_luminance};
+use super::common::{readable_accent_at, wcag_contrast, wcag_luminance};
 
 /// Interface text on a dark background: near white, since pure white glares
 /// on a very dark background.
@@ -191,20 +191,13 @@ pub fn hint_style(theme: &Theme) -> iced::widget::text::Style {
     }
 }
 
-/// `accent` moved towards `text` only as far as it takes to reach `ratio`
-/// against `bg`, so it keeps its hue in a light and a dark theme alike.
-pub fn readable_accent_on(accent: Color, bg: Color, text: Color, ratio: f32) -> Color {
-    (0..=20)
-        .map(|step| chrome::mix(accent, text, step as f32 / 20.0))
-        .find(|color| wcag_contrast(*color, bg) >= ratio)
-        .unwrap_or(text)
-}
-
 /// An accent drawn in an icon on the ribbon: readable at
-/// [`ACCENT_MIN_CONTRAST`] on the panel surface, in the theme's hue.
+/// [`ACCENT_MIN_CONTRAST`] on the panel surface, in the theme's hue (see
+/// [`readable_accent_at`]). The theme's own accent is left as it is for
+/// buttons, selections and fills.
 pub fn icon_accent(accent: Color, theme: &Theme) -> Color {
     let text = theme.palette().background.base.text;
-    readable_accent_on(accent, chrome::panel(theme), text, ACCENT_MIN_CONTRAST)
+    readable_accent_at(accent, chrome::panel(theme), text, ACCENT_MIN_CONTRAST)
 }
 
 #[cfg(test)]

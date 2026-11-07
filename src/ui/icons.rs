@@ -256,21 +256,25 @@ struct SemanticColors {
 impl SemanticColors {
     fn from_theme(theme: &Theme) -> Self {
         let palette = theme.palette();
+        // The accents an icon is drawn in keep the theme's hue but are
+        // pushed towards the text until they read on the ribbon.
+        let accent =
+            |color: Color| color_hex(crate::ui::style::readable::icon_accent(color, theme));
         Self {
             background: color_hex(palette.background.strong.color),
             text: color_hex(palette.background.base.text),
             primary_weak: color_hex(palette.primary.weak.color),
-            primary: color_hex(palette.primary.base.color),
+            primary: accent(palette.primary.base.color),
             primary_strong: color_hex(palette.primary.strong.color),
             secondary_weak: color_hex(palette.secondary.weak.color),
             secondary: color_hex(palette.secondary.base.color),
             secondary_strong: color_hex(palette.secondary.strong.color),
             success_weak: color_hex(palette.success.weak.color),
-            success: color_hex(palette.success.base.color),
-            warning: color_hex(palette.warning.base.color),
+            success: accent(palette.success.base.color),
+            warning: accent(palette.warning.base.color),
             warning_strong: color_hex(palette.warning.strong.color),
             danger_weak: color_hex(palette.danger.weak.color),
-            danger: color_hex(palette.danger.base.color),
+            danger: accent(palette.danger.base.color),
         }
     }
 }

@@ -566,7 +566,10 @@ impl OpenCADStudio {
         // ends here.
         let outline_switch_before = self.outline_switch_hover.then(|| {
             (
-                matches!(&msg, Message::WindowResized(..) | Message::OsWindowResized(..)),
+                matches!(
+                    &msg,
+                    Message::WindowResized(..) | Message::OsWindowResized(..)
+                ),
                 self.outline_switch_key(),
             )
         });

@@ -12348,7 +12348,8 @@ impl OpenCADStudio {
             Message::LayerMoreRun(msg) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.more_menu = false;
-                self.update(*msg)
+                let task = self.update(*msg);
+                Task::batch([task, self.layers_dialog_to_front()])
             }
             Message::LayerSearchOpen(open) => {
                 let i = self.active_tab;

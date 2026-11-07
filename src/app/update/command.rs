@@ -1984,7 +1984,7 @@ impl OpenCADStudio {
             A::FilterObjects => {
                 let layers = self.tabs[i].layers.selected_names().join(",");
                 self.filter_open_for_layers(layers);
-                Task::none()
+                self.layers_dialog_to_front()
             }
             A::MergeHere => {
                 let sources: Vec<String> = merge_sources
@@ -2241,7 +2241,7 @@ impl OpenCADStudio {
             }
         };
         self.filter_open_layers(name, filter);
-        Task::none()
+        self.layers_dialog_to_front()
     }
 
     /// A filter tree node's right-click menu: edit or delete a LAYERFILTER
@@ -2343,7 +2343,7 @@ impl OpenCADStudio {
                         *ticked = unused.iter().any(|u| u.eq_ignore_ascii_case(name));
                     }
                 }
-                return Task::none();
+                return self.layers_dialog_to_front();
             }
             (_, A::Edit | A::Delete | A::Rename | A::Purge) => return Task::none(),
             _ => {}
@@ -7130,6 +7130,131 @@ mod layer_name_target_tests {
         assert_eq!(shown(&app), ["ALPHA", "ZULU"]);
         let _ = app.update(Message::LayerShow(TreeNode::All));
         assert_eq!(shown(&app).len(), 4);
+    }
+
+    /// #2610 (F1): a group with a space in its name is renamed in place and
+    /// deleted from the tree's menu; a filter is renamed too, and a taken
+    /// name is refused.
+    #[test]
+    fn tree_rename_and_delete_with_spaces() {
+        use crate::ui::window::layers::{TreeAction, TreeNode};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.update(Message::LayerSelect("ZULU".into()));
+        let _ = app.update(Message::LayerGroupNew);
+        let group = app.tabs[i].layers.groups[0].0.clone();
+        assert!(
+            group.contains(' '),
+            "a default name like `Group 1` has a space"
+        );
+        let node = TreeNode::Group(group.clone());
+        let _ = app.update(Message::LayerTreeAction(node.clone(), TreeAction::Rename));
+        assert_eq!(app.tabs[i].layers.tree_rename, Some((node, group.clone())));
+        let _ = app.update(Message::LayerTreeRenameEdit("1. csoport".into()));
+        let _ = app.update(Message::LayerTreeRenameCommit);
+        assert_eq!(app.tabs[i].layers.groups[0].0, "1. csoport");
+        assert_eq!(app.tabs[i].layers.groups[0].1, ["ZULU"]);
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Group("1. csoport".into()),
+            TreeAction::Delete,
+        ));
+        assert!(
+            app.tabs[i].layers.groups.is_empty(),
+            "deleted despite the space"
+        );
+        // A filter: renamed; a second one may not take its name.
+        let _ = app.run_command_line("LAYERFILTER NEW LETTERS A*,Z*");
+        let _ = app.run_command_line("LAYERFILTER NEW OTHERS O*");
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Filter("LETTERS".into()),
+            TreeAction::Rename,
+        ));
+        let _ = app.update(Message::LayerTreeRenameEdit("Letters A-Z".into()));
+        let _ = app.update(Message::LayerTreeRenameCommit);
+        assert!(app.layer_filters.iter().any(|f| f.name == "Letters A-Z"));
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Filter("OTHERS".into()),
+            TreeAction::Rename,
+        ));
+        let _ = app.update(Message::LayerTreeRenameEdit("letters a-z".into()));
+        let _ = app.update(Message::LayerTreeRenameCommit);
+        assert!(app.layer_filters.iter().any(|f| f.name == "OTHERS"));
+    }
+
+    /// #2610 (F1): the row menu's group ticks add and take out; rows dropped
+    /// on a group join it; a node's eye lights all its layers; "Unused
+    /// layers" opens Purge with them ticked.
+    #[test]
+    fn groups_from_menu_and_drop_node_eye_and_purge() {
+        use crate::ui::window::layers::{LayerMenuAction, TreeAction, TreeNode};
+        let mut app = app_with_zulu_alpha();
+        let i = app.active_tab;
+        app.show_layers = true;
+        app.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        let _ = app.run_command_line("LAYERGROUP NEW WALLS ZULU");
+        let members = |app: &OpenCADStudio| app.tabs[app.active_tab].layers.groups[0].1.clone();
+        // ALPHA in by the menu, out again by its tick.
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::AddToGroup("WALLS".into()),
+        ));
+        assert_eq!(members(&app).len(), 2);
+        let _ = app.update(Message::LayerMenu(
+            "ALPHA".into(),
+            LayerMenuAction::AddToGroup("WALLS".into()),
+        ));
+        assert_eq!(members(&app), ["ZULU"]);
+        // A press on ALPHA, released on the group: it joins.
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        let _ = app.update(Message::LayerDragOver(Some("WALLS".into())));
+        assert_eq!(app.tabs[i].layers.drag_over.as_deref(), Some("WALLS"));
+        let _ = app.update(Message::LayerDrop("WALLS".into()));
+        assert_eq!(members(&app).len(), 2);
+        // Released on the row instead: no drop afterwards.
+        let _ = app.run_command_line("LAYERGROUP REMOVE WALLS ALPHA");
+        let _ = app.update(Message::LayerSelect("ALPHA".into()));
+        let _ = app.update(Message::LayerDragEnd);
+        let _ = app.update(Message::LayerDrop("WALLS".into()));
+        assert_eq!(members(&app), ["ZULU"]);
+        // The group's eye lights ZULU only; again, off.
+        let node = TreeNode::Group("WALLS".into());
+        let _ = app.update(Message::LayerNodeEye(node.clone()));
+        assert_eq!(app.tabs[i].layers.eye_layers, ["ZULU"]);
+        let _ = app.update(Message::LayerNodeEye(node));
+        assert!(app.tabs[i].layers.eye_layers.is_empty());
+        // Purge with the unused layers ticked (no objects anywhere).
+        let _ = app.update(Message::LayerTreeAction(
+            TreeNode::Unused,
+            TreeAction::Purge,
+        ));
+        let state = app.purge_dialog.as_ref().expect("Purge opens");
+        let ticked: Vec<&str> = state.items[0]
+            .iter()
+            .filter(|(_, t)| *t)
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(ticked.contains(&"ZULU") && ticked.contains(&"ALPHA"));
+    }
+
+    /// #2610 (F1): FILTER's "Open in Layer manager" opens the pallet the way
+    /// LAYERS does, and after closing it LAYERS opens it again (it stayed
+    /// "open" with no window and could not be opened).
+    #[test]
+    fn open_in_layer_manager_then_layers_again() {
+        use crate::app::filter_dialog::FilterMsg;
+        let mut app = app_with_zulu_alpha();
+        app.show_layers = false;
+        let _ = app.update(Message::FilterDialog(FilterMsg::Open(None)));
+        let _ = app.update(Message::FilterDialog(FilterMsg::ShowLayers));
+        assert!(app.show_layers);
+        assert!(app.dock_panel_visible(crate::ui::dock::PanelId::Layers));
+        let _ = app.update(Message::ToggleLayers);
+        assert!(!app.show_layers);
+        let _ = app.update(Message::ToggleLayers);
+        assert!(app.show_layers);
+        assert!(app.dock_panel_visible(crate::ui::dock::PanelId::Layers));
     }
 
     /// #2610: the tree as in the mockup: "All" with its count, Groups and

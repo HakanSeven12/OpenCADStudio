@@ -467,8 +467,13 @@ impl OpenCADStudio {
         panel.found_layers = layers;
         panel.view = crate::ui::window::layers::TreeNode::Found;
         panel.invert = false;
-        self.show_layers = true;
-        self.dock_open_at_default(crate::ui::dock::PanelId::Layers);
+        // The way LAYERS opens it: a pallet that lives in a window of its own
+        // gets that window. Setting `show_layers` alone left it "open" with
+        // no window, and LAYERS then took it as open already (#2610).
+        if !self.show_layers {
+            self.pallet_as_window(crate::ui::dock::PanelId::Layers);
+        }
+        self.open_layers_pallet();
     }
 
     /// FILTER over the layers, for a Layer manager filter named `name`.

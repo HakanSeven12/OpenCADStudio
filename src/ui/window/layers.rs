@@ -943,9 +943,14 @@ impl LayerPanel {
     fn tree_footer(&self) -> Element<'_, Message> {
         let shown = self.visible_indices().len();
         let selected = self.selected_names().len();
+        let node = match &self.view {
+            TreeNode::Group(name) => crate::tf!("Group “{}”", name).into_owned(),
+            TreeNode::Filter(name) => crate::tf!("Filter “{}”", name).into_owned(),
+            other => other.label(),
+        };
         let mut summary = format!(
             "{} · {}",
-            self.view.label(),
+            node,
             crate::tf!("{} of {} layers shown", shown, self.layers.len())
         );
         if selected > 0 {
@@ -1537,7 +1542,7 @@ impl LayerPanel {
                 toolbar_btn(
                     crate::ui::icons::LIST,
                     t!("Layer States"),
-                    Message::Command("LAYERSTATE".into()),
+                    Message::LayerMoreRun(Box::new(Message::Command("LAYERSTATE".into()))),
                     compact,
                 ),
                 // LAYERP: the last layer-property change undone (#2610).
@@ -1551,7 +1556,9 @@ impl LayerPanel {
                 toolbar_btn(
                     crate::ui::icons::IMPORT,
                     t!("Import..."),
-                    Message::LayerImport(crate::app::layer_import::LayerImportMsg::Pick),
+                    Message::LayerMoreRun(Box::new(Message::LayerImport(
+                        crate::app::layer_import::LayerImportMsg::Pick,
+                    ))),
                     compact,
                 ),
                 node_picker,
@@ -2577,7 +2584,7 @@ fn tree_menu(node: &TreeNode) -> Element<'static, Message> {
     let mut items: Vec<Element<'static, Message>> = Vec::new();
     match node {
         TreeNode::Filter(_) => {
-            items.push(entry(t!("Edit..."), TreeAction::Edit));
+            items.push(entry(t!("Edit…"), TreeAction::Edit));
             items.push(menu_item(
                 t!("Rename"),
                 Message::LayerTreeAction(node.clone(), TreeAction::Rename),

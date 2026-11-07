@@ -12416,6 +12416,9 @@ impl OpenCADStudio {
                 panel.view = node;
                 panel.tree_focus = true;
                 panel.keys_active = true;
+                if self.ribbon_layers_follow_filter {
+                    self.sync_ribbon_layers();
+                }
                 Task::none()
             }
             Message::LayerTreeRenameEdit(typed) => {
@@ -12448,6 +12451,15 @@ impl OpenCADStudio {
                     self.tabs[i].scene.set_filter_preview_highlights(&[]);
                 }
                 self.refresh_layer_counts();
+                Task::none()
+            }
+            Message::LayerSaveSearch => self.on_layer_save_search(),
+            Message::LayerRibbonFollows(on) => {
+                self.ribbon_layers_follow_filter = on;
+                let i = self.active_tab;
+                self.tabs[i].layers.ribbon_follows = on;
+                self.sync_ribbon_layers();
+                self.save_config();
                 Task::none()
             }
             Message::LayerMoreMenu(open) => {

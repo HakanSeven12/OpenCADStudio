@@ -130,6 +130,13 @@ impl OpenCADStudio {
             .iter()
             // The reference's hidden system layers (`*ADSK_CONSTRAINTS`) stay out.
             .filter(|l| !l.name.starts_with('*'))
+            // With the option on, only the Layer manager's chosen node's
+            // layers, and always the current one (#2610 LM-25).
+            .filter(|l| {
+                !self.ribbon_layers_follow_filter
+                    || l.name.eq_ignore_ascii_case(&active)
+                    || self.tabs[i].layers.in_chosen_node(l)
+            })
             .map(|l| crate::ui::ribbon::LayerInfo {
                 stored_color: l.color,
                 name: l.name.clone(),

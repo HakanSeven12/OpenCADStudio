@@ -4,7 +4,8 @@
 //! tessellation bake (which scales annotative content by the current annotation
 //! scale) must agree on *which* entities are annotative — so that logic lives
 //! here, once. An entity is annotative if it carries a per-object annotation
-//! context, legacy annotative XDATA, or an entity-level annotative flag. Text
+//! context, legacy annotative XDATA, or an entity-level annotative flag, unless
+//! an explicit object or block-definition flag disables annotation scaling. Text
 //! style state is consulted while creating an object and when an explicit
 //! annotation-style update is requested; changing a style alone does not
 //! retroactively scale existing text.
@@ -490,9 +491,9 @@ pub fn create_annotation_context(
 /// each annotation scale as its own object (e.g. a block insert per scale on a
 /// "0 @ <scale>" layer); only the current scale's representation should draw.
 ///
-/// False for non-annotative objects (no per-object context — the vast
-/// majority) and for objects whose contexts include the current scale. Gated
-/// on an extension dictionary so non-annotative entities skip the lookup.
+/// False for non-annotative objects, including disabled objects with obsolete
+/// contexts, and for objects whose contexts include the current scale. Gated
+/// on an extension dictionary so most non-annotative entities skip the lookup.
 pub fn annotative_offscale_for(
     doc: &Document,
     common: &EntityCommon,
@@ -507,6 +508,9 @@ pub fn annotative_offscale_for(
         .map(|h| !h.is_null())
         .unwrap_or(false)
     {
+        return false;
+    }
+    if explicit_annotation_flag(doc, common) == Some(false) {
         return false;
     }
     let scales = object_scale_memberships(doc, common.handle);
@@ -672,6 +676,12 @@ pub fn active_object_context_for_scale(
     entity: Handle,
     scale_handle: Option<Handle>,
 ) -> Option<&ObjectContextData> {
+    if doc
+        .get_entity(entity)
+        .is_some_and(|entity| explicit_annotation_flag(doc, entity.common()) == Some(false))
+    {
+        return None;
+    }
     active_context_in(doc, annotation_scales_dict(doc, entity)?, scale_handle)
 }
 
@@ -1026,6 +1036,9 @@ pub(crate) fn place_attribute_for_annotation_scale(
     attribute: &mut document::entities::AttributeEntity,
     scale_handle: Option<Handle>,
 ) -> bool {
+    if explicit_annotation_flag(doc, &attribute.common) == Some(false) {
+        return false;
+    }
     let Some(collection) = attribute
         .common
         .xdictionary_handle
@@ -1072,7 +1085,8 @@ fn apply_hatch_context(hatch: &mut document::entities::Hatch, context: &HatchSca
         .iter()
         .enumerate()
         .map(|(index, loop_data)| {
-            let flags = document::entities::BoundaryPathFlags::from_bits(loop_data.loop_type as u32);
+            let flags =
+                document::entities::BoundaryPathFlags::from_bits(loop_data.loop_type as u32);
             let mut path = if loop_data.supports_context {
                 base_paths.get(index).cloned()
             } else {
@@ -2110,36 +2124,79 @@ pub fn update_entity_from_annotation_style(
     true
 }
 
-/// Whether the block definition `name` is annotative: its block record
-/// carries `AcadAnnotative` (`AnnotativeData { 1 1 }`), or, in drawings an
-/// earlier build wrote, its BLOCK entity does.
-pub fn block_is_annotative(doc: &Document, name: &str) -> bool {
-    let Some(br) = doc.block_records.get(name) else {
-        return false;
-    };
-    let flag = |record: &document::xdata::ExtendedDataRecord| {
-        record
+fn annotation_flag(data: &document::xdata::ExtendedData) -> Option<bool> {
+    data.get_record("AcadAnnotative")?
+        .values
+        .iter()
+        .filter_map(|value| match value {
+            document::xdata::XDataValue::Integer16(value) => Some(*value != 0),
+            _ => None,
+        })
+        .last()
+}
+
+fn definition_annotation_flag(doc: &Document, br: &document::tables::BlockRecord) -> Option<bool> {
+    doc.object_xdata(br.handle)
+        .and_then(annotation_flag)
+        .or_else(|| {
+            doc.get_entity(br.block_entity_handle)
+                .and_then(|block| annotation_flag(&block.common().extended_data))
+        })
+}
+
+fn block_annotation_flag(doc: &Document, name: &str) -> Option<bool> {
+    let br = doc.block_records.get(name)?;
+    definition_annotation_flag(doc, br).or_else(|| {
+        // Evaluated anonymous blocks inherit the named definition's flag.
+        // Keep "absent" distinct from an explicit off: old contexts alone
+        // are still supported when neither definition stores a flag.
+        let source = doc
+            .object_xdata(br.handle)?
+            .get_record("AcDbBlockRepBTag")?
             .values
             .iter()
-            .filter_map(|value| match value {
-                document::xdata::XDataValue::Integer16(value) => Some(*value),
+            .find_map(|value| match value {
+                document::xdata::XDataValue::Handle(handle) if !handle.is_null() => Some(*handle),
                 _ => None,
-            })
-            .last()
-            .is_some_and(|value| value != 0)
-    };
-    if let Some(record) = doc
-        .object_xdata(br.handle)
-        .and_then(|xdata| xdata.get_record("AcadAnnotative"))
-    {
-        return flag(record);
-    }
-    doc.get_entity(br.block_entity_handle).is_some_and(|block| {
-        block
-            .common()
-            .extended_data
-            .get_record("AcadAnnotative")
-            .is_some_and(flag)
+            })?;
+        doc.block_records
+            .iter()
+            .find(|record| record.handle == source)
+            .and_then(|record| definition_annotation_flag(doc, record))
+    })
+}
+
+/// Whether the block definition is annotative, including the named source of
+/// an evaluated dynamic representation and legacy flags on its BLOCK marker.
+pub fn block_is_annotative(doc: &Document, name: &str) -> bool {
+    block_annotation_flag(doc, name).unwrap_or(false)
+}
+
+fn insert_annotation_flag(doc: &Document, insert: &document::entities::Insert) -> Option<bool> {
+    block_annotation_flag(doc, &insert.block_name).or_else(|| {
+        // Some files link the source only through per-reference RepData.
+        let source = doc.dynamic_definition_for_insert(insert.common.handle)?;
+        doc.block_records
+            .iter()
+            .find(|record| record.handle == source)
+            .and_then(|record| definition_annotation_flag(doc, record))
+    })
+}
+
+/// Explicit flags outrank retained context dictionaries. Attributes without
+/// their own flag also stop using obsolete contexts when their INSERT's
+/// definition has annotation scaling disabled.
+fn explicit_annotation_flag(doc: &Document, common: &EntityCommon) -> Option<bool> {
+    annotation_flag(&common.extended_data).or_else(|| {
+        if let Some(EntityType::Insert(insert)) = doc.get_entity(common.handle) {
+            return insert_annotation_flag(doc, insert);
+        }
+        if let Some(EntityType::Insert(insert)) = doc.get_entity(common.owner_handle) {
+            return annotation_flag(&insert.common.extended_data)
+                .or_else(|| insert_annotation_flag(doc, insert))
+                .filter(|flag| !flag);
+        }
+        None
     })
 }
 
@@ -2161,24 +2218,12 @@ pub fn is_annotative(doc: &Document, entity: &EntityType) -> bool {
     }
 }
 
-/// Whether an object carries its own annotative state: a per-object
-/// annotation context or an annotative XDATA marker. Its style does not count.
+/// Whether an object participates in annotation scaling. Explicit object and
+/// effective block-definition flags outrank contexts; text styles do not count.
 pub fn object_is_annotative(doc: &Document, common: &EntityCommon) -> bool {
     let xd = &common.extended_data;
-    // The object's own flag wins: a context left behind after annotative was
-    // switched off is stored with the flag at 0.
-    let standard_marker = xd.get_record("AcadAnnotative").and_then(|record| {
-        record
-            .values
-            .iter()
-            .filter_map(|value| match value {
-                document::xdata::XDataValue::Integer16(value) => Some(*value),
-                _ => None,
-            })
-            .last()
-    });
-    if let Some(flag) = standard_marker {
-        return flag != 0;
+    if let Some(flag) = explicit_annotation_flag(doc, common) {
+        return flag;
     }
     // Per-object annotation context (works regardless of style).
     has_context_manager(doc, common)

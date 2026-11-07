@@ -5444,6 +5444,9 @@ pub enum Message {
     QSelectAddCondition,
     /// Hide the filter and sample an object's filterable properties.
     QSelectPickObject,
+    /// Window…: step aside, pick the objects to search in, come back with
+    /// them as the selection.
+    QSelectWindow,
     QSelectEditCondition(usize),
     QSelectRemoveCondition(usize),
     QSelectClearConditions,

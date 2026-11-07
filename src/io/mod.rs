@@ -245,6 +245,30 @@ pub async fn pick_layer_standard_path() -> Option<PathBuf> {
     Some(crate::sys::handle_path(&handle))
 }
 
+/// Pick where saved selection filters are written, or read back from.
+pub async fn pick_selection_filters_path(save: bool) -> Option<PathBuf> {
+    let dialog = crate::sys::file_dialog()
+        .set_title(
+            crate::t!(if save {
+                "Export saved filters"
+            } else {
+                "Import saved filters"
+            })
+            .as_ref(),
+        )
+        .add_filter(crate::t!("Selection filters").as_ref(), &["ocsfilter"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+    let handle = if save {
+        dialog
+            .set_file_name("filters.ocsfilter")
+            .save_file()
+            .await?
+    } else {
+        dialog.pick_file().await?
+    };
+    Some(crate::sys::handle_path(&handle))
+}
+
 /// Pick where a set of layer mappings is written, or read back from.
 pub async fn pick_layer_mapping_path(save: bool) -> Option<PathBuf> {
     let dialog = crate::sys::file_dialog()

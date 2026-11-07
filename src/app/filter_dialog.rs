@@ -70,6 +70,15 @@ pub enum FilterMsg {
     PickObject,
     /// Layer mode: rows from this layer's properties, to tick.
     FromLayer(String),
+    /// Window…: pick the objects to search in.
+    Window,
+    /// Write the drawing's saved filters to a file / read them from one.
+    Export,
+    Import,
+    #[cfg(not(target_arch = "wasm32"))]
+    ExportTo(std::path::PathBuf),
+    #[cfg(not(target_arch = "wasm32"))]
+    ImportFrom(std::path::PathBuf),
     /// Layer mode: FILTER for the objects on the layers found.
     ObjectsOnLayers,
     /// Tick or untick a picked object's property.
@@ -285,6 +294,98 @@ pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
     }));
 }
 
+/// Window…: Quick Select or FILTER steps aside while the objects to search
+/// in are picked (a window, a crossing, picks); Enter brings the dialog
+/// back with them as the selection and "Selection" as the scope (#2611
+/// mockup: "Searching only the N selected objects").
+struct ScopeWindowCommand {
+    qselect: Option<Box<super::QSelectState>>,
+    filter: Option<Box<FilterDialogState>>,
+    tab_id: u64,
+    picked: bool,
+}
+
+impl ScopeWindowCommand {
+    fn finish(&mut self) -> crate::command::CmdResult {
+        use crate::command::CmdResult;
+        let picked = self.picked;
+        if let Some(mut state) = self.qselect.take() {
+            if picked {
+                state.scope = QSelectScope::CurrentSelection;
+            }
+            return CmdResult::QSelectSample {
+                state,
+                tab_id: self.tab_id,
+                handle: None,
+            };
+        }
+        if let Some(mut state) = self.filter.take() {
+            if picked {
+                state.scope = QSelectScope::CurrentSelection;
+            }
+            return CmdResult::FilterSample {
+                state,
+                tab_id: self.tab_id,
+                handle: None,
+            };
+        }
+        CmdResult::Cancel
+    }
+}
+
+impl crate::command::CadCommand for ScopeWindowCommand {
+    fn name(&self) -> &'static str {
+        if self.qselect.is_some() {
+            "QSELECT"
+        } else {
+            "FILTER"
+        }
+    }
+    fn prompt(&self) -> String {
+        format!("{}  {}", self.name(), crate::t!("Select objects:"))
+    }
+    fn is_selection_gathering(&self) -> bool {
+        true
+    }
+    fn on_selection_complete(&mut self, handles: Vec<Handle>) -> crate::command::CmdResult {
+        if handles.is_empty() {
+            return crate::command::CmdResult::NeedPoint;
+        }
+        self.picked = true;
+        self.finish()
+    }
+    fn on_point(&mut self, _point: glam::DVec3) -> crate::command::CmdResult {
+        crate::command::CmdResult::NeedPoint
+    }
+    fn on_enter(&mut self) -> crate::command::CmdResult {
+        self.finish()
+    }
+    fn on_escape(&mut self) -> crate::command::CmdResult {
+        self.picked = false;
+        self.finish()
+    }
+}
+
+/// Export / Import: the file to write the saved filters to, or read from.
+fn pick_filters_file(save: bool) -> Task<Message> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Task::perform(
+            crate::io::pick_selection_filters_path(save),
+            move |path| match path {
+                Some(path) if save => Message::FilterDialog(FilterMsg::ExportTo(path)),
+                Some(path) => Message::FilterDialog(FilterMsg::ImportFrom(path)),
+                None => Message::Noop,
+            },
+        )
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = save;
+        Task::none()
+    }
+}
+
 /// The pick behind FILTER's From object: the dialog waits in the command
 /// and comes back with the object, or without one on Enter or Esc.
 struct FilterSampleCommand {
@@ -343,6 +444,19 @@ impl OpenCADStudio {
     pub(super) fn on_filter_message(&mut self, msg: FilterMsg) -> Task<Message> {
         match msg {
             FilterMsg::PickObject => return self.filter_pick_object(),
+            FilterMsg::Window => return self.scope_window_pick(false),
+            FilterMsg::Export => return pick_filters_file(true),
+            FilterMsg::Import => return pick_filters_file(false),
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ExportTo(path) => {
+                self.export_saved_filters(&path);
+                return Task::none();
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ImportFrom(path) => {
+                self.import_saved_filters(&path);
+                return Task::none();
+            }
             FilterMsg::FromLayer(name) => {
                 self.filter_sample_layer(&name);
                 return Task::none();
@@ -602,6 +716,12 @@ impl OpenCADStudio {
             | FilterMsg::SaveLayerFilter
             | FilterMsg::PickObject
             | FilterMsg::FromLayer(_)
+            | FilterMsg::Window
+            | FilterMsg::Export
+            | FilterMsg::Import => {}
+            #[cfg(not(target_arch = "wasm32"))]
+            FilterMsg::ExportTo(_)
+            | FilterMsg::ImportFrom(_)
             | FilterMsg::ObjectsOnLayers
             | FilterMsg::SampleToggle(_)
             | FilterMsg::SampleAdd
@@ -613,6 +733,105 @@ impl OpenCADStudio {
         self.filter_refresh_scope();
         self.filter_refresh_live();
         Task::none()
+    }
+
+    /// Window…: the open Quick Select (`qselect`) or FILTER steps aside while
+    /// the objects to search in are picked.
+    pub(in crate::app) fn scope_window_pick(&mut self, qselect: bool) -> Task<Message> {
+        let i = self.active_tab;
+        let (qselect, filter) = if qselect {
+            match self.qselect.take() {
+                Some(state) => (Some(Box::new(state)), None),
+                None => return Task::none(),
+            }
+        } else {
+            match self.filter_dialog.take() {
+                Some(state) if state.layer_filter.is_none() => (None, Some(Box::new(state))),
+                Some(state) => {
+                    self.filter_dialog = Some(state);
+                    return Task::none();
+                }
+                None => return Task::none(),
+            }
+        };
+        self.tabs[i].scene.set_filter_preview_highlights(&[]);
+        // The objects picked now are the ones searched.
+        self.tabs[i].scene.deselect_all();
+        let command = ScopeWindowCommand {
+            qselect,
+            filter,
+            tab_id: self.tabs[i].id,
+            picked: false,
+        };
+        use crate::command::CadCommand;
+        self.active_modal = None;
+        self.command_line.input.clear();
+        self.command_line.set_step_options(Vec::new());
+        self.command_line.push_info(&command.prompt());
+        self.tabs[i].scene.selection.borrow_mut().menu.close();
+        self.tabs[i].active_cmd = Some(Box::new(command));
+        Task::none()
+    }
+
+    /// Export: the drawing's saved filters into a file, to bring into
+    /// another drawing with Import.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn export_saved_filters(&mut self, path: &std::path::Path) {
+        let i = self.active_tab;
+        let filters: Vec<serde_json::Value> =
+            super::saved_filters::saved_filters(&self.tabs[i].scene.document)
+                .into_iter()
+                .map(|(name, filter)| serde_json::json!({ "name": name, "filter": filter }))
+                .collect();
+        let text = serde_json::to_string_pretty(&serde_json::json!({ "filters": filters }))
+            .unwrap_or_default();
+        match std::fs::write(path, text) {
+            Ok(()) => self
+                .command_line
+                .push_output(crate::tf!("{} saved filter(s) exported.", filters.len()).as_ref()),
+            Err(why) => self
+                .command_line
+                .push_error(crate::tf!("Export saved filters: {}.", why).as_ref()),
+        }
+    }
+
+    /// Import: saved filters from a file into the drawing, one undo step; a
+    /// filter of the same name is replaced.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn import_saved_filters(&mut self, path: &std::path::Path) {
+        let i = self.active_tab;
+        let parsed: Option<Vec<(String, Filter)>> = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|value| {
+                value.get("filters")?.as_array().map(|list| {
+                    list.iter()
+                        .filter_map(|item| {
+                            let name = item.get("name")?.as_str()?.to_string();
+                            let filter =
+                                serde_json::from_value(item.get("filter")?.clone()).ok()?;
+                            Some((name, filter))
+                        })
+                        .collect()
+                })
+            });
+        let Some(filters) = parsed.filter(|f| !f.is_empty()) else {
+            self.command_line
+                .push_error(crate::t!("No saved filters found in that file.").as_ref());
+            return;
+        };
+        let count = filters.len();
+        self.edit_saved_filters(i, "FILTER IMPORT", |document| {
+            for (name, filter) in &filters {
+                super::saved_filters::store_saved_filter(document, name, filter);
+            }
+        });
+        let names = self.saved_filter_names(i);
+        if let Some(state) = self.filter_dialog.as_mut() {
+            state.saved = names;
+        }
+        self.command_line
+            .push_output(crate::tf!("{} saved filter(s) imported.", count).as_ref());
     }
 
     /// From object: the dialog steps aside while an object is picked.
@@ -1499,6 +1718,73 @@ mod tests {
         assert_eq!(fmt_count(1234567), "1\u{2009}234\u{2009}567");
     }
 
+    /// #2611 (J5): Window… steps aside for a pick; the objects picked become
+    /// the selection searched; Esc brings the dialog back as it was.
+    #[test]
+    fn window_scope_in_quick_select_and_filter() {
+        let (mut app, handles) = app_with_objects();
+        let i = app.active_tab;
+        let pick = |app: &mut OpenCADStudio, picked: &[Handle]| {
+            for h in picked {
+                app.tabs[i].scene.select_entity(*h, false);
+            }
+            let result = app.tabs[i]
+                .active_cmd
+                .as_mut()
+                .expect("picking")
+                .on_selection_complete(picked.to_vec());
+            let _ = app.apply_cmd_result(result);
+        };
+        let _ = app.update(Message::QSelectOpen);
+        let _ = app.update(Message::QSelectWindow);
+        assert!(app.qselect.is_none(), "Quick Select steps aside");
+        pick(&mut app, &handles[..2]);
+        let state = app.qselect.as_ref().expect("back");
+        assert_eq!(state.scope, QSelectScope::CurrentSelection);
+        let _ = app.update(Message::QSelectClose);
+        // FILTER: Esc leaves the scope alone.
+        app.tabs[i].scene.deselect_all();
+        filter(&mut app, FilterMsg::Open(None));
+        filter(&mut app, FilterMsg::Window);
+        assert!(app.filter_dialog.is_none());
+        let result = app.tabs[i].active_cmd.as_mut().unwrap().on_escape();
+        let _ = app.apply_cmd_result(result);
+        assert_eq!(
+            app.filter_dialog.as_ref().unwrap().scope,
+            QSelectScope::CurrentSpace
+        );
+        filter(&mut app, FilterMsg::Window);
+        pick(&mut app, &handles[2..]);
+        let state = app.filter_dialog.as_ref().unwrap();
+        assert_eq!(state.scope, QSelectScope::CurrentSelection);
+        assert_eq!(state.candidate_count, 1);
+    }
+
+    /// #2611 (J5): saved filters go to a file and come back into a drawing.
+    #[test]
+    fn saved_filters_export_and_import() {
+        let (mut app, _) = app_with_objects();
+        let i = app.active_tab;
+        filter(&mut app, FilterMsg::Open(None));
+        filter(
+            &mut app,
+            FilterMsg::Edit(
+                FilterRow::Root(0),
+                FilterRowEdit::Type(Some("Circle".into())),
+            ),
+        );
+        filter(&mut app, FilterMsg::SaveAs(Some("Circles".into())));
+        filter(&mut app, FilterMsg::SaveAsCommit);
+        let path =
+            std::env::temp_dir().join(format!("ocs-filters-{}.ocsfilter", std::process::id()));
+        filter(&mut app, FilterMsg::ExportTo(path.clone()));
+        filter(&mut app, FilterMsg::DeleteSaved);
+        assert!(app.saved_filter_names(i).is_empty());
+        filter(&mut app, FilterMsg::ImportFrom(path.clone()));
+        assert_eq!(app.saved_filter_names(i), ["Circles"]);
+        let _ = std::fs::remove_file(path);
+    }
+
     /// Quick Select's "Advanced…" carries its conditions over: two types
     /// become two groups under "any", and the count is the same.
     #[test]
@@ -1915,18 +2201,24 @@ mod view {
             .spacing(4)
             .align_y(iced::Alignment::Center);
         for scope in [QSelectScope::CurrentSpace, QSelectScope::CurrentSelection] {
+            let caption = match scope {
+                QSelectScope::CurrentSelection => t!("Selection"),
+                _ => Cow::Owned(scope.to_string()),
+            };
             scope_row = scope_row.push(
-                button(text(scope.to_string()).size(12))
+                button(text(caption).size(12))
                     .on_press(msg(FilterMsg::Scope(scope)))
                     .style(button_style(state.scope == scope))
                     .padding([4, 10]),
             );
         }
-        let scope_row = scope_row.push(match &state.for_command {
-            // Who the result goes to (#2611).
-            Some(command) => muted(crate::tf!("for {}", command)),
-            None => muted(String::new()),
-        });
+        // Window…: pick the objects to search in (#2611 mockup).
+        let scope_row = scope_row.push(
+            button(text(t!("Window…")).size(12))
+                .on_press(msg(FilterMsg::Window))
+                .style(button_style(false))
+                .padding([4, 10]),
+        );
 
         // ── Saved filters (kept in the drawing) ────────────────────────────
         let icon_button = |icon: &'static [u8], tip: Cow<'static, str>, on: Option<Message>| {
@@ -1973,6 +2265,22 @@ mod view {
                     .is_some()
                     .then_some(msg(FilterMsg::DeleteSaved)),
             ));
+        // Saved filters to and from a file, for another drawing (#2611).
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            saved_row = saved_row
+                .push(Space::new().width(6))
+                .push(icon_button(
+                    crate::ui::icons::IMPORT,
+                    t!("Import"),
+                    Some(msg(FilterMsg::Import)),
+                ))
+                .push(icon_button(
+                    crate::ui::icons::FILE_EXPORT,
+                    t!("Export"),
+                    (!state.saved.is_empty()).then_some(msg(FilterMsg::Export)),
+                ));
+        }
         if let Some(typed) = &state.save_as {
             saved_row = saved_row
                 .push(
@@ -2022,7 +2330,12 @@ mod view {
                 Length::Fixed(150.0),
             ))
             .push(head(t!("Op"), Length::Fixed(140.0)))
-            .push(head(t!("Value"), Fill));
+            .push(
+                row![muted(t!("Value")), crate::ui::live_result::pattern_help()]
+                    .spacing(2)
+                    .align_y(iced::Alignment::Center)
+                    .width(Fill),
+            );
         let mut rows = column![
             row![
                 text(intro).size(12),
@@ -2227,6 +2540,11 @@ mod view {
             ),
             crate::ui::live_result::track(state.live_count, state.candidate_count, true),
         ]
+        .push(if state.live_count == 0 {
+            Element::from(muted(t!("No match")))
+        } else {
+            Element::from(Space::new().height(0))
+        })
         .spacing(6)
         .width(Length::Fixed(240.0));
         if !layers_mode {
@@ -2353,6 +2671,12 @@ mod view {
         let mut body = column![].spacing(10);
         if !layers_mode {
             body = body.push(saved_row);
+            if state.scope == QSelectScope::CurrentSelection {
+                body = body.push(crate::ui::live_result::selection_note(
+                    state.candidate_count,
+                    msg(FilterMsg::Scope(QSelectScope::CurrentSpace)),
+                ));
+            }
         }
         if let Some(name) = &state.layer_filter {
             // The name on top, as in the mockup; without one it can't be
@@ -2428,10 +2752,11 @@ impl OpenCADStudio {
             iced::widget::Space::new()
                 .width(iced::Fill)
                 .height(iced::Fill),
-            if state.layer_filter.is_some() {
-                crate::t!("Layer Filter")
-            } else {
-                crate::t!("Filter")
+            match (&state.layer_filter, &state.for_command) {
+                (Some(_), _) => crate::t!("Layer Filter"),
+                // Who it works for (#2611 mockup, Transparent).
+                (None, Some(command)) => crate::tf!("Filter · for {}", command),
+                (None, None) => crate::t!("Filter"),
             },
             content,
             Message::FilterDialog(FilterMsg::Close),

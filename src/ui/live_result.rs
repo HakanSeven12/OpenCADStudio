@@ -256,6 +256,70 @@ pub fn reads<'a>(sentence: String, keywords: &[String]) -> Element<'a, Message> 
     iced::widget::rich_text(spans).size(12).into()
 }
 
+/// The "i" beside a value: what patterns a value may use (#2611 mockup,
+/// States), shown on hover.
+pub fn pattern_help<'a>() -> Element<'a, Message> {
+    let line = |pattern: &'static str, what: std::borrow::Cow<'static, str>| {
+        row![
+            text(pattern)
+                .size(11)
+                .font(iced::Font::MONOSPACE)
+                .width(Length::Fixed(80.0)),
+            text(what).size(11),
+        ]
+        .spacing(6)
+    };
+    let tip = container(
+        column![
+            text(crate::t!("A value may use patterns:")).size(11),
+            line("FAL*", crate::t!("any characters after FAL")),
+            line("FAL-?", crate::t!("one character after FAL-")),
+            line("A#", crate::t!("one digit")),
+            line("FAL*,AJTO*", crate::t!("either of them")),
+            line("~FAL*", crate::t!("not these")),
+        ]
+        .spacing(3),
+    )
+    .padding([6, 8])
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(theme.palette().background.base.color)),
+        border: Border {
+            color: theme.palette().background.neutral.color,
+            width: 1.0,
+            radius: 4.0.into(),
+        },
+        ..Default::default()
+    });
+    iced::widget::tooltip(
+        container(crate::ui::icons::themed_secondary(
+            crate::ui::icons::INFO,
+            13.0,
+        ))
+        .padding(4),
+        tip,
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .into()
+}
+
+/// "Searching only the N selected objects · Search all" (mockup, States):
+/// the selection scope says so, with a way back to everything.
+pub fn selection_note<'a>(count: usize, search_all: Message) -> Element<'a, Message> {
+    row![
+        muted(
+            crate::tf!("Searching only the {} selected objects", fmt_count(count)).into_owned(),
+            11.0
+        ),
+        button(text(crate::t!("Search all")).size(11))
+            .on_press(search_all)
+            .style(button::text)
+            .padding([0, 4]),
+    ]
+    .spacing(4)
+    .align_y(iced::Alignment::Center)
+    .into()
+}
+
 pub fn muted<'a>(label: impl text::IntoFragment<'a>, size: f32) -> iced::widget::Text<'a> {
     text(label).size(size).style(|theme: &Theme| text::Style {
         color: Some(theme.palette().background.base.text.scale_alpha(0.65)),

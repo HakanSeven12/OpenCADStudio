@@ -9147,6 +9147,7 @@ impl OpenCADStudio {
             }
 
             Message::QSelectPickObject => self.on_qselect_pick_object(),
+            Message::QSelectWindow => self.scope_window_pick(true),
             Message::QSelectAddCondition => {
                 if let Some(state) = self.qselect.as_mut() {
                     let condition = state.draft_condition();

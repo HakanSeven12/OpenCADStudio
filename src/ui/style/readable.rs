@@ -17,7 +17,7 @@ use iced::theme::palette::Seed;
 use iced::{Color, Theme};
 
 use super::chrome;
-use super::common::{readable_accent_at, wcag_contrast, wcag_luminance};
+use super::common::{wcag_contrast, wcag_luminance};
 
 /// Interface text on a dark background: near white, since pure white glares
 /// on a very dark background.
@@ -39,9 +39,10 @@ pub const MUTED_MIN_CONTRAST: f32 = 7.0;
 /// How far secondary text is mixed towards the background at most: the
 /// 0.68 alpha it used to be drawn at.
 pub const MUTED_MAX_FADE: f32 = 0.32;
-/// The least contrast an accent drawn as text or as an icon keeps (WCAG AA
-/// for body text).
-pub const ACCENT_MIN_CONTRAST: f32 = 4.5;
+/// The least contrast an accent drawn in an icon keeps: WCAG 1.4.11 for
+/// graphical objects. (Accents drawn as text keep the 4.5:1 of body text,
+/// see `common::readable_accent`.)
+pub const ICON_ACCENT_MIN_CONTRAST: f32 = 3.0;
 /// The name of the theme the user edits colour by colour: its text colour
 /// is the user's own choice and is left as it is.
 const USER_THEME: &str = "Custom";
@@ -191,13 +192,84 @@ pub fn hint_style(theme: &Theme) -> iced::widget::text::Style {
     }
 }
 
-/// An accent drawn in an icon on the ribbon: readable at
-/// [`ACCENT_MIN_CONTRAST`] on the panel surface, in the theme's hue (see
-/// [`readable_accent_at`]). The theme's own accent is left as it is for
+/// An accent drawn in an icon on the ribbon: the theme's own colour when it
+/// already reaches [`ICON_ACCENT_MIN_CONTRAST`] on the panel surface,
+/// otherwise lightened (or darkened, on a light theme) in its own hue until
+/// it does (see [`accent_in_hue`]). The theme's accent is left as it is for
 /// buttons, selections and fills.
 pub fn icon_accent(accent: Color, theme: &Theme) -> Color {
     let text = theme.palette().background.base.text;
-    readable_accent_at(accent, chrome::panel(theme), text, ACCENT_MIN_CONTRAST)
+    accent_in_hue(accent, chrome::panel(theme), text, ICON_ACCENT_MIN_CONTRAST)
+}
+
+/// `accent` with its OKLCH lightness moved towards that of `text` until it
+/// reaches `ratio` on `bg`. Hue is kept, and chroma as far as sRGB allows,
+/// so a red stays a red: mixing towards white instead would wash it out to
+/// pink. `accent` itself when it already reaches `ratio`; `text` when no
+/// lightness does.
+pub fn accent_in_hue(accent: Color, bg: Color, text: Color, ratio: f32) -> Color {
+    if wcag_contrast(accent, bg) >= ratio {
+        return accent;
+    }
+    const LIGHTNESS_STEPS: u16 = 100;
+    const CHROMA_STEPS: u16 = 40;
+    let [lightness, a, b] = to_oklab(accent);
+    let chroma = (a * a + b * b).sqrt();
+    let hue = b.atan2(a);
+    let target = to_oklab(text)[0];
+    (1..=LIGHTNESS_STEPS)
+        .map(|step| lightness + (target - lightness) * f32::from(step) / f32::from(LIGHTNESS_STEPS))
+        .filter_map(|l| {
+            // The most chroma sRGB holds at this lightness, up to the accent's.
+            (0..=CHROMA_STEPS).rev().find_map(|k| {
+                let c = chroma * f32::from(k) / f32::from(CHROMA_STEPS);
+                from_oklab([l, c * hue.cos(), c * hue.sin()])
+            })
+        })
+        .find(|color| wcag_contrast(*color, bg) >= ratio)
+        .unwrap_or(text)
+}
+
+/// sRGB `c` (0 to 1) from linear light.
+fn from_linear(c: f32) -> f32 {
+    if c <= 0.003_130_8 {
+        12.92 * c
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/// `color` in OKLab (Björn Ottosson's matrices): lightness, a, b.
+fn to_oklab(color: Color) -> [f32; 3] {
+    use super::common::to_linear;
+    let (r, g, b) = (to_linear(color.r), to_linear(color.g), to_linear(color.b));
+    let l = (0.412_221_47 * r + 0.536_332_54 * g + 0.051_445_99 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+    [
+        0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s,
+        1.977_998_5 * l - 2.428_592_2 * m + 0.450_593_7 * s,
+        0.025_904_037 * l + 0.782_771_77 * m - 0.808_675_77 * s,
+    ]
+}
+
+/// The sRGB colour of OKLab `[l, a, b]`, or `None` outside sRGB.
+fn from_oklab([lightness, a, b]: [f32; 3]) -> Option<Color> {
+    let l = (lightness + 0.396_337_78 * a + 0.215_803_76 * b).powi(3);
+    let m = (lightness - 0.105_561_346 * a - 0.063_854_17 * b).powi(3);
+    let s = (lightness - 0.089_484_18 * a - 1.291_485_5 * b).powi(3);
+    let rgb = [
+        4.076_741_7 * l - 3.307_711_6 * m + 0.230_969_93 * s,
+        -1.268_438 * l + 2.609_757_4 * m - 0.341_319_4 * s,
+        -0.004_196_086_3 * l - 0.703_418_6 * m + 1.707_614_7 * s,
+    ];
+    const EPSILON: f32 = 0.001;
+    rgb.iter()
+        .all(|v| (-EPSILON..=1.0 + EPSILON).contains(v))
+        .then(|| {
+            let [r, g, b] = rgb.map(|v| from_linear(v.clamp(0.0, 1.0)));
+            Color::from_rgb(r, g, b)
+        })
 }
 
 #[cfg(test)]
@@ -280,8 +352,58 @@ mod tests {
                 p.danger.base.color,
             ] {
                 let ratio = wcag_contrast(icon_accent(accent, &ui), chrome::panel(&ui));
-                assert!(ratio >= ACCENT_MIN_CONTRAST, "{base}: accent {ratio:.1}:1");
+                assert!(
+                    ratio >= ICON_ACCENT_MIN_CONTRAST,
+                    "{base}: accent {ratio:.1}:1"
+                );
             }
+        }
+    }
+
+    #[test]
+    fn icon_accents_keep_the_themes_colour_and_hue() {
+        /// The hue of `color` in OKLCH, in degrees.
+        fn hue(color: Color) -> f32 {
+            let [_, a, b] = to_oklab(color);
+            b.atan2(a).to_degrees()
+        }
+        for base in every_theme() {
+            let ui = ui_theme(&base);
+            let panel = chrome::panel(&ui);
+            let p = ui.palette();
+            for accent in [
+                p.primary.base.color,
+                p.success.base.color,
+                p.warning.base.color,
+                p.danger.base.color,
+            ] {
+                let icon = icon_accent(accent, &ui);
+                if wcag_contrast(accent, panel) >= ICON_ACCENT_MIN_CONTRAST {
+                    assert_eq!(icon, accent, "{base}: a readable accent is left alone");
+                } else {
+                    let turn = (hue(icon) - hue(accent) + 540.0) % 360.0 - 180.0;
+                    assert!(turn.abs() < 6.0, "{base}: hue turned {turn:.1}°");
+                }
+            }
+        }
+        // Oxocarbon's red, 2.9:1 on its ribbon, stays a red.
+        let ui = ui_theme(&Theme::Oxocarbon);
+        let red = icon_accent(ui.palette().danger.base.color, &ui);
+        let [r, g, b, _] = red.into_rgba8();
+        assert!(r > 230 && g < 80 && b < 60, "#{r:02x}{g:02x}{b:02x}");
+    }
+
+    #[test]
+    fn oklab_round_trips() {
+        for color in [
+            Color::from_rgb8(0xc3, 0x42, 0x3f),
+            Color::from_rgb8(0x4a, 0x9e, 0xff),
+            Color::from_rgb8(0xf0, 0xc0, 0x40),
+            Color::WHITE,
+            Color::BLACK,
+        ] {
+            let back = from_oklab(to_oklab(color)).unwrap();
+            assert_eq!(back.into_rgba8(), color.into_rgba8());
         }
     }
 

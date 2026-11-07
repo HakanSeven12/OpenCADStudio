@@ -1693,3 +1693,49 @@ impl OpenCADStudio {
         });
     }
 }
+
+#[cfg(test)]
+mod table_cell_ribbon_tests {
+    use super::*;
+    use document::entities::Table;
+    use document::types::Vector3;
+
+    fn app_with_cells_picked() -> (OpenCADStudio, usize, document::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Table(Box::new(Table::new(Vector3::ZERO, 3, 3))));
+        let _ = app.update(Message::Noop);
+        app.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+            table: handle,
+            anchor: (1, 1),
+            end: (2, 2),
+        });
+        (app, i, handle)
+    }
+
+    #[test]
+    fn picked_cells_bring_up_the_table_cell_tab_until_the_pick_ends() {
+        let (mut app, i, _) = app_with_cells_picked();
+        let (before, shown) = app.ribbon.tab_state("table_cell");
+        assert!(!shown, "no Table Cell tab before anything happens");
+        let _ = app.update(Message::Noop);
+        assert_eq!(app.ribbon.tab_state("table_cell"), ("table_cell", true));
+        app.tabs[i].scene.table_cells = None;
+        let _ = app.update(Message::Noop);
+        assert_eq!(app.ribbon.tab_state("table_cell"), (before, false), "the previous tab comes back");
+    }
+
+    #[test]
+    fn the_palette_alignment_buttons_align_the_picked_cells() {
+        let (mut app, i, handle) = app_with_cells_picked();
+        let tl = crate::ui::ribbon::table_cell_alignments().remove(0);
+        let _ = app.update(Message::RibbonToolClick { tool_id: tl.id.to_string(), event: tl.event.clone() });
+        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle) else {
+            panic!("table")
+        };
+        let align = |r: usize, c: usize| t.cell(r, c).and_then(|c| c.style.as_ref()).map(|s| s.alignment);
+        assert_eq!((align(1, 1), align(2, 2)), (Some(1), Some(1)), "Top Left on every picked cell");
+        assert_ne!(align(0, 0), Some(1), "cells outside the pick keep theirs");
+    }
+}

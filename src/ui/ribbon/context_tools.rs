@@ -139,11 +139,6 @@ pub fn table_cell_tools() -> Vec<ToolDef> {
             include_bytes!("../../../assets/icons/match_prop.svg"),
         ),
         tool(
-            "_TCELLALIGN",
-            "Alignment",
-            include_bytes!("../../../assets/icons/align_hcenter.svg"),
-        ),
-        tool(
             "_TCELLBORDERS",
             "Cell\nBorders",
             include_bytes!("../../../assets/icons/table_cell_borders.svg"),
@@ -188,6 +183,30 @@ pub fn table_cell_tools() -> Vec<ToolDef> {
             "Edit\nText",
             include_bytes!("../../../assets/icons/ddedit.svg"),
         ),
+    ]
+}
+
+/// The nine cell alignments, top row first, left to right.
+pub fn table_cell_alignments() -> Vec<ToolDef> {
+    macro_rules! align {
+        ($code:literal, $label:literal, $icon:literal) => {
+            tool(
+                concat!("_TCELLALIGN ", $code),
+                $label,
+                include_bytes!(concat!("../../../assets/icons/table_align_", $icon, ".svg")),
+            )
+        };
+    }
+    vec![
+        align!("TL", "Top\nLeft", "tl"),
+        align!("TC", "Top\nCenter", "tc"),
+        align!("TR", "Top\nRight", "tr"),
+        align!("ML", "Middle\nLeft", "ml"),
+        align!("MC", "Middle\nCenter", "mc"),
+        align!("MR", "Middle\nRight", "mr"),
+        align!("BL", "Bottom\nLeft", "bl"),
+        align!("BC", "Bottom\nCenter", "bc"),
+        align!("BR", "Bottom\nRight", "br"),
     ]
 }
 

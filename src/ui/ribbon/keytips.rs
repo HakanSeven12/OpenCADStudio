@@ -821,7 +821,7 @@ impl Ribbon {
     fn tab_tips(&self) -> Vec<Tip> {
         let tabs = self.modules.iter().enumerate().filter(|(index, module)| {
             module.id() != "layout"
-                && (module.id() != "block_editor" || self.block_editing.is_some())
+                && !self.contextual_off(module.id())
                 && !self.tab_hidden(*index)
         });
         let mut tips: Vec<Tip> = tabs

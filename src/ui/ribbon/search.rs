@@ -292,7 +292,7 @@ impl Ribbon {
         for index in tabs {
             let module = &self.modules[index];
             if module.id() == "layout"
-                || (module.id() == "block_editor" && self.block_editing.is_none())
+                || self.contextual_off(module.id())
                 || self.tab_hidden(index)
             {
                 continue;

@@ -686,11 +686,12 @@ impl TableCommand {
     fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
         let (point, widths, heights) = self.layout(first, second);
         let point = self.plane.to_world(point);
-        self.grid_wire(point, &widths, &heights)
+        self.grid_wire(point, &widths, &heights, self.title_header().0)
     }
 
-    /// The outline grid of a table at `point` (world).
-    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64]) -> WireModel {
+    /// The outline grid of a table at `point` (world); with `title` the
+    /// first row is one cell across the table, as the placed title is.
+    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64], title: bool) -> WireModel {
         let point = self.plane.to_local(point);
         let width: f64 = widths.iter().sum();
         let height: f64 = heights.iter().sum();
@@ -701,10 +702,12 @@ impl TableCommand {
                 .to_array()
         };
         let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 3);
+        let title_height = if title { heights.first().copied().unwrap_or(0.0) } else { 0.0 };
         let mut x = 0.0;
-        for column in std::iter::once(0.0).chain(widths.iter().copied()) {
+        for (index, column) in std::iter::once(0.0).chain(widths.iter().copied()).enumerate() {
             x += column;
-            points.push(world(x, 0.0));
+            let inner = index > 0 && index < widths.len();
+            points.push(world(x, if inner { -title_height } else { 0.0 }));
             points.push(world(x, -height));
             points.push([f32::NAN; 3]); // each line on its own
         }
@@ -1128,7 +1131,11 @@ impl CadCommand for TableCommand {
                 };
                 let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
                 let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
-                Some(self.grid_wire(point, &widths, &heights))
+                let title = widths.len() > 1
+                    && table.merged_ranges.iter().any(|r| {
+                        r.top_row == 0 && r.bottom_row == 0 && r.left_col == 0 && r.right_col + 1 >= widths.len()
+                    });
+                Some(self.grid_wire(point, &widths, &heights, title))
             }
             Step::Insertion => Some(self.preview_grid(point, None)),
             Step::SecondCorner(first) => Some(self.preview_grid(first, Some(point))),
@@ -1597,6 +1604,25 @@ mod tabledit_tests {
             assert!(line[0][0].is_finite() && line[1][0].is_finite());
             assert!(line[2][0].is_nan(), "lines must not join: {line:?}");
             assert!(line[0][0] == line[1][0] || line[0][1] == line[1][1], "diagonal {line:?}");
+        }
+    }
+
+    #[test]
+    fn table_preview_shows_the_title_row_as_one_cell() {
+        let names = ["Title", "Header", "Data"];
+        let cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
+        assert!(cmd.title_header().0, "a new table starts with a title row");
+        let wire = cmd.preview_grid(DVec3::ZERO, None);
+        let verticals: Vec<_> = wire.points.chunks(3).filter(|l| l[0][0] == l[1][0]).collect();
+        let (left, right) = (verticals[0][0][0], verticals[verticals.len() - 1][0][0]);
+        assert_eq!(verticals.len(), 4, "3 columns: 4 vertical lines");
+        for line in &verticals {
+            let top = line[0][1].max(line[1][1]);
+            if line[0][0] == left || line[0][0] == right {
+                assert_eq!(top, 0.0, "the outline reaches the top: {line:?}");
+            } else {
+                assert!(top < 0.0, "an inner column line must stop under the title: {line:?}");
+            }
         }
     }
 

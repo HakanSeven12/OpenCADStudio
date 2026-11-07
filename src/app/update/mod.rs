@@ -658,8 +658,6 @@ impl OpenCADStudio {
         task
     }
 
-    /// A dynamic UCS lasts for the command that set it: once that tab's
-    /// command has ended, the UCS it replaced comes back.
     /// What decides whether the viewport chip with its outline switch is on
     /// screen: the document, its layout and the number of model viewports.
     fn outline_switch_key(&self) -> Option<(u64, String, usize)> {
@@ -672,6 +670,8 @@ impl OpenCADStudio {
         })
     }
 
+    /// A dynamic UCS lasts for the command that set it: once that tab's
+    /// command has ended, the UCS it replaced comes back.
     fn restore_dynamic_ucs_after_command(&mut self) {
         let Some((tab_id, _)) = self.dynamic_ucs_restore else {
             return;

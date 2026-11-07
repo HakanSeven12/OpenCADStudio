@@ -130,6 +130,7 @@ fn window() -> (OpenCADStudio, Handle, Handle, i32) {
         line((0., 0.), (100., 0.)),
         line((0., 10.), (100., 10.)),
         line((0., 5.), (100., 5.)),
+        EntityType::Arc(Arc::from_center_radius_angles(Vector3::new(40., 30., 0.), 20., 0., std::f64::consts::FRAC_PI_2)),
     ];
     let (mut app, plain, mirrored) = drawing("WINDOW", entities, |insert| {
         insert.insert_point = Vector3::new(300., 50., 0.);
@@ -171,6 +172,7 @@ fn window() -> (OpenCADStudio, Handle, Handle, i32) {
         )
         .unwrap();
     }
+    actions::create(doc, def, Kind::Scale, width, &[members[5]], DVec3::ZERO).unwrap();
     let id = actions::all_parameters(doc, def)
         .into_iter()
         .find(|p| p.handle == width)
@@ -556,5 +558,55 @@ fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
         reopened.tabs[j].scene.document = loaded;
         let restored_lin = grip(&mut reopened, insert, lin_id, 1);
         assert!((restored_lin.world - target).length() < 1e-3, "{ext} grip persisted");
+    }
+}
+
+fn assert_window_arc(app: &OpenCADStudio, insert: Handle, center: DVec3, radius: f64) {
+    let (_, arcs) = geometry(&app.tabs[app.active_tab].scene.document, insert);
+    assert_eq!(arcs.len(), 1);
+    assert!(arcs[0].0.distance(center) < EPS, "actual={:?} expected={center:?}", arcs[0]);
+    assert!((arcs[0].1 - radius).abs() < EPS);
+    assert!(arcs[0].2.abs() < EPS);
+    assert!((arcs[0].3 - std::f64::consts::FRAC_PI_2).abs() < EPS);
+}
+
+#[test]
+fn synthetic_window_scale_grips_refresh_reload_reset_and_continue() {
+    for mirrored in [false, true] {
+        let (mut app, plain, mirror, id) = window();
+        let (insert, other) = if mirrored { (mirror, plain) } else { (plain, mirror) };
+        let i = app.active_tab;
+        let original = app.tabs[i].scene.document.clone();
+        drag(&mut app, insert, id, 0, 20.);
+        assert_window_arc(&app, insert, DVec3::new(52., 36., 0.), 24.);
+        let edited = app.tabs[i].scene.document.clone();
+        let _ = app.update(Message::Undo);
+        assert_eq!(geometry(&app.tabs[i].scene.document, insert), geometry(&original, insert));
+        let def = original.dynamic_definition_for_insert(insert).unwrap();
+        assert_eq!(actions::instance::load_action_bases(&app.tabs[i].scene.document, insert, def).unwrap(), actions::instance::load_action_bases(&original, insert, def).unwrap());
+        let _ = app.update(Message::Redo);
+        assert_eq!(geometry(&app.tabs[i].scene.document, insert), geometry(&edited, insert));
+        assert_eq!(actions::instance::load_action_bases(&app.tabs[i].scene.document, insert, def).unwrap(), actions::instance::load_action_bases(&edited, insert, def).unwrap());
+        let def = edited.dynamic_definition_for_insert(insert).unwrap();
+        app.tabs[i].scene.document = actions::instance::refresh_after_edit(&edited, &original, def).unwrap();
+        assert_window_arc(&app, insert, DVec3::new(52., 36., 0.), 24.);
+        assert_window_arc(&app, other, DVec3::new(40., 30., 0.), 20.);
+        for ext in ["dwg", "dxf"] {
+            let doc = &app.tabs[i].scene.document;
+            let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
+            let loaded = crate::io::load_bytes(&format!("synthetic.{ext}"), bytes).unwrap();
+            let mut reopened = OpenCADStudio::new_for_test();
+            let j = reopened.active_tab;
+            reopened.tabs[j].scene.document = loaded;
+            drag(&mut reopened, insert, id, 1, 20.);
+            // Incremental scale about base -20: -20 + (52 + 20) * 140/120.
+            assert_window_arc(&reopened, insert, DVec3::new(64., 42., 0.), 28.);
+            assert_window_arc(&reopened, other, DVec3::new(40., 30., 0.), 20.);
+            let reset = actions::instance::reset(&reopened.tabs[j].scene.document, insert).unwrap().unwrap();
+            reopened.tabs[j].scene.document = reset;
+            assert_window_arc(&reopened, insert, DVec3::new(40., 30., 0.), 20.);
+            drag(&mut reopened, insert, id, 1, 20.);
+            assert_window_arc(&reopened, insert, DVec3::new(48., 36., 0.), 24.);
+        }
     }
 }

@@ -486,6 +486,18 @@ pub(crate) fn save_action_bases(
     Ok(())
 }
 
+/// Reset discards per-reference dependent pivots along with parameter frames.
+fn clear_action_bases(doc: &mut Document, insert: Handle, definition: Handle) -> Result<(), &'static str> {
+    let ids: Vec<_> = super::actions(doc, definition).into_iter()
+        .filter(|(handle, _, kind, _)| *kind == Kind::Scale && super::options::base(doc, *handle).is_some_and(|a| a.dependent))
+        .filter_map(|(handle, _, _, _)| super::action_node_id(doc, handle))
+        .collect();
+    for id in ids {
+        remove_cache(doc, insert, id)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn update_action_bases(
     doc: &Document,
     insert: Handle,
@@ -1151,6 +1163,7 @@ pub(crate) fn reset(
         && (crate::scene::block_visibility::parameter(doc, def).is_none()
             || super::representation::visibility_state(doc, doc, def, insert) == Some(0))
         && history.is_none()
+        && load_action_bases(doc, insert, def)?.is_empty()
         && doc.get_entity(insert).is_none_or(|entity| {
             entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_none()
         });
@@ -1184,6 +1197,7 @@ pub(crate) fn reset(
     }
     clear_table_history(&mut result, insert, history)?;
     clear_canonical_inputs(&mut result, insert);
+    clear_action_bases(&mut result, insert, def)?;
     Ok(Some(result))
 }
 
@@ -1227,6 +1241,7 @@ pub(crate) fn reset_test(
     super::rebuild(&mut result, baseline, def)?;
     super::sync_representation(&mut result, def, &name)?;
     clear_canonical_inputs(&mut result, insert);
+    clear_action_bases(&mut result, insert, def)?;
     if let Some(parameter) =
         crate::scene::block_visibility::parameter(&result, def).map(|p| p.handle)
     {

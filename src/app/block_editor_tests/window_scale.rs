@@ -115,7 +115,7 @@ fn test_synthetic_dependent_scale_preserves_geometry_refresh_and_roundtrip() {
         .unwrap();
     // Prior position was 18. New base is -20. Distance from new base = 18 - (-20) = 38.
     // Scaled by 30 / 20 = 1.5: 38 * 1.5 = 57. Position = -20 + 57 = 37.
-    // Or from definition (4): -20 + (4 - (-20)) * 3 = -20 + 72 = 37!
+    // Rebuilding must retain the accumulated base; scaling the definition about -20 would yield 52.
     assert_eq!(c2.center, document::types::Vector3::new(37., 9., 0.));
     assert_eq!(c2.radius, 6.);
 

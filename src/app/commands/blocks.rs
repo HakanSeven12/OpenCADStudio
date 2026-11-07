@@ -80,6 +80,7 @@ impl OpenCADStudio {
         self.clipboard_base = base;
         self.clipboard = entities;
         self.clipboard_deps = deps;
+        self.clipboard_source_tab = self.tabs.get(i).map(|tab| tab.id);
         count
     }
 

@@ -381,6 +381,34 @@ impl OpenCADStudio {
             block_records_before,
             first_new_handle,
         );
+        // Pasted back into its own drawing, a copied associative array gets
+        // its own blocks and action, as COPY gives it; elsewhere the source
+        // handles mean nothing and it stays a plain reference.
+        if self.clipboard_source_tab == Some(self.tabs[i].id) {
+            let arrays: Vec<(Handle, Handle)> = handle_map
+                .iter()
+                .filter(|(source, _)| {
+                    crate::scene::assoc_array::array_of_insert(
+                        &self.tabs[i].scene.document,
+                        **source,
+                    )
+                    .is_some()
+                })
+                .map(|(&source, &copy)| (source, copy))
+                .collect();
+            for (source, copy) in arrays {
+                if crate::scene::assoc_array::clone_array_for_copy(
+                    &mut self.tabs[i].scene,
+                    source,
+                    copy,
+                    &handle_map,
+                ) {
+                    self.tabs[i]
+                        .scene
+                        .bump_entities(&[(copy, crate::scene::ChangeKind::Modified)]);
+                }
+            }
+        }
         by_index
     }
 
@@ -3202,5 +3230,92 @@ mod paste_viewport_clip_tests {
         let copy = viewport_in(&dst, &pasted);
         assert!(copy.clip_boundary_handle.is_null());
         assert!(!copy.status.non_rectangular_clipping);
+    }
+}
+
+#[cfg(test)]
+mod paste_assoc_array_tests {
+    use crate::app::OpenCADStudio;
+    use crate::scene::assoc_array::{array_of_insert, create_from_spec, AssocArraySpec};
+    use document::entities::{AttributeEntity, Circle, Insert};
+    use document::types::Vector3;
+    use document::EntityType;
+
+    /// An associative array of attributed block references in drawing `i`.
+    fn attributed_array(app: &mut OpenCADStudio, i: usize) -> document::Handle {
+        let scene = &mut app.tabs[i].scene;
+        scene.define_block_raw(
+            "PART",
+            Vector3::ZERO,
+            vec![EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0))],
+        );
+        let source = scene.add_entity(EntityType::Insert(Insert::new("PART", Vector3::ZERO)));
+        let mut att = AttributeEntity::new("NO".into(), "1".into());
+        att.common.handle = scene.document.allocate_handle();
+        att.common.owner_handle = source;
+        if let Some(EntityType::Insert(insert)) = scene.document.get_entity_mut(source) {
+            insert.attributes.push(att);
+        }
+        let spec = AssocArraySpec::Rectangular {
+            columns: 3,
+            rows: 2,
+            column_spacing: 20.0,
+            row_spacing: 30.0,
+        };
+        create_from_spec(scene, &[source], glam::DVec3::ZERO, &spec).unwrap()
+    }
+
+    /// Ctrl+C / Ctrl+V of an associative array in its own drawing gives an
+    /// array of its own (counts in Properties, array grips), as COPY does.
+    #[test]
+    fn a_pasted_array_in_its_own_drawing_is_an_array_of_its_own() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let array = attributed_array(&mut app, i);
+        app.copy_entities_to_clipboard(i, &[array], glam::DVec3::ZERO);
+        app.handle_paste_clipboard(glam::DVec3::new(200.0, 0.0, 0.0));
+
+        let document = &app.tabs[i].scene.document;
+        let pasted: Vec<document::Handle> = app.tabs[i].scene.selected_handles_in_order();
+        assert_eq!(pasted.len(), 1);
+        let original = array_of_insert(document, array).unwrap();
+        let copied =
+            array_of_insert(document, pasted[0]).expect("the pasted reference is an array");
+        assert_ne!(copied.action, original.action);
+        assert_ne!(copied.array_block, original.array_block);
+
+        app.undo_active_tab();
+        assert!(app.tabs[i].scene.document.get_entity(pasted[0]).is_none());
+        assert!(array_of_insert(&app.tabs[i].scene.document, array).is_some());
+    }
+
+    /// In another drawing the source's handles name nothing of the
+    /// source's, so the paste stays a plain reference and nothing breaks.
+    #[test]
+    fn a_pasted_array_in_another_drawing_stays_a_plain_reference() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let source_tab = app.active_tab;
+        let array = attributed_array(&mut app, source_tab);
+        app.copy_entities_to_clipboard(source_tab, &[array], glam::DVec3::ZERO);
+        app.tabs
+            .push(crate::app::tab_document::DocumentTab::new_drawing(100));
+        let target = app.tabs.len() - 1;
+        app.active_tab = target;
+        assert_ne!(target, source_tab);
+        // Same handle numbers in the target as in the source: an array there
+        // under the source's handles must not be mistaken for the copied one.
+        let _ = attributed_array(&mut app, target);
+        let actions_before = app.tabs[target].scene.document.objects.len();
+        app.handle_paste_clipboard(glam::DVec3::new(200.0, 0.0, 0.0));
+        let pasted: Vec<document::Handle> = app.tabs[target].scene.selected_handles_in_order();
+        assert_eq!(pasted.len(), 1);
+        assert!(array_of_insert(&app.tabs[target].scene.document, pasted[0]).is_none());
+        assert_eq!(
+            app.tabs[target].scene.document.objects.len(),
+            actions_before,
+            "no array cloned"
+        );
     }
 }

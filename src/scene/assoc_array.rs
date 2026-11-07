@@ -1773,10 +1773,9 @@ fn clonable_source_member(document: &Document, entity: &EntityType) -> bool {
     match entity {
         EntityType::Dimension(_) | EntityType::Leader(_) | EntityType::MultiLeader(_) => false,
         EntityType::Hatch(hatch) => !hatch.is_associative,
-        EntityType::Insert(insert) => {
-            insert.attributes.is_empty()
-                && array_of_insert(document, insert.common.handle).is_none()
-        }
+        // Attributes get their own handles and extension dictionaries with
+        // the reference they belong to.
+        EntityType::Insert(insert) => array_of_insert(document, insert.common.handle).is_none(),
         _ => true,
     }
 }
@@ -2674,6 +2673,83 @@ mod copy_tests {
             .map(|handle| action(document, *handle).unwrap().action_index)
             .collect();
         assert_ne!(indexes[0], indexes[1]);
+    }
+
+    /// An array of block references that carry attributes (a labelled
+    /// part, say) is copied as an array of its own too, its attributes
+    /// owned by the copied references.
+    #[test]
+    fn a_copied_array_of_attributed_blocks_is_an_array_of_its_own() {
+        use document::entities::{AttributeEntity, Insert};
+        use document::types::Vector3;
+        let mut scene = crate::scene::Scene::new();
+        scene.define_block_raw(
+            "PART",
+            Vector3::ZERO,
+            vec![EntityType::Circle(Circle::from_coords(0.0, 0.0, 0.0, 2.0))],
+        );
+        let source = scene.add_entity(EntityType::Insert(Insert::new("PART", Vector3::ZERO)));
+        for (tag, value) in [("NO", "1"), ("TYPE", "A")] {
+            let mut att = AttributeEntity::new(tag.into(), value.into());
+            att.common.handle = scene.document.allocate_handle();
+            att.common.owner_handle = source;
+            let Some(EntityType::Insert(insert)) = scene.document.get_entity_mut(source) else {
+                unreachable!();
+            };
+            insert.attributes.push(att);
+        }
+        let spec = AssocArraySpec::Rectangular {
+            columns: 3,
+            rows: 2,
+            column_spacing: 20.0,
+            row_spacing: 30.0,
+        };
+        let insert = create_from_spec(&mut scene, &[source], DVec3::ZERO, &spec).unwrap();
+        let before = world_items(&scene.document, insert);
+        let copy = copy_by(&mut scene, &[insert], DVec3::new(200.0, 0.0, 0.0))[0];
+
+        let document = &scene.document;
+        let original = array_of_insert(document, insert).unwrap();
+        let copied = array_of_insert(document, copy).expect("the copy is an array");
+        assert_ne!(copied.action, original.action);
+        assert_ne!(copied.source_block, original.source_block);
+        assert_eq!(world_items(document, copy), shifted(&before, 200_000, 0));
+        let attributes = |block: Handle| -> Vec<(Handle, Handle, Handle, String)> {
+            block_members(document, block)
+                .into_iter()
+                .filter_map(|member| match document.get_entity(member) {
+                    Some(EntityType::Insert(reference)) => Some(
+                        reference
+                            .attributes
+                            .iter()
+                            .map(|a| {
+                                (
+                                    member,
+                                    a.common.handle,
+                                    a.common.owner_handle,
+                                    a.value.clone(),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                    _ => None,
+                })
+                .flatten()
+                .collect()
+        };
+        let (old, new) = (
+            attributes(original.source_block),
+            attributes(copied.source_block),
+        );
+        assert_eq!(new.len(), 2, "both attributes travel: {new:?}");
+        assert_eq!(
+            new.iter().map(|a| a.3.as_str()).collect::<Vec<_>>(),
+            old.iter().map(|a| a.3.as_str()).collect::<Vec<_>>()
+        );
+        for (member, handle, owner, _) in &new {
+            assert_eq!(owner, member, "owned by the copied reference");
+            assert!(old.iter().all(|a| a.1 != *handle), "a handle of its own");
+        }
     }
 
     #[test]

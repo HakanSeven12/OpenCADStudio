@@ -168,17 +168,6 @@ impl OpenCADStudio {
     /// part answers the running command's prompt, or starts a command when
     /// none runs (`PDFIMPORT;FILE`).
     pub(super) fn dispatch_ribbon_command(&mut self, cmd: &str) -> Task<Message> {
-        if cmd.eq_ignore_ascii_case("BLOOKUPTABLE")
-            && self.block_editor_preferences.action_bars
-            && self.tabs[self.active_tab]
-                .active_block_edit_session()
-                .is_some()
-        {
-            // The palette's Lookup tool is the action bar's own affordance, so
-            // the refusal meant for the typed verb would silence it: open the
-            // table editor instead.
-            return self.open_lookup_table("");
-        }
         if !cmd.contains(';') {
             return self.dispatch_command(cmd);
         }

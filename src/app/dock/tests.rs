@@ -1732,6 +1732,76 @@ fn block_actions_array_palette_requires_distance_parameter() {
     });
 }
 
+/// The Actions tab's Lookup row asks which lookup parameter to edit and opens
+/// that parameter's table only once the choice is made.
+#[test]
+fn block_actions_lookup_palette_asks_for_the_parameter_before_the_table() {
+    with_stack(|| {
+        use crate::ui::window::authoring_palettes::Tab;
+        let mut app = authoring_app();
+        let _ = app.dispatch_command("BAUTHORPALETTE");
+        app.authoring_palette_tab = Tab::Actions;
+        let _ = app.run_command_line("BPARAMETER LOOKUP 0,0");
+        let i = app.active_tab;
+        let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        let placed = |app: &OpenCADStudio| {
+            crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+                .into_iter()
+                .map(|(handle, _)| handle)
+                .collect::<Vec<_>>()
+        };
+        let first = placed(&app)[0];
+        let _ = app.run_command_line("BPARAMETER LOOKUP 4,0");
+        let all = placed(&app);
+        assert_eq!(all.len(), 2, "the fixture places two lookup parameters");
+        let second = *all.iter().find(|handle| **handle != first).unwrap();
+        let name = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .find(|(handle, _)| *handle == second)
+            .map(|(_, parameter)| parameter.lookup_name.clone())
+            .expect("the second lookup parameter");
+        let _ = app.dispatch_command("BACTIONBARMODE 1");
+        let point = authoring_control(&app, "authoring-tool-lookup-table");
+        authoring_click(&mut app, point);
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "with action bars on the row defers to the bar"
+        );
+        let _ = app.dispatch_command("BACTIONBARMODE 0");
+        let point = authoring_control(&app, "authoring-tool-lookup-table");
+        authoring_click(&mut app, point);
+        assert!(
+            app.command_line.last_error.is_none(),
+            "the row is not refused: {:?}",
+            app.command_line.last_error
+        );
+        assert!(
+            app.block_lookup.is_none(),
+            "the row asks for the parameter first"
+        );
+        let command = app.tabs[i]
+            .active_cmd
+            .as_ref()
+            .expect("the row waits for a parameter");
+        assert!(
+            command.prompt().contains("Select a parameter"),
+            "{}",
+            command.prompt()
+        );
+        let _ = app.update(Message::CommandInput(name));
+        let _ = app.update(Message::CommandSubmit);
+        let state = app
+            .block_lookup
+            .as_ref()
+            .expect("the chosen parameter's table opens");
+        assert_eq!(state.drafts.len(), 2, "both tables are listed");
+        assert_eq!(
+            state.drafts[state.selected].parameter, second,
+            "the table of the parameter that was named"
+        );
+    });
+}
+
 #[test]
 fn block_actions_rotate_flip_palette_requires_matching_parameters() {
     with_stack(|| {
@@ -1862,6 +1932,15 @@ fn lookup_basepoint_palette_and_table_dialog_real_controls() {
         authoring_click(&mut app, point);
         let point = authoring_control(&app, "authoring-tool-lookup-table");
         authoring_click(&mut app, point);
+        let i = app.active_tab;
+        let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        let name = crate::scene::block_lookup::parameters(&app.tabs[i].scene.document, definition)
+            .into_iter()
+            .next()
+            .map(|(_, parameter)| parameter.lookup_name.clone())
+            .expect("the placed lookup parameter");
+        let _ = app.update(Message::CommandInput(name));
+        let _ = app.update(Message::CommandSubmit);
         assert_eq!(app.active_modal, Some(crate::app::ModalKind::BlockLookup));
         let _ = app.update(Message::BlockLookup(A::Property(0)));
         let point = find_in_view(&app, "Add Property");

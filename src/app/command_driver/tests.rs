@@ -5681,4 +5681,90 @@ mod batch4_tests {
             .clone();
         assert_eq!(current, "MYPAPER");
     }
+
+    fn model_lines(app: &OpenCADStudio) -> Vec<document::Handle> {
+        let i = app.active_tab;
+        app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Line(line) => Some(line.common.handle),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn group_rename_add_and_remove_edit_an_existing_group() {
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let _ = app.run_command_line("LINE 0,0 10,0");
+        let _ = app.run_command_line("LINE 0,5 10,5");
+        let _ = app.run_command_line("LINE 0,9 10,9");
+        let i = app.active_tab;
+        let lines = model_lines(&app);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        app.tabs[i]
+            .scene
+            .create_group("MYGROUP".to_string(), vec![lines[0], lines[1]]);
+
+        let _ = app.run_command_line("GROUP RENAME MYGROUP TEAM");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let names: Vec<String> = app.tabs[i].scene.groups().map(|g| g.name.clone()).collect();
+        assert_eq!(names, vec!["TEAM".to_string()], "{names:?}");
+        let renamed = app.tabs[i]
+            .scene
+            .groups()
+            .find(|g| g.name == "TEAM")
+            .cloned()
+            .expect("the renamed group");
+        assert_eq!(renamed.entities.len(), 2, "{:?}", renamed.entities);
+        let keyed = app.tabs[i]
+            .scene
+            .document
+            .objects
+            .values()
+            .find_map(|object| match object {
+                document::objects::ObjectType::Dictionary(dict) => {
+                    dict.entries.iter().find(|(key, _)| key == "TEAM").map(|_| ())
+                }
+                _ => None,
+            });
+        assert!(keyed.is_some(), "the group dictionary lost the new name");
+
+        let add = format!("GROUP ADD TEAM {:X}", lines[2].value());
+        let _ = app.run_command_line(&add);
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let group = app.tabs[i]
+            .scene
+            .groups()
+            .find(|g| g.name == "TEAM")
+            .cloned()
+            .expect("the group");
+        assert!(group.contains(lines[2]), "{:?}", group.entities);
+
+        let remove = format!("GROUP REMOVE TEAM {:X}", lines[0].value());
+        let _ = app.run_command_line(&remove);
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+        let group = app.tabs[i]
+            .scene
+            .groups()
+            .find(|g| g.name == "TEAM")
+            .cloned()
+            .expect("the group");
+        assert!(!group.contains(lines[0]), "{:?}", group.entities);
+        assert!(group.contains(lines[1]), "{:?}", group.entities);
+
+        let _ = app.run_command_line("GROUP RENAME NOSUCH OTHER");
+        assert!(
+            app.command_line
+                .last_error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("no group named"),
+            "{:?}",
+            app.command_line.last_error
+        );
+    }
 }

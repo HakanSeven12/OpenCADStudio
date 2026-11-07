@@ -1178,6 +1178,16 @@ impl OpenCADStudio {
             // VPORTS SAVE/RESTORE take their name on the same line.
             || tokens[0].eq_ignore_ascii_case("VPORTS")
             || tokens[0].eq_ignore_ascii_case("-VPORTS")
+            // GROUP editing (`GROUP RENAME/ADD/REMOVE ...`) takes its names
+            // and handles on one line; a bare `GROUP <name>` still creates a
+            // group through the interactive command.
+            || (tokens[0].eq_ignore_ascii_case("GROUP")
+                && tokens.get(1).is_some_and(|sub| {
+                    matches!(
+                        sub.to_ascii_uppercase().as_str(),
+                        "LIST" | "?" | "RENAME" | "NAME" | "ADD" | "REMOVE"
+                    )
+                }))
             // -PAGESETUP takes SAVE/APPLY/RENAME and names on one line.
             || tokens[0].eq_ignore_ascii_case("-PAGESETUP")
             // XBIND takes its reference, symbol type and names on one line.

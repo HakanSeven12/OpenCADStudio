@@ -42,6 +42,53 @@ impl Scene {
         gh
     }
 
+    /// Rename a group by its current name. The group dictionary keeps one
+    /// entry per group, keyed by name, so the entry moves with the rename.
+    pub fn rename_group_named(&mut self, old_name: &str, new_name: &str) -> bool {
+        let Some(group) = self.groups().find(|g| g.name.eq_ignore_ascii_case(old_name)) else {
+            return false;
+        };
+        let handle = group.handle;
+        let mut updated = group.clone();
+        updated.name = new_name.to_string();
+        self.document.objects.insert(handle, ObjectType::Group(updated));
+        let dict_handle = self.document.header.acad_group_dict_handle;
+        if let Some(ObjectType::Dictionary(dict)) = self.document.objects.get_mut(&dict_handle) {
+            if dict.remove(old_name).is_some() {
+                dict.insert(new_name, handle);
+            }
+        }
+        true
+    }
+
+    /// Add one entity to the group called `group_name`.
+    pub fn add_entity_to_group_named(&mut self, group_name: &str, handle: Handle) -> bool {
+        let Some(group) = self.groups().find(|g| g.name.eq_ignore_ascii_case(group_name)) else {
+            return false;
+        };
+        let mut updated = group.clone();
+        updated.add_entity(handle);
+        let group_handle = updated.handle;
+        self.set_group_member_reactors(group_handle, &updated.entities, true);
+        self.document.objects.insert(group_handle, ObjectType::Group(updated));
+        true
+    }
+
+    /// Remove one entity from the group called `group_name`.
+    pub fn remove_entity_from_group_named(&mut self, group_name: &str, handle: Handle) -> bool {
+        let Some(group) = self.groups().find(|g| g.name.eq_ignore_ascii_case(group_name)) else {
+            return false;
+        };
+        let mut updated = group.clone();
+        if !updated.remove_entity(handle) {
+            return false;
+        }
+        let group_handle = updated.handle;
+        self.set_group_member_reactors(group_handle, &updated.entities, false);
+        self.document.objects.insert(group_handle, ObjectType::Group(updated));
+        true
+    }
+
     /// Keep member back-links and their first-touch undo images together.
     fn set_group_member_reactors(&mut self, group: Handle, members: &[Handle], add: bool) {
         for &member in members {

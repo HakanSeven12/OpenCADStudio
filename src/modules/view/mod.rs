@@ -28,6 +28,7 @@ pub(crate) mod view_top;
 mod viewcube;
 pub mod visual_style;
 pub(crate) mod vports_config;
+mod vports_highlight;
 mod vports_join;
 mod vports_named;
 mod vports_restore;
@@ -80,6 +81,7 @@ impl CadModule for ViewModule {
                         RibbonItem::Tool(vports_named::tool()),
                         RibbonItem::Tool(vports_join::tool()),
                         RibbonItem::Tool(vports_restore::tool()),
+                        RibbonItem::Tool(vports_highlight::tool()),
                     ],
                 },
                 // ── Visual Style ──────────────────────────────────────────────────

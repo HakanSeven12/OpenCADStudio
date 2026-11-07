@@ -341,6 +341,8 @@ pub struct Ribbon {
     pub show_viewcube: bool,
     /// UCS icon (UCSICON) visibility — drives the UCS Icon button highlight.
     pub show_ucs_icon: bool,
+    /// VPHIGHLIGHT: the hovered Model viewport is outlined.
+    pub show_viewport_highlight: bool,
     /// Properties panel (PROPERTIES) visibility — drives the Properties button highlight.
     pub show_properties: bool,
     /// The Count palette is open (View › Palettes › Count).
@@ -536,6 +538,7 @@ impl Ribbon {
             ortho_mode: true,
             show_viewcube: true,
             show_ucs_icon: true,
+            show_viewport_highlight: true,
             show_properties: true,
             show_count_palette: false,
             show_sheet_set: false,
@@ -970,6 +973,7 @@ impl Ribbon {
             ortho_mode: self.ortho_mode,
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
+            show_viewport_highlight: self.show_viewport_highlight,
             show_properties: self.show_properties,
             show_count_palette: self.show_count_palette,
             show_graphic_attributes: self.show_graphic_attributes,

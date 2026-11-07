@@ -3842,3 +3842,72 @@ mod vports_dropdown_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod viewport_highlight_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    fn tool() -> crate::modules::ToolDef {
+        let module = crate::modules::view::ViewModule;
+        crate::modules::CadModule::ribbon_groups(&module)
+            .iter()
+            .find(|g| g.title == "Model Viewports")
+            .and_then(|g| {
+                g.tools.iter().find_map(|t| match t {
+                    crate::modules::RibbonItem::Tool(t) if t.id == "VPHIGHLIGHT" => Some(t.clone()),
+                    _ => None,
+                })
+            })
+            .expect("a hover-outline switch in View > Model Viewports")
+    }
+
+    #[test]
+    fn the_ribbon_switch_and_the_variables_control_the_hover_outline() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        assert!(app.model_space.viewport_hover_highlight, "on by default");
+        assert!(
+            app.model_space.viewport_hover_opacity <= 20,
+            "barely visible by default"
+        );
+        let t = tool();
+        let _ = app.update(Message::RibbonToolClick {
+            tool_id: t.id.to_string(),
+            event: t.event.clone(),
+        });
+        assert!(!app.model_space.viewport_hover_highlight, "the switch turns it off");
+        assert!(!app.ribbon.show_viewport_highlight, "and its light goes out");
+        let _ = app.update(Message::RibbonToolClick {
+            tool_id: t.id.to_string(),
+            event: t.event.clone(),
+        });
+        assert!(app.model_space.viewport_hover_highlight, "and on again");
+        assert!(app.ribbon.show_viewport_highlight);
+
+        let _ = app.run_command_line("VPHIGHLIGHT 0");
+        assert!(!app.model_space.viewport_hover_highlight);
+        let _ = app.run_command_line("VPHIGHLIGHTOPACITY 40");
+        assert_eq!(app.model_space.viewport_hover_opacity, 40);
+        let _ = app.run_command_line("VPHIGHLIGHTOPACITY 140");
+        assert_eq!(app.model_space.viewport_hover_opacity, 40, "out of range is refused");
+    }
+
+    #[test]
+    fn the_hovered_viewport_is_the_one_under_the_cursor() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let at = |app: &OpenCADStudio, x: f32| {
+            app.tabs[i]
+                .scene
+                .hovered_model_pane_px(800.0, 600.0, Some(iced::Point::new(x, 300.0)))
+        };
+        assert_eq!(at(&app, 100.0), None, "one viewport: nothing to tell apart");
+        let _ = app.run_command_line("VPORTS 2V");
+        let left = at(&app, 100.0).expect("left viewport");
+        let right = at(&app, 700.0).expect("right viewport");
+        assert!(left.x < 1.0 && left.x + left.width < 401.0, "{left:?}");
+        assert!(right.x > 399.0 && right.x + right.width > 799.0, "{right:?}");
+        assert_eq!(at(&app, 400.0), None, "on the divider no viewport is outlined");
+    }
+}

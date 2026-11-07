@@ -628,6 +628,7 @@ impl OpenCADStudio {
             self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes);
         self.ribbon.show_tool_palettes =
             self.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes);
+        self.ribbon.show_viewport_highlight = self.model_space.viewport_hover_highlight;
         task
     }
 

@@ -2325,6 +2325,9 @@ enum ViewSnapshot {
 /// divider width. The renderer derives tile rects through this same spacing so
 /// the drawn viewports line up exactly with the pane_grid layout.
 pub const TILE_DIVIDER_PX: f32 = 2.0;
+/// Extra grab width around a Model-pane divider where its resize arrows
+/// show (split across both sides).
+pub const TILE_RESIZE_LEEWAY_PX: f32 = 6.0;
 
 /// Minimum used until the viewport render-mode bar reports its natural width.
 pub const MODEL_PANE_MIN_FALLBACK_PX: f32 = 50.0;

@@ -1276,6 +1276,7 @@ pub fn selection_overlay<'a>(
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
     pane_drop_rect: Option<iced::Rectangle>,
+    pane_hover: Option<(iced::Rectangle, f32)>,
     nav: NavCursor,
     suppressed: bool,
     hover_locked: bool,
@@ -1316,6 +1317,7 @@ pub fn selection_overlay<'a>(
         dividers,
         pane_move_rect,
         pane_drop_rect,
+        pane_hover,
         nav,
         suppressed,
         hover_locked,
@@ -1400,6 +1402,9 @@ struct SelectionCanvas {
     pane_move_rect: Option<iced::Rectangle>,
     /// The pane under the cursor during a pane move (drop target), highlighted.
     pane_drop_rect: Option<iced::Rectangle>,
+    /// The Model viewport under the cursor (px) and the alpha of its faint
+    /// outline (VPHIGHLIGHT / VPHIGHLIGHTOPACITY). `None` with one viewport.
+    pane_hover: Option<(iced::Rectangle, f32)>,
     /// Which interactive navigation tool is armed. Any of them hides the
     /// crosshair — the viewport is being driven, not drawn on — and each
     /// picks its own cursor in `mouse_interaction`.
@@ -1701,21 +1706,34 @@ fn draw_grip_marker(
 }
 
 impl SelectionCanvas {
-    /// True when the cursor sits on a Model-pane divider (within a few px), so
-    /// `draw` can suppress the CAD crosshair there. The resize cursor itself is
-    /// supplied by the input pane_grid layered above.
+    /// True when the cursor sits on a Model-pane divider, so `draw` can
+    /// suppress the CAD crosshair there. The resize cursor itself is supplied
+    /// by the input pane_grid layered above.
     fn divider_under(&self, cursor: mouse::Cursor, bounds: iced::Rectangle) -> bool {
-        const TOL_PX: f32 = 3.0;
-        let Some(pos) = cursor.position_in(bounds) else {
-            return false;
-        };
-        self.dividers.iter().any(|d| {
-            pos.x >= d.x - TOL_PX
-                && pos.x <= d.x + d.width + TOL_PX
-                && pos.y >= d.y - TOL_PX
-                && pos.y <= d.y + d.height + TOL_PX
-        })
+        cursor_on_divider(&self.dividers, cursor, bounds)
     }
+}
+
+/// True when `cursor` lies in a divider's grab zone — the band where the
+/// pane_grid above shows its resize arrows. That pane_grid owns the cursor
+/// there, so this overlay receives it *levitated*; it is landed first, or
+/// the test misses exactly the spots where the arrows show and the
+/// crosshair stays drawn on top of them.
+pub(crate) fn cursor_on_divider(
+    dividers: &[iced::Rectangle],
+    cursor: mouse::Cursor,
+    bounds: iced::Rectangle,
+) -> bool {
+    let tol = crate::scene::TILE_RESIZE_LEEWAY_PX * 0.5;
+    let Some(pos) = cursor.land().position_in(bounds) else {
+        return false;
+    };
+    dividers.iter().any(|d| {
+        pos.x >= d.x - tol
+            && pos.x <= d.x + d.width + tol
+            && pos.y >= d.y - tol
+            && pos.y <= d.y + d.height + tol
+    })
 }
 
 // ── Selection overlay frame caches ─────────────────────────────────────────
@@ -2202,6 +2220,26 @@ impl canvas::Program<Message> for SelectionCanvas {
         // under the cursor, and drag a translucent ghost card along the cursor
         // so the pane is visibly "moving".
         layers.push(transient_layer(renderer, bounds, |frame| {
+        // Hovered viewport: a thin outline just inside its edges, in the
+        // accent colour at the user's (low) opacity, like a tiling window
+        // manager marks the window under the pointer.
+        if let Some((r, alpha)) = self.pane_hover.filter(|(_, a)| *a > 0.0) {
+            if self.pane_move_rect.is_none() && r.width > 4.0 && r.height > 4.0 {
+                let accent = theme.palette().primary.base.color;
+                let outline = canvas::Path::rectangle(
+                    Point::new(r.x + 1.0, r.y + 1.0),
+                    iced::Size::new(r.width - 2.0, r.height - 2.0),
+                );
+                frame.stroke(
+                    &outline,
+                    canvas::Stroke {
+                        width: 2.0,
+                        style: canvas::Style::Solid(Color { a: alpha, ..accent }),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         if let Some(src) = self.pane_move_rect {
             let accent = theme.palette().primary.base.color;
             // Source pane: dimmed + dashed-feel outline (it has been lifted).
@@ -7060,5 +7098,26 @@ mod grid_mask_tests {
             assert!(!pieces.is_empty(), "axis {axis} must stay outside the wipeout");
             assert!(!pieces.iter().any(crosses), "axis {axis} drawn over the wipeout");
         }
+    }
+}
+
+#[cfg(test)]
+mod divider_cursor_tests {
+    use super::cursor_on_divider;
+    use iced::mouse::Cursor;
+    use iced::{Point, Rectangle};
+
+    #[test]
+    fn the_crosshair_gives_way_where_the_resize_arrows_show() {
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let dividers = [Rectangle { x: 399.0, y: 0.0, width: 2.0, height: 600.0 }];
+        // The pane_grid above owns the cursor on its divider and hands this
+        // overlay a levitated one — that is where the arrows show.
+        for x in [400.0, 397.0, 403.0] {
+            let on = Cursor::Levitating(Point::new(x, 300.0));
+            assert!(cursor_on_divider(&dividers, on, bounds), "x = {x}");
+        }
+        let off = Cursor::Available(Point::new(380.0, 300.0));
+        assert!(!cursor_on_divider(&dividers, off, bounds));
     }
 }

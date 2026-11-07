@@ -149,11 +149,20 @@ mod tests {
             command.prompt(),
             "BACTION Lookup  Select a parameter endpoint or enter its name:"
         );
+        // The refusal leaves the command ready: the next pick still resolves.
+        let after_refusal = command.on_point(DVec3::new(0.8, 0.8, 0.));
+        assert!(
+            matches!(
+                after_refusal,
+                CmdResult::OpenBlockLookupTable { ref name, .. } if name == "Lookup2"
+            ),
+            "a refused pick does not discard the candidates"
+        );
     }
 
     #[test]
     fn a_pick_without_a_screen_asks_for_the_name() {
-        let Some(CmdResult::ReportError(error)) = Some(command().on_point(DVec3::ZERO)) else {
+        let CmdResult::ReportError(error) = command().on_point(DVec3::ZERO) else {
             panic!("expected a refusal");
         };
         assert_eq!(error, "Enter the Lookup parameter name.");

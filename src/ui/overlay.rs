@@ -1710,22 +1710,25 @@ impl SelectionCanvas {
     /// suppress the CAD crosshair there. The resize cursor itself is supplied
     /// by the input pane_grid layered above.
     fn divider_under(&self, cursor: mouse::Cursor, bounds: iced::Rectangle) -> bool {
-        cursor_on_divider(&self.dividers, cursor, bounds)
+        let last = self.selection.borrow().input.last_move_pos;
+        cursor_on_divider(&self.dividers, cursor, bounds, last)
     }
 }
 
-/// True when `cursor` lies in a divider's grab zone — the band where the
+/// True when the pointer lies in a divider's grab zone — the band where the
 /// pane_grid above shows its resize arrows. That pane_grid owns the cursor
-/// there, so this overlay receives it *levitated*; it is landed first, or
-/// the test misses exactly the spots where the arrows show and the
-/// crosshair stays drawn on top of them.
+/// there: the stack hands this overlay a levitated cursor in `update` and
+/// none at all (`Unavailable`) in `draw`. So the iced cursor is landed, and
+/// when it is missing the viewport's own last pointer position decides;
+/// otherwise the crosshair stays drawn on top of the arrows.
 pub(crate) fn cursor_on_divider(
     dividers: &[iced::Rectangle],
     cursor: mouse::Cursor,
     bounds: iced::Rectangle,
+    last_move_pos: Option<Point>,
 ) -> bool {
     let tol = crate::scene::TILE_RESIZE_LEEWAY_PX * 0.5;
-    let Some(pos) = cursor.land().position_in(bounds) else {
+    let Some(pos) = cursor.land().position_in(bounds).or(last_move_pos) else {
         return false;
     };
     dividers.iter().any(|d| {
@@ -7111,13 +7114,19 @@ mod divider_cursor_tests {
     fn the_crosshair_gives_way_where_the_resize_arrows_show() {
         let bounds = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
         let dividers = [Rectangle { x: 399.0, y: 0.0, width: 2.0, height: 600.0 }];
-        // The pane_grid above owns the cursor on its divider and hands this
-        // overlay a levitated one — that is where the arrows show.
-        for x in [400.0, 397.0, 403.0] {
-            let on = Cursor::Levitating(Point::new(x, 300.0));
-            assert!(cursor_on_divider(&dividers, on, bounds), "x = {x}");
+        // The pane_grid above owns the cursor on its divider: the stack
+        // levitates it for this overlay's update and withholds it from its
+        // draw. Both must still find the divider, across the whole band.
+        for x in [400.0, 396.0, 404.0] {
+            let p = Point::new(x, 300.0);
+            assert!(cursor_on_divider(&dividers, Cursor::Levitating(p), bounds, None), "x = {x}");
+            assert!(
+                cursor_on_divider(&dividers, Cursor::Unavailable, bounds, Some(p)),
+                "draw, x = {x}"
+            );
         }
-        let off = Cursor::Available(Point::new(380.0, 300.0));
-        assert!(!cursor_on_divider(&dividers, off, bounds));
+        let off = Point::new(380.0, 300.0);
+        assert!(!cursor_on_divider(&dividers, Cursor::Available(off), bounds, Some(off)));
+        assert!(!cursor_on_divider(&dividers, Cursor::Unavailable, bounds, Some(off)));
     }
 }

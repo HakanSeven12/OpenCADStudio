@@ -5764,6 +5764,24 @@ impl OpenCADStudio {
                 self.focus_model_pane(idx);
                 self.on_viewport_move(p)
             }
+            Message::ViewportHighlightToggle => {
+                let on = !self.model_space.viewport_hover_highlight;
+                self.model_space.viewport_hover_highlight = on;
+                self.command_line
+                    .push_info(&format!("VPHIGHLIGHT = {}", on as u8));
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::ViewportHighlightOpacity(op) => {
+                let op = op.min(100);
+                if op != self.model_space.viewport_hover_opacity {
+                    self.model_space.viewport_hover_opacity = op;
+                    // No echo: a wheel spin is many steps, and the chip's
+                    // tooltip and the outline itself show the value.
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
             Message::PaneMoveStart => {
                 let i = self.active_tab;
                 self.pane_move_from = Some(self.tabs[i].scene.active_model_tile.get());

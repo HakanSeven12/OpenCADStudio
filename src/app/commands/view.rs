@@ -3866,10 +3866,7 @@ mod viewport_highlight_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         assert!(app.model_space.viewport_hover_highlight, "on by default");
-        assert!(
-            app.model_space.viewport_hover_opacity <= 20,
-            "barely visible by default"
-        );
+        assert_eq!(app.model_space.viewport_hover_opacity, 50, "soft by default");
         let t = tool();
         let _ = app.update(Message::RibbonToolClick {
             tool_id: t.id.to_string(),

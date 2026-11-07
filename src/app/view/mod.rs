@@ -2398,6 +2398,10 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.render_mode_menu_open,
                     self.render_mode_preview,
                     style_name,
+                    (
+                        self.model_space.viewport_hover_highlight,
+                        self.model_space.viewport_hover_opacity,
+                    ),
                 );
                 // Adaptive: DensitySwap measures the bar's real width every frame
                 // (reported into `render_bar_w`, which the ViewCube reads to decide
@@ -2491,6 +2495,7 @@ bg={bg_ms:.1}ms n={view_count}"
                     self.render_mode_menu_open,
                     self.render_mode_preview,
                     named_visual_style(&tab.scene, vp_mode),
+                    (false, 0),
                 );
                 let adaptive: Element<'_, Message> = DensitySwap::new(vec![
                     iced::widget::opaque(bar),

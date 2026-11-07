@@ -351,8 +351,8 @@ pub const DEFAULT_PAPER_BG: [u8; 3] = [255, 255, 255];
 /// Standard paper space desk surround [138, 138, 138].
 pub const DEFAULT_DESK_BG: [u8; 3] = [138, 138, 138];
 
-/// Default VPHIGHLIGHTOPACITY: a faint outline that is only just visible.
-pub const DEFAULT_VIEWPORT_HOVER_OPACITY: u8 = 15;
+/// Default VPHIGHLIGHTOPACITY: a soft outline that does not compete with the drawing.
+pub const DEFAULT_VIEWPORT_HOVER_OPACITY: u8 = 50;
 
 /// Persistent configuration for Model Space appearance and selection visual effects.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]

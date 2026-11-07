@@ -4523,6 +4523,11 @@ pub enum Message {
     /// Drag-handle pressed on the active pane's controls bar: arm a pane move —
     /// the next pane released over is swapped with the active pane.
     PaneMoveStart,
+    /// Viewport chip: switch the hovered-viewport outline (VPHIGHLIGHT).
+    ViewportHighlightToggle,
+    /// Viewport chip: wheel over the outline switch sets its strength
+    /// (VPHIGHLIGHTOPACITY, percent).
+    ViewportHighlightOpacity(u8),
     ViewCubeSnap(CubeRegion),
     /// World-frame view snap from a compass cardinal (N/E/S/W), bypassing the
     /// UCS so the compass stays world-aligned.

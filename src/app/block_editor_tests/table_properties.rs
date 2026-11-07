@@ -770,6 +770,79 @@ fn the_value_list_follows_its_grip_when_the_view_moves() {
     );
 }
 
+/// Inside a floating viewport the grips are drawn through that viewport's own
+/// camera and rectangle, so the list that hangs from one is placed there too,
+/// not through the sheet camera over the whole canvas.
+#[test]
+fn the_value_list_hangs_from_the_grip_a_floating_viewport_draws() {
+    let (mut app, _, def, _, _, table) = table_fixture(false);
+    let i = app.active_tab;
+    crate::scene::block_grips::config::set(&mut app.tabs[i].scene.document, def, table, Some(1))
+        .unwrap();
+    app.refresh_properties();
+    app.open_table_popup();
+    assert!(
+        app.table_popup.is_some(),
+        "the list opens for the lone selected reference"
+    );
+
+    let world = app.tabs[i]
+        .table_grip
+        .as_ref()
+        .expect("the selected reference still draws its grip")
+        .world;
+
+    let scene = &mut app.tabs[i].scene;
+    scene.document.add_layout("Sheet").unwrap();
+    scene.set_current_layout("Sheet".into());
+    let mut viewport = document::entities::Viewport::new();
+    viewport.id = 2;
+    viewport.center = Vector3::new(50., 50., 0.);
+    viewport.width = 100.;
+    viewport.height = 100.;
+    viewport.view_height = 1000.;
+    viewport.view_target = Vector3::new(world.x, world.y, world.z);
+    viewport.view_direction = Vector3::UNIT_Z;
+    viewport.turn_on();
+    let viewport = scene.add_entity(EntityType::Viewport(Box::new(viewport)));
+    scene.active_viewport = Some(viewport);
+
+    let canvas = iced::Rectangle {
+        x: 0.,
+        y: 0.,
+        width: 1600.,
+        height: 900.,
+    };
+    let (camera, rect) = app.tabs[i]
+        .scene
+        .viewport_edit_frame((canvas.width, canvas.height))
+        .expect("the active floating viewport has an editing frame");
+    let projected = camera
+        .project(world, rect)
+        .expect("the grip projects through the viewport");
+    let expected = iced::Point::new(rect.x + projected.x, rect.y + projected.y);
+    assert!(
+        rect.contains(expected),
+        "the viewport draws the grip inside its own rectangle: {expected:?} in {rect:?}"
+    );
+    let sheet = app.tabs[i]
+        .scene
+        .camera
+        .borrow()
+        .project(world, canvas)
+        .expect("the grip projects through the sheet camera too");
+    assert!(
+        iced::Point::new(canvas.x + sheet.x, canvas.y + sheet.y).distance(expected) > 1.0,
+        "the viewport and the sheet place the grip apart, so the choice matters"
+    );
+    assert_eq!(
+        app.table_popup_anchor(i, canvas)
+            .expect("the open list has an anchor"),
+        expected,
+        "the list hangs from the grip where the viewport draws it"
+    );
+}
+
 #[test]
 fn the_value_list_closes_when_its_drawing_tab_is_left() {
     let (mut app, _, def, _, _, table) = table_fixture(false);

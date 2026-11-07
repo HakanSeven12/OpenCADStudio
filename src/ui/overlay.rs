@@ -1555,11 +1555,11 @@ fn idle_grip_color(
     }
 }
 
-/// The five corners of the alignment tag, clockwise from its top left: 0.72
+/// The five corners of the alignment tag, clockwise from its top left: 0.69
 /// units wide per unit of height, the straight sides ending 62% of the way
 /// down and the point at the bottom.
 fn alignment_tag_points(centre: Point, h: f32) -> [Point; 5] {
-    let half_width = h * 0.72;
+    let half_width = h * 0.69;
     [
         Point::new(centre.x - half_width, centre.y - h),
         Point::new(centre.x + half_width, centre.y - h),
@@ -6796,8 +6796,8 @@ mod selection_visual_color_tests {
         let width = corners[1].x - corners[0].x;
         let height = corners[3].y - corners[0].y;
         assert!(
-            (width / height - 0.72).abs() < 1e-6,
-            "0.72 wide per unit tall"
+            (width / height - 0.69).abs() < 1e-6,
+            "0.69 wide per unit tall"
         );
         assert!(
             ((corners[2].y - corners[0].y) / height - 0.62).abs() < 1e-6,

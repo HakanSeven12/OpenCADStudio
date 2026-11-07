@@ -2679,7 +2679,12 @@ mod view {
             Element::from(Space::new().height(0))
         })
         .spacing(6)
-        .width(Length::Fixed(240.0));
+        .width(Length::Fixed(240.0))
+        .height(if sizing.height == Length::Fill {
+            Length::Fill
+        } else {
+            Length::Shrink
+        });
         if !layers_mode {
             live = live.push(muted(t!("By type")));
         }
@@ -2707,7 +2712,14 @@ mod view {
                     .spacing(6),
                 );
             }
-            live = live.push(scrollable(names).height(Length::Shrink));
+            // A long list scrolls: at its natural size the dialog keeps a
+            // modest height, and a dialog made taller gives the list the room
+            // (it filled the screen and could not be made smaller).
+            live = live.push(scrollable(names).height(if sizing.height == Length::Fill {
+                Length::Fill
+            } else {
+                Length::Fixed(260.0)
+            }));
             live = live.push(
                 text(t!(
                     "The filter stays live: a new layer that matches shows up in it on its own."

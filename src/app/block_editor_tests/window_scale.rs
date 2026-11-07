@@ -162,3 +162,36 @@ fn test_synthetic_dependent_scale_preserves_geometry_refresh_and_roundtrip() {
         assert_eq!(c_loaded.radius, 6.);
     }
 }
+
+#[test]
+fn synthetic_scale_refresh_uses_changed_source_geometry() {
+    let (mut doc, def, targets) = synthetic_fixture();
+    let p = crate::scene::block_distance_parameter::create(&mut doc, def,
+        crate::scene::block_distance_parameter::Kind::Linear,
+        document::types::Vector3::ZERO, document::types::Vector3::new(10., 0., 0.),
+        document::types::Vector3::new(5., 2., 0.)).unwrap();
+    actions::create(&mut doc, def, actions::Kind::Scale, p, &targets[1..], DVec3::ZERO).unwrap();
+    let insert = doc.add_entity(EntityType::Insert(document::entities::Insert::new("ACTIONS", document::types::Vector3::ZERO))).unwrap();
+    let edited = actions::instance::evaluate_frame(&doc, insert, p,
+        actions::instance::ParameterFrame { base: DVec3::new(-10., 0., 0.), end: DVec3::new(10., 0., 0.) }).unwrap().unwrap();
+    let mut changed = edited.clone();
+    let EntityType::Circle(circle) = changed.get_entity_mut(targets[1]).unwrap() else { panic!() };
+    circle.center = document::types::Vector3::new(6., 4., 0.);
+    circle.radius = 3.;
+    let refreshed = actions::instance::refresh_after_edit(&changed, &edited, def).unwrap();
+    let check = |doc: &Document, center: document::types::Vector3, radius: f64| {
+        let EntityType::Insert(reference) = doc.get_entity(insert).unwrap() else { panic!() };
+        let circle = doc.entities_in_block(&reference.block_name).find_map(|e| if let EntityType::Circle(c) = e { Some(c) } else { None }).unwrap();
+        assert!((circle.center.x - center.x).abs() < 1e-8 && (circle.center.y - center.y).abs() < 1e-8);
+        assert!((circle.radius - radius).abs() < 1e-8);
+    };
+    check(&refreshed, document::types::Vector3::new(22., 8., 0.), 6.);
+    let continued = actions::instance::evaluate(&refreshed, insert, p, DVec3::new(20., 0., 0.)).unwrap().unwrap();
+    check(&continued, document::types::Vector3::new(38., 12., 0.), 9.);
+    let test = actions::instance::evaluate_test_value(&doc, &doc, def, insert, p,
+        actions::Value::Frame { base: DVec3::new(-10., 0., 0.), end: DVec3::new(10., 0., 0.) }).unwrap().unwrap();
+    let reset = actions::instance::reset_test(&test, &doc, def, insert).unwrap().unwrap();
+    assert!(actions::instance::load_action_bases(&reset, insert, def).unwrap().is_empty());
+    let continued = actions::instance::evaluate_test_value(&reset, &doc, def, insert, p, actions::Value::Point(DVec3::new(12., 0., 0.))).unwrap().unwrap();
+    check(&continued, document::types::Vector3::new(4.8, 3.6, 0.), 2.4);
+}

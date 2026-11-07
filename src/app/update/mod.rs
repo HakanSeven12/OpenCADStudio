@@ -560,7 +560,25 @@ impl OpenCADStudio {
             }
         }
         let from_options = self.active_modal == Some(super::ModalKind::Options);
+        // The viewport chip's outline switch can vanish under a resting
+        // pointer (another document or layout, a viewport count change, a
+        // narrower window); a removed mouse_area sends no exit, so its hover
+        // ends here.
+        let outline_switch_before = self.outline_switch_hover.then(|| {
+            (
+                matches!(
+                    &msg,
+                    Message::WindowResized(..) | Message::OsWindowResized(..)
+                ),
+                self.outline_switch_key(),
+            )
+        });
         let mut task = self.update_message(msg);
+        if let Some((resized, key)) = outline_switch_before {
+            if resized || self.outline_switch_key() != key {
+                self.outline_switch_hover = false;
+            }
+        }
         self.refresh_layer_counts();
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let notices = std::mem::take(&mut tab.scene.center_notices);
@@ -628,11 +646,24 @@ impl OpenCADStudio {
             self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes);
         self.ribbon.show_tool_palettes =
             self.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes);
+        self.ribbon.show_viewport_highlight = self.model_space.viewport_hover_highlight;
         task
     }
 
     /// A dynamic UCS lasts for the command that set it: once that tab's
     /// command has ended, the UCS it replaced comes back.
+    /// What decides whether the viewport chip with its outline switch is on
+    /// screen: the document, its layout and the number of model viewports.
+    fn outline_switch_key(&self) -> Option<(u64, String, usize)> {
+        self.tabs.get(self.active_tab).map(|tab| {
+            (
+                tab.id,
+                tab.scene.current_layout.clone(),
+                tab.scene.model_tiles.borrow().len(),
+            )
+        })
+    }
+
     fn restore_dynamic_ucs_after_command(&mut self) {
         let Some((tab_id, _)) = self.dynamic_ucs_restore else {
             return;
@@ -5762,6 +5793,28 @@ impl OpenCADStudio {
                 }
                 self.focus_model_pane(idx);
                 self.on_viewport_move(p)
+            }
+            Message::ViewportHighlightToggle => {
+                let on = !self.model_space.viewport_hover_highlight;
+                self.model_space.viewport_hover_highlight = on;
+                self.command_line
+                    .push_info(&format!("VPHIGHLIGHT = {}", on as u8));
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::ViewportHighlightOpacity(op) => {
+                let op = op.min(100);
+                if op != self.model_space.viewport_hover_opacity {
+                    self.model_space.viewport_hover_opacity = op;
+                    // No echo: a wheel spin is many steps, and the chip's
+                    // tooltip and the outline itself show the value.
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+            Message::ViewportOutlineSwitchHover(on) => {
+                self.outline_switch_hover = on;
+                Task::none()
             }
             Message::PaneMoveStart => {
                 let i = self.active_tab;

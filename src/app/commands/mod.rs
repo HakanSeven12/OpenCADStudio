@@ -1323,6 +1323,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "COLORTHEME",
         "SELECTIONAREA",
         "SELECTIONAREAOPACITY",
+        "VPHIGHLIGHT",
+        "VPHIGHLIGHTOPACITY",
         "SELECTIONEFFECT",
         "SELECTIONEFFECTCOLOR",
         "VSEDGECOLOR",

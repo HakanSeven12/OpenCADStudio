@@ -143,6 +143,14 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = None;
                 self.tabs[i].snap_result = None;
                 self.restore_pre_cmd_tangent();
+                // MTP / M2P started from a hot grip: its midpoint places
+                // the grip, through the same path as a typed point.
+                if self.tabs[i].active_grip.is_some() {
+                    self.last_point = Some(pt);
+                    self.grip_point_override = Some(pt);
+                    self.command_line.input.clear();
+                    return self.on_command_submit();
+                }
                 return Task::none();
             }
         }

@@ -537,7 +537,7 @@ impl OpenCADStudio {
         self.focus_cmd_input()
     }
 
-    pub(super) fn on_command_submit(&mut self) -> Task<Message> {
+    pub(in crate::app) fn on_command_submit(&mut self) -> Task<Message> {
         // Submitting a command implicitly dismisses the history
         // dropdown so the dispatched command's new prompt is
         // immediately visible on the overlay.
@@ -683,7 +683,23 @@ impl OpenCADStudio {
         {
             let i = self.active_tab;
 
-            if let Some(grip) = self.tabs[i].active_grip.clone() {
+            // MTP / M2P while a grip is hot (no command runs a grip edit):
+            // pick the two points, and their midpoint places the grip.
+            if self.grip_point_prompt(i) {
+                let raw = self.command_line.input.trim().trim_start_matches('_');
+                if raw.eq_ignore_ascii_case("MTP") || raw.eq_ignore_ascii_case("M2P") {
+                    self.command_line.input.clear();
+                    self.start_mtp_modifier(i);
+                    return self.focus_cmd_input();
+                }
+            }
+            let point_override = self.grip_point_override.take();
+
+            if let Some(grip) = self.tabs[i]
+                .active_grip
+                .clone()
+                .filter(|_| self.tabs[i].active_cmd.is_none())
+            {
                 if matches!(
                     grip.mode,
                     GripEditMode::Stretch | GripEditMode::RectangleResize
@@ -693,7 +709,9 @@ impl OpenCADStudio {
                         .iter()
                         .any(|field| field.buffer.is_some());
 
-                    let target = if matches!(grip.mode, GripEditMode::RectangleResize) {
+                    let target = if let Some(point) = point_override {
+                        Some(point)
+                    } else if matches!(grip.mode, GripEditMode::RectangleResize) {
                         grip.rectangle_frame
                             .map(|(opposite, width_axis, height_axis)| {
                                 let cursor_delta = self.tabs[i].last_cursor_world - opposite;

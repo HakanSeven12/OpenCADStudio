@@ -520,17 +520,18 @@ impl CadCommand for ActionCommand {
             let Some(c) = self.context else {
                 return CmdResult::ReportError(crate::t!("Enter the parameter name.").into_owned());
             };
-            let screen =
-                |p| crate::scene::pick::hit_test::world_to_screen(p, c.view, c.eye, c.bounds);
-            let click = screen(point);
-            let candidate = self
-                .candidates
-                .iter()
-                .filter(|p| actions::compatible(p, self.kind.unwrap()))
-                .map(|p| (screen(p.end).distance(click), p))
-                .filter(|(d, _)| d.is_finite() && *d <= c.aperture_px.max(10.))
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .map(|(_, p)| p.clone());
+            let candidate = crate::scene::view::projection::nearest_in_aperture(
+                c.view,
+                c.eye,
+                c.bounds,
+                point,
+                c.aperture_px,
+                self.candidates
+                    .iter()
+                    .filter(|p| actions::compatible(p, self.kind.unwrap()))
+                    .cloned(),
+                |p| p.end,
+            );
             return candidate.map(|p| self.choose(p)).unwrap_or_else(|| {
                 CmdResult::ReportError(
                     crate::t!("Pick a compatible parameter endpoint.").into_owned(),

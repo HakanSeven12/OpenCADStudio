@@ -7601,7 +7601,16 @@ impl Scene {
             .collect();
         self.command_preview_hidden = desired;
         if !changes.is_empty() {
-            self.bump_entities(&changes);
+            // Visibility is a scene concern. Normal edit bookkeeping can
+            // regenerate table pictures, prune fields and solve associations.
+            let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+            self.geometry_epoch = epoch;
+            self.invalidate_projection_bounds();
+            for (handle, _) in &changes {
+                self.tess_memo.borrow_mut().remove(handle);
+                self.resident_tess_memo.borrow_mut().remove(handle);
+            }
+            self.push_geometry_delta(epoch, changes, false);
         }
     }
 

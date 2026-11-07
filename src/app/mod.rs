@@ -67,6 +67,9 @@ mod layers;
 mod measurement;
 mod model_ops;
 mod mtext_editor;
+mod table_cell_edit;
+#[cfg(test)]
+mod table_inplace_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
@@ -1862,6 +1865,8 @@ pub(super) struct OpenCADStudio {
     ctrl_down: bool,
     /// Open in-place MText editor (toolbar + text area + live preview), if any.
     mtext_editor: Option<mtext_editor::MTextEditorState>,
+    table_cell_editor: Option<table_cell_edit::TableCellEditor>,
+    table_edit_command_line: bool,
     /// Return rich text to a suspended drawing command.
     command_mtext_input: bool,
     pending_command_editor_text: Option<String>,
@@ -5457,6 +5462,7 @@ pub enum Message {
     MTextCaretMove(i32),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
+    TableEditorClick(iced::Point),
     /// Commit the editor: create or update the MText entity.
     MTextOk,
     /// Apply the buffer to the entity but leave the editor open (the button).
@@ -6589,6 +6595,8 @@ impl OpenCADStudio {
             ctrl_down: false,
             cont_anchor: None,
             mtext_editor: None,
+            table_cell_editor: None,
+            table_edit_command_line: false,
             command_mtext_input: false,
             pending_command_editor_text: None,
             text_inline: None,

@@ -1,3 +1,5 @@
+mod cell_editor;
+pub(crate) use cell_editor::{cell_picture, CellPicture};
 use document::entities::Table;
 use glam::Vec3;
 

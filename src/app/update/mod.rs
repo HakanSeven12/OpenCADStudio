@@ -3551,6 +3551,7 @@ impl OpenCADStudio {
 
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {
+                self.close_table_cell_editor();
                 // Preserve the outgoing drawing's Ortho / running OSNAP.
                 self.stamp_header_sysvars(self.active_tab);
                 // The quad does not survive the switch to the fresh
@@ -3593,6 +3594,9 @@ impl OpenCADStudio {
             }
 
             Message::TabSwitch(idx) => {
+                if idx != self.active_tab {
+                    self.close_table_cell_editor();
+                }
                 if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
                 }
@@ -3709,6 +3713,9 @@ impl OpenCADStudio {
             Message::PluginGripPump => self.pump_plugin_grips(),
 
             Message::TabClose(tab_id) => {
+                if self.table_cell_editor.as_ref().is_some_and(|cell| cell.tab_id == tab_id) {
+                    self.close_table_cell_editor();
+                }
                 self.hovered_doc_tab = None;
                 // Resolve the stable id when the message is handled, not when
                 // it was built: an earlier close in the same batch may have
@@ -3926,6 +3933,9 @@ impl OpenCADStudio {
             }
 
             Message::DynTabNext => {
+                if self.table_cell_editor.is_some() {
+                    return self.table_editor_step(0, 1, true);
+                }
                 if let Some(task) = self.table_cell_tab(true) {
                     return task;
                 }
@@ -3947,6 +3957,9 @@ impl OpenCADStudio {
             }
 
             Message::DynTabPrev => {
+                if self.table_cell_editor.is_some() {
+                    return self.table_editor_step(0, -1, true);
+                }
                 if let Some(task) = self.table_cell_tab(false) {
                     return task;
                 }
@@ -4135,6 +4148,16 @@ impl OpenCADStudio {
                     let down = matches!(direction, ArrowKey::Down);
                     let step = crate::ui::ribbon::SearchMsg::Move(down);
                     return self.update(Message::RibbonSearch(step));
+                }
+                if self.table_cell_editor.is_some() && !extend_selection {
+                    let ed = self.mtext_editor.as_ref().unwrap();
+                    match direction {
+                        ArrowKey::Up => return self.table_editor_step(-1, 0, false),
+                        ArrowKey::Down => return self.table_editor_step(1, 0, false),
+                        ArrowKey::Left if ed.caret == 0 => return self.table_editor_step(0, -1, false),
+                        ArrowKey::Right if ed.caret == self.mtext_vis_count() => return self.table_editor_step(0, 1, false),
+                        _ => {}
+                    }
                 }
                 if self.mtext_editor.is_some() {
                     match direction {
@@ -8337,6 +8360,7 @@ impl OpenCADStudio {
             }
 
             // ── In-place MText editor ───────────────────────────────────
+            Message::TableEditorClick(point) => self.table_editor_click(point),
             Message::MTextEdit(action) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.content.perform(action);
@@ -13088,6 +13112,10 @@ impl OpenCADStudio {
             Message::PspaceCommand => Task::done(Message::ExitViewport),
 
             Message::Undo => {
+                if self.table_cell_editor.is_some() {
+                    self.mtext_undo();
+                    return Task::none();
+                }
                 // Mid-command Ctrl+Z: a drawing command steps itself back
                 // (PLINE pops the last vertex) instead of the document undo
                 // swallowing the whole in-progress object.
@@ -13103,6 +13131,10 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::Redo => {
+                if self.table_cell_editor.is_some() {
+                    self.mtext_redo();
+                    return Task::none();
+                }
                 self.redo_active_tab();
                 Task::none()
             }

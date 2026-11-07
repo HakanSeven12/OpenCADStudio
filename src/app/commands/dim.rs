@@ -566,7 +566,8 @@ impl OpenCADStudio {
                 self.place_command_line_link_table(&cmd["-TABLE _LINK ".len()..]);
             }
 
-            "TABLEDIT" => {
+            "TABLEDIT" | "-TABLEDIT" => {
+                self.table_edit_command_line = cmd == "-TABLEDIT" || self.script_running;
                 use crate::modules::annotate::table_cmd::TableditCommand;
                 let cmd = TableditCommand::new();
                 self.command_line.push_info(&cmd.prompt());

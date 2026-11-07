@@ -45,21 +45,8 @@ impl OpenCADStudio {
             return Some(Task::batch([task, finish]));
         }
         if cmd == "_TCELLEDIT" {
-            let Some(document::EntityType::Table(table)) =
-                self.tabs[i].scene.document.get_entity(cells.table)
-            else {
-                return Some(Task::none());
-            };
-            let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
-                cells.table,
-                table,
-                r0,
-                c0,
-            );
-            use crate::command::CadCommand;
-            self.command_line.push_info(&command.prompt());
-            self.tabs[i].active_cmd = Some(Box::new(command));
-            return Some(self.finish_dispatch(cmd));
+            self.open_table_cell_editor(cells.table, r0, c0);
+            return Some(self.unfocus_widgets());
         }
         let (label, edit): (&str, Box<dyn Fn(&mut Table) -> Option<(usize, usize, usize, usize)>>) =
             match cmd {
@@ -264,11 +251,37 @@ impl OpenCADStudio {
         self.table_cell_step(CellStep::Down)
     }
 
+    pub(in crate::app) fn ask_table_editor_value_type(
+        &mut self,
+        handle: document::Handle,
+        row: usize,
+        column: usize,
+        text: String,
+    ) {
+        self.table_cell_entry = Some(CellEntry { handle, row, column, text, step: CellStep::Down });
+        self.active_modal = Some(crate::app::ModalKind::TableCellEntry);
+        self.reset_modal_geometry();
+    }
+
     /// After the data type question: "change the type" puts the value in
     /// with the cell's type changed to the value's (one undo step) and goes
     /// on as the key that ended the editing would; "change the value"
     /// reopens the cell's editor with the value.
     fn resume_cell_entry(&mut self, entry: CellEntry, change_type: bool) -> Task<Message> {
+        if let Some(cell) = self.table_cell_editor.as_ref() {
+            if !change_type {
+                self.mtext_select_all();
+                return self.unfocus_widgets();
+            }
+            let pending_move = cell.pending_move;
+            self.table_cell_entry_typed = true;
+            return if let Some((dr, dc, tab)) = pending_move {
+                self.table_editor_step(dr, dc, tab)
+            } else {
+                self.commit_table_cell_editor();
+                self.focus_cmd_input()
+            };
+        }
         let i = self.active_tab;
         let Some(document::EntityType::Table(table)) =
             self.tabs[i].scene.document.get_entity(entry.handle)

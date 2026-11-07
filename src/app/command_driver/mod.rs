@@ -263,16 +263,26 @@ impl OpenCADStudio {
         // A transparent zoom that just finished hands control back to the
         // command it interrupted before the "command ended" bookkeeping below.
         self.resume_transparent_parent(i);
-        let preview_hidden = self.tabs[i]
+        if self.table_cell_editor.is_some()
+            && self.field_dialog.is_some()
+            && self.tabs[i].active_cmd.is_none()
+        {
+            self.refresh_table_cell_picture();
+        }
+        let mut preview_hidden = self.tabs[i]
             .active_cmd
             .as_ref()
             .map(|command| command.preview_hidden_handles().to_vec())
             .unwrap_or_default();
+        if let Some(cell) = self.table_cell_editor.as_ref().filter(|c| c.tab_id == self.tabs[i].id) {
+            preview_hidden.push(cell.handle);
+        }
         self.tabs[i]
             .scene
             .set_command_preview_hidden(&preview_hidden);
         if was_active
             && !preserve_selection
+            && self.table_cell_editor.is_none()
             && self.tabs[i].active_cmd.is_none()
             && !self.tabs[i].scene.selected.is_empty()
         {
@@ -372,6 +382,13 @@ impl OpenCADStudio {
         self.refresh_properties();
         if hit.locked {
             return TableCellEditStart::LockedCell;
+        }
+        if !self.script_running && !self.table_edit_command_line {
+            return if self.open_table_cell_editor(handle, hit.row, hit.column) {
+                TableCellEditStart::Started
+            } else {
+                TableCellEditStart::LockedCell
+            };
         }
         let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
             handle, &table, hit.row, hit.column,
@@ -2040,17 +2057,19 @@ impl OpenCADStudio {
             }
         }
 
-        match self.begin_table_cell_edit(i, handle, point) {
+        let result = self.begin_table_cell_edit(i, handle, point);
+        let command_line = std::mem::take(&mut self.table_edit_command_line);
+        match result {
             TableCellEditStart::Started => {}
             TableCellEditStart::LockedCell => {
                 self.command_line
                     .push_error(crate::t!("The cell is content locked.").as_ref());
-                let _ = self.dispatch_command("TABLEDIT");
+                let _ = self.dispatch_command(if command_line { "-TABLEDIT" } else { "TABLEDIT" });
             }
             TableCellEditStart::NoCell => {
                 self.command_line
                     .push_error(crate::t!("No editable table cell picked.").as_ref());
-                let _ = self.dispatch_command("TABLEDIT");
+                let _ = self.dispatch_command(if command_line { "-TABLEDIT" } else { "TABLEDIT" });
             }
         }
         None

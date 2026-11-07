@@ -1470,6 +1470,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "SELSIM",
         // Draw a new object of the same type as the selected one. (#239)
         "ADDSELECTED",
+        // Explode a block reference and keep its attribute values as text.
+        "BURST",
         // Outline of origin planes, open sketch and solid bodies.
         "BROWSER",
         // Open and close a sketch: a drawing plane, a square-on view and

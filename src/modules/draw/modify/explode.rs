@@ -1,7 +1,11 @@
-// Explode tool — ribbon definition + command implementation.
+// Explode tools — ribbon definition + command implementation.
 //
 // Command:  EXPLODE (X)
 //   EXPLODE: Breaks compound objects into their constituent simple entities.
+//
+// Command:  BURST
+//   BURST: EXPLODE for a block reference, but its attribute values stay as
+//   text instead of disappearing with the reference.
 //
 //   Supported:
 //     LwPolyline  → Lines (straight segments) + Arcs (bulge segments)
@@ -21,8 +25,8 @@ use super::geom::normalize_angle as norm_angle;
 
 use document::entities::EntityCommon;
 use document::entities::{
-    Arc as ArcEnt, Block, BlockEnd, Circle as CircleEnt, Dimension, Line as LineEnt, LwPolyline,
-    MLine,
+    Arc as ArcEnt, AttributeDefinition, AttributeEntity, Block, BlockEnd, Circle as CircleEnt,
+    Dimension, Line as LineEnt, LwPolyline, MLine, Text,
 };
 use document::entities::{Polyline, Polyline2D};
 use document::tables::BlockRecord;
@@ -184,6 +188,196 @@ pub fn plan_explode_in_context(
             }
         })
         .collect()
+}
+
+/// Plan BURST: EXPLODE the selection, but a block reference's attribute
+/// values become text instead of disappearing with the reference.
+pub fn plan_burst(
+    selected: &[(Handle, &EntityType)],
+    doc: &Document,
+) -> Vec<(Handle, Vec<EntityType>)> {
+    selected
+        .iter()
+        .filter_map(|(handle, entity)| {
+            let pieces = explode_entity(entity, doc);
+            if pieces.is_empty() {
+                return None;
+            }
+            let pieces = match entity {
+                EntityType::Insert(insert) => burst_block_attributes(insert, pieces),
+                _ => pieces,
+            };
+            Some((*handle, pieces))
+        })
+        .collect()
+}
+
+/// Replace a block reference's attribute definitions and values with text.
+fn burst_block_attributes(
+    insert: &document::entities::Insert,
+    pieces: Vec<EntityType>,
+) -> Vec<EntityType> {
+    let mut out: Vec<EntityType> = pieces
+        .into_iter()
+        .filter_map(|piece| match piece {
+            // A constant definition draws its own value, so it becomes text.
+            // A variable definition is drawn by the reference's attribute
+            // instances below, not by its (unused) default value.
+            EntityType::AttributeDefinition(definition) if definition.flags.constant => {
+                attribute_definition_as_text(insert, &definition)
+            }
+            EntityType::AttributeDefinition(_) => None,
+            other => Some(other),
+        })
+        .collect();
+    out.extend(
+        insert
+            .attributes
+            .iter()
+            .map(|attribute| attribute_as_text(insert, attribute)),
+    );
+    out
+}
+
+/// A detached text holding one attribute value. A multi-line attribute keeps
+/// its embedded MTEXT payload so every line survives.
+fn attribute_as_text(
+    insert: &document::entities::Insert,
+    attribute: &AttributeEntity,
+) -> EntityType {
+    if attribute.is_multiline {
+        if let Some(mtext) = &attribute.embedded_mtext {
+            let mut text = (**mtext).clone();
+            text.common = attribute.common.clone();
+            finish_attribute_common(insert, &mut text.common);
+            return EntityType::MText(Box::new(text));
+        }
+    }
+    let mut text = Text::new();
+    text.common = attribute.common.clone();
+    finish_attribute_common(insert, &mut text.common);
+    text.value = attribute.value.clone();
+    text.insertion_point = attribute.insertion_point;
+    text.alignment_point = justified_alignment(
+        attribute.horizontal_alignment,
+        attribute.vertical_alignment,
+        attribute.alignment_point,
+    );
+    text.height = attribute.height;
+    text.rotation = attribute.rotation;
+    text.width_factor = attribute.width_factor;
+    text.oblique_angle = attribute.oblique_angle;
+    text.style = attribute.text_style.clone();
+    text.horizontal_alignment = text_horizontal_alignment(attribute.horizontal_alignment);
+    text.vertical_alignment = text_vertical_alignment(attribute.vertical_alignment);
+    text.normal = attribute.normal;
+    text.generation_flags = attribute.text_generation_flags;
+    EntityType::Text(text)
+}
+
+/// A constant attribute definition's default value as text. The definition
+/// piece has already been moved into the reference's plane by EXPLODE.
+fn attribute_definition_as_text(
+    insert: &document::entities::Insert,
+    definition: &AttributeDefinition,
+) -> Option<EntityType> {
+    if definition.is_multiline {
+        if let Some(mtext) = &definition.embedded_mtext {
+            let mut text = (**mtext).clone();
+            text.common = definition.common.clone();
+            finish_attribute_common(insert, &mut text.common);
+            return Some(EntityType::MText(Box::new(text)));
+        }
+    }
+    let mut text = Text::new();
+    text.common = definition.common.clone();
+    finish_attribute_common(insert, &mut text.common);
+    text.value = definition.default_value.clone();
+    text.insertion_point = definition.insertion_point;
+    text.alignment_point = justified_alignment(
+        definition.horizontal_alignment,
+        definition.vertical_alignment,
+        definition.alignment_point,
+    );
+    text.height = definition.height;
+    text.rotation = definition.rotation;
+    text.width_factor = definition.width_factor;
+    text.oblique_angle = definition.oblique_angle;
+    text.style = definition.text_style.clone();
+    text.horizontal_alignment = text_horizontal_alignment(definition.horizontal_alignment);
+    text.vertical_alignment = text_vertical_alignment(definition.vertical_alignment);
+    text.normal = definition.normal;
+    text.generation_flags = definition.text_generation_flags;
+    Some(EntityType::Text(text))
+}
+
+/// The block reference owns the attribute, so its layer/colour inheritance has
+/// to be resolved before the text stands on its own.
+fn finish_attribute_common(
+    insert: &document::entities::Insert,
+    common: &mut EntityCommon,
+) {
+    if common.layer == "0" {
+        common.layer = insert.common.layer.clone();
+        common.layer_handle = insert.common.layer_handle;
+    }
+    if common.color == document::types::Color::ByBlock {
+        common.color = insert.common.color;
+        common.color_name = insert.common.color_name.clone();
+        common.color_book_handle = insert.common.color_book_handle;
+    }
+    if common.line_weight == document::types::LineWeight::ByBlock {
+        common.line_weight = insert.common.line_weight;
+    }
+    if common.transparency.is_by_block() {
+        common.transparency = insert.common.transparency;
+    }
+    if common.linetype.eq_ignore_ascii_case("byblock") {
+        common.linetype = insert.common.linetype.clone();
+        common.linetype_handle = insert.common.linetype_handle;
+    }
+    common.handle = Handle::NULL;
+    common.owner_handle = Handle::NULL;
+    common.xdictionary_handle = None;
+    common.reactors.clear();
+}
+
+fn justified_alignment(
+    horizontal: document::entities::attribute_definition::HorizontalAlignment,
+    vertical: document::entities::attribute_definition::VerticalAlignment,
+    point: Vector3,
+) -> Option<Vector3> {
+    use document::entities::attribute_definition::{HorizontalAlignment, VerticalAlignment};
+    (horizontal != HorizontalAlignment::Left || vertical != VerticalAlignment::Baseline)
+        .then_some(point)
+}
+
+fn text_horizontal_alignment(
+    alignment: document::entities::attribute_definition::HorizontalAlignment,
+) -> document::entities::TextHorizontalAlignment {
+    use document::entities::attribute_definition::HorizontalAlignment as A;
+    use document::entities::TextHorizontalAlignment as T;
+    match alignment {
+        A::Left => T::Left,
+        A::Center => T::Center,
+        A::Right => T::Right,
+        A::Aligned => T::Aligned,
+        A::Middle => T::Middle,
+        A::Fit => T::Fit,
+    }
+}
+
+fn text_vertical_alignment(
+    alignment: document::entities::attribute_definition::VerticalAlignment,
+) -> document::entities::TextVerticalAlignment {
+    use document::entities::attribute_definition::VerticalAlignment as A;
+    use document::entities::TextVerticalAlignment as T;
+    match alignment {
+        A::Baseline => T::Baseline,
+        A::Bottom => T::Bottom,
+        A::Middle => T::Middle,
+        A::Top => T::Top,
+    }
 }
 
 /// Apply precomputed EXPLODE replacements, erasing only sources with pieces.

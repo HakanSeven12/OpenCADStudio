@@ -5804,4 +5804,89 @@ mod batch4_tests {
         assert_eq!(count(&app), 1, "{}", out(&app));
         assert!(out(&app).contains("a value is needed"), "{}", out(&app));
     }
+
+    #[test]
+    fn burst_explodes_a_block_and_keeps_attribute_values_as_text() {
+        use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+        use document::types::Vector3;
+
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+
+        let mut record = document::tables::BlockRecord::new("TAGBLOCK");
+        record.handle = doc.allocate_handle();
+        let owner = record.handle;
+        doc.block_records.add(record).unwrap();
+
+        let mut line = document::entities::Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.owner_handle = owner;
+        let line_handle = doc.add_entity(document::EntityType::Line(line)).unwrap();
+
+        let mut variable =
+            AttributeDefinition::new("STATUS".into(), "Status".into(), "DEFAULT".into());
+        variable.insertion_point = Vector3::new(1.0, 1.0, 0.0);
+        variable.alignment_point = variable.insertion_point;
+        variable.height = 2.5;
+        variable.common.owner_handle = owner;
+        let variable_handle = doc
+            .add_entity(document::EntityType::AttributeDefinition(variable.clone()))
+            .unwrap();
+
+        let mut constant =
+            AttributeDefinition::new("SHEET".into(), String::new(), "A-101".into());
+        constant.insertion_point = Vector3::new(1.0, 4.0, 0.0);
+        constant.alignment_point = constant.insertion_point;
+        constant.flags.constant = true;
+        constant.common.owner_handle = owner;
+        let constant_handle = doc
+            .add_entity(document::EntityType::AttributeDefinition(constant))
+            .unwrap();
+
+        let record = doc.block_records.get_mut("TAGBLOCK").unwrap();
+        record.entity_handles = vec![line_handle, variable_handle, constant_handle];
+
+        let mut insert = Insert::new("TAGBLOCK", Vector3::new(100.0, 50.0, 0.0));
+        let mut attribute = AttributeEntity::from_definition(&variable, Some("ACTIVE".into()));
+        attribute.insertion_point = Vector3::new(101.0, 51.0, 0.0);
+        attribute.alignment_point = attribute.insertion_point;
+        insert.attributes.push(attribute);
+        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+
+        let _ = app.run_command_line("SELECTALL");
+        let _ = app.run_command_line("BURST");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        let doc = &app.tabs[i].scene.document;
+        assert!(
+            doc.get_entity(insert_handle).is_none(),
+            "the reference itself must be gone"
+        );
+        let texts: Vec<(String, f64, f64)> = doc
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::Text(text) => {
+                    Some((text.value.clone(), text.insertion_point.x, text.insertion_point.y))
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(
+            texts.contains(&("ACTIVE".to_string(), 101.0, 51.0)),
+            "the reference's value must survive as text: {texts:?}"
+        );
+        assert!(
+            texts.contains(&("A-101".to_string(), 101.0, 54.0)),
+            "a constant attribute's value must survive at its placed point: {texts:?}"
+        );
+        assert_eq!(texts.len(), 2, "{texts:?}");
+        assert!(
+            !doc.entities()
+                .any(|entity| matches!(entity, document::EntityType::AttributeEntity(_))),
+            "no attribute instance may remain"
+        );
+    }
 }

@@ -210,27 +210,41 @@ fn block_xy_shared_coordinate_grips_drive_endpoint_actions() {
 }
 
 #[test]
-#[ignore = "requires OCS_DYNAMIC_BLOCK_FIXTURES native fixture directory"]
-fn block_key_point_fixture_suppresses_unassociated_base_grip() {
-    let root = std::env::var("OCS_DYNAMIC_BLOCK_FIXTURES").expect("fixture root");
-    let path = std::path::Path::new(&root).join("DXF-2018/closet.dxf");
-    let bytes = std::fs::read(&path).unwrap();
-    let doc = crate::io::load_bytes(path.to_str().unwrap(), bytes).unwrap();
-    let handle = Handle::from(0x3A7ADu64);
-    let (definition, p) = doc
-        .block_records
-        .iter()
-        .find_map(|block| {
-            all_parameters(&doc, block.handle)
-                .into_iter()
-                .find(|p| p.handle == handle)
-                .map(|p| (block.handle, p))
-        })
+fn block_key_point_synthetic_suppresses_unassociated_base_grip() {
+    let (mut doc, definition, targets) = super::super::tests::fixture();
+    let handle = distance::create(
+        &mut doc,
+        definition,
+        distance::Kind::Linear,
+        Vector3::ZERO,
+        Vector3::new(10., 0., 0.),
+        Vector3::UNIT_Y,
+    )
+    .unwrap();
+    config::set(&mut doc, definition, handle, Some(2)).unwrap();
+    let p = all_parameters(&doc, definition)
+        .into_iter()
+        .find(|p| p.handle == handle)
         .unwrap();
     assert_eq!(
         config::locations(&doc, definition, handle).unwrap().len(),
         2
     );
+
+    // Associate an action ONLY with End key point (role 1)
+    create_with_options(
+        &mut doc,
+        definition,
+        Kind::Move,
+        handle,
+        Some(XyKeyPoint::End),
+        &targets[..1],
+        DVec3::ZERO,
+        None,
+        None,
+    )
+    .unwrap();
+
     assert_eq!(mask(&doc, definition, &p), 2);
     assert_eq!(
         runtime::action_grips(&doc, definition, &p, Value::Point(p.end))
@@ -241,7 +255,7 @@ fn block_key_point_fixture_suppresses_unassociated_base_grip() {
     );
     for extension in ["dwg", "dxf"] {
         let data = crate::io::save_to_bytes(&doc, extension, doc.version).unwrap();
-        let loaded = crate::io::load_bytes(&format!("closet-roles.{extension}"), data).unwrap();
+        let loaded = crate::io::load_bytes(&format!("roles.{extension}"), data).unwrap();
         assert_eq!(mask(&loaded, definition, &p), 2);
         assert_eq!(
             config::locations(&loaded, definition, handle)

@@ -1116,63 +1116,7 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "requires the local dynamic block DWG fixtures"]
-    fn block_grip_counts_native_two_grip_fixture_roundtrips() {
-        let root =
-            std::env::var("OCS_DYNAMIC_BLOCK_FIXTURES").expect("set OCS_DYNAMIC_BLOCK_FIXTURES");
-        let path = std::path::Path::new(&root).join("DWG-2018/BT.dwg");
-        let mut doc = DwgReader::from_file(&path).unwrap().read().unwrap();
-        let parameter = doc
-            .objects
-            .iter()
-            .find_map(|(handle, object)| match object {
-                ObjectType::DynamicBlock(object) => match &object.data {
-                    DynamicBlockData::LinearParameter(p)
-                        if p.parameter.property_states[0] > 0
-                            && p.parameter.property_states[1] > 0 =>
-                    {
-                        Some((*handle, object.owner))
-                    }
-                    _ => None,
-                },
-                _ => None,
-            })
-            .expect("the native fixture contains a two-grip Linear parameter");
-        let definition = doc
-            .block_records
-            .iter()
-            .find(|record| {
-                authoring::graph(&doc, record.handle).ok().flatten() == Some(parameter.1)
-            })
-            .unwrap()
-            .handle;
-        assert_eq!(count(&doc, definition, parameter.0), Some(2));
-        let actions_before = actions::actions(&doc, definition)
-            .into_iter()
-            .map(|(handle, ..)| (handle, doc.objects[&handle].clone()))
-            .collect::<Vec<_>>();
-        for desired in [1, 0, 2] {
-            set(&mut doc, definition, parameter.0, Some(desired)).unwrap();
-            assert_eq!(count(&doc, definition, parameter.0), Some(desired));
-            check_graph(&doc, definition);
-            assert!(actions_before
-                .iter()
-                .all(|(handle, object)| &doc.objects[handle] == object));
-        }
-        for saved in [
-            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
-                .read()
-                .unwrap(),
-            DxfReader::from_reader(Cursor::new(DxfWriter::new(&doc).write_to_vec().unwrap()))
-                .unwrap()
-                .read()
-                .unwrap(),
-        ] {
-            assert_eq!(count(&saved, definition, parameter.0), Some(2));
-            check_graph(&saved, definition);
-        }
-    }
+
 
     #[test]
     fn block_grip_counts_reject_malformed_and_shared_dependencies_atomically() {

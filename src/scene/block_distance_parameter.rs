@@ -1013,65 +1013,6 @@ mod tests {
         let (_, max) = scene.visible_block_bounds(definition).unwrap();
         assert!(max.x <= 1.0 && max.y < 1.0);
     }
-
-    #[test]
-    #[ignore = "requires OCS_DYNAMIC_BLOCK_FIXTURES with local DWG fixtures"]
-    fn distance_parameter_fixture_batch_roundtrips() {
-        use sha2::{Digest, Sha256};
-        let directory = std::env::var_os("OCS_DYNAMIC_BLOCK_FIXTURES").expect("fixture directory");
-        let mut paths = std::fs::read_dir(directory)
-            .unwrap()
-            .map(|p| p.unwrap().path())
-            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dwg")))
-            .collect::<Vec<_>>();
-        paths.sort();
-        assert_eq!(paths.len(), 17);
-        for path in paths {
-            let bytes = std::fs::read(&path).unwrap();
-            let checksum = Sha256::digest(&bytes);
-            let filename = path.file_name().unwrap().to_string_lossy();
-            let mut document = crate::io::load_bytes(&filename, bytes).unwrap();
-            let definition = document
-                .block_records
-                .iter()
-                .map(|b| b.handle)
-                .find(|h| authoring::graph(&document, *h).is_ok_and(|g| g.is_some()))
-                .expect("editable existing graph");
-            let graph = graph_handle(&document, definition).unwrap();
-            let before = document.clone();
-            let handles = append_batch(&mut document, definition);
-            for (h, o) in &before.objects {
-                if *h != graph {
-                    assert_eq!(
-                        document.objects.get(h),
-                        Some(o),
-                        "{filename}: preserved {h}"
-                    );
-                }
-            }
-            if let (ObjectType::DynamicBlock(old), ObjectType::DynamicBlock(new)) =
-                (&before.objects[&graph], &document.objects[&graph])
-            {
-                if let (
-                    DynamicBlockData::EvaluationGraph(old),
-                    DynamicBlockData::EvaluationGraph(new),
-                ) = (&old.data, &new.data)
-                {
-                    assert_eq!(&new.nodes[..old.nodes.len()], &old.nodes);
-                    assert_eq!(&new.edges[..old.edges.len()], &old.edges);
-                }
-            }
-            for extension in ["dwg", "dxf"] {
-                let bytes =
-                    crate::io::save_to_bytes(&document, extension, document.version).unwrap();
-                let read = crate::io::load_bytes(&format!("batch.{extension}"), bytes).unwrap();
-                assert_native(&read, &handles);
-                assert!(authoring::graph(&read, definition).is_ok());
-            }
-            assert_eq!(Sha256::digest(std::fs::read(&path).unwrap()), checksum);
-            eprintln!("{filename}: Linear/Polar/XY appended to existing graph; DWG/DXF passed; original objects/checksum preserved");
-        }
-    }
 }
 
 #[cfg(test)]

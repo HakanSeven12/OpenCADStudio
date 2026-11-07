@@ -486,7 +486,7 @@ fn coupled_flip_synthetic() -> (OpenCADStudio, Handle, i32, i32, i32) {
         Kind::Stretch,
         linear,
         Some(XyKeyPoint::End),
-        &[members[1], members[2]],
+        &[members[0], members[1], members[2]],
         DVec3::ZERO,
         Some([DVec3::new(90., -5., 0.), DVec3::new(110., 25., 0.)]),
         None,
@@ -508,56 +508,71 @@ fn coupled_flip_synthetic() -> (OpenCADStudio, Handle, i32, i32, i32) {
     (app, plain, lin_id, flip_v_id, flip_h_id)
 }
 
+fn assert_coupled_geometry(app: &OpenCADStudio, insert: Handle, width: f64, vertical: bool, horizontal: bool) {
+    let transform = |x: f64, y: f64| (if vertical { 100. - x } else { x }, if horizontal { 20. - y } else { y });
+    let expected = [
+        (transform(0., 0.), transform(width, 0.)),
+        (transform(width, 0.), transform(width, 20.)),
+        (transform(width, 20.), transform(0., 20.)),
+        (transform(0., 20.), transform(0., 0.)),
+    ];
+    assert_lines(&geometry(&app.tabs[app.active_tab].scene.document, insert).0, &expected, "coupled geometry");
+}
+
+fn toggle(app: &mut OpenCADStudio, insert: Handle, id: i32) {
+    let before = grip(app, insert, id, 0);
+    assert_eq!(before.shape, crate::scene::model::object::GripShape::Arrow);
+    assert!(app.start_test_action_grip(insert, before.id));
+    assert_eq!(app.command_line.last_error, None);
+    assert!(app.tabs[app.active_tab].active_cmd.is_none());
+    assert!((grip(app, insert, id, 0).dir.unwrap() + before.dir.unwrap()).length() < EPS);
+}
+
 #[test]
 fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
-    let (mut app, insert, lin_id, flip_v_id, flip_h_id) = coupled_flip_synthetic();
-    let i = app.active_tab;
-
-    // Toggle Flip 1
-    let flip1_grip = grip(&mut app, insert, flip_v_id, 0);
-    assert_eq!(flip1_grip.shape, crate::scene::model::object::GripShape::Arrow);
-    let dir1_before = flip1_grip.dir.unwrap();
-    assert!(app.start_test_action_grip(insert, flip1_grip.id));
-    assert_eq!(app.command_line.last_error, None);
-
-    let flip1_after = grip(&mut app, insert, flip_v_id, 0);
-    assert!((flip1_after.dir.unwrap() + dir1_before).length() < 1e-6, "arrow reversed");
-
-    // Toggle Flip 2
-    let flip2_grip = grip(&mut app, insert, flip_h_id, 0);
-    let dir2_before = flip2_grip.dir.unwrap();
-    assert!(app.start_test_action_grip(insert, flip2_grip.id));
-    assert_eq!(app.command_line.last_error, None);
-
-    let flip2_after = grip(&mut app, insert, flip_h_id, 0);
-    assert!((flip2_after.dir.unwrap() + dir2_before).length() < 1e-6, "arrow reversed");
-
-    // Clear canonical inputs to verify native frame recovery on double-flipped block
-    actions::instance::clear_canonical_inputs(&mut app.tabs[i].scene.document, insert);
-
-    // Drag linear grip
-    let lin_grip = grip(&mut app, insert, lin_id, 1);
-    let delta = 30.0;
-    let target = lin_grip.world + lin_grip.dir.unwrap() * delta;
-    assert!(app.start_test_action_grip(insert, lin_grip.id));
-    let _ = app.feed_command(crate::command::StepInput::Point(target));
-    assert_eq!(app.command_line.last_error, None);
-
-    // Verify Undo & Redo
-    let changed_doc = app.tabs[i].scene.document.clone();
-    let _ = app.update(Message::Undo);
-    let _ = app.update(Message::Redo);
-    assert_eq!(app.tabs[i].scene.document, changed_doc);
-
-    // DWG & DXF roundtrip
-    for ext in ["dwg", "dxf"] {
-        let bytes = crate::io::save_to_bytes(&changed_doc, ext, changed_doc.version).unwrap();
-        let loaded = crate::io::load_bytes(&format!("coupled.{ext}"), bytes).unwrap();
-        let mut reopened = OpenCADStudio::new_for_test();
-        let j = reopened.active_tab;
-        reopened.tabs[j].scene.document = loaded;
-        let restored_lin = grip(&mut reopened, insert, lin_id, 1);
-        assert!((restored_lin.world - target).length() < 1e-3, "{ext} grip persisted");
+    for reverse in [false, true] {
+        let (mut app, insert, lin_id, flip_v_id, flip_h_id) = coupled_flip_synthetic();
+        let i = app.active_tab;
+        let order = if reverse { [flip_h_id, flip_v_id] } else { [flip_v_id, flip_h_id] };
+        let baseline = app.tabs[i].scene.document.clone();
+        toggle(&mut app, insert, order[0]);
+        assert_coupled_geometry(&app, insert, 100., !reverse, reverse);
+        toggle(&mut app, insert, order[1]);
+        assert_coupled_geometry(&app, insert, 100., true, true);
+        actions::instance::clear_canonical_inputs(&mut app.tabs[i].scene.document, insert);
+        let before_stretch = geometry(&app.tabs[i].scene.document, insert);
+        let target = drag(&mut app, insert, lin_id, 1, 30.);
+        assert_coupled_geometry(&app, insert, 130., true, true);
+        let changed = app.tabs[i].scene.document.clone();
+        let _ = app.update(Message::Undo);
+        assert_eq!(geometry(&app.tabs[i].scene.document, insert), before_stretch);
+        let _ = app.update(Message::Redo);
+        assert_coupled_geometry(&app, insert, 130., true, true);
+        let def = changed.dynamic_definition_for_insert(insert).unwrap();
+        app.tabs[i].scene.document = actions::instance::refresh_after_edit(&changed, &baseline, def).unwrap();
+        assert_coupled_geometry(&app, insert, 130., true, true);
+        for ext in ["dwg", "dxf"] {
+            let doc = &app.tabs[i].scene.document;
+            let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
+            let loaded = crate::io::load_bytes(&format!("coupled.{ext}"), bytes).unwrap();
+            let mut reopened = OpenCADStudio::new_for_test();
+            let j = reopened.active_tab;
+            reopened.tabs[j].scene.document = loaded;
+            assert!(grip(&mut reopened, insert, lin_id, 1).world.distance(target) < EPS);
+            assert_coupled_geometry(&reopened, insert, 130., true, true);
+            drag(&mut reopened, insert, lin_id, 1, 10.);
+            assert_coupled_geometry(&reopened, insert, 140., true, true);
+            toggle(&mut reopened, insert, order[1]);
+            assert_coupled_geometry(&reopened, insert, 140., !reverse, reverse);
+            toggle(&mut reopened, insert, order[0]);
+            assert_coupled_geometry(&reopened, insert, 140., false, false);
+            select(&mut reopened, insert);
+            let _ = reopened.reset_selected_block_references(false);
+            assert_eq!(reopened.command_line.last_error, None);
+            assert_coupled_geometry(&reopened, insert, 100., false, false);
+            drag(&mut reopened, insert, lin_id, 1, 5.);
+            assert_coupled_geometry(&reopened, insert, 105., false, false);
+        }
     }
 }
 

@@ -242,6 +242,91 @@ mod parametric_constraint_undo_tests {
             .add_entity(document::EntityType::Circle(circle))
     }
 
+    fn add_arc(
+        app: &mut OpenCADStudio,
+        cx: f64,
+        cy: f64,
+        radius: f64,
+        start_angle: f64,
+        end_angle: f64,
+    ) -> Handle {
+        let mut arc = document::entities::Arc::new();
+        arc.center = document::types::Vector3::new(cx, cy, 0.0);
+        arc.radius = radius;
+        arc.start_angle = start_angle;
+        arc.end_angle = end_angle;
+        app.tabs[app.active_tab]
+            .scene
+            .add_entity(document::EntityType::Arc(arc))
+    }
+
+    fn add_coincident_at(
+        app: &mut OpenCADStudio,
+        first: Handle,
+        second: Handle,
+        point: [f64; 2],
+    ) {
+        let pick = |handle| crate::command::CoincidentPick {
+            handle: Some(handle),
+            point: glam::DVec3::new(point[0], point[1], 0.0),
+            whole_curve: false,
+        };
+        let _ = app.apply_cmd_result(CmdResult::AddCoincidentConstraint {
+            first: pick(first),
+            second: pick(second),
+            multiple: false,
+            label: "Coincident constraint",
+        });
+    }
+
+    fn assert_geometry_unchanged(
+        app: &OpenCADStudio,
+        handle: Handle,
+        expected: &document::EntityType,
+        stage: &str,
+    ) {
+        const EPS: f64 = 1.0e-10;
+        let actual = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+            .unwrap_or_else(|| panic!("{stage}: entity {handle:?} disappeared"));
+        match (expected, actual) {
+            (document::EntityType::Line(expected), document::EntityType::Line(actual)) => {
+                assert!(
+                    (actual.start - expected.start).length() <= EPS
+                        && (actual.end - expected.end).length() <= EPS,
+                    "{stage}: line {handle:?} moved: {:?} -> {:?}",
+                    expected,
+                    actual
+                );
+                assert!(
+                    (actual.length() - expected.length()).abs() <= EPS,
+                    "{stage}: line {handle:?} length changed: {} -> {}",
+                    expected.length(),
+                    actual.length()
+                );
+            }
+            (document::EntityType::Arc(expected), document::EntityType::Arc(actual)) => {
+                assert!(
+                    (actual.center - expected.center).length() <= EPS,
+                    "{stage}: arc {handle:?} center moved: {:?} -> {:?}",
+                    expected.center,
+                    actual.center
+                );
+                assert!(
+                    (actual.radius - expected.radius).abs() <= EPS
+                        && (actual.start_angle - expected.start_angle).abs() <= EPS
+                        && (actual.end_angle - expected.end_angle).abs() <= EPS,
+                    "{stage}: arc {handle:?} geometry changed: {:?} -> {:?}",
+                    expected,
+                    actual
+                );
+            }
+            _ => panic!("{stage}: entity {handle:?} changed type: {expected:?} -> {actual:?}"),
+        }
+    }
+
     fn circle_center_radius(app: &OpenCADStudio, handle: Handle) -> ([f64; 2], f64) {
         match app.tabs[app.active_tab].scene.document.get_entity(handle) {
             Some(document::EntityType::Circle(circle)) => {
@@ -1272,6 +1357,116 @@ mod parametric_constraint_undo_tests {
         assert!((first.end - document::types::Vector3::new(5.0, 0.0, 0.0)).length() < 1.0e-7);
         assert!((second.start - first.end).length() < 1.0e-7);
         assert!((second.length() - 5.0).abs() < 1.0e-7);
+    }
+
+    #[test]
+    fn satisfied_h_chain_stays_exactly_in_place_during_initial_constraint_solves() {
+        use std::f64::consts::{FRAC_PI_2, PI};
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        // BYPI 0 0 60 0 60 40 100 40 100 80, with all three R15 corners.
+        // The middle arc is stored counter-clockwise, hence its endpoints
+        // appear in the opposite order along the alignment.
+        let elements = vec![
+            add_line(&mut app, 0.0, 0.0, 45.0, 0.0),
+            add_arc(&mut app, 45.0, 15.0, 15.0, -FRAC_PI_2, 0.0),
+            add_line(&mut app, 60.0, 15.0, 60.0, 25.0),
+            add_arc(&mut app, 75.0, 25.0, 15.0, FRAC_PI_2, PI),
+            add_line(&mut app, 75.0, 40.0, 85.0, 40.0),
+            add_arc(&mut app, 85.0, 55.0, 15.0, -FRAC_PI_2, 0.0),
+            add_line(&mut app, 100.0, 55.0, 100.0, 80.0),
+        ];
+        let originals: Vec<_> = elements
+            .iter()
+            .map(|&handle| {
+                app.tabs[app.active_tab]
+                    .scene
+                    .document
+                    .get_entity(handle)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        let assert_all_unmoved = |app: &OpenCADStudio, stage: &str| {
+            for (&handle, expected) in elements.iter().zip(&originals) {
+                assert_geometry_unchanged(app, handle, expected, stage);
+            }
+        };
+        let joints = [
+            (0usize, 1usize, [45.0, 0.0]),
+            (1, 2, [60.0, 15.0]),
+            (2, 3, [60.0, 25.0]),
+            (3, 4, [75.0, 40.0]),
+            (4, 5, [85.0, 40.0]),
+            (5, 6, [100.0, 55.0]),
+        ];
+
+        for (joint, (first, second, point)) in joints.into_iter().enumerate() {
+            add_coincident_at(&mut app, elements[first], elements[second], point);
+            assert_all_unmoved(&app, &format!("coincident at joint {joint}"));
+
+            let _ = app.apply_cmd_result(CmdResult::AddTangentConstraint {
+                first: ParametricRef::whole(elements[first]),
+                second: ParametricRef::whole(elements[second]),
+                label: "Tangent constraint",
+            });
+            assert_all_unmoved(&app, &format!("tangent at joint {joint}"));
+        }
+    }
+
+    #[test]
+    fn violated_coincident_moves_the_second_reference_onto_the_first() {
+        const EPS: f64 = 1.0e-10;
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let first = add_line(&mut app, 0.0, 0.0, 5.0, 0.0);
+        let second = add_line(&mut app, 20.0, 0.0, 20.0, 5.0);
+        let first_before = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(first)
+            .unwrap()
+            .clone();
+        assert!(line_segment(&app, second).0[0] - 5.0 > 1.0);
+
+        let _ = app.apply_cmd_result(CmdResult::AddCoincidentConstraint {
+            first: crate::command::CoincidentPick {
+                handle: Some(first),
+                point: glam::DVec3::new(5.0, 0.0, 0.0),
+                whole_curve: false,
+            },
+            second: crate::command::CoincidentPick {
+                handle: Some(second),
+                point: glam::DVec3::new(20.0, 0.0, 0.0),
+                whole_curve: false,
+            },
+            multiple: false,
+            label: "Coincident constraint",
+        });
+
+        let (document::EntityType::Line(expected), Some(document::EntityType::Line(actual))) = (
+            &first_before,
+            app.tabs[app.active_tab].scene.document.get_entity(first),
+        ) else {
+            panic!("the first reference changed entity type");
+        };
+        assert!(
+            (actual.end - expected.end).length() <= EPS,
+            "the picked reference point must stay fixed: {:?} -> {:?}",
+            expected.end,
+            actual.end
+        );
+        let (start, end) = line_segment(&app, second);
+        assert!(
+            (start[0] - 5.0).abs() <= EPS && start[1].abs() <= EPS,
+            "the second start must move onto the first end: {start:?}"
+        );
+        let length = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
+        assert!(
+            (length - 5.0).abs() <= 1.0e-7,
+            "the second segment must remain rigid at its picked point: {start:?} -> {end:?}"
+        );
     }
 
     /// A pick that doesn't land near any real point (no object snap match)

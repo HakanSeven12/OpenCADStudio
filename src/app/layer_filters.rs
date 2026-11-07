@@ -60,6 +60,7 @@ impl crate::filter::PropertySource for LayerProperties {
             "frozen" => flag(layer.is_frozen()),
             "locked" => flag(layer.is_locked()),
             "plot" => flag(layer.is_plottable),
+            "xref" => flag(layer.name.contains('|') || layer.flags.xref_dependent),
             _ => return None,
         })
     }

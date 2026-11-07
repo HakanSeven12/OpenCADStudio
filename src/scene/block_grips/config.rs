@@ -1117,13 +1117,26 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires the local dynamic block DWG fixtures"]
-    fn block_grip_counts_native_two_grip_fixture_roundtrips() {
-        let root =
-            std::env::var("OCS_DYNAMIC_BLOCK_FIXTURES").expect("set OCS_DYNAMIC_BLOCK_FIXTURES");
-        let path = std::path::Path::new(&root).join("DWG-2018/BT.dwg");
-        let mut doc = DwgReader::from_file(&path).unwrap().read().unwrap();
-        let parameter = doc
+    fn block_grip_counts_reloaded_two_grip_linear_parameter_cycles_and_roundtrips() {
+        let (mut doc, definition, parameter) = fixture(1);
+        let target = doc.block_records.get("GRIPS").unwrap().entity_handles[0];
+        actions::create_with_options(
+            &mut doc,
+            definition,
+            actions::Kind::Move,
+            parameter,
+            Some(actions::XyKeyPoint::Base),
+            &[target],
+            glam::DVec3::ZERO,
+            None,
+            None,
+        )
+        .unwrap();
+        set(&mut doc, definition, parameter, Some(2)).unwrap();
+        let mut doc = DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&doc).unwrap()))
+            .read()
+            .unwrap();
+        let found = doc
             .objects
             .iter()
             .find_map(|(handle, object)| match object {
@@ -1138,23 +1151,20 @@ mod tests {
                 },
                 _ => None,
             })
-            .expect("the native fixture contains a two-grip Linear parameter");
-        let definition = doc
-            .block_records
-            .iter()
-            .find(|record| {
-                authoring::graph(&doc, record.handle).ok().flatten() == Some(parameter.1)
-            })
-            .unwrap()
-            .handle;
-        assert_eq!(count(&doc, definition, parameter.0), Some(2));
+            .expect("reloaded two-grip Linear parameter");
+        assert_eq!(found.0, parameter);
+        assert_eq!(
+            authoring::graph(&doc, definition).ok().flatten(),
+            Some(found.1)
+        );
+        assert_eq!(count(&doc, definition, parameter), Some(2));
         let actions_before = actions::actions(&doc, definition)
             .into_iter()
             .map(|(handle, ..)| (handle, doc.objects[&handle].clone()))
             .collect::<Vec<_>>();
         for desired in [1, 0, 2] {
-            set(&mut doc, definition, parameter.0, Some(desired)).unwrap();
-            assert_eq!(count(&doc, definition, parameter.0), Some(desired));
+            set(&mut doc, definition, parameter, Some(desired)).unwrap();
+            assert_eq!(count(&doc, definition, parameter), Some(desired));
             check_graph(&doc, definition);
             assert!(actions_before
                 .iter()
@@ -1169,10 +1179,12 @@ mod tests {
                 .read()
                 .unwrap(),
         ] {
-            assert_eq!(count(&saved, definition, parameter.0), Some(2));
+            assert_eq!(count(&saved, definition, parameter), Some(2));
             check_graph(&saved, definition);
         }
     }
+
+
 
     #[test]
     fn block_grip_counts_reject_malformed_and_shared_dependencies_atomically() {

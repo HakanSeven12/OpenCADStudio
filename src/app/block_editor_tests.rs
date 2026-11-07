@@ -11,12 +11,11 @@ mod lookup_properties;
 mod visibility_properties;
 mod nested_properties;
 mod grip_descriptions;
-mod imported_flip_workflow;
-mod imported_reference_audit;
 mod flip_frame_grips;
 mod flip_state_labels;
 mod properties_internal_rows;
 mod synthetic_reference_grips;
+mod window_scale;
 
 fn fixture() -> (OpenCADStudio, Handle) {
     let mut app = OpenCADStudio::new_for_test();

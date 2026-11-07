@@ -292,21 +292,21 @@ fn walk_mline_element(
 }
 
 #[derive(Clone, Copy)]
-struct BlockObjectStyle {
-    color: [f32; 4],
+pub(crate) struct BlockObjectStyle {
+    pub(crate) color: [f32; 4],
     aci: u8,
-    pattern_length: f32,
-    pattern: [f32; 8],
-    line_weight_px: f32,
-    layer: view::render::InheritStyle,
+    pub(crate) pattern_length: f32,
+    pub(crate) pattern: [f32; 8],
+    pub(crate) line_weight_px: f32,
+    pub(crate) layer: view::render::InheritStyle,
     layer_aci: u8,
-    layer_plottable: bool,
+    pub(crate) layer_plottable: bool,
 }
 
 pub(crate) struct ExpandedBlockObject {
     pub(crate) wires: Vec<WireModel>,
-    style: BlockObjectStyle,
-    is_xref: bool,
+    pub(crate) style: BlockObjectStyle,
+    pub(crate) is_xref: bool,
 }
 
 #[derive(Clone, Copy, Default)]

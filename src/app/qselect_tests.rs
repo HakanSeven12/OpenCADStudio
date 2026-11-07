@@ -61,6 +61,7 @@ fn state(
         result: crate::app::QSelectResult::New,
         error: None,
         live_count: 0,
+            live_by_type: Vec::new(),
         show: false,
         value_counts: Vec::new(),
         sample: None,

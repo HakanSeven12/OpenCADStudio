@@ -308,7 +308,14 @@ const MENUS: &[(&str, &[Entry])] = &[
             Cmd("Clean Screen", "CLEANSCREEN", "Ctrl+0"),
             Sep,
             Cmd("Spelling", "SPELL", ""),
+            Sep,
+            // Selection (#2611 mockup, Menus): saved filters are in FILTER's
+            // list and the drawing's right-click menu.
             Cmd("Quick Select...", "QSELECT", ""),
+            Cmd("Filter...", "FILTER", ""),
+            Cmd("Select Similar", "SELECTSIMILAR", ""),
+            Cmd("Select All", "SELECTALL", "Ctrl+A"),
+            Sep,
             Sub(
                 "Draw Order",
                 &[

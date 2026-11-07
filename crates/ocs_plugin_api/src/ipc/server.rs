@@ -243,6 +243,11 @@ pub fn handle_plugin_request(
         SampleParametric { chain, s } => {
             PluginResponse::SampleParametricResult(host.sample_parametric(&chain, s))
         }
+        ValidateParametricChain { chain, tolerance } => {
+            PluginResponse::ValidateParametricChainResult(
+                host.validate_parametric_chain(&chain, tolerance),
+            )
+        }
         RegisterPluginClass { class } => {
             PluginResponse::RegisterPluginClassResult(host.register_plugin_class(
                 &plugin_id,

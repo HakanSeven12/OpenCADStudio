@@ -245,6 +245,30 @@ pub async fn pick_layer_standard_path() -> Option<PathBuf> {
     Some(crate::sys::handle_path(&handle))
 }
 
+/// Pick where saved selection filters are written, or read back from.
+pub async fn pick_selection_filters_path(save: bool) -> Option<PathBuf> {
+    let dialog = crate::sys::file_dialog()
+        .set_title(
+            crate::t!(if save {
+                "Export saved filters"
+            } else {
+                "Import saved filters"
+            })
+            .as_ref(),
+        )
+        .add_filter(crate::t!("Selection filters").as_ref(), &["ocsfilter"])
+        .add_filter(crate::t!("All Files").as_ref(), &["*"]);
+    let handle = if save {
+        dialog
+            .set_file_name("filters.ocsfilter")
+            .save_file()
+            .await?
+    } else {
+        dialog.pick_file().await?
+    };
+    Some(crate::sys::handle_path(&handle))
+}
+
 /// Pick where a set of layer mappings is written, or read back from.
 pub async fn pick_layer_mapping_path(save: bool) -> Option<PathBuf> {
     let dialog = crate::sys::file_dialog()
@@ -1430,10 +1454,24 @@ fn normalize_block_origins(doc: &mut Document) {
     use document::types::Vector3;
     use document::EntityType;
 
+    // Evaluated dynamic origins share coordinates with reference parameter
+    // caches and authoring frames. Translating only their bodies would move
+    // grips on reopen and change the next evaluation's coordinate basis.
+    let dynamic_origins: std::collections::BTreeSet<_> = doc.entities()
+        .filter_map(|entity| match entity {
+            EntityType::Insert(reference) => doc.dynamic_definition_for_insert(reference.common.handle)
+                .filter(|definition| crate::scene::block_basepoint::parameter(doc, *definition).is_some())
+                .map(|_| reference.block_name.to_ascii_lowercase()),
+            _ => None,
+        }).collect();
+
     let blocks: Vec<_> = doc
         .block_records
         .iter()
         .filter_map(|record| {
+            if dynamic_origins.contains(&record.name.to_ascii_lowercase()) {
+                return None;
+            }
             let marker_point = match doc.get_entity(record.block_entity_handle) {
                 Some(EntityType::Block(block)) => block.base_point,
                 _ => Vector3::ZERO,

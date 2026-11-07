@@ -2829,6 +2829,7 @@ command =
     .tcount-starting-number-start = TCOUNT  起始編號 <__ocs_fmt_0__>：
     .tcount-increment-increment = TCOUNT  遞增量 <__ocs_fmt_0__>：
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  放置方式 [覆蓋/前綴/後綴] <覆蓋>：
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = 「__ocs_fmt_0__」已在另一個分頁中開啟。在網頁版中兩個分頁共用同一份儲存複本——最後一次儲存會覆寫另一份。
@@ -6740,6 +6741,15 @@ ui =
     .mid-between-2-points = 兩點之間的中點
     .osnap-settings = 物件鎖點設定…
     .snap-override-none-next-pick-only = 鎖點覆寫：無（僅限下一次點選）。
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (後端)
     .window-click-add-alias-type-the-alias-and-command-accep = 按一下「+ 新增別名」，輸入別名與指令，確認該列後再按「套用」。按 Esc 鍵可取消未完成的列。

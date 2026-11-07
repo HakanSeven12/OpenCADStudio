@@ -2834,6 +2834,7 @@ command =
     .tcount-starting-number-start = TCOUNT  Počáteční číslo <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  Přírůstek <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  Umístění [Overwrite/Prefix/Suffix] <Overwrite>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = „__ocs_fmt_0__“ je již otevřen na jiné kartě. Na webu obě karty sdílejí jednu uloženou kopii — poslední uložení přepíše tu druhou.
@@ -6746,6 +6747,15 @@ ui =
     .mid-between-2-points = Střed mezi 2 body
     .osnap-settings = Nastavení uchopení…
     .snap-override-none-next-pick-only = Dočasné uchopení: žádné (jen pro další bod).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Klikněte na + Přidat alias, zadejte alias a příkaz, potvrďte řádek a zvolte Použít. Esc zruší rozpracovaný řádek.

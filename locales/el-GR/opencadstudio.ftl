@@ -2829,6 +2829,7 @@ command =
     .tcount-starting-number-start = TCOUNT  αρχικός αριθμός <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  βήμα <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  τοποθέτηση [Αντικατάσταση/Πρόθεμα/Κατάληξη] <Αντικατάσταση>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = Το «__ocs_fmt_0__» είναι ήδη ανοιχτό σε άλλη καρτέλα. Στον ιστό οι δύο καρτέλες μοιράζονται ένα αποθηκευμένο αντίγραφο — η τελευταία αποθήκευση αντικαθιστά την άλλη.
@@ -6744,6 +6745,15 @@ ui =
     .mid-between-2-points = Μέσο μεταξύ 2 σημείων
     .osnap-settings = Ρυθμίσεις έλξης...
     .snap-override-none-next-pick-only = Προσωρινή έλξη: Καμία (μόνο για το επόμενο σημείο).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

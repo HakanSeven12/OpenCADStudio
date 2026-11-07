@@ -5476,6 +5476,7 @@ impl OpenCADStudio {
                 }
                 let (shift, ctrl) = (self.shift_down, self.ctrl_down);
                 let panel = &mut self.tabs[i].layers;
+                panel.tree_rename = None;
                 // The press may become a drag onto a group in the tree.
                 panel.dragging = true;
                 panel.tree_focus = false;
@@ -12304,6 +12305,14 @@ impl OpenCADStudio {
             Message::LayerShow(node) => {
                 let i = self.active_tab;
                 let panel = &mut self.tabs[i].layers;
+                // A press on the tree is never the end of a row drag: one
+                // released elsewhere must not file the layers here.
+                panel.dragging = false;
+                panel.drag_over = None;
+                // A rename open on another node ends with the click.
+                if panel.tree_rename.as_ref().is_some_and(|(n, _)| *n != node) {
+                    panel.tree_rename = None;
+                }
                 panel.view = node;
                 panel.tree_focus = true;
                 panel.keys_active = true;

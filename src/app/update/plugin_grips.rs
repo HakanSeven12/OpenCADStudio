@@ -700,6 +700,10 @@ impl OpenCADStudio {
         self.plugin_grip_deliveries = Default::default();
         self.plugin_grip_live_originals = Vec::new();
         self.plugin_grip_descriptor_drag = None;
+        // The drag's snap and tracking state ends with it.
+        self.snapper.from_point = None;
+        self.otrack_active = None;
+        self.tabs[tab].snap_result = None;
         self.tabs[tab].scene.set_preview_wires(Vec::new());
         self.tabs[tab].dirty = true;
     }

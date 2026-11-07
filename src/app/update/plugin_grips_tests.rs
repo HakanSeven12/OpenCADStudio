@@ -1912,6 +1912,7 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
         .expect("bond");
         app.finish_pending_history(i);
     }
+    let bonded_a = serialized(&app, a);
     let bonded_b = serialized(&app, b);
 
     // A drag whose live answer moves ONLY entity `a` (the plugin's choice â€”
@@ -1948,8 +1949,9 @@ fn live_geometry_does_not_trigger_the_constraint_solver() {
     );
 
     // Esc discards the visual phase byte-identically.
+    // The bond may have moved `a` onto `b`; Esc returns to the drag's start.
     assert!(app.cancel_active_grip_edit());
-    assert_eq!(serialized(&app, a), before_a);
+    assert_eq!(serialized(&app, a), bonded_a);
     assert_eq!(serialized(&app, b), bonded_b);
     grip_points::remove_in_process_sink(TEST_PLUGIN);
 }

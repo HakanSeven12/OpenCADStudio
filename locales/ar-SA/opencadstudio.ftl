@@ -2842,6 +2842,7 @@ command =
     .tcount-starting-number-start = TCOUNT  رقم البداية <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  الزيادة <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  الموضع [استبدال/بادئة/لاحقة] <استبدال>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = "__ocs_fmt_0__" مفتوح بالفعل في علامة تبويب أخرى. على الويب تتشارك العلامتان نسخة مخزنة واحدة — آخر حفظ يستبدل الأخرى.
@@ -6756,6 +6757,15 @@ ui =
     .mid-between-2-points = المنتصف بين نقطتين
     .osnap-settings = إعدادات الالتقاط...
     .snap-override-none-next-pick-only = تجاوز الالتقاط: بدون (للاختيار التالي فقط).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

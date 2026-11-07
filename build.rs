@@ -84,7 +84,7 @@ fn main() {
     println!("cargo:rustc-env=OCS_BUILD_PROFILE={profile}");
     // Bounded selection UI construction exceeds the 1 MiB default in release;
     // link every profile explicitly because rustflags may be overridden/bypassed.
-    if std::env::var("TARGET").ok().as_deref() == Some("x86_64-pc-windows-msvc") {
+    if std::env::var("TARGET").is_ok_and(|t| t.ends_with("-pc-windows-msvc")) {
         println!("cargo:rustc-link-arg-bin=OpenCADStudio=/STACK:16777216");
     }
     let mut features: Vec<String> = std::env::vars()

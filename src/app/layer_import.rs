@@ -85,6 +85,9 @@ pub struct ImportReport {
     pub skipped: usize,
     /// The drawing's layers that took the imported properties.
     pub overwritten_names: Vec<String>,
+    /// Each imported or overwritten layer: its name in the source and the
+    /// name it has in the drawing now (a renamed one is "X (2)").
+    pub targets: Vec<(String, String)>,
 }
 
 /// Bring the ticked layers of `state` into `document`.
@@ -145,6 +148,7 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
                 }
                 report.overwritten += 1;
                 report.overwritten_names.push(source.name.clone());
+                report.targets.push((source.name.clone(), source.name.clone()));
                 continue;
             }
             (true, OnConflict::Rename) => (2..)
@@ -153,13 +157,14 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
                 .unwrap_or_default(),
         };
         let mut layer = source.clone();
-        layer.name = name;
+        layer.name = name.clone();
         layer.handle = document.allocate_handle();
         // Objects of the other drawing don't come along.
         layer.material = Handle::NULL;
         layer.plotstyle_handle = Handle::NULL;
         if document.layers.add(layer).is_ok() {
             report.imported += 1;
+            report.targets.push((source.name.clone(), name));
         }
     }
     crate::app::command_driver::clipboard::merge_table_records(document, &deps);
@@ -302,12 +307,8 @@ impl OpenCADStudio {
         self.push_undo_snapshot(i, "LAYER IMPORT");
         let report = import_layers(&mut self.tabs[i].scene.document, &state);
         if state.bring_groups {
-            let ticked: Vec<&str> = state
-                .rows
-                .iter()
-                .filter(|row| row.ticked)
-                .map(|row| row.layer.name.as_str())
-                .collect();
+            // Only the layers that came in join their groups, under the name
+            // they got here; a skipped one leaves the drawing's layer alone.
             let document = &mut self.tabs[i].scene.document;
             for (group, names) in &state.groups {
                 let mut members: Vec<Handle> = super::layer_groups::layer_groups(document)
@@ -316,10 +317,13 @@ impl OpenCADStudio {
                     .map(|g| g.layers)
                     .unwrap_or_default();
                 let mut added = false;
-                for name in names
-                    .iter()
-                    .filter(|n| ticked.iter().any(|t| t.eq_ignore_ascii_case(n)))
-                {
+                for name in names.iter().filter_map(|n| {
+                    report
+                        .targets
+                        .iter()
+                        .find(|(source, _)| source.eq_ignore_ascii_case(n))
+                        .map(|(_, target)| target)
+                }) {
                     if let Some(layer) = document
                         .layers
                         .iter()
@@ -798,6 +802,7 @@ mod tests {
                 imported: 1,
                 overwritten: 0,
                 skipped: 1,
+                targets: vec![("Doors".into(), "Doors".into())],
                 ..Default::default()
             }
         );

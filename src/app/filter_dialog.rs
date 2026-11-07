@@ -242,9 +242,11 @@ fn sample_type_of(filter: &Filter) -> Vec<String> {
 /// as its rows; beside rows of the same type (or none) as more rows; next
 /// to rows of another type as a group of their own, the rows already there
 /// becoming a group too and the filter matching any of them.
-pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
+/// Returns false, leaving the filter as it is, when the rows cannot join it
+/// without making it match nothing.
+pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) -> bool {
     if rows.is_empty() {
-        return;
+        return true;
     }
     let blank = |c: &Condition| c.property.is_none() && c.type_filter.is_none() && !c.negate;
     let empty = filter.items.iter().all(|item| match item {
@@ -254,7 +256,7 @@ pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
     if empty {
         filter.root = Match::All;
         filter.items = rows.into_iter().map(Item::Condition).collect();
-        return;
+        return true;
     }
     let sample_type = rows.iter().find_map(|c| c.type_filter.clone());
     let has_groups = filter
@@ -273,7 +275,12 @@ pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
                 filter.items.push(Item::Condition(row));
             }
         }
-        return;
+        return true;
+    }
+    // Groups do not nest: under "all of" with groups already there, another
+    // type's group would have to match both types at once.
+    if filter.root == Match::All && has_groups && !same_type {
+        return false;
     }
     if filter.root == Match::All && !has_groups {
         let before: Vec<Condition> = filter
@@ -294,6 +301,7 @@ pub fn add_sample(filter: &mut Filter, rows: Vec<Condition>) {
         mode: Match::All,
         conditions: rows,
     }));
+    true
 }
 
 /// Window…: Quick Select or FILTER steps aside while the objects to search
@@ -349,12 +357,11 @@ impl crate::command::CadCommand for ScopeWindowCommand {
     fn is_selection_gathering(&self) -> bool {
         true
     }
+    // Windows and picks add up in the selection until Enter, as at any
+    // "Select objects:" prompt.
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> crate::command::CmdResult {
-        if handles.is_empty() {
-            return crate::command::CmdResult::NeedPoint;
-        }
-        self.picked = true;
-        self.finish()
+        self.picked |= !handles.is_empty();
+        crate::command::CmdResult::NeedPoint
     }
     fn on_point(&mut self, _point: glam::DVec3) -> crate::command::CmdResult {
         crate::command::CmdResult::NeedPoint
@@ -470,20 +477,7 @@ impl OpenCADStudio {
                     .map(|state| state.by_layer.iter().map(|(n, _)| n.clone()).collect())
                     .unwrap_or_default();
                 self.filter_dialog = None;
-                self.filter_open(Some(FilterSeed {
-                    filter: Filter {
-                        root: Match::All,
-                        items: vec![Item::Condition(Condition {
-                            property: Some("layer".into()),
-                            value: names.join(","),
-                            ..Default::default()
-                        })],
-                    },
-                    scope: QSelectScope::CurrentSpace,
-                    result: QSelectResult::New,
-                    invert: false,
-                    show: false,
-                }));
+                self.filter_open_for_layers(names.join(","));
                 return Task::none();
             }
             FilterMsg::SampleToggle(index) => {
@@ -512,7 +506,14 @@ impl OpenCADStudio {
                             .filter(|(_, ticked)| *ticked)
                             .map(|(condition, _)| Condition::from(condition))
                             .collect();
-                        add_sample(&mut state.filter, ticked);
+                        if !add_sample(&mut state.filter, ticked) {
+                            self.command_line.push_error(
+                                crate::t!(
+                                    "An object of another type cannot join a filter that needs all of its groups. Set the filter to \"any of these\" first."
+                                )
+                                .as_ref(),
+                            );
+                        }
                     }
                     Some(sample_type_of(&state.filter))
                 } else {
@@ -552,6 +553,12 @@ impl OpenCADStudio {
             }
             FilterMsg::ShowLayers => {
                 self.filter_show_layers();
+                // The dialog is gone: a parked command or block dialog comes
+                // back as it does on Close.
+                if self.transparent_select.is_some() {
+                    return self.finish_transparent_select(None);
+                }
+                self.return_to_block_dialog(false);
                 return Task::none();
             }
             FilterMsg::Saved(name) => {
@@ -790,7 +797,7 @@ impl OpenCADStudio {
                 .into_iter()
                 .map(|(name, filter)| serde_json::json!({ "name": name, "filter": filter }))
                 .collect();
-        let text = serde_json::to_string_pretty(&serde_json::json!({ "filters": filters }))
+        let text = serde_json::to_string_pretty(&serde_json::json!({ "version": 1, "filters": filters }))
             .unwrap_or_default();
         match std::fs::write(path, text) {
             Ok(()) => self
@@ -814,7 +821,11 @@ impl OpenCADStudio {
                 value.get("filters")?.as_array().map(|list| {
                     list.iter()
                         .filter_map(|item| {
-                            let name = item.get("name")?.as_str()?.to_string();
+                            // The names Save as accepts: trimmed, not empty.
+                            let name = item.get("name")?.as_str()?.trim().to_string();
+                            if name.is_empty() {
+                                return None;
+                            }
                             let filter =
                                 serde_json::from_value(item.get("filter")?.clone()).ok()?;
                             Some((name, filter))
@@ -881,22 +892,9 @@ impl OpenCADStudio {
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
         self.tabs[i].scene.clear_preview_wire();
+        self.restore_pre_cmd_tangent();
         if let Some(handle) = handle {
-            let conditions = self.tabs[i].scene.qselect_conditions_from_entity(handle);
-            let type_name = conditions
-                .first()
-                .and_then(|condition| condition.type_filter.clone())
-                .unwrap_or_default();
-            let rows = conditions
-                .into_iter()
-                .map(|condition| {
-                    let ticked = condition.property.as_ref().is_none_or(|property| {
-                        super::SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
-                    });
-                    (condition, ticked)
-                })
-                .collect();
-            state.sample = Some(super::QSelectSample { type_name, rows });
+            state.sample = Some(self.sample_from_entity(i, handle));
         }
         self.filter_dialog = Some(state);
         self.filter_refresh_scope();
@@ -1010,11 +1008,15 @@ impl OpenCADStudio {
             state.layer_filter = Some(name);
             // Layers, not the objects a parked command asks for.
             state.for_command = None;
-            // Layers have no type: a blank row reads the name.
+            // Layers have no type: a blank row reads the name, any name
+            // until a value is typed, so it still finds every layer.
             for item in &mut state.filter.items {
                 if let Item::Condition(c) = item {
                     if c.property.is_none() && c.type_filter.is_none() {
                         c.property = Some("name".into());
+                        if c.value.is_empty() {
+                            c.op = Op::Any;
+                        }
                     }
                 }
             }
@@ -1285,12 +1287,7 @@ impl OpenCADStudio {
             let reasons: Vec<String> = layers
                 .iter()
                 .map(|(name, objects)| {
-                    let layer = self.tabs[i]
-                        .scene
-                        .document
-                        .layers
-                        .iter()
-                        .find(|l| &l.name == name);
+                    let layer = self.tabs[i].scene.document.layers.get(name);
                     match (&reason_field, &label, layer) {
                         (Some(field), Some(label), Some(layer)) => {
                             use crate::filter::PropertySource;
@@ -1453,6 +1450,12 @@ impl OpenCADStudio {
     /// objects, parked until the dialog closes. Anywhere else it says why
     /// not.
     pub(super) fn start_transparent_select(&mut self, i: usize, cmd: &str) -> Task<Message> {
+        if self.tabs[i].suspended_cmd.is_some() {
+            self.command_line.push_error(
+                crate::tf!("'{} cannot run while another command is waiting.", cmd).as_ref(),
+            );
+            return Task::none();
+        }
         let asking = self.tabs[i]
             .active_cmd
             .as_ref()
@@ -1787,11 +1790,11 @@ mod tests {
             for h in picked {
                 app.tabs[i].scene.select_entity(*h, false);
             }
-            let result = app.tabs[i]
-                .active_cmd
-                .as_mut()
-                .expect("picking")
-                .on_selection_complete(picked.to_vec());
+            let command = app.tabs[i].active_cmd.as_mut().expect("picking");
+            // Picks add up until Enter.
+            let more = command.on_selection_complete(picked.to_vec());
+            assert!(matches!(more, crate::command::CmdResult::NeedPoint));
+            let result = command.on_enter();
             let _ = app.apply_cmd_result(result);
         };
         let _ = app.update(Message::QSelectOpen);

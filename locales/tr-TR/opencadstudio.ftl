@@ -2814,6 +2814,7 @@ command =
     .tcount-starting-number-start = TCOUNT  Başlangıç numarası <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  Artış miktarı <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  Yerleştirme [Üzerine yaz/Önek/Sonek] <Üzerine yaz>:
+    .transparent-already-waiting = Başka bir komut beklerken '__ocs_fmt_0__ çalışamaz.
 
 file =
     .web-already-open-shared-copy = "__ocs_fmt_0__" başka bir sekmede zaten açık. Web'de iki sekme tek bir kayıtlı kopyayı paylaşır — son kaydetme diğerinin üzerine yazar.
@@ -6667,6 +6668,15 @@ ui =
     .mid-between-2-points = 2 nokta arası orta
     .osnap-settings = Nesne kenetleme ayarları...
     .snap-override-none-next-pick-only = Geçici kenetleme: Yok (yalnızca sonraki nokta).
+    .filter-sample-other-type = Başka türden bir nesne, tüm gruplarının sağlanmasını isteyen bir filtreye eklenemez. Önce filtreyi "bunlardan herhangi biri" yapın.
+    .geo-unnamed = Adsız
+    .geo-local-grid = Yerel ızgara
+    .geo-projected-grid = Projeksiyon ızgarası
+    .geo-geographic = Coğrafi
+    .geo-gis-coordinates = CBS koordinatları
+    .geo-coordinate-system = Koordinat sistemi
+    .geo-reference-point = Referans noktası
+    .geo-design-point = Tasarım noktası
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

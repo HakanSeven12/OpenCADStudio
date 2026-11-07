@@ -2100,6 +2100,13 @@ impl OpenCADStudio {
                 panel.selected_multi = panel.visible_indices();
                 Some(Task::none())
             }
+            "DELETE"
+                if panel.tree_focus
+                    && matches!(panel.view, TreeNode::Group(_) | TreeNode::Filter(_)) =>
+            {
+                let node = panel.view.clone();
+                Some(self.update(Message::LayerTreeAction(node, TreeAction::Delete)))
+            }
             "DELETE" => Some(self.on_layer_delete()),
             "F2" if panel.tree_focus
                 && matches!(panel.view, TreeNode::Group(_) | TreeNode::Filter(_)) =>
@@ -2442,6 +2449,8 @@ impl OpenCADStudio {
             || self.filter_dialog.is_some()
             || self.qselect.is_some()
         {
+            // The dialog owns the highlight now; recompute once it closes.
+            self.tabs[i].layers.highlight_key = None;
             return;
         }
         let names = self.tabs[i].layers.eye_layers.clone();

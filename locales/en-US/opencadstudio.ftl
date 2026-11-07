@@ -2830,6 +2830,7 @@ command =
     .tcount-starting-number-start = TCOUNT  starting number <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  increment <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT  placement [Overwrite/Prefix/Suffix] <Overwrite>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .in-place-save-failed-downloaded = In-place save failed (__ocs_fmt_0__); a copy was downloaded instead
@@ -6745,6 +6746,15 @@ ui =
     .mid-between-2-points = Mid Between 2 Points
     .osnap-settings = Osnap Settings...
     .snap-override-none-next-pick-only = Snap override: None (next pick only).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

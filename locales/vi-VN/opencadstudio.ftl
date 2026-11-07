@@ -2834,6 +2834,7 @@ command =
     .tcount-starting-number-start = TCOUNT số bắt đầu <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT  bước tăng <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT vị trí [Ghi đè/Tiền tố/Hậu tố] <Ghi đè>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .in-place-save-failed-downloaded = Lưu tại chỗ không thành công (__ocs_fmt_0__); thay vào đó một bản sao đã được tải xuống
@@ -6751,6 +6752,15 @@ ui =
     .mid-between-2-points = Giữa 2 điểm
     .osnap-settings = Cài đặt Osnap...
     .snap-override-none-next-pick-only = Ghi đè truy bắt: Không (chỉ lần chọn kế tiếp).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Nhấp vào + Thêm bí danh, nhập bí danh và lệnh, chấp nhận hàng rồi Áp dụng. Esc hủy hàng đang chờ xử lý.

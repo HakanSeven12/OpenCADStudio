@@ -218,8 +218,8 @@ impl V4Connection {
                             tab_id.expect("an unserviceable foreign-tab request has a tab id");
                         let response = PluginResponse::Error(format!(
                             "nested plugin request for tab {requested_tab} cannot be served inline \
-                             during another tab's dispatch (current tab {current_tab_id}); retry \
-                             when tab {requested_tab} is active"
+                             while the host dispatches to tab {current_tab_id}; send it again \
+                             after that dispatch returns"
                         ));
                         let mut writer =
                             self.shared.writer.lock().unwrap_or_else(|e| e.into_inner());

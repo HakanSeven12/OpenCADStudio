@@ -2829,6 +2829,7 @@ command =
     .tcount-starting-number-start = TCOUNT aloitusnumero <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT:n lisäys <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT-sijoittelu [Korvaa/etuliite/liite] <Overwrite>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = "__ocs_fmt_0__" on jo auki toisessa välilehdessä. Verkossa molemmat välilehdet jakavat yhden tallennetun kopion — viimeisin tallennus korvaa toisen.
@@ -6741,6 +6742,15 @@ ui =
     .mid-between-2-points = 2 pisteen keskikohta
     .osnap-settings = Tartunta-asetukset...
     .snap-override-none-next-pick-only = Tilapäinen tartunta: Ei mitään (vain seuraava piste).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

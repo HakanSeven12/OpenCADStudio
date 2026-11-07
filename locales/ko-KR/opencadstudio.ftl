@@ -2829,6 +2829,7 @@ command =
     .tcount-starting-number-start = TCOUNT 시작 번호 <__ocs_fmt_0__>:
     .tcount-increment-increment = TCOUNT 증분 <__ocs_fmt_0__>:
     .tcount-placement-overwrite-prefix-suffix-overw = TCOUNT 배치 [덮어쓰기/접두사/접미사] <Overwrite>:
+    .transparent-already-waiting = '__ocs_fmt_0__ cannot run while another command is waiting.
 
 file =
     .web-already-open-shared-copy = "__ocs_fmt_0__"이(가) 이미 다른 탭에서 열려 있습니다. 웹에서는 두 탭이 하나의 저장된 사본을 공유하므로 마지막 저장이 다른 쪽을 덮어씁니다.
@@ -6743,6 +6744,15 @@ ui =
     .mid-between-2-points = 두 점 사이의 중간
     .osnap-settings = 객체 스냅 설정...
     .snap-override-none-next-pick-only = 스냅 재지정: 없음 (다음 선택만).
+    .filter-sample-other-type = An object of another type cannot join a filter that needs all of its groups. Set the filter to "any of these" first.
+    .geo-unnamed = Unnamed
+    .geo-local-grid = Local grid
+    .geo-projected-grid = Projected grid
+    .geo-geographic = Geographic
+    .geo-gis-coordinates = GIS Coordinates
+    .geo-coordinate-system = Coordinate system
+    .geo-reference-point = Reference point
+    .geo-design-point = Design point
 
     .window-gpu-backend = GPU (backend)
     .window-click-add-alias-type-the-alias-and-command-accep = Click + Add alias, type the alias and command, accept the row, then Apply. Esc cancels the pending row.

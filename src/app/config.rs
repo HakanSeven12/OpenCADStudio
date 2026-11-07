@@ -492,6 +492,9 @@ impl ModelSpaceThemeConfig {
 
 /// Default canvas background for a given theme variant.
 pub fn theme_canvas_background(theme: &iced::Theme) -> [u8; 3] {
+    // Match the theme the user chose, not the readable copy `ui_theme` made.
+    let base = crate::ui::style::readable::base_theme(theme);
+    let theme = &base;
     match theme {
         iced::Theme::Light => [255, 255, 255],
         iced::Theme::SolarizedLight => [253, 246, 227],

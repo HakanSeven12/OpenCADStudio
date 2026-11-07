@@ -82,7 +82,7 @@ impl LayerSortCol {
             Self::Color => t!("Color"),
             Self::Linetype => t!("Linetype"),
             Self::Lineweight => t!("Lineweight"),
-            Self::Transparency => t!("Transparency"),
+            Self::Transparency => t!("Transp."),
             Self::Description => t!("Description"),
             Self::Objects => t!("Objects"),
         }
@@ -112,8 +112,8 @@ const COLUMNS: [LayerSortCol; 10] = [
     LayerSortCol::Linetype,
     LayerSortCol::Lineweight,
     LayerSortCol::Transparency,
-    LayerSortCol::Description,
     LayerSortCol::Objects,
+    LayerSortCol::Description,
 ];
 
 /// The columns a narrow pallet keeps (#2610, under 420 px): what is changed
@@ -775,7 +775,7 @@ impl LayerPanel {
                     .size(FONT_SZ)
                     .style(move |theme: &Theme| text::Style {
                         color: Some(if chosen {
-                            theme.palette().primary.weak.text
+                            selection_colors(theme).1
                         } else {
                             theme.palette().background.base.text.scale_alpha(0.6)
                         }),
@@ -1262,11 +1262,18 @@ impl LayerPanel {
         .width(Length::Fill)
         .padding([4, 8]);
 
+        // The room the table has: beside the tree on a wide pallet.
+        let table_w = if band == WidthBand::Wide && !self.columns_menu {
+            (inner_w - TREE_W - 2.0).max(0.0)
+        } else {
+            inner_w
+        };
+
         // ── Column header ─────────────────────────────────────────────────
         let sc = self.sort_col;
         let sa = self.sort_asc;
         let mut header_row = row![
-            text(t!("Status")).size(10).style(muted_style).width(50),
+            text(t!("Status")).size(10).style(muted_style).width(COL_STATUS),
             sortable_header(
                 t!("Name"),
                 LayerSortCol::Name,
@@ -1308,8 +1315,11 @@ impl LayerPanel {
                     .width(Length::Fixed(COL_ICON * 2.0 + 4.0)),
             );
         }
-        // Over the rows' eye buttons.
-        header_row = header_row.push(iced::widget::Space::new().width(COL_EYE));
+        // Over the rows' eye buttons, after the same filler the rows have.
+        header_row = header_row
+            .width(Fill)
+            .push(iced::widget::Space::new().width(Fill))
+            .push(iced::widget::Space::new().width(COL_EYE));
 
         let col_header = container(header_row)
             .style(|theme: &Theme| {
@@ -1402,7 +1412,7 @@ impl LayerPanel {
             col_header,
             table,
             iced::widget::Space::new()
-                .width(Length::Fixed(inner_w))
+                .width(Length::Fixed(table_w))
                 .height(0),
         ]
         .height(Length::Fill);
@@ -1913,7 +1923,7 @@ fn layer_row<'a>(
                 right: 4.0,
             })
             .width(Length::Fixed(COL_LT))
-            .input_style(|theme, status| field_style_with_radius(theme, status, 2.0)),
+            .input_style(cell_field_style),
             LINETYPE_MENU_W,
         )
     } else {
@@ -1941,7 +1951,7 @@ fn layer_row<'a>(
             right: 4.0,
         })
         .width(Length::Fixed(COL_LW))
-        .input_style(|theme, status| field_style_with_radius(theme, status, 2.0))
+        .input_style(cell_field_style)
         .into()
     } else {
         text(cur_lw_item.to_string())
@@ -1965,11 +1975,7 @@ fn layer_row<'a>(
             left: 4.0,
             right: 4.0,
         })
-        .style(|theme: &Theme, status| {
-            let mut style = field_style_with_radius(theme, status, 2.0);
-            style.background = iced::Background::Color(Color::TRANSPARENT);
-            style
-        })
+        .style(cell_field_style)
         .width(Length::Fixed(COL_TRANS));
     if trans_buf.is_some() {
         trans_cell = trans_cell.id(transparency_input_id());
@@ -1988,11 +1994,7 @@ fn layer_row<'a>(
             left: 4.0,
             right: 4.0,
         })
-        .style(|theme: &Theme, status| {
-            let mut style = field_style_with_radius(theme, status, 2.0);
-            style.background = iced::Background::Color(Color::TRANSPARENT);
-            style
-        })
+        .style(cell_field_style)
         .width(Length::Fixed(COL_DESC));
     if desc_buf.is_some() {
         desc_cell = desc_cell.id(description_input_id());
@@ -2018,7 +2020,7 @@ fn layer_row<'a>(
         // A double click on the status makes the layer current.
         mouse_area(
             container(status_dot)
-                .width(50)
+                .width(COL_STATUS)
                 .height(Length::Fixed(ROW_H))
                 .align_x(iced::Center)
                 .align_y(iced::Center),
@@ -2139,16 +2141,16 @@ fn layer_row<'a>(
         container(row_content)
             .style(move |theme: &Theme| {
                 let palette = theme.palette();
-                let pair = if is_selected {
-                    palette.primary.weak
+                let (color, text_color) = if is_selected {
+                    selection_colors(theme)
                 } else if index % 2 == 0 {
-                    palette.background.base
+                    (palette.background.base.color, palette.background.base.text)
                 } else {
-                    palette.background.weak
+                    (palette.background.weak.color, palette.background.weak.text)
                 };
                 container::Style {
-                    background: Some(Background::Color(pair.color)),
-                    text_color: Some(pair.text),
+                    background: Some(Background::Color(color)),
+                    text_color: Some(text_color),
                     ..Default::default()
                 }
             })
@@ -2165,20 +2167,47 @@ fn layer_row<'a>(
     .into()
 }
 
+/// A table cell's field: plain text until hovered or typed in (#2610
+/// mockup), then a field.
+fn cell_field_style(theme: &Theme, status: text_input::Status) -> text_input::Style {
+    let mut style = field_style_with_radius(theme, status, 2.0);
+    style.background = Background::Color(Color::TRANSPARENT);
+    if matches!(status, text_input::Status::Active | text_input::Status::Disabled) {
+        style.border.color = Color::TRANSPARENT;
+    }
+    style
+}
+
+/// The selection colour of the rows and the tree: the accent mixed into
+/// the background, quiet in a dark theme as in the mockup, with the
+/// background's text colour.
+pub fn selection_colors(theme: &Theme) -> (Color, Color) {
+    let palette = theme.palette();
+    let bg = palette.background.base.color;
+    let accent = palette.primary.base.color;
+    let dark = bg.r * 0.299 + bg.g * 0.587 + bg.b * 0.114 < 0.5;
+    let t = if dark { 0.32 } else { 0.18 };
+    let mix = |a: f32, b: f32| a + (b - a) * t;
+    (
+        Color::from_rgb(mix(bg.r, accent.r), mix(bg.g, accent.g), mix(bg.b, accent.b)),
+        palette.background.base.text,
+    )
+}
+
 /// A tree line: flat, the chosen one in the selection colour, a light
 /// hover.
 fn tree_line_style(theme: &Theme, status: button::Status, chosen: bool) -> button::Style {
     let palette = theme.palette();
     let pair = if chosen {
-        Some(palette.primary.weak)
+        Some(selection_colors(theme))
     } else if matches!(status, button::Status::Hovered) {
-        Some(palette.background.weak)
+        Some((palette.background.weak.color, palette.background.weak.text))
     } else {
         None
     };
     button::Style {
-        background: pair.map(|p| Background::Color(p.color)),
-        text_color: pair.map_or(palette.background.base.text, |p| p.text),
+        background: pair.map(|p| Background::Color(p.0)),
+        text_color: pair.map_or(palette.background.base.text, |p| p.1),
         border: Border {
             radius: 3.0.into(),
             ..Default::default()
@@ -2359,15 +2388,17 @@ pub fn iced_color_from_acad(c: &AcadColor) -> Color {
 
 // Name column width is user-adjustable via the header divider drag (#359);
 // the app passes the current width into `view_window`.
-const COL_ICON: f32 = 44.0;
+const COL_ICON: f32 = 36.0;
 const COL_COLOR: f32 = 90.0;
-const COL_LT: f32 = 110.0;
-const COL_LW: f32 = 90.0;
-const COL_TRANS: f32 = 80.0;
-const COL_DESC: f32 = 160.0;
+const COL_LT: f32 = 100.0;
+const COL_LW: f32 = 80.0;
+const COL_TRANS: f32 = 56.0;
+const COL_DESC: f32 = 200.0;
 /// The filter tree beside the table.
 const TREE_W: f32 = 190.0;
-const COL_OBJECTS: f32 = 70.0;
+const COL_OBJECTS: f32 = 60.0;
+/// The status column (current, used, empty).
+const COL_STATUS: f32 = 36.0;
 /// The eye button at the row's end.
 const COL_EYE: f32 = 30.0;
 

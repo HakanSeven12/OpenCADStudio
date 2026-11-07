@@ -89,3 +89,73 @@ impl CadCommand for LookupActionCommand {
         CmdResult::Cancel
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context() -> PointPickContext {
+        PointPickContext {
+            view: glam::Mat4::orthographic_rh_gl(-10., 10., -10., 10., -1., 1.),
+            eye: DVec3::ZERO,
+            bounds: iced::Rectangle {
+                x: 0.,
+                y: 0.,
+                width: 400.,
+                height: 400.,
+            },
+            aperture_px: 100.,
+        }
+    }
+
+    fn command() -> LookupActionCommand {
+        LookupActionCommand::new(
+            0,
+            Handle::new(1),
+            vec![
+                Candidate {
+                    name: "Lookup1".into(),
+                    point: DVec3::new(-1., -1., 0.),
+                },
+                Candidate {
+                    name: "Lookup2".into(),
+                    point: DVec3::new(1., 1., 0.),
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn a_grip_pick_chooses_the_lookup_nearest_the_click() {
+        let mut command = command();
+        command.set_point_pick_context(Some(context()));
+        // Both grips sit inside the aperture; the click is closer to the second.
+        let near_second = command.on_point(DVec3::new(0.8, 0.8, 0.));
+        assert!(matches!(
+            near_second,
+            CmdResult::OpenBlockLookupTable { ref name, .. } if name == "Lookup2"
+        ));
+    }
+
+    #[test]
+    fn a_pick_away_from_every_grip_keeps_the_prompt() {
+        let mut command = command();
+        command.set_point_pick_context(Some(context()));
+        let CmdResult::ReportError(error) = command.on_point(DVec3::new(0., 9., 0.)) else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error, "Pick a Lookup parameter grip.");
+        assert_eq!(
+            command.prompt(),
+            "BACTION Lookup  Select a parameter endpoint or enter its name:"
+        );
+    }
+
+    #[test]
+    fn a_pick_without_a_screen_asks_for_the_name() {
+        let Some(CmdResult::ReportError(error)) = Some(command().on_point(DVec3::ZERO)) else {
+            panic!("expected a refusal");
+        };
+        assert_eq!(error, "Enter the Lookup parameter name.");
+    }
+}

@@ -7706,16 +7706,25 @@ impl OpenCADStudio {
             1.0
         };
         if !d.fit_to_paper {
-            d.scale = scale_name_for_factor(&d.scales, target_factor).unwrap_or_else(|| {
-                // A scale the drawing has no name for stays what it is rather
-                // than snapping to 1:1; the ratio entry disappears again with
-                // the next scale-list refresh once it is no longer selected.
-                let name = ratio_scale_name(target_factor);
-                d.scales.push((name.clone(), target_factor));
-                d.scales
-                    .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-                name
-            });
+            // Layout plots are 1:1 in paper units irrespective of INSUNITS.
+            // A legacy metre DWG can have a physical viewport "1:1" scale
+            // (1000 mm/model unit) next to an imperial 1:1 scale object.
+            // Prefer the explicit paper ratio label over an unrelated
+            // architectural name that merely happens to have factor 1.
+            d.scale = if d.area == "Layout"
+                && d.scales.iter().any(|(name, _)| name == "1:1")
+            {
+                "1:1".to_string()
+            } else {
+                scale_name_for_factor(&d.scales, target_factor).unwrap_or_else(|| {
+                    // A scale the drawing has no name for stays what it is.
+                    let name = ratio_scale_name(target_factor);
+                    d.scales.push((name.clone(), target_factor));
+                    d.scales
+                        .sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                    name
+                })
+            };
         } else if !d.scales.iter().any(|(name, _)| name == &d.scale) {
             // A fitted plot's stored ratio is what the fit computed, not a
             // choice; the picker just needs a valid entry behind it.

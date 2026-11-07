@@ -5772,7 +5772,13 @@ mod batch4_tests {
         let _ = app.run_command_line("VPSCALE 1:50");
         assert!(app.command_line.last_error.is_none(), "{}", out(&app));
         let eff = effective_scale(&app, handles[0]);
-        assert!((eff - 0.02).abs() < 1e-9, "the viewport is not at 1:50");
+        // VPSCALE is a physical sheet scale: metre drawings require
+        // 1000 / 50 paper units per model unit, not the raw 1/50.
+        let expected = 0.02 * app.tabs[app.active_tab].scene.default_scale_unit_factor();
+        assert!(
+            (eff - expected).abs() < 1e-9,
+            "the viewport is not at 1:50 (got {eff}, expected {expected})"
+        );
 
         let text = out(&app);
         assert!(text.contains("VPSCALE"), "{text}");

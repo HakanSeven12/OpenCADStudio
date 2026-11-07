@@ -6619,7 +6619,13 @@ impl Scene {
     /// (#2354). A template whose scales are stored already converted (a
     /// metre drawing's 1:50 as 1 = 0.05) gets its conversion from them.
     pub(crate) fn sync_annotation_scale_from_header(&mut self) {
-        let cannoscale_value = self.document.header.annotation_scale_value;
+        let cannoscale_value = self
+            .scale_object_handle(&self.document.header.current_annotation_scale)
+            .and_then(|handle| match self.document.objects.get(&handle) {
+                Some(ObjectType::Scale(scale)) => Some(self.effective_scale_factor(scale)),
+                _ => None,
+            })
+            .unwrap_or(self.document.header.annotation_scale_value);
         self.annotation_scale = if cannoscale_value > 1e-9 {
             (1.0 / cannoscale_value) as f32
         } else {
@@ -6644,6 +6650,26 @@ impl Scene {
         )
         .filter(|factor| factor.is_finite() && *factor > 0.0)
         .unwrap_or(1.0)
+    }
+
+    /// A standard scale ("1:200") means a physical paper-to-model ratio,
+    /// even in older DWGs that store its unconverted 1/200 definition.
+    ///
+    /// Newer DWGs may already store the paper units converted to the model
+    /// unit (1 paper = 0.2 drawing for a metre-based "1:200"). A custom
+    /// scale, including "1:100 m", always keeps its own stored ratio.
+    /// Normalize only exact standard names with exact legacy ratios.
+    fn effective_scale_factor(&self, scale: &document::objects::Scale) -> f64 {
+        let stored = scale.factor();
+        let legacy_standard = self.default_scales().iter().any(|&(name, base)| {
+            scale.name.eq_ignore_ascii_case(name)
+                && (stored - base).abs() <= 1.0e-9 * base.max(1.0)
+        });
+        if legacy_standard {
+            stored * self.default_scale_unit_factor()
+        } else {
+            stored
+        }
     }
 
     fn is_architectural_scale_name(name: &str) -> bool {
@@ -6720,7 +6746,8 @@ impl Scene {
                         && !s.name.contains('|')
                         && !s.name.to_ascii_uppercase().ends_with("_XREF") =>
                 {
-                    Some((s.name.clone(), s.inverse_factor() as f32, s.factor()))
+                    let factor = self.effective_scale_factor(s);
+                    Some((s.name.clone(), (1.0 / factor) as f32, factor))
                 }
                 _ => None,
             })
@@ -6988,7 +7015,8 @@ impl Scene {
                 return None;
             };
 
-            (scale.name.clone(), scale.factor(), scale.inverse_factor())
+            let factor = self.effective_scale_factor(scale);
+            (scale.name.clone(), factor, 1.0 / factor)
         };
 
         self.annotation_scale = multiplier as f32;
@@ -7200,7 +7228,7 @@ impl Scene {
         let scale = self.displayed_annotation_scale_handle();
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
-                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
+                Some(ObjectType::Scale(scale)) => Some(1.0 / self.effective_scale_factor(scale)),
                 _ => None,
             })
             .unwrap_or(self.annotation_scale as f64);
@@ -7920,7 +7948,7 @@ impl Scene {
             .iter()
             .filter_map(|(handle, object)| match object {
                 ObjectType::Scale(scale) if !scale.is_temporary => {
-                    Some((*handle, (scale.factor() - factor).abs()))
+                    Some((*handle, (self.effective_scale_factor(scale) - factor).abs()))
                 }
                 _ => None,
             })
@@ -7940,7 +7968,9 @@ impl Scene {
     fn viewport_annotation_multiplier(&self, viewport: Handle) -> f32 {
         self.viewport_scale_handle(viewport)
             .and_then(|handle| match self.document.objects.get(&handle) {
-                Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor() as f32),
+                Some(ObjectType::Scale(scale)) => {
+                    Some((1.0 / self.effective_scale_factor(scale)) as f32)
+                },
                 _ => None,
             })
             .unwrap_or(self.annotation_scale)
@@ -8040,9 +8070,9 @@ impl Scene {
     pub fn set_viewport_scale_named_for(&mut self, viewport: Handle, name: &str) -> Option<Handle> {
         let scale_handle = self.scale_handle_ensuring(name)?;
 
-        // The scale's own paper : drawing ratio, as stored.
+        // Honor legacy standard ratios without converting custom/file ratios twice.
         let factor = match self.document.objects.get(&scale_handle) {
-            Some(ObjectType::Scale(scale)) => scale.factor(),
+            Some(ObjectType::Scale(scale)) => self.effective_scale_factor(scale),
             _ => return None,
         };
 
@@ -8095,7 +8125,7 @@ impl Scene {
             .find_map(|object| match object {
                 ObjectType::Scale(scale)
                     if !scale.is_temporary
-                        && (scale.factor() - factor).abs()
+                        && (self.effective_scale_factor(scale) - factor).abs()
                             <= 1.0e-9 * factor.max(1.0) =>
                 {
                     Some(scale.name.clone())
@@ -8132,7 +8162,7 @@ impl Scene {
 
         let effective = vp_effective_scale(vp.custom_scale, vp.view_height, vp.height);
 
-        let expected = scale.factor();
+        let expected = self.effective_scale_factor(scale);
 
         Some((effective - expected).abs() <= 1.0e-6 * expected.max(1.0))
     }
@@ -8144,7 +8174,7 @@ impl Scene {
             return false;
         };
         let factor = match self.document.objects.get(&scale_handle) {
-            Some(ObjectType::Scale(scale)) => scale.factor(),
+            Some(ObjectType::Scale(scale)) => self.effective_scale_factor(scale),
             _ => return false,
         };
         let Some(EntityType::Viewport(vp)) = self.document.get_entity_mut(viewport) else {
@@ -18508,11 +18538,113 @@ mod layout_cache_tests {
         assert!((paper / drawing - 10.0).abs() < 1e-9, "{paper} = {drawing}");
     }
 
+    /// A physical 10 m line measures 100/50/20 mm at 1:100/1:200/1:500.
+    /// Legacy files keep bare ratios; newer files may store converted ratios.
+    /// Both must behave the same, including after the viewport is synchronized.
+    #[test]
+    fn standard_viewport_scales_use_physical_paper_units_without_double_conversion() {
+        for (units, mm_per_model_unit) in [(4, 1.0), (5, 10.0), (6, 1000.0)] {
+            for (name, denominator) in [("1:100", 100.0), ("1:200", 200.0), ("1:500", 500.0)] {
+                for stored_converted in [false, true] {
+                    let mut scene = Scene::new();
+                    scene.document.header.insertion_units = units;
+                    scene.add_layout("P1").unwrap();
+                    scene.current_layout = "P1".to_string();
+
+                    let drawing_units = if stored_converted {
+                        denominator / mm_per_model_unit
+                    } else {
+                        denominator
+                    };
+                    assert!(scene.add_scale(name, 1.0, drawing_units));
+
+                    let mut vp = document::entities::Viewport::new();
+                    vp.width = 200.0;
+                    vp.height = 100.0;
+                    let viewport = scene
+                        .document
+                        .add_entity_to_layout(
+                            document::EntityType::Viewport(Box::new(vp)),
+                            "P1",
+                        )
+                        .unwrap();
+
+                    assert!(scene.set_viewport_scale_named_for(viewport, name).is_some());
+                    let expected_factor = mm_per_model_unit / denominator;
+                    let actual = scene.viewport_effective_scale(viewport).unwrap();
+                    assert!(
+                        (actual - expected_factor).abs() < 1.0e-9,
+                        "{name}: INSUNITS={units}, stored_converted={stored_converted}, got {actual}, expected {expected_factor}"
+                    );
+                    let model_length_10m = 10000.0 / mm_per_model_unit;
+                    let expected_length_mm = 10000.0 / denominator;
+                    assert!(
+                        (model_length_10m * actual - expected_length_mm).abs() < 1.0e-7
+                    );
+                    assert_eq!(scene.viewport_annotation_scale_synced(), Some(true));
+                    assert!(scene.scale_list().iter().any(|(label, _, factor)| {
+                        label == name && (factor - expected_factor).abs() < 1.0e-9
+                    }));
+                    // Stored SCALE object remains untouched, while the picker
+                    // and viewport apply the physically correct effective ratio.
+                    let (paper, drawing) = scene.scale_ratio(name).unwrap();
+                    assert!((paper / drawing - 1.0 / drawing_units).abs() < 1.0e-9);
+                    assert!(scene.set_annotation_scale_named(name).is_some());
+                    assert!(
+                        ((scene.annotation_scale as f64) - 1.0 / expected_factor).abs() < 1.0e-5
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn virtual_standard_scale_in_metre_drawing_is_unit_aware() {
+        let mut scene = Scene::new();
+        scene.document.header.insertion_units = 6;
+        // scale_ratio intentionally exposes literal stored/name ratios for
+        // plot settings; scale_list is the unit-aware viewport picker.
+        let (paper, drawing) = scene.scale_ratio("1:200").unwrap();
+        assert!((paper / drawing - 0.005).abs() < 1.0e-9);
+        let (_, _, fallback) = scene
+            .scale_list()
+            .into_iter()
+            .find(|(name, _, _)| name == "1:200")
+            .unwrap();
+        assert!((fallback - 5.0).abs() < 1.0e-9);
+        assert!(scene.ensure_real_scale_list());
+        let (_, _, stored) = scene
+            .scale_list()
+            .into_iter()
+            .find(|(name, _, _)| name == "1:200")
+            .unwrap();
+        assert!((stored - 5.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn custom_metre_scale_keeps_its_exact_stored_paper_to_drawing_ratio() {
+        let mut scene = Scene::new();
+        scene.document.header.insertion_units = 6;
+        scene.add_layout("P1").unwrap();
+        scene.current_layout = "P1".to_string();
+        assert!(scene.add_scale("1:200 m", 1000.0, 200.0));
+        let mut vp = document::entities::Viewport::new();
+        vp.width = 200.0;
+        vp.height = 100.0;
+        let viewport = scene
+            .document
+            .add_entity_to_layout(document::EntityType::Viewport(Box::new(vp)), "P1")
+            .unwrap();
+        assert!(scene.set_viewport_scale_named_for(viewport, "1:200 m").is_some());
+        assert!((scene.viewport_effective_scale(viewport).unwrap() - 5.0).abs() < 1.0e-9);
+    }
+
     /// #2626: with nothing selected, a layout's only viewport takes the scale
     /// picked from the list; with two, neither changes until one is picked.
     #[test]
     fn a_picked_scale_reaches_the_layouts_only_viewport() {
         let mut scene = Scene::new();
+        scene.document.header.insertion_units = 4; // The existing 0.02 assertion is in mm.
         scene.add_layout("P1").unwrap();
         scene.current_layout = "P1".to_string();
         assert!(scene.add_scale("1:50", 1.0, 50.0));

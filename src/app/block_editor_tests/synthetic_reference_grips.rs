@@ -496,8 +496,16 @@ fn coupled_flip_synthetic() -> (OpenCADStudio, Handle, i32, i32, i32) {
     // Flip actions affecting all geometry and the linear parameter
     let mut targets = members.clone();
     targets.push(linear);
-    actions::create(doc, def, Kind::Flip, flip_v, &targets, DVec3::ZERO).unwrap();
-    actions::create(doc, def, Kind::Flip, flip_h, &targets, DVec3::ZERO).unwrap();
+    let first = actions::create(doc, def, Kind::Flip, flip_v, &targets, DVec3::ZERO).unwrap();
+    let second = actions::create(doc, def, Kind::Flip, flip_h, &targets, DVec3::ZERO).unwrap();
+    let basepoint = crate::scene::block_basepoint::create(doc, def, Vector3::ZERO).unwrap();
+    let base_id = crate::scene::block_basepoint::parameter(doc, def).unwrap().1.parameter.parameter.element.eval.node_id;
+    for handle in [first, second] {
+        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&handle).unwrap() else { panic!() };
+        let document::objects::DynamicBlockData::FlipAction(action) = &mut object.data else { panic!() };
+        action.action.dependencies.push(basepoint);
+        action.action.action_ids.push(base_id);
+    }
 
     let all_p = actions::all_parameters(doc, def);
     let lin_id = all_p.iter().find(|p| p.handle == linear).unwrap().id;
@@ -554,7 +562,7 @@ fn synthetic_coupled_flip_workflow_and_linear_stretch_roundtrip() {
         for ext in ["dwg", "dxf"] {
             let doc = &app.tabs[i].scene.document;
             let bytes = crate::io::save_to_bytes(doc, ext, doc.version).unwrap();
-            let loaded = crate::io::load_bytes(&format!("coupled.{ext}"), bytes).unwrap();
+            let loaded = crate::io::load_bytes_finalized(std::path::Path::new(&format!("coupled.{ext}")), bytes).unwrap();
             let mut reopened = OpenCADStudio::new_for_test();
             let j = reopened.active_tab;
             reopened.tabs[j].scene.document = loaded;
@@ -622,6 +630,46 @@ fn synthetic_window_scale_grips_refresh_reload_reset_and_continue() {
             assert_window_arc(&reopened, insert, DVec3::new(40., 30., 0.), 20.);
             drag(&mut reopened, insert, id, 1, 20.);
             assert_window_arc(&reopened, insert, DVec3::new(48., 36., 0.), 24.);
+        }
+    }
+}
+
+#[test]
+fn synthetic_basepoint_stretch_grips_survive_finalized_open_and_continue() {
+    for mirrored in [false, true] {
+        let (mut app, plain, mirror, id) = window();
+        begin(&mut app, plain);
+        let i = app.active_tab;
+        let def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        let doc = &mut app.tabs[i].scene.document;
+        let action = actions::actions(doc, def).into_iter().find_map(|(h, _, kind, _)| {
+            if kind != Kind::Stretch { return None }
+            let document::objects::ObjectType::DynamicBlock(object) = &doc.objects[&h] else { return None };
+            let document::objects::DynamicBlockData::StretchAction(action) = &object.data else { return None };
+            action.connections.iter().any(|c| c.name == "BaseXDelta").then_some(h)
+        }).unwrap();
+        let basepoint = crate::scene::block_basepoint::create(doc, def, Vector3::ZERO).unwrap();
+        let node = crate::scene::block_basepoint::parameter(doc, def).unwrap().1.parameter.parameter.element.eval.node_id;
+        let document::objects::ObjectType::DynamicBlock(object) = doc.objects.get_mut(&action).unwrap() else { panic!() };
+        let document::objects::DynamicBlockData::StretchAction(action) = &mut object.data else { panic!() };
+        action.action.dependencies.push(basepoint);
+        action.action.action_ids.push(node);
+        action.codes.push(document::objects::BlockStretchCode { code: node, indexes: vec![0] });
+        save_and_close(&mut app);
+        let insert = if mirrored { mirror } else { plain };
+        let target = drag(&mut app, insert, id, 0, 20.);
+        let changed = app.tabs[i].scene.document.clone();
+        for ext in ["dwg", "dxf"] {
+            let bytes = crate::io::save_to_bytes(&changed, ext, changed.version).unwrap();
+            let loaded = crate::io::load_bytes_finalized(std::path::Path::new(&format!("basepoint.{ext}")), bytes).unwrap();
+            let mut reopened = OpenCADStudio::new_for_test();
+            let j = reopened.active_tab;
+            reopened.tabs[j].scene.document = loaded;
+            let actual = grip(&mut reopened, insert, id, 0).world;
+            assert!(actual.distance(target) < EPS, "{ext} mirrored={mirrored} actual={actual:?} expected={target:?}");
+            assert_window_arc(&reopened, insert, DVec3::new(52., 36., 0.), 24.);
+            drag(&mut reopened, insert, id, 1, 10.);
+            assert_window_arc(&reopened, insert, DVec3::new(58., 39., 0.), 26.);
         }
     }
 }

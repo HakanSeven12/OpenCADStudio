@@ -1430,10 +1430,24 @@ fn normalize_block_origins(doc: &mut Document) {
     use document::types::Vector3;
     use document::EntityType;
 
+    // Evaluated dynamic origins share coordinates with reference parameter
+    // caches and authoring frames. Translating only their bodies would move
+    // grips on reopen and change the next evaluation's coordinate basis.
+    let dynamic_origins: std::collections::BTreeSet<_> = doc.entities()
+        .filter_map(|entity| match entity {
+            EntityType::Insert(reference) => doc.dynamic_definition_for_insert(reference.common.handle)
+                .filter(|definition| crate::scene::block_basepoint::parameter(doc, *definition).is_some())
+                .map(|_| reference.block_name.to_ascii_lowercase()),
+            _ => None,
+        }).collect();
+
     let blocks: Vec<_> = doc
         .block_records
         .iter()
         .filter_map(|record| {
+            if dynamic_origins.contains(&record.name.to_ascii_lowercase()) {
+                return None;
+            }
             let marker_point = match doc.get_entity(record.block_entity_handle) {
                 Some(EntityType::Block(block)) => block.base_point,
                 _ => Vector3::ZERO,

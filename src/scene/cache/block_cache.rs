@@ -706,6 +706,19 @@ fn build_defn(
         None => return BlockDefn::default(),
     };
 
+    // An annotative member of a block that is not annotative itself follows
+    // the scale on its own, as it would outside the block: a 1:50 dimension's
+    // text is 50 times its style height. An annotative block scales as a
+    // whole at its insert instead.
+    let member_scale = annotation_scale_handle
+        .filter(|_| !crate::scene::annotative::block_is_annotative(doc, block_name))
+        .and_then(|handle| match doc.objects.get(&handle) {
+            Some(document::objects::ObjectType::Scale(scale)) => {
+                Some(scale.inverse_factor() as f32)
+            }
+            _ => None,
+        });
+
     // ── Pass 2: tessellate each sub with the chosen offset so stored
     // coordinates fit into f32 without precision loss.
     let cap = br.entity_handles.len();
@@ -813,10 +826,13 @@ fn build_defn(
                 // so the shader band matches the scaled geometry (same band the
                 // top-level path draws — depth-tested + linetype-dashed).
                 let solid = solid_snaps.get(&entity.common().handle);
+                let sub_scale = member_scale
+                    .filter(|_| crate::scene::annotative::is_annotative(doc, entity))
+                    .unwrap_or(anno_scale);
                 for mut lw in tessellate_sub_local(
                     doc,
                     entity,
-                    anno_scale,
+                    sub_scale,
                     annotation_scale_handle,
                     bg_color,
                     viewport,

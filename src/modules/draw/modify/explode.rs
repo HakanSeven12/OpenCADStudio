@@ -634,38 +634,10 @@ fn explode_multileader(
         }
         pieces.push(EntityType::MText(Box::new(text)));
     } else {
-        // The render helper resolves the block's extents anchor, scale and rotation.
+        // The render helper resolves the block's extents anchor, scale,
+        // rotation and attribute values.
         if let Some(mut insert) = block_content_insert(doc, ml) {
             insert.common = common_for(ml.block_content_color);
-            let record = doc
-                .block_records
-                .iter()
-                .find(|r| r.name == insert.block_name);
-            let definitions: Vec<_> = record
-                .into_iter()
-                .flat_map(|r| &r.entity_handles)
-                .filter_map(|h| match doc.get_entity(*h) {
-                    Some(EntityType::AttributeDefinition(definition)) => Some(definition),
-                    _ => None,
-                })
-                .collect();
-            let transform = crate::scene::render_graph::insert_transform(doc, &insert);
-            for (index, definition) in definitions.iter().enumerate() {
-                let value = ml
-                    .block_attributes
-                    .iter()
-                    .find(|a| a.attribute_definition_handle == Some(definition.common.handle))
-                    .or_else(|| {
-                        ml.block_attributes.iter().find(|a| {
-                            a.attribute_definition_handle.is_none() && a.index as usize == index
-                        })
-                    })
-                    .map(|a| a.text.clone());
-                let mut attribute =
-                    document::entities::AttributeEntity::from_definition(definition, value);
-                document::Entity::apply_transform(&mut attribute, &transform);
-                insert.attributes.push(attribute);
-            }
             pieces.push(EntityType::Insert(insert));
         }
     }
@@ -2636,6 +2608,14 @@ fn sync_dimension_base_points_and_collect_pending(doc: &mut Document) -> Vec<Han
             }
         }
         if block_missing {
+            // An edit may leave group 42 behind; a stale one would make the
+            // reopened drawing prefer a picture the edit left behind.
+            if let Some(EntityType::Dimension(dimension)) = doc.get_entity_mut(handle) {
+                let measured = dimension.stored_measurement();
+                if measured.abs() > 1e-9 {
+                    dimension.base_mut().actual_measurement = measured;
+                }
+            }
             pending.push(handle);
         }
     }

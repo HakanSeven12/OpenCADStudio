@@ -791,6 +791,50 @@ mod tests {
             matches!(bincode::deserialize::<PluginResponse>(&bytes).unwrap(),
             PluginResponse::SampleParametricResult(Ok(None)))
         );
+
+        let request = PluginToHostV4::Request {
+            id: 80,
+            tab_id: Some(7),
+            payload: PluginRequest::ValidateParametricChain {
+                chain: chain.clone(),
+                tolerance: 1e-3,
+            },
+        };
+        let bytes = bincode::serialize(&request).unwrap();
+        match bincode::deserialize::<PluginToHostV4>(&bytes).unwrap() {
+            PluginToHostV4::Request {
+                id,
+                tab_id,
+                payload:
+                    PluginRequest::ValidateParametricChain {
+                        chain: decoded,
+                        tolerance,
+                    },
+            } => {
+                assert_eq!(id, 80);
+                assert_eq!(tab_id, Some(7));
+                assert_eq!(decoded, chain);
+                assert_eq!(tolerance, 1e-3);
+            }
+            other => panic!("unexpected validation request: {other:?}"),
+        }
+        for (id, result) in [
+            (81, Ok(())),
+            (82, Err("hard-corner seam".to_owned())),
+        ] {
+            let response = HostToPluginV4::Response {
+                id,
+                payload: PluginResponse::ValidateParametricChainResult(result.clone()),
+            };
+            let bytes = bincode::serialize(&response).unwrap();
+            assert!(matches!(
+                bincode::deserialize::<HostToPluginV4>(&bytes).unwrap(),
+                HostToPluginV4::Response {
+                    id: decoded_id,
+                    payload: PluginResponse::ValidateParametricChainResult(decoded),
+                } if decoded_id == id && decoded == result
+            ));
+        }
     }
 
     #[test]

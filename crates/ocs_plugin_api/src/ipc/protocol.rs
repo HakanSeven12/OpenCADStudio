@@ -377,6 +377,11 @@ pub enum PluginRequest {
     UnregisterQuadPanels {
         panel_ids: Vec<String>,
     },
+    /// Additive: audit a declared chain without staging or mutating host state.
+    ValidateParametricChain {
+        chain: crate::host::ParametricChain,
+        tolerance: f64,
+    },
 }
 
 /// Responses the host sends back for `PluginRequest`.
@@ -467,6 +472,8 @@ pub enum PluginResponse {
         ok: Vec<bool>,
         errors: Vec<String>,
     },
+    /// Additive: outcome of pure parametric-chain validation.
+    ValidateParametricChainResult(Result<(), String>),
 }
 
 /// Messages sent from the host to the plugin runner.

@@ -2068,11 +2068,11 @@ impl OpenCADStudio {
         self.drag_table_cells(i, p, tile_b, &edit_cam);
 
         // ── Custom plugin-grip drag (API v11) ────────────────────────────
-        // The plugin's preview is the only live feedback: no host ghost, no
-        // entity mutation, the anchor entity never moves by host action. The
-        // point is computed like a built-in drag's (drafting plane through
-        // the grip's own elevation), never snapped (plugin semantics), and
-        // the declared axis is a HARD constraint.
+        // Picking is the native entity-grip path: the UCS drafting plane,
+        // object/grid snap, OTRACK, ortho/polar and Shift axis lock all feed
+        // the same Snapper and the visible snap_result marker. The declared
+        // custom axis remains a hard constraint, including native projection
+        // of an acquired object point onto that axis.
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(active) = self.tabs[i].active_plugin_grip.clone() {
             let (vw, vh) = vp_size;
@@ -2108,22 +2108,133 @@ impl OpenCADStudio {
                     self.tabs[i].scene.paper_to_model(paper)
                 }
             };
-            let point = match active.axis {
-                Some(axis) => {
-                    let (view_rot, eye) = match &edit_cam {
-                        Some(cam) => (cam.view_proj_rte(bounds), cam.eye()),
-                        None => {
-                            let cam = self.tabs[i].scene.camera.borrow();
-                            (cam.view_proj_rte(bounds), cam.eye())
-                        }
-                    };
-                    cursor_on_projected_axis(p, bounds, view_rot, eye, active.origin_world, axis)
-                        .unwrap_or(raw)
+            let (view_rot, eye) = match &edit_cam {
+                Some(cam) => (cam.view_proj_rte(bounds), cam.eye()),
+                None => {
+                    let cam = self.tabs[i].scene.camera.borrow();
+                    (cam.view_proj_rte(bounds), cam.eye())
                 }
-                None => raw,
             };
+            let all_wires =
+                if let (Some(_), Some(h)) = (&edit_cam, self.tabs[i].scene.active_viewport) {
+                    self.tabs[i]
+                        .scene
+                        .model_wires_for_viewport_arc(h, bounds.height)
+                } else {
+                    self.tabs[i].scene.hit_test_wires()
+                };
+            let mut snap_candidates = self.tabs[i].scene.interaction_candidates_near(
+                all_wires,
+                raw,
+                view_rot,
+                eye,
+                bounds,
+                self.snapper.osnap_radius_px,
+            );
+            if let Some(anchor) = active.anchor {
+                // Native grips do not snap back onto the entity being edited.
+                snap_candidates.exclude_wires(|wire| {
+                    crate::scene::Scene::handle_from_wire_name(&wire.name) == Some(anchor)
+                });
+            }
+            let base = active.origin_world;
+            self.snapper.from_point = Some(base);
+            let (go, gr) = self.drafting_grid_basis(i);
+            let construction_ray =
+                self.active_construction_ray(i, p, raw, base, view_rot, eye, bounds);
+            self.sync_osnap_z_plane(i);
+            let snap_hit = self.snapper.snap_stable(
+                raw,
+                p,
+                &snap_candidates,
+                view_rot,
+                eye,
+                bounds,
+                go,
+                gr,
+                construction_ray,
+                self.tabs[i].snap_result,
+            );
+            self.tabs[i].snap_result = snap_hit;
+            let dwell_hit = snap_hit.filter(|hit| {
+                matches!(
+                    hit.snap_type,
+                    crate::snap::SnapType::Endpoint
+                        | crate::snap::SnapType::Midpoint
+                        | crate::snap::SnapType::Center
+                        | crate::snap::SnapType::Node
+                        | crate::snap::SnapType::Quadrant
+                        | crate::snap::SnapType::Intersection
+                        | crate::snap::SnapType::Insertion
+                        | crate::snap::SnapType::ApparentIntersection
+                )
+            });
+            self.snapper.update_otrack_dwell(
+                dwell_hit,
+                &snap_candidates,
+                view_rot,
+                eye,
+                bounds,
+                Instant::now(),
+            );
+            let axis_lock = self.active_axis_lock(i, raw, base, true);
+            let otrack_hit = if axis_lock.is_none() {
+                self.active_otrack_hit(i, raw, snap_hit, Some(base), true, view_rot, eye, bounds)
+            } else {
+                None
+            };
+            let drafting_guide = construction_ray.and_then(|(base, target)| {
+                Some((base, (target - base).try_normalize()?))
+            });
+            self.otrack_active = otrack_hit.map(|hit| (hit.base, hit.dir)).or(drafting_guide);
+            self.otrack_cross = otrack_hit.and_then(|hit| hit.cross);
+            self.otrack_kind = otrack_hit.map(|hit| hit.kind);
+
+            let mut point = if let Some(dir) = axis_lock {
+                axis_lock_apply(snap_hit.map(|hit| hit.world).unwrap_or(raw), base, dir)
+            } else if let Some(hit) = otrack_hit {
+                hit.aligned
+            } else {
+                snap_hit.map(|hit| hit.world).unwrap_or(raw)
+            };
+            if let Some(s) = self.tabs[i].snap_result.as_mut() {
+                snap_pixels_to_canvas(s, tile_b);
+            }
+            if axis_lock.is_none()
+                && otrack_hit.is_none()
+                && !snap_hit.is_some_and(|hit| {
+                    !matches!(
+                        hit.snap_type,
+                        crate::snap::SnapType::Grid | crate::snap::SnapType::Extension
+                    )
+                })
+            {
+                if let Some((drafted, _)) =
+                    self.drafting_point(i, p, point, base, view_rot, eye, bounds)
+                {
+                    point = drafted;
+                }
+            }
+            if let Some(axis) = active.axis {
+                let acquired_point = otrack_hit.is_some()
+                    || snap_hit.is_some_and(|hit| hit.snap_type != crate::snap::SnapType::Grid);
+                if acquired_point {
+                    if let Some(axis) = axis.try_normalize() {
+                        point = base + axis * (point - base).dot(axis);
+                    }
+                } else {
+                    point = cursor_on_projected_axis(p, bounds, view_rot, eye, base, axis)
+                        .unwrap_or(point);
+                }
+            }
+
             self.tabs[i].last_cursor_world = point;
             self.tabs[i].last_cursor_screen = p_full;
+            let anchor_ndc = view_rot.project_point3((base - eye).as_vec3());
+            self.tabs[i].last_point_screen = Some(Point::new(
+                (anchor_ndc.x + 1.0) * 0.5 * bounds.width + tile_b.x,
+                (1.0 - anchor_ndc.y) * 0.5 * bounds.height + tile_b.y,
+            ));
             return self.move_plugin_grip_drag(i, point);
         }
 
@@ -5356,13 +5467,27 @@ impl OpenCADStudio {
         // or the release of a press-drag). Do not let the same press arm the
         // normal box/lasso state or trigger another viewport control; the
         // release path below will commit the grip.
-        if self.tabs[i].active_grip.is_some() {
+        #[cfg(not(target_arch = "wasm32"))]
+        let plugin_grip_active = self.tabs[i].active_plugin_grip.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let plugin_grip_active = false;
+        if self.tabs[i].active_grip.is_some() || plugin_grip_active {
+            // The press position can be newer than the last ViewportMove.
+            // Refresh the custom drag through the native snap/constraint path
+            // before consuming the gesture; its release then settles at the
+            // exact event-time point. ViewportLeftPressAt's plain-selection
+            // path has not already run a full move, so this emits one Move.
+            let task = if plugin_grip_active {
+                self.on_viewport_move(p)
+            } else {
+                Task::none()
+            };
             self.tabs[i]
                 .scene
                 .selection
                 .borrow_mut()
                 .clear_left_selection_gesture();
-            return Task::none();
+            return task;
         }
 
         // Interactive navigation tools reuse the middle-button movement path,
@@ -5720,7 +5845,23 @@ impl OpenCADStudio {
                     .selection
                     .borrow_mut()
                     .clear_left_selection_gesture();
-                return self.begin_plugin_grip_drag(i, &candidate);
+                let task = self.begin_plugin_grip_drag(i, &candidate);
+                self.grip_engage_press = Some(p_full);
+                if self.dyn_input {
+                    use crate::app::document::DynFieldEntry;
+                    self.tabs[i].dyn_fields = [
+                        crate::command::DynRole::Distance,
+                        crate::command::DynRole::Angle,
+                    ]
+                    .into_iter()
+                    .map(DynFieldEntry::from_role)
+                    .collect();
+                    self.tabs[i].dyn_active = 0;
+                    self.tabs[i].dyn_guide = crate::command::DynGuide::Polar;
+                    self.tabs[i].dyn_anchor = Some(candidate.point);
+                    self.tabs[i].dyn_ref = None;
+                }
+                return task;
             }
         }
 
@@ -6006,18 +6147,30 @@ impl OpenCADStudio {
             (p, is_click, sel.input.left_down)
         };
 
-        // Custom plugin-grip drag (API v11): mouse-up settles — the plugin
-        // applies its own edits inside its own undo scope; the host records
-        // nothing. A bare click (no move delivered) still settles: the
-        // plugin decides what a no-move settle means (typically nothing,
-        // zero writes, zero undo steps).
+        // Custom grips mirror native click-move-click: the engaging bare
+        // click leaves the grip hot; a press-drag release or the next click
+        // settles. The second press first refreshes the event-time point via
+        // the active-grip guard, then this release performs the settle.
         #[cfg(not(target_arch = "wasm32"))]
         if self.tabs[i].active_plugin_grip.is_some() {
             {
                 let mut sel = self.tabs[i].scene.selection.borrow_mut();
                 sel.clear_left_selection_gesture();
             }
-            return self.settle_plugin_grip_drag();
+            let engaging_click = self.grip_engage_press.take().is_some_and(|press| {
+                let (dx, dy) = (p.x - press.x, p.y - press.y);
+                dx * dx + dy * dy <= 12.0 * 12.0
+            });
+            let moved = self.tabs[i]
+                .active_plugin_grip
+                .as_ref()
+                .is_some_and(|active| active.moved);
+            if engaging_click && !moved {
+                return Task::none();
+            }
+            let task = self.settle_plugin_grip_drag();
+            self.sync_dyn_fields();
+            return task;
         }
 
         // Grip editing: click-move-click (plus legacy press-drag).

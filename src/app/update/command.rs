@@ -667,6 +667,13 @@ impl OpenCADStudio {
             return Task::none();
         }
 
+        // Enter settles a custom grip at its current point. In particular it
+        // must never reach the empty-submit repeat-last-command shortcut.
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.tabs[self.active_tab].active_plugin_grip.is_some() {
+            return self.settle_plugin_grip_from_enter();
+        }
+
         // Numeric entry while a normal grip stretch is active.
         //
         // With Dynamic Input enabled, typed values live in the shared
@@ -1271,6 +1278,56 @@ impl OpenCADStudio {
         Some(task)
     }
 
+    /// Shared Enter commit for a hot custom grip. Typed Dynamic Input and the
+    /// native direct-distance form both become one ordinary drag Move before
+    /// Settle, so the plugin sees the same lifecycle as a pointer placement.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn settle_plugin_grip_from_enter(&mut self) -> Task<Message> {
+        let i = self.active_tab;
+        let Some(active) = self.tabs[i].active_plugin_grip.clone() else {
+            return Task::none();
+        };
+        let dyn_locked = self.dyn_input
+            && self.tabs[i]
+                .dyn_fields
+                .iter()
+                .any(|field| field.locked());
+        let target = if dyn_locked {
+            self.dyn_resolve_point()
+        } else {
+            // Mirror native grip Stretch's direct-distance entry, including
+            // its tracking-ray behavior. No custom-grip scalar/radius mode is
+            // introduced here: this is only a displacement from the origin.
+            let text = crate::app::expr_eval::eval_to_string(self.command_line.input.trim());
+            crate::app::expr_eval::eval_number(text.trim()).map(|dist| {
+                if let Some((base, dir)) = self.active_distance_ray(i) {
+                    base + dir * dist
+                } else {
+                    let direction = self.tabs[i].last_cursor_world - active.origin_world;
+                    let len = direction.length();
+                    if len <= 1e-12 {
+                        active.origin_world
+                    } else {
+                        active.origin_world + direction / len * dist
+                    }
+                }
+            })
+        };
+        self.command_line.input.clear();
+
+        let mut move_task = Task::none();
+        if let Some(mut point) = target {
+            // Typed input must not bypass the declaration's hard axis.
+            if let Some(axis) = active.axis.and_then(|axis| axis.try_normalize()) {
+                point = active.origin_world + axis * (point - active.origin_world).dot(axis);
+            }
+            move_task = self.move_plugin_grip_drag(i, point);
+        }
+        let settle_task = self.settle_plugin_grip_drag();
+        self.sync_dyn_fields();
+        Task::batch([move_task, settle_task])
+    }
+
     /// The active command's current step collects free-form prose from the
     /// command line. Single decision point for the routes that type into
     /// the buffer (CommandInput, Shift+Enter, the view's on_submit wiring).
@@ -1327,6 +1384,10 @@ impl OpenCADStudio {
         // fields use the same keyboard path. Route Enter through CommandSubmit,
         // whose grip branch resolves Distance / Angle and finalizes the edit.
         let i = self.active_tab;
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.tabs[i].active_plugin_grip.is_some() && self.tabs[i].active_cmd.is_none() {
+            return self.settle_plugin_grip_from_enter();
+        }
         let grip_dyn_locked = self.tabs[i].active_grip.is_some()
             && self.dyn_input
             && self.tabs[i].dyn_fields.iter().any(|field| field.locked());
@@ -1493,6 +1554,7 @@ impl OpenCADStudio {
         // A hot grip (click-move-click placement in progress) rolls
         // back to its pre-drag image on Escape.
         if self.cancel_active_grip_edit() {
+            self.sync_dyn_fields();
             return Task::none();
         }
         // Cancel layout rename first, then fall through.

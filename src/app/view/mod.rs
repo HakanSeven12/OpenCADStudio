@@ -1261,7 +1261,7 @@ bg={bg_ms:.1}ms n={view_count}"
                 (vec![], vec![])
             };
             // API v11: plugin-declared custom grips render in the same overlay
-            // layer with a distinct accent (always-visible display state of a
+            // layer with native grip paint (always-visible display state of a
             // live declaring plugin; hover highlighting through the same
             // pipeline; the dragged grip is hot). Culling is the per-tab
             // uniform grid's view-rect query, not a scan of every grip.
@@ -2047,8 +2047,12 @@ bg={bg_ms:.1}ms n={view_count}"
             .as_ref()
             .map(|c| c.needs_entity_pick() || c.needs_structure_point_pick())
             .unwrap_or(false);
+        #[cfg(not(target_arch = "wasm32"))]
+        let plugin_grip_active = tab.active_plugin_grip.is_some();
+        #[cfg(target_arch = "wasm32")]
+        let plugin_grip_active = false;
         let dyn_input_overlay: Option<Element<'_, Message>> = if self.dyn_input
-            && (tab.active_cmd.is_some() || tab.active_grip.is_some())
+            && (tab.active_cmd.is_some() || tab.active_grip.is_some() || plugin_grip_active)
             && (!tab.dyn_fields.is_empty() || dyn_picks_object)
         {
             let w = tab.last_cursor_world;

@@ -5,6 +5,7 @@ use document::types::Vector3;
 use document::{EntityType, Handle};
 
 mod construction_visibility;
+mod dxf_reference_integrity;
 mod retained_save_as;
 mod table_properties;
 mod lookup_properties;

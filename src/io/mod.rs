@@ -2459,6 +2459,7 @@ where
     let write_started = iced::time::Instant::now();
     if ext == "dxf" {
         crate::entities::spline::complete_nurbs_for_dxf(&mut doc);
+        ocs_save::prune_omitted_dxf_records(&mut doc);
     }
     let result = match ext.as_str() {
         "dxf" => DxfWriter::new(&doc)

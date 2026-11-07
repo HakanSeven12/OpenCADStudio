@@ -1909,6 +1909,9 @@ impl OpenCADStudio {
         // (still blockless) dimension trips a false semantic_mismatch.
         let mut baked_view = snapshot.clone();
         crate::modules::draw::modify::explode::bake_dimension_blocks(&mut baked_view);
+        if is_dxf {
+            ocs_save::prune_omitted_dxf_records(&mut baked_view);
+        }
         let before = document_manifest(&baked_view);
         crate::io::save_as_version(&snapshot, &path, version).map_err(|error| {
             json!({

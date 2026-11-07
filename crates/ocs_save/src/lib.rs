@@ -18,7 +18,10 @@ use document::{
     ReadStage, ReadStats,
 };
 
+mod dxf_reference_integrity;
 mod ifccad;
+
+pub use dxf_reference_integrity::{has_omitted_dxf_records, prune_omitted_dxf_records};
 
 /// Worker protocol version. Bumped whenever a request/response payload shape
 /// changes; the `?v=` cache-buster on the worker URL must match. v5 adds the
@@ -35,6 +38,14 @@ pub const PROTOCOL_VERSION: u16 = 5;
 pub fn serialize_document(doc: &Document, ext: &str) -> Result<Vec<u8>, String> {
     let ext = ext.to_lowercase();
     if ext == "dxf" {
+        let mut pruned;
+        let doc = if has_omitted_dxf_records(doc) {
+            pruned = doc.clone();
+            prune_omitted_dxf_records(&mut pruned);
+            &pruned
+        } else {
+            doc
+        };
         return DxfWriter::new(doc).write_to_vec().map_err(|e| e.to_string());
     }
     if let Some(format) = external_format(&ext) {

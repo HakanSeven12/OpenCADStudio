@@ -71,12 +71,14 @@ impl CadCommand for LookupActionCommand {
             );
         };
         let screen =
-            |p: DVec3| crate::scene::pick::hit_test::world_to_screen(p, c.view, c.eye, c.bounds);
-        let click = screen(point);
+            |p: DVec3| crate::scene::view::projection::project_screen(c.view, c.eye, c.bounds, p);
+        let Some(click) = screen(point) else {
+            return CmdResult::ReportError(crate::t!("Pick a Lookup parameter grip.").into_owned());
+        };
         let candidate = self
             .candidates
             .iter()
-            .map(|p| (screen(p.point).distance(click), p))
+            .filter_map(|p| screen(p.point).map(|at| (at.distance(click), p)))
             .filter(|(d, _)| d.is_finite() && *d <= c.aperture_px.max(10.))
             .min_by(|a, b| a.0.total_cmp(&b.0))
             .map(|(_, p)| p);
@@ -123,6 +125,69 @@ mod tests {
                 },
             ],
         )
+    }
+
+    fn perspective_context() -> PointPickContext {
+        PointPickContext {
+            view: glam::camera::rh::proj::directx::perspective(
+                45.0_f32.to_radians(),
+                1.0,
+                0.1,
+                2000.0,
+            ),
+            eye: DVec3::ZERO,
+            bounds: iced::Rectangle {
+                x: 0.,
+                y: 0.,
+                width: 400.,
+                height: 400.,
+            },
+            aperture_px: 100.,
+        }
+    }
+
+    #[test]
+    fn a_grip_behind_the_eye_is_not_picked() {
+        // A point behind the eye divides by a negative clip W and lands under
+        // the cursor; a pick must not take it for a grip.
+        let mut command = LookupActionCommand::new(
+            0,
+            Handle::new(1),
+            vec![Candidate {
+                name: "Behind".into(),
+                point: DVec3::new(0., 0., 100.),
+            }],
+        );
+        command.set_point_pick_context(Some(perspective_context()));
+        let CmdResult::ReportError(error) = command.on_point(DVec3::new(0., 0., -100.)) else {
+            panic!("a grip behind the eye is not a pick target");
+        };
+        assert_eq!(error, "Pick a Lookup parameter grip.");
+
+        // Both project under the cursor; only the one in front is a target.
+        let mut command = LookupActionCommand::new(
+            0,
+            Handle::new(1),
+            vec![
+                Candidate {
+                    name: "Behind".into(),
+                    point: DVec3::new(0., 0., 100.),
+                },
+                Candidate {
+                    name: "Front".into(),
+                    point: DVec3::new(0., 0., -100.),
+                },
+            ],
+        );
+        command.set_point_pick_context(Some(perspective_context()));
+        let pick = command.on_point(DVec3::new(0., 0., -100.));
+        assert!(
+            matches!(
+                pick,
+                CmdResult::OpenBlockLookupTable { ref name, .. } if name == "Front"
+            ),
+            "the grip behind the eye does not shadow the one in front"
+        );
     }
 
     #[test]

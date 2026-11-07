@@ -138,16 +138,17 @@ fn tool_button(t: &ToolDef, on: bool) -> Element<'static, Message> {
 /// The tools in `groups` as a grid `per_row` buttons wide (a rule between
 /// groups), floated at the right edge like [`view`] — for tool sets too
 /// long for one column.
-pub fn view_grid(groups: &[&[ToolDef]], per_row: usize) -> Option<Element<'static, Message>> {
-    if groups.iter().all(|g| g.is_empty()) {
+pub fn view_grid(groups: &[(&[ToolDef], usize)]) -> Option<Element<'static, Message>> {
+    if groups.iter().all(|(g, _)| g.is_empty()) {
         return None;
     }
+    let widest = groups.iter().map(|(_, n)| *n).max().unwrap_or(1);
     let mut col = column![].spacing(4).align_x(iced::Center);
-    for (index, tools) in groups.iter().filter(|g| !g.is_empty()).enumerate() {
+    for (index, &(tools, per_row)) in groups.iter().filter(|(g, _)| !g.is_empty()).enumerate() {
         if index > 0 {
             col = col.push(
                 container(iced::widget::Space::new())
-                    .width(Length::Fixed(BTN_SIZE * per_row as f32))
+                    .width(Length::Fixed(BTN_SIZE * widest as f32))
                     .height(Length::Fixed(1.0))
                     .style(|theme: &Theme| container::Style {
                         background: Some(Background::Color(

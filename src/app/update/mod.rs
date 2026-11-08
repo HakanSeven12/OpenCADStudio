@@ -13345,6 +13345,18 @@ impl OpenCADStudio {
                 panel.filter_menu = !panel.filter_menu;
                 Task::none()
             }
+            Message::ParametersManagerHeaderMenu => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                panel.header_menu = !panel.header_menu;
+                Task::none()
+            }
+            Message::ParametersManagerColumn(column) => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                let index = column.index();
+                panel.columns[index] = !panel.columns[index];
+                panel.header_menu = false;
+                Task::none()
+            }
             Message::ParametersManagerSearch(value) => {
                 self.tabs[self.active_tab].parameters_panel.search = value;
                 Task::none()

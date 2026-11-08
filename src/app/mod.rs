@@ -4064,6 +4064,10 @@ pub enum Message {
     ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
     /// Toggles the funnel's two-entry menu.
     ParametersManagerFilterMenu,
+    /// Toggles the header's column menu.
+    ParametersManagerHeaderMenu,
+    /// Shows or hides one header column.
+    ParametersManagerColumn(crate::ui::window::parameters_manager::Column),
     ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click

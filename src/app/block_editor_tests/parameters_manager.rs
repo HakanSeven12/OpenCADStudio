@@ -1309,6 +1309,36 @@ fn the_funnel_menu_opens_and_a_choice_sets_the_filter_and_closes_it() {
 }
 
 #[test]
+fn the_header_menu_opens_and_an_entry_toggles_its_column_and_closes_the_menu() {
+    use crate::ui::window::parameters_manager::Column;
+    let (mut app, tab, _definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    assert!(
+        !app.tabs[tab].parameters_panel.header_menu,
+        "the menu starts closed"
+    );
+    let _ = app.update(Message::ParametersManagerHeaderMenu);
+    assert!(
+        app.tabs[tab].parameters_panel.header_menu,
+        "a right-click on the header opens it"
+    );
+    let _ = app.update(Message::ParametersManagerColumn(Column::Type));
+    assert!(
+        !app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "choosing Type hides that column"
+    );
+    assert!(
+        !app.tabs[tab].parameters_panel.header_menu,
+        "and closes the menu"
+    );
+    let _ = app.update(Message::ParametersManagerColumn(Column::Type));
+    assert!(
+        app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "choosing it again brings the column back"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
 fn the_two_fields_narrow_the_list_and_the_count_follows() {
     let (mut app, tab, definition) = open(
         &[

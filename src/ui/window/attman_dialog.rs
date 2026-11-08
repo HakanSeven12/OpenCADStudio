@@ -574,7 +574,7 @@ fn choice_row<'a>(
 fn segmented<'a>(current: EditTab) -> Element<'a, Message> {
     let tabs = [
         (EditTab::Attribute, t!("Attribute").into_owned()),
-        (EditTab::Text, t!("Text").into_owned()),
+        (EditTab::Text, t!("Text Options").into_owned()),
         (EditTab::Properties, t!("Properties").into_owned()),
     ];
     let buttons = tabs.into_iter().map(|(tab, label)| {
@@ -688,12 +688,10 @@ fn edit_card<'a>(state: &'a AttManState, row_: &'a AttManRow) -> Element<'a, Mes
                 .spacing(6),
                 row![
                     mode("preset", "Preset", def.flags.preset),
-                    mode("multiline", "Multiple lines", def.is_multiline),
+                    pill(t!("Constant").into_owned(), constant, None),
                 ]
                 .spacing(6),
-                text(t!("The Constant mode cannot be changed in the definition."))
-                    .size(10)
-                    .style(muted_style),
+                row![mode("multiline", "Multiple lines", def.is_multiline)].spacing(6),
             ]
             .spacing(6)
             .width(Length::Fixed(230.0));
@@ -1087,5 +1085,62 @@ mod tests {
         assert_eq!(state.drafts.width, "1.0000");
         assert_eq!(state.drafts.boundary, "0.0000");
         assert_eq!(state.drafts.rotation, "0");
+    }
+
+    /// Whether `label` is laid out and in view in the dialog.
+    fn shows(state: &AttManState, label: &str) -> bool {
+        use iced_test::core::widget;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::Selector;
+        let _one = crate::headless_ui_lock();
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let sizing = crate::ui::modal::ModalSizing {
+            width: Length::Fixed(620.0),
+            height: Length::Fixed(600.0),
+        };
+        let mut ui = UserInterface::build(
+            view(state, sizing),
+            iced::Size::new(620.0, 100_000.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut find = Selector::find(label);
+        ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+        matches!(
+            widget::Operation::finish(&find),
+            widget::operation::Outcome::Some(Some(target)) if target.visible_bounds().is_some()
+        )
+    }
+
+    #[test]
+    fn the_edit_card_keeps_constant_visible_and_names_the_text_options_tab() {
+        let mut state = state_with(AttributeDefinition::new(
+            "TAG".into(),
+            "Prompt".into(),
+            "Default".into(),
+        ));
+        state.tab = EditTab::Attribute;
+        assert!(
+            shows(&state, "Constant"),
+            "the Constant mode stays visible in the mode group"
+        );
+        assert!(
+            !shows(
+                &state,
+                "The Constant mode cannot be changed in the definition."
+            ),
+            "prose does not replace the disabled control"
+        );
+        state.tab = EditTab::Text;
+        assert!(
+            shows(&state, "Text Options"),
+            "the tab is named as in the reference"
+        );
     }
 }

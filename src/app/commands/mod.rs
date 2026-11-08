@@ -894,6 +894,8 @@ pub fn is_transparent(cmd: &str) -> bool {
                 | "TOOLPALETTES"
                 | "TOOLPALETTESCLOSE"
                 | "TP"
+                // Help about the running command must not end it.
+                | "HELP"
         )
 }
 

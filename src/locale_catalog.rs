@@ -3034,7 +3034,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Opened printer properties." => Some(("file", "opened-printer-properties")),
         "Opened read-only against other editors: {error}" => Some(("file", "opened-read-only-against-other-editors-error")),
         "Opening \"{name}\" ({size_label})…" => Some(("common", "opening-name-size-label")),
-        "Opening OCS Discussions for help and questions..." => Some(("view", "opening-ocs-discussions-for-help-and-questions")),
+        "Opening help: {}" => Some(("view", "opening-help")),
         "Opening OCS Web..." => Some(("view", "opening-ocs-web")),
         "\"{name}\" is already loaded with different contents; the existing file was kept." => Some(("file", "already-loaded-different-contents-kept")),
         "\"{name}\" could not be sized from its header and decoding it exceeded the {limit} MB image limit of this build — it cannot be attached." => Some(("file", "image-refusal-unknown-size")),

@@ -715,6 +715,13 @@ pub fn ribbon_commands() -> &'static HashMap<String, (&'static str, IconKind)> {
 /// Dedicated `VAR` badge SVG for system variables and `SETVAR`.
 static SYSVAR_ICON: &[u8] = include_bytes!("../../assets/icons/sysvar.svg");
 
+/// Whether `name` is a registered system variable (HELP opens its own page).
+pub fn is_system_variable(name: &str) -> bool {
+    SYSTEM_VARIABLES
+        .iter()
+        .any(|sysvar| sysvar.eq_ignore_ascii_case(name))
+}
+
 /// Registered system variables that display the `VAR` badge icon in
 /// command-line autocomplete and action lists.
 const SYSTEM_VARIABLES: &[&str] = &[

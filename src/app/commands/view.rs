@@ -1,5 +1,55 @@
 use super::*;
 
+const WIKI_URL: &str = "https://github.com/HakanSeven12/OpenCADStudio/wiki";
+
+/// The wiki page for a help topic: a system variable has a page of its own
+/// (`OSMODE-System-Variable`), and so has a registered command (`LINE-Command`;
+/// the `-LINE` command-line form and ribbon tokens such as `ARC_3P` share their
+/// command's page). Anything else is searched for, and no topic opens the
+/// wiki's home page.
+fn help_url(topic: Option<&str>) -> String {
+    let Some(topic) = topic.map(str::trim).filter(|topic| !topic.is_empty()) else {
+        return WIKI_URL.to_string();
+    };
+    if crate::modules::registry::is_system_variable(topic) {
+        return format!("{WIKI_URL}/{}-System-Variable", topic.to_ascii_uppercase());
+    }
+    let names = crate::command::all_registered_command_names();
+    let registered = |name: &str| names.iter().any(|known| known.eq_ignore_ascii_case(name));
+    let bare = topic.trim_start_matches(['-', '\'', '_']);
+    let base = [bare.split('_').next().unwrap_or(bare), bare]
+        .into_iter()
+        .find(|name| registered(name))
+        .or_else(|| registered(&format!("-{bare}")).then_some(bare));
+    match base {
+        Some(name) => format!("{WIKI_URL}/{}-Command", name.to_ascii_uppercase()),
+        None => format!(
+            "https://github.com/HakanSeven12/OpenCADStudio/search?type=wikis&q={}",
+            topic
+                .bytes()
+                .filter(u8::is_ascii_alphanumeric)
+                .map(char::from)
+                .collect::<String>()
+        ),
+    }
+}
+
+#[cfg(test)]
+mod help_url_tests {
+    use super::help_url;
+
+    #[test]
+    fn help_opens_the_command_page_or_searches_the_wiki() {
+        assert!(help_url(None).ends_with("/wiki"));
+        assert!(help_url(Some("LINE")).ends_with("/wiki/LINE-Command"));
+        assert!(help_url(Some("-LAYER")).ends_with("/wiki/LAYER-Command"));
+        assert!(help_url(Some("ARC_3P")).ends_with("/wiki/ARC-Command"));
+        assert!(help_url(Some("-LAYOUT")).ends_with("/wiki/LAYOUT-Command"));
+        assert!(help_url(Some("osmode")).ends_with("/wiki/OSMODE-System-Variable"));
+        assert!(help_url(Some("NOSUCHTOPIC")).ends_with("search?type=wikis&q=NOSUCHTOPIC"));
+    }
+}
+
 // Sort tables belong to the block's extension dictionary. Reserve real handles
 // and reconnect older unattached tables without losing their existing entries.
 fn ensure_draw_order_table(doc: &mut document::Document, block: document::Handle) -> document::Handle {
@@ -87,14 +137,24 @@ impl OpenCADStudio {
                 ));
             }
 
-            "HELP" => {
-                self.command_line.push_info(
-                    crate::t!("Opening OCS Discussions for help and questions...").as_ref(),
-                );
-                return Some(crate::sys::open_url(
-                    "https://github.com/HakanSeven12/OpenCADStudio/discussions",
-                    self.main_window,
-                ));
+            // HELP opens the wiki; inside a command ('HELP or F1, which run
+            // transparently) it opens that command's page, and `HELP <name>`
+            // opens the page of a command or alias, or searches the wiki.
+            cmd if cmd == "HELP" || cmd.starts_with("HELP ") => {
+                let topic = match cmd.strip_prefix("HELP").map(str::trim) {
+                    Some(name) if !name.is_empty() => {
+                        let name = name.to_ascii_uppercase();
+                        Some(self.resolve_alias(&name).unwrap_or(name))
+                    }
+                    _ => self.tabs[i]
+                        .active_cmd
+                        .as_ref()
+                        .map(|command| command.name().to_string()),
+                };
+                let url = help_url(topic.as_deref());
+                self.command_line
+                    .push_info(crate::tf!("Opening help: {}", url).as_ref());
+                return Some(crate::sys::open_url(&url, self.main_window));
             }
 
             // ── DWGPROPS — Drawing Properties dialog ─────────────────────

@@ -985,16 +985,18 @@ fn a_printable_key_belongs_to_the_open_list() {
     ] {
         let mut app = fixture();
         open(&mut app);
-        assert!(
-            app.intercept_property_list_key(&Message::CommandAppendChar("M".into()))
-                .is_some(),
+        let before = app.command_line.input.clone();
+        let _ = app.update(Message::CommandAppendChar("M".into()));
+        assert_eq!(
+            app.command_line.input, before,
             "a printable key belongs to the open list"
         );
         let _ = app.update(Message::CommandEscape);
-        assert!(
-            app.intercept_property_list_key(&Message::CommandAppendChar("M".into()))
-                .is_none(),
-            "with no list open the key still reaches the command line"
+        let _ = app.update(Message::CommandAppendChar("M".into()));
+        assert_eq!(
+            app.command_line.input,
+            format!("{before}M"),
+            "with no list open the key still types"
         );
     }
 }

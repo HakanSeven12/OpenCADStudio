@@ -1553,6 +1553,7 @@ impl PropertiesPanel {
         }
         let list = DropdownList::new(rows)
             .selected(selected)
+            .select_first_by_default(selected.is_some())
             .on_escape(Message::PropChoiceDismiss { field, quick });
         let popup = container(list).style(container::bordered_box).padding(2);
 
@@ -2722,27 +2723,16 @@ mod tests {
         }
     }
 
-    /// The list under a generic choice row is keyboard-navigable: the arrows
-    /// move the highlight and Enter commits the highlighted row through the
-    /// same message a click sends.
-    #[test]
-    fn a_choice_list_moves_its_highlight_and_commits_on_enter() {
+    /// Drive a generic choice row's open list with real key events and return
+    /// the messages it publishes.
+    fn choice_row_messages(
+        current: &str,
+        keys: &[(iced::keyboard::Key, iced::keyboard::key::Code)],
+    ) -> Vec<crate::app::Message> {
         use iced::futures::executor::block_on;
         use iced::keyboard;
         use iced_test::core::{renderer::Headless, shell, window};
         use iced_test::runtime::user_interface::{Cache, UserInterface};
-
-        fn press(key: keyboard::Key, code: keyboard::key::Code) -> iced::Event {
-            iced::Event::Keyboard(keyboard::Event::KeyPressed {
-                key: key.clone(),
-                modified_key: key,
-                physical_key: keyboard::key::Physical::Code(code),
-                location: keyboard::Location::Standard,
-                modifiers: keyboard::Modifiers::empty(),
-                text: None,
-                repeat: false,
-            })
-        }
 
         let _guard = crate::headless_ui_lock();
         let mut renderer = block_on(iced::Renderer::new(
@@ -2754,25 +2744,28 @@ mod tests {
         let options = vec!["Meters".to_string(), "Centimeters".to_string()];
         let mut panel = super::PropertiesPanel::default();
         panel.open_choice = Some(("bedit_units", false));
-        let row = panel.render_choice_row("Units", "bedit_units", "Meters", &options);
-
+        let row = panel.render_choice_row("Units", "bedit_units", current, &options);
         let mut ui = UserInterface::build(
             row,
             iced::Size::new(360.0, 320.0),
             Cache::default(),
             &mut renderer,
         );
+        let events: Vec<iced::Event> = keys
+            .iter()
+            .map(|(key, code)| {
+                iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: key.clone(),
+                    modified_key: key.clone(),
+                    physical_key: keyboard::key::Physical::Code(*code),
+                    location: keyboard::Location::Standard,
+                    modifiers: keyboard::Modifiers::empty(),
+                    text: None,
+                    repeat: false,
+                })
+            })
+            .collect();
         let mut messages = Vec::new();
-        let events = [
-            press(
-                keyboard::Key::Named(keyboard::key::Named::ArrowDown),
-                keyboard::key::Code::ArrowDown,
-            ),
-            press(
-                keyboard::Key::Named(keyboard::key::Named::Enter),
-                keyboard::key::Code::Enter,
-            ),
-        ];
         let _ = ui.update(
             &window::Headless,
             &shell::Waker::noop(),
@@ -2781,8 +2774,11 @@ mod tests {
             &mut renderer,
             &mut messages,
         );
+        messages
+    }
 
-        let changed: Vec<_> = messages
+    fn commits(messages: &[crate::app::Message]) -> Vec<(&'static str, &str)> {
+        messages
             .iter()
             .filter_map(|msg| match msg {
                 crate::app::Message::PropGeomChoiceChanged { field, value } => {
@@ -2790,11 +2786,52 @@ mod tests {
                 }
                 _ => None,
             })
-            .collect();
+            .collect()
+    }
+
+    /// The list under a generic choice row is keyboard-navigable: the arrows
+    /// move the highlight and Enter commits the highlighted row through the
+    /// same message a click sends.
+    #[test]
+    fn a_choice_list_moves_its_highlight_and_commits_on_enter() {
+        use iced::keyboard;
+
+        let messages = choice_row_messages(
+            "Meters",
+            &[
+                (
+                    keyboard::Key::Named(keyboard::key::Named::ArrowDown),
+                    keyboard::key::Code::ArrowDown,
+                ),
+                (
+                    keyboard::Key::Named(keyboard::key::Named::Enter),
+                    keyboard::key::Code::Enter,
+                ),
+            ],
+        );
         assert_eq!(
-            changed,
+            commits(&messages),
             vec![("bedit_units", "Centimeters")],
             "the arrows move the highlight and Enter commits it"
+        );
+    }
+
+    /// A row shared by several entities has no single value. Its list opens
+    /// with no row highlighted, so a bare Enter writes nothing to them all.
+    #[test]
+    fn a_varies_choice_list_opens_with_no_highlight() {
+        use iced::keyboard;
+
+        let messages = choice_row_messages(
+            super::VARIES_LABEL,
+            &[(
+                keyboard::Key::Named(keyboard::key::Named::Enter),
+                keyboard::key::Code::Enter,
+            )],
+        );
+        assert!(
+            commits(&messages).is_empty(),
+            "Enter must not pick a value the row does not hold"
         );
     }
 

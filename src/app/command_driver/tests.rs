@@ -3751,6 +3751,63 @@ mod attedit_dash_tests {
         );
     }
 
+    /// A definition dropped from the block takes the attribute it produced off
+    /// every reference, while the tags that remain keep their values.
+    #[test]
+    fn attsync_drops_the_attribute_whose_definition_is_gone() {
+        use document::entities::AttributeDefinition;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let definition = |tag: &str, y: f64| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, y, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(tag.into(), format!("{tag} prompt"), String::new())
+            })
+        };
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![definition("TAG1", 2.0), definition("TAG2", 5.0)],
+        );
+        let mut insert = Insert::new("SYNCED", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAG1".into(), "kept".into()));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAG2".into(), "old".into()));
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "SYNCED",
+                Vector3::new(0.0, 0.0, 0.0),
+                vec![definition("TAG1", 2.0)],
+            )
+            .expect("the definition loses its second tag");
+
+        let _ = app.run_command_line("ATTSYNC SYNCED");
+
+        let doc = &app.tabs[i].scene.document;
+        let EntityType::Insert(insert) = doc.get_entity(reference).expect("reference") else {
+            panic!("not an insert");
+        };
+        let pairs: Vec<(String, String)> = insert
+            .attributes
+            .iter()
+            .map(|a| (a.tag.clone(), a.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![("TAG1".into(), "kept".into())],
+            "the reference follows the definition it has now, keeping the value that remains"
+        );
+    }
+
     fn set_values(app: &mut OpenCADStudio, handles: &[document::Handle], values: &[&str]) {
         let i = app.active_tab;
         for (handle, value) in handles.iter().zip(values) {

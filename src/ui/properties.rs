@@ -1525,27 +1525,36 @@ impl PropertiesPanel {
         // A click anywhere in the cell opens the list, not only on the caret.
         let head = mouse_area(head).on_press(Message::PropChoiceToggle { field, quick });
 
-        let mut list = column![].spacing(1);
-        for option in options {
+        // The shared list owns the highlight, the arrows, Enter and type-ahead;
+        // a picked row still publishes the message a click sends.
+        use crate::ui::dropdown_list::{DropdownList, DropdownRow};
+        let mut rows = Vec::with_capacity(options.len());
+        let mut selected = None;
+        for (index, option) in options.iter().enumerate() {
             let is_current = !varies && option.as_str() == current;
-            list = list.push(
-                button(text(LocalizedChoice::new(option.clone()).to_string()).size(FONT_SZ))
-                    .on_press(Message::PropGeomChoiceChanged {
-                        field,
-                        value: option.clone(),
-                    })
-                    .style(if is_current {
-                        button::secondary
-                    } else {
-                        button::subtle
-                    })
-                    .padding([2, 6])
-                    .width(Length::Fill),
-            );
+            if is_current {
+                selected = Some(index);
+            }
+            let label = LocalizedChoice::new(option.clone()).to_string();
+            let msg = Message::PropGeomChoiceChanged {
+                field,
+                value: option.clone(),
+            };
+            let btn = button(text(label.clone()).size(FONT_SZ))
+                .on_press(msg.clone())
+                .style(if is_current {
+                    button::secondary
+                } else {
+                    button::subtle
+                })
+                .padding([2, 6])
+                .width(Length::Fill);
+            rows.push(DropdownRow::item(btn, label, msg));
         }
-        let popup = container(scrollable(list).height(Length::Shrink))
-            .style(container::bordered_box)
-            .padding(2);
+        let list = DropdownList::new(rows)
+            .selected(selected)
+            .on_escape(Message::PropChoiceDismiss { field, quick });
+        let popup = container(list).style(container::bordered_box).padding(2);
 
         let value = crate::ui::color_select::editable_drop_down_below(
             head.into(),
@@ -2711,6 +2720,82 @@ mod tests {
                 "focus lost with dropdown open={open}"
             );
         }
+    }
+
+    /// The list under a generic choice row is keyboard-navigable: the arrows
+    /// move the highlight and Enter commits the highlighted row through the
+    /// same message a click sends.
+    #[test]
+    fn a_choice_list_moves_its_highlight_and_commits_on_enter() {
+        use iced::futures::executor::block_on;
+        use iced::keyboard;
+        use iced_test::core::{renderer::Headless, shell, window};
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+
+        fn press(key: keyboard::Key, code: keyboard::key::Code) -> iced::Event {
+            iced::Event::Keyboard(keyboard::Event::KeyPressed {
+                key: key.clone(),
+                modified_key: key,
+                physical_key: keyboard::key::Physical::Code(code),
+                location: keyboard::Location::Standard,
+                modifiers: keyboard::Modifiers::empty(),
+                text: None,
+                repeat: false,
+            })
+        }
+
+        let _guard = crate::headless_ui_lock();
+        let mut renderer = block_on(iced::Renderer::new(
+            iced_test::core::renderer::Settings::default(),
+            Some("tiny-skia"),
+        ))
+        .expect("headless renderer");
+
+        let options = vec!["Meters".to_string(), "Centimeters".to_string()];
+        let mut panel = super::PropertiesPanel::default();
+        panel.open_choice = Some(("bedit_units", false));
+        let row = panel.render_choice_row("Units", "bedit_units", "Meters", &options);
+
+        let mut ui = UserInterface::build(
+            row,
+            iced::Size::new(360.0, 320.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut messages = Vec::new();
+        let events = [
+            press(
+                keyboard::Key::Named(keyboard::key::Named::ArrowDown),
+                keyboard::key::Code::ArrowDown,
+            ),
+            press(
+                keyboard::Key::Named(keyboard::key::Named::Enter),
+                keyboard::key::Code::Enter,
+            ),
+        ];
+        let _ = ui.update(
+            &window::Headless,
+            &shell::Waker::noop(),
+            &events,
+            iced::mouse::Cursor::Unavailable,
+            &mut renderer,
+            &mut messages,
+        );
+
+        let changed: Vec<_> = messages
+            .iter()
+            .filter_map(|msg| match msg {
+                crate::app::Message::PropGeomChoiceChanged { field, value } => {
+                    Some((*field, value.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            changed,
+            vec![("bedit_units", "Centimeters")],
+            "the arrows move the highlight and Enter commits it"
+        );
     }
 
     fn sample_sections() -> Vec<crate::scene::model::object::PropSection> {

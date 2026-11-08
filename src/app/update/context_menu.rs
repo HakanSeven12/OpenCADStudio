@@ -527,7 +527,11 @@ impl OpenCADStudio {
             _ => None,
         };
         let escape = matches!(msg, Message::CommandEscape) || matches!(base, Some("ESCAPE"));
+        // A printable key names a row in the open list (type-ahead); it must
+        // not start a command at the command line.
+        let printable = matches!(msg, Message::CommandAppendChar(_));
         let consumed = escape
+            || printable
             || matches!(
                 msg,
                 Message::ArrowKeyPressed { .. }

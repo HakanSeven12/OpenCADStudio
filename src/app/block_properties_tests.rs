@@ -966,6 +966,39 @@ fn enter_does_not_reach_the_command_line_while_the_list_is_open() {
     assert_eq!(app.command_line.input, "LINE");
 }
 
+/// A printable key while a property list is open names a row in that list and
+/// must not start a command at the command line. With no list open the same
+/// key still types.
+#[test]
+fn a_printable_key_belongs_to_the_open_list() {
+    for open in [
+        |app: &mut OpenCADStudio| {
+            let _ = open_dynamic_value_list(app);
+        },
+        |app: &mut OpenCADStudio| {
+            let _ = app.update(Message::PropChoiceToggle {
+                field: "bedit_units",
+                quick: false,
+            });
+            assert!(app.tabs[app.active_tab].properties.open_choice.is_some());
+        },
+    ] {
+        let mut app = fixture();
+        open(&mut app);
+        assert!(
+            app.intercept_property_list_key(&Message::CommandAppendChar("M".into()))
+                .is_some(),
+            "a printable key belongs to the open list"
+        );
+        let _ = app.update(Message::CommandEscape);
+        assert!(
+            app.intercept_property_list_key(&Message::CommandAppendChar("M".into()))
+                .is_none(),
+            "with no list open the key still reaches the command line"
+        );
+    }
+}
+
 /// A flag naming a row that is not on the panel is dropped by the rebuild
 /// instead of leaving the guard swallowing keys.
 #[test]

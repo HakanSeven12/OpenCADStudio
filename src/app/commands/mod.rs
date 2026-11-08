@@ -970,6 +970,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "-WBLOCK",
         "-WB",
         "-ATTEDIT",
+        // Redefine a block's attribute definitions from an existing reference.
+        "ATTREDEF",
         // Script forms of the table commands.
         "-LAYER",
         "-PURGE",

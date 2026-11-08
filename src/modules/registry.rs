@@ -1324,6 +1324,7 @@ pub static QUAD_ENTITY_COMMANDS: &[(&str, &[&str])] = &[
             "CLIP",
             "BEDIT",
             "REFEDIT",
+            "ATTREDEF",
             "ERASE",
         ],
     ),

@@ -6090,4 +6090,95 @@ mod batch4_tests {
             "no attribute instance may remain"
         );
     }
+
+    #[test]
+    fn attredef_takes_the_reference_attributes_as_the_new_definitions() {
+        use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+        use document::types::Vector3;
+
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+
+        let mut record = document::tables::BlockRecord::new("TAGBLOCK");
+        record.handle = doc.allocate_handle();
+        let owner = record.handle;
+        doc.block_records.add(record).unwrap();
+
+        let mut line = document::entities::Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.owner_handle = owner;
+        let line_handle = doc.add_entity(document::EntityType::Line(line)).unwrap();
+
+        let mut definition =
+            AttributeDefinition::new("STATUS".into(), "Status".into(), "DEFAULT".into());
+        definition.insertion_point = Vector3::new(1.0, 1.0, 0.0);
+        definition.alignment_point = definition.insertion_point;
+        definition.height = 2.5;
+        definition.common.owner_handle = owner;
+        let definition_handle = doc
+            .add_entity(document::EntityType::AttributeDefinition(definition.clone()))
+            .unwrap();
+        doc.block_records
+            .get_mut("TAGBLOCK")
+            .unwrap()
+            .entity_handles = vec![line_handle, definition_handle];
+
+        let mut insert = Insert::new("TAGBLOCK", Vector3::new(100.0, 50.0, 0.0));
+        let mut attribute = AttributeEntity::from_definition(&definition, Some("ACTIVE".into()));
+        attribute.insertion_point = Vector3::new(101.0, 51.0, 0.0);
+        attribute.alignment_point = attribute.insertion_point;
+        insert.attributes.push(attribute);
+        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+
+        // The reference is the authority: its value and placement changed.
+        if let Some(document::EntityType::Insert(insert)) = doc.get_entity_mut(insert_handle) {
+            insert.attributes[0].value = "CHANGED".into();
+            insert.attributes[0].insertion_point = Vector3::new(105.0, 52.0, 0.0);
+            insert.attributes[0].alignment_point = Vector3::new(105.0, 52.0, 0.0);
+        }
+
+        let _ = app.run_command_line("ATTREDEF TAGBLOCK");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        let doc = &app.tabs[i].scene.document;
+        let definitions: Vec<_> = doc
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::AttributeDefinition(definition) => Some(definition),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            definitions.len(),
+            1,
+            "the old definition must be replaced"
+        );
+        let definition = definitions[0];
+        assert_eq!(definition.tag, "STATUS");
+        assert_eq!(
+            definition.default_value, "CHANGED",
+            "the reference value becomes the new default"
+        );
+        assert!(
+            (definition.insertion_point.x - 5.0).abs() < 1e-9
+                && (definition.insertion_point.y - 2.0).abs() < 1e-9,
+            "the placement is folded back into block space: {:?}",
+            definition.insertion_point
+        );
+
+        let Some(document::EntityType::Insert(insert)) = doc.get_entity(insert_handle) else {
+            panic!("reference gone");
+        };
+        assert_eq!(insert.attributes.len(), 1);
+        assert_eq!(insert.attributes[0].value, "CHANGED");
+        assert!(
+            (insert.attributes[0].insertion_point.x - 105.0).abs() < 1e-9
+                && (insert.attributes[0].insertion_point.y - 52.0).abs() < 1e-9,
+            "the synchronised attribute keeps the reference's placement: {:?}",
+            insert.attributes[0].insertion_point
+        );
+    }
 }

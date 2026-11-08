@@ -610,6 +610,94 @@ fn a_copied_block_reference_arrives_with_its_definition() {
     );
 }
 
+/// A copied reference whose definition holds another reference brings both
+/// definitions, so the pasted block does not render with an empty member.
+#[test]
+fn a_copied_nested_reference_brings_both_definitions() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"LINE 0,0 10,0"}"#);
+    let line = app.automation_op(r#"{"op":"query","type":"Line","detail":"summary"}"#)["entities"]
+        [0]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+        .as_u64()
+        .unwrap();
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"block_define","request_id":"n1","document_id":{doc},"name":"INNER","base":[0,0,0],"handles":["{line}"]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let inner = app.automation_op(r#"{"op":"query","type":"Insert","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"block_define","request_id":"n2","document_id":{doc},"name":"OUTER","base":[0,0,0],"handles":["{inner}"]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let outer = app.automation_op(r#"{"op":"query","type":"Insert","detail":"full"}"#)["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entity| entity["block"] == "OUTER")
+        .and_then(|entity| entity["handle"].as_str())
+        .expect("the OUTER reference")
+        .to_owned();
+
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"n3","document_id":{target},"handles":["{outer}"]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    app.active_tab = 1;
+    let names: Vec<String> = app.tabs[1]
+        .scene
+        .document
+        .block_records
+        .iter()
+        .map(|record| record.name.clone())
+        .collect();
+    assert!(
+        names.iter().any(|name| name == "OUTER") && names.iter().any(|name| name == "INNER"),
+        "the target needs the outer definition and the one its member names: {names:?}"
+    );
+    let outer_record = app.tabs[1]
+        .scene
+        .document
+        .block_records
+        .iter()
+        .find(|record| record.name == "OUTER")
+        .expect("the outer record travelled");
+    assert_eq!(outer_record.entity_handles.len(), 1);
+    let member = app.tabs[1]
+        .scene
+        .document
+        .get_entity(outer_record.entity_handles[0])
+        .expect("the outer definition holds its member");
+    let document::EntityType::Insert(member) = member else {
+        panic!("the outer definition's member is not a reference: {member:?}");
+    };
+    assert_eq!(
+        member.block_name, "INNER",
+        "and that member names the definition the copy brought with it"
+    );
+    let audit = app.automation_op(r#"{"op":"audit"}"#);
+    assert!(
+        !audit["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "missing_block"),
+        "the target holds every record the pasted reference names: {audit}"
+    );
+}
+
 /// A copied raster has to arrive registered in the target the way an
 /// interactive paste registers it: the target's own definition of its file,
 /// plus the reactor that links image and definition both ways. A copy that

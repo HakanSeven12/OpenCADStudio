@@ -283,11 +283,9 @@ impl PluginPanelState {
         let panel_id = self.def.id.clone();
         match control {
             DialogControl::InfoText { text: msg, align_h } => {
-                let mut t = text(msg)
-                    .size(12)
-                    .style(|theme: &Theme| text::Style {
-                        color: Some(theme.palette().background.base.text.scale_alpha(0.75)),
-                    });
+                let mut t = text(msg).size(12).style(|theme: &Theme| text::Style {
+                    color: Some(crate::ui::style::readable::muted_text(theme)),
+                });
                 if let Some(h) = align_h {
                     match h {
                         HorizontalAlign::Left => {
@@ -646,7 +644,9 @@ impl PluginPanelState {
                                                 radius: 2.0.into(),
                                             },
                                             icon: palette.background.base.text,
-                                            placeholder: palette.background.base.text.scale_alpha(0.4),
+                                            placeholder: crate::ui::style::readable::hint_text(
+                                                theme,
+                                            ),
                                             value: palette.background.base.text,
                                             selection: palette.primary.base.color.scale_alpha(0.5),
                                         },
@@ -658,7 +658,9 @@ impl PluginPanelState {
                                                 radius: 2.0.into(),
                                             },
                                             icon: palette.background.base.text,
-                                            placeholder: palette.background.base.text.scale_alpha(0.4),
+                                            placeholder: crate::ui::style::readable::hint_text(
+                                                theme,
+                                            ),
                                             value: palette.background.base.text,
                                             selection: palette.primary.base.color.scale_alpha(0.5),
                                         },
@@ -670,7 +672,9 @@ impl PluginPanelState {
                                                 radius: 0.0.into(),
                                             },
                                             icon: palette.background.base.text,
-                                            placeholder: palette.background.base.text.scale_alpha(0.4),
+                                            placeholder: crate::ui::style::readable::hint_text(
+                                                theme,
+                                            ),
                                             value: palette.background.base.text,
                                             selection: palette.primary.base.color.scale_alpha(0.5),
                                         },

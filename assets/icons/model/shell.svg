@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Shell">
-  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M8.5 10 15 6.6V14L8.5 17.4Z" fill="#526B80"/>
-    <path d="M15 6.6 23.5 10V17.4L15 14Z" fill="#3F5466"/>
-    <path d="M8.5 17.4 15 14 23.5 17.4 17 20.8Z" fill="#6DB7ED"/>
-    <path d="M4 10 17 16V28L4 22Z" fill="#A9BFCE"/>
-    <path d="M17 16 28 10V22L17 28Z" fill="#718C9E"/>
-    <path d="M4 10 15 4 28 10 17 16ZM8.5 10 15 6.6 23.5 10 17 13.4Z" fill="#DCE7F0" fill-rule="evenodd"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M7.5 3L10.5 4.5L7.5 6L4.5 4.5Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M7.5 1.5L13.5 4.5L7.5 7.5L1.5 4.5Z" fill="#ffffff" fill-opacity="0.2"/><path d="M1.5 4.5L7.5 7.5L7.5 14.5L1.5 11.5Z" fill="#ffffff" fill-opacity="0.12"/><path d="M7.5 7.5L13.5 4.5L13.5 11.5L7.5 14.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M7.5 1.5L13.5 4.5L13.5 11.5L7.5 14.5L1.5 11.5L1.5 4.5Z" fill="none" stroke="#ffffff"/><path d="M1.5 4.5L7.5 7.5L13.5 4.5" fill="none" stroke="#ffffff"/><path d="M7.5 7.5L7.5 14.5" fill="none" stroke="#ffffff"/></g><path d="M7.5 3L10.5 4.5L7.5 6L4.5 4.5Z" fill="#4a9eff" fill-opacity="0.4"/><path d="M7.5 3L10.5 4.5L7.5 6L4.5 4.5Z" fill="none" stroke="#4a9eff"/></svg>

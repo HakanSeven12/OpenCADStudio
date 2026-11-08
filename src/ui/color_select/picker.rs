@@ -701,18 +701,17 @@ impl ColorPicker {
     fn view_button(&self, icon: &'static [u8], view: DocView) -> Element<'_, Message> {
         let active = self.doc_view == view;
         button(
-            container(
-                svg(crate::ui::icons::themed_handle(icon))
-                    .width(18)
-                    .height(18)
-                    .style(move |theme: &Theme, _status| svg::Style {
-                        color: Some(if active {
-                            theme.palette().primary.weak.text
-                        } else {
-                            theme.palette().background.base.text
-                        }),
-                    }),
-            )
+            container(crate::ui::icons::tinted(
+                icon,
+                18.0,
+                move |theme: &Theme| {
+                    if active {
+                        theme.palette().primary.weak.text
+                    } else {
+                        theme.palette().background.base.text
+                    }
+                },
+            ))
             .center(Length::Fill),
         )
         .on_press(picker_msg(ColorPickerMsg::DocView(view)))
@@ -781,13 +780,11 @@ impl ColorPicker {
                 .padding([6, 8])
                 .width(Length::Fill),
                 load_button(
-                    container(
-                        tab_icon(crate::ui::icons::themed_handle(
-                            crate::ui::icons::FOLDER_OPEN
-                        ))
-                        .width(16)
-                        .height(16)
-                    )
+                    container(crate::ui::icons::tinted(
+                        crate::ui::icons::FOLDER_OPEN,
+                        16.0,
+                        |theme: &Theme| theme.palette().background.strong.text,
+                    ))
                     .center(Length::Fill)
                     .into()
                 )
@@ -926,6 +923,7 @@ impl ColorPicker {
     fn true_color_tab(&self) -> Element<'_, Message> {
         // The eyedropper reads the window back from the GPU, which the web
         // build cannot do.
+        let eyedropper = crate::ui::icons::art_for(crate::ui::icons::EYEDROPPER, 24.0);
         let pipette: Option<Element<'_, Message>> = if cfg!(target_arch = "wasm32") {
             None
         } else {
@@ -933,21 +931,19 @@ impl ColorPicker {
                 // Just the icon, without a button frame.
                 button(
                     // Gray at rest; the accent colour while the pointer is on it.
-                    iced::widget::svg(crate::ui::icons::themed_handle(
-                        crate::ui::icons::EYEDROPPER,
-                    ))
-                    .width(24)
-                    .height(24)
-                    .style(|theme: &Theme, status| iced::widget::svg::Style {
-                        color: Some(match status {
-                            iced::widget::svg::Status::Hovered => {
-                                theme.palette().primary.base.color
-                            }
-                            iced::widget::svg::Status::Idle => {
-                                theme.palette().background.base.text.scale_alpha(0.5)
-                            }
+                    iced::widget::svg(crate::ui::icons::themed_handle(eyedropper))
+                        .width(24)
+                        .height(24)
+                        .style(|theme: &Theme, status| iced::widget::svg::Style {
+                            color: Some(match status {
+                                iced::widget::svg::Status::Hovered => {
+                                    theme.palette().primary.base.color
+                                }
+                                iced::widget::svg::Status::Idle => {
+                                    theme.palette().background.base.text.scale_alpha(0.5)
+                                }
+                            }),
                         }),
-                    }),
                 )
                 .on_press(picker_msg(ColorPickerMsg::Eyedropper(EyedropperMsg::Start)))
                 .padding(0)
@@ -976,7 +972,7 @@ impl ColorPicker {
                 color: Some(if exact {
                     theme.palette().success.base.color
                 } else {
-                    theme.palette().background.base.text.scale_alpha(0.65)
+                    crate::ui::style::readable::muted_text(theme)
                 }),
             }),
             button(
@@ -1138,14 +1134,11 @@ fn search_box<'a>(
                 left: 28.0,
             })
             .width(Length::Fill),
-        container(
-            svg(crate::ui::icons::themed_handle(crate::ui::icons::SEARCH))
-                .width(14)
-                .height(14)
-                .style(|theme: &Theme, _status| svg::Style {
-                    color: Some(theme.palette().background.base.text.scale_alpha(0.5)),
-                }),
-        )
+        container(crate::ui::icons::tinted(
+            crate::ui::icons::SEARCH,
+            14.0,
+            |theme: &Theme| theme.palette().background.base.text.scale_alpha(0.5),
+        ))
         .padding([0, 8])
         .height(Length::Fill)
         .center_y(Length::Fill),
@@ -1162,13 +1155,6 @@ fn tab_button_style(theme: &Theme, status: button::Status) -> button::Style {
         style.background = Some(theme.palette().background.stronger.color.into());
     }
     style
-}
-
-/// An icon in the active tab's text colour, for `tab_button_style`.
-fn tab_icon<'a>(handle: svg::Handle) -> svg::Svg<'a> {
-    svg(handle).style(|theme: &Theme, _status| svg::Style {
-        color: Some(theme.palette().background.strong.text),
-    })
 }
 
 /// A clickable colour swatch, ringed when selected or hovered.
@@ -1247,7 +1233,7 @@ fn filled(color: Color) -> container::Style {
 
 pub(super) fn muted_text(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     }
 }
 

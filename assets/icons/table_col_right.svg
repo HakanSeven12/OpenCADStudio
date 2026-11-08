@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Insert Column Right">
-  <rect x="4" y="4" width="10" height="16" rx="1" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="9" y1="4" x2="9" y2="20" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="4" y1="12" x2="14" y2="12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <rect x="16" y="4" width="4" height="16" rx="0.5" stroke="none" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M11 2H14V14H11Z" fill="#4a9eff" fill-opacity="0.33"/><path d="M1.5 1.5H14.5V14.5H1.5Z" fill="none" stroke="#ffffff"/><path d="M5.5 1.5L5.5 14.5" fill="none" stroke="#ffffff"/><path d="M10.5 1.5L10.5 14.5" fill="none" stroke="#ffffff"/><path d="M1.5 5.5L14.5 5.5" fill="none" stroke="#ffffff"/><path d="M1.5 10.5L14.5 10.5" fill="none" stroke="#ffffff"/><path d="M10.5 1.5H14.5V14.5H10.5Z" fill="none" stroke="#4a9eff"/></svg>

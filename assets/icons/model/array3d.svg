@@ -1,13 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="3D Array">
-  <g stroke="#526B80" stroke-width="1" stroke-linejoin="round">
-    <path d="M4 19 9 16.5 14 19 9 21.5Z" fill="#DCE7F0"/>
-    <path d="M4 19 9 21.5V27.5L4 25Z" fill="#A9BFCE"/>
-    <path d="M9 21.5 14 19V25L9 27.5Z" fill="#718C9E"/>
-    <path d="M16 19 21 16.5 26 19 21 21.5Z" fill="#6DB7ED"/>
-    <path d="M16 19 21 21.5V27.5L16 25Z" fill="#6DB7ED"/>
-    <path d="M21 21.5 26 19V25L21 27.5Z" fill="#1565C0"/>
-    <path d="M10 9 15 6.5 20 9 15 11.5Z" fill="#6DB7ED"/>
-    <path d="M10 9 15 11.5V17.5L10 15Z" fill="#6DB7ED"/>
-    <path d="M15 11.5 20 9V15L15 17.5Z" fill="#1565C0"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M4.5 1.5L7.5 3L4.5 4.5L1.5 3Z" fill="#ffffff" fill-opacity="0.2"/><path d="M1.5 3L4.5 4.5L4.5 7.5L1.5 6Z" fill="#ffffff" fill-opacity="0.12"/><path d="M4.5 4.5L7.5 3L7.5 6L4.5 7.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M4.5 1.5L7.5 3L7.5 6L4.5 7.5L1.5 6L1.5 3Z" fill="none" stroke="#ffffff"/><path d="M1.5 3L4.5 4.5L7.5 3" fill="none" stroke="#ffffff"/><path d="M4.5 4.5L4.5 7.5" fill="none" stroke="#ffffff"/><path d="M11.5 3.5L14.5 5L11.5 6.5L8.5 5Z" fill="#ffffff" fill-opacity="0.2"/><path d="M8.5 5L11.5 6.5L11.5 9.5L8.5 8Z" fill="#ffffff" fill-opacity="0.12"/><path d="M11.5 6.5L14.5 5L14.5 8L11.5 9.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M11.5 3.5L14.5 5L14.5 8L11.5 9.5L8.5 8L8.5 5Z" fill="none" stroke="#4a9eff"/><path d="M8.5 5L11.5 6.5L14.5 5" fill="none" stroke="#4a9eff"/><path d="M11.5 6.5L11.5 9.5" fill="none" stroke="#4a9eff"/><path d="M4.5 8.5L7.5 10L4.5 11.5L1.5 10Z" fill="#ffffff" fill-opacity="0.2"/><path d="M1.5 10L4.5 11.5L4.5 14.5L1.5 13Z" fill="#ffffff" fill-opacity="0.12"/><path d="M4.5 11.5L7.5 10L7.5 13L4.5 14.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M4.5 8.5L7.5 10L7.5 13L4.5 14.5L1.5 13L1.5 10Z" fill="none" stroke="#4a9eff"/><path d="M1.5 10L4.5 11.5L7.5 10" fill="none" stroke="#4a9eff"/><path d="M4.5 11.5L4.5 14.5" fill="none" stroke="#4a9eff"/></svg>

@@ -1,11 +1,1 @@
-<?xml version="1.0" encoding="UTF-8" standalone="no"?>
-<svg viewBox="0 0 24 24" width="64" height="64" version="1.1" xmlns="http://www.w3.org/2000/svg">
-  <!-- Object on another layer moves down onto the current layer -->
-  <line x1="1.2" y1="4.6" x2="22.8" y2="4.6" stroke="#B4B6B9" stroke-linecap="round" style="stroke-width:2.25;stroke-dasharray:4.275, 2.92501" />
-  <circle cx="6" cy="4.6" r="2.16" fill="#B4B6B9" />
-  <line x1="1.2" y1="21.6" x2="22.8" y2="21.6" stroke="#B4B6B9" stroke-linecap="round" style="stroke-width:2.25" />
-  <line x1="1.2" y1="17.4" x2="22.8" y2="17.4" stroke="#6DB7ED" stroke-linecap="round" style="stroke-width:2.25" />
-  <circle cx="17" cy="17.4" r="2.16" fill="#6DB7ED" />
-  <path d="M 8.5 6.6 C 12 7.4 15.5 9.6 16.4 13" fill="none" stroke="#6DB7ED" stroke-linecap="round" style="stroke-width:2.25" />
-  <polyline points="14,11.4 16.6,14 18.6,11" fill="none" stroke="#6DB7ED" stroke-linecap="round" stroke-linejoin="round" style="stroke-width:2.25" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M3.5 6L8 12L5 12L5 16L2 16L2 12L0 12Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M1.5 4.5L7.5 1.5L13.5 4.5L7.5 7.5Z" fill="#4a9eff" fill-opacity="0.15"/><path d="M0.5 4.5L7.5 1L14.5 4.5L7.5 8Z" fill="none" stroke="#4a9eff"/><path d="M0.5 8L7.5 11.5L14.5 8" fill="none" stroke="#ffffff"/><path d="M0.5 11.5L7.5 15L14.5 11.5" fill="none" stroke="#ffffff"/></g><path d="M3.5 15.5L3.5 10.5" fill="none" stroke="#4a9eff"/><path d="M3.5 7L0 11L7 11Z" fill="#4a9eff"/></svg>

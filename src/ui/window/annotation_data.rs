@@ -467,7 +467,7 @@ pub enum DataExtractionField {
 
 fn muted(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.62)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     }
 }
 
@@ -1627,12 +1627,11 @@ pub fn data_extraction_view(
 /// The notice DATAEXTRACTION shows on a drawing that was never saved.
 pub fn data_extraction_unsaved_view(sizing: crate::ui::modal::ModalSizing) -> Element<'static, Message> {
     let amber = iced::Color::from_rgb8(0xE0, 0x9A, 0x2B);
-    let badge = container(
-        iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::WARNING))
-            .width(18.0)
-            .height(18.0)
-            .style(move |_: &Theme, _| iced::widget::svg::Style { color: Some(amber) }),
-    )
+    let badge = container(crate::ui::icons::tinted(
+        crate::ui::icons::WARNING,
+        18.0,
+        move |_: &Theme| amber,
+    ))
     .width(34)
     .height(34)
     .center_x(34)

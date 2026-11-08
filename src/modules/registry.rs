@@ -35,9 +35,9 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("RECTANG", "RECT"),
     ("RECTANGLE", "RECT"),
     ("POLYGON", "POLY"),
+    // Polygonal and Freehand have their own icons from the Revision Cloud
+    // dropdown; Rectangular shares the face's.
     ("REVCLOUD_RECTANGULAR", "REVCLOUD"),
-    ("REVCLOUD_POLYGONAL", "REVCLOUD"),
-    ("REVCLOUD_FREEHAND", "REVCLOUD"),
     ("CONSTRUCTIONLINE", "XLINE"),
     ("SPLINEFIT", "SPLINE"),
     ("FITSPLINE", "SPLINE"),
@@ -1028,13 +1028,106 @@ pub fn command_icon(command: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
+    /// The Paste dropdown lists its five variants, each with its own icon,
+    /// which every other place showing the command uses too; the face is
+    /// plain Paste.
+    #[test]
+    fn paste_variants_have_their_own_icons() {
+        use crate::modules::draw::clipboard::paste;
+        let bytes = |icon: IconKind| match icon {
+            IconKind::Svg(bytes) => bytes,
+            IconKind::Glyph(_) => panic!("paste icons are SVG"),
+        };
+        let commands: Vec<&str> = paste::MENU_ITEMS.iter().map(|(cmd, _, _)| *cmd).collect();
+        assert_eq!(
+            commands,
+            [
+                "PASTECLIP",
+                "PASTEORIG",
+                "PASTEBLOCK",
+                "PASTEASHYPERLINK",
+                "PASTESPEC"
+            ]
+        );
+        let icons: Vec<&[u8]> = paste::MENU_ITEMS
+            .iter()
+            .map(|(_, _, icon)| bytes(*icon))
+            .collect();
+        for (n, a) in icons.iter().enumerate() {
+            for b in &icons[n + 1..] {
+                assert_ne!(a, b, "two Paste variants share an icon");
+            }
+        }
+        assert_eq!(bytes(paste::ICON), icons[0], "the face is plain Paste");
+        for (command, icon) in commands.iter().zip(&icons) {
+            assert_eq!(command_icon(command), Some(*icon), "{command}");
+            assert!(crate::ui::menu_bar::implemented(command), "{command} runs");
+        }
+    }
+
+    /// Authoring Palettes shows its own icon wherever the command appears
+    /// (ribbon, command search, QAT and its dock tab); Tool Palettes and
+    /// Editor Settings keep the plain tool palette.
+    #[test]
+    fn authoring_palettes_have_their_own_icon() {
+        let authoring = crate::ui::icons::AUTHORING_PALETTES;
+        for command in ["BAUTHORPALETTE", "BAUTHORPALETTECLOSE"] {
+            assert_eq!(command_icon(command), Some(authoring), "{command}");
+        }
+        assert_eq!(
+            crate::ui::dock::PanelId::AuthoringPalettes.icon(),
+            authoring
+        );
+        let tool_palettes: &[u8] = include_bytes!("../../assets/icons/tool_palettes.svg");
+        assert_ne!(authoring, tool_palettes);
+        for command in ["TOOLPALETTES", "BESETTINGS"] {
+            assert_eq!(command_icon(command), Some(tool_palettes), "{command}");
+        }
+        assert_eq!(crate::ui::dock::PanelId::ToolPalettes.icon(), tool_palettes);
+    }
+
+    /// The three revision cloud types each show their own icon, in the
+    /// Revision Cloud dropdown and wherever else the command appears; the
+    /// dropdown face shows the Rectangular cloud until another type is chosen.
+    #[test]
+    fn revision_cloud_types_have_their_own_icons() {
+        let mut found = None;
+        for module in all_modules() {
+            for group in module.ribbon_groups() {
+                for item in &group.tools {
+                    if let RibbonItem::LargeDropdown {
+                        id: "REVCLOUD",
+                        icon,
+                        items,
+                        ..
+                    } = item
+                    {
+                        found = Some((*icon, items.clone()));
+                    }
+                }
+            }
+        }
+        let (face, items) = found.expect("the Revision Cloud dropdown");
+        let bytes = |icon: IconKind| match icon {
+            IconKind::Svg(bytes) => bytes,
+            IconKind::Glyph(_) => panic!("revision cloud icons are SVG"),
+        };
+        let icons: Vec<&[u8]> = items.iter().map(|(_, _, icon)| bytes(*icon)).collect();
+        assert_eq!(icons.len(), 3);
+        assert_ne!(icons[0], icons[1]);
+        assert_ne!(icons[0], icons[2]);
+        assert_ne!(icons[1], icons[2]);
+        assert_eq!(bytes(face), icons[0], "the face starts as Rectangular");
+        for ((command, _, _), icon) in items.iter().zip(&icons) {
+            assert_eq!(command_icon(command), Some(*icon), "{command}");
+        }
+    }
+
     #[test]
     fn command_aliases_and_variants_resolve_target_icons() {
         for (alias, target) in [
             ("RECTANG", "RECT"),
             ("REVCLOUD_RECTANGULAR", "REVCLOUD"),
-            ("REVCLOUD_POLYGONAL", "REVCLOUD"),
-            ("REVCLOUD_FREEHAND", "REVCLOUD"),
             ("POLYGON", "POLY"),
             ("ARC", "ARC_3P"),
             ("PASTE", "PASTECLIP"),

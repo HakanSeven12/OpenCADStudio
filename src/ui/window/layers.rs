@@ -831,7 +831,7 @@ impl LayerPanel {
                         color: Some(if chosen {
                             selection_colors(theme).1
                         } else {
-                            theme.palette().background.base.text.scale_alpha(0.6)
+                            crate::ui::style::readable::muted_text(theme)
                         }),
                     })
                     .into(),

@@ -193,7 +193,7 @@ impl PanelId {
             }
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
             PanelId::ToolPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
-            PanelId::AuthoringPalettes => include_bytes!("../../assets/icons/edit_block.svg"),
+            PanelId::AuthoringPalettes => crate::ui::icons::AUTHORING_PALETTES,
             PanelId::ParametersManager => include_bytes!("../../assets/icons/table.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
             PanelId::Browser => include_bytes!("../../assets/icons/content_browser.svg"),
@@ -1129,6 +1129,8 @@ pub const DOCK_FLOAT_BAR_W: f32 = 28.0;
 pub const DOCK_STRIP_W: f32 = 40.0;
 /// Height of one pallet icon in the strip.
 pub const STRIP_CELL_H: f32 = 32.0;
+/// Size of a pallet icon in the strip.
+pub const RAIL_ICON: f32 = 20.0;
 /// Text size of a strip tab's name.
 pub const STRIP_LABEL_SIZE: f32 = 13.0;
 /// Space after a strip tab's name.
@@ -1474,7 +1476,7 @@ impl iced::widget::canvas::Program<crate::app::Message> for VerticalLabel {
             frame.fill_text(iced::widget::canvas::Text {
                 content: self.text.clone(),
                 position: iced::Point::new(start, 0.0),
-                color: theme.palette().background.base.text.scale_alpha(0.72),
+                color: crate::ui::style::readable::muted_text(theme),
                 size: iced::Pixels(STRIP_LABEL_SIZE),
                 align_x,
                 align_y: iced::alignment::Vertical::Center,

@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Report">
-  <path d="M5 3 H14 L18 7 V21 H5 Z M14 3 V7 H18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="8" y1="9" x2="15" y2="9" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="8" y1="13" x2="15" y2="13" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="8" y1="17" x2="13" y2="17" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M9.5 1.5L3.5 1.5L3.5 14.5L12.5 14.5L12.5 4.5L9.5 1.5" fill="none" stroke="#ffffff"/><path d="M9.5 1.5L9.5 4.5L12.5 4.5" fill="none" stroke="#ffffff"/><path d="M5.5 12.5L10.5 12.5" fill="none" stroke="#ffffff"/><path d="M6 10H7V12H6Z" fill="#4a9eff"/><path d="M8 8H9V12H8Z" fill="#4a9eff"/><path d="M10 9H11V12H10Z" fill="#4a9eff"/></svg>

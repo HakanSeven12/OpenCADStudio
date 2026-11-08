@@ -1937,7 +1937,7 @@ fn qselect_content<'a>(
         text(s)
             .size(11)
             .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(theme.palette().background.base.text.scale_alpha(0.7)),
+                color: Some(crate::ui::style::readable::muted_text(theme)),
             })
     };
     let heading = |s: std::borrow::Cow<'static, str>| text(s).size(12);

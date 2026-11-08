@@ -275,6 +275,7 @@ pub fn all_themes() -> Vec<iced::Theme> {
         .iter()
         .cloned()
         .chain(crate::ui::style::fusion_theme::fusion_themes())
+        .chain(crate::ui::style::studio_theme::studio_themes())
         .collect()
 }
 
@@ -529,7 +530,9 @@ pub fn theme_canvas_background(theme: &iced::Theme) -> [u8; 3] {
         // rule: black chrome is paired with a white canvas, so falling
         // through to the palette below would paint model space black and
         // undo the whole point of the theme.
-        other => match crate::ui::style::fusion_theme::fusion_canvas(other) {
+        other => match crate::ui::style::fusion_theme::fusion_canvas(other)
+            .or_else(|| crate::ui::style::studio_theme::studio_canvas(other))
+        {
             Some(rgb) => rgb,
             None => color_to_rgb(other.palette().background.base.color),
         },
@@ -565,6 +568,7 @@ pub fn parse_theme_name(s: &str) -> Option<iced::Theme> {
         "FERRA" => Some(iced::Theme::Ferra),
         "FUSIONBLACK" => Some(crate::ui::style::fusion_theme::fusion_black()),
         "FUSIONWHITE" => Some(crate::ui::style::fusion_theme::fusion_white()),
+        "STUDIODARK" => Some(crate::ui::style::studio_theme::studio_dark()),
         _ => None,
     }
 }
@@ -911,6 +915,10 @@ mod tests {
         assert_eq!(
             parse_theme_name("Kanagawa_Lotus"),
             Some(iced::Theme::KanagawaLotus)
+        );
+        assert_eq!(
+            parse_theme_name("studio dark"),
+            Some(crate::ui::style::studio_theme::studio_dark())
         );
         assert_eq!(parse_theme_name("1"), None);
         assert_eq!(parse_theme_name("0"), None);

@@ -1,14 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Full ellipse -->
-  <ellipse cx="12" cy="12" rx="9" ry="5.5" stroke="#B4B6B9" stroke-width="2" fill="none"/>
-  <!-- Major axis line (dashed) -->
-  <line x1="3" y1="12" x2="21" y2="12" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <!-- Minor distance line -->
-  <line x1="12" y1="12" x2="12" y2="6.5" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <!-- Axis endpoint 1 -->
-  <circle cx="3"  cy="12"  r="2"   fill="#6DB7ED"/>
-  <!-- Axis endpoint 2 -->
-  <circle cx="21" cy="12"  r="2"   fill="#6DB7ED"/>
-  <!-- Minor axis point -->
-  <circle cx="12" cy="6.5" r="1.5" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M0 12H4V16H0ZM12 0H16V4H12Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M1.5 14.5A9.19 4.24 -45 0 1 14.5 1.5M14.5 1.5A9.19 4.24 -45 0 1 1.5 14.5" fill="none" stroke="#ffffff"/><path d="M4 12L12 4" fill="none" stroke="#4a9eff"/></g><path d="M1 13H3V15H1Z" fill="#4a9eff"/><path d="M13 1H15V3H13Z" fill="#4a9eff"/></svg>

@@ -4,7 +4,7 @@
 use crate::app::tab_document::DocumentTab;
 use crate::app::{Message, OpenCADStudio};
 use crate::t;
-use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_FLOAT_BAR_W};
+use crate::ui::dock::{DOCK_DIVIDER_W, DOCK_FLOAT_BAR_W, RAIL_ICON};
 use iced::widget::{button, canvas, column, container, mouse_area, row, stack, text, Space};
 use iced::{Background, Border, Color, Element, Fill, Length, Theme};
 
@@ -281,12 +281,13 @@ impl OpenCADStudio {
                     || (dragging
                         && movement
                             .is_some_and(|(panel, group, _)| group.is_none() && panel == id));
+                let art = id.icon();
                 let glyph = if faded {
-                    crate::ui::icons::themed_disabled(id.icon(), 20.0)
+                    crate::ui::icons::themed_disabled(art, RAIL_ICON)
                 } else if is_shown {
-                    crate::ui::icons::themed(id.icon(), 20.0)
+                    crate::ui::icons::themed(art, RAIL_ICON)
                 } else {
-                    crate::ui::icons::themed_secondary(id.icon(), 20.0)
+                    crate::ui::icons::themed_secondary(art, RAIL_ICON)
                 };
                 let hovered = !dragging && self.dock_icon_hover == Some(id);
                 // Labelled, the pallet's name reads upward under its icon.

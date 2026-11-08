@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Sweep">
-  <defs><linearGradient id="body" x2="1" y2="1"><stop stop-color="#DCE7F0"/><stop offset=".55" stop-color="#A9BFCE"/><stop offset="1" stop-color="#718C9E"/></linearGradient></defs>
-  <path d="M5 24C5 10 12 5 25 5V13C17 13 13 17 13 24Z" fill="url(#body)" stroke="#526B80" stroke-width="1.1"/>
-  <path d="M9 24C9 12 15 9 25 9" fill="none" stroke="#F4F8FC" stroke-width="1.2"/>
-  <ellipse cx="25" cy="9" rx="2.5" ry="4" fill="#718C9E" stroke="#526B80" stroke-width="1.1"/>
-  <ellipse cx="9" cy="24" rx="4" ry="2.7" fill="#6DB7ED" stroke="#526B80" stroke-width="1.1"/>
-  <path d="M17 26c0-7 4-9 11-9m-3-3 3 3-3 3" fill="none" stroke="#6DB7ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 14.5V8.5A6 6 0 0 1 7.5 2.5H14.5V6.5H7.5A2 2 0 0 0 5.5 8.5V14.5Z" fill="#ffffff" fill-opacity="0.12"/><path d="M1.5 14.5V8.5A6 6 0 0 1 7.5 2.5H14.5" fill="none" stroke="#ffffff"/><path d="M5.5 14.5V8.5A2 2 0 0 1 7.5 6.5H14.5" fill="none" stroke="#ffffff"/><path d="M1.5 14.5L5.5 14.5" fill="none" stroke="#ffffff"/><path d="M3.5 14V8.5A4 4 0 0 1 7.5 4.5H14" fill="none" stroke="#4a9eff" stroke-dasharray="2 2"/><path d="M14.5 2L14.5 7" fill="none" stroke="#4a9eff"/></svg>

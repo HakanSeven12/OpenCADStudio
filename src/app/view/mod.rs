@@ -4096,7 +4096,7 @@ pub(super) fn doc_tab_bar<'a>(
                     } else if is_hovered {
                         palette.background.weak.text
                     } else {
-                        palette.background.base.text.scale_alpha(0.72)
+                        crate::ui::style::readable::muted_text(theme)
                     },
                     border: Border::default(),
                     shadow: iced::Shadow::default(),
@@ -4135,7 +4135,7 @@ pub(super) fn doc_tab_bar<'a>(
                         } else if is_hovered {
                             palette.background.weak.text
                         } else {
-                            palette.background.base.text.scale_alpha(0.72)
+                            crate::ui::style::readable::muted_text(theme)
                         },
                         border: Border::default(),
                         shadow: iced::Shadow::default(),
@@ -4284,7 +4284,7 @@ pub(super) fn doc_tab_bar<'a>(
 //
 fn start_muted_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.68)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     }
 }
 
@@ -4988,7 +4988,7 @@ fn start_page_content<'a>(
                             background: pair.map(|p| Background::Color(p.color)),
                             text_color: pair
                                 .map(|p| p.text)
-                                .unwrap_or(palette.background.base.text.scale_alpha(0.68)),
+                                .unwrap_or(crate::ui::style::readable::muted_text(theme)),
                             border: Border {
                                 color: if is_active {
                                     palette.primary.base.color
@@ -5332,7 +5332,7 @@ pub(super) fn recent_files_panel<'a>(
                 button::Style {
                     background: matches!(status, button::Status::Hovered)
                         .then_some(Background::Color(palette.danger.weak.color)),
-                    text_color: palette.background.base.text.scale_alpha(0.68),
+                    text_color: crate::ui::style::readable::muted_text(theme),
                     border: Border {
                         color: Color::TRANSPARENT,
                         width: 0.0,

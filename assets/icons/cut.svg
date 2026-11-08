@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Cut">
-  <circle cx="7" cy="17" r="2.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="17" cy="17" r="2.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="8.5" y1="15" x2="16" y2="5" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="15.5" y1="15" x2="8" y2="5" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M7 12A3 3 0 1 1 1 12A3 3 0 1 1 7 12Z" fill="#000"/></mask><mask id="m2" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M15 12A3 3 0 1 1 9 12A3 3 0 1 1 15 12Z" fill="#000"/></mask></defs><g mask="url(#m2)"><g mask="url(#m1)"><path d="M5.5 9.5L12.5 2.5" fill="none" stroke="#ffffff"/><path d="M10.5 9.5L3.5 2.5" fill="none" stroke="#ffffff"/></g><path d="M6.5 12A2.5 2.5 0 1 1 1.5 12A2.5 2.5 0 1 1 6.5 12Z" fill="none" stroke="#ffffff"/></g><path d="M14.5 12A2.5 2.5 0 1 1 9.5 12A2.5 2.5 0 1 1 14.5 12Z" fill="none" stroke="#ffffff"/></svg>

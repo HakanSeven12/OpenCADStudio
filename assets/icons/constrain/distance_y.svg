@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <path d="M5 4h14M5 20h14" stroke="#B4B6B9" stroke-width="1.7" stroke-linecap="round"/>
-  <path d="M12 5v14m0-14l-3 3m3-3l3 3m-3 11l-3-3m3 3l3-3" stroke="#6DB7ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="15" y="14" font-size="5" fill="#6DB7ED" font-family="sans-serif">Y</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M8 8H15V15H8Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M1.5 1.5L8.5 1.5" fill="none" stroke="#f0c040"/><path d="M1.5 12.5L8.5 12.5" fill="none" stroke="#f0c040"/><path d="M4.5 2L3 5L6 5Z" fill="#f0c040"/><path d="M4.5 12L3 9L6 9Z" fill="#f0c040"/><path d="M4.5 5L4.5 9" fill="none" stroke="#f0c040"/></g><path d="M9 11H15V15H9Z" fill="#f0c040"/><path d="M10.5 11V9.5A1.5 1.5 0 0 1 13.5 9.5V11" fill="none" stroke="#f0c040"/></svg>

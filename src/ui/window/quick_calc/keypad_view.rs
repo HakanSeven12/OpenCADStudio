@@ -7,10 +7,11 @@ use iced::widget::{
 };
 use iced::{font, mouse, Background, Border, Color, Element, Fill, Font, Padding, Shadow, Theme};
 
-use super::view::{icon, m, mix, muted, strong, tip, tokens, CHEVRON_DOWN, POINT, STRONG};
+use super::view::{icon, m, mix, muted, strong, tip, tokens, POINT, STRONG};
 use super::{Flyout, Key, KeypadMode, MemoryOp, QuickCalcMsg, QuickCalcPalette};
 use crate::app::calc::Value;
 use crate::app::Message;
+use crate::ui::icons::TRI_DOWN;
 
 const BACKSPACE: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/backspace.svg");
 const TRIGONOMETRY: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/trigonometry.svg");
@@ -328,9 +329,9 @@ fn memory_row<'a>(p: &QuickCalcPalette) -> Element<'a, Message> {
             // The svg doesn't take the button's text colour, so it is
             // dimmed here to match the disabled label.
             if has {
-                icon(CHEVRON_DOWN, 10.0, |t| t.text)
+                icon(TRI_DOWN, 10.0, |t| t.text)
             } else {
-                icon(CHEVRON_DOWN, 10.0, super::view::disabled)
+                icon(TRI_DOWN, 10.0, super::view::disabled)
             }
         ]
         .spacing(2)
@@ -363,7 +364,7 @@ fn flyout_button<'a>(
         row![
             lead,
             text(label).size(12).font(STRONG),
-            icon(CHEVRON_DOWN, 10.0, |t| t.muted),
+            icon(TRI_DOWN, 10.0, |t| t.muted),
         ]
         .spacing(6)
         .align_y(iced::Center),

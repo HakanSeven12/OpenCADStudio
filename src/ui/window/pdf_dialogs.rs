@@ -368,14 +368,11 @@ pub(crate) fn chip<'a>(label: String, on: bool, message: Message) -> Element<'a,
     // The tick is an SVG: the web build's font has no check-mark glyph.
     let mut content = row![].spacing(4).align_y(iced::Center);
     if on {
-        content = content.push(
-            iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::CHECK))
-                .width(11.0)
-                .height(11.0)
-                .style(|theme: &Theme, _| iced::widget::svg::Style {
-                    color: Some(theme.palette().primary.base.text),
-                }),
-        );
+        content = content.push(crate::ui::icons::tinted(
+            crate::ui::icons::CHECK,
+            11.0,
+            |theme: &Theme| theme.palette().primary.base.text,
+        ));
     }
     button(content.push(text(label).size(11)))
         .on_press(message)
@@ -506,7 +503,7 @@ fn page_tiles<'a>(
                             color: Some(if chosen {
                                 theme.palette().primary.base.color
                             } else {
-                                theme.palette().background.base.text.scale_alpha(0.68)
+                                crate::ui::style::readable::muted_text(theme)
                             }),
                         })
                 ]
@@ -2088,16 +2085,10 @@ pub fn view_point_cloud_color_map<'a>(
         .on_press(msg(PdfDialogMsg::MapEven))
         .style(button_style(false))
         .padding([5, 6]);
-    let reverse = button(
-        iced::widget::svg(crate::ui::icons::themed_handle(include_bytes!(
-            "../../../assets/icons/modify_reverse.svg"
-        )))
-        .width(16.0)
-        .height(16.0),
-    )
-    .on_press(msg(PdfDialogMsg::MapReverse))
-    .style(button_style(false))
-    .padding([4, 6]);
+    let reverse = button(crate::ui::icons::tool(crate::ui::icons::SWAP, 16.0))
+        .on_press(msg(PdfDialogMsg::MapReverse))
+        .style(button_style(false))
+        .padding([4, 6]);
     let mut scheme_rows = column![
         row![scheme, small(t!("New"), PdfDialogMsg::MapNew)]
             .spacing(8)

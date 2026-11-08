@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Design Center">
-  <circle cx="12" cy="12" r="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="12" cy="12" r="3" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polygon points="12,3 14,10 12,12 10,10" stroke="none" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 2.5H14.5V13.5H1.5Z" fill="none" stroke="#ffffff"/><path d="M5.5 2.5L5.5 13.5" fill="none" stroke="#ffffff"/><path d="M7.5 5.5L12.5 5.5" fill="none" stroke="#4a9eff"/><path d="M7.5 8.5L12.5 8.5" fill="none" stroke="#4a9eff"/><path d="M7.5 11.5L12.5 11.5" fill="none" stroke="#4a9eff"/></svg>

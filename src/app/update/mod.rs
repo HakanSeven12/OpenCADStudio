@@ -8876,6 +8876,8 @@ impl OpenCADStudio {
                 }
             }
 
+            Message::PasteAsHyperlink(text) => self.paste_as_hyperlink(text),
+
             Message::PasteSpecial(text) => {
                 let i = self.active_tab;
                 let waiting = self.tabs[i]

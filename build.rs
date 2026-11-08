@@ -106,6 +106,8 @@ fn main() {
 
     println!("cargo:rerun-if-env-changed=OCS_PATREON_TOKEN");
 
+    write_icon_pairs();
+
     // Release builds generate the icon before compiling.
     #[cfg(windows)]
     {
@@ -117,6 +119,57 @@ fn main() {
             res.set("FileVersion", &app_version);
             if let Err(e) = res.compile() {
                 println!("cargo:warning=failed to embed Windows icon: {e}");
+            }
+        }
+    }
+}
+
+/// Pair every icon drawn for 32 px (`assets/icons/32/<p>`) with its 16 px
+/// drawing (`assets/icons/<p>`) in `$OUT_DIR/icon_pairs.rs`, so the UI can
+/// find the large art from the small art's bytes.
+fn write_icon_pairs() {
+    println!("cargo:rerun-if-changed=assets/icons");
+    let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
+    let icons = manifest.join("assets").join("icons");
+    let large_root = icons.join("32");
+    let mut relative = Vec::new();
+    collect_svgs(&large_root, &large_root, &mut relative);
+    relative.sort();
+
+    let mut source = String::from("pub static ICON_PAIRS: &[(&[u8], &[u8])] = &[\n");
+    for path in &relative {
+        let small = icons.join(path);
+        if !small.is_file() {
+            println!(
+                "cargo:warning=assets/icons/32/{} has no 16 px partner",
+                path.display()
+            );
+            continue;
+        }
+        let large = large_root.join(path);
+        source.push_str(&format!(
+            "    (include_bytes!({:?}), include_bytes!({:?})),\n",
+            small.display().to_string(),
+            large.display().to_string()
+        ));
+    }
+    source.push_str("];\n");
+    let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR")).join("icon_pairs.rs");
+    std::fs::write(out, source).expect("write icon_pairs.rs");
+}
+
+/// Every `.svg` below `dir`, as a path relative to `root`.
+fn collect_svgs(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_svgs(root, &path, out);
+        } else if path.extension().is_some_and(|ext| ext == "svg") {
+            if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_path_buf());
             }
         }
     }

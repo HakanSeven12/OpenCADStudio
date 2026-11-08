@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#B4B6B9" stroke-width="2" stroke-linecap="round">
-  <line x1="10" y1="5" x2="17" y2="5"/>
-  <line x1="7" y1="19" x2="14" y2="19"/>
-  <line x1="14" y1="5" x2="10" y2="19"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M7.5 1.5L13.5 1.5" fill="none" stroke="#ffffff"/><path d="M2.5 14.5L8.5 14.5" fill="none" stroke="#ffffff"/><path d="M 10.5 1.5 L 5.5 14.5" fill="none" stroke="#ffffff"/></svg>

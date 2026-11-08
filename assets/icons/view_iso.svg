@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="View Iso">
-  <polygon points="12,3.5 20,8 20,16 12,20.5 4,16 4,8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="4,8 12,12.5 20,8" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="12" y1="12.5" x2="12" y2="20.5" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round"/>
-  <line x1="12" y1="3.5" x2="12" y2="12.5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M7.5 1.5L13.5 4.5L7.5 7.5L1.5 4.5Z" fill="#4a9eff" fill-opacity="0.4"/><path d="M1.5 4.5L7.5 7.5L7.5 14.5L1.5 11.5Z" fill="#4a9eff" fill-opacity="0.4"/><path d="M7.5 7.5L13.5 4.5L13.5 11.5L7.5 14.5Z" fill="#4a9eff" fill-opacity="0.4"/><path d="M7.5 1.5L13.5 4.5L13.5 11.5L7.5 14.5L1.5 11.5L1.5 4.5Z" fill="none" stroke="#4a9eff"/><path d="M1.5 4.5L7.5 7.5L13.5 4.5" fill="none" stroke="#4a9eff"/><path d="M7.5 7.5L7.5 14.5" fill="none" stroke="#4a9eff"/></svg>

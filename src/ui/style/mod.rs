@@ -9,9 +9,11 @@ pub mod mleaderstyle;
 pub mod mlstyle;
 pub mod plotstyle;
 pub mod point_style;
+pub mod readable;
 pub mod ribbon_metrics;
 pub mod row_button;
 pub mod scale_manager;
+pub mod studio_theme;
 pub mod style_list;
 pub mod style_manager;
 pub mod tablestyle;
@@ -20,18 +22,17 @@ pub mod textstyle;
 
 #[cfg(test)]
 mod common_tests {
-    // RED: this test must fail until `common::muted_style` exists and is byte-identical
-    // to the 7 local copies (alpha 0.68). It also documents the btn_s divergence.
+    // `common::muted_style` replaced 7 byte-identical local copies. It was the
+    // text at 0.68 alpha; it is now the opaque, readable muted text. It also
+    // documents the btn_s divergence.
     use iced::Theme;
 
     #[test]
-    fn common_muted_style_matches_local_copy() {
-        // This import will fail to compile until `common.rs` exists → RED
+    fn common_muted_style_is_the_readable_muted_text() {
         let style = crate::ui::style::common::muted_style(&Theme::Dark);
-        let expected = iced::widget::text::Style {
-            color: Some(Theme::Dark.palette().background.base.text.scale_alpha(0.68)),
-        };
-        assert_eq!(style.color, expected.color);
+        let expected = crate::ui::style::readable::muted_text(&Theme::Dark);
+        assert_eq!(style.color, Some(expected));
+        assert_eq!(expected.a, 1.0, "muted text is opaque");
     }
 
     #[test]

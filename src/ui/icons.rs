@@ -19,9 +19,9 @@ use rustc_hash::FxHashMap;
 use crate::ui::style::common::{accessible_accent, wcag_contrast};
 use crate::ui::style::ribbon_metrics as metrics;
 
-static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
-static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
-static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
+pub(crate) static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
+pub(crate) static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
+pub(crate) static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
 static TRI_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/tri_left.svg");
 static HOME: &[u8] = include_bytes!("../../assets/icons/ui/home.svg");
 pub static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
@@ -50,14 +50,14 @@ static OSNAP_MTP: &[u8] = include_bytes!("../../assets/icons/osnap/mtp.svg");
 static NAV_PAN: &[u8] = include_bytes!("../../assets/icons/pan.svg");
 static NAV_ZOOM: &[u8] = include_bytes!("../../assets/icons/zoom_in.svg");
 
-static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
-static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
-static LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layfrz.svg");
-static LAY_THW: &[u8] = include_bytes!("../../assets/icons/layers/laythw.svg");
+static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/state_on.svg");
+static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/state_off.svg");
+static LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/state_freeze.svg");
+static LAY_THW: &[u8] = include_bytes!("../../assets/icons/layers/state_thaw.svg");
 static LAY_VP_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layvpfrz.svg");
 static LAY_VP_THW: &[u8] = include_bytes!("../../assets/icons/layers/layvpthw.svg");
-static LAY_LCK: &[u8] = include_bytes!("../../assets/icons/layers/laylck.svg");
-static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/layulk.svg");
+static LAY_LCK: &[u8] = include_bytes!("../../assets/icons/layers/state_lock.svg");
+static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/state_unlock.svg");
 
 // Monochrome chrome glyphs (replace Unicode glyphs in buttons / menus / toolbars).
 // All are black-on-transparent; recolour them at the call site with [`tinted`].
@@ -109,6 +109,11 @@ pub static IMAGE: &[u8] = include_bytes!("../../assets/icons/ui/image.svg");
 pub static LOCK: &[u8] = include_bytes!("../../assets/icons/ui/lock.svg");
 pub static EYE: &[u8] = include_bytes!("../../assets/icons/ui/eye.svg");
 pub static EYE_OFF: &[u8] = include_bytes!("../../assets/icons/ui/eye_off.svg");
+/// The eye in blue: show everything (Show All).
+pub static EYE_ALL: &[u8] = include_bytes!("../../assets/icons/ui/eye_all.svg");
+/// The tool palette with the authoring pencil: Authoring Palettes
+/// (BAUTHORPALETTE), apart from Tool Palettes.
+pub static AUTHORING_PALETTES: &[u8] = include_bytes!("../../assets/icons/authoring_palettes.svg");
 
 // ── Status-bar toggle icons (issue #216) ──────────────────────────────────
 pub static ST_ORTHO: &[u8] = include_bytes!("../../assets/icons/status/ortho.svg");
@@ -125,6 +130,216 @@ pub static ST_FILTER: &[u8] = include_bytes!("../../assets/icons/status/filter.s
 pub static ST_SELCYCLE: &[u8] = include_bytes!("../../assets/icons/status/selcycle.svg");
 pub static ST_CLEANSCREEN: &[u8] = include_bytes!("../../assets/icons/status/cleanscreen.svg");
 
+// ── 16 px / 32 px artwork ──────────────────────────────────────────────────
+
+// `ICON_PAIRS`: every `(assets/icons/<p>, assets/icons/32/<p>)`, written by
+// build.rs.
+include!(concat!(env!("OUT_DIR"), "/icon_pairs.rs"));
+
+/// The 32 px drawing of the icon whose 16 px drawing is `bytes`, if it has
+/// one.
+///
+/// The pairs are keyed by content, not by address: the same file included
+/// from two places need not have one address. A per-thread cache on
+/// `(address, length)` sits in front so a frame never hashes file contents.
+fn large_art(bytes: &'static [u8]) -> Option<&'static [u8]> {
+    /// `(address, length)` of the 16 px bytes → their 32 px partner.
+    type ByAddress = FxHashMap<(usize, usize), Option<&'static [u8]>>;
+    static BY_CONTENT: std::sync::OnceLock<FxHashMap<&'static [u8], &'static [u8]>> =
+        std::sync::OnceLock::new();
+    thread_local! {
+        static BY_ADDRESS: RefCell<ByAddress> = RefCell::new(FxHashMap::default());
+    }
+    let key = (bytes.as_ptr() as usize, bytes.len());
+    if let Some(hit) = BY_ADDRESS.with(|cache| cache.borrow().get(&key).copied()) {
+        return hit;
+    }
+    let found = BY_CONTENT
+        .get_or_init(|| {
+            let mut map = FxHashMap::default();
+            // Identical 16 px files keep the first partner in path order.
+            for &(small, large) in ICON_PAIRS {
+                map.entry(small).or_insert(large);
+            }
+            map
+        })
+        .get(bytes)
+        .copied();
+    BY_ADDRESS.with(|cache| cache.borrow_mut().insert(key, found));
+    found
+}
+
+/// The artwork to draw an icon from at `size` logical px: the 32 px drawing
+/// from [`metrics::LARGE_ART_MIN`] up when there is one, otherwise `bytes`.
+/// The line weight does not depend on the choice: fitting caps every icon's
+/// lines at the ribbon's weight (see [`ribbon_weight`]).
+pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
+    if size >= metrics::LARGE_ART_MIN {
+        large_art(bytes).unwrap_or(bytes)
+    } else {
+        bytes
+    }
+}
+
+// ── Sharp rendering of pixel-grid art ─────────────────────────────────────
+
+mod grid;
+
+/// How many physical px wide an icon `size` logical px wide is drawn.
+fn physical_pixels(size: f32) -> u32 {
+    (size * pixel_scale()).round().max(1.0) as u32
+}
+
+/// The line weight of the ribbon's icons at the screen's scale, in physical
+/// px. No icon is fitted with thicker lines, so a slot between the drawn
+/// sizes (the dock rail's 20 px, a panel button's 22 px) never looks
+/// heavier than the ribbon next to it.
+fn ribbon_weight() -> u32 {
+    grid::line_weight(f64::from(pixel_scale()))
+}
+
+/// The handle of `bytes` drawn `fit.0` physical px wide with lines of at
+/// most `fit.1` px (`None`: at the art's own size), fitted and sharpened
+/// when it is pixel-grid art.
+fn grid_handle(bytes: &'static [u8], fit: Option<(u32, u32)>) -> svg::Handle {
+    match grid_svg(bytes, fit) {
+        Some(sharp) => svg::Handle::from_memory(sharp),
+        None => svg::Handle::from_memory(bytes),
+    }
+}
+
+/// Pixel-grid art fitted to `fit.0` physical px with lines of at most
+/// `fit.1` px (see [`grid::fit`]) when that is not its own size, then
+/// sharpened (see [`sharpen_text`]). `None` for any other SVG.
+fn grid_svg(source: &[u8], fit: Option<(u32, u32)>) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(source).ok()?;
+    let art = grid::art_size(text)?;
+    let fitted = match fit {
+        Some((pixels, cap)) if pixels != art => grid::fit(text, art, pixels, cap).or_else(|| {
+            static WARNED: std::sync::atomic::AtomicBool =
+                std::sync::atomic::AtomicBool::new(false);
+            if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                log::warn!("icon art could not be fitted to {pixels} px; drawing it scaled");
+            }
+            None
+        }),
+        _ => None,
+    };
+    Some(sharpen_text(fitted.as_deref().unwrap_or(text)).into_bytes())
+}
+
+/// [`sharpen_text`] on any SVG: `None` unless it is pixel-grid art.
+#[cfg(test)]
+fn sharpen_grid_svg(source: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(source).ok()?;
+    grid::art_size(text)?;
+    Some(sharpen_text(text).into_bytes())
+}
+
+/// Pixel-grid icon art rewritten so it reads sharp at small sizes, without
+/// touching its geometry:
+///
+/// - Stroked lines that only run horizontally and vertically are drawn
+///   without anti-aliasing (`shape-rendering="crispEdges"`). They already
+///   sit on the pixel grid, so this changes nothing for solid lines, but it
+///   keeps a dotted line dotted: dashes that start half a pixel off the grid
+///   would otherwise smear into a solid grey line.
+/// - Everything else — diagonals, curves and filled shapes — stays
+///   anti-aliased but is drawn twice, which turns a pixel's coverage `a`
+///   into `1 - (1 - a)²`: edge pixels come out nearly as bright as the
+///   line itself instead of fading into faint grey dots, while diagonals
+///   and curves stay smooth. (Without anti-aliasing, diagonals turn into
+///   visible staircases, curves get gaps and tiny arrowheads disappear.)
+///
+/// Masks and clip paths are left as they are, and so is any path with its
+/// own opacity.
+fn sharpen_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() * 3 / 2);
+    // Inside a <mask> or <clipPath>.
+    let mut hidden = 0usize;
+    let mut rest = text;
+    while let Some(open) = rest.find('<') {
+        out.push_str(&rest[..open]);
+        let after = &rest[open..];
+        let Some(close) = after.find('>').map(|i| i + 1) else {
+            out.push_str(after);
+            rest = "";
+            break;
+        };
+        let tag = &after[..close];
+        let self_closing = tag.ends_with("/>");
+        if tag.starts_with("<mask") || tag.starts_with("<clipPath") {
+            hidden += usize::from(!self_closing);
+            out.push_str(tag);
+        } else if tag.starts_with("</mask") || tag.starts_with("</clipPath") {
+            hidden = hidden.saturating_sub(1);
+            out.push_str(tag);
+        } else if hidden == 0 && self_closing && tag.starts_with("<path") {
+            sharpen_path(tag, &mut out);
+        } else {
+            out.push_str(tag);
+        }
+        rest = &after[close..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// One self-closing `<path …/>` of [`sharpen_text`].
+fn sharpen_path(tag: &str, out: &mut String) {
+    let attr = |name: &str| {
+        let start = tag.find(&format!(" {name}=\""))? + name.len() + 3;
+        Some(&tag[start..start + tag[start..].find('"')?])
+    };
+    if attr("opacity").is_some()
+        || attr("fill-opacity").is_some()
+        || attr("stroke-opacity").is_some()
+        || attr("shape-rendering").is_some()
+    {
+        out.push_str(tag);
+        return;
+    }
+    let stroked =
+        attr("stroke").is_some_and(|stroke| stroke != "none") && attr("fill") == Some("none");
+    if stroked && attr("d").is_some_and(only_horizontal_and_vertical) {
+        out.push_str(r#"<path shape-rendering="crispEdges""#);
+        out.push_str(&tag["<path".len()..]);
+    } else {
+        out.push_str(tag);
+        out.push_str(tag);
+    }
+}
+
+/// Whether path data `d` holds only horizontal and vertical lines. Anything
+/// it cannot read counts as no.
+fn only_horizontal_and_vertical(d: &str) -> bool {
+    use svgtypes::SimplePathSegment as Seg;
+    let (mut at, mut start) = ((0.0, 0.0), (0.0, 0.0));
+    let straight = |a: (f64, f64), b: (f64, f64)| a.0 == b.0 || a.1 == b.1;
+    for segment in svgtypes::SimplifyingPathParser::from(d) {
+        match segment {
+            Ok(Seg::MoveTo { x, y }) => {
+                at = (x, y);
+                start = at;
+            }
+            Ok(Seg::LineTo { x, y }) => {
+                if !straight(at, (x, y)) {
+                    return false;
+                }
+                at = (x, y);
+            }
+            Ok(Seg::ClosePath) => {
+                if !straight(at, start) {
+                    return false;
+                }
+                at = start;
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
 // Tool SVGs share a small source palette. These colours are semantic rather
 // than literal: cyan is the accent, pale grey is foreground, yellow is warning,
 // and so on. `SemanticIcon` resolves those roles from Iced's active extended
@@ -136,6 +351,10 @@ struct SemanticCacheKey {
     address: usize,
     length: usize,
     palette: [[u8; 4]; 6],
+    /// Physical px the art is fitted to.
+    pixels: u32,
+    /// The most px a line may be (see [`ribbon_weight`]).
+    cap: u32,
 }
 
 thread_local! {
@@ -226,7 +445,7 @@ pub fn themed_handle(bytes: &'static [u8]) -> svg::Handle {
     }
 
     // Miss: build the handle with no cache borrow held, then insert.
-    let handle = svg::Handle::from_memory(bytes);
+    let handle = grid_handle(bytes, None);
     THEMED_CACHE.with(|cache| {
         let mut c = cache.borrow_mut();
         c.mru[1] = c.mru[0].take();
@@ -257,34 +476,41 @@ struct SemanticColors {
 impl SemanticColors {
     fn from_theme(theme: &Theme) -> Self {
         let palette = theme.palette();
+        // The accents an icon is drawn in keep the theme's hue but are
+        // pushed towards the text until they read on the ribbon.
+        let accent =
+            |color: Color| color_hex(crate::ui::style::readable::icon_accent(color, theme));
         Self {
             background: color_hex(palette.background.strong.color),
             text: color_hex(palette.background.base.text),
             primary_weak: color_hex(palette.primary.weak.color),
-            primary: color_hex(palette.primary.base.color),
+            primary: accent(palette.primary.base.color),
             primary_strong: color_hex(palette.primary.strong.color),
             secondary_weak: color_hex(palette.secondary.weak.color),
             secondary: color_hex(palette.secondary.base.color),
             secondary_strong: color_hex(palette.secondary.strong.color),
             success_weak: color_hex(palette.success.weak.color),
-            success: color_hex(palette.success.base.color),
-            warning: color_hex(palette.warning.base.color),
+            success: accent(palette.success.base.color),
+            warning: accent(palette.warning.base.color),
             warning_strong: color_hex(palette.warning.strong.color),
             danger_weak: color_hex(palette.danger.weak.color),
-            danger: color_hex(palette.danger.base.color),
+            danger: accent(palette.danger.base.color),
         }
     }
 }
 
-struct SemanticIcon {
+/// Picks one colour from the theme for a whole icon.
+type Tint<'a> = Box<dyn Fn(&Theme) -> Color + 'a>;
+
+struct SemanticIcon<'a> {
     bytes: &'static [u8],
     size: f32,
     opacity: f32,
     /// One colour for the whole icon instead of its semantic colours.
-    tint: Option<fn(&Theme) -> Color>,
+    tint: Option<Tint<'a>>,
 }
 
-impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
+impl<M> Widget<M, Theme, Renderer> for SemanticIcon<'_> {
     fn size(&self) -> Size<Length> {
         Size::new(Length::Fixed(self.size), Length::Fixed(self.size))
     }
@@ -308,39 +534,45 @@ impl<M> Widget<M, Theme, Renderer> for SemanticIcon {
         _cursor: iced::advanced::mouse::Cursor,
         _viewport: &Rectangle,
     ) {
+        let pixels = physical_pixels(self.size);
         let handle = match self.tint {
-            Some(_) => tinted_handle(self.bytes),
-            None => semantic_handle(self.bytes, theme),
+            Some(_) => tinted_handle(self.bytes, pixels),
+            None => semantic_handle(self.bytes, theme, pixels),
         };
         let measured = renderer.measure_svg(&handle);
         if measured.width == 0 || measured.height == 0 {
             return;
         }
 
-        let image_size = Size::new(measured.width as f32, measured.height as f32);
         // The icon keeps its own square, centred, when a stretched button
-        // lays it out wider.
+        // lays it out wider. The square is a whole number of physical pixels
+        // and its corner sits on a physical pixel, so pixel-grid art is
+        // drawn 1:1 at 100 % and exactly 2x at 200 %.
         let laid = layout.bounds();
-        let bounds = Rectangle::new(
-            Point::new(
-                laid.center_x() - self.size / 2.0,
-                laid.center_y() - self.size / 2.0,
-            ),
-            Size::new(self.size, self.size),
-        );
+        let bounds = physical_square(laid.center_x(), laid.center_y(), self.size);
         let svg = core_svg::Svg {
             handle,
-            color: self.tint.map(|tint| tint(theme)),
+            color: self.tint.as_ref().map(|tint| tint(theme)),
             rotation: Radians(0.0),
             opacity: self.opacity,
         };
-        let fitted = ContentFit::Contain.fit(image_size, bounds.size());
-        let position = Point::new(
-            bounds.center_x() - fitted.width / 2.0,
-            bounds.center_y() - fitted.height / 2.0,
-        );
+        let drawn = if measured.width == measured.height {
+            // `ContentFit::Contain` could shrink a square by a fraction of
+            // a pixel; a square image fills the square exactly.
+            bounds
+        } else {
+            let image_size = Size::new(measured.width as f32, measured.height as f32);
+            let fitted = ContentFit::Contain.fit(image_size, bounds.size());
+            Rectangle::new(
+                Point::new(
+                    on_physical_pixel(bounds.center_x() - fitted.width / 2.0),
+                    on_physical_pixel(bounds.center_y() - fitted.height / 2.0),
+                ),
+                fitted,
+            )
+        };
 
-        renderer.draw_svg(svg, Rectangle::new(position, fitted), bounds);
+        renderer.draw_svg(svg, drawn, bounds);
     }
 }
 
@@ -497,7 +729,7 @@ pub fn logo<'a, M: 'a>(letters: bool, width: f32, height: f32) -> Element<'a, M>
 /// Render a multi-colour tool icon using semantic colours from the active theme.
 pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
         tint: None,
@@ -507,7 +739,7 @@ pub fn semantic<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 /// [`semantic`] faded like disabled menu text.
 pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
         tint: None,
@@ -518,7 +750,7 @@ pub fn semantic_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<
 /// is: the whole canvas fits the box and the lines keep their own width.
 pub fn tool<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
         tint: None,
@@ -528,7 +760,7 @@ pub fn tool<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
 /// [`tool`] faded like disabled menu text.
 pub fn tool_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
         tint: None,
@@ -538,20 +770,51 @@ pub fn tool_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, 
 /// A chrome icon in the theme's text colour, drawn like [`tool`].
 pub fn chrome<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 1.0,
-        tint: Some(|theme| theme.palette().background.base.text),
+        tint: Some(Box::new(|theme: &Theme| {
+            theme.palette().background.base.text
+        })),
     })
 }
 
 /// [`chrome`] faded like disabled menu text.
 pub fn chrome_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
     Element::new(SemanticIcon {
-        bytes,
+        bytes: art_for(bytes, size),
         size,
         opacity: 0.42,
-        tint: Some(|theme| theme.palette().background.base.text),
+        tint: Some(Box::new(|theme: &Theme| {
+            theme.palette().background.base.text
+        })),
+    })
+}
+
+/// A one-colour icon `size` × `size` in the colour `color` picks from the
+/// theme, drawn like [`chrome`]: its art chosen and fitted for the physical
+/// size, on whole physical pixels.
+pub fn tinted<'a, M: 'a>(
+    bytes: &'static [u8],
+    size: f32,
+    color: impl Fn(&Theme) -> Color + 'a,
+) -> Element<'a, M> {
+    tinted_faded(bytes, size, 1.0, color)
+}
+
+/// [`tinted`] at `opacity`. The fade goes through the opacity: a tint only
+/// replaces RGB, so alpha on the colour would be ignored.
+pub fn tinted_faded<'a, M: 'a>(
+    bytes: &'static [u8],
+    size: f32,
+    opacity: f32,
+    color: impl Fn(&Theme) -> Color + 'a,
+) -> Element<'a, M> {
+    Element::new(SemanticIcon {
+        bytes: art_for(bytes, size),
+        size,
+        opacity,
+        tint: Some(Box::new(color)),
     })
 }
 
@@ -561,26 +824,37 @@ fn size_key(size: f32) -> u16 {
 }
 
 thread_local! {
-    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize), svg::Handle>> =
+    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize, u32, u32), svg::Handle>> =
         RefCell::new(FxHashMap::default());
 }
 
-/// The handle of a one-colour icon.
-fn tinted_handle(bytes: &'static [u8]) -> svg::Handle {
-    let key = (bytes.as_ptr() as usize, bytes.len());
+/// The handle of a one-colour icon drawn `pixels` physical px wide.
+fn tinted_handle(bytes: &'static [u8], pixels: u32) -> svg::Handle {
+    let cap = ribbon_weight();
+    let key = (bytes.as_ptr() as usize, bytes.len(), pixels, cap);
     if let Some(handle) = TINTED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
         return handle;
     }
-    let handle = svg::Handle::from_memory(bytes);
-    TINTED_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
+    let handle = grid_handle(bytes, Some((pixels, cap)));
+    TINTED_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        // Every UI scale or monitor DPI adds one handle per icon; start over
+        // rather than keep the sizes no longer drawn.
+        if cache.len() >= SEMANTIC_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, handle.clone());
+    });
     handle
 }
 
-fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
+fn semantic_handle(bytes: &'static [u8], theme: &Theme, pixels: u32) -> svg::Handle {
     let key = SemanticCacheKey {
         address: bytes.as_ptr() as usize,
         length: bytes.len(),
         palette: palette_key(theme),
+        pixels,
+        cap: ribbon_weight(),
     };
 
     SEMANTIC_CACHE.with(|cache| {
@@ -589,7 +863,9 @@ fn semantic_handle(bytes: &'static [u8], theme: &Theme) -> svg::Handle {
             return handle.clone();
         }
 
-        let handle = svg::Handle::from_memory(recolor_semantic_svg(bytes, theme));
+        let themed = recolor_semantic_svg(bytes, theme);
+        let handle =
+            svg::Handle::from_memory(grid_svg(&themed, Some((pixels, key.cap))).unwrap_or(themed));
         if cache.len() >= SEMANTIC_CACHE_LIMIT {
             cache.clear();
         }
@@ -733,115 +1009,74 @@ fn color_hex(color: Color) -> [u8; 7] {
 
 /// Render a chrome icon with the active Iced theme's normal text color.
 pub fn themed<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().background.base.text
+    })
 }
 
 /// Render secondary chrome with the active Iced theme's text color.
 pub fn themed_secondary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text.scale_alpha(0.72)),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().background.base.text.scale_alpha(0.72)
+    })
 }
 
 /// Render disabled chrome with the active Iced theme's text color, faded
 /// like disabled text. The fade goes through the widget's opacity: an SVG
 /// tint only replaces RGB, so alpha on the style colour would be ignored.
 pub fn themed_disabled<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .opacity(0.42_f32)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().background.base.text),
-        })
-        .into()
+    tinted_faded(bytes, size, 0.42, |theme: &Theme| {
+        theme.palette().background.base.text
+    })
 }
 
 /// Render an emphasized chrome icon with the active Iced theme's primary color.
 pub fn themed_primary<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().primary.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().primary.base.color
+    })
 }
 
 /// Render an icon with the foreground chosen for a weak primary surface.
 pub fn themed_primary_weak_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().primary.weak.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().primary.weak.text
+    })
 }
 
 /// Render a positive-state chrome icon with the active Iced theme's success color.
 pub fn themed_success<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().success.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().success.base.color
+    })
 }
 
 /// Render an icon with the foreground chosen for a success-coloured surface.
 pub fn themed_success_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().success.base.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().success.base.text
+    })
 }
 
 /// Render a warning-state chrome icon from the active Iced theme.
 pub fn themed_warning<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().warning.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().warning.base.color
+    })
 }
 
 /// Render a destructive-state chrome icon from the active Iced theme.
 pub fn themed_danger<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().danger.base.color),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().danger.base.color
+    })
 }
 
 /// Render an icon with the foreground chosen for a danger-coloured surface.
 pub fn themed_danger_text<'a, M: 'a>(bytes: &'static [u8], size: f32) -> Element<'a, M> {
-    svg(themed_handle(bytes))
-        .width(size)
-        .height(size)
-        .style(|theme: &Theme, _| svg::Style {
-            color: Some(theme.palette().danger.base.text),
-        })
-        .into()
+    tinted(bytes, size, |theme: &Theme| {
+        theme.palette().danger.base.text
+    })
 }
 
 /// Fixed-width check column colored from the active Iced theme.
@@ -1104,21 +1339,55 @@ pub fn set_scale_factor(scale: f32) {
     );
 }
 
+/// The window's own scale factor, as the system sets it (without the
+/// application's UI scale).
 pub fn scale_factor() -> f32 {
     SCALE_FACTOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
 }
 
+/// The application's UI scale (Options), in thousandths.
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1000);
+
+/// Note the application's UI scale, as handed to iced's `scale_factor`.
+pub fn set_ui_scale(scale: f32) {
+    UI_SCALE.store(
+        (scale * 1000.0).round() as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+}
+
+/// Physical pixels per logical pixel, as iced draws: the window's scale
+/// times the application's UI scale.
+pub fn pixel_scale() -> f32 {
+    scale_factor() * UI_SCALE.load(std::sync::atomic::Ordering::Relaxed) as f32 / 1000.0
+}
+
 /// The width of a line one physical pixel wide, in logical pixels: a 1 px
-/// line at a fractional window scale (125 %, 150 %) would cover one or two
+/// line at a fractional scale (125 %, 150 %) would cover one or two
 /// pixels depending on where it falls.
 pub fn hairline() -> f32 {
-    1.0 / scale_factor()
+    1.0 / pixel_scale()
 }
 
 /// `value` moved onto the nearest whole physical pixel.
 fn on_physical_pixel(value: f32) -> f32 {
-    let scale = scale_factor();
+    let scale = pixel_scale();
     (value * scale).round() / scale
+}
+
+/// A square of about `size` logical px centred on `(center_x, center_y)`:
+/// `round(size × scale)` physical px wide, with its corner on a whole
+/// physical pixel.
+fn physical_square(center_x: f32, center_y: f32, size: f32) -> Rectangle {
+    let scale = pixel_scale();
+    let side = (size * scale).round().max(1.0) / scale;
+    Rectangle::new(
+        Point::new(
+            on_physical_pixel(center_x - side / 2.0),
+            on_physical_pixel(center_y - side / 2.0),
+        ),
+        Size::new(side, side),
+    )
 }
 
 thread_local! {
@@ -1292,8 +1561,298 @@ mod tests {
         assert!(contains(&themed, &colors.text));
     }
 
+    fn icon_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                icon_files(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "svg") {
+                out.push(path);
+            }
+        }
+    }
+
+    fn icons_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/icons")
+    }
+
+    /// `name="<value>"` in the root `<svg>` tag.
+    fn root_attr<'a>(source: &'a str, name: &str) -> Option<&'a str> {
+        let root = &source[..source.find('>')?];
+        let start = root.find(&format!(" {name}=\""))? + name.len() + 3;
+        Some(&root[start..start + root[start..].find('"')?])
+    }
+
+    #[test]
+    fn icon_files_are_square_pixel_grid_svgs() {
+        let mut files = Vec::new();
+        icon_files(&icons_dir(), &mut files);
+        assert!(files.len() > 800, "only {} icon files", files.len());
+        for path in files {
+            // A brand logo, kept as its owner draws it.
+            if path.ends_with("reddit.svg") {
+                continue;
+            }
+            let bytes = std::fs::read(&path).unwrap();
+            let source = std::str::from_utf8(&bytes).unwrap();
+            let name = path.display();
+            for banned in ["currentColor", "var(", "<style", "class="] {
+                assert!(!source.contains(banned), "{name} contains {banned}");
+            }
+            let width = root_attr(source, "width").unwrap_or_else(|| panic!("{name}: width"));
+            let height = root_attr(source, "height").unwrap_or_else(|| panic!("{name}: height"));
+            let view_box =
+                root_attr(source, "viewBox").unwrap_or_else(|| panic!("{name}: viewBox"));
+            assert_eq!(width, height, "{name}");
+            assert_eq!(view_box, format!("0 0 {width} {width}"), "{name}");
+            let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default())
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            let side: f32 = width.parse().unwrap();
+            assert_eq!(tree.size().width(), side, "{name}");
+            assert_eq!(tree.size().height(), side, "{name}");
+        }
+    }
+
+    /// Every 32 px drawing is found from its own 16 px file. The pairs are
+    /// looked up by content, so two byte-identical 16 px files with
+    /// different 32 px drawings would both get the first one: such a pair
+    /// needs 16 px drawings that differ.
+    #[test]
+    fn every_large_icon_has_a_small_partner() {
+        let large_root = icons_dir().join("32");
+        let mut files = Vec::new();
+        icon_files(&large_root, &mut files);
+        assert_eq!(files.len(), ICON_PAIRS.len());
+        for large_path in files {
+            let relative = large_path.strip_prefix(&large_root).unwrap();
+            let rel = relative.to_string_lossy().replace('\\', "/");
+            let small_path = icons_dir().join(relative);
+            assert!(small_path.is_file(), "32/{rel} has no 16 px partner");
+            let small: &'static [u8] = std::fs::read(&small_path).unwrap().leak();
+            let large = std::fs::read(&large_path).unwrap();
+            let found = large_art(small).unwrap_or_else(|| panic!("no large art for {rel}"));
+            assert!(
+                found == large.as_slice(),
+                "{rel} finds another icon's 32 px art: its 16 px file is identical to another's"
+            );
+        }
+    }
+
+    #[test]
+    fn art_for_picks_the_drawing_by_size() {
+        let cases: [(&'static [u8], &[u8]); 3] = [
+            (
+                include_bytes!("../../assets/icons/line.svg"),
+                include_bytes!("../../assets/icons/32/line.svg"),
+            ),
+            (
+                include_bytes!("../../assets/icons/arc/arc_sca.svg"),
+                include_bytes!("../../assets/icons/32/arc/arc_sca.svg"),
+            ),
+            (UNDO, include_bytes!("../../assets/icons/32/ui/undo.svg")),
+        ];
+        for (small, large) in cases {
+            assert_eq!(art_for(small, metrics::SMALL_ICON), small);
+            assert_eq!(art_for(small, metrics::LARGE_ICON), large);
+            assert_eq!(art_for(small, metrics::LARGE_ART_MIN), large);
+        }
+        // Bytes without a 32 px drawing are drawn as they are.
+        let plain: &'static [u8] = b"<svg/>";
+        assert_eq!(art_for(plain, metrics::LARGE_ICON), plain);
+    }
+
+    /// Writes icons as they are drawn at 100–200 % (scaled, and fitted to
+    /// the grid) to `$OCS_ICON_DUMP`, with a `manifest.txt` of one row per
+    /// icon and size: `pixels:path` cells. For looking at the result.
+    /// `$OCS_ICON_DUMP_NAMES` (comma-separated asset paths) picks the icons.
+    #[test]
+    #[ignore = "writes files; set OCS_ICON_DUMP and run with --ignored"]
+    fn dump_fitted_icons() {
+        let Some(dir) = std::env::var_os("OCS_ICON_DUMP").map(std::path::PathBuf::from) else {
+            return;
+        };
+        let named = std::env::var("OCS_ICON_DUMP_NAMES").unwrap_or_default();
+        let named: Vec<&str> = named.split(',').filter(|name| !name.is_empty()).collect();
+        let default = [
+            "line.svg",
+            "polyline.svg",
+            "circle/circle_cr.svg",
+            "arc/arc_3p.svg",
+            "rotate.svg",
+            "mirror.svg",
+            "fillet.svg",
+            "dim_linear.svg",
+            "area.svg",
+            "explode.svg",
+            "array_rect.svg",
+            "paste.svg",
+            "match_prop.svg",
+            "ui/undo.svg",
+            "text.svg",
+            "helix.svg",
+        ];
+        let icons: &[&str] = if named.is_empty() { &default } else { &named };
+        let mut manifest = String::new();
+        for (art, sub) in [(16u32, ""), (32, "32/")] {
+            for &name in icons {
+                let Ok(source) = std::fs::read(icons_dir().join(format!("{sub}{name}"))) else {
+                    continue;
+                };
+                for percent in [100u32, 125, 150, 175, 200] {
+                    let n = art * percent / 100;
+                    let flat = name.replace('/', "_");
+                    for (kind, svg) in [
+                        ("scaled", sharpen_grid_svg(&source).unwrap()),
+                        ("fitted", grid_svg(&source, Some((n, u32::MAX))).unwrap()),
+                    ] {
+                        let path = dir.join(format!("{kind}_{art}_{percent}_{flat}"));
+                        std::fs::write(&path, svg).unwrap();
+                        manifest.push_str(&format!("{n}:{} ", path.display()));
+                    }
+                }
+                manifest.push('\n');
+            }
+        }
+        std::fs::write(dir.join("manifest.txt"), manifest).unwrap();
+    }
+
+    /// The pair lookup on a warm cache, next to a `themed_handle` hit.
+    /// Release-profile wall-clock numbers; run with `--ignored`.
+    #[test]
+    #[ignore = "wall-clock benchmark; run with --ignored"]
+    fn art_for_costs_less_than_a_handle_lookup() {
+        const N: u32 = 200_000;
+        let _ = art_for(UNDO, metrics::LARGE_ICON);
+        let _ = themed_handle(UNDO);
+        let start = std::time::Instant::now();
+        for _ in 0..N {
+            std::hint::black_box(art_for(
+                std::hint::black_box(UNDO),
+                std::hint::black_box(metrics::LARGE_ICON),
+            ));
+        }
+        let art_ns = start.elapsed().as_nanos() as f64 / f64::from(N);
+        let start = std::time::Instant::now();
+        for _ in 0..N {
+            std::hint::black_box(themed_handle(std::hint::black_box(UNDO)));
+        }
+        let handle_ns = start.elapsed().as_nanos() as f64 / f64::from(N);
+        println!("art_for warm: {art_ns:.1} ns, themed_handle warm: {handle_ns:.1} ns");
+        assert!(art_ns < 100.0, "art_for takes {art_ns:.1} ns");
+    }
+
+    #[test]
+    fn sharpening_keeps_grid_lines_crisp_and_doubles_the_rest() {
+        let source = br##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16"><defs><mask id="m1"><path d="M0 0H16V16H0Z" fill="#fff"/></mask></defs><g mask="url(#m1)"><path d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/></g><path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/><path d="M2 12H4V14H2Z" fill="#4a9eff"/><path d="M1 1L5 5" fill="none" stroke="#ffffff" stroke-opacity="0.5"/><path d="M2.5 2.5H8.5V8.5" fill="none" stroke="#ffffff" stroke-dasharray="1 1"/></svg>"##;
+        let sharp = String::from_utf8(sharpen_grid_svg(source).unwrap()).unwrap();
+        // Horizontal and vertical lines are crisp, which keeps dashes apart.
+        assert!(sharp.contains(
+            r##"<path shape-rendering="crispEdges" d="M2.5 2.5H8.5V8.5" fill="none" stroke="#ffffff" stroke-dasharray="1 1"/>"##
+        ));
+        // A diagonal, like a curve, stays smooth and is drawn twice.
+        let diagonal = r##"<path d="M3.5 12.5L6.5 6.5" fill="none" stroke="#ffffff"/>"##;
+        assert_eq!(sharp.matches(diagonal).count(), 2);
+        let arc = r##"<path d="M2 8A6 6 0 0 1 14 8" fill="none" stroke="#ffffff"/>"##;
+        assert_eq!(sharp.matches(arc).count(), 2);
+        assert_eq!(sharp.matches(r##"<path d="M2 12H4V14H2Z""##).count(), 2);
+        // Masks and paths with their own opacity are left alone.
+        assert_eq!(
+            sharp
+                .matches(r##"<path d="M0 0H16V16H0Z" fill="#fff"/>"##)
+                .count(),
+            1
+        );
+        assert_eq!(sharp.matches("M1 1L5 5").count(), 1);
+        assert!(!sharp.contains(r#"crispEdges" d="M1 1"#));
+        // Anything not drawn on a 16 or 32 px grid is not touched.
+        assert!(
+            sharpen_grid_svg(br#"<svg viewBox="0 0 24 24"><path d="M1 1L2 2"/></svg>"#).is_none()
+        );
+    }
+
+    #[test]
+    fn every_icon_still_parses_once_sharpened() {
+        let mut files = Vec::new();
+        icon_files(&icons_dir(), &mut files);
+        let mut sharpened = 0;
+        for path in files {
+            let bytes = std::fs::read(&path).unwrap();
+            let Some(sharp) = sharpen_grid_svg(&bytes) else {
+                continue;
+            };
+            sharpened += 1;
+            resvg::usvg::Tree::from_data(&sharp, &resvg::usvg::Options::default())
+                .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        }
+        assert!(sharpened > 800, "only {sharpened} icons sharpened");
+    }
+
+    #[test]
+    fn recolouring_keeps_masks_intact() {
+        let source = include_bytes!("../../assets/icons/32/add_scale.svg");
+        assert!(contains(source, b"url(#m1)"));
+        for theme in [Theme::Dark, Theme::Light] {
+            let themed = recolor_semantic_svg(source, &theme);
+            for kept in [
+                &b"fill=\"#fff\""[..],
+                b"fill=\"#000\"",
+                b"url(#m1)",
+                b"id=\"m1\"",
+            ] {
+                assert!(contains(&themed, kept), "{}", String::from_utf8_lossy(kept));
+            }
+            let colors = SemanticColors::from_theme(&theme);
+            assert!(contains(&themed, &colors.text));
+            assert!(contains(&themed, &colors.primary));
+        }
+    }
+
     fn contains(source: &[u8], needle: &[u8]) -> bool {
         source.windows(needle.len()).any(|window| window == needle)
+    }
+
+    /// Every slot the ribbon, the dock rail and the panel buttons draw at
+    /// gets the ribbon's line weight at every scale: never thicker (the
+    /// 20 and 22 px slots at 125 % and 200 %), and never thinner where the
+    /// slot is at least the 16 px art's size.
+    #[test]
+    fn slots_draw_the_ribbons_line_weight() {
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0, 2.5] {
+            let ribbon = grid::line_weight(f64::from(scale));
+            for size in [16.0_f32, 20.0, 22.0, 32.0] {
+                let art = if size >= metrics::LARGE_ART_MIN {
+                    32
+                } else {
+                    16
+                };
+                let pixels = (size * scale).round() as u32;
+                assert_eq!(
+                    grid::fitted_weight(art, pixels, ribbon),
+                    ribbon,
+                    "{size} px at {scale}"
+                );
+            }
+        }
+        // A small chrome glyph keeps its own, thinner weight.
+        assert_eq!(grid::fitted_weight(16, 14, 2), 1);
+    }
+
+    /// The layer state cells draw only the state glyph; the layer stack with
+    /// the badge stays on the ribbon tools that switch every layer.
+    #[test]
+    fn layer_states_are_not_the_ribbon_tool_icons() {
+        for (state, command) in [
+            (layer_visible(true), "LAYON"),
+            (layer_visible(false), "LAYOFF"),
+            (layer_freeze(true), "LAYFRZ"),
+            (layer_freeze(false), "LAYTHW"),
+            (layer_lock(true), "LAYLCK"),
+            (layer_lock(false), "LAYULK"),
+        ] {
+            let tool = crate::modules::registry::command_icon(command)
+                .unwrap_or_else(|| panic!("{command} has a ribbon icon"));
+            assert_ne!(state, tool, "{command}");
+        }
     }
 }
 
@@ -1339,7 +1898,7 @@ mod themed_cache_tests {
         })
     }
 
-    /// Two calls to the public `themed` function with the same
+    /// Two calls to `themed_handle` with the same
     /// `&'static [u8]` must share a single cache entry: the second
     /// call is a cache hit, not a fresh `Handle::from_memory`.
     #[test]
@@ -1350,8 +1909,8 @@ mod themed_cache_tests {
             "precondition: TRI_DOWN must not be cached before the test"
         );
         let size_before = themed_cache_size_for_test();
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
+        let _ = themed_handle(TRI_DOWN);
         assert_eq!(
             themed_cache_size_for_test(),
             size_before + 1,
@@ -1378,8 +1937,8 @@ mod themed_cache_tests {
             TRI_UP.len()
         ));
         let size_before = themed_cache_size_for_test();
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
-        let _: Element<'static, ()> = themed(TRI_UP, 16.0);
+        let _ = themed_handle(TRI_DOWN);
+        let _ = themed_handle(TRI_UP);
         assert_eq!(
             themed_cache_size_for_test(),
             size_before + 2,
@@ -1420,7 +1979,7 @@ mod themed_cache_tests {
         );
         let size_before = themed_cache_size_for_test();
         // Warm the cache with the first call (miss → build → insert).
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
         let cached_after_first =
             themed_cache_get_handle_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len())
                 .expect("cache must hold the handle after the first call");
@@ -1431,7 +1990,7 @@ mod themed_cache_tests {
             "first call must insert exactly one entry"
         );
         // Second call: must be a cache hit, not a fresh build.
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
         let cached_after_second =
             themed_cache_get_handle_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len())
                 .expect("cache must still hold the handle after the second call");
@@ -1443,32 +2002,16 @@ mod themed_cache_tests {
         let _ = (cached_after_first, cached_after_second);
     }
 
-    /// Wrapper functions (e.g. `themed_arrow_down`) delegate to
-    /// the 9 `themed*` byte-taking functions and therefore inherit
-    /// the cache transparently. This end-to-end test confirms the
-    /// delegation: a wrapper call populates the cache for its
-    /// underlying static bytes. The cache entry is cleared first so
-    /// the assertion is independent of test execution order (tests
-    /// share the `thread_local!` when run on the same thread).
+    /// The `themed*` functions draw through `SemanticIcon`'s one-colour
+    /// mode: its handle is built once per art and physical size and then
+    /// shared, and a different physical size gets its own fitted art.
     #[test]
-    fn themed_wrapper_populates_cache_for_underlying_bytes() {
-        themed_cache_remove_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len());
-        assert!(
-            !themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()),
-            "precondition: TRI_DOWN must not be cached before the call"
-        );
-        let size_before = themed_cache_size_for_test();
-        // `themed_arrow_down` delegates to `themed(TRI_DOWN, size)`.
-        let _: Element<'static, ()> = themed_arrow_down(16.0);
-        assert_eq!(
-            themed_cache_size_for_test(),
-            size_before + 1,
-            "one wrapper call must populate exactly one cache entry (delta +1)"
-        );
-        assert!(
-            themed_cache_contains_for_test(TRI_DOWN.as_ptr(), TRI_DOWN.len()),
-            "the cache must hold an entry for the wrapper's underlying bytes (TRI_DOWN)"
-        );
+    fn tinted_handles_are_cached_per_physical_size() {
+        let first = super::tinted_handle(TRI_DOWN, 16);
+        let again = super::tinted_handle(TRI_DOWN, 16);
+        let larger = super::tinted_handle(TRI_DOWN, 20);
+        assert_eq!(first.id(), again.id());
+        assert_ne!(first.id(), larger.id());
     }
 
     /// Cache key includes length: a sub-slice of a static must not
@@ -1490,7 +2033,7 @@ mod themed_cache_tests {
         assert!(!themed_cache_contains_for_test(sub.as_ptr(), sub.len()));
         let size_before = themed_cache_size_for_test();
         // Populate full static.
-        let _: Element<'static, ()> = themed(TRI_DOWN, 16.0);
+        let _ = themed_handle(TRI_DOWN);
         assert!(themed_cache_contains_for_test(
             TRI_DOWN.as_ptr(),
             TRI_DOWN.len()

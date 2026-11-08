@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Pyramid">
-  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M15 3 3 22 16 28Z" fill="#DCE7F0"/>
-    <path d="M15 3 16 28 29 21Z" fill="#A9BFCE"/>
-    <path d="M15 3 29 21 24 12Z" fill="#718C9E"/>
-  </g>
-  <path d="m15 4 1 23" stroke="#F4F8FC" stroke-width="1"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M7.5 1.5L1.5 11.5L7.5 14.5Z" fill="#ffffff" fill-opacity="0.12"/><path d="M7.5 1.5L7.5 14.5L13.5 11.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M7.5 1.5L1.5 11.5L7.5 14.5L13.5 11.5Z" fill="none" stroke="#ffffff"/><path d="M7.5 1.5L7.5 14.5" fill="none" stroke="#ffffff"/></svg>

@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Section Plane">
-  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M5 11 16 5 24 9 13 15Z" fill="#DCE7F0"/>
-    <path d="M5 11 13 15V26L5 22Z" fill="#A9BFCE"/>
-    <path d="M13 15 24 9V20L13 26Z" fill="#6DB7ED"/>
-  </g>
-  <path d="M10 17 27 8V22L10 30Z" fill="#6DB7ED" fill-opacity="0.28" stroke="#6DB7ED" stroke-width="1.4" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M7.5 1.5L13.5 4.5L7.5 7.5L1.5 4.5Z" fill="#ffffff" fill-opacity="0.2"/><path d="M1.5 4.5L7.5 7.5L7.5 14.5L1.5 11.5Z" fill="#ffffff" fill-opacity="0.12"/><path d="M7.5 7.5L13.5 4.5L13.5 11.5L7.5 14.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M7.5 1.5L13.5 4.5L13.5 11.5L7.5 14.5L1.5 11.5L1.5 4.5Z" fill="none" stroke="#ffffff"/><path d="M1.5 4.5L7.5 7.5L13.5 4.5" fill="none" stroke="#ffffff"/><path d="M7.5 7.5L7.5 14.5" fill="none" stroke="#ffffff"/><path d="M4.5 2.5L10.5 5.5L10.5 13.5L4.5 10.5Z" fill="none" stroke="#4a9eff"/></svg>

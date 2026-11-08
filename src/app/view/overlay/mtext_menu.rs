@@ -29,7 +29,7 @@ fn close() -> Message {
 
 /// Readable but clearly secondary: the panel text at reduced opacity.
 fn dim(theme: &Theme) -> Color {
-    theme.palette().background.base.text.scale_alpha(0.45)
+    crate::ui::style::readable::muted_text(theme)
 }
 
 fn item_style(theme: &Theme, status: button::Status) -> button::Style {

@@ -322,6 +322,6 @@ pub fn selection_note<'a>(count: usize, search_all: Message) -> Element<'a, Mess
 
 pub fn muted<'a>(label: impl text::IntoFragment<'a>, size: f32) -> iced::widget::Text<'a> {
     text(label).size(size).style(|theme: &Theme| text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     })
 }

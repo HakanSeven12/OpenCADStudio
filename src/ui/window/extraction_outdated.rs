@@ -33,12 +33,11 @@ pub fn view<'a>(
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| settings.to_string());
-    let badge = container(
-        iced::widget::svg(crate::ui::icons::themed_handle(crate::ui::icons::WARNING))
-            .width(18.0)
-            .height(18.0)
-            .style(|_: &Theme, _| iced::widget::svg::Style { color: Some(AMBER) }),
-    )
+    let badge = container(crate::ui::icons::tinted(
+        crate::ui::icons::WARNING,
+        18.0,
+        |_: &Theme| AMBER,
+    ))
     .width(34)
     .height(34)
     .center_x(34)

@@ -146,14 +146,32 @@ impl CadModule for BlockEditorModule {
                 manage.tools.push(command("BGRIPSET", "Parameter Grips", include_bytes!("../../../assets/icons/ui/list.svg")));
                 manage.tools.push(command("BCONSTATUSMODE TOGGLE", "Constraint Status", include_bytes!("../../../assets/icons/constrain/fixed.svg")));
                 manage.tools.push(RibbonItem::LargeDropdown {
-                    id: "BLOCK_CONSTRUCTION", label: "Construction Geometry",
-                    icon: IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg")),
+                    id: "BLOCK_CONSTRUCTION",
+                    label: "Construction Geometry",
+                    icon: IconKind::Svg(crate::ui::icons::EYE),
                     items: vec![
-                        ("BCONSTRUCTION CONVERT", "Convert", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                        ("BCONSTRUCTION REVERT", "Revert", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show.svg"))),
-                        ("BCONSTRUCTION SHOW", "Show All", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/show_all.svg"))),
-                        ("BCONSTRUCTION HIDE", "Hide All", IconKind::Svg(include_bytes!("../../../assets/icons/constrain/hide_all.svg"))),
-                    ], default: "BCONSTRUCTION CONVERT",
+                        (
+                            "BCONSTRUCTION CONVERT",
+                            "Convert",
+                            IconKind::Svg(crate::ui::icons::EYE),
+                        ),
+                        (
+                            "BCONSTRUCTION REVERT",
+                            "Revert",
+                            IconKind::Svg(crate::ui::icons::EYE),
+                        ),
+                        (
+                            "BCONSTRUCTION SHOW",
+                            "Show All",
+                            IconKind::Svg(crate::ui::icons::EYE_ALL),
+                        ),
+                        (
+                            "BCONSTRUCTION HIDE",
+                            "Hide All",
+                            IconKind::Svg(crate::ui::icons::EYE_OFF),
+                        ),
+                    ],
+                    default: "BCONSTRUCTION CONVERT",
                 });
                 manage.tools.push(command(
                     "BCYCLEORDER",
@@ -175,7 +193,7 @@ impl CadModule for BlockEditorModule {
                     command(
                         "BAUTHORPALETTE",
                         "Authoring Palettes",
-                        include_bytes!("../../../assets/icons/tool_palettes.svg"),
+                        crate::ui::icons::AUTHORING_PALETTES,
                     ),
                 );
             }
@@ -191,25 +209,19 @@ impl CadModule for BlockEditorModule {
                     RibbonItem::Tool(ToolDef {
                         id: "BVMODE_TOGGLE",
                         label: "Visibility Mode",
-                        icon: IconKind::Svg(include_bytes!(
-                            "../../../assets/icons/constrain/show_all.svg"
-                        )),
+                        icon: IconKind::Svg(crate::ui::icons::EYE_ALL),
                         event: ModuleEvent::Command("BVMODE TOGGLE".into()),
                     }),
                     RibbonItem::Tool(ToolDef {
                         id: "BVSHOW",
                         label: "Make Visible",
-                        icon: IconKind::Svg(include_bytes!(
-                            "../../../assets/icons/constrain/show.svg"
-                        )),
+                        icon: IconKind::Svg(crate::ui::icons::EYE),
                         event: ModuleEvent::Command("BVSHOW".into()),
                     }),
                     RibbonItem::Tool(ToolDef {
                         id: "BVHIDE",
                         label: "Make Invisible",
-                        icon: IconKind::Svg(include_bytes!(
-                            "../../../assets/icons/constrain/hide_all.svg"
-                        )),
+                        icon: IconKind::Svg(crate::ui::icons::EYE_OFF),
                         event: ModuleEvent::Command("BVHIDE".into()),
                     }),
                 ],

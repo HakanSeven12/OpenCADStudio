@@ -83,7 +83,7 @@ fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Messa
         tool(
             "BVMODE_TOGGLE",
             "Visibility Mode",
-            include_bytes!("../../../assets/icons/constrain/show_all.svg"),
+            crate::ui::icons::EYE_ALL,
             false,
             mode,
             target.map(|target| Message::BlockVisibility(Action::Mode(target)))
@@ -91,7 +91,7 @@ fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Messa
         tool(
             "BVSHOW",
             "Make Visible",
-            include_bytes!("../../../assets/icons/constrain/show.svg"),
+            crate::ui::icons::EYE,
             false,
             false,
             target.map(|_| Message::Command("BVSHOW".into()))
@@ -99,7 +99,7 @@ fn view(context: Option<RibbonContext>, compact: bool) -> Element<'static, Messa
         tool(
             "BVHIDE",
             "Make Invisible",
-            include_bytes!("../../../assets/icons/constrain/hide_all.svg"),
+            crate::ui::icons::EYE_OFF,
             false,
             false,
             target.map(|_| Message::Command("BVHIDE".into()))

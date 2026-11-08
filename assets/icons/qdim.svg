@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Qdim">
-  <line x1="5" y1="6" x2="5" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="19" y1="6" x2="19" y2="18" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="7" y1="11" x2="17" y2="11" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="9,9 7,11 9,13" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="15,9 17,11 15,13" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polygon points="18,15 21,18 18,21 15,18" stroke="none" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 7.5L1.5 14.5" fill="none" stroke="#f0c040"/><path d="M7.5 7.5L7.5 14.5" fill="none" stroke="#f0c040"/><path d="M14.5 7.5L14.5 14.5" fill="none" stroke="#f0c040"/><path d="M2 11.5L5 10L5 13Z" fill="#f0c040"/><path d="M7 11.5L4 10L4 13Z" fill="#f0c040"/><path d="M8 11.5L11 10L11 13Z" fill="#f0c040"/><path d="M14 11.5L11 10L11 13Z" fill="#f0c040"/><path d="M8 1L6 5L8 5L7 8L10 4L8 4L9 1Z" fill="#4a9eff"/></svg>

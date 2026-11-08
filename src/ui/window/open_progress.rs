@@ -112,7 +112,7 @@ pub fn view<'a>(progress: &'a OpenProgress, _now: Instant) -> Element<'a, Messag
     ))
     .size(13)
     .style(|theme: &Theme| iced::widget::text::Style {
-        color: Some(theme.palette().background.base.text.scale_alpha(0.82)),
+        color: Some(crate::ui::style::readable::muted_text(theme)),
     });
 
     let phase_line = text(format!(

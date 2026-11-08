@@ -1,9 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Flatshot">
-  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M8 7 16 3 24 7 16 11Z" fill="#DCE7F0"/>
-    <path d="M8 7 16 11V17L8 13Z" fill="#A9BFCE"/>
-    <path d="M16 11 24 7V13L16 17Z" fill="#718C9E"/>
-  </g>
-  <path d="M16 18V22m-2.2-1.8L16 22.5l2.2-2.3" fill="none" stroke="#6DB7ED" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M6 25 16 21 26 25 16 29Z" fill="none" stroke="#6DB7ED" stroke-width="1.6" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M7.5 1.5L10.5 3L7.5 4.5L4.5 3Z" fill="#ffffff" fill-opacity="0.2"/><path d="M4.5 3L7.5 4.5L7.5 7.5L4.5 6Z" fill="#ffffff" fill-opacity="0.12"/><path d="M7.5 4.5L10.5 3L10.5 6L7.5 7.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M7.5 1.5L10.5 3L10.5 6L7.5 7.5L4.5 6L4.5 3Z" fill="none" stroke="#ffffff"/><path d="M4.5 3L7.5 4.5L10.5 3" fill="none" stroke="#ffffff"/><path d="M7.5 4.5L7.5 7.5" fill="none" stroke="#ffffff"/><path d="M1.5 11.5L7.5 8.5L13.5 11.5L7.5 14.5Z" fill="none" stroke="#4a9eff"/><path d="M2 11.5L7.5 9L13 11.5L7.5 14Z" fill="#ffffff" fill-opacity="0.05"/></svg>

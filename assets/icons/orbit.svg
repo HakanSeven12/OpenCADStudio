@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="12" cy="12" r="8" stroke="#B4B6B9" stroke-width="1.5"/>
-  <ellipse cx="12" cy="12" rx="8" ry="3" stroke="#B4B6B9" stroke-width="1.5"/>
-  <path d="M 5,7 A 9 9 0 0 1 19,7" stroke="#6DB7ED" stroke-width="1.5"/>
-  <polyline points="17,4.5 19,7 16.5,8.5" stroke="#6DB7ED" stroke-width="1.5"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M10.5 8.5A3 3 0 1 1 4.5 8.5A3 3 0 1 1 10.5 8.5Z" fill="none" stroke="#ffffff"/><path d="M 14.5 8.5 A 6.92 3.46 0 1 1 7.5 4.5" fill="none" stroke="#4a9eff"/><path d="M9.5 4.5L6.5 3L6.5 6Z" fill="#4a9eff"/></svg>

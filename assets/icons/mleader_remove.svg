@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Mleader Remove">
-  <polyline points="4,18 10,12 18,12" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polygon points="3.5,18.5 6.5,17.5 4.5,15.5" stroke="none" fill="#6DB7ED"/>
-  <line x1="14" y1="8" x2="20" y2="8" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="14" y1="5" x2="19" y2="5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="16.8" y1="18" x2="21.2" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M9 10H15V15H9Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M2.5 10.5L6.5 6.5L8.5 6.5" fill="none" stroke="#f0c040"/><path d="M1 12L4.18 10.94L2.06 8.82Z" fill="#f0c040"/><path d="M9.5 4.5L13.5 4.5" fill="none" stroke="#ffffff"/><path d="M9.5 6.5L12.5 6.5" fill="none" stroke="#ffffff"/></g><path d="M10 12.5L15 12.5" fill="none" stroke="#e05050"/></svg>

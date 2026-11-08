@@ -501,6 +501,7 @@ impl OpenCADStudio {
                         "DARK LIGHT DRACULA NORD SOLARIZED_LIGHT SOLARIZED_DARK \
                          GRUVBOX_LIGHT GRUVBOX_DARK TOKYONIGHT TOKYONIGHTSTORM TOKYONIGHTLIGHT \
                          KANAGAWAWAVE KANAGAWADRAGON KANAGAWALOTUS MOONFLY NIGHTFLY OXOCARBON FERRA \
+                         FUSION_BLACK FUSION_WHITE STUDIO_DARK \
                          SYSTEM (follows the OS or browser color scheme)",
                     ));
                     return Some(Task::none());
@@ -521,7 +522,7 @@ impl OpenCADStudio {
                         self.saved_custom_palette = Some(self.ui_theme.palette);
                     }
                     let resolved = crate::app::config::resolve_system_theme();
-                    let name = format!("{resolved:?}");
+                    let name = resolved.to_string();
                     self.ui_theme.name = "System".to_string();
                     self.ui_theme.palette =
                         crate::app::config::UiThemePalette::from_iced(resolved.seed());
@@ -539,7 +540,7 @@ impl OpenCADStudio {
                     if self.ui_theme.name == "Custom" {
                         self.saved_custom_palette = Some(self.ui_theme.palette);
                     }
-                    let name = format!("{:?}", t);
+                    let name = t.to_string();
                     self.ui_theme.name = t.to_string();
                     self.ui_theme.palette = crate::app::config::UiThemePalette::from_iced(t.seed());
                     self.theme_color_inputs = self.ui_theme.palette.hex_values();

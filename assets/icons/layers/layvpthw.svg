@@ -1,10 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <rect x="1.5" y="3.5" width="21" height="17" rx="1.5" fill="none" stroke="#8FA3B5" stroke-width="1.6"/>
-  <circle cx="12" cy="12" r="2.6" fill="#f0c040" fill-opacity="0.4" stroke="#f0c040" stroke-width="1.6"/>
-  <g stroke="#f0c040" stroke-width="1.6" stroke-linecap="round">
-    <line x1="12" y1="6.3" x2="12" y2="7.6"/>
-    <line x1="12" y1="16.4" x2="12" y2="17.7"/>
-    <line x1="6.3" y1="12" x2="7.6" y2="12"/>
-    <line x1="16.4" y1="12" x2="17.7" y2="12"/>
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M5 5H16V16H5Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M0.5 0.5H12.5V10.5H0.5Z" fill="none" stroke="#ffffff"/></g><path d="M13 11A2 2 0 1 1 9 11A2 2 0 1 1 13 11Z" fill="#f0c040"/><path d="M10 6H12V8H10Z" fill="#f0c040"/><path d="M10 14H12V16H10Z" fill="#f0c040"/><path d="M6 10H8V12H6Z" fill="#f0c040"/><path d="M14 10H16V12H14Z" fill="#f0c040"/><path d="M7 7H8V8H7Z" fill="#f0c040"/><path d="M14 7H15V8H14Z" fill="#f0c040"/><path d="M7 14H8V15H7Z" fill="#f0c040"/><path d="M14 14H15V15H14Z" fill="#f0c040"/></svg>

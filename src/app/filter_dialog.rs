@@ -2084,7 +2084,7 @@ mod view {
         text(s.into())
             .size(11)
             .style(|theme: &Theme| iced::widget::text::Style {
-                color: Some(theme.palette().background.base.text.scale_alpha(0.7)),
+                color: Some(crate::ui::style::readable::muted_text(theme)),
             })
     }
 
@@ -2131,7 +2131,7 @@ mod view {
                 text_color: if on {
                     palette.primary.base.color
                 } else {
-                    palette.background.base.text.scale_alpha(0.7)
+                    crate::ui::style::readable::muted_text(theme)
                 },
                 border: Border {
                     color: if on {
@@ -2726,7 +2726,7 @@ mod view {
                 ))
                 .size(11)
                 .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                    color: Some(crate::ui::style::readable::hint_text(theme)),
                 }),
             );
         } else {
@@ -2747,7 +2747,7 @@ mod view {
                 ))
                 .size(11)
                 .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(theme.palette().background.base.text.scale_alpha(0.65)),
+                    color: Some(crate::ui::style::readable::hint_text(theme)),
                 }),
             );
         }

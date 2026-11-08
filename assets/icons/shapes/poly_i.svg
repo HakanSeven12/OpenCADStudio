@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <circle cx="12" cy="12" r="8" stroke="#6DB7ED" stroke-width="1" stroke-dasharray="2 2" fill="none"/>
-  <polygon points="20,12 16,5 8,5 4,12 8,19 16,19" stroke="#B4B6B9" stroke-width="2" fill="none"/>
-  <line x1="12" y1="12" x2="20" y2="12" stroke="#6DB7ED" stroke-width="1.5" stroke-dasharray="2 2"/>
-  <circle cx="12" cy="12" r="1.8" fill="#6DB7ED"/>
-  <circle cx="20" cy="12" r="1.8" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M6 6H10V10H6ZM6 0H10V4H6Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M8 1.5L14.5 4.75L14.5 11.25L8 14.5L1.5 11.25L1.5 4.75Z" fill="none" stroke="#ffffff"/></g><path d="M7 7H9V9H7Z" fill="#4a9eff"/><path d="M7 1H9V3H7Z" fill="#4a9eff"/></svg>

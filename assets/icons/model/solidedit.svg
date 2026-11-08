@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Solid Edit">
-  <g stroke="#526B80" stroke-width="1.1" stroke-linejoin="round">
-    <path d="M4 10 15 4 26 10 15 16Z" fill="#DCE7F0"/>
-    <path d="M4 10 15 16V28L4 22Z" fill="#A9BFCE"/>
-    <path d="M15 16 26 10V22L15 28Z" fill="#6DB7ED"/>
-  </g>
-  <path d="M21 18 29 22m-3.5.8L29 22l-.8-3.5" fill="none" stroke="#6DB7ED" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M6 11L12 5L15 8L15 10L10 15L6 15Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M5.5 1.5L9.5 3.5L5.5 5.5L1.5 3.5Z" fill="#ffffff" fill-opacity="0.2"/><path d="M1.5 3.5L5.5 5.5L5.5 9.5L1.5 7.5Z" fill="#ffffff" fill-opacity="0.12"/><path d="M5.5 5.5L9.5 3.5L9.5 7.5L5.5 9.5Z" fill="#ffffff" fill-opacity="0.05"/><path d="M5.5 1.5L9.5 3.5L9.5 7.5L5.5 9.5L1.5 7.5L1.5 3.5Z" fill="none" stroke="#ffffff"/><path d="M1.5 3.5L5.5 5.5L9.5 3.5" fill="none" stroke="#ffffff"/><path d="M5.5 5.5L5.5 9.5" fill="none" stroke="#ffffff"/></g><path d="M7.5 11.5L12.5 6.5L14.5 8.5L9.5 13.5L7.5 13.5L7.5 11.5" fill="none" stroke="#4a9eff"/><path d="M7.5 11.5L9.5 13.5" fill="none" stroke="#4a9eff"/><path d="M7 11L10 14L7 14Z" fill="#4a9eff"/></svg>

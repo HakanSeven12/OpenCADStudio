@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Triangular ruler" fill="none" stroke-linejoin="round">
-  <path d="M3.5 3.5 20.5 20.5h-17Z M7.161165 12.338835v4.5h4.5Z" fill="#6DB7ED" fill-opacity=".16" fill-rule="evenodd"/>
-  <path d="M3.5 3.5 20.5 20.5h-17Z" stroke="#B4B6B9" stroke-width="1.5"/>
-  <path d="M7.161165 12.338835v4.5h4.5Z" stroke="#6DB7ED" stroke-width="1.1"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 11.5L11.5 1.5L14.5 4.5L4.5 14.5Z" fill="none" stroke="#f0c040"/><path d="M4.5 8.5L6.5 10.5" fill="none" stroke="#f0c040"/><path d="M6.5 6.5L7.5 7.5" fill="none" stroke="#f0c040"/><path d="M8.5 4.5L10.5 6.5" fill="none" stroke="#f0c040"/></svg>

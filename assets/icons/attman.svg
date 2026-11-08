@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Attman">
-  <path d="M4 7 L10 3 H19 V12 L13 18 L4 9 Z" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <circle cx="8" cy="7" r="1.2" stroke="none" fill="#6DB7ED"/>
-  <line x1="11" y1="12" x2="18" y2="12" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="11" y1="15" x2="18" y2="15" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="11" y1="18" x2="16" y2="18" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M1.5 1.5L7.5 1.5L10.5 4.5L7.5 7.5L1.5 7.5Z" fill="none" stroke="#ffffff"/><path d="M1.5 10.5L12.5 10.5" fill="none" stroke="#4a9eff"/><path d="M1.5 12.5L12.5 12.5" fill="none" stroke="#4a9eff"/><path d="M1.5 14.5L12.5 14.5" fill="none" stroke="#4a9eff"/></svg>

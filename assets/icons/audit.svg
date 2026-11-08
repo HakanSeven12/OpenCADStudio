@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M9 3 H5 a1 1 0 0 0 -1 1 v16 a1 1 0 0 0 1 1 h14 a1 1 0 0 0 1 -1 V4 a1 1 0 0 0 -1 -1 h-4" stroke="#B4B6B9" stroke-width="1.5"/>
-  <rect x="9" y="1" width="6" height="4" rx="1" stroke="#B4B6B9" stroke-width="1.5"/>
-  <polyline points="7,12 10,15 17,9" stroke="#6DB7ED" stroke-width="1.5"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M5 1H11V4H5Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M2.5 2.5H13.5V14.5H2.5Z" fill="none" stroke="#ffffff"/></g><path d="M5.5 1.5H10.5V3.5H5.5Z" fill="none" stroke="#ffffff"/><path d="M4.5 8.5L6.5 10.5L10.5 6.5" fill="none" stroke="#4a9eff"/></svg>

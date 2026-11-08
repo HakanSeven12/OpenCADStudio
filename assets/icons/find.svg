@@ -1,4 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Find">
-  <circle cx="10" cy="10" r="5" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="14.3" y1="14.3" x2="20" y2="20" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M11.5 6.5A5 5 0 1 1 1.5 6.5A5 5 0 1 1 11.5 6.5Z" fill="none" stroke="#ffffff"/><path d="M10.5 10.5L14.5 14.5" fill="none" stroke="#ffffff"/><path d="M4.5 8.5L6.5 4.5L8.5 8.5" fill="none" stroke="#4a9eff"/></svg>

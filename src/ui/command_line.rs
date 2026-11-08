@@ -878,7 +878,7 @@ impl CommandLine {
                 text_editor::Style {
                     background: Background::Color(palette.background.base.color),
                     border: Border::default(),
-                    placeholder: palette.background.base.text.scale_alpha(0.72),
+                    placeholder: crate::ui::style::readable::hint_text(theme),
                     value: palette.background.base.text,
                     selection: palette.primary.base.color.scale_alpha(0.5),
                 }
@@ -1333,7 +1333,7 @@ impl CommandLine {
                     text_editor::Style {
                         background: Background::Color(palette.background.base.color),
                         border: Border::default(),
-                        placeholder: palette.background.base.text.scale_alpha(0.72),
+                        placeholder: crate::ui::style::readable::hint_text(theme),
                         value: palette.background.base.text,
                         selection: palette.primary.base.color.scale_alpha(0.5),
                     }

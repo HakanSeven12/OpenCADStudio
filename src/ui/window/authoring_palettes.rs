@@ -66,10 +66,7 @@ const PARAMETERS: &[(&str, &[u8])] = &[
         include_bytes!("../../../assets/icons/modify_align.svg"),
     ),
     ("Flip", include_bytes!("../../../assets/icons/mirror.svg")),
-    (
-        "Visibility",
-        include_bytes!("../../../assets/icons/constrain/show.svg"),
-    ),
+    ("Visibility", crate::ui::icons::EYE),
     (
         "Lookup",
         include_bytes!("../../../assets/icons/data_extract.svg"),
@@ -177,10 +174,7 @@ const PARAMETER_SETS: &[(&str, &[u8])] = &[
         "Flip Set",
         include_bytes!("../../../assets/icons/mirror.svg"),
     ),
-    (
-        "Visibility Set",
-        include_bytes!("../../../assets/icons/constrain/show.svg"),
-    ),
+    ("Visibility Set", crate::ui::icons::EYE),
     (
         "Lookup Set",
         include_bytes!("../../../assets/icons/data_extract.svg"),

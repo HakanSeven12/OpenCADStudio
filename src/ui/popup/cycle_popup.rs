@@ -97,7 +97,7 @@ fn item_row(
                 .size(10)
                 .align_x(Horizontal::Right)
                 .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(theme.palette().background.base.text.scale_alpha(0.72)),
+                    color: Some(crate::ui::style::readable::muted_text(theme)),
                 })
         )
         .width(Length::Fixed(layer_w))

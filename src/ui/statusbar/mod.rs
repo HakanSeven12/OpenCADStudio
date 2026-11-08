@@ -962,7 +962,7 @@ fn polar_pill<'a>(
                     color: Some(if active {
                         palette.primary.weak.text
                     } else {
-                        palette.background.base.text.scale_alpha(0.72)
+                        crate::ui::style::readable::muted_text(theme)
                     }),
                 }
             }),
@@ -1025,7 +1025,7 @@ fn quad_pill<'a>(
             color: Some(if on {
                 palette.primary.weak.text
             } else {
-                palette.background.base.text.scale_alpha(0.72)
+                crate::ui::style::readable::muted_text(theme)
             }),
         }
     });
@@ -1150,7 +1150,7 @@ fn space_tab<'a>(
         } else if is_active {
             palette.primary.weak.text
         } else {
-            palette.background.base.text.scale_alpha(0.72)
+            crate::ui::style::readable::muted_text(theme)
         };
         container::Style {
             background: is_active.then_some(Background::Color(palette.primary.weak.color)),

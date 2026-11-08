@@ -1,7 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="64" height="64">
-  <!-- Diagonal line from bottom-left to top-right -->
-  <line x1="4" y1="20" x2="20" y2="4" stroke="#B4B6B9" stroke-width="2" stroke-linecap="round"/>
-  <!-- Endpoint dots -->
-  <circle cx="4"  cy="20" r="2" fill="#6DB7ED"/>
-  <circle cx="20" cy="4"  r="2" fill="#6DB7ED"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><defs><mask id="m1" maskUnits="userSpaceOnUse" x="0" y="0" width="16" height="16"><path d="M0 0H16V16H0Z" fill="#fff"/><path d="M0 12H4V16H0ZM12 0H16V4H12Z" fill="#000"/></mask></defs><g mask="url(#m1)"><path d="M1.5 14.5L14.5 1.5" fill="none" stroke="#ffffff"/></g><path d="M1 13H3V15H1Z" fill="#4a9eff"/><path d="M13 1H15V3H13Z" fill="#4a9eff"/></svg>

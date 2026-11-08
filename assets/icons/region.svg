@@ -1,3 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Region" fill="none" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M3 8L11 3L21 8V21H3Z" fill="#B4B6B9" stroke="none"/><circle cx="12" cy="13" r="4" fill="#6DB7ED" stroke="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M2 2L14 2L14 8L8 8L8 14L2 14Z" fill="#4a9eff" fill-opacity="0.4"/><path d="M1.5 1.5L14.5 1.5L14.5 8.5L8.5 8.5L8.5 14.5L1.5 14.5Z" fill="none" stroke="#4a9eff"/></svg>

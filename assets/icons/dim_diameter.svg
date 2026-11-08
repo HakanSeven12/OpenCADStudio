@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Dim Diameter">
-  <circle cx="12" cy="12" r="7" stroke="#B4B6B9" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <line x1="6" y1="18" x2="18" y2="6" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <polyline points="7,14 6,18 10,17" stroke="#6DB7ED" stroke-width="1.625" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter"><path d="M14.5 7.5A7 7 0 1 1 0.5 7.5A7 7 0 1 1 14.5 7.5Z" fill="none" stroke="#ffffff"/><path d="M5.5 9.5L9.5 5.5" fill="none" stroke="#f0c040"/><path d="M13 2L9.5 3.5L11.5 5.5Z" fill="#f0c040"/><path d="M2 13L5.5 11.5L3.5 9.5Z" fill="#f0c040"/></svg>

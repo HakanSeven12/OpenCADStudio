@@ -197,6 +197,9 @@ pub const MINIMIZED_BUTTON_ICON: f32 = 22.0;
 pub const SMALL_ICON: f32 = 16.0;
 /// Size large icons are drawn at.
 pub const LARGE_ICON: f32 = 32.0;
+/// From this logical size up an icon is drawn from its 32 px artwork
+/// (`assets/icons/32/`) instead of its 16 px artwork.
+pub const LARGE_ART_MIN: f32 = 24.0;
 /// Size of the icons of tiny strip buttons, such as the search box's
 /// collapse button.
 pub const STRIP_ICON: f32 = 14.0;

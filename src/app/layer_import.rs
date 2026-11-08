@@ -433,7 +433,7 @@ mod view {
             text(s)
                 .size(11)
                 .style(|theme: &Theme| iced::widget::text::Style {
-                    color: Some(theme.palette().background.base.text.scale_alpha(0.7)),
+                    color: Some(crate::ui::style::readable::muted_text(theme)),
                 })
         };
         // As in the mockup: Source with Browse…; All · None · Only new and
@@ -510,7 +510,7 @@ mod view {
                     .width(Length::Fixed(w))
                     .wrapping(iced::widget::text::Wrapping::None)
                     .style(move |theme: &Theme| iced::widget::text::Style {
-                        color: dim.then(|| theme.palette().background.base.text.scale_alpha(0.55)),
+                        color: dim.then(|| crate::ui::style::readable::hint_text(theme)),
                     })
             };
             let line = row![

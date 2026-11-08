@@ -749,9 +749,9 @@ Rules and budgets:
   ids), exactly like `register_quad_panels`.
 - **Icons**: `QuadItemDef.icon` reuses the ribbon `IconKind`, so custom
   SVG bytes ride the same `OwnedIconKind` wire encoding as ribbon tools.
-  Recommended artwork is a 24×24 viewBox with `currentColor` strokes/fills
-  (multicolour is allowed but fixed colours do not re-theme); icons are
-  parsed once at registration and cached, never per frame. An icon over the
+  Quad items draw that SVG at 24 px as it is (see "Plugin icons" below for
+  what that means for the artwork); icons are parsed once at registration
+  and cached, never per frame. An icon over the
   **8 KiB** budget or failing to parse does not abort registration — the item
   renders the glyph fallback (label-derived abbreviation) instead.
 - **v14 compat**: plugins compiled against v14 or older keep working
@@ -761,6 +761,30 @@ Rules and budgets:
 - Runnable reference: [`docs/plugin-template-v2/`](plugin-template-v2) —
   panel bound to `Insert`, one `Command` item and one `Callback` item with a
   custom SVG icon.
+
+## Plugin icons
+
+A plugin sends one SVG per tool (`IconKind::Svg`). Where it ends up decides
+how it is drawn:
+
+- **Ribbon, command search, QAT, menus**: drawn like the built-in icons.
+  - *Size*: draw on the OCS pixel grid, `width="16" height="16"
+    viewBox="0 0 16 16"`, with 1 px strokes on half-pixel coordinates
+    (`M3.5 2.5H12.5`) and fills on whole pixels. The host recognises that
+    art by its viewBox and fits it to the screen's pixels at every size and
+    scale, so lines stay one or two pixels wide and sharp. Any other viewBox
+    (24×24, say) is scaled as it is and looks soft.
+  - *32 px slots*: the built-in icons have a separate 32 px drawing; a
+    plugin cannot send one, so its 16 px art is fitted to the large slot.
+  - *Colour*: use the OCS palette, which the host maps to the active theme:
+    `#ffffff` for lines and text-coloured parts, `#888888` for secondary
+    parts, `#4a9eff` for the accent, `#4ccf6f` (success), `#f0c040`
+    (warning) and `#e05050` (danger). The full list is `semantic_color` in
+    `src/ui/icons.rs`. Other colours are drawn as they are. `currentColor`
+    is not filled in and renders black.
+- **Quad menu items**: drawn at 24 px as they are, without fitting or
+  recolouring (see [quad-menu.md](quad-menu.md)). Draw them on a 24×24
+  viewBox in their final colours.
 
 ## HostApi vs MCP — the two surfaces
 

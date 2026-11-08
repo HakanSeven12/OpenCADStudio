@@ -169,31 +169,25 @@ fn large_art(bytes: &'static [u8]) -> Option<&'static [u8]> {
     found
 }
 
-/// The artwork to draw an icon from at `size` logical px: the 32 px drawing
-/// from [`metrics::LARGE_ART_MIN`] up when there is one, otherwise `bytes`.
-/// The choice is made on the logical size, so small slots use the 16 px art
-/// and large slots the 32 px art at every screen scale.
+/// The artwork to draw an icon from at `size` logical px, so its lines come
+/// out as thick as the ribbon's at the current screen scale:
+///
+/// - from [`metrics::LARGE_ART_MIN`] up, the 32 px drawing when there is
+///   one;
+/// - below it, the 16 px drawing, unless that drawing scaled to the slot's
+///   physical size would get thicker lines than the ribbon has while the
+///   32 px drawing would not. A 20 or 22 px slot at 150 % is 30 or 33 px,
+///   where the 16 px drawing's lines turn 2 px and the ribbon's are 1 px.
+///
+/// The ribbon's own 16 px and 32 px slots never switch.
 pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
-    if size >= metrics::LARGE_ART_MIN {
-        large_art(bytes).unwrap_or(bytes)
+    let Some(large) = large_art(bytes) else {
+        return bytes;
+    };
+    if size >= metrics::LARGE_ART_MIN || prefers_large_art(physical_pixels(size), pixel_scale()) {
+        large
     } else {
         bytes
-    }
-}
-
-/// [`art_for`] for a slot between the 16 px and 32 px sizes, such as the
-/// dock rail's 20 px: the drawing whose lines come out as thick as the
-/// ribbon's at the current screen scale. At 150 % the 16 px drawing is
-/// scaled to 30 px, where its lines turn 2 px while the ribbon's are still
-/// 1 px; the 32 px drawing keeps them 1 px there.
-pub(crate) fn art_with_ribbon_weight(bytes: &'static [u8], size: f32) -> &'static [u8] {
-    let art = art_for(bytes, size);
-    if !std::ptr::eq(art, bytes) {
-        return art;
-    }
-    match large_art(bytes) {
-        Some(large) if prefers_large_art(physical_pixels(size), pixel_scale()) => large,
-        _ => bytes,
     }
 }
 
@@ -848,7 +842,15 @@ fn tinted_handle(bytes: &'static [u8], pixels: u32) -> svg::Handle {
         return handle;
     }
     let handle = grid_handle(bytes, Some(pixels));
-    TINTED_CACHE.with(|cache| cache.borrow_mut().insert(key, handle.clone()));
+    TINTED_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        // Every UI scale or monitor DPI adds one handle per icon; start over
+        // rather than keep the sizes no longer drawn.
+        if cache.len() >= SEMANTIC_CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, handle.clone());
+    });
     handle
 }
 
@@ -1615,16 +1617,10 @@ mod tests {
         }
     }
 
-    /// 16 px files that are byte-identical but whose 32 px drawings differ:
-    /// the bytes cannot tell them apart, so both get the first partner in
-    /// path order.
-    const SHARED_SMALL_ART: &[&str] = &[
-        "constrain/distance_x.svg",
-        "box3d.svg",
-        "mt_cancel.svg",
-        "vports_restore.svg",
-    ];
-
+    /// Every 32 px drawing is found from its own 16 px file. The pairs are
+    /// looked up by content, so two byte-identical 16 px files with
+    /// different 32 px drawings would both get the first one: such a pair
+    /// needs 16 px drawings that differ.
     #[test]
     fn every_large_icon_has_a_small_partner() {
         let large_root = icons_dir().join("32");
@@ -1640,8 +1636,8 @@ mod tests {
             let large = std::fs::read(&large_path).unwrap();
             let found = large_art(small).unwrap_or_else(|| panic!("no large art for {rel}"));
             assert!(
-                found == large.as_slice() || SHARED_SMALL_ART.contains(&rel.as_str()),
-                "{rel} finds another icon's 32 px art"
+                found == large.as_slice(),
+                "{rel} finds another icon's 32 px art: its 16 px file is identical to another's"
             );
         }
     }
@@ -1819,23 +1815,29 @@ mod tests {
         source.windows(needle.len()).any(|window| window == needle)
     }
 
-    /// The dock rail's 20 px icons keep the ribbon's line weight: the 32 px
+    /// A slot between 16 and 32 px (the dock rail's 20 px, a minimized
+    /// panel button's 22 px) keeps the ribbon's line weight: the 32 px
     /// drawing where the 16 px one would turn 2 px while the ribbon is 1 px.
     #[test]
-    fn rail_icons_take_the_drawing_with_the_ribbons_line_weight() {
+    fn slots_between_the_sizes_keep_the_ribbons_line_weight() {
         let rail = |scale: f32| prefers_large_art((20.0 * scale).round() as u32, scale);
         assert!(!rail(1.0), "100 %: 16 px drawing, 1 px lines");
         assert!(!rail(1.25), "125 %: 16 px drawing, 1 px lines");
         assert!(rail(1.5), "150 %: 32 px drawing keeps 1 px lines");
         assert!(!rail(1.75), "175 %: the ribbon is 2 px too");
         assert!(!rail(2.0), "200 %: the ribbon is 2 px too");
+        let button = |scale: f32| prefers_large_art((22.0 * scale).round() as u32, scale);
+        assert!(!button(1.0), "100 %: 16 px drawing, 1 px lines");
+        assert!(
+            button(1.25),
+            "125 %: 28 px would turn the 16 px drawing 2 px"
+        );
+        assert!(button(1.5), "150 %: 32 px drawing keeps 1 px lines");
+        assert!(!button(2.0), "200 %: the ribbon is 2 px too");
         // The ribbon's own sizes never switch.
         for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
             assert!(!prefers_large_art((16.0 * scale).round() as u32, scale));
         }
-        // A 32 px drawing is picked only for art that has one.
-        let plain: &'static [u8] = b"<svg/>";
-        assert_eq!(art_with_ribbon_weight(plain, 20.0), plain);
     }
 
     /// The layer state cells draw only the state glyph; the layer stack with

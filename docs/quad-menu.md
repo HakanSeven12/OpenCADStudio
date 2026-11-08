@@ -332,10 +332,11 @@ frame cap (`ipc/transport.rs:18`), far above any icon.
 
 Contract for plugins (enforced + documented in `plugin-template-v2`):
 
-- **Format**: raw `<svg>` bytes; recommended 24×24 viewBox matching OCS icon
-  conventions; use `currentColor` for strokes/fills so the icon participates in
-  light/dark theming (multicolour artwork allowed, but fixed colours will not
-  re-theme).
+- **Format**: raw `<svg>` bytes. A quad item draws a plugin's SVG at 24 px as
+  it is: no pixel fitting and no theme recolouring, so draw it on a 24×24
+  viewBox with the colours it should have. `currentColor` is not filled in by
+  the host and renders black. Ribbon tools are drawn differently; see
+  "Plugin icons" in [plugin-architecture.md](plugin-architecture.md).
 - **Budget** (grip-cap style, honest and capped): ≤ 8 KiB of SVG per icon
   (`MAX_QUAD_ICON_BYTES`, `src/plugin/quad.rs`), at most 16 panels per plugin
   and 64 items per panel. The host keeps the declared bytes at registration

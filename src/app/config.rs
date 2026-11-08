@@ -279,9 +279,19 @@ pub fn all_themes() -> Vec<iced::Theme> {
 }
 
 pub fn builtin_theme(name: &str) -> Option<iced::Theme> {
-    all_themes()
-        .into_iter()
-        .find(|theme| theme.to_string() == name)
+    // Style code asks for this while drawing (`readable::base_theme`), and
+    // building every theme generates the Fusion palettes, so the list is
+    // made once. The first theme of a name wins, as a search would.
+    thread_local! {
+        static BY_NAME: rustc_hash::FxHashMap<String, iced::Theme> = {
+            let mut by_name = rustc_hash::FxHashMap::default();
+            for theme in all_themes() {
+                by_name.entry(theme.to_string()).or_insert(theme);
+            }
+            by_name
+        };
+    }
+    BY_NAME.with(|by_name| by_name.get(name).cloned())
 }
 
 fn color_to_rgb(color: iced::Color) -> [u8; 3] {

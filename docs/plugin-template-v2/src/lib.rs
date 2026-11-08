@@ -39,8 +39,9 @@ static ENTITY_CLASSES: EntityClasses = EntityClasses {
     labels: &[("POINT", "Survey Point")],
 };
 
-/// The quad panel's custom SVG icon: raw `<svg>` bytes, 24×24 viewBox,
-/// `currentColor` strokes so the icon follows the light/dark theme. It rides
+/// The quad panel's custom SVG icon: raw `<svg>` bytes, 24×24 viewBox. The
+/// quad menu draws it as it is, so its `currentColor` strokes render black
+/// (see "Plugin icons" in `docs/plugin-architecture.md`). It rides
 /// the same wire encoding as ribbon icons and is parsed once at registration
 /// (≤ 8 KiB; malformed or over-budget bytes fall back to the glyph tile).
 static QUAD_ICON: &[u8] = include_bytes!("../quad_icon.svg");

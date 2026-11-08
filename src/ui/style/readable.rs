@@ -11,7 +11,7 @@
 //! Secondary text is not faded with alpha but mixed towards the background
 //! only as far as it stays clearly readable ([`muted_text`]), and accents
 //! drawn as text or icons are pushed towards the text colour until they
-//! read ([`readable_accent_on`]).
+//! read ([`icon_accent`], [`accent_in_hue`]).
 
 use iced::theme::palette::Seed;
 use iced::{Color, Theme};
@@ -139,9 +139,75 @@ pub fn worst_contrast(color: Color, theme: &Theme) -> f32 {
     worst_contrast_on(color, &text_surfaces(theme))
 }
 
+/// A colour's exact bits, for a cache key.
+type ColorBits = [u32; 4];
+
+fn color_bits(color: Color) -> ColorBits {
+    [color.r, color.g, color.b, color.a].map(f32::to_bits)
+}
+
+/// What the reading surfaces of a theme are made from, exactly: its
+/// background, its text and the weak background shade.
+fn surface_key(theme: &Theme) -> [ColorBits; 3] {
+    let background = theme.palette().background;
+    [
+        background.base.color,
+        background.base.text,
+        background.weak.color,
+    ]
+    .map(color_bits)
+}
+
+/// How many answers a readable-colour cache keeps before it starts over.
+/// Each theme needs a handful; editing a custom theme's colours adds new
+/// ones for every step.
+const CACHE_LIMIT: usize = 256;
+
+/// The answer for `key` from `cache`, worked out by `work_out` the first
+/// time.
+fn cached<K: std::hash::Hash + Eq>(
+    cache: &'static std::thread::LocalKey<std::cell::RefCell<rustc_hash::FxHashMap<K, Color>>>,
+    key: K,
+    work_out: impl FnOnce() -> Color,
+) -> Color {
+    if let Some(color) = cache.with(|cache| cache.borrow().get(&key).copied()) {
+        return color;
+    }
+    let color = work_out();
+    cache.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= CACHE_LIMIT {
+            cache.clear();
+        }
+        cache.insert(key, color);
+    });
+    color
+}
+
 /// The theme's text mixed towards its background, opaque, as far as
 /// `max_fade` but never below `min_contrast` on any reading surface.
+///
+/// Text styles ask for it on every draw, for every label, so the answer is
+/// kept per theme: working it out takes up to 33 mixes, each checked on
+/// five surfaces.
 fn faded_text(theme: &Theme, max_fade: f32, min_contrast: f32) -> Color {
+    type Key = ([ColorBits; 3], u32, u32);
+    thread_local! {
+        static CACHE: std::cell::RefCell<rustc_hash::FxHashMap<Key, Color>> =
+            std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    }
+    let key = (
+        surface_key(theme),
+        max_fade.to_bits(),
+        min_contrast.to_bits(),
+    );
+    cached(&CACHE, key, || {
+        work_out_faded_text(theme, max_fade, min_contrast)
+    })
+}
+
+/// [`faded_text`] without the cache.
+fn work_out_faded_text(theme: &Theme, max_fade: f32, min_contrast: f32) -> Color {
     let background = theme.palette().background.base;
     let surfaces = reading_surfaces(theme);
     const STEPS: u8 = 32;
@@ -169,8 +235,21 @@ pub fn hint_text(theme: &Theme) -> Color {
 
 /// `color` as secondary text: itself when it already reads at
 /// [`MUTED_MIN_CONTRAST`] on every reading surface, otherwise
-/// [`muted_text`].
+/// [`muted_text`]. Kept per theme and colour, as [`faded_text`] is: the
+/// chrome's tab and title text ask for it on every draw.
 pub fn at_least_muted(color: Color, theme: &Theme) -> Color {
+    type Key = ([ColorBits; 3], ColorBits);
+    thread_local! {
+        static CACHE: std::cell::RefCell<rustc_hash::FxHashMap<Key, Color>> =
+            std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    }
+    cached(&CACHE, (surface_key(theme), color_bits(color)), || {
+        work_out_at_least_muted(color, theme)
+    })
+}
+
+/// [`at_least_muted`] without the cache.
+fn work_out_at_least_muted(color: Color, theme: &Theme) -> Color {
     if worst_contrast_on(color, &reading_surfaces(theme)) >= MUTED_MIN_CONTRAST {
         color
     } else {
@@ -336,6 +415,36 @@ mod tests {
             ] {
                 let ratio = worst_contrast_on(color, &surfaces);
                 assert!(ratio >= MUTED_MIN_CONTRAST, "{base}: chrome {ratio:.1}:1");
+            }
+        }
+    }
+
+    /// The kept answer is the worked-out one, for every theme and both
+    /// strengths, also when themes take turns.
+    #[test]
+    fn faded_text_is_kept_per_theme() {
+        let themes: Vec<Theme> = every_theme().iter().map(ui_theme).collect();
+        for _ in 0..2 {
+            for theme in &themes {
+                for (fade, contrast) in [
+                    (MUTED_MAX_FADE, MUTED_MIN_CONTRAST),
+                    (HINT_MAX_FADE, HINT_MIN_CONTRAST),
+                ] {
+                    assert_eq!(
+                        faded_text(theme, fade, contrast),
+                        work_out_faded_text(theme, fade, contrast)
+                    );
+                }
+                for color in [
+                    chrome::title_text(theme),
+                    chrome::tab_text(theme),
+                    theme.palette().background.base.text,
+                ] {
+                    assert_eq!(
+                        at_least_muted(color, theme),
+                        work_out_at_least_muted(color, theme)
+                    );
+                }
             }
         }
     }

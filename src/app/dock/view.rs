@@ -281,9 +281,7 @@ impl OpenCADStudio {
                     || (dragging
                         && movement
                             .is_some_and(|(panel, group, _)| group.is_none() && panel == id));
-                // 20 px sits between the drawn sizes: take the drawing whose
-                // lines are as thin as the ribbon's at this screen scale.
-                let art = crate::ui::icons::art_with_ribbon_weight(id.icon(), RAIL_ICON);
+                let art = id.icon();
                 let glyph = if faded {
                     crate::ui::icons::themed_disabled(art, RAIL_ICON)
                 } else if is_shown {

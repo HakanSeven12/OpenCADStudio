@@ -8668,14 +8668,9 @@ impl Scene {
         } else {
             self.paper_viewport_handles().2.len()
         };
-        let mut sets = self.resident_wire_sets.borrow_mut();
-        // Evict stale entries (older epochs / abandoned keys) so switching
-        // spaces or re-scaling a viewport can't accumulate dead full sets.
         let cur_epoch = self.geometry_epoch;
-        sets.retain(|_, set| set.epoch == cur_epoch);
-        if sets.len() > 16.max(shown + 2) {
-            sets.clear();
-        }
+        let mut sets = self.resident_wire_sets.borrow_mut();
+        self.prune_resident_wire_sets(&mut sets, shown);
         sets.insert(
             key,
             ResidentWireSet {
@@ -8686,6 +8681,43 @@ impl Scene {
             },
         );
         arc
+    }
+
+    /// Make room in the resident-set map for a freshly built or patched set.
+    ///
+    /// A stale entry is not dead weight: it is exactly what
+    /// [`Self::try_resident_patch`] moves forward, which refuses an entry
+    /// already at the current epoch. Pruning by epoch alone therefore deleted
+    /// the other viewports' bases every time one of them stored its own set,
+    /// so on a layout with N content viewports one patched and the other N-1
+    /// reported `resident-patch-skip reason=no-entry` and paid a full
+    /// assembly plus an arena build on every edit.
+    ///
+    /// Keep whatever the journal can still replay — `replay_since` refuses
+    /// anything below the floor — and bound the map by giving up the stalest
+    /// bases first, falling back to the wholesale clear only when the live
+    /// sets alone exceed the cap.
+    fn prune_resident_wire_sets(&self, sets: &mut HashMap<u64, ResidentWireSet>, shown: usize) {
+        let cur_epoch = self.geometry_epoch;
+        let floor = self.geometry_journal_floor.get();
+        sets.retain(|_, set| set.epoch == cur_epoch || set.epoch >= floor);
+        let cap = 16.max(shown + 2);
+        while sets.len() > cap {
+            let stalest = sets
+                .iter()
+                .filter(|(_, set)| set.epoch != cur_epoch)
+                .min_by_key(|(_, set)| set.epoch)
+                .map(|(key, _)| *key);
+            match stalest {
+                Some(key) => {
+                    sets.remove(&key);
+                }
+                None => {
+                    sets.clear();
+                    break;
+                }
+            }
+        }
     }
 
     fn resident_wire_key(
@@ -9394,8 +9426,16 @@ impl Scene {
             self.bind_memo_to_set(&arc, &layout.ranges);
         }
         let cur_epoch = self.geometry_epoch;
+        // Same bound as the full build: this path used to rely on the epoch
+        // prune alone, so weakening that without a cap here would let
+        // abandoned keys accumulate full sets.
+        let shown = if self.current_layout == "Model" {
+            0
+        } else {
+            self.paper_viewport_handles().2.len()
+        };
         let mut sets = self.resident_wire_sets.borrow_mut();
-        sets.retain(|_, set| set.epoch == cur_epoch);
+        self.prune_resident_wire_sets(&mut sets, shown);
         sets.insert(
             key,
             ResidentWireSet {
@@ -16941,6 +16981,47 @@ mod journal_tests {
         drop(wires);
 
         assert_eq!(scene.resident_patch_hits.get(), hits + 1);
+    }
+
+    #[test]
+    fn a_second_resident_set_still_patches_after_the_first_one_does() {
+        use document::entities::Line;
+        use document::types::Vector3;
+
+        fn line(y: f64) -> EntityType {
+            EntityType::Line(Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(10.0, y, 0.0),
+            ))
+        }
+
+        let mut scene = Scene::new();
+        scene.add_entity(line(0.0));
+        let block = scene.model_space_block_handle();
+        // Two resident keys over the same wires, as a paper layout's content
+        // viewports have: `None` and an empty frozen-layer set hash apart.
+        let unfrozen: HashSet<Handle> = HashSet::default();
+        drop(scene.resident_wires_for(block, None, None, None, None));
+        drop(scene.resident_wires_for(block, None, None, Some(&unfrozen), None));
+        assert_eq!(
+            scene.resident_wire_sets.borrow().len(),
+            2,
+            "the two keys must hold separate sets, or this proves nothing"
+        );
+
+        let hits = scene.resident_patch_hits.get();
+        scene.add_entity(line(1.0));
+        // The first set patches forward, and must not cost the second its base.
+        drop(scene.resident_wires_for(block, None, None, None, None));
+        drop(scene.resident_wires_for(block, None, None, Some(&unfrozen), None));
+
+        assert_eq!(
+            scene.resident_patch_hits.get(),
+            hits + 2,
+            "both sets must patch: pruning stale entries by epoch alone drops \
+             the set the next viewport was about to patch, and that viewport \
+             then pays a full assembly plus an arena build on every edit"
+        );
     }
 
     #[test]

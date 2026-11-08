@@ -427,6 +427,27 @@ impl OpenCADStudio {
         }
     }
 
+    /// The record the label keeps from creation: a model-space dimension names
+    /// the anonymous block that draws it, and that block holds the geometry the
+    /// solve left. Save reuses the same cache.
+    fn complete_created_dimension(
+        &mut self,
+        tab: usize,
+        dimension: document::Handle,
+        scope: crate::scene::parametric_constraints::ParametricScope,
+    ) {
+        if scope == crate::scene::parametric_constraints::ParametricScope::ModelSpace {
+            if let Some(document::EntityType::Dimension(d)) =
+                self.tabs[tab].scene.document.get_entity_mut(dimension)
+            {
+                d.base_mut().common.entity_mode = Some(2);
+            }
+        }
+        crate::modules::draw::modify::explode::bake_dimension_blocks(
+            &mut self.tabs[tab].scene.document,
+        );
+    }
+
     pub(super) fn handle_add_dimensional_constraint(
         &mut self,
         result: CmdResult,
@@ -623,19 +644,7 @@ impl OpenCADStudio {
         // DYNCONSTRAINTDISPLAY 0 also keeps a new dynamic dimension off screen.
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
-        // The record the reference keeps from creation: a model-space dimension
-        // names the anonymous block that draws it, and that block holds the
-        // geometry the solve left. Save reuses the same cache.
-        if scope == crate::scene::parametric_constraints::ParametricScope::ModelSpace {
-            if let Some(document::EntityType::Dimension(d)) =
-                self.tabs[i].scene.document.get_entity_mut(dimension)
-            {
-                d.base_mut().common.entity_mode = Some(2);
-            }
-        }
-        crate::modules::draw::modify::explode::bake_dimension_blocks(
-            &mut self.tabs[i].scene.document,
-        );
+        self.complete_created_dimension(i, dimension, scope);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
@@ -814,6 +823,7 @@ impl OpenCADStudio {
             .bump_entities_after_constraint_added(&changes, &anchors, false, &[]);
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
+        self.complete_created_dimension(i, dimension, scope);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;
@@ -1036,6 +1046,7 @@ impl OpenCADStudio {
         );
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
+        self.complete_created_dimension(i, dimension, scope);
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;

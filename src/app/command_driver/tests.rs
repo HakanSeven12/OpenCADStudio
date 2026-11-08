@@ -3636,6 +3636,60 @@ mod attedit_dash_tests {
         );
     }
 
+    /// Renaming a tag in the manager and syncing writes the new tag to the
+    /// definition and to the references that already carry it.
+    #[test]
+    fn battman_sync_renames_the_definition_tag_and_its_references() {
+        use crate::ui::window::attman_dialog::AttManMsg;
+        use document::entities::AttributeDefinition;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new("TAG1".into(), "Tag one".into(), String::new())
+            })],
+        );
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "SYNCED",
+            Vector3::new(100.0, 100.0, 0.0),
+        )));
+        let _ = app.dispatch_command("BATTMAN");
+
+        let _ = app.on_attman(AttManMsg::Tag("SHEET".into()));
+        let _ = app.on_attman(AttManMsg::Sync);
+
+        let doc = &app.tabs[i].scene.document;
+        let definition_tag = doc
+            .block_records
+            .get("SYNCED")
+            .expect("definition")
+            .entity_handles
+            .iter()
+            .find_map(|h| match doc.get_entity(*h) {
+                Some(EntityType::AttributeDefinition(def)) => Some(def.tag.clone()),
+                _ => None,
+            });
+        assert_eq!(
+            definition_tag.as_deref(),
+            Some("SHEET"),
+            "the definition takes the renamed tag"
+        );
+        let EntityType::Insert(insert) = doc.get_entity(reference).expect("reference") else {
+            panic!("not an insert");
+        };
+        assert_eq!(
+            insert.attributes[0].tag, "SHEET",
+            "and the reference is rebuilt against the renamed definition"
+        );
+    }
+
     fn set_values(app: &mut OpenCADStudio, handles: &[document::Handle], values: &[&str]) {
         let i = app.active_tab;
         for (handle, value) in handles.iter().zip(values) {

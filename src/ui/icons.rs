@@ -50,14 +50,14 @@ static OSNAP_MTP: &[u8] = include_bytes!("../../assets/icons/osnap/mtp.svg");
 static NAV_PAN: &[u8] = include_bytes!("../../assets/icons/pan.svg");
 static NAV_ZOOM: &[u8] = include_bytes!("../../assets/icons/zoom_in.svg");
 
-static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/layon.svg");
-static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/layoff.svg");
-static LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layfrz.svg");
-static LAY_THW: &[u8] = include_bytes!("../../assets/icons/layers/laythw.svg");
+static LAY_ON: &[u8] = include_bytes!("../../assets/icons/layers/state_on.svg");
+static LAY_OFF: &[u8] = include_bytes!("../../assets/icons/layers/state_off.svg");
+static LAY_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/state_freeze.svg");
+static LAY_THW: &[u8] = include_bytes!("../../assets/icons/layers/state_thaw.svg");
 static LAY_VP_FRZ: &[u8] = include_bytes!("../../assets/icons/layers/layvpfrz.svg");
 static LAY_VP_THW: &[u8] = include_bytes!("../../assets/icons/layers/layvpthw.svg");
-static LAY_LCK: &[u8] = include_bytes!("../../assets/icons/layers/laylck.svg");
-static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/layulk.svg");
+static LAY_LCK: &[u8] = include_bytes!("../../assets/icons/layers/state_lock.svg");
+static LAY_ULK: &[u8] = include_bytes!("../../assets/icons/layers/state_unlock.svg");
 
 // Monochrome chrome glyphs (replace Unicode glyphs in buttons / menus / toolbars).
 // All are black-on-transparent; recolour them at the call site with [`tinted`].
@@ -1788,6 +1788,24 @@ mod tests {
 
     fn contains(source: &[u8], needle: &[u8]) -> bool {
         source.windows(needle.len()).any(|window| window == needle)
+    }
+
+    /// The layer state cells draw only the state glyph; the layer stack with
+    /// the badge stays on the ribbon tools that switch every layer.
+    #[test]
+    fn layer_states_are_not_the_ribbon_tool_icons() {
+        for (state, command) in [
+            (layer_visible(true), "LAYON"),
+            (layer_visible(false), "LAYOFF"),
+            (layer_freeze(true), "LAYFRZ"),
+            (layer_freeze(false), "LAYTHW"),
+            (layer_lock(true), "LAYLCK"),
+            (layer_lock(false), "LAYULK"),
+        ] {
+            let tool = crate::modules::registry::command_icon(command)
+                .unwrap_or_else(|| panic!("{command} has a ribbon icon"));
+            assert_ne!(state, tool, "{command}");
+        }
     }
 }
 

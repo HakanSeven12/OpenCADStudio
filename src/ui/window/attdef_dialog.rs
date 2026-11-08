@@ -13,7 +13,7 @@ use crate::modules::draw::draw::attdef::{
 use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style};
-use crate::ui::window::pdf_dialogs::{accent_text, card_style};
+use crate::ui::window::pdf_dialogs::card_style;
 
 /// One edit in either attribute definition dialog.
 #[derive(Debug, Clone)]
@@ -103,17 +103,11 @@ fn msg(m: AttdefDialogMsg) -> Message {
 }
 
 fn card<'a>(title: String, content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
-    container(
-        column![
-            text(title.to_uppercase()).size(10).style(accent_text),
-            content.into()
-        ]
-        .spacing(8),
-    )
-    .padding([10, 12])
-    .width(Fill)
-    .style(card_style)
-    .into()
+    container(column![text(title).size(11).style(muted_style), content.into()].spacing(8))
+        .padding([10, 12])
+        .width(Fill)
+        .style(card_style)
+        .into()
 }
 
 fn labelled<'a>(label: String, field: Element<'a, Message>, enabled: bool) -> Element<'a, Message> {
@@ -206,10 +200,13 @@ fn error_band<'a>(error: &Option<String>) -> Option<Element<'a, Message>> {
     )
 }
 
-/// The face of the buttons that take a value from the drawing.
+/// The face of the buttons that take a value from the drawing: a dotted
+/// square over a crosshair, the pick-on-screen mark.
 fn screen_pick<'a>() -> Element<'a, Message> {
-    crate::ui::icons::themed(crate::ui::icons::SNAP, 14.0)
+    crate::ui::icons::themed_success(PICK_ON_SCREEN, 14.0)
 }
+
+static PICK_ON_SCREEN: &[u8] = include_bytes!("../../../assets/icons/ui/pick_point.svg");
 
 static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_triangle.svg");
 
@@ -613,6 +610,19 @@ mod tests {
         assert!(
             !shows(&state, "Define"),
             "the primary button no longer reads Define"
+        );
+    }
+
+    #[test]
+    fn the_group_headings_keep_their_mixed_case() {
+        let state = state();
+        assert!(
+            shows(&state, "Text Settings"),
+            "the heading is set in mixed case"
+        );
+        assert!(
+            !shows(&state, "TEXT SETTINGS"),
+            "the heading is not shouted in capitals"
         );
     }
 }

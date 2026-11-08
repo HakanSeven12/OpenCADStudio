@@ -38,5 +38,10 @@
     "repo": "AAD001-Dwg/OpenCadStudio-construction-layer-plugin",
     "name": "Construction Layers & Guides",
     "description": "Construction layers, infinite lines, rays, reference circles and LibreCAD/FreeCAD drafting guides with real-time viewport preview and auto-conversion."
+  },
+  {
+    "repo": "pabloxbezx/teren-ocs-plugin",
+    "name": "Terén",
+    "description": "Survey points and TIN surfaces: point import with format detection (PNEZD, PYXZD, S-JTSK), breaklines, boundaries and holes, manual triangle edits, contours, point and surface styles, 3D viewer, LandXML/DXF export. Czech and English."
   }
 ]

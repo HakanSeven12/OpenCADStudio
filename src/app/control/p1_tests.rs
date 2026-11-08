@@ -796,6 +796,117 @@ fn a_copied_attribute_reference_points_at_the_targets_definition() {
     );
 }
 
+/// A copied reference that shows its own evaluated copy brings both records —
+/// the anonymous copy it displays and the dynamic definition it was evaluated
+/// from — and keeps pointing at the definition in the target.
+#[test]
+fn a_copied_dynamic_reference_stays_dynamic_in_the_target() {
+    use crate::scene::block_visibility;
+    use document::entities::{EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let i = app.active_tab;
+    app.tabs[i].scene.define_block_raw(
+        "DYN",
+        Vector3::ZERO,
+        vec![EntityType::Line(Line::from_points(
+            Vector3::ZERO,
+            Vector3::UNIT_X,
+        ))],
+    );
+    let reference = app.tabs[i]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(Insert::new("DYN", Vector3::ZERO)))
+        .expect("the seeded reference");
+    let definition = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .get("DYN")
+        .unwrap()
+        .handle;
+    let member = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .get("DYN")
+        .unwrap()
+        .entity_handles[0];
+    {
+        let doc = &mut app.tabs[i].scene.document;
+        let parameter = block_visibility::create(doc, definition, Vector3::ZERO).unwrap();
+        block_visibility::add_state(doc, parameter, "Hidden", 0).unwrap();
+        block_visibility::set_visible(doc, parameter, 1, &[member], false);
+        block_visibility::finish_editing(doc, definition);
+    }
+
+    let name = app.tabs[i]
+        .scene
+        .visibility_representation(reference)
+        .expect("the reference gets its own evaluated copy");
+    assert!(name.starts_with("*U"), "and names it: {name}");
+
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    // Give the target a handle history of its own, so the source's record
+    // handle cannot pass for the target's by coincidence.
+    for _ in 0..6 {
+        app.tabs[1].scene.document.allocate_handle();
+    }
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"dy1","document_id":{target},"handles":["{:X}"]}}"#,
+        reference.value()
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    assert_eq!(r["result"]["count"], 1, "{r}");
+
+    let doc = &app.tabs[1].scene.document;
+    let pasted = doc
+        .entities()
+        .find_map(|entity| match entity {
+            EntityType::Insert(insert) if insert.block_name == name => Some(insert.common.handle),
+            _ => None,
+        })
+        .expect("the evaluated reference arrived");
+    let names: Vec<&str> = doc
+        .block_records
+        .iter()
+        .map(|record| record.name.as_str())
+        .collect();
+    assert!(
+        names.contains(&"DYN"),
+        "the dynamic definition travelled: {names:?}"
+    );
+    assert!(
+        names.contains(&name.as_str()),
+        "and so does the evaluated copy it displays: {names:?}"
+    );
+    let travelled = doc
+        .block_records
+        .get("DYN")
+        .expect("the definition travelled")
+        .handle;
+    assert_ne!(
+        travelled, definition,
+        "the target defines it under its own handle"
+    );
+    assert_eq!(
+        doc.dynamic_definition_for_insert(pasted),
+        Some(travelled),
+        "the reference still names the definition its copy was evaluated from, here in the target"
+    );
+    assert!(
+        doc.block_representations
+            .values()
+            .any(|&block| block == travelled),
+        "and the representation link is registered with this drawing"
+    );
+}
+
 /// A copied raster has to arrive registered in the target the way an
 /// interactive paste registers it: the target's own definition of its file,
 /// plus the reactor that links image and definition both ways. A copy that

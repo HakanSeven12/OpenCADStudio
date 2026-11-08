@@ -698,6 +698,51 @@ fn a_copied_nested_reference_brings_both_definitions() {
     );
 }
 
+/// A document that holds a reference to a definition it does not have keeps
+/// that reference when it is written and read back, so the missing record is
+/// still visible to the server's own audit after a round trip rather than
+/// being silently repaired or dropped on write.
+#[test]
+fn a_dangling_reference_survives_a_dxf_round_trip() {
+    use document::entities::Insert;
+    use document::types::Vector3;
+
+    let mut doc = document::Document::new();
+    doc.add_entity(document::EntityType::Insert(Insert::new(
+        "MISSING",
+        Vector3::ZERO,
+    )))
+    .expect("the seeded reference");
+    let bytes = document::DxfWriter::new(&doc)
+        .write_to_vec()
+        .expect("the drawing writes");
+    let reopened = document::DxfReader::from_reader(std::io::Cursor::new(bytes))
+        .expect("the drawing reads")
+        .read()
+        .expect("the drawing opens");
+    let reference = reopened
+        .entities()
+        .find_map(|entity| match entity {
+            document::EntityType::Insert(insert) if insert.block_name == "MISSING" => {
+                Some(insert.common.handle)
+            }
+            _ => None,
+        })
+        .expect("the reference is preserved on write");
+    assert!(
+        reopened.block_records.get("MISSING").is_none(),
+        "and the record it names is still absent, so the defect is not hidden"
+    );
+    assert!(
+        reopened.block_records.get("*Model_Space").is_some(),
+        "while the records the drawing does have still travel, so the absence is not vacuous"
+    );
+    assert!(matches!(
+        reopened.get_entity(reference),
+        Some(document::EntityType::Insert(_))
+    ));
+}
+
 /// A copied reference's attribute values point at a definition, and in the
 /// target that is the definition the copy brought, not the handle the source
 /// drawing gave it.

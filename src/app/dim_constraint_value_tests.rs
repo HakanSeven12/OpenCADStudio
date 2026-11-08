@@ -390,8 +390,14 @@ fn a_solve_mode_of_zero_edits_the_corner_by_resizing_it() {
 }
 
 /// The label a constraint creates names the block that draws it from the
-/// moment it exists, not only once a save bakes one.
-fn assert_created_label_is_a_complete_record(app: &OpenCADStudio, tab: usize, dimension: Handle) {
+/// moment it exists, not only once a save bakes one, and prints the value it
+/// was created with.
+fn assert_created_label_is_a_complete_record(
+    app: &OpenCADStudio,
+    tab: usize,
+    dimension: Handle,
+    value: f64,
+) {
     let document = &app.tabs[tab].scene.document;
     let Some(EntityType::Dimension(printed)) = document.get_entity(dimension) else {
         panic!("the constraint's label is a dimension");
@@ -414,14 +420,31 @@ fn assert_created_label_is_a_complete_record(app: &OpenCADStudio, tab: usize, di
         !record.entity_handles.is_empty(),
         "the live block holds the geometry the label draws"
     );
+    let text = label(app, tab, dimension)
+        .0
+        .expect("the label carries the value it was created with");
+    let shown = text.rsplit('=').next().unwrap_or(&text);
+    let shown: f64 = shown
+        .parse()
+        .unwrap_or_else(|_| panic!("the label prints a number, found {text:?}"));
+    assert!(
+        solved(shown, value),
+        "the label prints the value it was given, found {text:?}"
+    );
 }
 
 fn created_label(app: &OpenCADStudio, tab: usize) -> Handle {
-    app.tabs[tab]
+    let dimensions = &app.tabs[tab]
         .scene
         .parametric_constraint_set(ParametricScope::ModelSpace)
         .expect("the drawing has a constraint set")
-        .dimensions
+        .dimensions;
+    assert_eq!(
+        dimensions.len(),
+        1,
+        "the one constraint created drives exactly one label"
+    );
+    dimensions
         .values()
         .next()
         .copied()
@@ -435,7 +458,7 @@ fn a_radius_label_is_a_complete_record_from_creation() {
     let _ = app.feed_command(StepInput::EntityPick(shape, DVec3::new(35.0, 10.0, 0.0)));
     let _ = app.feed_command(StepInput::Point(DVec3::new(50.0, 20.0, 0.0)));
     let _ = app.feed_command(StepInput::Text("40".into()));
-    assert_created_label_is_a_complete_record(&app, i, created_label(&app, i));
+    assert_created_label_is_a_complete_record(&app, i, created_label(&app, i), 40.0);
 }
 
 #[test]
@@ -443,7 +466,7 @@ fn an_angular_label_is_a_complete_record_from_creation() {
     let (mut app, i, first, second) = two_lines();
     walk_to_the_angular_prompt(&mut app, first, second);
     let _ = app.feed_command(StepInput::Text("30".into()));
-    assert_created_label_is_a_complete_record(&app, i, created_label(&app, i));
+    assert_created_label_is_a_complete_record(&app, i, created_label(&app, i), 30.0);
 }
 
 #[test]

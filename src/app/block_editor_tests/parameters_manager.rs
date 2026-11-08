@@ -917,6 +917,18 @@ fn a_renamed_lookup_row_keeps_the_name_across_a_save() {
         row.name, "Grip9",
         "the reopened row shows the parameter's own name"
     );
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[tab].scene.document).unwrap();
+    let reopened = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
+        .read()
+        .unwrap();
+    let row = manager::rows(&reopened, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Lookup")
+        .expect("the lookup still lists a row after the DWG round trip");
+    assert_eq!(
+        row.name, "Grip9",
+        "the DWG round trip keeps the parameter's own name too"
+    );
 }
 
 #[test]

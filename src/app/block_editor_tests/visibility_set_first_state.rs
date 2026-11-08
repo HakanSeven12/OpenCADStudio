@@ -101,15 +101,15 @@ fn a_member_drawn_after_the_graph_reaches_the_visibility_copy_tagged() {
 
 /// A definition that already carries an evaluation graph still has its members
 /// tagged when a visibility parameter joins it: preparing tags only a new
-/// graph, so a member drawn after the graph would otherwise enter the state
-/// set untagged.
+/// graph, so a member drawn after the graph carries no tag until the
+/// visibility parameter adds one, and would otherwise enter the state set
+/// untagged.
 #[test]
 fn a_visibility_parameter_tags_a_member_the_existing_graph_has_not_tagged() {
     let (mut app, reference) = fixture();
     begin(&mut app, reference);
     let _ = app.run_command_line("BPARAMETER POINT 2,3 4,5");
     let _ = app.run_command_line("LINE 20,20 24,20");
-    let _ = app.run_command_line("BPARAMETER VISIBILITY 8,8");
     let i = app.active_tab;
     let late = app.tabs[i]
         .scene
@@ -121,6 +121,19 @@ fn a_visibility_parameter_tags_a_member_the_existing_graph_has_not_tagged() {
         })
         .map(|entity| entity.common().handle)
         .expect("the member drawn after the graph is in the definition");
+    assert!(
+        app.tabs[i]
+            .scene
+            .document
+            .get_entity(late)
+            .unwrap()
+            .common()
+            .extended_data
+            .get_record("AcDbBlockRepETag")
+            .is_none(),
+        "the point parameter's graph leaves the later member untagged"
+    );
+    let _ = app.run_command_line("BPARAMETER VISIBILITY 8,8");
     let tag = app.tabs[i]
         .scene
         .document

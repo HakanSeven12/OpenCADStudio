@@ -131,6 +131,19 @@ impl OpenCADStudio {
         self.snapper.snap3d_enabled = state.osnap3d_on;
         self.snapper.enabled3d = state.snap3d_modes.clone();
         self.set_dyn_input(state.dyn_input_on);
+        // A quick-properties list belongs to that panel; switching the panel
+        // off here takes the list with it, so switching it back on cannot
+        // revive it. Lists are per-tab and a tab switch closes them, so only
+        // the active tab can hold one. A docked-panel list stays open.
+        if self.quick_properties && !state.quick_props_on {
+            let panel = &mut self.tabs[self.active_tab].properties;
+            if panel.open_block_picker.is_some_and(|(_, quick)| quick) {
+                panel.open_block_picker = None;
+            }
+            if panel.open_choice.is_some_and(|(_, quick)| quick) {
+                panel.open_choice = None;
+            }
+        }
         self.quick_properties = state.quick_props_on;
         self.quick_properties_float = state.quick_props_float;
         self.selection_cycling = state.selection_cycling_on;

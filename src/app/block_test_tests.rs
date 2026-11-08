@@ -1116,3 +1116,86 @@ fn a_hidden_quick_properties_copy_does_not_swallow_escape() {
     let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
     assert!(app.tabs[test].scene.selected.is_empty());
 }
+
+/// Quick Properties switched off in Drafting Settings takes its list with it,
+/// so switching it back on shows a closed panel rather than the list that was
+/// open before the panel went away.
+#[test]
+fn drafting_settings_drops_a_quick_properties_list_with_the_panel() {
+    use crate::ui::window::drafting_settings::DraftingSettingsState;
+
+    let (mut app, test) = lookup_choice_tab();
+    app.quick_properties = true;
+    let key = lookup_choice_key(&app, test);
+    let _ = app.update(Message::PropBlockPickerToggle { key, quick: true });
+    assert_eq!(
+        app.tabs[test].properties.open_block_picker,
+        Some((key, true))
+    );
+
+    let mut state = DraftingSettingsState::from_app(&app);
+    state.quick_props_on = false;
+    app.drafting_settings_state = Some(state);
+    assert!(app.apply_drafting_settings());
+    assert_eq!(
+        app.tabs[test].properties.open_block_picker, None,
+        "the list goes with the panel that showed it"
+    );
+
+    let mut state = DraftingSettingsState::from_app(&app);
+    state.quick_props_on = true;
+    app.drafting_settings_state = Some(state);
+    assert!(app.apply_drafting_settings());
+    assert_eq!(
+        app.tabs[test].properties.open_block_picker, None,
+        "restoring the panel must not revive the old list"
+    );
+}
+
+/// A plain choice list on the Quick Properties copy goes with the panel in
+/// the same way as a block picker.
+#[test]
+fn drafting_settings_drops_a_quick_choice_list_with_the_panel() {
+    use crate::ui::window::drafting_settings::DraftingSettingsState;
+
+    let (mut app, test) = lookup_choice_tab();
+    app.quick_properties = true;
+    let _ = app.update(Message::PropChoiceToggle {
+        field: "bedit_units",
+        quick: true,
+    });
+    assert_eq!(
+        app.tabs[test].properties.open_choice,
+        Some(("bedit_units", true))
+    );
+
+    let mut state = DraftingSettingsState::from_app(&app);
+    state.quick_props_on = false;
+    app.drafting_settings_state = Some(state);
+    assert!(app.apply_drafting_settings());
+    assert_eq!(
+        app.tabs[test].properties.open_choice, None,
+        "the choice list goes with the panel that showed it"
+    );
+}
+
+/// Switching Quick Properties off leaves the docked Properties panel alone,
+/// so a list open there stays open.
+#[test]
+fn drafting_settings_keeps_the_docked_list_when_quick_properties_goes_off() {
+    use crate::ui::window::drafting_settings::DraftingSettingsState;
+
+    let (mut app, test) = lookup_choice_tab();
+    let key = open_lookup_list(&mut app, test);
+    app.quick_properties = true;
+
+    let mut state = DraftingSettingsState::from_app(&app);
+    state.quick_props_on = false;
+    app.drafting_settings_state = Some(state);
+    assert!(app.apply_drafting_settings());
+    assert_eq!(
+        app.tabs[test].properties.open_block_picker,
+        Some((key, false)),
+        "the docked panel is still on screen with its list"
+    );
+}

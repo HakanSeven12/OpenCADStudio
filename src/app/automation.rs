@@ -3007,6 +3007,53 @@ mod tests {
         );
     }
 
+    /// The read path answers for a reference with the same box the shared
+    /// measurement gives: the definition's geometry carried through the
+    /// insertion transform, not the insertion point.
+    #[test]
+    fn the_entity_read_reports_a_reference_box_from_the_geometry_it_draws() {
+        use document::entities::{EntityType, Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "READ_REF",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(20.0, 0.0, 0.0),
+                )),
+                EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(0.0, 10.0, 0.0),
+                )),
+            ],
+        );
+        let mut insert = Insert::new("READ_REF".to_string(), Vector3::new(100.0, 100.0, 0.0))
+            .with_uniform_scale(2.0);
+        insert.rotation = 30.0_f64.to_radians();
+        app.tabs[i].scene.add_entity(EntityType::Insert(insert));
+
+        let r = app.automation_op(
+            r#"{"op":"query","type":"INSERT","detail":"full","fields":["bounds"]}"#,
+        );
+        let bounds = &r["entities"][0]["bounds"];
+        let at = |path: &str, axis: usize| bounds[path][axis].as_f64().unwrap();
+        assert!((at("min", 0) - 90.0).abs() < 1e-3, "box min x: {bounds}");
+        assert!((at("min", 1) - 100.0).abs() < 1e-3, "box min y: {bounds}");
+        assert!(
+            (at("max", 0) - 134.641_016_2).abs() < 1e-3,
+            "box max x: {bounds}"
+        );
+        assert!(
+            (at("max", 1) - 137.320_508_1).abs() < 1e-3,
+            "box max y: {bounds}"
+        );
+    }
+
     #[test]
     fn block_reference_query_exposes_instance_attributes() {
         use document::entities::{AttributeEntity, EntityType, Insert};

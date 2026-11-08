@@ -3502,6 +3502,95 @@ mod attedit_dash_tests {
         }
     }
 
+    /// A definition change reaches its references through `ATTSYNC`: each
+    /// reference takes the definition's attributes in their order, a tag it
+    /// already carried keeps the value it held, and a newly defined tag
+    /// arrives with its default.
+    #[test]
+    fn attsync_rebuilds_a_reference_from_its_changed_definition() {
+        use document::entities::AttributeDefinition;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let tag_one = || {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, 2.0, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new("TAG1".into(), "Tag one".into(), String::new())
+            })
+        };
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![tag_one()],
+        );
+        let mut insert = Insert::new("SYNCED", Vector3::new(100.0, 100.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::new("TAG1".into(), "kept".into()));
+        let reference = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Insert(insert));
+        assert!(!reference.is_null(), "the reference is placed");
+        app.tabs[i]
+            .scene
+            .redefine_block_raw(
+                "SYNCED",
+                Vector3::new(0.0, 0.0, 0.0),
+                vec![
+                    tag_one(),
+                    EntityType::AttributeDefinition(AttributeDefinition {
+                        insertion_point: Vector3::new(2.0, 5.0, 0.0),
+                        height: 1.0,
+                        ..AttributeDefinition::new("TAG2".into(), "Tag two".into(), "two".into())
+                    }),
+                ],
+            )
+            .expect("the definition takes the new tag");
+
+        let _ = app.run_command_line("ATTSYNC SYNCED");
+
+        let doc = &app.tabs[i].scene.document;
+        let defs: usize = doc
+            .block_records
+            .get("SYNCED")
+            .expect("definition")
+            .entity_handles
+            .iter()
+            .filter_map(|h| doc.get_entity(*h))
+            .filter(|e| matches!(e, EntityType::AttributeDefinition(_)))
+            .count();
+        assert_eq!(defs, 2, "the definition carries both tags");
+        let table = crate::modules::insert::block_cmdline::BlockTable::of(doc);
+        assert!(
+            table.attributed.iter().any(|b| b == "SYNCED"),
+            "the definition is listed as attributed: {:?}",
+            table.attributed
+        );
+        assert!(
+            app.tabs[i].active_cmd.is_none(),
+            "the command ran without waiting for a prompt"
+        );
+        let EntityType::Insert(insert) = doc.get_entity(reference).expect("reference") else {
+            panic!("not an insert");
+        };
+        let pairs: Vec<(String, String)> = insert
+            .attributes
+            .iter()
+            .map(|a| (a.tag.clone(), a.get_value().to_string()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("TAG1".into(), "kept".into()),
+                ("TAG2".into(), "two".into())
+            ],
+            "the reference follows the definition without losing the value it carried"
+        );
+    }
+
     fn set_values(app: &mut OpenCADStudio, handles: &[document::Handle], values: &[&str]) {
         let i = app.active_tab;
         for (handle, value) in handles.iter().zip(values) {

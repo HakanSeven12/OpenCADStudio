@@ -1213,6 +1213,9 @@ impl OpenCADStudio {
             // LAYTRANS takes its standards file and FROM=TO pairs on one line.
             || tokens[0].eq_ignore_ascii_case("LAYTRANS")
             || tokens[0].eq_ignore_ascii_case("-LAYTRANS")
+            // ATTSYNC <block> names its block on the line; a bare ATTSYNC
+            // still asks its [?/Name/Select] question.
+            || (tokens[0].eq_ignore_ascii_case("ATTSYNC") && tokens.len() > 1)
         {
             return self.dispatch_command(cmd);
         }

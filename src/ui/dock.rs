@@ -193,7 +193,7 @@ impl PanelId {
             }
             PanelId::BlockPalette => include_bytes!("../../assets/icons/blocks/insert.svg"),
             PanelId::ToolPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
-            PanelId::AuthoringPalettes => include_bytes!("../../assets/icons/tool_palettes.svg"),
+            PanelId::AuthoringPalettes => crate::ui::icons::AUTHORING_PALETTES,
             PanelId::ParametersManager => include_bytes!("../../assets/icons/table.svg"),
             PanelId::ExternalReferences => crate::ui::icons::FOLDER_OPEN,
             PanelId::Browser => include_bytes!("../../assets/icons/content_browser.svg"),

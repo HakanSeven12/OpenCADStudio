@@ -193,7 +193,7 @@ impl CadModule for BlockEditorModule {
                     command(
                         "BAUTHORPALETTE",
                         "Authoring Palettes",
-                        include_bytes!("../../../assets/icons/tool_palettes.svg"),
+                        crate::ui::icons::AUTHORING_PALETTES,
                     ),
                 );
             }

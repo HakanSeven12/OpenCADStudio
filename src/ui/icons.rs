@@ -111,6 +111,9 @@ pub static EYE: &[u8] = include_bytes!("../../assets/icons/ui/eye.svg");
 pub static EYE_OFF: &[u8] = include_bytes!("../../assets/icons/ui/eye_off.svg");
 /// The eye in blue: show everything (Show All).
 pub static EYE_ALL: &[u8] = include_bytes!("../../assets/icons/ui/eye_all.svg");
+/// The tool palette with the authoring pencil: Authoring Palettes
+/// (BAUTHORPALETTE), apart from Tool Palettes.
+pub static AUTHORING_PALETTES: &[u8] = include_bytes!("../../assets/icons/authoring_palettes.svg");
 
 // ── Status-bar toggle icons (issue #216) ──────────────────────────────────
 pub static ST_ORTHO: &[u8] = include_bytes!("../../assets/icons/status/ortho.svg");

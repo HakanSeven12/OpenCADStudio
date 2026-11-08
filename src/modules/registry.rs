@@ -1054,6 +1054,27 @@ mod tests {
         }
     }
 
+    /// Authoring Palettes shows its own icon wherever the command appears
+    /// (ribbon, command search, QAT and its dock tab); Tool Palettes and
+    /// Editor Settings keep the plain tool palette.
+    #[test]
+    fn authoring_palettes_have_their_own_icon() {
+        let authoring = crate::ui::icons::AUTHORING_PALETTES;
+        for command in ["BAUTHORPALETTE", "BAUTHORPALETTECLOSE"] {
+            assert_eq!(command_icon(command), Some(authoring), "{command}");
+        }
+        assert_eq!(
+            crate::ui::dock::PanelId::AuthoringPalettes.icon(),
+            authoring
+        );
+        let tool_palettes: &[u8] = include_bytes!("../../assets/icons/tool_palettes.svg");
+        assert_ne!(authoring, tool_palettes);
+        for command in ["TOOLPALETTES", "BESETTINGS"] {
+            assert_eq!(command_icon(command), Some(tool_palettes), "{command}");
+        }
+        assert_eq!(crate::ui::dock::PanelId::ToolPalettes.icon(), tool_palettes);
+    }
+
     /// The three revision cloud types each show their own icon, in the
     /// Revision Cloud dropdown and wherever else the command appears; the
     /// dropdown face shows the Rectangular cloud until another type is chosen.

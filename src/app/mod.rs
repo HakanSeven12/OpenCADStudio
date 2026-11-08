@@ -3533,6 +3533,8 @@ pub enum Message {
     PasteShortcutResolved(PasteFocus),
     /// Completion of the system text clipboard read PASTESPEC starts.
     PasteSpecial(Option<String>),
+    /// Completion of the system text clipboard read PASTEASHYPERLINK starts.
+    PasteAsHyperlink(Option<String>),
     /// Completion of a system text clipboard read requested by PASTECLIP.
     SystemClipboardPaste(SystemClipboardText),
     /// Completion of the clipboard-image read the paste fallback starts when

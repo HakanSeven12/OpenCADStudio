@@ -1017,6 +1017,43 @@ pub fn command_icon(command: &str) -> Option<&'static [u8]> {
 mod tests {
     use super::*;
 
+    /// The Paste dropdown lists its five variants, each with its own icon,
+    /// which every other place showing the command uses too; the face is
+    /// plain Paste.
+    #[test]
+    fn paste_variants_have_their_own_icons() {
+        use crate::modules::draw::clipboard::paste;
+        let bytes = |icon: IconKind| match icon {
+            IconKind::Svg(bytes) => bytes,
+            IconKind::Glyph(_) => panic!("paste icons are SVG"),
+        };
+        let commands: Vec<&str> = paste::MENU_ITEMS.iter().map(|(cmd, _, _)| *cmd).collect();
+        assert_eq!(
+            commands,
+            [
+                "PASTECLIP",
+                "PASTEORIG",
+                "PASTEBLOCK",
+                "PASTEASHYPERLINK",
+                "PASTESPEC"
+            ]
+        );
+        let icons: Vec<&[u8]> = paste::MENU_ITEMS
+            .iter()
+            .map(|(_, _, icon)| bytes(*icon))
+            .collect();
+        for (n, a) in icons.iter().enumerate() {
+            for b in &icons[n + 1..] {
+                assert_ne!(a, b, "two Paste variants share an icon");
+            }
+        }
+        assert_eq!(bytes(paste::ICON), icons[0], "the face is plain Paste");
+        for (command, icon) in commands.iter().zip(&icons) {
+            assert_eq!(command_icon(command), Some(*icon), "{command}");
+            assert!(crate::ui::menu_bar::implemented(command), "{command} runs");
+        }
+    }
+
     /// The three revision cloud types each show their own icon, in the
     /// Revision Cloud dropdown and wherever else the command appears; the
     /// dropdown face shows the Rectangular cloud until another type is chosen.

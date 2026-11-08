@@ -1031,7 +1031,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "3DMOVE",
         // Quick leader (same as LEADER).
         "QLEADER",
-        "QL",
         // Restore the last-erased objects.
         "OOPS",
         // Plan (top) view.
@@ -1544,7 +1543,6 @@ inventory::submit!(crate::command::CommandRegistration {
         "-VIEW",
         "VPORTS",
         "VS",
-        "VW",
         "WB",
         "WBLOCK",
         "WEBVERSION",

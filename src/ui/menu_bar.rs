@@ -229,7 +229,7 @@ const MENUS: &[(&str, &[Entry])] = &[
     (
         "Format",
         &[
-            Cmd("Layer...", "LAYER", ""),
+            Cmd("Layer...", "LAYERS", ""),
             Cmd("Layer States Manager...", "LAYERSTATE", ""),
             Cmd("Layer Walk...", "LAYWALK", ""),
             Sub(
@@ -294,7 +294,7 @@ const MENUS: &[(&str, &[Entry])] = &[
                 "Palettes",
                 &[
                     Cmd("Properties", "PROPERTIES", "Ctrl+1"),
-                    Cmd("Layers", "LAYER", ""),
+                    Cmd("Layers", "LAYERS", ""),
                     Cmd("Design Center", "ADCENTER", "Ctrl+2"),
                     Cmd("Tool Palettes", "TOOLPALETTES", "Ctrl+3"),
                     Cmd("Sheet Set Manager", "SHEETSET", "Ctrl+4"),

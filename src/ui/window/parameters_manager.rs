@@ -150,24 +150,22 @@ impl<Message> canvas::Program<Message> for Glyph {
                 frame.fill(&canvas::Path::circle(centre, 1.6), line);
             }
             GlyphKind::Xy => {
-                let grid = canvas::Stroke::default()
-                    .with_color(palette.primary.strong.color)
-                    .with_width(1.0);
-                frame.stroke(&square(reach), grid.clone());
-                frame.stroke(
-                    &canvas::Path::line(
-                        Point::new(centre.x, centre.y - reach),
-                        Point::new(centre.x, centre.y + reach),
-                    ),
-                    grid.clone(),
-                );
-                frame.stroke(
-                    &canvas::Path::line(
-                        Point::new(centre.x - reach, centre.y),
-                        Point::new(centre.x + reach, centre.y),
-                    ),
-                    grid,
-                );
+                let colour = palette.primary.strong.color;
+                let gap = 1.0;
+                let cell = reach - gap / 2.0;
+                let left = centre.x - reach;
+                let top = centre.y - reach;
+                for (x, y) in [
+                    (left, top),
+                    (left + cell + gap, top),
+                    (left, top + cell + gap),
+                    (left + cell + gap, top + cell + gap),
+                ] {
+                    frame.fill(
+                        &canvas::Path::rectangle(Point::new(x, y), Size::new(cell, cell)),
+                        colour,
+                    );
+                }
             }
             GlyphKind::Tag => {
                 let tag = canvas::Path::new(|p| {

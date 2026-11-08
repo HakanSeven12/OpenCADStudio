@@ -3690,6 +3690,67 @@ mod attedit_dash_tests {
         );
     }
 
+    /// Removing a row from the manager and syncing drops the definition from
+    /// the block and the attribute it produced from every reference.
+    #[test]
+    fn battman_sync_drops_the_removed_definition_and_its_attributes() {
+        use crate::ui::window::attman_dialog::AttManMsg;
+        use document::entities::AttributeDefinition;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let definition = |tag: &str, y: f64| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, y, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(tag.into(), format!("{tag} prompt"), String::new())
+            })
+        };
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![definition("TAG1", 2.0), definition("TAG2", 5.0)],
+        );
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "SYNCED",
+            Vector3::new(100.0, 100.0, 0.0),
+        )));
+        let _ = app.dispatch_command("BATTMAN");
+
+        let _ = app.on_attman(AttManMsg::Select(1));
+        let _ = app.on_attman(AttManMsg::Remove);
+        let _ = app.on_attman(AttManMsg::Sync);
+
+        let doc = &app.tabs[i].scene.document;
+        let definition_tags: Vec<String> = doc
+            .block_records
+            .get("SYNCED")
+            .expect("definition")
+            .entity_handles
+            .iter()
+            .filter_map(|h| match doc.get_entity(*h) {
+                Some(EntityType::AttributeDefinition(def)) => Some(def.tag.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            definition_tags,
+            vec!["TAG1".to_string()],
+            "the block keeps only the definition left in the list"
+        );
+        let EntityType::Insert(insert) = doc.get_entity(reference).expect("reference") else {
+            panic!("not an insert");
+        };
+        let reference_tags: Vec<&str> = insert.attributes.iter().map(|a| a.tag.as_str()).collect();
+        assert_eq!(
+            reference_tags,
+            vec!["TAG1"],
+            "and the reference no longer carries the removed attribute"
+        );
+    }
+
     fn set_values(app: &mut OpenCADStudio, handles: &[document::Handle], values: &[&str]) {
         let i = app.active_tab;
         for (handle, value) in handles.iter().zip(values) {

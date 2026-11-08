@@ -250,5 +250,5 @@ impl CadCommand for DashAtteditCommand {
 
 // ── Autocomplete registry ─────────────────────────────────
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["ATTEDIT"]
+    names: &["ATTEDIT", "EATTEDIT"]
 });

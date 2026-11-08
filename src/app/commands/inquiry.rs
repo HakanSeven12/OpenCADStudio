@@ -541,11 +541,11 @@ impl OpenCADStudio {
                 self.tabs[i].active_cmd = Some(Box::new(cmd_obj));
             }
 
-            // Bare ATTEDIT (and the ATE alias) open the attribute editor dialog.
-            // If a single block with attributes is already selected it opens on
-            // that block; otherwise the pick command runs and the editor opens
-            // once a block is chosen (see `command_driver`).
-            "ATTEDIT" => {
+            // Bare ATTEDIT (and the ATE/EATTEDIT forms) open the attribute
+            // editor dialog. If a single block with attributes is already
+            // selected it opens on that block; otherwise the pick command runs
+            // and the editor opens once a block is chosen (see `command_driver`).
+            "ATTEDIT" | "EATTEDIT" => {
                 self.open_attedit_dialog();
             }
 

@@ -3445,6 +3445,21 @@ mod attedit_dash_tests {
     }
 
     #[test]
+    fn eattedit_opens_the_attribute_editor_on_a_selected_reference() {
+        let (mut app, handles) = inserts_with_title();
+        let i = app.active_tab;
+        app.tabs[i].scene.select_entities(&[handles[1]]);
+
+        let _ = app.run_command_line("EATTEDIT");
+
+        assert_eq!(
+            app.attr_editor_rows.len(),
+            1,
+            "the editor opens on the selected reference's one attribute"
+        );
+    }
+
+    #[test]
     fn dash_attedit_asks_whether_to_edit_one_at_a_time() {
         let (mut app, _) = inserts_with_title();
         let _ = app.run_command_line("-ATTEDIT");

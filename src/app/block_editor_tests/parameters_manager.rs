@@ -1840,3 +1840,94 @@ fn an_uneditable_graph_keeps_the_component_rows_it_holds_listed() {
         "and they still read as the parameter type they came from: {after:?}"
     );
 }
+
+/// An XY parameter's two rows are its two offsets from the base point, and each
+/// row writes only its own axis. The two branches share the writer with the
+/// linear and polar rows, so an axis mapped the wrong way would put the endpoint
+/// somewhere neither number asked for.
+#[test]
+fn an_xy_row_writes_its_own_axis_as_an_offset_from_the_base() {
+    let (mut app, tab, definition) = open(&["BPARAMETER XY 2,3 12,13 5,5"], &[]);
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    let xy: Vec<_> = rows.iter().filter(|row| row.type_name == "XY").collect();
+    assert_eq!(
+        xy.len(),
+        2,
+        "an XY parameter lists one row per axis: {rows:?}"
+    );
+    assert_eq!(xy[0].name, "X Distance1");
+    assert_eq!(xy[1].name, "Y Distance1");
+    assert_eq!(
+        xy[0].expression, "10",
+        "the X row reads the offset it was placed at"
+    );
+    assert_eq!(xy[1].expression, "10", "and so does the Y row");
+
+    answer(&mut app, "X Distance1", Cell::Value, "4");
+    let (base, end) = endpoints(&app, tab, definition);
+    assert!(
+        (base - glam::DVec3::new(2.0, 3.0, 0.0)).length() < 1e-9,
+        "the base point stays put"
+    );
+    assert!(
+        (end - glam::DVec3::new(6.0, 13.0, 0.0)).length() < 1e-9,
+        "the X row adds its offset to the base and leaves Y: {end:?}"
+    );
+
+    answer(&mut app, "Y Distance1", Cell::Value, "3");
+    let (_, end) = endpoints(&app, tab, definition);
+    assert!(
+        (end - glam::DVec3::new(6.0, 6.0, 0.0)).length() < 1e-9,
+        "the Y row adds its offset to the base and keeps the X just written: {end:?}"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "X Distance1").expression,
+        "4"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Y Distance1").expression,
+        "3"
+    );
+}
+
+/// A rotation parameter's row is its angle, written as a bearing from the base
+/// point: the endpoint keeps the parameter's radius and turns to the typed angle.
+#[test]
+fn a_rotation_row_writes_its_angle_and_keeps_the_radius() {
+    let (mut app, tab, definition) = open(&["BPARAMETER ROTATION 2,3 10 0 5,5"], &[]);
+    let row = manager::rows(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Rotation")
+        .expect("a rotation parameter gets a row");
+    assert!(row.numeric, "the angle is a number the manager writes back");
+    assert_eq!(
+        row.expression, "0",
+        "the row reads the angle it was placed at"
+    );
+    let (base, end) = endpoints(&app, tab, definition);
+    assert!(
+        ((end - base).length() - 10.0).abs() < 1e-9,
+        "the parameter starts at its authored radius: {end:?}"
+    );
+
+    answer(&mut app, &row.name, Cell::Value, "90");
+    assert_eq!(
+        printed(&app, tab, definition, &row.name).value,
+        "90",
+        "the value cell prints the angle just written"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, &row.name).expression,
+        "90",
+        "and the definition stores that angle"
+    );
+    let (base, end) = endpoints(&app, tab, definition);
+    assert!(
+        (base - glam::DVec3::new(2.0, 3.0, 0.0)).length() < 1e-9,
+        "the base point stays put"
+    );
+    assert!(
+        (end - glam::DVec3::new(2.0, 13.0, 0.0)).length() < 1e-9,
+        "the endpoint turned about the base to the typed bearing at the same radius: {end:?}"
+    );
+}

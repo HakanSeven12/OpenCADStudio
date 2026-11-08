@@ -823,6 +823,14 @@ fn edit_card<'a>(state: &'a AttManState, row_: &'a AttManRow) -> Element<'a, Mes
                         lineweight_options(),
                         Some(AttManMsg::Lineweight),
                     ),
+                    // The definition carries no plot style of its own, so the
+                    // row reports the default and offers no choice.
+                    choice_row(
+                        t!("Plot style").into_owned(),
+                        "ByLayer".to_string(),
+                        vec!["ByLayer".to_string()],
+                        None,
+                    ),
                 ]
                 .spacing(6)
                 .width(Fill),
@@ -1158,6 +1166,20 @@ mod tests {
         assert!(
             !shows(&state, "Show changes in the drawing as they are made"),
             "the long sentence is gone"
+        );
+    }
+
+    #[test]
+    fn the_properties_tab_lists_a_plot_style_row() {
+        let mut def = AttributeDefinition::new("TAG".into(), "Prompt".into(), "Default".into());
+        def.common.linetype = "Continuous".into();
+        def.common.color = document::types::Color::Index(1);
+        let mut state = state_with(def);
+        state.tab = EditTab::Properties;
+        assert!(shows(&state, "Plot style"), "the row is listed");
+        assert!(
+            shows(&state, "ByLayer"),
+            "the row reports the definition's plot style"
         );
     }
 }

@@ -883,6 +883,42 @@ fn a_renamed_lookup_row_shows_the_parameter_name() {
     );
 }
 
+/// The rename is a property of the definition, so it has to survive the
+/// drawing being written and read back; the row must not fall back to the
+/// lookup's own label or to the name the parameter was placed with.
+#[test]
+fn a_renamed_lookup_row_keeps_the_name_across_a_save() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LOOKUP 3,3"], &[]);
+    let lookup = crate::scene::block_lookup::parameters(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .next()
+        .map(|(handle, _)| handle)
+        .expect("one lookup parameter");
+    crate::scene::block_authoring::metadata::set_parameter_name(
+        &mut app.tabs[tab].scene.document,
+        definition,
+        lookup,
+        "Grip9",
+    )
+    .expect("the lookup takes a name");
+    let document = app.tabs[tab].scene.document_for_save();
+    let version = document.version;
+    let prepared = crate::io::prepare_document_for_save(document, version);
+    let bytes = document::DxfWriter::new(&prepared).write_to_vec().unwrap();
+    let reopened = document::DxfReader::from_reader(std::io::Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap();
+    let row = manager::rows(&reopened, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Lookup")
+        .expect("the lookup still lists a row after the save");
+    assert_eq!(
+        row.name, "Grip9",
+        "the reopened row shows the parameter's own name"
+    );
+}
+
 #[test]
 fn a_lookup_parameter_lists_one_row_typed_lookup() {
     let rows = edited(

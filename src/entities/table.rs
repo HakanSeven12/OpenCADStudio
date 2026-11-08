@@ -4607,6 +4607,47 @@ mod tests {
         assert!((depth(grip_at(&table, 4)) - total).abs() < 1e-9);
     }
 
+    /// The top and left grips of a picked cell move the edge it shares with
+    /// the row above / the column to its left: dragging the third row's top
+    /// edge up shrinks the second row by what the third gains, and the
+    /// table keeps its height (and width for the left edge).
+    #[test]
+    fn a_cells_top_and_left_grips_move_the_edge_shared_with_its_neighbour() {
+        let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 4, 3);
+        for row in &mut table.rows {
+            row.height = 10.0;
+        }
+        for column in &mut table.columns {
+            column.width = 20.0;
+        }
+        let (origin, horizontal, down) = grip_frame(&table);
+        let at = |x: f64, y: f64| origin + horizontal * x + down * y;
+        let heights = |table: &Table| table.rows.iter().map(|row| row.height).collect::<Vec<_>>();
+        let widths = |table: &Table| {
+            table
+                .columns
+                .iter()
+                .map(|column| column.width)
+                .collect::<Vec<_>>()
+        };
+
+        // Third row's top edge (y = 20) dragged up by 4.
+        apply_cell_grip(&mut table, (2, 1, 2, 1), CELL_GRIP_TOP, at(30.0, 16.0));
+        assert_eq!(heights(&table), vec![10.0, 6.0, 14.0, 10.0]);
+        // Second column's left edge (x = 20) dragged left by 5.
+        apply_cell_grip(&mut table, (2, 1, 2, 1), CELL_GRIP_LEFT, at(15.0, 23.0));
+        assert_eq!(widths(&table), vec![15.0, 25.0, 20.0]);
+        // Dragged down past the cell's own bottom: the edge stops just short
+        // of it, and the total height still holds.
+        apply_cell_grip(&mut table, (2, 1, 2, 1), CELL_GRIP_TOP, at(30.0, 60.0));
+        let h = heights(&table);
+        assert!(h[2] > 0.0 && h[2] < 1.0e-3, "{h:?}");
+        assert!((h.iter().sum::<f64>() - 40.0).abs() < 1.0e-9, "{h:?}");
+        // The first row has no neighbour above: its top edge still narrows it.
+        apply_cell_grip(&mut table, (0, 0, 0, 0), CELL_GRIP_TOP, at(10.0, 3.0));
+        assert_eq!(table.rows[0].height, 7.0);
+    }
+
     fn sample_table() -> Table {
         let mut table = Table::new(document::types::Vector3::new(0.0, 0.0, 0.0), 2, 2);
         table.set_cell_text(0, 0, "10");
@@ -4891,11 +4932,13 @@ pub fn cell_range_grips(table: &Table, range: (usize, usize, usize, usize)) -> V
     ]
 }
 
-/// A cell grip moved to `point`: an edge grip sizes the column / row on its
-/// side of the range by how far the edge moves (the left and top edges as
-/// well: the column / row narrows as its edge moves in, the others keep
-/// their size), the diamond fills the cells it is dragged over from the
-/// picked ones.
+/// A cell grip moved to `point`: the right and bottom edge grips size the
+/// column / row on their side of the range by how far the edge moves. The
+/// left and top edge grips move the edge the range shares with the column /
+/// row before it: one narrows by what the other gains, so the edge follows
+/// the cursor and the table keeps its size. The first column / row has no
+/// neighbour there and narrows as its edge moves in. The diamond fills the
+/// cells it is dragged over from the picked ones.
 pub fn apply_cell_grip(
     table: &mut Table,
     range: (usize, usize, usize, usize),
@@ -4922,10 +4965,28 @@ pub fn apply_cell_grip(
             table.rows[r1].height = (below - before).max(MIN);
         }
         CELL_GRIP_LEFT => {
-            table.columns[c0].width = (table.columns[c0].width - (along - x0)).max(MIN);
+            let moved = along - x0;
+            if c0 > 0 {
+                let before = table.columns[c0 - 1].width;
+                let after = table.columns[c0].width;
+                let moved = moved.clamp(MIN - before, after - MIN);
+                table.columns[c0 - 1].width = before + moved;
+                table.columns[c0].width = after - moved;
+            } else {
+                table.columns[c0].width = (table.columns[c0].width - moved).max(MIN);
+            }
         }
         CELL_GRIP_TOP => {
-            table.rows[r0].height = (table.rows[r0].height - (below - y0)).max(MIN);
+            let moved = below - y0;
+            if r0 > 0 {
+                let before = table.rows[r0 - 1].height;
+                let after = table.rows[r0].height;
+                let moved = moved.clamp(MIN - before, after - MIN);
+                table.rows[r0 - 1].height = before + moved;
+                table.rows[r0].height = after - moved;
+            } else {
+                table.rows[r0].height = (table.rows[r0].height - moved).max(MIN);
+            }
         }
         CELL_GRIP_FILL => {
             let (to_row, to_column) = fill_cell_at(table, below, along);

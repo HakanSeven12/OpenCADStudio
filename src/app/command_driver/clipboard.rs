@@ -2300,6 +2300,96 @@ mod paste_entities_kernel_tests {
     }
 
     #[test]
+    fn a_tab_to_tab_paste_through_the_interactive_path_brings_the_definition() {
+        use document::entities::{AttributeDefinition, AttributeEntity, EntityType, Insert, Line};
+        use document::types::Vector3;
+
+        let mut app = crate::app::OpenCADStudio::new_for_test();
+        app.tabs
+            .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+        let source_tab = app.tabs.len() - 1;
+        let mut definition =
+            AttributeDefinition::new("TAG1".into(), "Tag one".into(), "first".into());
+        definition.insertion_point = Vector3::new(2.0, 1.0, 0.0);
+        app.tabs[source_tab].scene.define_block_raw(
+            "PART",
+            Vector3::ZERO,
+            vec![
+                EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(10.0, 0.0, 0.0),
+                )),
+                EntityType::AttributeDefinition(definition),
+            ],
+        );
+        let attdef = app.tabs[source_tab]
+            .scene
+            .document
+            .block_records
+            .get("PART")
+            .expect("the definition was created")
+            .entity_handles
+            .iter()
+            .copied()
+            .find(|handle| {
+                matches!(
+                    app.tabs[source_tab].scene.document.get_entity(*handle),
+                    Some(EntityType::AttributeDefinition(_))
+                )
+            })
+            .expect("the definition holds its attribute definition");
+        let mut insert = Insert::new("PART", Vector3::ZERO);
+        let mut attribute = AttributeEntity::new("TAG1".into(), "first".into());
+        attribute.attdef_handle = attdef;
+        insert.attributes.push(attribute);
+        let source = app.tabs[source_tab]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(insert))
+            .expect("the seeded reference");
+
+        app.copy_entities_to_clipboard(source_tab, &[source], glam::DVec3::ZERO);
+        app.tabs
+            .push(crate::app::tab_document::DocumentTab::new_drawing(100));
+        let target = app.tabs.len() - 1;
+        // Give the target a handle history of its own, so a source handle that
+        // leaks into the copy cannot pass for one of the target's.
+        while app.tabs[target].scene.document.next_handle() <= attdef.value() {
+            app.tabs[target].scene.document.allocate_handle();
+        }
+        app.active_tab = target;
+        app.handle_paste_clipboard(glam::DVec3::new(50.0, 0.0, 0.0));
+
+        let doc = &app.tabs[target].scene.document;
+        let record = doc
+            .block_records
+            .get("PART")
+            .expect("the definition travelled");
+        let pasted_attdef = record
+            .entity_handles
+            .iter()
+            .copied()
+            .find(|handle| {
+                matches!(
+                    doc.get_entity(*handle),
+                    Some(EntityType::AttributeDefinition(_))
+                )
+            })
+            .expect("the definition brought its attribute definition");
+        assert_ne!(pasted_attdef, attdef);
+        let pasted = doc
+            .entities()
+            .find_map(|entity| match entity {
+                EntityType::Insert(insert) if insert.block_name == "PART" => Some(insert),
+                _ => None,
+            })
+            .expect("the reference arrived");
+        assert_eq!(pasted.attributes.len(), 1, "with its value");
+        assert_eq!(pasted.attributes[0].value, "first");
+        assert_eq!(pasted.attributes[0].attdef_handle, pasted_attdef);
+    }
+
+    #[test]
     fn pasted_table_roundtrip_record_brings_its_table_content() {
         use document::objects::{Dictionary, ObjectType, XRecord, XRecordEntry};
         let mut seed = document::Document::new();

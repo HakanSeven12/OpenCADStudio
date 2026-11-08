@@ -51,24 +51,12 @@ impl canvas::Program<Message> for DragHandle {
                     .filter(|point| bounds.contains(*point))?;
                 state.start = Some(point);
                 state.initial = self.offset;
-                Some(
-                    canvas::Action::publish(Message::BlockActionBarMove(
-                        self.parameter,
-                        self.offset,
-                    ))
-                    .and_capture(),
-                )
+                Some(canvas::Action::capture())
             }
             iced::Event::Mouse(Event::ButtonReleased(Button::Left))
                 if state.start.take().is_some() =>
             {
-                Some(
-                    canvas::Action::publish(Message::BlockActionBarMove(
-                        self.parameter,
-                        self.offset,
-                    ))
-                    .and_capture(),
-                )
+                Some(canvas::Action::capture())
             }
             _ => None,
         }

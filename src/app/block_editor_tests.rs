@@ -8311,6 +8311,156 @@ fn block_action_bars_group_native_actions_and_preserve_drawing_history() {
 }
 
 #[test]
+fn action_bars_at_one_anchor_are_stacked_without_overlapping() {
+    use crate::scene::block_actions::{self as actions, Kind};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let _ = app.run_command_line("BPARAMETER LINEAR 0.2,0 0.3,0 0.25,0");
+    let _ = app.run_command_line("BPARAMETER LINEAR 0.2,0 0.3,0 0.25,0");
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameters = actions::all_parameters(&app.tabs[i].scene.document, definition);
+    assert_eq!(parameters.len(), 2);
+    let targets = members(&app);
+    for parameter in &parameters {
+        actions::create(
+            &mut app.tabs[i].scene.document,
+            definition,
+            Kind::Move,
+            parameter.handle,
+            &targets,
+            glam::DVec3::new(4., 4., 0.),
+        )
+        .unwrap();
+    }
+    let bounds = iced::Rectangle::new(iced::Point::new(0.0, 0.0), iced::Size::new(800.0, 600.0));
+    let layout = app.action_bar_layout(bounds);
+    assert_eq!(layout.len(), 2, "both parameters carry a bar");
+    let card = super::block_action_bars::BAR_HEIGHT;
+    let rects: Vec<_> = layout
+        .iter()
+        .map(|(_, point, _, width)| iced::Rectangle::new(*point, iced::Size::new(*width, card)))
+        .collect();
+    let (a, b) = (rects[0], rects[1]);
+    let overlap =
+        a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    assert!(
+        !overlap,
+        "the two bars must not cover each other: {a:?} {b:?}"
+    );
+    for rect in [a, b] {
+        assert!(
+            rect.y >= bounds.y && rect.y + rect.height <= bounds.y + bounds.height,
+            "a bar stays inside the viewport: {rect:?}"
+        );
+    }
+}
+
+#[test]
+fn action_bars_near_the_bottom_edge_stack_upwards_without_overlapping() {
+    use crate::scene::block_actions::{self as actions, Kind};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    for _ in 0..6 {
+        let _ = app.run_command_line("BPARAMETER LINEAR 0.2,-0.19 0.3,-0.19 0.25,-0.19");
+    }
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameters = actions::all_parameters(&app.tabs[i].scene.document, definition);
+    assert_eq!(parameters.len(), 6);
+    let targets = members(&app);
+    for parameter in &parameters {
+        actions::create(
+            &mut app.tabs[i].scene.document,
+            definition,
+            Kind::Move,
+            parameter.handle,
+            &targets,
+            glam::DVec3::new(4., 4., 0.),
+        )
+        .unwrap();
+    }
+    let bounds = iced::Rectangle::new(iced::Point::new(0.0, 0.0), iced::Size::new(800.0, 600.0));
+    let layout = app.action_bar_layout(bounds);
+    assert_eq!(layout.len(), 6);
+    let card = super::block_action_bars::BAR_HEIGHT;
+    let rects: Vec<_> = layout
+        .iter()
+        .map(|(_, point, _, width)| iced::Rectangle::new(*point, iced::Size::new(*width, card)))
+        .collect();
+    for (index, a) in rects.iter().enumerate() {
+        assert!(
+            a.y >= bounds.y && a.y + a.height <= bounds.y + bounds.height,
+            "bar {index} stays inside the viewport: {a:?}"
+        );
+        for (other, b) in rects.iter().enumerate().skip(index + 1) {
+            let overlap = a.x < b.x + b.width
+                && b.x < a.x + a.width
+                && a.y < b.y + b.height
+                && b.y < a.y + a.height;
+            assert!(!overlap, "bar {index} covers bar {other}: {a:?} {b:?}");
+        }
+    }
+}
+
+#[test]
+fn a_dragged_action_bar_keeps_its_place_and_the_others_make_room() {
+    use crate::scene::block_actions::{self as actions, Kind};
+    let (mut app, reference) = fixture();
+    begin(&mut app, reference);
+    let i = app.active_tab;
+    let _ = app.run_command_line("BPARAMETER LINEAR 0.2,0 0.3,0 0.25,0");
+    let _ = app.run_command_line("BPARAMETER LINEAR 0.2,0 0.3,0 0.25,0");
+    let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+    let parameters = actions::all_parameters(&app.tabs[i].scene.document, definition);
+    assert_eq!(parameters.len(), 2);
+    let targets = members(&app);
+    for parameter in &parameters {
+        actions::create(
+            &mut app.tabs[i].scene.document,
+            definition,
+            Kind::Move,
+            parameter.handle,
+            &targets,
+            glam::DVec3::new(4., 4., 0.),
+        )
+        .unwrap();
+    }
+    let bounds = iced::Rectangle::new(iced::Point::new(0.0, 0.0), iced::Size::new(800.0, 600.0));
+    let before = app.action_bar_layout(bounds);
+    assert_eq!(before.len(), 2);
+    let parameter = before[1].0.parameter;
+    let origin = before[1].1;
+    let effective = before[1].2;
+    assert_ne!(effective, iced::Vector::ZERO, "the second card was stacked");
+    let _ = app.update(Message::BlockActionBarMove(
+        parameter,
+        effective + iced::Vector::new(0., 50.),
+    ));
+    let after = app.action_bar_layout(bounds);
+    let moved = after
+        .iter()
+        .find(|(group, ..)| group.parameter == parameter)
+        .expect("the dragged card is still laid out");
+    assert_eq!(
+        moved.1,
+        iced::Point::new(origin.x, origin.y + 50.0),
+        "a drag continues from the place the card was drawn"
+    );
+    let card = super::block_action_bars::BAR_HEIGHT;
+    let dragged = iced::Rectangle::new(moved.1, iced::Size::new(moved.3, card));
+    let other = iced::Rectangle::new(after[0].1, iced::Size::new(after[0].3, card));
+    let overlap = dragged.x < other.x + other.width
+        && other.x < dragged.x + dragged.width
+        && dragged.y < other.y + other.height
+        && other.y < dragged.y + dragged.height;
+    assert!(
+        !overlap,
+        "the remaining bar makes room for the dragged one: {dragged:?} {other:?}"
+    );
+}
+
+#[test]
 fn block_action_bars_open_lookup_and_orphan_association_and_ignore_stale_callbacks() {
     use crate::scene::{block_action_bars as bars, block_actions::{self as actions, Kind}};
     let (mut app, reference) = fixture();

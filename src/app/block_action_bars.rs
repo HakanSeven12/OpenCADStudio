@@ -1,13 +1,51 @@
 use super::{Message, OpenCADStudio};
 use crate::scene::block_action_bars::{self as bars, EntryKind, Group};
 use document::Handle;
-use iced::{Point, Rectangle, Task, Vector};
+use iced::{Point, Rectangle, Size, Task, Vector};
 use std::collections::{HashMap, HashSet};
+
+/// The height a bar is assumed to occupy when it is laid out, used both to keep
+/// the card inside the viewport and to keep two default cards from covering
+/// each other. The rendered card can be shorter; the reserved strip is the
+/// space a card with a selected entry and its edit row needs.
+pub(super) const BAR_HEIGHT: f32 = 90.0;
+
+/// The clear space kept between two stacked cards.
+const BAR_GAP: f32 = 8.0;
 
 #[derive(Default)]
 pub(super) struct ViewState {
     pub hidden: HashSet<Handle>,
     pub offsets: HashMap<Handle, Vector>,
+}
+
+fn overlaps(a: Rectangle, b: Rectangle) -> bool {
+    a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+}
+
+/// Place a default card in the in-viewport slot nearest its natural position
+/// that no card already placed covers. When the viewport has no free slot the
+/// natural position is kept, so a short tile degrades to the old placement
+/// rather than pushing a card outside the view.
+fn stack_clear(natural: Point, width: f32, bounds: Rectangle, placed: &[Rectangle]) -> Point {
+    let lowest = (bounds.y + bounds.height - BAR_HEIGHT).max(bounds.y);
+    let mut slots = vec![natural.y.clamp(bounds.y, lowest)];
+    for rect in placed {
+        slots.push(rect.y + rect.height + BAR_GAP);
+        slots.push(rect.y - BAR_HEIGHT - BAR_GAP);
+    }
+    slots.push(bounds.y);
+    slots.push(lowest);
+    slots.retain(|y| (bounds.y..=lowest).contains(y));
+    slots.sort_by(|a, b| (a - natural.y).abs().total_cmp(&(b - natural.y).abs()));
+    slots.dedup();
+    for y in slots {
+        let rect = Rectangle::new(Point::new(natural.x, y), Size::new(width, BAR_HEIGHT));
+        if !placed.iter().any(|other| overlaps(*other, rect)) {
+            return Point::new(natural.x, y);
+        }
+    }
+    Point::new(natural.x, natural.y.clamp(bounds.y, lowest))
 }
 
 impl OpenCADStudio {
@@ -32,6 +70,7 @@ impl OpenCADStudio {
         };
         let camera = tab.scene.camera.borrow();
         let width = 360.0_f32.min(bounds.width.max(1.0));
+        let mut placed: Vec<Rectangle> = vec![];
         bars::groups(&tab.scene.document, session.br_handle)
             .into_iter()
             .filter_map(|group| {
@@ -54,13 +93,22 @@ impl OpenCADStudio {
                     .get(&group.parameter)
                     .copied()
                     .unwrap_or(Vector::ZERO);
-                let point = Point::new(
+                let natural = Point::new(
                     (bounds.x + anchor.x + 16.0 + offset.x)
                         .clamp(bounds.x, (bounds.x + bounds.width - width).max(bounds.x)),
-                    (bounds.y + anchor.y + 20.0 + offset.y)
-                        .clamp(bounds.y, (bounds.y + bounds.height - 90.0).max(bounds.y)),
+                    (bounds.y + anchor.y + 20.0 + offset.y).clamp(
+                        bounds.y,
+                        (bounds.y + bounds.height - BAR_HEIGHT).max(bounds.y),
+                    ),
                 );
-                Some((group, point, offset, width))
+                let point = if tab.action_bars.offsets.contains_key(&group.parameter) {
+                    natural
+                } else {
+                    stack_clear(natural, width, bounds, &placed)
+                };
+                placed.push(Rectangle::new(point, Size::new(width, BAR_HEIGHT)));
+                let effective = Vector::new(point.x - natural.x, point.y - natural.y) + offset;
+                Some((group, point, effective, width))
             })
             .collect()
     }

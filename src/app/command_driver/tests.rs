@@ -6338,6 +6338,90 @@ mod batch4_tests {
             insert.attributes[0].insertion_point
         );
     }
+
+    /// A block with one line and the given attribute definitions.
+    fn block_with_attributes(
+        app: &mut crate::app::OpenCADStudio,
+        name: &str,
+        definitions: &[(&str, &str, &str)],
+    ) -> (document::Handle, Vec<document::Handle>) {
+        use document::entities::{AttributeDefinition, Line};
+        use document::types::Vector3;
+
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+        let mut record = document::tables::BlockRecord::new(name);
+        record.handle = doc.allocate_handle();
+        let owner = record.handle;
+        doc.block_records.add(record).unwrap();
+
+        let mut line = Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.owner_handle = owner;
+        let line_handle = doc.add_entity(document::EntityType::Line(line)).unwrap();
+
+        let mut handles = vec![line_handle];
+        for (tag, prompt, default) in definitions {
+            let mut definition =
+                AttributeDefinition::new((*tag).into(), (*prompt).into(), (*default).into());
+            definition.insertion_point = Vector3::new(1.0, 1.0, 0.0);
+            definition.alignment_point = definition.insertion_point;
+            definition.common.owner_handle = owner;
+            let handle = doc
+                .add_entity(document::EntityType::AttributeDefinition(definition))
+                .unwrap();
+            handles.push(handle);
+        }
+        doc.block_records.get_mut(name).unwrap().entity_handles = handles.clone();
+        (owner, handles)
+    }
+
+    #[test]
+    fn xplode_stamps_the_named_properties_on_the_pieces() {
+        use document::entities::Insert;
+        use document::types::Vector3;
+
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        block_with_attributes(&mut app, "XUNIT", &[]);
+        let doc = &mut app.tabs[i].scene.document;
+        doc.layers
+            .add(document::tables::Layer::new("DEST"))
+            .unwrap();
+        let insert = Insert::new("XUNIT", Vector3::new(5.0, 5.0, 0.0));
+        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+        app.tabs[i].scene.selected.insert(insert_handle);
+
+        let _ = app.run_command_line(
+            "XPLODE COLOR 1 LAYER DEST LINETYPE DASHED LINEWEIGHT 0.50",
+        );
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        use document::Entity as _;
+        let doc = &app.tabs[i].scene.document;
+        assert!(
+            doc.get_entity(insert_handle).is_none(),
+            "the reference itself must be gone"
+        );
+        let pieces: Vec<_> = doc
+            .entities()
+            .filter(|entity| {
+                matches!(entity, document::EntityType::Line(_)) && entity.common().layer == "DEST"
+            })
+            .collect();
+        assert_eq!(pieces.len(), 1, "one line comes out");
+        let common = pieces[0].common();
+        assert_eq!(common.color, document::types::Color::Index(1));
+        assert_eq!(common.layer, "DEST");
+        assert_eq!(common.linetype, "DASHED");
+        assert_eq!(
+            common.line_weight,
+            document::types::LineWeight::Value(50),
+            "0.50 mm is 50 hundredths"
+        );
+    }
 }
 
 #[cfg(test)]

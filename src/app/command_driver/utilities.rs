@@ -1168,6 +1168,8 @@ impl OpenCADStudio {
             // QSELECT takes its property, operator and value on one line; a
             // bare QSELECT still opens the dialog.
             || tokens[0].eq_ignore_ascii_case("QSELECT")
+            // XPLODE takes its property overrides on one line.
+            || tokens[0].eq_ignore_ascii_case("XPLODE")
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("LAYERGROUP")

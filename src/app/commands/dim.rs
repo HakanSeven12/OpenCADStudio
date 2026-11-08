@@ -7,6 +7,76 @@ const TEXTMASK_APP: &str = "TEXTMASK";
 /// means the offset follows the text height (15% of it).
 const TEXTMASK_OFFSET_VAR: &str = "TEXTMASKOFFSET";
 
+/// XPLODE's property overrides: the properties stamped on every object the
+/// exploded references become.
+#[derive(Default, Clone, Debug)]
+struct XplodeOverrides {
+    color: Option<document::types::Color>,
+    layer: Option<String>,
+    linetype: Option<String>,
+    line_weight: Option<document::types::LineWeight>,
+}
+
+impl XplodeOverrides {
+    /// Parse `COLOR <value> LAYER <name> LINETYPE <name> LINEWEIGHT <mm>` in
+    /// any order. Keywords are case-insensitive; a keyword without a value, or
+    /// a value the drawing cannot represent, is an error.
+    fn parse(rest: &str) -> Result<Self, String> {
+        let tokens: Vec<&str> = rest.split_whitespace().collect();
+        let mut overrides = Self::default();
+        let mut index = 0;
+        while index < tokens.len() {
+            let key = tokens[index].to_ascii_uppercase();
+            let Some(value) = tokens.get(index + 1) else {
+                return Err(crate::tf!("XPLODE: {key} needs a value.").to_string());
+            };
+            match key.as_str() {
+                "COLOR" | "COLOUR" | "C" => {
+                    overrides.color =
+                        Some(crate::ui::window::attman_dialog::parse_color(value).ok_or_else(
+                            || crate::tf!("XPLODE: \"{value}\" is not a colour.").to_string(),
+                        )?);
+                }
+                "LAYER" | "LA" => overrides.layer = Some(value.to_string()),
+                "LINETYPE" | "LT" => overrides.linetype = Some(value.to_string()),
+                "LINEWEIGHT" | "LW" => {
+                    overrides.line_weight = Some(
+                        crate::ui::window::attman_dialog::parse_lineweight(value).ok_or_else(
+                            || crate::tf!("XPLODE: \"{value}\" is not a lineweight.").to_string(),
+                        )?,
+                    );
+                }
+                other => {
+                    return Err(crate::tf!(
+                        "XPLODE: unknown property \"{other}\" (COLOR, LAYER, LINETYPE, LINEWEIGHT)."
+                    )
+                    .to_string());
+                }
+            }
+            index += 2;
+        }
+        Ok(overrides)
+    }
+}
+
+/// Stamp the requested overrides onto one exploded object.
+fn apply_xplode_overrides(piece: &mut document::EntityType, overrides: &XplodeOverrides) {
+    let common = piece.common_mut();
+    if let Some(color) = overrides.color {
+        common.color = color;
+        common.color_name = None;
+    }
+    if let Some(layer) = &overrides.layer {
+        common.layer = layer.clone();
+    }
+    if let Some(linetype) = &overrides.linetype {
+        common.linetype = linetype.clone();
+    }
+    if let Some(line_weight) = overrides.line_weight {
+        common.line_weight = line_weight;
+    }
+}
+
 fn selected_edge_body(app: &OpenCADStudio, tab: usize) -> Option<document::Handle> {
     let scene = &app.tabs.get(tab)?.scene;
     let selected = scene.selected_handles_in_order();
@@ -1136,6 +1206,18 @@ impl OpenCADStudio {
                 self.explode_selection(i, cmd == "BURST");
             }
 
+            // XPLODE — explode, then give every resulting object the
+            // properties named on the command line.
+            "XPLODE" => {
+                self.xplode_selection(i, &XplodeOverrides::default());
+            }
+            cmd if cmd.starts_with("XPLODE ") => {
+                match XplodeOverrides::parse(&cmd["XPLODE ".len()..]) {
+                    Ok(overrides) => self.xplode_selection(i, &overrides),
+                    Err(message) => self.command_line.push_error(&message),
+                }
+            }
+
             // TXTEXP — text becomes the polylines of its character outlines.
             "TXTEXP" => {
                 let selected: Vec<_> = self.tabs[i]
@@ -1895,6 +1977,72 @@ impl OpenCADStudio {
         } else {
             self.command_line
                 .push_info(crate::t!("EXPLODE: no explodable objects selected.").as_ref());
+        }
+    }
+
+    /// XPLODE: explode the selection, then stamp the named properties on
+    /// every object that came out of it.
+    fn xplode_selection(&mut self, i: usize, overrides: &XplodeOverrides) {
+        let selected: Vec<_> = self.tabs[i]
+            .scene
+            .selected_entities()
+            .into_iter()
+            .filter(|(handle, _)| !self.tabs[i].scene.is_layer_locked(*handle))
+            .collect();
+        if selected.is_empty() {
+            use crate::modules::draw::select::SelectObjectsCommand;
+            let cmd = SelectObjectsCommand::new("XPLODE");
+            self.command_line.push_info(&cmd.prompt());
+            self.tabs[i].active_cmd = Some(Box::new(cmd));
+            return;
+        }
+
+        // A layer name is resolved to the layer's own spelling; a name no
+        // layer has is refused rather than written to the pieces.
+        let mut overrides = overrides.clone();
+        if let Some(name) = &overrides.layer {
+            let Some(layer) = self.tabs[i]
+                .scene
+                .document
+                .layers
+                .iter()
+                .find(|layer| layer.name.eq_ignore_ascii_case(name))
+            else {
+                self.command_line
+                    .push_error(crate::tf!("XPLODE: no layer named \"{name}\".").as_ref());
+                return;
+            };
+            overrides.layer = Some(layer.name.clone());
+        }
+
+        use crate::modules::draw::modify::explode::plan_explode_in_context;
+        let mut replacements = plan_explode_in_context(
+            &selected,
+            &self.tabs[i].scene.document,
+            self.tabs[i].scene.displayed_annotation_scale_handle(),
+        );
+        for (_, pieces) in &mut replacements {
+            for piece in pieces {
+                apply_xplode_overrides(piece, &overrides);
+            }
+        }
+        let exploded = replacements.len();
+        if exploded > 0 {
+            self.push_undo_snapshot(i, "XPLODE");
+        }
+        crate::modules::draw::modify::explode::apply_explode_replacements(
+            &mut self.tabs[i].scene,
+            replacements,
+        );
+        if exploded > 0 {
+            self.tabs[i].dirty = true;
+            self.refresh_properties();
+            self.command_line.push_output(
+                crate::tf!("{exploded} object(s) exploded with new properties.").as_ref(),
+            );
+        } else {
+            self.command_line
+                .push_info(crate::t!("XPLODE: no explodable objects selected.").as_ref());
         }
     }
 

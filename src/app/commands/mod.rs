@@ -1493,6 +1493,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "ADDSELECTED",
         // Explode a block reference and keep its attribute values as text.
         "BURST",
+        // Explode and give the pieces the properties named on the command line.
+        "XPLODE",
         // Outline of origin planes, open sketch and solid bodies.
         "BROWSER",
         // Open and close a sketch: a drawing plane, a square-on view and

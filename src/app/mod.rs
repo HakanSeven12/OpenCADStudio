@@ -1862,6 +1862,9 @@ pub(super) struct OpenCADStudio {
     /// paste into a *different* drawing can recreate any that are missing —
     /// otherwise the pasted entities would dangle on a non-existent layer.
     clipboard_deps: ClipboardDeps,
+    /// The document (tab id) the clipboard was copied from: only a paste back
+    /// into it can give a pasted associative array an array of its own.
+    clipboard_source_tab: Option<u64>,
     /// True while the Shift key is held — drives subtractive pick (Shift+click
     /// removes the picked entity from the selection). Tracked from keyboard
     /// modifier-change events since mouse click messages carry no modifiers.
@@ -6614,6 +6617,7 @@ impl OpenCADStudio {
             oops_cache: Vec::new(),
             clipboard_base: glam::DVec3::ZERO,
             clipboard_deps: ClipboardDeps::default(),
+            clipboard_source_tab: None,
             shift_down: false,
             ctrl_down: false,
             cont_anchor: None,

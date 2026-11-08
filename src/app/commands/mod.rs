@@ -562,6 +562,12 @@ impl OpenCADStudio {
         }
         // Cancel any running command before starting a new one.
         if self.tabs[i].active_cmd.is_some() {
+            if self.tabs[i].pending_parameter_set_follow_up.is_some()
+                || self.tabs[i].pending_xy_box_set.is_some()
+                || self.tabs[i].pending_action_pair.is_some()
+            {
+                self.rollback_cancelled_parameter_set();
+            }
             self.tabs[i].pending_parameter_set_follow_up = None;
             self.tabs[i].pending_xy_box_set = None;
             self.tabs[i].pending_action_pair = None;

@@ -1537,9 +1537,34 @@ impl OpenCADStudio {
         }
     }
 
+    /// A box or pair Parameter Set is one operation: when its action steps are
+    /// abandoned, the parameter it placed is taken back with them so a rerun
+    /// does not author a second copy.
+    pub(super) fn rollback_cancelled_parameter_set(&mut self) {
+        let i = self.active_tab;
+        let Some((document, dirty)) = self.tabs[i].pending_set_snapshot.take() else {
+            return;
+        };
+        self.tabs[i]
+            .scene
+            .document
+            .record_all_entities_for_transaction();
+        self.tabs[i].scene.document = document;
+        self.tabs[i].dirty = dirty;
+        self.tabs[i].selected_authoring = None;
+        self.tabs[i].scene.bump_geometry();
+        self.refresh_properties();
+    }
+
     fn handle_cancel(&mut self, cancel: CmdResult) {
         crate::ui::ribbon::keytip_note_command_finished();
         let i = self.active_tab;
+        if self.tabs[i].pending_parameter_set_follow_up.is_some()
+            || self.tabs[i].pending_xy_box_set.is_some()
+            || self.tabs[i].pending_action_pair.is_some()
+        {
+            self.rollback_cancelled_parameter_set();
+        }
         self.tabs[i].pending_parameter_set_follow_up = None;
         self.tabs[i].pending_xy_box_set = None;
         self.tabs[i].pending_action_pair = None;

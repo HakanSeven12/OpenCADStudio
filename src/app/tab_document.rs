@@ -202,6 +202,10 @@ pub(super) struct DocumentTab {
     pub(super) pending_parameter_set_follow_up: Option<&'static str>,
     pub(super) pending_xy_box_set: Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
     pub(super) pending_action_pair: Option<(document::Handle, crate::scene::block_actions::Kind, u8)>,
+    /// The definition as it stood when a box or pair Parameter Set began, plus
+    /// the dirty flag it carried, so a cancelled set takes back the parameter
+    /// it placed and leaves the drawing as unsaved as it found it.
+    pub(super) pending_set_snapshot: Option<(document::Document, bool)>,
     pub(super) measurement: super::measurement::MeasurementDisplay,
     /// Remaining command tokens queued behind a PAUSE (or `\`) awaiting user interaction.
     pub(super) pending_pause_tokens: Option<Vec<String>>,
@@ -813,6 +817,7 @@ impl DocumentTab {
             pending_parameter_set_follow_up: None,
             pending_xy_box_set: None,
             pending_action_pair: None,
+            pending_set_snapshot: None,
             measurement: super::measurement::MeasurementDisplay::default(),
             pending_pause_tokens: None,
             layiso_state: None,

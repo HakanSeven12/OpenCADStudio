@@ -663,6 +663,14 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 self.tabs[i].pending_parameter_set_follow_up = Some(set.follow_up);
+                // A box or pair set places its parameter before it knows
+                // whether the operator will finish the action steps, so the
+                // definition as it stands is kept until the set ends.
+                self.tabs[i].pending_set_snapshot = matches!(
+                    set.follow_up,
+                    "XY_MOVE_BOX_SET" | "XY_STRETCH_BOX_SET" | "MOVE_PAIR" | "STRETCH_PAIR"
+                )
+                .then(|| (self.tabs[i].scene.document.clone(), self.tabs[i].dirty));
                 Some(self.dispatch_command(&format!("BPARAMETER {}", set.parameter)))
             }
             "BACTIONSET" => Some(self.start_block_action_set()),

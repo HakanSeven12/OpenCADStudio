@@ -580,6 +580,7 @@ impl OpenCADStudio {
                                 return self.start_xy_box_set_action(parameter, kind, next);
                             }
                             self.tabs[i].pending_xy_box_set = None;
+                            self.tabs[i].pending_set_snapshot = None;
                         }
                         if let Some((set_parameter, expected_kind, expected_side)) =
                             self.tabs[i].pending_action_pair
@@ -598,6 +599,7 @@ impl OpenCADStudio {
                                 return self.start_parameter_pair_action(parameter, kind, 1);
                             }
                             self.tabs[i].pending_action_pair = None;
+                            self.tabs[i].pending_set_snapshot = None;
                         }
                     }
                     Err(e) => self.command_line.push_error(crate::t!(e).as_ref()),

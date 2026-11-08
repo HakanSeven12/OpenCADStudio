@@ -2493,6 +2493,7 @@ fn stretch_pair_sets_guide_both_frames_with_undo_and_cancel() {
             2
         );
 
+        let before = app.tabs[i].scene.document.clone();
         let _ = app.dispatch_command(&format!("BPARAMETERSET {label}"));
         for point in [
             glam::DVec3::ZERO,
@@ -2501,7 +2502,6 @@ fn stretch_pair_sets_guide_both_frames_with_undo_and_cancel() {
         ] {
             let _ = app.feed_command(StepInput::Point(point));
         }
-        let before = app.tabs[i].scene.document.clone();
         let _ = app.update(Message::CommandEscape);
         assert!(app.tabs[i].pending_action_pair.is_none());
         assert_eq!(app.tabs[i].scene.document, before);
@@ -2519,6 +2519,49 @@ fn stretch_pair_sets_guide_both_frames_with_undo_and_cancel() {
         assert!(app.tabs[i].pending_action_pair.is_none());
         assert!(app.tabs[i].pending_parameter_set_follow_up.is_none());
         let _ = app.update(Message::CommandEscape);
+    }
+}
+
+#[test]
+fn cancelling_a_parameter_set_takes_the_parameter_with_it() {
+    use crate::command::StepInput;
+    use crate::scene::block_distance_parameter as distance;
+    for label in [
+        "Linear Move Pair",
+        "Polar Stretch Pair",
+        "XY Move Box Set",
+        "XY Stretch Box Set",
+    ] {
+        let (mut app, reference) = fixture();
+        begin(&mut app, reference);
+        let i = app.active_tab;
+        let definition = app.tabs[i].active_block_edit_session().unwrap().br_handle;
+        let before = app.tabs[i].scene.document.clone();
+
+        let box_set = label.contains("Box Set");
+        let _ = app.dispatch_command(&format!("BPARAMETERSET {label}"));
+        let end = glam::DVec3::new(10., if box_set { 10. } else { 0. }, 0.);
+        let _ = app.feed_command(StepInput::Point(glam::DVec3::ZERO));
+        let _ = app.feed_command(StepInput::Point(end));
+        if box_set {
+            let _ = app.feed_command(StepInput::Enter);
+        }
+        let _ = app.feed_command(StepInput::Point(glam::DVec3::new(5., 2., 0.)));
+        assert!(
+            !distance::parameters(&app.tabs[i].scene.document, definition).is_empty(),
+            "{label}: the parameter is placed before the action step"
+        );
+
+        let _ = app.update(Message::CommandEscape);
+
+        assert!(
+            distance::parameters(&app.tabs[i].scene.document, definition).is_empty(),
+            "{label}: cancelling the set removes the parameter it placed"
+        );
+        assert_eq!(
+            app.tabs[i].scene.document, before,
+            "{label}: the definition is back where the set started"
+        );
     }
 }
 

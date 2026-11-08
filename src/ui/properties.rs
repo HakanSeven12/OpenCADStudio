@@ -2334,10 +2334,7 @@ fn render_params_visibility_toggle_row<'a>(value: bool) -> Element<'a, Message> 
     let btn_label = if value { t!("On") } else { t!("Off") }.into_owned();
     let btn = button(
         row![
-            crate::ui::icons::semantic(
-                crate::ui::icons::layer_visible(value),
-                crate::ui::style::ribbon_metrics::SMALL_ICON,
-            ),
+            crate::ui::icons::semantic(crate::ui::icons::layer_visible(value), 13.0),
             text(btn_label).size(FONT_SZ),
         ]
         .spacing(6)

@@ -653,14 +653,11 @@ pub const LIST_ID: &str = "layer-walk-list";
 /// Column widths: the swatch, the count, the hold pin and the state cluster are
 /// fixed; the layer name takes the rest and elides like the Layer Manager.
 /// The state column is exactly one effective eye plus the two underlying marks
-/// it can carry, so it never leaves dead width next to the name. The marks are
-/// drawn at the 16 px the state art is made for, so their lines stay sharp.
+/// it can carry, so it never leaves dead width next to the name.
 const COL_SWATCH: f32 = 22.0;
 const COL_COUNT: f32 = 40.0;
 const COL_PIN: f32 = 22.0;
-const STATE_ICON: f32 = crate::ui::style::ribbon_metrics::SMALL_ICON;
-const STATE_GAP: f32 = 2.0;
-const COL_STATE: f32 = 3.0 * STATE_ICON + 2.0 * STATE_GAP;
+const COL_STATE: f32 = 36.0;
 /// How much a row the walk hides loses: alpha carries the signal because the
 /// bundled UI font has no italic cut.
 const HIDDEN_ALPHA: f32 = 0.38;
@@ -1242,27 +1239,27 @@ fn state_cells<'a>(row: &LayerWalkRow, is_visible: bool) -> Element<'a, Message>
         crate::tr!("layer-walk", "eye-hidden")
     };
     let eye: Element<'a, Message> = if on_screen {
-        crate::ui::icons::themed(crate::ui::icons::layer_visible(true), STATE_ICON)
+        crate::ui::icons::themed(crate::ui::icons::layer_visible(true), ICON_SZ * 0.72)
     } else {
-        crate::ui::icons::themed_disabled(crate::ui::icons::layer_visible(false), STATE_ICON)
+        crate::ui::icons::themed_disabled(crate::ui::icons::layer_visible(false), ICON_SZ * 0.72)
     };
     let mut state = row![tooltip(
         eye,
         text(tip).size(10),
         iced::widget::tooltip::Position::FollowCursor
     )]
-    .spacing(STATE_GAP)
+    .spacing(2)
     .align_y(iced::Center);
     if row.frozen {
         state = state.push(tooltip(
-            crate::ui::icons::themed_disabled(crate::ui::icons::layer_freeze(true), STATE_ICON),
+            crate::ui::icons::themed_disabled(crate::ui::icons::layer_freeze(true), ICON_SZ * 0.55),
             text(crate::tr!("layer-walk", "frozen-tip")).size(10),
             iced::widget::tooltip::Position::FollowCursor,
         ));
     }
     if row.locked {
         state = state.push(tooltip(
-            crate::ui::icons::themed_disabled(crate::ui::icons::layer_lock(true), STATE_ICON),
+            crate::ui::icons::themed_disabled(crate::ui::icons::layer_lock(true), ICON_SZ * 0.55),
             text(crate::tr!("layer-walk", "locked-tip")).size(10),
             iced::widget::tooltip::Position::FollowCursor,
         ));

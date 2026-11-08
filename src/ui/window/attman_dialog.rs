@@ -838,7 +838,7 @@ fn edit_card<'a>(state: &'a AttManState, row_: &'a AttManRow) -> Element<'a, Mes
             segmented(state.tab),
             body,
             labeled_switch(
-                t!("Show changes in the drawing as they are made").into_owned(),
+                t!("Auto preview changes").into_owned(),
                 live,
                 AttManMsg::Live
             ),
@@ -1141,6 +1141,23 @@ mod tests {
         assert!(
             shows(&state, "Text Options"),
             "the tab is named as in the reference"
+        );
+    }
+
+    #[test]
+    fn the_live_toggle_reads_auto_preview_changes() {
+        let state = state_with(AttributeDefinition::new(
+            "TAG".into(),
+            "Prompt".into(),
+            "Default".into(),
+        ));
+        assert!(
+            shows(&state, "Auto preview changes"),
+            "the toggle names what it does in two words"
+        );
+        assert!(
+            !shows(&state, "Show changes in the drawing as they are made"),
+            "the long sentence is gone"
         );
     }
 }

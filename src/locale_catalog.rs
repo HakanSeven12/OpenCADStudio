@@ -449,7 +449,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "In drawing: {} · in model space: {}" => Some(("attman", "counts")),
         "Columns:" => Some(("attman", "columns")),
         "The Constant mode cannot be changed in the definition." => Some(("attman", "constant-note")),
-        "Show changes in the drawing as they are made" => Some(("attman", "live")),
+        "Auto preview changes" => Some(("attman", "live")),
         "Apply changes to existing references" => Some(("attman", "apply-existing")),
         "Emphasize duplicate tags" => Some(("attman", "emphasize")),
         "Sync" => Some(("attman", "sync")),

@@ -47,11 +47,18 @@ pub(super) fn line_weight(s: f64) -> u32 {
     ((s + 0.5).floor() as u32).max(1)
 }
 
+/// The line weight art `art` px square gets drawn `n` px wide: its own
+/// [`line_weight`], but never more than `cap` (the ribbon's weight at the
+/// screen's scale), so no icon draws thicker lines than the ribbon.
+pub(super) fn fitted_weight(art: u32, n: u32, cap: u32) -> u32 {
+    line_weight(f64::from(n) / f64::from(art)).min(cap).max(1)
+}
+
 /// The art (`art` px square) rewritten as `n` × `n` physical px with every
-/// edge on a pixel. `None` when the SVG holds anything but the elements the
+/// edge on a pixel, its lines at most `cap` px wide (see [`fitted_weight`]). `None` when the SVG holds anything but the elements the
 /// icon sets use, or a path that does not parse.
-pub(super) fn fit(text: &str, art: u32, n: u32) -> Option<String> {
-    let grid = Grid::new(art, n);
+pub(super) fn fit(text: &str, art: u32, n: u32, cap: u32) -> Option<String> {
+    let grid = Grid::with_cap(art, n, cap);
     let grips = collect_grips(text, &grid)?;
     let mut out = String::with_capacity(text.len() + text.len() / 4);
     // Inside a <mask> or <clipPath>.
@@ -97,13 +104,18 @@ struct Grid {
 }
 
 impl Grid {
+    /// The grid with lines as thick as the scale makes them (tests).
+    #[cfg(test)]
     fn new(art: u32, n: u32) -> Self {
-        let s = f64::from(n) / f64::from(art);
+        Self::with_cap(art, n, u32::MAX)
+    }
+
+    fn with_cap(art: u32, n: u32, cap: u32) -> Self {
         Self {
             art: f64::from(art),
             n,
-            s,
-            weight: line_weight(s),
+            s: f64::from(n) / f64::from(art),
+            weight: fitted_weight(art, n, cap),
         }
     }
 
@@ -617,7 +629,7 @@ mod tests {
 
     #[test]
     fn strokes_land_on_pixel_centres_at_125_percent() {
-        let fitted = fit(POLYLINE_32, 32, 40).unwrap();
+        let fitted = fit(POLYLINE_32, 32, 40, u32::MAX).unwrap();
         assert!(fitted.contains(r#"width="40" height="40" viewBox="0 0 40 40""#));
         assert!(fitted.contains(r#"stroke-width="1""#));
         let strokes = paths_with(&fitted, r##"stroke="#ffffff""##);
@@ -644,7 +656,7 @@ mod tests {
             (32, POLYLINE_32, 56),
         ] {
             let grid = Grid::new(art, n);
-            let fitted = fit(source, art, n).unwrap();
+            let fitted = fit(source, art, n, u32::MAX).unwrap();
             let grips = collect_grips(source, &grid).unwrap();
             assert!(!grips.is_empty());
             let first = grips[0].fitted;
@@ -686,7 +698,7 @@ mod tests {
         let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" stroke-width="1"><path d="M2.5 2.5H29.5V29.5H2.5Z" fill="none" stroke="#ffffff"/><path d="M3 3H29V29H3Z" fill="#ffffff" fill-opacity="0.12"/></svg>"##;
         for n in [24, 28, 40, 48, 56, 64] {
             let grid = Grid::new(32, n);
-            assert!(fit(source, 32, n).is_some());
+            assert!(fit(source, 32, n, u32::MAX).is_some());
             let half = f64::from(grid.weight) / 2.0;
             // The pixels the left and right lines cover, and the fill.
             let (left_end, right_start) = (grid.line(2.5) + half, grid.line(29.5) - half);
@@ -725,7 +737,7 @@ mod tests {
             // 75 % to 200 % of the art's own size.
             for percent in [75, 100, 125, 150, 175, 200] {
                 let n = art * percent / 100;
-                let out = fit(&text, art, n)
+                let out = fit(&text, art, n, u32::MAX)
                     .unwrap_or_else(|| panic!("{} does not fit {n} px", path.display()));
                 let tree = resvg::usvg::Tree::from_str(&out, &resvg::usvg::Options::default())
                     .unwrap_or_else(|error| panic!("{} at {n} px: {error}", path.display()));
@@ -741,7 +753,7 @@ mod tests {
         // A ring 6 px across, as in the array icons.
         let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" stroke-width="1"><path d="M18.5 5.5A3 3 0 1 1 12.5 5.5A3 3 0 1 1 18.5 5.5Z" fill="none" stroke="#ffffff"/></svg>"##;
         for n in [24, 28, 40, 48, 56, 64] {
-            let fitted = fit(source, 32, n).unwrap();
+            let fitted = fit(source, 32, n, u32::MAX).unwrap();
             let d = attr(paths_with(&fitted, "stroke=")[0], "d").unwrap();
             let mut on_curve = Vec::new();
             for segment in SimplifyingPathParser::from(d) {
@@ -776,6 +788,6 @@ mod tests {
     #[test]
     fn unknown_elements_are_not_fitted() {
         let source = r#"<svg width="16" height="16" viewBox="0 0 16 16" stroke-width="1"><circle cx="8" cy="8" r="4"/></svg>"#;
-        assert!(fit(source, 16, 20).is_none());
+        assert!(fit(source, 16, 20, u32::MAX).is_none());
     }
 }

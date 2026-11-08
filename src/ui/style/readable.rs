@@ -48,35 +48,12 @@ pub fn reading_surfaces(theme: &Theme) -> [Color; 5] {
     ]
 }
 
-/// The surfaces text sits on only in a state: hovered and pressed
-/// controls, an opened panel and the strong background shade.
-pub fn state_surfaces(theme: &Theme) -> [Color; 3] {
-    [
-        theme.palette().background.strong.color,
-        chrome::open_panel(theme),
-        chrome::hover(theme),
-    ]
-}
-
-/// Every surface interface text is drawn on in `theme`:
-/// [`reading_surfaces`] and [`state_surfaces`].
-pub fn text_surfaces(theme: &Theme) -> [Color; 8] {
-    let [a, b, c, d, e] = reading_surfaces(theme);
-    let [f, g, h] = state_surfaces(theme);
-    [a, b, c, d, e, f, g, h]
-}
-
 /// The lowest contrast `color` has on any of `surfaces`.
 pub fn worst_contrast_on(color: Color, surfaces: &[Color]) -> f32 {
     surfaces
         .iter()
         .map(|surface| wcag_contrast(color, *surface))
         .fold(f32::MAX, f32::min)
-}
-
-/// The lowest contrast `color` has on any of `theme`'s [`text_surfaces`].
-pub fn worst_contrast(color: Color, theme: &Theme) -> f32 {
-    worst_contrast_on(color, &text_surfaces(theme))
 }
 
 /// A colour's exact bits, for a cache key.
@@ -128,8 +105,8 @@ fn cached<K: std::hash::Hash + Eq>(
 /// `max_fade` but never below `min_contrast` on any reading surface.
 ///
 /// Text styles ask for it on every draw, for every label, so the answer is
-/// kept per theme: working it out takes up to 33 mixes, each checked on
-/// five surfaces.
+/// kept per theme: working it out takes up to 53 mixes (one per 0.01 of
+/// fade), each checked on five surfaces.
 fn faded_text(theme: &Theme, max_fade: f32, min_contrast: f32) -> Color {
     type Key = ([ColorBits; 3], u32, u32);
     thread_local! {
@@ -179,8 +156,9 @@ pub fn hint_text(theme: &Theme) -> Color {
 /// `color` as secondary chrome text (labels, panel titles, tab labels):
 /// itself when it already reads at [`MUTED_MIN_CONTRAST`] on every chrome
 /// surface it is drawn on, otherwise moved towards the text colour only
-/// as far as that takes, so the shades keep their order. Kept per theme and colour, as [`faded_text`] is: the
-/// chrome's tab and title text ask for it on every draw.
+/// as far as that takes, so the shades keep their order. Kept per theme
+/// and colour, as [`faded_text`] is: the chrome's tab and title text ask
+/// for it on every draw.
 pub fn at_least_muted(color: Color, theme: &Theme) -> Color {
     type Key = ([ColorBits; 3], ColorBits);
     thread_local! {
@@ -269,13 +247,6 @@ fn chrome_text_surfaces(theme: &Theme) -> [Color; 4] {
 pub fn muted_style(theme: &Theme) -> iced::widget::text::Style {
     iced::widget::text::Style {
         color: Some(muted_text(theme)),
-    }
-}
-
-/// A text style in [`hint_text`].
-pub fn hint_style(theme: &Theme) -> iced::widget::text::Style {
-    iced::widget::text::Style {
-        color: Some(hint_text(theme)),
     }
 }
 

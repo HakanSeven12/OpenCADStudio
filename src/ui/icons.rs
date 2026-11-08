@@ -169,34 +169,16 @@ fn large_art(bytes: &'static [u8]) -> Option<&'static [u8]> {
     found
 }
 
-/// The artwork to draw an icon from at `size` logical px, so its lines come
-/// out as thick as the ribbon's at the current screen scale:
-///
-/// - from [`metrics::LARGE_ART_MIN`] up, the 32 px drawing when there is
-///   one;
-/// - below it, the 16 px drawing, unless that drawing scaled to the slot's
-///   physical size would get thicker lines than the ribbon has while the
-///   32 px drawing would not. A 20 or 22 px slot at 125 % is 25 or 28 px,
-///   where the 16 px drawing's lines turn 2 px and the ribbon's are 1 px.
-///
-/// The ribbon's own 16 px and 32 px slots never switch.
+/// The artwork to draw an icon from at `size` logical px: the 32 px drawing
+/// from [`metrics::LARGE_ART_MIN`] up when there is one, otherwise `bytes`.
+/// The line weight does not depend on the choice: fitting caps every icon's
+/// lines at the ribbon's weight (see [`ribbon_weight`]).
 pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
-    let Some(large) = large_art(bytes) else {
-        return bytes;
-    };
-    if size >= metrics::LARGE_ART_MIN || prefers_large_art(physical_pixels(size), pixel_scale()) {
-        large
+    if size >= metrics::LARGE_ART_MIN {
+        large_art(bytes).unwrap_or(bytes)
     } else {
         bytes
     }
-}
-
-/// Whether `pixels` physical px drawn from the 32 px art matches the
-/// ribbon's line weight at `scale` where the 16 px art would not.
-fn prefers_large_art(pixels: u32, scale: f32) -> bool {
-    let ribbon = grid::line_weight(f64::from(scale));
-    let pixels = f64::from(pixels);
-    grid::line_weight(pixels / 16.0) != ribbon && grid::line_weight(pixels / 32.0) == ribbon
 }
 
 // ── Sharp rendering of pixel-grid art ─────────────────────────────────────
@@ -208,23 +190,32 @@ fn physical_pixels(size: f32) -> u32 {
     (size * pixel_scale()).round().max(1.0) as u32
 }
 
-/// The handle of `bytes` drawn `pixels` physical px wide (`None`: at the
-/// art's own size), fitted and sharpened when it is pixel-grid art.
-fn grid_handle(bytes: &'static [u8], pixels: Option<u32>) -> svg::Handle {
-    match grid_svg(bytes, pixels) {
+/// The line weight of the ribbon's icons at the screen's scale, in physical
+/// px. No icon is fitted with thicker lines, so a slot between the drawn
+/// sizes (the dock rail's 20 px, a panel button's 22 px) never looks
+/// heavier than the ribbon next to it.
+fn ribbon_weight() -> u32 {
+    grid::line_weight(f64::from(pixel_scale()))
+}
+
+/// The handle of `bytes` drawn `fit.0` physical px wide with lines of at
+/// most `fit.1` px (`None`: at the art's own size), fitted and sharpened
+/// when it is pixel-grid art.
+fn grid_handle(bytes: &'static [u8], fit: Option<(u32, u32)>) -> svg::Handle {
+    match grid_svg(bytes, fit) {
         Some(sharp) => svg::Handle::from_memory(sharp),
         None => svg::Handle::from_memory(bytes),
     }
 }
 
-/// Pixel-grid art fitted to `pixels` physical px (see [`grid::fit`]) when
-/// that is not its own size, then sharpened (see [`sharpen_text`]).
-/// `None` for any other SVG.
-fn grid_svg(source: &[u8], pixels: Option<u32>) -> Option<Vec<u8>> {
+/// Pixel-grid art fitted to `fit.0` physical px with lines of at most
+/// `fit.1` px (see [`grid::fit`]) when that is not its own size, then
+/// sharpened (see [`sharpen_text`]). `None` for any other SVG.
+fn grid_svg(source: &[u8], fit: Option<(u32, u32)>) -> Option<Vec<u8>> {
     let text = std::str::from_utf8(source).ok()?;
     let art = grid::art_size(text)?;
-    let fitted = match pixels {
-        Some(pixels) if pixels != art => grid::fit(text, art, pixels).or_else(|| {
+    let fitted = match fit {
+        Some((pixels, cap)) if pixels != art => grid::fit(text, art, pixels, cap).or_else(|| {
             static WARNED: std::sync::atomic::AtomicBool =
                 std::sync::atomic::AtomicBool::new(false);
             if !WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -362,6 +353,8 @@ struct SemanticCacheKey {
     palette: [[u8; 4]; 6],
     /// Physical px the art is fitted to.
     pixels: u32,
+    /// The most px a line may be (see [`ribbon_weight`]).
+    cap: u32,
 }
 
 thread_local! {
@@ -831,17 +824,18 @@ fn size_key(size: f32) -> u16 {
 }
 
 thread_local! {
-    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize, u32), svg::Handle>> =
+    static TINTED_CACHE: RefCell<FxHashMap<(usize, usize, u32, u32), svg::Handle>> =
         RefCell::new(FxHashMap::default());
 }
 
 /// The handle of a one-colour icon drawn `pixels` physical px wide.
 fn tinted_handle(bytes: &'static [u8], pixels: u32) -> svg::Handle {
-    let key = (bytes.as_ptr() as usize, bytes.len(), pixels);
+    let cap = ribbon_weight();
+    let key = (bytes.as_ptr() as usize, bytes.len(), pixels, cap);
     if let Some(handle) = TINTED_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
         return handle;
     }
-    let handle = grid_handle(bytes, Some(pixels));
+    let handle = grid_handle(bytes, Some((pixels, cap)));
     TINTED_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         // Every UI scale or monitor DPI adds one handle per icon; start over
@@ -860,6 +854,7 @@ fn semantic_handle(bytes: &'static [u8], theme: &Theme, pixels: u32) -> svg::Han
         length: bytes.len(),
         palette: palette_key(theme),
         pixels,
+        cap: ribbon_weight(),
     };
 
     SEMANTIC_CACHE.with(|cache| {
@@ -869,7 +864,8 @@ fn semantic_handle(bytes: &'static [u8], theme: &Theme, pixels: u32) -> svg::Han
         }
 
         let themed = recolor_semantic_svg(bytes, theme);
-        let handle = svg::Handle::from_memory(grid_svg(&themed, Some(pixels)).unwrap_or(themed));
+        let handle =
+            svg::Handle::from_memory(grid_svg(&themed, Some((pixels, key.cap))).unwrap_or(themed));
         if cache.len() >= SEMANTIC_CACHE_LIMIT {
             cache.clear();
         }
@@ -1707,7 +1703,7 @@ mod tests {
                     let flat = name.replace('/', "_");
                     for (kind, svg) in [
                         ("scaled", sharpen_grid_svg(&source).unwrap()),
-                        ("fitted", grid_svg(&source, Some(n)).unwrap()),
+                        ("fitted", grid_svg(&source, Some((n, u32::MAX))).unwrap()),
                     ] {
                         let path = dir.join(format!("{kind}_{art}_{percent}_{flat}"));
                         std::fs::write(&path, svg).unwrap();
@@ -1815,30 +1811,30 @@ mod tests {
         source.windows(needle.len()).any(|window| window == needle)
     }
 
-    /// A slot between 16 and 32 px (the dock rail's 20 px, a minimized
-    /// panel button's 22 px) keeps the ribbon's line weight: the 32 px
-    /// drawing where the 16 px one would turn 2 px while the ribbon is 1 px
-    /// (at 125 %); from 150 % the ribbon is 2 px too.
+    /// Every slot the ribbon, the dock rail and the panel buttons draw at
+    /// gets the ribbon's line weight at every scale: never thicker (the
+    /// 20 and 22 px slots at 125 % and 200 %), and never thinner where the
+    /// slot is at least the 16 px art's size.
     #[test]
-    fn slots_between_the_sizes_keep_the_ribbons_line_weight() {
-        let rail = |scale: f32| prefers_large_art((20.0 * scale).round() as u32, scale);
-        assert!(!rail(1.0), "100 %: 16 px drawing, 1 px lines");
-        assert!(rail(1.25), "125 %: 32 px drawing keeps 1 px lines");
-        assert!(!rail(1.5), "150 %: the ribbon is 2 px too");
-        assert!(!rail(1.75), "175 %: the ribbon is 2 px too");
-        assert!(!rail(2.0), "200 %: the ribbon is 2 px too");
-        let button = |scale: f32| prefers_large_art((22.0 * scale).round() as u32, scale);
-        assert!(!button(1.0), "100 %: 16 px drawing, 1 px lines");
-        assert!(
-            button(1.25),
-            "125 %: 28 px would turn the 16 px drawing 2 px"
-        );
-        assert!(!button(1.5), "150 %: the ribbon is 2 px too");
-        assert!(!button(2.0), "200 %: the ribbon is 2 px too");
-        // The ribbon's own sizes never switch.
-        for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
-            assert!(!prefers_large_art((16.0 * scale).round() as u32, scale));
+    fn slots_draw_the_ribbons_line_weight() {
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0, 2.5] {
+            let ribbon = grid::line_weight(f64::from(scale));
+            for size in [16.0_f32, 20.0, 22.0, 32.0] {
+                let art = if size >= metrics::LARGE_ART_MIN {
+                    32
+                } else {
+                    16
+                };
+                let pixels = (size * scale).round() as u32;
+                assert_eq!(
+                    grid::fitted_weight(art, pixels, ribbon),
+                    ribbon,
+                    "{size} px at {scale}"
+                );
+            }
         }
+        // A small chrome glyph keeps its own, thinner weight.
+        assert_eq!(grid::fitted_weight(16, 14, 2), 1);
     }
 
     /// The layer state cells draw only the state glyph; the layer stack with

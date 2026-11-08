@@ -916,6 +916,10 @@ mod tests {
             parse_theme_name("Kanagawa_Lotus"),
             Some(iced::Theme::KanagawaLotus)
         );
+        assert_eq!(
+            parse_theme_name("studio dark"),
+            Some(crate::ui::style::studio_theme::studio_dark())
+        );
         assert_eq!(parse_theme_name("1"), None);
         assert_eq!(parse_theme_name("0"), None);
         assert_eq!(parse_theme_name("nonexistent_theme"), None);

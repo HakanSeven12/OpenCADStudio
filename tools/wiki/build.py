@@ -123,7 +123,9 @@ def main(out):
     keys = shortcuts()
     since_path = os.path.join(WIKI, "since.json")
     since = json.loads(read(since_path)) if os.path.exists(since_path) else {}
-    current = version()
+    # A release run records new names under the version being released; a
+    # hand run between releases marks them as coming in the next one.
+    current = os.environ.get("WIKI_NEW_SINCE") or version()
     used_icons = set()
 
     def icon(name):
@@ -149,9 +151,9 @@ def main(out):
         return f"[`{name}`]({page_of(name)})"
 
     def first_release(name):
-        if name not in since:
+        if name not in since and current != "next release":
             since[name] = current
-        return since[name]
+        return since.get(name, current)
 
     commands = {}
     for name in names:

@@ -112,7 +112,7 @@ impl OpenCADStudio {
             // (see the ATTEDIT arm in the inquiry family); the dash form is the
             // command-line entry point.
             // Usage:
-            //   -ATTEDIT                        — list all attributes on selected Insert(s)
+            //   -ATTEDIT                        — ask the measured question flow
             //   -ATTEDIT REPLACE <old> <new> [block] [tag] [value]
             //                                   — swap one string inside matching values
             //   ATTEDIT <tag> <v>               — quick-set attribute <tag> to <v>
@@ -125,6 +125,43 @@ impl OpenCADStudio {
                     .or_else(|| cmd.strip_prefix("ATTEDIT"))
                     .unwrap_or("")
                     .trim();
+                if rest.is_empty() {
+                    use crate::modules::draw::modify::attedit::{
+                        AttributeCandidate, DashAtteditCommand,
+                    };
+                    let candidates: Vec<AttributeCandidate> = self.tabs[i]
+                        .scene
+                        .document
+                        .entities()
+                        .filter_map(|entity| match entity {
+                            document::EntityType::Insert(insert) => Some(insert),
+                            _ => None,
+                        })
+                        .flat_map(|insert| {
+                            let on_screen = self.typed_point_in_view(
+                                i,
+                                glam::DVec3::new(
+                                    insert.insert_point.x,
+                                    insert.insert_point.y,
+                                    insert.insert_point.z,
+                                ),
+                            );
+                            insert
+                                .attributes
+                                .iter()
+                                .map(move |attr| AttributeCandidate {
+                                    block: insert.block_name.clone(),
+                                    tag: attr.tag.clone(),
+                                    value: attr.get_value().to_string(),
+                                    on_screen,
+                                })
+                        })
+                        .collect();
+                    let command = DashAtteditCommand::new(candidates);
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    return Some(Task::none());
+                }
                 let tokens: Vec<&str> = rest.split_whitespace().collect();
                 let selection: Vec<document::Handle> = self.tabs[i]
                     .scene
@@ -254,11 +291,42 @@ impl OpenCADStudio {
                     let block_spec = args.get(3).copied().unwrap_or("*");
                     let tag_spec = args.get(4).copied().unwrap_or("*");
                     let value_spec = args.get(5).copied().unwrap_or("*");
+                    // The global question flow appends its on-screen answer.
+                    let visible_only = args
+                        .get(6)
+                        .is_some_and(|flag| flag.eq_ignore_ascii_case("VISIBLE"));
+                    let on_screen: std::collections::HashSet<document::Handle> = if visible_only {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
+                            .filter_map(|entity| match entity {
+                                document::EntityType::Insert(insert)
+                                    if self.typed_point_in_view(
+                                        i,
+                                        glam::DVec3::new(
+                                            insert.insert_point.x,
+                                            insert.insert_point.y,
+                                            insert.insert_point.z,
+                                        ),
+                                    ) =>
+                                {
+                                    Some(entity.common().handle)
+                                }
+                                _ => None,
+                            })
+                            .collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    };
                     let mut changed = 0usize;
                     let mut occurrences = 0usize;
                     self.push_undo_snapshot(i, "ATTEDIT REPLACE");
                     for handle in &targets {
                         if self.tabs[i].scene.is_layer_locked(*handle) {
+                            continue;
+                        }
+                        if visible_only && !on_screen.contains(handle) {
                             continue;
                         }
                         if let Some(document::EntityType::Insert(ins)) = self.tabs[i]

@@ -3445,7 +3445,7 @@ mod attedit_dash_tests {
     }
 
     #[test]
-    fn dash_attedit_prompts_when_nothing_is_selected() {
+    fn dash_attedit_asks_whether_to_edit_one_at_a_time() {
         let (mut app, _) = inserts_with_title();
         let _ = app.run_command_line("-ATTEDIT");
 
@@ -3453,12 +3453,28 @@ mod attedit_dash_tests {
         let command = app.tabs[i]
             .active_cmd
             .as_ref()
-            .expect("ATTEDIT must ask for a reference");
-        assert!(
-            command.prompt().contains("Select block"),
-            "prompt was {}",
-            command.prompt()
+            .expect("ATTEDIT must ask its first question");
+        assert_eq!(
+            command.prompt(),
+            "Edit attributes one at a time? [Yes/No] <Y>:"
         );
+    }
+
+    #[test]
+    fn dash_attedit_global_branch_swaps_a_string_after_its_prompts() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT");
+        let _ = app.feed_script_line("N");
+        let _ = app.feed_script_line("N");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("old");
+        let _ = app.feed_script_line("new");
+
+        for handle in handles {
+            assert_eq!(attribute(&app, handle).1, "new");
+        }
     }
 
     #[test]

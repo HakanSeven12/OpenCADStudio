@@ -178,6 +178,30 @@ pub(crate) fn art_for(bytes: &'static [u8], size: f32) -> &'static [u8] {
     }
 }
 
+/// [`art_for`] for a slot between the 16 px and 32 px sizes, such as the
+/// dock rail's 20 px: the drawing whose lines come out as thick as the
+/// ribbon's at the current screen scale. At 150 % the 16 px drawing is
+/// scaled to 30 px, where its lines turn 2 px while the ribbon's are still
+/// 1 px; the 32 px drawing keeps them 1 px there.
+pub(crate) fn art_with_ribbon_weight(bytes: &'static [u8], size: f32) -> &'static [u8] {
+    let art = art_for(bytes, size);
+    if !std::ptr::eq(art, bytes) {
+        return art;
+    }
+    match large_art(bytes) {
+        Some(large) if prefers_large_art(physical_pixels(size), pixel_scale()) => large,
+        _ => bytes,
+    }
+}
+
+/// Whether `pixels` physical px drawn from the 32 px art matches the
+/// ribbon's line weight at `scale` where the 16 px art would not.
+fn prefers_large_art(pixels: u32, scale: f32) -> bool {
+    let ribbon = grid::line_weight(f64::from(scale));
+    let pixels = f64::from(pixels);
+    grid::line_weight(pixels / 16.0) != ribbon && grid::line_weight(pixels / 32.0) == ribbon
+}
+
 // ── Sharp rendering of pixel-grid art ─────────────────────────────────────
 
 mod grid;
@@ -1790,6 +1814,25 @@ mod tests {
 
     fn contains(source: &[u8], needle: &[u8]) -> bool {
         source.windows(needle.len()).any(|window| window == needle)
+    }
+
+    /// The dock rail's 20 px icons keep the ribbon's line weight: the 32 px
+    /// drawing where the 16 px one would turn 2 px while the ribbon is 1 px.
+    #[test]
+    fn rail_icons_take_the_drawing_with_the_ribbons_line_weight() {
+        let rail = |scale: f32| prefers_large_art((20.0 * scale).round() as u32, scale);
+        assert!(!rail(1.0), "100 %: 16 px drawing, 1 px lines");
+        assert!(!rail(1.25), "125 %: 16 px drawing, 1 px lines");
+        assert!(rail(1.5), "150 %: 32 px drawing keeps 1 px lines");
+        assert!(!rail(1.75), "175 %: the ribbon is 2 px too");
+        assert!(!rail(2.0), "200 %: the ribbon is 2 px too");
+        // The ribbon's own sizes never switch.
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+            assert!(!prefers_large_art((16.0 * scale).round() as u32, scale));
+        }
+        // A 32 px drawing is picked only for art that has one.
+        let plain: &'static [u8] = b"<svg/>";
+        assert_eq!(art_with_ribbon_weight(plain, 20.0), plain);
     }
 
     /// The layer state cells draw only the state glyph; the layer stack with

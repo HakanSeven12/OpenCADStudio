@@ -1129,6 +1129,8 @@ pub const DOCK_FLOAT_BAR_W: f32 = 28.0;
 pub const DOCK_STRIP_W: f32 = 40.0;
 /// Height of one pallet icon in the strip.
 pub const STRIP_CELL_H: f32 = 32.0;
+/// Size of a pallet icon in the strip.
+pub const RAIL_ICON: f32 = 20.0;
 /// Text size of a strip tab's name.
 pub const STRIP_LABEL_SIZE: f32 = 13.0;
 /// Space after a strip tab's name.

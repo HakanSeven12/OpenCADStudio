@@ -1117,6 +1117,89 @@ fn a_hidden_quick_properties_copy_does_not_swallow_escape() {
     assert!(app.tabs[test].scene.selected.is_empty());
 }
 
+/// A pallet on a collapsed auto-hiding edge is not painted; its open list
+/// must not keep the guard swallowing keys.
+#[test]
+fn a_collapsed_auto_hiding_edge_does_not_swallow_escape() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockMsg, PanelId};
+
+    let (mut app, test) = lookup_choice_tab();
+    open_lookup_list(&mut app, test);
+    let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+    assert!(app.dock.edge_auto_hide(DockSide::Left));
+    assert_eq!(app.dock_peek, None);
+    assert!(!app.dock_edge_expanded(DockSide::Left));
+    assert!(
+        app.tabs[test].properties.open_block_picker.is_some(),
+        "the list is still open, so the guard is what lets the key through"
+    );
+
+    let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+    assert!(app.tabs[test].scene.selected.is_empty());
+}
+
+/// The same edge, expanded by a hover, draws its pallet again; its open list
+/// keeps the keys.
+#[test]
+fn an_expanded_auto_hiding_edge_still_owns_its_list_keys() {
+    use crate::ui::dock::{DockMsg, PanelId};
+
+    let (mut app, test) = lookup_choice_tab();
+    open_lookup_list(&mut app, test);
+    let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+    let _ = app.on_dock(DockMsg::Hover(PanelId::Properties));
+    let _ = app.on_dock(DockMsg::HoverSettled(app.dock_hover_gen));
+    assert_eq!(app.dock_peek, Some(PanelId::Properties));
+
+    let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+    assert_eq!(app.tabs[test].properties.open_block_picker, None);
+    assert!(!app.tabs[test].scene.selected.is_empty());
+}
+
+/// A docked group behind another group's tab is not painted either, so its
+/// open list lets the keys through.
+#[test]
+fn a_list_behind_another_group_tab_does_not_swallow_escape() {
+    use crate::app::config::DockSide;
+    use crate::ui::dock::{DockGroup, PanelId};
+
+    let (mut app, test) = lookup_choice_tab();
+    open_lookup_list(&mut app, test);
+    app.show_block_palette = true;
+    app.dock.left.push(DockGroup::single(PanelId::BlockPalette));
+    assert!(app.dock.show_group(DockSide::Left, 1));
+    assert!(app.dock_panel_visible(PanelId::Properties));
+    assert!(!app.dock_panel_on_screen(PanelId::Properties));
+
+    let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+    assert!(app.tabs[test].scene.selected.is_empty());
+}
+
+/// A floating pallet collapsed by its own toggle is not painted; its open
+/// list must let the keys through like any other tucked-away panel.
+#[test]
+fn a_collapsed_floating_properties_pallet_does_not_swallow_escape() {
+    use crate::ui::dock::{DockMsg, FloatPanel, PanelId};
+
+    let (mut app, test) = lookup_choice_tab();
+    open_lookup_list(&mut app, test);
+    assert!(app.dock.float(FloatPanel::new(
+        PanelId::Properties,
+        40.0,
+        40.0,
+        240.0,
+        400.0
+    )));
+    let _ = app.on_dock(DockMsg::AutoCollapseToggle(PanelId::Properties));
+    assert!(app.dock.auto_collapse(PanelId::Properties));
+    assert_eq!(app.dock_peek, None);
+    assert!(!app.dock_panel_on_screen(PanelId::Properties));
+
+    let _ = app.update(Message::ShortcutPressed("ESCAPE".into()));
+    assert!(app.tabs[test].scene.selected.is_empty());
+}
+
 /// Quick Properties switched off in Drafting Settings takes its list with it,
 /// so switching it back on shows a closed panel rather than the list that was
 /// open before the panel went away.

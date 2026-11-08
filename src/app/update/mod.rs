@@ -944,14 +944,17 @@ impl OpenCADStudio {
         }
         // An open property list owns Escape, Enter and the arrows: without
         // this they reach the command line or the viewport and dismiss the
-        // selection the list was opened for. A list whose panel is hidden is
-        // not on screen, so it must not keep the guard on.
+        // selection the list was opened for. A list whose panel is hidden or
+        // tucked away — collapsed on an auto-hiding edge, behind another
+        // group's tab, collapsed while floating — is not on screen, so it
+        // must not keep the guard on.
         let panel = &self.tabs[self.active_tab].properties;
         let shown = |quick: bool| {
             if quick {
                 self.quick_properties
             } else {
-                self.dock_panel_visible(crate::ui::dock::PanelId::Properties)
+                let id = crate::ui::dock::PanelId::Properties;
+                self.dock_panel_visible(id) && self.dock_panel_on_screen(id)
             }
         };
         let picker_shown = panel.open_block_picker.is_some_and(|(_, quick)| shown(quick))

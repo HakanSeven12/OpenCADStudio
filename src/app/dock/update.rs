@@ -874,19 +874,20 @@ impl OpenCADStudio {
             .collect()
     }
 
-    /// The group `side` draws: the one it shows, or the first with an open
-    /// pallet when that one has none.
-    /// Whether open pallet `id` is drawn: floating, or in the shown group of
-    /// an expanded edge.
+    /// Whether open pallet `id` is drawn: in a window of its own, floating
+    /// unless it collapsed itself, or in the shown group of an expanded edge.
     pub(crate) fn dock_panel_on_screen(&self, id: crate::ui::dock::PanelId) -> bool {
         match self.dock.location(id) {
             Some((side, group)) => {
                 self.dock_shown_group(side) == Some(group) && self.dock_edge_expanded(side)
             }
-            None => true,
+            None if self.dock.is_separate(id) => true,
+            None => !self.dock.auto_collapse(id) || self.dock_peek == Some(id),
         }
     }
 
+    /// The group `side` draws: the one it shows, or the first with an open
+    /// pallet when that one has none.
     pub(crate) fn dock_shown_group(&self, side: crate::app::config::DockSide) -> Option<usize> {
         let visible = self.dock_visible_groups(side);
         let shown = self.dock.shown(side);

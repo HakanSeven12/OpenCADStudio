@@ -112,8 +112,9 @@ impl OpenCADStudio {
             // (see the ATTEDIT arm in the inquiry family); the dash form is the
             // command-line entry point.
             // Usage:
-            //   -ATTEDIT          — list all attributes on selected Insert(s)
-            //   ATTEDIT <tag> <v> — quick-set attribute <tag> to <v>
+            //   -ATTEDIT                    — list all attributes on selected Insert(s)
+            //   -ATTEDIT REPLACE <old> <new> — swap one string inside every value
+            //   ATTEDIT <tag> <v>           — quick-set attribute <tag> to <v>
             cmd if cmd.starts_with("ATTEDIT ")
                 || cmd == "-ATTEDIT"
                 || cmd.starts_with("-ATTEDIT ") =>
@@ -223,6 +224,64 @@ impl OpenCADStudio {
                         self.command_line.push_error(
                             crate::tf!("ATTEDIT: tag '{old_up}' not found.").as_ref(),
                         );
+                    }
+                } else if option.as_deref() == Some("REPLACE") {
+                    let (Some(old), Some(new)) = (args.get(1).copied(), args.get(2).copied())
+                    else {
+                        self.command_line.push_error(
+                            crate::t!(
+                                "ATTEDIT: usage is -ATTEDIT REPLACE <old string> <new string>."
+                            )
+                            .as_ref(),
+                        );
+                        return Some(Task::none());
+                    };
+                    // No handle and no selection means the whole drawing.
+                    if targets.is_empty() {
+                        targets = self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
+                            .filter_map(|entity| match entity {
+                                document::EntityType::Insert(_) => Some(entity.common().handle),
+                                _ => None,
+                            })
+                            .collect();
+                    }
+                    let mut changed = 0usize;
+                    let mut occurrences = 0usize;
+                    self.push_undo_snapshot(i, "ATTEDIT REPLACE");
+                    for handle in &targets {
+                        if self.tabs[i].scene.is_layer_locked(*handle) {
+                            continue;
+                        }
+                        if let Some(document::EntityType::Insert(ins)) = self.tabs[i]
+                            .scene
+                            .document
+                            .entities_mut()
+                            .find(|e| e.common().handle == *handle)
+                        {
+                            for attr in &mut ins.attributes {
+                                let value = attr.get_value().to_string();
+                                if value.contains(old) {
+                                    occurrences += value.matches(old).count();
+                                    attr.set_value(value.replace(old, new));
+                                    changed += 1;
+                                }
+                            }
+                        }
+                    }
+                    if changed > 0 {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "ATTEDIT: replaced {occurrences} occurrence(s) of '{old}' with '{new}' in {changed} attribute(s)."
+                            )
+                            .as_ref(),
+                        );
+                    } else {
+                        self.command_line
+                            .push_error(crate::tf!("ATTEDIT: string '{old}' not found.").as_ref());
                     }
                 } else if targets.is_empty() {
                     // No handle and nothing selected: ask for the reference

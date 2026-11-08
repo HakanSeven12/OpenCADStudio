@@ -3470,6 +3470,73 @@ mod attedit_dash_tests {
             assert_eq!(attribute(&app, handle), ("SHEET".into(), "old".into()));
         }
     }
+
+    fn set_values(app: &mut OpenCADStudio, handles: &[document::Handle], values: &[&str]) {
+        let i = app.active_tab;
+        for (handle, value) in handles.iter().zip(values) {
+            let entity = app.tabs[i]
+                .scene
+                .document
+                .entities_mut()
+                .find(|entity| entity.common().handle == *handle)
+                .expect("insert");
+            let document::EntityType::Insert(insert) = entity else {
+                panic!("not an insert");
+            };
+            insert.attributes[0].set_value(*value);
+        }
+    }
+
+    #[test]
+    fn dash_attedit_replaces_a_string_inside_every_attribute_value() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new");
+
+        for handle in handles {
+            assert_eq!(attribute(&app, handle), ("TITLE".into(), "new".into()));
+        }
+    }
+
+    #[test]
+    fn dash_attedit_replacement_keeps_the_rest_of_each_value() {
+        let (mut app, handles) = inserts_with_title();
+        set_values(&mut app, &handles, &["old north", "old south", "keep"]);
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new");
+
+        assert_eq!(attribute(&app, handles[0]).1, "new north");
+        assert_eq!(attribute(&app, handles[1]).1, "new south");
+        assert_eq!(attribute(&app, handles[2]).1, "keep");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_takes_a_handle_before_the_verb() {
+        let (mut app, handles) = inserts_with_title();
+        let line = format!("-ATTEDIT {:X} REPLACE old new", handles[1].value());
+        let _ = app.run_command_line(&line);
+
+        assert_eq!(attribute(&app, handles[1]).1, "new");
+        assert_eq!(attribute(&app, handles[0]).1, "old");
+        assert_eq!(attribute(&app, handles[2]).1, "old");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_reports_a_string_that_matches_nothing() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT REPLACE zzz new");
+
+        assert!(
+            app.command_line
+                .last_error
+                .as_deref()
+                .unwrap_or("")
+                .contains("zzz"),
+            "error was {:?}",
+            app.command_line.last_error
+        );
+        for handle in handles {
+            assert_eq!(attribute(&app, handle).1, "old");
+        }
+    }
 }
 
 #[cfg(test)]

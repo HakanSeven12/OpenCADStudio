@@ -698,6 +698,104 @@ fn a_copied_nested_reference_brings_both_definitions() {
     );
 }
 
+/// A copied reference's attribute values point at a definition, and in the
+/// target that is the definition the copy brought, not the handle the source
+/// drawing gave it.
+#[test]
+fn a_copied_attribute_reference_points_at_the_targets_definition() {
+    use document::entities::{AttributeDefinition, AttributeEntity, EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    let mut definition = AttributeDefinition::new("TAG1".into(), "Tag one".into(), "first".into());
+    definition.insertion_point = Vector3::new(2.0, 1.0, 0.0);
+    app.tabs[0].scene.define_block_raw(
+        "ATTR_BLOCK",
+        Vector3::ZERO,
+        vec![
+            EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(10.0, 0.0, 0.0),
+            )),
+            EntityType::AttributeDefinition(definition),
+        ],
+    );
+    let source_definition = app.tabs[0]
+        .scene
+        .document
+        .block_records
+        .get("ATTR_BLOCK")
+        .expect("the definition was created")
+        .entity_handles
+        .iter()
+        .copied()
+        .find(|handle| {
+            matches!(
+                app.tabs[0].scene.document.get_entity(*handle),
+                Some(EntityType::AttributeDefinition(_))
+            )
+        })
+        .expect("the definition holds its attribute definition");
+
+    let mut insert = Insert::new("ATTR_BLOCK", Vector3::ZERO);
+    let mut attribute = AttributeEntity::new("TAG1".into(), "first".into());
+    attribute.attdef_handle = source_definition;
+    insert.attributes.push(attribute);
+    let source = app.tabs[0]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(insert))
+        .expect("the seeded reference");
+
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    // Give the target a handle history of its own, so a source handle that
+    // leaks into the copy cannot pass for a target handle by coincidence.
+    for _ in 0..6 {
+        app.tabs[1].scene.document.allocate_handle();
+    }
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"at1","document_id":{target},"handles":["{:X}"]}}"#,
+        source.value()
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    assert_eq!(r["result"]["count"], 1);
+
+    let doc = &app.tabs[1].scene.document;
+    let record = doc
+        .block_records
+        .get("ATTR_BLOCK")
+        .expect("the definition travelled");
+    let target_definition = record
+        .entity_handles
+        .iter()
+        .copied()
+        .find(|handle| {
+            matches!(doc.get_entity(*handle),
+                Some(EntityType::AttributeDefinition(definition)) if definition.tag == "TAG1")
+        })
+        .expect("the copied definition holds a TAG1 definition");
+    assert_ne!(
+        target_definition, source_definition,
+        "the target gives the definition its own handle"
+    );
+    let pasted = doc
+        .entities()
+        .find_map(|entity| match entity {
+            EntityType::Insert(insert) if insert.block_name == "ATTR_BLOCK" => Some(insert),
+            _ => None,
+        })
+        .expect("the reference arrived");
+    assert_eq!(pasted.attributes.len(), 1, "the attribute value travelled");
+    assert_eq!(pasted.attributes[0].tag, "TAG1");
+    assert_eq!(
+        pasted.attributes[0].attdef_handle, target_definition,
+        "the value points at the definition in this drawing, not the handle the source gave it"
+    );
+}
+
 /// A copied raster has to arrive registered in the target the way an
 /// interactive paste registers it: the target's own definition of its file,
 /// plus the reactor that links image and definition both ways. A copy that

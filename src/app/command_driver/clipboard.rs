@@ -563,6 +563,25 @@ pub(crate) fn remap_mleader(entity: &mut document::EntityType, map: &std::collec
     }
 }
 
+/// Point a pasted reference's attribute values at this drawing's ATTDEF for
+/// the same tag. `map` comes from the block definitions merged with them; a
+/// value whose definition the copy could not bring points nowhere rather
+/// than at a handle that means something else here.
+pub(crate) fn remap_insert_attributes(
+    entity: &mut document::EntityType,
+    map: &std::collections::HashMap<Handle, Handle>,
+) {
+    let document::EntityType::Insert(insert) = entity else {
+        return;
+    };
+    for attribute in &mut insert.attributes {
+        attribute.attdef_handle = map
+            .get(&attribute.attdef_handle)
+            .copied()
+            .unwrap_or(Handle::NULL);
+    }
+}
+
 /// Merge named styles after blocks exist, keeping target definitions on a name conflict.
 fn merge_mleader_styles(
     doc: &mut document::Document,
@@ -1153,6 +1172,7 @@ pub(crate) fn paste_entities_kernel(
             remap_eed_apps(&mut entity, &apps);
             remap_image_definition(&mut entity, &image_definitions);
             remap_mleader(&mut entity, &records);
+            remap_insert_attributes(&mut entity, &records);
             if let document::EntityType::Table(table) = &mut entity {
                 remap_table_cell_blocks(table, &records);
             }

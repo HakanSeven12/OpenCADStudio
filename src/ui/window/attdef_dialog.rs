@@ -215,13 +215,10 @@ static ICON_WARN: &[u8] = include_bytes!("../../../assets/icons/ui/warning_trian
 
 fn footer<'a>(action: std::borrow::Cow<'static, str>, ok: AttdefDialogMsg) -> Element<'a, Message> {
     row![
-        button(text("?").size(12))
-            .on_press(msg(AttdefDialogMsg::Help))
-            .style(button_style(false))
-            .padding([5, 11]),
         Space::new().width(Fill),
-        dialog_button(t!("Cancel"), Message::CloseModal, false),
         dialog_button(action, msg(ok), true),
+        dialog_button(t!("Cancel"), Message::CloseModal, false),
+        dialog_button(t!("Help"), msg(AttdefDialogMsg::Help), false),
     ]
     .spacing(6)
     .align_y(iced::Center)
@@ -456,7 +453,7 @@ pub fn view<'a>(
         content = content.push(band);
     }
     content
-        .push(footer(t!("Define"), AttdefDialogMsg::Ok))
+        .push(footer(t!("OK"), AttdefDialogMsg::Ok))
         .spacing(10)
         .padding([10, 12])
         .width(sizing.width)
@@ -543,5 +540,79 @@ pub fn tag_error(tag: &str) -> Option<&'static str> {
         Some("The tag may not contain spaces.")
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui::modal::ModalSizing;
+
+    fn state() -> AttdefDialogState {
+        AttdefDialogState {
+            aflags: 0,
+            annotative: false,
+            tag: String::new(),
+            prompt: String::new(),
+            default: String::new(),
+            justify: Justify::Left,
+            style: "Standard".into(),
+            styles: vec!["Standard".into()],
+            height: "2.5000".into(),
+            rotation: "0".into(),
+            width: "0.0000".into(),
+            on_screen: true,
+            coords: ["0.0000".into(), "0.0000".into(), "0.0000".into()],
+            align_below: false,
+            can_align_below: false,
+            error: None,
+            field: None,
+        }
+    }
+
+    /// Whether `label` is laid out and in view in the dialog.
+    fn shows(state: &AttdefDialogState, label: &str) -> bool {
+        use iced_test::core::widget;
+        use iced_test::runtime::user_interface::{Cache, UserInterface};
+        use iced_test::Selector;
+        let _one = crate::headless_ui_lock();
+        let mut renderer = iced_test::futures::futures::executor::block_on(
+            <iced::Renderer as iced_test::core::renderer::Headless>::new(
+                iced_test::core::renderer::Settings::default(),
+                std::env::var("ICED_TEST_BACKEND").ok().as_deref(),
+            ),
+        )
+        .expect("headless renderer");
+        let sizing = ModalSizing {
+            width: Length::Fixed(620.0),
+            height: Length::Fixed(600.0),
+        };
+        let mut ui = UserInterface::build(
+            view(state, sizing),
+            iced::Size::new(620.0, 100_000.0),
+            Cache::default(),
+            &mut renderer,
+        );
+        let mut find = Selector::find(label);
+        ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
+        matches!(
+            widget::Operation::finish(&find),
+            widget::operation::Outcome::Some(Some(target)) if target.visible_bounds().is_some()
+        )
+    }
+
+    #[test]
+    fn the_footer_names_the_primary_button_ok_and_puts_help_beside_cancel() {
+        let state = state();
+        assert!(shows(&state, "OK"), "the primary button reads OK");
+        assert!(shows(&state, "Cancel"));
+        assert!(
+            shows(&state, "Help"),
+            "help is a labelled button in the footer"
+        );
+        assert!(
+            !shows(&state, "Define"),
+            "the primary button no longer reads Define"
+        );
     }
 }

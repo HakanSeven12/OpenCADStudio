@@ -11,11 +11,6 @@ use crate::ui::window::attdef_dialog::{
 };
 use iced::Task;
 
-fn short(v: f64) -> String {
-    let t = format!("{v:.4}");
-    t.trim_end_matches('0').trim_end_matches('.').to_string()
-}
-
 impl OpenCADStudio {
     pub(super) fn dispatch_attdef(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         if matches!(cmd, "ATTDEF" | "-ATTDEF") {
@@ -137,11 +132,15 @@ impl OpenCADStudio {
             justify: Justify::Left,
             style: defaults.style_name,
             styles,
-            height: short(defaults.height),
+            height: crate::entities::common::format_length(defaults.height),
             rotation: "0".into(),
-            width: "0".into(),
+            width: crate::entities::common::format_length(0.0),
             on_screen: session.on_screen,
-            coords: ["0".into(), "0".into(), "0".into()],
+            coords: [
+                crate::entities::common::format_length(0.0),
+                crate::entities::common::format_length(0.0),
+                crate::entities::common::format_length(0.0),
+            ],
             align_below: false,
             can_align_below: session.last_in(drawing).is_some(),
             error: None,
@@ -403,5 +402,22 @@ impl OpenCADStudio {
             self.refresh_properties();
         }
         self.post_editor_closed(changed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_attribute_definition_dialog_seeds_its_numbers_at_drawing_precision() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.open_attdef_dialog(0);
+        let state = app.attdef_dialog.as_ref().expect("the dialog is open");
+        assert_eq!(state.height, "2.5000");
+        assert_eq!(state.rotation, "0");
+        assert_eq!(state.width, "0.0000");
+        let coords: Vec<&str> = state.coords.iter().map(String::as_str).collect();
+        assert_eq!(coords, ["0.0000", "0.0000", "0.0000"]);
     }
 }

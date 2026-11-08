@@ -112,9 +112,10 @@ impl OpenCADStudio {
             // (see the ATTEDIT arm in the inquiry family); the dash form is the
             // command-line entry point.
             // Usage:
-            //   -ATTEDIT                    — list all attributes on selected Insert(s)
-            //   -ATTEDIT REPLACE <old> <new> — swap one string inside every value
-            //   ATTEDIT <tag> <v>           — quick-set attribute <tag> to <v>
+            //   -ATTEDIT                        — list all attributes on selected Insert(s)
+            //   -ATTEDIT REPLACE <old> <new> [block] [tag] [value]
+            //                                   — swap one string inside matching values
+            //   ATTEDIT <tag> <v>               — quick-set attribute <tag> to <v>
             cmd if cmd.starts_with("ATTEDIT ")
                 || cmd == "-ATTEDIT"
                 || cmd.starts_with("-ATTEDIT ") =>
@@ -248,6 +249,11 @@ impl OpenCADStudio {
                             })
                             .collect();
                     }
+                    // The reference narrows the global edit with block-name,
+                    // tag and value specifications, in that order.
+                    let block_spec = args.get(3).copied().unwrap_or("*");
+                    let tag_spec = args.get(4).copied().unwrap_or("*");
+                    let value_spec = args.get(5).copied().unwrap_or("*");
                     let mut changed = 0usize;
                     let mut occurrences = 0usize;
                     self.push_undo_snapshot(i, "ATTEDIT REPLACE");
@@ -261,9 +267,22 @@ impl OpenCADStudio {
                             .entities_mut()
                             .find(|e| e.common().handle == *handle)
                         {
+                            if !crate::app::control::block_ops::glob_match_ci(
+                                block_spec,
+                                &ins.block_name,
+                            ) {
+                                continue;
+                            }
                             for attr in &mut ins.attributes {
+                                if !crate::app::control::block_ops::glob_match_ci(
+                                    tag_spec, &attr.tag,
+                                ) {
+                                    continue;
+                                }
                                 let value = attr.get_value().to_string();
-                                if value.contains(old) {
+                                if crate::app::control::block_ops::glob_match_ci(value_spec, &value)
+                                    && value.contains(old)
+                                {
                                     occurrences += value.matches(old).count();
                                     attr.set_value(value.replace(old, new));
                                     changed += 1;

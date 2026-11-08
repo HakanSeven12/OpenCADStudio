@@ -3537,6 +3537,80 @@ mod attedit_dash_tests {
             assert_eq!(attribute(&app, handle).1, "old");
         }
     }
+
+    fn add_note_attributes(app: &mut OpenCADStudio, handles: &[document::Handle]) {
+        let i = app.active_tab;
+        for handle in handles {
+            let entity = app.tabs[i]
+                .scene
+                .document
+                .entities_mut()
+                .find(|entity| entity.common().handle == *handle)
+                .expect("insert");
+            let document::EntityType::Insert(insert) = entity else {
+                panic!("not an insert");
+            };
+            insert
+                .attributes
+                .push(AttributeEntity::new("NOTE".into(), "old".into()));
+        }
+    }
+
+    fn attribute_value(
+        app: &OpenCADStudio,
+        handle: document::Handle,
+        tag: &str,
+    ) -> String {
+        let entity = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("insert");
+        let document::EntityType::Insert(insert) = entity else {
+            panic!("not an insert");
+        };
+        insert
+            .attributes
+            .iter()
+            .find(|attr| attr.tag == tag)
+            .map(|attr| attr.get_value().to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn dash_attedit_replacement_filters_by_tag() {
+        let (mut app, handles) = inserts_with_title();
+        add_note_attributes(&mut app, &handles);
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new * TITLE");
+
+        assert_eq!(attribute_value(&app, handles[0], "TITLE"), "new");
+        assert_eq!(attribute_value(&app, handles[0], "NOTE"), "old");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_filters_by_value() {
+        let (mut app, handles) = inserts_with_title();
+        set_values(&mut app, &handles, &["old north", "north old", "keep"]);
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new * * old*");
+
+        assert_eq!(attribute(&app, handles[0]).1, "new north");
+        assert_eq!(attribute(&app, handles[1]).1, "north old");
+        assert_eq!(attribute(&app, handles[2]).1, "keep");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_filters_by_block_name() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new OTHERBLOCK");
+        for handle in &handles {
+            assert_eq!(attribute(&app, *handle).1, "old");
+        }
+
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new TITLEBLOCK");
+        for handle in &handles {
+            assert_eq!(attribute(&app, *handle).1, "new");
+        }
+    }
 }
 
 #[cfg(test)]

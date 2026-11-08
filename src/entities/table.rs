@@ -4932,6 +4932,18 @@ pub fn cell_range_grips(table: &Table, range: (usize, usize, usize, usize)) -> V
     ]
 }
 
+/// How far a shared edge may move: neither side goes under `min`. Two sides
+/// already too thin for that (a file can store them) keep the edge put
+/// rather than give `clamp` a range it panics on.
+fn shared_edge_shift(moved: f64, before: f64, after: f64, min: f64) -> f64 {
+    let (lo, hi) = (min - before, after - min);
+    if lo <= hi {
+        moved.clamp(lo, hi)
+    } else {
+        0.0
+    }
+}
+
 /// A cell grip moved to `point`: the right and bottom edge grips size the
 /// column / row on their side of the range by how far the edge moves. The
 /// left and top edge grips move the edge the range shares with the column /
@@ -4969,7 +4981,7 @@ pub fn apply_cell_grip(
             if c0 > 0 {
                 let before = table.columns[c0 - 1].width;
                 let after = table.columns[c0].width;
-                let moved = moved.clamp(MIN - before, after - MIN);
+                let moved = shared_edge_shift(moved, before, after, MIN);
                 table.columns[c0 - 1].width = before + moved;
                 table.columns[c0].width = after - moved;
             } else {
@@ -4981,7 +4993,7 @@ pub fn apply_cell_grip(
             if r0 > 0 {
                 let before = table.rows[r0 - 1].height;
                 let after = table.rows[r0].height;
-                let moved = moved.clamp(MIN - before, after - MIN);
+                let moved = shared_edge_shift(moved, before, after, MIN);
                 table.rows[r0 - 1].height = before + moved;
                 table.rows[r0].height = after - moved;
             } else {

@@ -114,6 +114,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("-ATTEDIT", "ATTEDIT"),
     ("EATTEDIT", "ATTEDIT"),
     ("BATTMAN", "ATTMAN"),
+    ("ATTREDEF", "ATTMAN"),
     ("ATTEXT", "DATAEXTRACTION"),
     ("EATTEXT", "DATAEXTRACTION"),
     ("-BEDIT", "BEDIT"),

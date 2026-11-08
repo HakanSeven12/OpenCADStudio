@@ -1141,6 +1141,8 @@ impl OpenCADStudio {
                     | "COLORTHEME"
                     | "SELECTIONAREA"
                     | "SELECTIONAREAOPACITY"
+                    | "VPHIGHLIGHT"
+                    | "VPHIGHLIGHTOPACITY"
                     | "SELECTIONEFFECT"
                     | "SELECTIONEFFECTCOLOR"
                     | "VSEDGECOLOR"
@@ -2663,6 +2665,48 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             },
+                            "VPHIGHLIGHT" => match &value {
+                                Some(v) => {
+                                    let on = match v.to_uppercase().as_str() {
+                                        "0" | "OFF" => Some(false),
+                                        "1" | "ON" => Some(true),
+                                        "T" | "TOGGLE" => {
+                                            Some(!self.model_space.viewport_hover_highlight)
+                                        }
+                                        _ => None,
+                                    };
+                                    match on {
+                                        Some(on) => {
+                                            self.model_space.viewport_hover_highlight = on;
+                                            Ok((format!("VPHIGHLIGHT = {}", on as u8), true))
+                                        }
+                                        None => Err("SETVAR: 0 or 1 required.".into()),
+                                    }
+                                }
+                                None => Ok((
+                                    format!(
+                                        "VPHIGHLIGHT = {}",
+                                        self.model_space.viewport_hover_highlight as u8
+                                    ),
+                                    false,
+                                )),
+                            },
+                            "VPHIGHLIGHTOPACITY" => match &value {
+                                Some(v) => match v.parse::<u8>() {
+                                    Ok(op) if op <= 100 => {
+                                        self.model_space.viewport_hover_opacity = op;
+                                        Ok((format!("VPHIGHLIGHTOPACITY = {op}"), true))
+                                    }
+                                    _ => Err("SETVAR: integer from 0 to 100 required.".into()),
+                                },
+                                None => Ok((
+                                    format!(
+                                        "VPHIGHLIGHTOPACITY = {}",
+                                        self.model_space.viewport_hover_opacity
+                                    ),
+                                    false,
+                                )),
+                            },
                             "SELECTIONEFFECT" => match &value {
                                 Some(v) => match v.as_str() {
                                     "0" => {
@@ -3642,6 +3686,8 @@ impl OpenCADStudio {
                                         | "COLORTHEME"
                                         | "SELECTIONAREA"
                                         | "SELECTIONAREAOPACITY"
+                                        | "VPHIGHLIGHT"
+                                        | "VPHIGHLIGHTOPACITY"
                                         | "SELECTIONEFFECT"
                                         | "SELECTIONEFFECTCOLOR"
                                         | "VSEDGECOLOR"

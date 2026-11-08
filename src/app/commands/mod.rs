@@ -315,6 +315,12 @@ impl OpenCADStudio {
         cmd: &str,
         allow_suggest: bool,
     ) -> Option<Task<Message>> {
+        if self.table_cell_editor.is_some()
+            && self.field_dialog.is_none()
+            && !self.commit_table_cell_editor()
+        {
+            return Some(Task::none());
+        }
         let i = self.active_tab;
         // Expand a command alias ("L" → "LINE") on the leading token before any
         // routing, so every path below (Start-tab gate, plugins, all dispatch
@@ -964,6 +970,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "-WBLOCK",
         "-WB",
         "-ATTEDIT",
+        // Redefine a block's attribute definitions from an existing reference.
+        "ATTREDEF",
         // Script forms of the table commands.
         "-LAYER",
         "-PURGE",
@@ -1323,6 +1331,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "COLORTHEME",
         "SELECTIONAREA",
         "SELECTIONAREAOPACITY",
+        "VPHIGHLIGHT",
+        "VPHIGHLIGHTOPACITY",
         "SELECTIONEFFECT",
         "SELECTIONEFFECTCOLOR",
         "VSEDGECOLOR",

@@ -2325,6 +2325,9 @@ enum ViewSnapshot {
 /// divider width. The renderer derives tile rects through this same spacing so
 /// the drawn viewports line up exactly with the pane_grid layout.
 pub const TILE_DIVIDER_PX: f32 = 2.0;
+/// Extra grab width around a Model-pane divider where its resize arrows
+/// show (split across both sides).
+pub const TILE_RESIZE_LEEWAY_PX: f32 = 6.0;
 
 /// Minimum used until the viewport render-mode bar reports its natural width.
 pub const MODEL_PANE_MIN_FALLBACK_PX: f32 = 50.0;
@@ -2655,6 +2658,9 @@ pub struct Scene {
     /// Separate from object isolation so a grip can never activate the
     /// isolation status or be captured in its undo state.
     pub preview_hidden: HashSet<Handle>,
+    /// The table whose fill grip is being dragged: its picked range stays
+    /// drawn over the grip preview that hides it.
+    pub table_fill_drag: Option<Handle>,
     /// Source handles replaced by an active command preview. Kept separate
     /// from grip state so either interaction can clean up only its own hides.
     command_preview_hidden: HashSet<Handle>,
@@ -2733,6 +2739,10 @@ pub struct Scene {
     /// entity/insert) re-tessellate only the visible wires (~baseline cost)
     /// instead of rebuilding every block defn (the edit-time spike).
     pub block_epoch: u64,
+    /// Layer visibility changes since a `block_epoch` (`from`, `to`, and the
+    /// definitions they touched): a cache built at `from` is brought to `to`
+    /// by rebuilding only those definitions, not all of them (#2696).
+    block_visibility_edits: Option<(u64, u64, HashSet<String>)>,
     /// Incremented when the selection / hover-highlight set changes WITHOUT a
     /// geometry change. The wire tessellation is selection-independent, so a
     /// pick only refreshes the GPU xray overlay (cheap) instead of bumping
@@ -3227,6 +3237,20 @@ pub struct Scene {
     /// Hash of the tessellation parameters `tess_memo` was built under. When
     /// the current call's parameters differ, the memo is stale and cleared.
     tess_memo_guard: std::cell::Cell<u64>,
+    /// One unrestricted block-stub expansion, kept so repeated whole-set
+    /// snap/pick queries over the same wires do not redo it. Keyed by the
+    /// source wire set's identity and `geometry_epoch`.
+    ///
+    /// Measured need: on a paper-space viewport the resident-identity gate in
+    /// `interaction_candidates_near_impl` fails, so every pointer move took
+    /// the unindexed path and re-expanded the same 47 353 wires into the same
+    /// 202 830 at ~75 ms. 355 such moves in one recorded session.
+    ///
+    /// The source is held weakly, not by address: a dropped `Arc` can be
+    /// replaced at the same address within one epoch, and a bare pointer
+    /// compare would then hand back another set's expansion.
+    stub_expansion_cache:
+        RefCell<Option<(std::sync::Weak<Vec<WireModel>>, u64, Arc<Vec<WireModel>>)>>,
     /// Camera-independent model tessellation, separate from the culled memo.
     resident_tess_memo: RefCell<HashMap<Handle, MemoRun>>,
     /// The resident set `resident_tess_memo`'s `InSet` runs read from.
@@ -3272,7 +3296,17 @@ pub struct Scene {
     /// those entities' instance slabs instead of re-uploading every wire. The
     /// render layer matches `new_gen` against the viewport's content id and
     /// `prev_gen` against what the GPU currently holds; a mismatch just rebuilds.
-    model_wire_gpu_patch: RefCell<Option<(u64, u64, Arc<WireGpuPatch>, bool)>>,
+    ///
+    /// Keyed by the viewport whose resident set it belongs to. It used to be a
+    /// single slot, and on a paper layout with two content viewports that was
+    /// the whole reason dragging was slow: each viewport's full rebuild
+    /// cleared the other's pending handoff, so neither ever had one, every
+    /// `arena-base` test failed, and every dragged pointer move paid a full
+    /// ~90 ms `arena-build` per viewport instead of an in-place patch. The
+    /// sets are independent and already carry their own generations, so they
+    /// get their own entries.
+    model_wire_gpu_patch:
+        RefCell<HashMap<Option<Handle>, (u64, u64, Arc<WireGpuPatch>, bool)>>,
     /// Active delta-undo recording, or `None` when no entity-only command is
     /// capturing. Populated by the five mutation primitives via
     /// [`Scene::record_undo_before`]; consumed by the app (`take_undo_recording`)
@@ -3403,6 +3437,7 @@ impl Scene {
             layer_walk: LayerWalkState::default(),
             reference_only: Default::default(),
             preview_hidden: HashSet::default(),
+            table_fill_drag: None,
             command_preview_hidden: HashSet::default(),
             refedit_keep: None,
             refedit_lock: false,
@@ -3430,6 +3465,7 @@ impl Scene {
             geometry_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
             projection_bounds_epoch: std::cell::Cell::new(0),
             block_epoch: GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed),
+            block_visibility_edits: None,
             selection_generation: 0,
             #[cfg(any(test, not(target_arch = "wasm32")))]
             selection_fingerprint_cache: 0,
@@ -3555,6 +3591,7 @@ impl Scene {
             split_cache: RefCell::new(HashMap::default()),
             tess_memo: RefCell::new(HashMap::default()),
             tess_memo_guard: std::cell::Cell::new(0),
+            stub_expansion_cache: RefCell::new(None),
             resident_tess_memo: RefCell::new(HashMap::default()),
             resident_memo_backing: RefCell::new(MemoBacking::default()),
             building_resident_set: std::cell::Cell::new(false),
@@ -3569,7 +3606,7 @@ impl Scene {
             pending_removed_categories: RefCell::new(HashMap::default()),
             geometry_journal_floor: std::cell::Cell::new(0),
             resident_patch_hits: std::cell::Cell::new(0),
-            model_wire_gpu_patch: RefCell::new(None),
+            model_wire_gpu_patch: RefCell::new(HashMap::default()),
             undo_recording: None,
         }
     }
@@ -3712,12 +3749,45 @@ impl Scene {
         // before the drawing had a complex one kept no path for its children.
         key = key.rotate_left(13)
             ^ crate::io::linetypes::defines_complex_lt(&self.document) as u64;
-        {
+        let stale = {
             let cache = self.block_defn_cache.borrow();
-            if let Some((epoch, arc)) = cache.get(&key) {
-                if *epoch == self.block_epoch {
-                    return Arc::clone(arc);
+            match cache.get(&key) {
+                Some((epoch, arc)) if *epoch == self.block_epoch => return Arc::clone(arc),
+                Some((epoch, arc)) => Some((*epoch, Arc::clone(arc))),
+                None => None,
+            }
+        };
+        // Only layers were switched since this cache was built: rebuild the
+        // definitions that hold their objects, keep the rest.
+        if let (Some((epoch, old)), Some((from, to, names))) =
+            (stale, self.block_visibility_edits.as_ref())
+        {
+            if epoch == *from && *to == self.block_epoch {
+                let solid_snaps: HashMap<Handle, _> = self
+                    .block_meshes
+                    .keys()
+                    .map(|handle| (*handle, self.solid_snap_points(*handle)))
+                    .filter(|(_, points)| !points.is_empty())
+                    .collect();
+                let mut built = old.with_rebuilt_blocks(
+                    &self.document,
+                    names,
+                    1.0,
+                    annotation_scale_handle,
+                    all_visible,
+                    bg,
+                    viewport,
+                    &self.draw_depth_map(),
+                    &solid_snaps,
+                );
+                if self.constraint_shading_active() {
+                    built.disable_prototypes();
                 }
+                let arc = Arc::new(built);
+                self.block_defn_cache
+                    .borrow_mut()
+                    .insert(key, (self.block_epoch, Arc::clone(&arc)));
+                return arc;
             }
         }
         // Block definitions are cached at block-local size (annotation scale
@@ -7576,7 +7646,16 @@ impl Scene {
             .collect();
         self.command_preview_hidden = desired;
         if !changes.is_empty() {
-            self.bump_entities(&changes);
+            // Visibility is a scene concern. Normal edit bookkeeping can
+            // regenerate table pictures, prune fields and solve associations.
+            let epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+            self.geometry_epoch = epoch;
+            self.invalidate_projection_bounds();
+            for (handle, _) in &changes {
+                self.tess_memo.borrow_mut().remove(handle);
+                self.resident_tess_memo.borrow_mut().remove(handle);
+            }
+            self.push_geometry_delta(epoch, changes, false);
         }
     }
 
@@ -8572,9 +8651,14 @@ impl Scene {
         let gen = WIRE_CONTENT_GEN.fetch_add(1, Ordering::Relaxed);
         self.last_model_wire_gen.set(gen);
         // A full rebuild of the Model set — the GPU arena must rebuild too, not
-        // apply a stale patch, so clear any pending handoff.
+        // apply a stale patch, so drop this set's pending handoff. Only this
+        // viewport's: another viewport's set is a separate chain with its own
+        // generations, and clearing it here is what left every viewport
+        // patchless on a two-viewport layout.
         if block == self.model_space_block_handle() {
-            *self.model_wire_gpu_patch.borrow_mut() = None;
+            self.model_wire_gpu_patch
+                .borrow_mut()
+                .remove(&style_viewport);
         }
         // Every content viewport of the shown layout holds a set of its own;
         // a cap below their count cleared them all each frame and rebuilt
@@ -8584,14 +8668,9 @@ impl Scene {
         } else {
             self.paper_viewport_handles().2.len()
         };
-        let mut sets = self.resident_wire_sets.borrow_mut();
-        // Evict stale entries (older epochs / abandoned keys) so switching
-        // spaces or re-scaling a viewport can't accumulate dead full sets.
         let cur_epoch = self.geometry_epoch;
-        sets.retain(|_, set| set.epoch == cur_epoch);
-        if sets.len() > 16.max(shown + 2) {
-            sets.clear();
-        }
+        let mut sets = self.resident_wire_sets.borrow_mut();
+        self.prune_resident_wire_sets(&mut sets, shown);
         sets.insert(
             key,
             ResidentWireSet {
@@ -8602,6 +8681,43 @@ impl Scene {
             },
         );
         arc
+    }
+
+    /// Make room in the resident-set map for a freshly built or patched set.
+    ///
+    /// A stale entry is not dead weight: it is exactly what
+    /// [`Self::try_resident_patch`] moves forward, which refuses an entry
+    /// already at the current epoch. Pruning by epoch alone therefore deleted
+    /// the other viewports' bases every time one of them stored its own set,
+    /// so on a layout with N content viewports one patched and the other N-1
+    /// reported `resident-patch-skip reason=no-entry` and paid a full
+    /// assembly plus an arena build on every edit.
+    ///
+    /// Keep whatever the journal can still replay — `replay_since` refuses
+    /// anything below the floor — and bound the map by giving up the stalest
+    /// bases first, falling back to the wholesale clear only when the live
+    /// sets alone exceed the cap.
+    fn prune_resident_wire_sets(&self, sets: &mut HashMap<u64, ResidentWireSet>, shown: usize) {
+        let cur_epoch = self.geometry_epoch;
+        let floor = self.geometry_journal_floor.get();
+        sets.retain(|_, set| set.epoch == cur_epoch || set.epoch >= floor);
+        let cap = 16.max(shown + 2);
+        while sets.len() > cap {
+            let stalest = sets
+                .iter()
+                .filter(|(_, set)| set.epoch != cur_epoch)
+                .min_by_key(|(_, set)| set.epoch)
+                .map(|(key, _)| *key);
+            match stalest {
+                Some(key) => {
+                    sets.remove(&key);
+                }
+                None => {
+                    sets.clear();
+                    break;
+                }
+            }
+        }
     }
 
     fn resident_wire_key(
@@ -8682,8 +8798,12 @@ impl Scene {
     /// a viewport that rebuilt independently.
     pub(crate) fn model_wire_patch_for(&self, gen: u64) -> Option<(u64, Arc<WireGpuPatch>)> {
         let mut pending = self.model_wire_gpu_patch.borrow_mut();
-        match pending.as_mut() {
-            Some((prev, new, patch, delivered)) if *new == gen => {
+        // The caller knows only the content generation it is rendering, not
+        // which viewport produced it, so the entry is found by generation.
+        // Generations come from one global counter, so at most one entry can
+        // match, and the map holds one entry per content viewport.
+        match pending.values_mut().find(|(_, new, _, _)| *new == gen) {
+            Some((prev, _new, patch, delivered)) => {
                 // Multiple viewport slots can request the same handoff while
                 // preparing one frame. Keep it available to all of them, but
                 // let the next geometry update know that the current version
@@ -9274,23 +9394,48 @@ impl Scene {
                 text_pass_changed,
             };
             let mut pending = self.model_wire_gpu_patch.borrow_mut();
-            let combined = match pending.take() {
-                Some((base, pending_gen, previous, false)) if pending_gen == prev_gen => Some((
+            let combined = match pending.remove(&style_viewport) {
+                Some((base, pending_gen, previous, false)) if pending_gen == prev_gen => (
                     base,
                     gen,
                     Arc::new(compose_wire_gpu_patches(&previous, next_patch)),
                     false,
-                )),
-                _ => Some((prev_gen, gen, Arc::new(next_patch), false)),
+                ),
+                _ => (prev_gen, gen, Arc::new(next_patch), false),
             };
-            *pending = combined;
+            pending.insert(style_viewport, combined);
+            // One entry per content viewport is the working set; switching
+            // layouts would otherwise leave an entry — and its patch's changed
+            // handles and runs — behind for every viewport ever rendered.
+            // Generations only grow, so the lowest is the stalest.
+            const MAX_PENDING_WIRE_PATCHES: usize = 8;
+            while pending.len() > MAX_PENDING_WIRE_PATCHES {
+                let stalest = pending
+                    .iter()
+                    .min_by_key(|(_, (_, new, _, _))| *new)
+                    .map(|(key, _)| *key);
+                match stalest {
+                    Some(key) => {
+                        pending.remove(&key);
+                    }
+                    None => break,
+                }
+            }
         }
         if shareable {
             self.bind_memo_to_set(&arc, &layout.ranges);
         }
         let cur_epoch = self.geometry_epoch;
+        // Same bound as the full build: this path used to rely on the epoch
+        // prune alone, so weakening that without a cap here would let
+        // abandoned keys accumulate full sets.
+        let shown = if self.current_layout == "Model" {
+            0
+        } else {
+            self.paper_viewport_handles().2.len()
+        };
         let mut sets = self.resident_wire_sets.borrow_mut();
-        sets.retain(|_, set| set.epoch == cur_epoch);
+        self.prune_resident_wire_sets(&mut sets, shown);
         sets.insert(
             key,
             ResidentWireSet {
@@ -11655,6 +11800,12 @@ impl Scene {
         .with_annotation_scale(self.annotation_scale)
         .with_viewport(viewport);
         let mut out = Vec::new();
+        // Skip block subtrees that hold no mesh at all, the way the instanced
+        // hatch walk skips hatch-free ones. Without it every INSERT's whole
+        // definition tree is enumerated to ask, which on a drawing whose
+        // blocks carry no solids is ~795 ms spent producing nothing. The
+        // presence test is memoised across instances by block name.
+        let mut mesh_block_memo = std::collections::HashMap::new();
         graph.walk_root(
             self.render_scene_root(layout_block),
             |entity, context| {
@@ -11665,9 +11816,31 @@ impl Scene {
                 if self.entity_temporarily_hidden(handle) {
                     return false;
                 }
-                targets.map_or(true, |targets| {
+                if !targets.map_or(true, |targets| {
                     matches!(entity, EntityType::Insert(_)) && targets.contains(&handle)
-                })
+                }) {
+                    return false;
+                }
+                // The graph walks at `self.annotation_scale`, so the presence
+                // test has to resolve representations at that same scale: at
+                // a different one an annotative INSERT can resolve to another
+                // block, and skipping on that answer would hide real meshes.
+                let block_uses: Vec<_> = render_graph::entity_render_block_uses(
+                    &self.document,
+                    entity,
+                    self.annotation_scale,
+                )
+                .into_iter()
+                .filter(|block_use| block_use.active)
+                .collect();
+                block_uses.is_empty()
+                    || block_uses.into_iter().any(|block_use| {
+                        render_graph::block_contains_mesh(
+                            &self.document,
+                            &block_use.insert.block_name,
+                            &mut mesh_block_memo,
+                        )
+                    })
             },
             |entity, context| {
                 if !context.is_instanced() {
@@ -12245,8 +12418,9 @@ impl Scene {
     ) -> crate::scene::pick::interaction_index::InteractionCandidates {
         let wires = self.hit_test_wires();
         if self.current_layout != "Model" || !self.interaction_index_worthwhile(&wires) {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
-                .materialize_stubs();
+            return self.materialize_stubs_cached(
+                crate::scene::pick::interaction_index::InteractionCandidates::all(wires),
+            );
         }
         self.indexed_interaction_candidates_xy(wires, aabb, false, false, None)
     }
@@ -12255,6 +12429,47 @@ impl Scene {
     /// sub-geometry (one giant polyline/text batch/mesh) enables the index.
     const INTERACTION_INDEX_MIN_WIRES: usize = 4_000;
     const INTERACTION_INDEX_MIN_WORK: usize = 20_000;
+
+    /// `InteractionCandidates::materialize_stubs`, but an unrestricted
+    /// expansion of a wire set already expanded under this `geometry_epoch`
+    /// is reused instead of recomputed. A restricted (XY- or index-limited)
+    /// query depends on the query too, so it is passed straight through.
+    fn materialize_stubs_cached(
+        &self,
+        candidates: crate::scene::pick::interaction_index::InteractionCandidates,
+    ) -> crate::scene::pick::interaction_index::InteractionCandidates {
+        if !candidates.expansion_is_unrestricted() {
+            return candidates.materialize_stubs();
+        }
+        let Some(source) = candidates.snapshot_arc() else {
+            return candidates.materialize_stubs();
+        };
+        if !candidates.has_stubs() {
+            return candidates;
+        }
+        if let Some((weak, epoch, wires)) = self.stub_expansion_cache.borrow().as_ref() {
+            if *epoch == self.geometry_epoch
+                && weak
+                    .upgrade()
+                    .is_some_and(|alive| Arc::ptr_eq(&alive, &source))
+            {
+                if crate::perf::enabled() {
+                    crate::perf_record!(
+                        "[perf] stub-cache hit wires={} source={}",
+                        wires.len(),
+                        source.len(),
+                    );
+                }
+                return candidates.with_materialized(Arc::clone(wires));
+            }
+        }
+        let expanded = candidates.materialize_stubs();
+        if let Some(wires) = expanded.snapshot_arc() {
+            *self.stub_expansion_cache.borrow_mut() =
+                Some((Arc::downgrade(&source), self.geometry_epoch, wires));
+        }
+        expanded
+    }
 
     fn interaction_index_worthwhile(&self, wires: &[WireModel]) -> bool {
         wires.len() >= Self::INTERACTION_INDEX_MIN_WIRES
@@ -12555,14 +12770,17 @@ impl Scene {
         area_only: bool,
         snap: Option<SnapQueryCategory>,
     ) -> InteractionCandidates {
-        self.indexed_interaction_candidates_xy_stubbed(
+        // The stubbed query falls back to the whole unindexed set when no
+        // index is cached yet, and that fallback is unrestricted — so it goes
+        // through the cache, which passes a genuinely restricted result
+        // straight on.
+        self.materialize_stubs_cached(self.indexed_interaction_candidates_xy_stubbed(
             wires,
             aabb,
             allow_pending_empty,
             area_only,
             snap,
-        )
-        .materialize_stubs()
+        ))
     }
 
     /// `snap` narrows the query to the object-snap feature indexes (and,
@@ -12708,7 +12926,7 @@ impl Scene {
         allow_pending_empty: bool,
         snap: Option<SnapQueryCategory>,
     ) -> InteractionCandidates {
-        self.indexed_interaction_candidates_screen_stubbed(
+        self.materialize_stubs_cached(self.indexed_interaction_candidates_screen_stubbed(
             wires,
             screen_rect,
             view_rot,
@@ -12716,8 +12934,7 @@ impl Scene {
             bounds,
             allow_pending_empty,
             snap,
-        )
-        .materialize_stubs()
+        ))
     }
 
     fn indexed_interaction_candidates_screen_stubbed(
@@ -13097,7 +13314,7 @@ impl Scene {
         if !self.interaction_source_is_resident(&wires, bounds.height)
             || !self.interaction_index_worthwhile(&wires)
         {
-            return InteractionCandidates::all(wires).materialize_stubs();
+            return self.materialize_stubs_cached(InteractionCandidates::all(wires));
         }
         // Snap features are indexed at their own points; only picking grows
         // the aperture to cover screen-sized markers and wide strokes.
@@ -13117,9 +13334,11 @@ impl Scene {
         if !flat_ortho {
             let clip = view_rot * (cursor - eye).as_vec3().extend(1.0);
             if !clip.is_finite() || clip.w <= 1e-6 {
-                return self
-                    .unindexed_interaction_candidates(wires, allow_pending_empty, snap)
-                    .materialize_stubs();
+                return self.materialize_stubs_cached(self.unindexed_interaction_candidates(
+                    wires,
+                    allow_pending_empty,
+                    snap,
+                ));
             }
             let ndc = clip.truncate() / clip.w;
             let screen = iced::Point::new(
@@ -13150,9 +13369,11 @@ impl Scene {
         .sqrt();
         let s = world_x_px.min(world_y_px);
         if s <= 1e-6 {
-            return self
-                .unindexed_interaction_candidates(wires, allow_pending_empty, snap)
-                .materialize_stubs();
+            return self.materialize_stubs_cached(self.unindexed_interaction_candidates(
+                wires,
+                allow_pending_empty,
+                snap,
+            ));
         }
         let radius = radius_px.max(0.0) as f64 / s as f64;
         let query = [
@@ -13188,8 +13409,9 @@ impl Scene {
         if !self.interaction_source_is_resident(&wires, bounds.height)
             || !self.interaction_index_worthwhile(&wires)
         {
-            return crate::scene::pick::interaction_index::InteractionCandidates::all(wires)
-                .materialize_stubs();
+            return self.materialize_stubs_cached(
+                crate::scene::pick::interaction_index::InteractionCandidates::all(wires),
+            );
         }
         let pad_px = self.indexed_interaction_pick_radius(&wires, 0.0, bounds.height, true);
         if flat_ortho {
@@ -14077,21 +14299,20 @@ impl Scene {
         type LayerRef<'a> = Option<&'a document::tables::layer::Layer>;
         let layer_of: RefCell<rustc_hash::FxHashMap<&'doc str, LayerRef<'doc>>> =
             RefCell::new(rustc_hash::FxHashMap::default());
+        let layer_for = |e: &'doc EntityType| match layer_of.borrow_mut().entry(e.common().layer.as_str()) {
+            std::collections::hash_map::Entry::Occupied(hit) => *hit.get(),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                *slot.insert(self.document.layers.get(e.common().layer.as_str()))
+            }
+        };
         let visibility_ok = |e: &'doc EntityType| {
-            let name = e.common().layer.as_str();
-            let layer = match layer_of.borrow_mut().entry(name) {
-                std::collections::hash_map::Entry::Occupied(hit) => *hit.get(),
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    *slot.insert(self.document.layers.get(name))
-                }
-            };
             self.resident_entity_visible_with_layer(
                 e,
                 block_handle,
                 frozen_layers,
                 annotation_scale_handle,
                 all_visible,
-                layer,
+                layer_for(e),
             )
         };
 
@@ -14106,6 +14327,15 @@ impl Scene {
         // PERF-only breakdown for index maintenance and handle resolution.
         let mut visible_index_ms = 0.0f64;
         let mut visible_probe_ms = 0.0f64;
+        // PERF-only ablation of the visibility predicate (see the block that
+        // fills them). Each is a full pass, so their sum is also how much the
+        // diagnostic itself adds to `visible` on a PERF run.
+        let mut vis_a_layer_ms = 0.0f64;
+        let mut vis_a_hidden_ms = 0.0f64;
+        let mut vis_a_invis_ms = 0.0f64;
+        let mut vis_a_walk_ms = 0.0f64;
+        let mut vis_a_block_ms = 0.0f64;
+        let mut vis_a_full_ms = 0.0f64;
 
         // Phase 2.1 — quadtree-driven candidate selection. When a view
         // AABB exists (Model layout with a settled camera), only iterate
@@ -14228,6 +14458,52 @@ impl Scene {
                 }
                 std::hint::black_box(resolved);
                 visible_probe_ms = t_probe.elapsed().as_secs_f64() * 1000.0;
+
+                // Which part of the predicate owns the rest of `visible`.
+                //
+                // Behind its own variable, not plain `PERF=1`: these are six
+                // extra passes over every candidate, and they run INSIDE the
+                // `visible` region, so leaving them on inflates `visible` and
+                // `wires-build` (measured: 2406 ms → 4389 ms) and makes a
+                // PERF run incomparable with any other.
+                //
+                // Timing each call individually cannot answer this either: at
+                // ~1.3 µs per entity the two `Instant::now()` reads cost more
+                // than the work and report themselves (tried; the two halves
+                // came back equal to 3 digits and `visible` went 350 ms →
+                // 4650 ms). So each component gets ONE timer over the whole
+                // list, and its cost is that run minus `visible_probe`.
+                //
+                // Read them as WARM figures. They run after the main loop has
+                // already touched every entity, so they exclude the cold-miss
+                // cost that dominates the real pass: `full` here is ~149 ms
+                // against ~650 ms for the same work done first. Do not
+                // conclude from a small `full` that the predicate is cheap.
+                let ablate = |f: &dyn Fn(&'doc EntityType) -> bool| {
+                    let t = iced::time::Instant::now();
+                    let mut n = 0usize;
+                    for &handle in claimed {
+                        if let Some(e) = self.document.get_entity(handle) {
+                            n += f(e) as usize;
+                        }
+                    }
+                    std::hint::black_box(n);
+                    t.elapsed().as_secs_f64() * 1000.0
+                };
+                if std::env::var_os("OCS_PERF_ABLATE").is_some() {
+                    vis_a_layer_ms = ablate(&|e| layer_for(e).is_some());
+                    vis_a_hidden_ms =
+                        ablate(&|e| self.entity_temporarily_hidden(e.common().handle));
+                    vis_a_invis_ms = ablate(&|e| self.display_entity_invisible(e.common()));
+                    // Note this resolves the layer itself, so its figure
+                    // includes `layer`; subtract to get the walk test alone.
+                    vis_a_walk_ms = ablate(&|e| self.layer_walk_hidden(layer_for(e)));
+                    vis_a_block_ms = ablate(&|e| {
+                        let c = e.common();
+                        self.belongs_to_visible_block(c.handle, c.owner_handle, block_handle)
+                    });
+                    vis_a_full_ms = ablate(&|e| visibility_ok(e));
+                }
             }
             out
         };
@@ -14525,7 +14801,8 @@ impl Scene {
 build={:.1} [classify={:.1} hits={:.1} tess={:.1} materialize={:.1}] sort={:.1}({}) \
 entities={} memo_hit={} memo_miss={} wires={} memo={} visible_path={} candidates={} \
 guard={:016x} guard_stale={} avp={} anno={:.4} anno_h={} all_vis={} sdf_gen={} \
-vis_index={:.1} visible_probe={:.1}",
+vis_index={:.1} visible_probe={:.1} \
+vis_a[layer={:.1} hidden={:.1} invis={:.1} walk={:.1} block={:.1} full={:.1}]",
                 crate::perf::elapsed_ms(t_fn),
                 sort_cache_ms,
                 visible_ms,
@@ -14554,6 +14831,12 @@ vis_index={:.1} visible_probe={:.1}",
                 crate::scene::text::sdf_atlas::generation(),
                 visible_index_ms,
                 visible_probe_ms,
+                vis_a_layer_ms,
+                vis_a_hidden_ms,
+                vis_a_invis_ms,
+                vis_a_walk_ms,
+                vis_a_block_ms,
+                vis_a_full_ms,
             );
         }
         wires
@@ -15257,7 +15540,28 @@ vis_index={:.1} visible_probe={:.1}",
             return;
         }
         if targets.touches_block_definition {
+            let from = self.block_epoch;
             self.block_epoch = GEOMETRY_EPOCH.fetch_add(1, Ordering::Relaxed);
+            let records: HashMap<Handle, &str> = self
+                .document
+                .block_records
+                .iter()
+                .map(|record| (record.handle, record.name.as_str()))
+                .collect();
+            let touched: HashSet<String> = targets
+                .source_handles
+                .iter()
+                .filter_map(|handle| self.document.get_entity(*handle))
+                .filter_map(|entity| records.get(&entity.common().owner_handle))
+                .map(|name| name.to_string())
+                .collect();
+            self.block_visibility_edits = match self.block_visibility_edits.take() {
+                Some((base, to, mut names)) if to == from => {
+                    names.extend(touched);
+                    Some((base, self.block_epoch, names))
+                }
+                _ => Some((from, self.block_epoch, touched)),
+            };
         }
         let kept: Vec<_> = {
             let mut tm = self.tess_memo.borrow_mut();
@@ -16677,6 +16981,47 @@ mod journal_tests {
         drop(wires);
 
         assert_eq!(scene.resident_patch_hits.get(), hits + 1);
+    }
+
+    #[test]
+    fn a_second_resident_set_still_patches_after_the_first_one_does() {
+        use document::entities::Line;
+        use document::types::Vector3;
+
+        fn line(y: f64) -> EntityType {
+            EntityType::Line(Line::from_points(
+                Vector3::new(0.0, y, 0.0),
+                Vector3::new(10.0, y, 0.0),
+            ))
+        }
+
+        let mut scene = Scene::new();
+        scene.add_entity(line(0.0));
+        let block = scene.model_space_block_handle();
+        // Two resident keys over the same wires, as a paper layout's content
+        // viewports have: `None` and an empty frozen-layer set hash apart.
+        let unfrozen: HashSet<Handle> = HashSet::default();
+        drop(scene.resident_wires_for(block, None, None, None, None));
+        drop(scene.resident_wires_for(block, None, None, Some(&unfrozen), None));
+        assert_eq!(
+            scene.resident_wire_sets.borrow().len(),
+            2,
+            "the two keys must hold separate sets, or this proves nothing"
+        );
+
+        let hits = scene.resident_patch_hits.get();
+        scene.add_entity(line(1.0));
+        // The first set patches forward, and must not cost the second its base.
+        drop(scene.resident_wires_for(block, None, None, None, None));
+        drop(scene.resident_wires_for(block, None, None, Some(&unfrozen), None));
+
+        assert_eq!(
+            scene.resident_patch_hits.get(),
+            hits + 2,
+            "both sets must patch: pruning stale entries by epoch alone drops \
+             the set the next viewport was about to patch, and that viewport \
+             then pays a full assembly plus an arena build on every edit"
+        );
     }
 
     #[test]

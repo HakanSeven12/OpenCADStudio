@@ -183,19 +183,27 @@ impl OpenCADStudio {
     }
 
     /// The screen point the open value list hangs from: its grip's world point
-    /// through the current view, so the list tracks the grip through pan, zoom
-    /// and any move that re-seats the grip.
+    /// through the view that draws the grips. Inside a floating viewport that
+    /// is the viewport's own camera and rectangle; anywhere else it is the
+    /// drawing camera over the canvas, so the list tracks the grip through pan,
+    /// zoom and any move that re-seats the grip.
     pub(super) fn table_popup_anchor(
         &self,
         tab: usize,
         bounds: iced::Rectangle,
     ) -> Option<iced::Point> {
         let grip = self.tabs[tab].table_grip.as_ref()?;
-        let point = self.tabs[tab]
-            .scene
-            .camera
-            .borrow()
-            .project(grip.world, bounds)?;
+        let scene = &self.tabs[tab].scene;
+        let edit_frame = if scene.current_layout == "Model" {
+            None
+        } else {
+            scene.viewport_edit_frame((bounds.width, bounds.height))
+        };
+        let (camera, bounds) = match edit_frame {
+            Some((camera, rect)) => (camera, rect),
+            None => (scene.camera.borrow().clone(), bounds),
+        };
+        let point = camera.project(grip.world, bounds)?;
         let point = iced::Point::new(bounds.x + point.x, bounds.y + point.y);
         (point.x.is_finite() && point.y.is_finite()).then_some(point)
     }

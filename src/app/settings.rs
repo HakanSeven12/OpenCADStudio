@@ -855,6 +855,9 @@ pub struct UserSettings {
     pub command_line_hidden: bool,
     /// The Layer Manager's column order; a hidden column is led by `-`.
     pub layer_columns: Vec<String>,
+    /// The ribbon's layer list shows the layers of the Layer manager's
+    /// chosen tree node only (#2610 LM-25).
+    pub ribbon_layers_follow_filter: bool,
     /// When true, double-clicking a block reference starts REFEDIT instead of BEDIT.
     pub double_click_block_refedit: bool,
     /// When true, double-clicking a block with attributes opens ATTEDIT.
@@ -1466,6 +1469,7 @@ impl Default for UserSettings {
             ribbon_closed: false,
             command_line_hidden: false,
             layer_columns: Vec::new(),
+            ribbon_layers_follow_filter: false,
             options_tab: crate::ui::window::options::OptionsTab::General,
             show_viewcube: true,
             show_ucs_icon: true,

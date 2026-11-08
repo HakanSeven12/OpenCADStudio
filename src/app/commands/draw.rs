@@ -112,8 +112,10 @@ impl OpenCADStudio {
             // (see the ATTEDIT arm in the inquiry family); the dash form is the
             // command-line entry point.
             // Usage:
-            //   -ATTEDIT          — list all attributes on selected Insert(s)
-            //   ATTEDIT <tag> <v> — quick-set attribute <tag> to <v>
+            //   -ATTEDIT                        — ask the measured question flow
+            //   -ATTEDIT REPLACE <old> <new> [block] [tag] [value]
+            //                                   — swap one string inside matching values
+            //   ATTEDIT <tag> <v>               — quick-set attribute <tag> to <v>
             cmd if cmd.starts_with("ATTEDIT ")
                 || cmd == "-ATTEDIT"
                 || cmd.starts_with("-ATTEDIT ") =>
@@ -123,6 +125,43 @@ impl OpenCADStudio {
                     .or_else(|| cmd.strip_prefix("ATTEDIT"))
                     .unwrap_or("")
                     .trim();
+                if rest.is_empty() {
+                    use crate::modules::draw::modify::attedit::{
+                        AttributeCandidate, DashAtteditCommand,
+                    };
+                    let candidates: Vec<AttributeCandidate> = self.tabs[i]
+                        .scene
+                        .document
+                        .entities()
+                        .filter_map(|entity| match entity {
+                            document::EntityType::Insert(insert) => Some(insert),
+                            _ => None,
+                        })
+                        .flat_map(|insert| {
+                            let on_screen = self.typed_point_in_view(
+                                i,
+                                glam::DVec3::new(
+                                    insert.insert_point.x,
+                                    insert.insert_point.y,
+                                    insert.insert_point.z,
+                                ),
+                            );
+                            insert
+                                .attributes
+                                .iter()
+                                .map(move |attr| AttributeCandidate {
+                                    block: insert.block_name.clone(),
+                                    tag: attr.tag.clone(),
+                                    value: attr.get_value().to_string(),
+                                    on_screen,
+                                })
+                        })
+                        .collect();
+                    let command = DashAtteditCommand::new(candidates);
+                    self.command_line.push_info(&command.prompt());
+                    self.tabs[i].active_cmd = Some(Box::new(command));
+                    return Some(Task::none());
+                }
                 let tokens: Vec<&str> = rest.split_whitespace().collect();
                 let selection: Vec<document::Handle> = self.tabs[i]
                     .scene
@@ -223,6 +262,113 @@ impl OpenCADStudio {
                         self.command_line.push_error(
                             crate::tf!("ATTEDIT: tag '{old_up}' not found.").as_ref(),
                         );
+                    }
+                } else if option.as_deref() == Some("REPLACE") {
+                    let (Some(old), Some(new)) = (args.get(1).copied(), args.get(2).copied())
+                    else {
+                        self.command_line.push_error(
+                            crate::t!(
+                                "ATTEDIT: usage is -ATTEDIT REPLACE <old string> <new string>."
+                            )
+                            .as_ref(),
+                        );
+                        return Some(Task::none());
+                    };
+                    // No handle and no selection means the whole drawing.
+                    if targets.is_empty() {
+                        targets = self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
+                            .filter_map(|entity| match entity {
+                                document::EntityType::Insert(_) => Some(entity.common().handle),
+                                _ => None,
+                            })
+                            .collect();
+                    }
+                    // The reference narrows the global edit with block-name,
+                    // tag and value specifications, in that order.
+                    let block_spec = args.get(3).copied().unwrap_or("*");
+                    let tag_spec = args.get(4).copied().unwrap_or("*");
+                    let value_spec = args.get(5).copied().unwrap_or("*");
+                    // The global question flow appends its on-screen answer.
+                    let visible_only = args
+                        .get(6)
+                        .is_some_and(|flag| flag.eq_ignore_ascii_case("VISIBLE"));
+                    let on_screen: std::collections::HashSet<document::Handle> = if visible_only {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .entities()
+                            .filter_map(|entity| match entity {
+                                document::EntityType::Insert(insert)
+                                    if self.typed_point_in_view(
+                                        i,
+                                        glam::DVec3::new(
+                                            insert.insert_point.x,
+                                            insert.insert_point.y,
+                                            insert.insert_point.z,
+                                        ),
+                                    ) =>
+                                {
+                                    Some(entity.common().handle)
+                                }
+                                _ => None,
+                            })
+                            .collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    };
+                    let mut changed = 0usize;
+                    let mut occurrences = 0usize;
+                    self.push_undo_snapshot(i, "ATTEDIT REPLACE");
+                    for handle in &targets {
+                        if self.tabs[i].scene.is_layer_locked(*handle) {
+                            continue;
+                        }
+                        if visible_only && !on_screen.contains(handle) {
+                            continue;
+                        }
+                        if let Some(document::EntityType::Insert(ins)) = self.tabs[i]
+                            .scene
+                            .document
+                            .entities_mut()
+                            .find(|e| e.common().handle == *handle)
+                        {
+                            if !crate::app::control::block_ops::glob_match_ci(
+                                block_spec,
+                                &ins.block_name,
+                            ) {
+                                continue;
+                            }
+                            for attr in &mut ins.attributes {
+                                if !crate::app::control::block_ops::glob_match_ci(
+                                    tag_spec, &attr.tag,
+                                ) {
+                                    continue;
+                                }
+                                let value = attr.get_value().to_string();
+                                if crate::app::control::block_ops::glob_match_ci(value_spec, &value)
+                                    && value.contains(old)
+                                {
+                                    occurrences += value.matches(old).count();
+                                    attr.set_value(value.replace(old, new));
+                                    changed += 1;
+                                }
+                            }
+                        }
+                    }
+                    if changed > 0 {
+                        self.tabs[i].dirty = true;
+                        self.command_line.push_output(
+                            crate::tf!(
+                                "ATTEDIT: replaced {occurrences} occurrence(s) of '{old}' with '{new}' in {changed} attribute(s)."
+                            )
+                            .as_ref(),
+                        );
+                    } else {
+                        self.command_line
+                            .push_error(crate::tf!("ATTEDIT: string '{old}' not found.").as_ref());
                     }
                 } else if targets.is_empty() {
                     // No handle and nothing selected: ask for the reference

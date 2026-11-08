@@ -1115,16 +1115,61 @@ impl OpenCADStudio {
                     }
                     // Model space: split the tiled viewport layout via pane_grid.
                     use iced::widget::pane_grid::{Axis, Configuration as C};
-                    let split = |axis, a, b| C::Split {
+                    let split_at = |axis, ratio, a, b| C::Split {
                         axis,
-                        ratio: 0.5,
+                        ratio,
                         a: Box::new(a),
                         b: Box::new(b),
+                    };
+                    let split = |axis, a, b| split_at(axis, 0.5, a, b);
+                    // Three equal bands: a third, then half of the rest.
+                    let thirds = |axis| {
+                        split_at(
+                            axis,
+                            1.0 / 3.0,
+                            C::Pane(0),
+                            split(axis, C::Pane(1), C::Pane(2)),
+                        )
                     };
                     let config: Option<(C<usize>, usize)> = match sub.as_str() {
                         "SINGLE" | "SI" | "1" => Some((C::Pane(0), 1)),
                         "2H" | "2" => Some((split(Axis::Horizontal, C::Pane(0), C::Pane(1)), 2)),
                         "2V" => Some((split(Axis::Vertical, C::Pane(0), C::Pane(1)), 2)),
+                        // Three: the big one on the named side.
+                        "3R" | "3" => Some((
+                            split(
+                                Axis::Vertical,
+                                split(Axis::Horizontal, C::Pane(0), C::Pane(1)),
+                                C::Pane(2),
+                            ),
+                            3,
+                        )),
+                        "3L" => Some((
+                            split(
+                                Axis::Vertical,
+                                C::Pane(0),
+                                split(Axis::Horizontal, C::Pane(1), C::Pane(2)),
+                            ),
+                            3,
+                        )),
+                        "3A" => Some((
+                            split(
+                                Axis::Horizontal,
+                                C::Pane(0),
+                                split(Axis::Vertical, C::Pane(1), C::Pane(2)),
+                            ),
+                            3,
+                        )),
+                        "3B" => Some((
+                            split(
+                                Axis::Horizontal,
+                                split(Axis::Vertical, C::Pane(0), C::Pane(1)),
+                                C::Pane(2),
+                            ),
+                            3,
+                        )),
+                        "3V" => Some((thirds(Axis::Vertical), 3)),
+                        "3H" => Some((thirds(Axis::Horizontal), 3)),
                         "4" => Some((
                             split(
                                 Axis::Vertical,
@@ -3788,6 +3833,225 @@ impl OpenCADStudio {
                 crate::tf!("CHSPACE: {count} object(s) changed to model space.")
             }
             .as_ref(),
+        );
+    }
+}
+
+#[cfg(test)]
+mod vports_dropdown_tests {
+    use crate::app::{Message, OpenCADStudio};
+    use crate::modules::RibbonItem;
+
+    #[test]
+    fn each_viewport_configuration_in_the_dropdown_tiles_the_model_view() {
+        let RibbonItem::LargeDropdown { items, .. } =
+            crate::modules::view::vports_config::dropdown()
+        else {
+            panic!("a dropdown");
+        };
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        for (cmd, label, _) in items {
+            let want = match label.split(':').next().unwrap() {
+                "Single" => 1,
+                "Two" => 2,
+                "Three" => 3,
+                "Four" => 4,
+                other => panic!("{other}"),
+            };
+            let _ = app.update(Message::DropdownSelectItem {
+                dropdown_id: "VPORTS_CONFIG",
+                cmd,
+            });
+            assert_eq!(
+                app.tabs[i].scene.model_tiles.borrow().len(),
+                want,
+                "{label}"
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod viewport_highlight_tests {
+    use crate::app::{Message, OpenCADStudio};
+
+    fn tool() -> crate::modules::ToolDef {
+        let module = crate::modules::view::ViewModule;
+        crate::modules::CadModule::ribbon_groups(&module)
+            .iter()
+            .find(|g| g.title == "Model Viewports")
+            .and_then(|g| {
+                g.tools.iter().find_map(|t| match t {
+                    crate::modules::RibbonItem::Tool(t) if t.id == "VPHIGHLIGHT" => Some(t.clone()),
+                    _ => None,
+                })
+            })
+            .expect("a hover-outline switch in View > Model Viewports")
+    }
+
+    /// On the chip's outline switch the active viewport keeps its outline
+    /// (the pointer is off the drawing there), and a wheel step changes it
+    /// at once.
+    #[test]
+    fn the_outline_switch_keeps_the_active_viewport_outlined_while_its_wheel_turns() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let _ = app.update(Message::DropdownSelectItem {
+            dropdown_id: "VPORTS_CONFIG",
+            cmd: "VPORTS 2V".into(),
+        });
+        assert_eq!(app.tabs[i].scene.model_tiles.borrow().len(), 2);
+        app.tabs[i].scene.selection.borrow_mut().input.pointer_away = true;
+        assert!(
+            app.model_viewport_outline(&app.tabs[i]).is_none(),
+            "pointer away: no outline"
+        );
+
+        app.tabs[i].scene.sync_tiles_from_panes(800.0, 600.0);
+        app.tabs[i].scene.active_model_tile.set(1);
+
+        let _ = app.update(Message::ViewportOutlineSwitchHover(true));
+        let (rect, alpha) = app
+            .model_viewport_outline(&app.tabs[i])
+            .expect("outline on the switch");
+        assert!(
+            rect.x > 350.0 && rect.width < 450.0 && rect.height > 550.0,
+            "the right-hand viewport: {rect:?}"
+        );
+        assert!((alpha - 0.5).abs() < 1e-6);
+        let _ = app.update(Message::ViewportHighlightOpacity(70));
+        let (_, alpha) = app.model_viewport_outline(&app.tabs[i]).unwrap();
+        assert!((alpha - 0.7).abs() < 1e-6, "the wheel step shows at once");
+
+        let _ = app.update(Message::ViewportOutlineSwitchHover(false));
+        assert!(
+            app.model_viewport_outline(&app.tabs[i]).is_none(),
+            "gone once the pointer leaves"
+        );
+    }
+
+    /// The switch can disappear under a resting pointer and a removed widget
+    /// sends no exit; the outline must not stay pinned afterwards.
+    #[test]
+    fn the_outline_switch_hover_ends_when_the_chip_goes_away() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let two = |app: &mut OpenCADStudio| {
+            let _ = app.update(Message::DropdownSelectItem {
+                dropdown_id: "VPORTS_CONFIG",
+                cmd: "VPORTS 2V".into(),
+            });
+            app.tabs[app.active_tab]
+                .scene
+                .selection
+                .borrow_mut()
+                .input
+                .pointer_away = true;
+            let _ = app.update(Message::ViewportOutlineSwitchHover(true));
+            assert!(app
+                .model_viewport_outline(&app.tabs[app.active_tab])
+                .is_some());
+        };
+
+        two(&mut app);
+        let _ = app.update(Message::DropdownSelectItem {
+            dropdown_id: "VPORTS_CONFIG",
+            cmd: "VPORTS SINGLE".into(),
+        });
+        let _ = app.update(Message::DropdownSelectItem {
+            dropdown_id: "VPORTS_CONFIG",
+            cmd: "VPORTS 2V".into(),
+        });
+        app.tabs[i].scene.selection.borrow_mut().input.pointer_away = true;
+        assert!(
+            app.model_viewport_outline(&app.tabs[i]).is_none(),
+            "a viewport count change ends the hover"
+        );
+
+        two(&mut app);
+        let _ = app.update(Message::WindowResized(700.0, 500.0));
+        assert!(
+            app.model_viewport_outline(&app.tabs[i]).is_none(),
+            "a resize ends the hover"
+        );
+
+        two(&mut app);
+        let _ = app.update(Message::ViewportHighlightOpacity(60));
+        assert!(
+            app.model_viewport_outline(&app.tabs[i]).is_some(),
+            "a wheel step keeps it"
+        );
+    }
+
+    #[test]
+    fn the_ribbon_switch_and_the_variables_control_the_hover_outline() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        assert!(app.model_space.viewport_hover_highlight, "on by default");
+        assert_eq!(
+            app.model_space.viewport_hover_opacity, 50,
+            "soft by default"
+        );
+        let t = tool();
+        let _ = app.update(Message::RibbonToolClick {
+            tool_id: t.id.to_string(),
+            event: t.event.clone(),
+        });
+        assert!(
+            !app.model_space.viewport_hover_highlight,
+            "the switch turns it off"
+        );
+        assert!(
+            !app.ribbon.show_viewport_highlight,
+            "and its light goes out"
+        );
+        let _ = app.update(Message::RibbonToolClick {
+            tool_id: t.id.to_string(),
+            event: t.event.clone(),
+        });
+        assert!(app.model_space.viewport_hover_highlight, "and on again");
+        assert!(app.ribbon.show_viewport_highlight);
+
+        let _ = app.run_command_line("VPHIGHLIGHT 0");
+        assert!(!app.model_space.viewport_hover_highlight);
+        let _ = app.run_command_line("VPHIGHLIGHTOPACITY 40");
+        assert_eq!(app.model_space.viewport_hover_opacity, 40);
+        let _ = app.run_command_line("VPHIGHLIGHTOPACITY 140");
+        assert_eq!(
+            app.model_space.viewport_hover_opacity, 40,
+            "out of range is refused"
+        );
+    }
+
+    #[test]
+    fn the_hovered_viewport_is_the_one_under_the_cursor() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let at = |app: &OpenCADStudio, x: f32| {
+            app.tabs[i]
+                .scene
+                .hovered_model_pane_px(800.0, 600.0, Some(iced::Point::new(x, 300.0)))
+        };
+        assert_eq!(at(&app, 100.0), None, "one viewport: nothing to tell apart");
+        let _ = app.run_command_line("VPORTS 2V");
+        let left = at(&app, 100.0).expect("left viewport");
+        let right = at(&app, 700.0).expect("right viewport");
+        assert!(left.x < 1.0 && left.x + left.width < 401.0, "{left:?}");
+        assert!(
+            right.x > 399.0 && right.x + right.width > 799.0,
+            "{right:?}"
+        );
+        assert_eq!(
+            at(&app, 400.0),
+            None,
+            "on the divider no viewport is outlined"
         );
     }
 }

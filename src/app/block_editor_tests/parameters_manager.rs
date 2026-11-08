@@ -883,6 +883,54 @@ fn a_renamed_lookup_row_shows_the_parameter_name() {
     );
 }
 
+/// The rename is a property of the definition, so it has to survive the
+/// drawing being written and read back; the row must not fall back to the
+/// lookup's own label or to the name the parameter was placed with.
+#[test]
+fn a_renamed_lookup_row_keeps_the_name_across_a_save() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LOOKUP 3,3"], &[]);
+    let lookup = crate::scene::block_lookup::parameters(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .next()
+        .map(|(handle, _)| handle)
+        .expect("one lookup parameter");
+    crate::scene::block_authoring::metadata::set_parameter_name(
+        &mut app.tabs[tab].scene.document,
+        definition,
+        lookup,
+        "Grip9",
+    )
+    .expect("the lookup takes a name");
+    let document = app.tabs[tab].scene.document_for_save();
+    let version = document.version;
+    let prepared = crate::io::prepare_document_for_save(document, version);
+    let bytes = document::DxfWriter::new(&prepared).write_to_vec().unwrap();
+    let reopened = document::DxfReader::from_reader(std::io::Cursor::new(bytes))
+        .unwrap()
+        .read()
+        .unwrap();
+    let row = manager::rows(&reopened, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Lookup")
+        .expect("the lookup still lists a row after the save");
+    assert_eq!(
+        row.name, "Grip9",
+        "the reopened row shows the parameter's own name"
+    );
+    let bytes = document::DwgWriter::write_to_vec(&app.tabs[tab].scene.document).unwrap();
+    let reopened = document::DwgReader::from_stream(std::io::Cursor::new(bytes))
+        .read()
+        .unwrap();
+    let row = manager::rows(&reopened, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Lookup")
+        .expect("the lookup still lists a row after the DWG round trip");
+    assert_eq!(
+        row.name, "Grip9",
+        "the DWG round trip keeps the parameter's own name too"
+    );
+}
+
 #[test]
 fn a_lookup_parameter_lists_one_row_typed_lookup() {
     let rows = edited(
@@ -1304,6 +1352,36 @@ fn the_funnel_menu_opens_and_a_choice_sets_the_filter_and_closes_it() {
     assert!(
         !app.tabs[tab].parameters_panel.filter_menu,
         "choosing an entry closes the menu"
+    );
+    let _ = app.dispatch_command("BEDIT_DISCARD");
+}
+
+#[test]
+fn the_header_menu_opens_and_an_entry_toggles_its_column_and_closes_the_menu() {
+    use crate::ui::window::parameters_manager::Column;
+    let (mut app, tab, _definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
+    assert!(
+        !app.tabs[tab].parameters_panel.header_menu,
+        "the menu starts closed"
+    );
+    let _ = app.update(Message::ParametersManagerHeaderMenu);
+    assert!(
+        app.tabs[tab].parameters_panel.header_menu,
+        "a right-click on the header opens it"
+    );
+    let _ = app.update(Message::ParametersManagerColumn(Column::Type));
+    assert!(
+        !app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "choosing Type hides that column"
+    );
+    assert!(
+        !app.tabs[tab].parameters_panel.header_menu,
+        "and closes the menu"
+    );
+    let _ = app.update(Message::ParametersManagerColumn(Column::Type));
+    assert!(
+        app.tabs[tab].parameters_panel.columns[Column::Type.index()],
+        "choosing it again brings the column back"
     );
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }
@@ -1760,5 +1838,96 @@ fn an_uneditable_graph_keeps_the_component_rows_it_holds_listed() {
     assert!(
         after.iter().all(|(_, type_name, _)| *type_name == "Polar"),
         "and they still read as the parameter type they came from: {after:?}"
+    );
+}
+
+/// An XY parameter's two rows are its two offsets from the base point, and each
+/// row writes only its own axis. The two branches share the writer with the
+/// linear and polar rows, so an axis mapped the wrong way would put the endpoint
+/// somewhere neither number asked for.
+#[test]
+fn an_xy_row_writes_its_own_axis_as_an_offset_from_the_base() {
+    let (mut app, tab, definition) = open(&["BPARAMETER XY 2,3 12,13 5,5"], &[]);
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    let xy: Vec<_> = rows.iter().filter(|row| row.type_name == "XY").collect();
+    assert_eq!(
+        xy.len(),
+        2,
+        "an XY parameter lists one row per axis: {rows:?}"
+    );
+    assert_eq!(xy[0].name, "X Distance1");
+    assert_eq!(xy[1].name, "Y Distance1");
+    assert_eq!(
+        xy[0].expression, "10",
+        "the X row reads the offset it was placed at"
+    );
+    assert_eq!(xy[1].expression, "10", "and so does the Y row");
+
+    answer(&mut app, "X Distance1", Cell::Value, "4");
+    let (base, end) = endpoints(&app, tab, definition);
+    assert!(
+        (base - glam::DVec3::new(2.0, 3.0, 0.0)).length() < 1e-9,
+        "the base point stays put"
+    );
+    assert!(
+        (end - glam::DVec3::new(6.0, 13.0, 0.0)).length() < 1e-9,
+        "the X row adds its offset to the base and leaves Y: {end:?}"
+    );
+
+    answer(&mut app, "Y Distance1", Cell::Value, "3");
+    let (_, end) = endpoints(&app, tab, definition);
+    assert!(
+        (end - glam::DVec3::new(6.0, 6.0, 0.0)).length() < 1e-9,
+        "the Y row adds its offset to the base and keeps the X just written: {end:?}"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "X Distance1").expression,
+        "4"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Y Distance1").expression,
+        "3"
+    );
+}
+
+/// A rotation parameter's row is its angle, written as a bearing from the base
+/// point: the endpoint keeps the parameter's radius and turns to the typed angle.
+#[test]
+fn a_rotation_row_writes_its_angle_and_keeps_the_radius() {
+    let (mut app, tab, definition) = open(&["BPARAMETER ROTATION 2,3 10 0 5,5"], &[]);
+    let row = manager::rows(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Rotation")
+        .expect("a rotation parameter gets a row");
+    assert!(row.numeric, "the angle is a number the manager writes back");
+    assert_eq!(
+        row.expression, "0",
+        "the row reads the angle it was placed at"
+    );
+    let (base, end) = endpoints(&app, tab, definition);
+    assert!(
+        ((end - base).length() - 10.0).abs() < 1e-9,
+        "the parameter starts at its authored radius: {end:?}"
+    );
+
+    answer(&mut app, &row.name, Cell::Value, "90");
+    assert_eq!(
+        printed(&app, tab, definition, &row.name).value,
+        "90",
+        "the value cell prints the angle just written"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, &row.name).expression,
+        "90",
+        "and the definition stores that angle"
+    );
+    let (base, end) = endpoints(&app, tab, definition);
+    assert!(
+        (base - glam::DVec3::new(2.0, 3.0, 0.0)).length() < 1e-9,
+        "the base point stays put"
+    );
+    assert!(
+        (end - glam::DVec3::new(2.0, 13.0, 0.0)).length() < 1e-9,
+        "the endpoint turned about the base to the typed bearing at the same radius: {end:?}"
     );
 }

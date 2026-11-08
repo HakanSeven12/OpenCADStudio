@@ -678,18 +678,20 @@ impl TableCommand {
         if self.dash() {
             self.remember();
         }
-        // Like the dialog's table, the new one opens its first cell.
-        CmdResult::CommitAndEditText(self.build_table(first, second))
+        // The table is placed and the command ends; a double click or
+        // TABLEDIT edits a cell when the user wants to.
+        CmdResult::CommitAndExit(self.build_table(first, second))
     }
 
     fn preview_grid(&self, first: DVec3, second: Option<DVec3>) -> WireModel {
         let (point, widths, heights) = self.layout(first, second);
         let point = self.plane.to_world(point);
-        self.grid_wire(point, &widths, &heights)
+        self.grid_wire(point, &widths, &heights, self.title_header().0)
     }
 
-    /// The outline grid of a table at `point` (world).
-    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64]) -> WireModel {
+    /// The outline grid of a table at `point` (world); with `title` the
+    /// first row is one cell across the table, as the placed title is.
+    fn grid_wire(&self, point: DVec3, widths: &[f64], heights: &[f64], title: bool) -> WireModel {
         let point = self.plane.to_local(point);
         let width: f64 = widths.iter().sum();
         let height: f64 = heights.iter().sum();
@@ -699,18 +701,22 @@ impl TableCommand {
                 .as_vec3()
                 .to_array()
         };
-        let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 2);
+        let mut points = Vec::with_capacity((widths.len() + heights.len() + 2) * 3);
+        let title_height = if title { heights.first().copied().unwrap_or(0.0) } else { 0.0 };
         let mut x = 0.0;
-        for column in std::iter::once(0.0).chain(widths.iter().copied()) {
+        for (index, column) in std::iter::once(0.0).chain(widths.iter().copied()).enumerate() {
             x += column;
-            points.push(world(x, 0.0));
+            let inner = index > 0 && index < widths.len();
+            points.push(world(x, if inner { -title_height } else { 0.0 }));
             points.push(world(x, -height));
+            points.push([f32::NAN; 3]); // each line on its own
         }
         let mut y = 0.0;
         for row in std::iter::once(0.0).chain(heights.iter().copied()) {
             y -= row;
             points.push(world(0.0, y));
             points.push(world(width, y));
+            points.push([f32::NAN; 3]);
         }
         WireModel {
             name: "table_preview".into(),
@@ -1125,7 +1131,11 @@ impl CadCommand for TableCommand {
                 };
                 let widths: Vec<f64> = table.columns.iter().map(|c| c.width).collect();
                 let heights: Vec<f64> = table.rows.iter().map(|r| r.height).collect();
-                Some(self.grid_wire(point, &widths, &heights))
+                let title = widths.len() > 1
+                    && table.merged_ranges.iter().any(|r| {
+                        r.top_row == 0 && r.bottom_row == 0 && r.left_col == 0 && r.right_col + 1 >= widths.len()
+                    });
+                Some(self.grid_wire(point, &widths, &heights, title))
             }
             Step::Insertion => Some(self.preview_grid(point, None)),
             Step::SecondCorner(first) => Some(self.preview_grid(first, Some(point))),
@@ -1354,7 +1364,7 @@ impl CadCommand for TableditCommand {
 }
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["TABLEDIT"]
+    names: &["TABLEDIT", "-TABLEDIT"]
 });
 
 pub struct TableCellEditCommand {
@@ -1505,7 +1515,7 @@ mod tabledit_tests {
     //! shortcut and the TABLEDIT pick, so its grid math is pinned here.
     //! `Table::new` seeds 2.5-unit columns and 0.25-unit rows with the
     //! default orientation (horizontal +X, flow down).
-    use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableditCommand};
+    use super::{table_cell_at, TableCellEditCommand, TableCellHit, TableCommand, TableditCommand};
     use crate::command::{CadCommand, CmdResult};
     use document::entities::table::CellStateFlags;
     use document::entities::Table;
@@ -1581,6 +1591,54 @@ mod tabledit_tests {
                 .expect("neighbour resolves")
                 .locked
         );
+    }
+
+    #[test]
+    fn table_preview_draws_only_the_grid_lines() {
+        let names = ["Title", "Header", "Data"];
+        let cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
+        let wire = cmd.preview_grid(DVec3::ZERO, None);
+        // Every line is two points closed by a break: no line joins the next.
+        assert_eq!(wire.points.len() % 3, 0);
+        for line in wire.points.chunks(3) {
+            assert!(line[0][0].is_finite() && line[1][0].is_finite());
+            assert!(line[2][0].is_nan(), "lines must not join: {line:?}");
+            assert!(line[0][0] == line[1][0] || line[0][1] == line[1][1], "diagonal {line:?}");
+        }
+    }
+
+    #[test]
+    fn table_preview_shows_the_title_row_as_one_cell() {
+        let names = ["Title", "Header", "Data"];
+        let cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
+        assert!(cmd.title_header().0, "a new table starts with a title row");
+        let wire = cmd.preview_grid(DVec3::ZERO, None);
+        let verticals: Vec<_> = wire.points.chunks(3).filter(|l| l[0][0] == l[1][0]).collect();
+        let (left, right) = (verticals[0][0][0], verticals[verticals.len() - 1][0][0]);
+        assert_eq!(verticals.len(), 4, "3 columns: 4 vertical lines");
+        for line in &verticals {
+            let top = line[0][1].max(line[1][1]);
+            if line[0][0] == left || line[0][0] == right {
+                assert_eq!(top, 0.0, "the outline reaches the top: {line:?}");
+            } else {
+                assert!(top < 0.0, "an inner column line must stop under the title: {line:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn placing_a_table_ends_without_opening_a_cell() {
+        let names = ["Title", "Header", "Data"];
+        let mut cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, false, true, names);
+        match cmd.on_point(DVec3::new(10.0, 20.0, 0.0)) {
+            CmdResult::CommitAndExit(document::EntityType::Table(t)) => assert_eq!(t.column_count(), 3),
+            CmdResult::CommitAndEditText(_) => panic!("the new table must not open a cell editor"),
+            _ => panic!("expected the table to be committed"),
+        }
+        // the window (two corners) form too
+        let mut cmd = TableCommand::configured(None, Some(3), Some(2), 2.5, 1, true, true, names);
+        let _ = cmd.on_point(DVec3::ZERO);
+        assert!(matches!(cmd.on_point(DVec3::new(9.0, -6.0, 0.0)), CmdResult::CommitAndExit(_)));
     }
 
     #[test]

@@ -24,6 +24,7 @@ pub fn all_modules() -> Vec<Box<dyn CadModule>> {
         Box::new(super::manage::ManageModule),
         Box::new(super::layout::LayoutModule),
         Box::new(super::block_editor::BlockEditorModule),
+        Box::new(super::table_cell::TableCellModule),
     ]
 }
 
@@ -113,6 +114,7 @@ const COMMAND_ICON_ALIASES: &[(&str, &str)] = &[
     ("-ATTEDIT", "ATTEDIT"),
     ("EATTEDIT", "ATTEDIT"),
     ("BATTMAN", "ATTMAN"),
+    ("ATTREDEF", "ATTMAN"),
     ("ATTEXT", "DATAEXTRACTION"),
     ("EATTEXT", "DATAEXTRACTION"),
     ("-BEDIT", "BEDIT"),
@@ -982,6 +984,8 @@ const SYSTEM_VARIABLES: &[&str] = &[
     "USERR",
     "USRTIMER",
     "VISRETAIN",
+    "VPHIGHLIGHT",
+    "VPHIGHLIGHTOPACITY",
     "VSCURRENT",
     "VSEDGECOLOR",
     "VSEDGESMOOTH",
@@ -1414,6 +1418,7 @@ pub static QUAD_ENTITY_COMMANDS: &[(&str, &[&str])] = &[
             "CLIP",
             "BEDIT",
             "REFEDIT",
+            "ATTREDEF",
             "ERASE",
         ],
     ),

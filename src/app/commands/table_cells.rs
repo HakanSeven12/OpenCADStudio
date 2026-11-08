@@ -26,8 +26,53 @@ fn row_like(source: &TableRow) -> TableRow {
     row
 }
 
+/// `n` rows like row `source` (no content) inserted at `at`: as many rows
+/// as the picked cells span.
+fn insert_rows_like(t: &mut Table, source: usize, at: usize, n: usize) {
+    let row = row_like(&t.rows[source]);
+    for _ in 0..n {
+        t.insert_row(at);
+        t.rows[at] = row.clone();
+    }
+}
+
+/// `n` columns like column `source` (width, style, blank cells) inserted at
+/// `at`: as many columns as the picked cells span.
+fn insert_columns_like(t: &mut Table, source: usize, at: usize, n: usize) {
+    let mut column = t.columns[source].clone();
+    column.name.clear();
+    // Rows read from a file can be short of cells.
+    let cells: Vec<TableCell> = t
+        .rows
+        .iter()
+        .map(|row| row.cells.get(source).map(blank_like).unwrap_or_default())
+        .collect();
+    for _ in 0..n {
+        t.insert_column(at, column.width);
+        t.columns[at] = column.clone();
+        for (row, cell) in t.rows.iter_mut().zip(&cells) {
+            if let Some(slot) = row.cells.get_mut(at) {
+                *slot = cell.clone();
+            }
+        }
+    }
+}
+
+/// Empties the picked cells; locked contents stay.
+fn clear_cells(t: &mut Table, (r0, c0, r1, c1): (usize, usize, usize, usize)) {
+    for r in r0..=r1 {
+        for c in c0..=c1 {
+            if let Some(cell) = t.cell_mut(r, c) {
+                if !cell.state.intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY) {
+                    cell.set_text("");
+                }
+            }
+        }
+    }
+}
+
 impl OpenCADStudio {
-    pub(super) fn dispatch_table_cells(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+    pub(in crate::app) fn dispatch_table_cells(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         if !cmd.starts_with("_TCELL") {
             return None;
         }
@@ -45,39 +90,23 @@ impl OpenCADStudio {
             return Some(Task::batch([task, finish]));
         }
         if cmd == "_TCELLEDIT" {
-            let Some(document::EntityType::Table(table)) =
-                self.tabs[i].scene.document.get_entity(cells.table)
-            else {
-                return Some(Task::none());
-            };
-            let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
-                cells.table,
-                table,
-                r0,
-                c0,
-            );
-            use crate::command::CadCommand;
-            self.command_line.push_info(&command.prompt());
-            self.tabs[i].active_cmd = Some(Box::new(command));
-            return Some(self.finish_dispatch(cmd));
+            self.open_table_cell_editor(cells.table, r0, c0);
+            return Some(self.unfocus_widgets());
         }
         let (label, edit): (&str, Box<dyn Fn(&mut Table) -> Option<(usize, usize, usize, usize)>>) =
             match cmd {
                 "_TCELLROWABOVE" => (
                     "TABLE INSERT ROW",
                     Box::new(move |t| {
-                        let row = row_like(&t.rows[r0]);
-                        t.insert_row(r0);
-                        t.rows[r0] = row;
-                        Some((r0 + 1, c0, r1 + 1, c1))
+                        let n = r1 - r0 + 1;
+                        insert_rows_like(t, r0, r0, n);
+                        Some((r0 + n, c0, r1 + n, c1))
                     }),
                 ),
                 "_TCELLROWBELOW" => (
                     "TABLE INSERT ROW",
                     Box::new(move |t| {
-                        let row = row_like(&t.rows[r1]);
-                        t.insert_row(r1 + 1);
-                        t.rows[r1 + 1] = row;
+                        insert_rows_like(t, r1, r1 + 1, r1 - r0 + 1);
                         Some((r0, c0, r1, c1))
                     }),
                 ),
@@ -99,23 +128,14 @@ impl OpenCADStudio {
                     (
                         "TABLE INSERT COLUMN",
                         Box::new(move |t| {
-                            let (source, at) = if left { (c0, c0) } else { (c1, c1 + 1) };
-                            let mut column = t.columns[source].clone();
-                            // Rows read from a file can be short of cells.
-                            let cells: Vec<TableCell> = t
-                                .rows
-                                .iter()
-                                .map(|row| row.cells.get(source).map(blank_like).unwrap_or_default())
-                                .collect();
-                            t.insert_column(at, column.width);
-                            column.name.clear();
-                            t.columns[at] = column;
-                            for (row, cell) in t.rows.iter_mut().zip(cells) {
-                                if let Some(slot) = row.cells.get_mut(at) {
-                                    *slot = cell;
-                                }
+                            let n = c1 - c0 + 1;
+                            if left {
+                                insert_columns_like(t, c0, c0, n);
+                                Some((r0, c0 + n, r1, c1 + n))
+                            } else {
+                                insert_columns_like(t, c1, c1 + 1, n);
+                                Some((r0, c0, r1, c1))
                             }
-                            Some(if left { (r0, c0 + 1, r1, c1 + 1) } else { (r0, c0, r1, c1) })
                         }),
                     )
                 }
@@ -175,6 +195,14 @@ impl OpenCADStudio {
                                 }
                             }
                         }
+                        Some((r0, c0, r1, c1))
+                    }),
+                ),
+                // Delete with cells picked: their contents go, the table stays.
+                "_TCELLCLEAR" => (
+                    "TABLE CLEAR CELLS",
+                    Box::new(move |t| {
+                        clear_cells(t, (r0, c0, r1, c1));
                         Some((r0, c0, r1, c1))
                     }),
                 ),
@@ -264,11 +292,37 @@ impl OpenCADStudio {
         self.table_cell_step(CellStep::Down)
     }
 
+    pub(in crate::app) fn ask_table_editor_value_type(
+        &mut self,
+        handle: document::Handle,
+        row: usize,
+        column: usize,
+        text: String,
+    ) {
+        self.table_cell_entry = Some(CellEntry { handle, row, column, text, step: CellStep::Down });
+        self.active_modal = Some(crate::app::ModalKind::TableCellEntry);
+        self.reset_modal_geometry();
+    }
+
     /// After the data type question: "change the type" puts the value in
     /// with the cell's type changed to the value's (one undo step) and goes
     /// on as the key that ended the editing would; "change the value"
     /// reopens the cell's editor with the value.
     fn resume_cell_entry(&mut self, entry: CellEntry, change_type: bool) -> Task<Message> {
+        if let Some(cell) = self.table_cell_editor.as_ref() {
+            if !change_type {
+                self.mtext_select_all();
+                return self.unfocus_widgets();
+            }
+            let pending_move = cell.pending_move;
+            self.table_cell_entry_typed = true;
+            return if let Some((dr, dc, tab)) = pending_move {
+                self.table_editor_step(dr, dc, tab)
+            } else {
+                self.commit_table_cell_editor();
+                self.focus_cmd_input()
+            };
+        }
         let i = self.active_tab;
         let Some(document::EntityType::Table(table)) =
             self.tabs[i].scene.document.get_entity(entry.handle)
@@ -1691,5 +1745,133 @@ impl OpenCADStudio {
             }
             changed
         });
+    }
+}
+
+#[cfg(test)]
+mod table_cell_ribbon_tests {
+    use super::*;
+    use document::entities::Table;
+    use document::types::Vector3;
+
+    fn app_with_cells_picked() -> (OpenCADStudio, usize, document::Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Table(Box::new(Table::new(Vector3::ZERO, 3, 3))));
+        let _ = app.update(Message::Noop);
+        app.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+            table: handle,
+            anchor: (1, 1),
+            end: (2, 2),
+        });
+        (app, i, handle)
+    }
+
+    #[test]
+    fn picked_cells_bring_up_the_table_cell_tab_until_the_pick_ends() {
+        let (mut app, i, _) = app_with_cells_picked();
+        let (before, shown) = app.ribbon.tab_state("table_cell");
+        assert!(!shown, "no Table Cell tab before anything happens");
+        let _ = app.update(Message::Noop);
+        assert_eq!(app.ribbon.tab_state("table_cell"), ("table_cell", true));
+        app.tabs[i].scene.table_cells = None;
+        let _ = app.update(Message::Noop);
+        assert_eq!(app.ribbon.tab_state("table_cell"), (before, false), "the previous tab comes back");
+    }
+
+    #[test]
+    fn the_palette_alignment_buttons_align_the_picked_cells() {
+        let (mut app, i, handle) = app_with_cells_picked();
+        let tl = crate::ui::ribbon::table_cell_alignments().remove(0);
+        let _ = app.update(Message::RibbonToolClick { tool_id: tl.id.to_string(), event: tl.event.clone() });
+        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle) else {
+            panic!("table")
+        };
+        let align = |r: usize, c: usize| t.cell(r, c).and_then(|c| c.style.as_ref()).map(|s| s.alignment);
+        assert_eq!((align(1, 1), align(2, 2)), (Some(1), Some(1)), "Top Left on every picked cell");
+        assert_ne!(align(0, 0), Some(1), "cells outside the pick keep theirs");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::types::Vector3;
+
+    #[test]
+    fn delete_with_cells_picked_empties_them_and_keeps_the_table() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let mut t = Table::new(Vector3::ZERO, 3, 3);
+        for r in 0..3 {
+            for c in 0..3 {
+                t.set_cell_text(r, c, "x");
+            }
+        }
+        t.cell_mut(1, 1).unwrap().state.insert(CellStateFlags::CONTENT_LOCKED);
+        let i = app.active_tab;
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Table(Box::new(t)));
+        app.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+            table: handle,
+            anchor: (1, 0),
+            end: (2, 1),
+        });
+        let _ = app.update(Message::DeleteSelected);
+        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle) else {
+            panic!("Delete on picked cells must keep the table");
+        };
+        let text = |r: usize, c: usize| t.cell(r, c).unwrap().text_value().to_string();
+        assert_eq!((text(1, 0), text(2, 0), text(2, 1)), (String::new(), String::new(), String::new()));
+        assert_eq!(text(1, 1), "x", "a locked cell keeps its contents");
+        assert_eq!((text(0, 0), text(1, 2)), ("x".into(), "x".into()), "cells outside the pick stay");
+    }
+
+    fn table() -> Table {
+        // 4 rows x 5 columns, column widths 1..5, each cell names itself
+        let mut t = Table::new(Vector3::ZERO, 4, 5);
+        for (c, column) in t.columns.iter_mut().enumerate() {
+            column.width = (c + 1) as f64;
+        }
+        for r in 0..4 {
+            for c in 0..5 {
+                t.set_cell_text(r, c, &format!("{r}{c}"));
+            }
+        }
+        t
+    }
+
+    fn text(t: &Table, r: usize, c: usize) -> String {
+        t.cell(r, c).map(|cell| cell.text_value().to_string()).unwrap_or_default()
+    }
+
+    #[test]
+    fn insert_right_of_b_to_d_adds_three_columns_after_d() {
+        // picked B1:D2 (columns 1..=3): insert right
+        let mut t = table();
+        insert_columns_like(&mut t, 3, 4, 3);
+        assert_eq!(t.columns.len(), 8);
+        assert_eq!(text(&t, 0, 3), "03");
+        for c in 4..7 {
+            assert_eq!(text(&t, 0, c), "", "column {c} is new and blank");
+            assert_eq!(t.columns[c].width, 4.0, "the new columns are as wide as D");
+        }
+        assert_eq!(text(&t, 0, 7), "04", "E moved after the three new columns");
+        assert!(t.rows.iter().all(|row| row.cells.len() == 8));
+    }
+
+    #[test]
+    fn insert_left_and_rows_above_below_follow_the_picked_span() {
+        let mut t = table();
+        insert_columns_like(&mut t, 1, 1, 3);
+        assert_eq!((text(&t, 0, 0), text(&t, 0, 1), text(&t, 0, 4)), ("00".into(), String::new(), "01".into()));
+        // picked rows 1..=2: two rows below row 2, two above row 1
+        let mut t = table();
+        insert_rows_like(&mut t, 2, 3, 2);
+        assert_eq!(t.rows.len(), 6);
+        assert_eq!((text(&t, 2, 0), text(&t, 3, 0), text(&t, 4, 0), text(&t, 5, 0)), ("20".into(), String::new(), String::new(), "30".into()));
+        let mut t = table();
+        insert_rows_like(&mut t, 1, 1, 2);
+        assert_eq!((text(&t, 0, 0), text(&t, 1, 0), text(&t, 2, 0), text(&t, 3, 0)), ("00".into(), String::new(), String::new(), "10".into()));
     }
 }

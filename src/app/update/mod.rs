@@ -139,6 +139,7 @@ pub(in crate::app) use file::background_task;
 #[cfg(not(target_arch = "wasm32"))]
 pub(in crate::app) use file::native_paths_match;
 mod page_setup_import;
+mod prop_commit;
 #[cfg(not(target_arch = "wasm32"))]
 mod plugin_grips;
 #[cfg(not(target_arch = "wasm32"))]
@@ -560,7 +561,25 @@ impl OpenCADStudio {
             }
         }
         let from_options = self.active_modal == Some(super::ModalKind::Options);
+        // The viewport chip's outline switch can vanish under a resting
+        // pointer (another document or layout, a viewport count change, a
+        // narrower window); a removed mouse_area sends no exit, so its hover
+        // ends here.
+        let outline_switch_before = self.outline_switch_hover.then(|| {
+            (
+                matches!(
+                    &msg,
+                    Message::WindowResized(..) | Message::OsWindowResized(..)
+                ),
+                self.outline_switch_key(),
+            )
+        });
         let mut task = self.update_message(msg);
+        if let Some((resized, key)) = outline_switch_before {
+            if resized || self.outline_switch_key() != key {
+                self.outline_switch_hover = false;
+            }
+        }
         self.refresh_layer_counts();
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
             let notices = std::mem::take(&mut tab.scene.center_notices);
@@ -620,6 +639,13 @@ impl OpenCADStudio {
             self.ribbon.set_block_testing(false);
             self.ribbon.set_block_editing(block_editing);
         }
+        let cells_picked = !testing
+            && !block_editing
+            && self
+                .tabs
+                .get(self.active_tab)
+                .is_some_and(|tab| tab.scene.table_cells.is_some());
+        self.ribbon.set_table_cell_context(cells_picked);
         // The ribbon light follows the pane that is actually rendered, so a
         // session ending, a clean screen or another tab closes the light with it.
         self.ribbon.show_parameters_manager =
@@ -628,7 +654,20 @@ impl OpenCADStudio {
             self.dock_panel_visible(crate::ui::dock::PanelId::AuthoringPalettes);
         self.ribbon.show_tool_palettes =
             self.dock_panel_visible(crate::ui::dock::PanelId::ToolPalettes);
+        self.ribbon.show_viewport_highlight = self.model_space.viewport_hover_highlight;
         task
+    }
+
+    /// What decides whether the viewport chip with its outline switch is on
+    /// screen: the document, its layout and the number of model viewports.
+    fn outline_switch_key(&self) -> Option<(u64, String, usize)> {
+        self.tabs.get(self.active_tab).map(|tab| {
+            (
+                tab.id,
+                tab.scene.current_layout.clone(),
+                tab.scene.model_tiles.borrow().len(),
+            )
+        })
     }
 
     /// A dynamic UCS lasts for the command that set it: once that tab's
@@ -844,6 +883,15 @@ impl OpenCADStudio {
         if self.snap_override_popup.is_some() {
             if let Some(task) = self.intercept_snap_override_key(&msg) {
                 return task;
+            }
+        }
+        // Tab in a Properties field applies it and moves to the next field
+        // (Shift+Tab: the previous one) instead of cycling Dynamic Input.
+        if let Message::ShortcutPressed(key) = &msg {
+            if matches!(key.as_str(), "TAB" | "SHIFT+TAB") {
+                if let Some(task) = self.prop_tab(key == "TAB") {
+                    return task;
+                }
             }
         }
         // After a click in the Layer manager's table, ↑/↓ move through its
@@ -1673,7 +1721,7 @@ impl OpenCADStudio {
                 let allowed = self.tabs[i].active_cmd.as_ref().is_some_and(|c| {
                     (!c.input_kind().wants_text() || c.point_step_accepts_keywords())
                         && !c.needs_entity_pick()
-                });
+                }) || (!from && self.grip_point_prompt(i));
                 if allowed {
                     if from {
                         self.start_from_modifier(i);
@@ -3534,6 +3582,7 @@ impl OpenCADStudio {
 
             // ── Document tabs ─────────────────────────────────────────────
             Message::TabNew => {
+                self.close_table_cell_editor();
                 // Preserve the outgoing drawing's Ortho / running OSNAP.
                 self.stamp_header_sysvars(self.active_tab);
                 // The quad does not survive the switch to the fresh
@@ -3576,6 +3625,9 @@ impl OpenCADStudio {
             }
 
             Message::TabSwitch(idx) => {
+                if idx != self.active_tab {
+                    self.close_table_cell_editor();
+                }
                 if self.dialog_open(super::ModalKind::Recovery) {
                     return Task::none();
                 }
@@ -3692,6 +3744,9 @@ impl OpenCADStudio {
             Message::PluginGripPump => self.pump_plugin_grips(),
 
             Message::TabClose(tab_id) => {
+                if self.table_cell_editor.as_ref().is_some_and(|cell| cell.tab_id == tab_id) {
+                    self.close_table_cell_editor();
+                }
                 self.hovered_doc_tab = None;
                 // Resolve the stable id when the message is handled, not when
                 // it was built: an earlier close in the same batch may have
@@ -3909,6 +3964,9 @@ impl OpenCADStudio {
             }
 
             Message::DynTabNext => {
+                if self.table_cell_editor.is_some() {
+                    return self.table_editor_step(0, 1, true);
+                }
                 if let Some(task) = self.table_cell_tab(true) {
                     return task;
                 }
@@ -3930,6 +3988,9 @@ impl OpenCADStudio {
             }
 
             Message::DynTabPrev => {
+                if self.table_cell_editor.is_some() {
+                    return self.table_editor_step(0, -1, true);
+                }
                 if let Some(task) = self.table_cell_tab(false) {
                     return task;
                 }
@@ -4118,6 +4179,16 @@ impl OpenCADStudio {
                     let down = matches!(direction, ArrowKey::Down);
                     let step = crate::ui::ribbon::SearchMsg::Move(down);
                     return self.update(Message::RibbonSearch(step));
+                }
+                if self.table_cell_editor.is_some() && !extend_selection {
+                    let ed = self.mtext_editor.as_ref().unwrap();
+                    match direction {
+                        ArrowKey::Up => return self.table_editor_step(-1, 0, false),
+                        ArrowKey::Down => return self.table_editor_step(1, 0, false),
+                        ArrowKey::Left if ed.caret == 0 => return self.table_editor_step(0, -1, false),
+                        ArrowKey::Right if ed.caret == self.mtext_vis_count() => return self.table_editor_step(0, 1, false),
+                        _ => {}
+                    }
                 }
                 if self.mtext_editor.is_some() {
                     match direction {
@@ -5763,6 +5834,28 @@ impl OpenCADStudio {
                 self.focus_model_pane(idx);
                 self.on_viewport_move(p)
             }
+            Message::ViewportHighlightToggle => {
+                let on = !self.model_space.viewport_hover_highlight;
+                self.model_space.viewport_hover_highlight = on;
+                self.command_line
+                    .push_info(&format!("VPHIGHLIGHT = {}", on as u8));
+                self.persist_settings_if_changed();
+                Task::none()
+            }
+            Message::ViewportHighlightOpacity(op) => {
+                let op = op.min(100);
+                if op != self.model_space.viewport_hover_opacity {
+                    self.model_space.viewport_hover_opacity = op;
+                    // No echo: a wheel spin is many steps, and the chip's
+                    // tooltip and the outline itself show the value.
+                    self.persist_settings_if_changed();
+                }
+                Task::none()
+            }
+            Message::ViewportOutlineSwitchHover(on) => {
+                self.outline_switch_hover = on;
+                Task::none()
+            }
             Message::PaneMoveStart => {
                 let i = self.active_tab;
                 self.pane_move_from = Some(self.tabs[i].scene.active_model_tile.get());
@@ -5777,7 +5870,10 @@ impl OpenCADStudio {
             Message::PanePress(idx) => {
                 // A click-away into the drawing area re-syncs the active-row
                 // highlight against real focus before the pick runs.
-                let sweep = self.sync_active_field_if_any();
+                // The press takes the focus from a Properties field: what was typed
+                // there is applied before the pick can change the selection.
+                let applied = self.commit_active_prop_field();
+                let sweep = Task::batch([applied, self.sync_active_field_if_any()]);
                 // A fresh press ends any stale (un-dropped) pane move.
                 self.pane_move_from = None;
                 self.focus_model_pane(idx);
@@ -5863,13 +5959,19 @@ impl OpenCADStudio {
                     );
                 }
                 self.graphic_attributes.open_menu = None;
-                let sweep = self.sync_active_field_if_any();
+                // The press takes the focus from a Properties field: what was typed
+                // there is applied before the pick can change the selection.
+                let applied = self.commit_active_prop_field();
+                let sweep = Task::batch([applied, self.sync_active_field_if_any()]);
                 Task::batch(vec![moved, sweep, self.on_viewport_left_press()])
             }
 
             Message::ViewportLeftPress => {
                 self.graphic_attributes.open_menu = None;
-                let sweep = self.sync_active_field_if_any();
+                // The press takes the focus from a Properties field: what was typed
+                // there is applied before the pick can change the selection.
+                let applied = self.commit_active_prop_field();
+                let sweep = Task::batch([applied, self.sync_active_field_if_any()]);
                 Task::batch(vec![sweep, self.on_viewport_left_press()])
             }
 
@@ -8255,6 +8357,12 @@ impl OpenCADStudio {
                     }
                     return Task::none();
                 }
+                // Picked table cells: Delete empties them, not the table.
+                if self.tabs[i].scene.table_cells.is_some() {
+                    if let Some(task) = self.dispatch_table_cells("_TCELLCLEAR", i) {
+                        return task;
+                    }
+                }
                 let handles: Vec<_> = self.tabs[i].scene.selected.iter().cloned().collect();
                 if !handles.is_empty() {
                     // Erase is delta-safe unless a target is in a group (group
@@ -8311,6 +8419,7 @@ impl OpenCADStudio {
             }
 
             // ── In-place MText editor ───────────────────────────────────
+            Message::TableEditorClick(point) => self.table_editor_click(point),
             Message::MTextEdit(action) => {
                 if let Some(ed) = self.mtext_editor.as_mut() {
                     ed.content.perform(action);
@@ -9884,6 +9993,18 @@ impl OpenCADStudio {
             }
 
             Message::PropSyncActive(focused) => {
+                // The field the focus left keeps what was typed into it.
+                let left = self.tabs[self.active_tab]
+                    .properties
+                    .active_field
+                    .clone()
+                    .filter(|key| {
+                        !crate::ui::properties::active_key_focused(Some(key), focused.as_ref())
+                    });
+                let commit = match left {
+                    Some(key) => self.commit_prop_field(key),
+                    None => Task::none(),
+                };
                 // The Graphic Attributes linetype scale field behaves like a
                 // Properties field: the first click selects its value.
                 let scale_field = iced::widget::Id::new(
@@ -9892,9 +10013,12 @@ impl OpenCADStudio {
                 if focused.as_ref() == Some(&scale_field) {
                     if !std::mem::replace(&mut self.graphic_attributes.linetype_scale_focused, true)
                     {
-                        return iced::widget::operation::select_all(scale_field);
+                        return Task::batch([
+                            commit,
+                            iced::widget::operation::select_all(scale_field),
+                        ]);
                     }
-                    return Task::none();
+                    return commit;
                 }
                 self.graphic_attributes.linetype_scale_focused = false;
                 self.graphic_attributes.linetype_scale_input = None;
@@ -9908,9 +10032,12 @@ impl OpenCADStudio {
                         // the same field (or sweeping after a click elsewhere
                         // left its focus in place) must keep caret placement.
                         if changed {
-                            return iced::widget::operation::select_all(id.clone());
+                            return Task::batch([
+                                commit,
+                                iced::widget::operation::select_all(id.clone()),
+                            ]);
                         }
-                        return Task::none();
+                        return commit;
                     }
                 }
                 if !crate::ui::properties::active_key_focused(
@@ -9919,7 +10046,7 @@ impl OpenCADStudio {
                 ) {
                     panel.active_field = None;
                 }
-                Task::none()
+                commit
             }
 
             Message::PropPickerSurface(quick, message) => {
@@ -12327,6 +12454,9 @@ impl OpenCADStudio {
                 panel.view = node;
                 panel.tree_focus = true;
                 panel.keys_active = true;
+                if self.ribbon_layers_follow_filter {
+                    self.sync_ribbon_layers();
+                }
                 Task::none()
             }
             Message::LayerTreeRenameEdit(typed) => {
@@ -12359,6 +12489,15 @@ impl OpenCADStudio {
                     self.tabs[i].scene.set_filter_preview_highlights(&[]);
                 }
                 self.refresh_layer_counts();
+                Task::none()
+            }
+            Message::LayerSaveSearch => self.on_layer_save_search(),
+            Message::LayerRibbonFollows(on) => {
+                self.ribbon_layers_follow_filter = on;
+                let i = self.active_tab;
+                self.tabs[i].layers.ribbon_follows = on;
+                self.sync_ribbon_layers();
+                self.save_config();
                 Task::none()
             }
             Message::LayerMoreMenu(open) => {
@@ -13048,6 +13187,10 @@ impl OpenCADStudio {
             Message::PspaceCommand => Task::done(Message::ExitViewport),
 
             Message::Undo => {
+                if self.table_cell_editor.is_some() {
+                    self.mtext_undo();
+                    return Task::none();
+                }
                 // Mid-command Ctrl+Z: a drawing command steps itself back
                 // (PLINE pops the last vertex) instead of the document undo
                 // swallowing the whole in-progress object.
@@ -13063,6 +13206,10 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::Redo => {
+                if self.table_cell_editor.is_some() {
+                    self.mtext_redo();
+                    return Task::none();
+                }
                 self.redo_active_tab();
                 Task::none()
             }
@@ -13200,6 +13347,18 @@ impl OpenCADStudio {
             Message::ParametersManagerFilterMenu => {
                 let panel = &mut self.tabs[self.active_tab].parameters_panel;
                 panel.filter_menu = !panel.filter_menu;
+                Task::none()
+            }
+            Message::ParametersManagerHeaderMenu => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                panel.header_menu = !panel.header_menu;
+                Task::none()
+            }
+            Message::ParametersManagerColumn(column) => {
+                let panel = &mut self.tabs[self.active_tab].parameters_panel;
+                let index = column.index();
+                panel.columns[index] = !panel.columns[index];
+                panel.header_menu = false;
                 Task::none()
             }
             Message::ParametersManagerSearch(value) => {

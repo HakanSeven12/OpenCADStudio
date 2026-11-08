@@ -30,7 +30,8 @@ mod color_dropdown;
 mod context_tools;
 mod visibility_panel;
 pub use context_tools::{
-    UnderlayContext, pdf_underlay_tools, point_cloud_tools, table_cell_tools, xref_tools,
+    UnderlayContext, pdf_underlay_tools, point_cloud_tools, table_cell_alignments, table_cell_tools,
+    xref_tools,
 };
 pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use widgets::{StyleContext, *};
@@ -326,7 +327,7 @@ const CONTEXTUAL_LINE: f32 = 2.0;
 /// Whether module `id`'s tab is contextual: shown only while its context
 /// lasts (a block being edited).
 fn is_contextual(id: &str) -> bool {
-    id == "block_editor"
+    matches!(id, "block_editor" | "table_cell")
 }
 
 // ── Ribbon state ───────────────────────────────────────────────────────────
@@ -341,6 +342,8 @@ pub struct Ribbon {
     pub show_viewcube: bool,
     /// UCS icon (UCSICON) visibility — drives the UCS Icon button highlight.
     pub show_ucs_icon: bool,
+    /// VPHIGHLIGHT: the hovered Model viewport is outlined.
+    pub show_viewport_highlight: bool,
     /// Properties panel (PROPERTIES) visibility — drives the Properties button highlight.
     pub show_properties: bool,
     /// The Count palette is open (View › Palettes › Count).
@@ -427,6 +430,9 @@ pub struct Ribbon {
     /// A block editor session is open: the tab that was active before the
     /// Block Editor tab took over.
     block_editing: Option<usize>,
+    /// While table cells are picked: the tab that was active before the
+    /// Table Cell tab came up.
+    table_cell_open: Option<usize>,
     block_testing: Option<usize>,
     /// XDWGFADECTL as the Reference slide-out shows it (negative = off).
     pub xref_fade: i32,
@@ -536,6 +542,7 @@ impl Ribbon {
             ortho_mode: true,
             show_viewcube: true,
             show_ucs_icon: true,
+            show_viewport_highlight: true,
             show_properties: true,
             show_count_palette: false,
             show_sheet_set: false,
@@ -588,6 +595,7 @@ impl Ribbon {
             xref_ctx: false,
             point_cloud_ctx: None,
             block_editing: None,
+            table_cell_open: None,
             block_testing: None,
             xref_fade: 50,
             text_find: String::new(),
@@ -789,6 +797,44 @@ impl Ribbon {
         }
     }
 
+    /// Show the Table Cell tab while table cells are picked, and return to
+    /// the previous tab when the pick ends.
+    pub fn set_table_cell_context(&mut self, picked: bool) {
+        let Some(index) = self
+            .modules
+            .iter()
+            .position(|module| module.id() == "table_cell")
+        else {
+            return;
+        };
+        match (picked, self.table_cell_open) {
+            (true, None) => {
+                self.table_cell_open = Some(self.active);
+                self.active = index;
+            }
+            (false, Some(previous)) => {
+                self.table_cell_open = None;
+                if self.active == index {
+                    self.active = previous.min(self.modules.len().saturating_sub(1));
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The id of the tab shown now, and whether the tab `id` is in the bar.
+    #[cfg(test)]
+    pub(crate) fn tab_state(&self, id: &str) -> (&'static str, bool) {
+        let shown = self.modules.iter().any(|m| m.id() == id) && !self.contextual_off(id);
+        (self.modules[self.active].id(), shown)
+    }
+
+    /// A contextual tab whose context is not on: it is not shown.
+    fn contextual_off(&self, id: &str) -> bool {
+        (id == "block_editor" && self.block_editing.is_none())
+            || (id == "table_cell" && self.table_cell_open.is_none())
+    }
+
     pub fn set_block_testing(&mut self, testing: bool) {
         if testing != self.block_testing.is_some() {
             self.close_dropdown();
@@ -970,6 +1016,7 @@ impl Ribbon {
             ortho_mode: self.ortho_mode,
             show_viewcube: self.show_viewcube,
             show_ucs_icon: self.show_ucs_icon,
+            show_viewport_highlight: self.show_viewport_highlight,
             show_properties: self.show_properties,
             show_count_palette: self.show_count_palette,
             show_graphic_attributes: self.show_graphic_attributes,
@@ -1221,7 +1268,7 @@ impl Ribbon {
                 // The Layout module no longer has a ribbon tab — its paper-space
                 // tools live in the right-edge side toolbar (see ui::side_toolbar).
                 if module.id() == "layout"
-                    || (module.id() == "block_editor" && self.block_editing.is_none())
+                    || self.contextual_off(module.id())
                     || self.tab_hidden(i)
                 {
                     return acc;

@@ -26,6 +26,7 @@ pub use ocs_plugin_api::ribbon::{
 
 pub mod annotate;
 pub mod block_editor;
+pub mod table_cell;
 pub mod draw;
 pub mod insert;
 pub mod layout;

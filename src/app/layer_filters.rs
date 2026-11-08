@@ -69,10 +69,45 @@ impl crate::filter::PropertySource for LayerProperties {
 impl LayerFilter {
     /// The name pattern and the predicates as one all-filter.
     pub(in crate::app) fn to_filter(&self) -> crate::filter::Filter {
-        use crate::filter::{Condition, Filter, Item, Match, Op};
+        use crate::filter::{Filter, Group, Item, Match};
+        // Conditions from the editor (or read back from the drawing), with a
+        // name pattern or predicates LAYERFILTER SET added since (#2610).
         if let Some(conditions) = &self.conditions {
+            let mut extra = self.legacy_filter();
+            if extra.items.is_empty() {
+                return conditions.clone();
+            }
+            if conditions.root == Match::All {
+                let mut items = conditions.items.clone();
+                items.append(&mut extra.items);
+                return Filter {
+                    root: Match::All,
+                    items,
+                };
+            }
+            if conditions.items.iter().all(|item| matches!(item, Item::Condition(_))) {
+                let group = Group {
+                    mode: Match::Any,
+                    conditions: conditions
+                        .items
+                        .iter()
+                        .filter_map(|item| match item {
+                            Item::Condition(c) => Some(c.clone()),
+                            Item::Group(_) => None,
+                        })
+                        .collect(),
+                };
+                extra.items.push(Item::Group(group));
+                return extra;
+            }
             return conditions.clone();
         }
+        self.legacy_filter()
+    }
+
+    /// The name pattern and the predicates alone, as one all-filter.
+    fn legacy_filter(&self) -> crate::filter::Filter {
+        use crate::filter::{Condition, Filter, Item, Match, Op};
         let condition = |property: &str, value: String| {
             Item::Condition(Condition {
                 property: Some(property.to_string()),
@@ -112,7 +147,109 @@ impl LayerFilter {
     }
 }
 
+/// The filter named `name` anywhere in the tree, nested ones included.
+pub(in crate::app) fn find_filter_mut<'a>(
+    list: &'a mut [LayerFilter],
+    name: &str,
+) -> Option<&'a mut LayerFilter> {
+    for filter in list {
+        if filter.name.eq_ignore_ascii_case(name) {
+            return Some(filter);
+        }
+        if let Some(found) = find_filter_mut(&mut filter.children, name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Take the filter named `name` (and the filters under it) out of the tree.
+pub(in crate::app) fn remove_filter(list: &mut Vec<LayerFilter>, name: &str) {
+    list.retain(|filter| !filter.name.eq_ignore_ascii_case(name));
+    for filter in list {
+        remove_filter(&mut filter.children, name);
+    }
+}
+
 impl OpenCADStudio {
+    /// The drawing's layer filters as the session works with them: read from
+    /// the drawing, so undo, another drawing and a file just opened are
+    /// right (#2610).
+    pub(in crate::app) fn load_layer_filters(&mut self, i: usize) {
+        let stored = super::layer_filter_store::stored_layer_filters(&self.tabs[i].scene.document);
+        fn build(
+            parent: Option<&str>,
+            stored: &[super::layer_filter_store::StoredLayerFilter],
+            depth: usize,
+        ) -> Vec<LayerFilter> {
+            if depth > 16 {
+                return Vec::new();
+            }
+            stored
+                .iter()
+                .filter(|f| match (&f.parent, parent) {
+                    (None, None) => true,
+                    (Some(p), Some(q)) => p.eq_ignore_ascii_case(q),
+                    _ => false,
+                })
+                .map(|f| LayerFilter {
+                    name: f.name.clone(),
+                    pattern: String::new(),
+                    predicates: Vec::new(),
+                    children: build(Some(&f.name), stored, depth + 1),
+                    conditions: Some(f.filter.clone()),
+                })
+                .collect()
+        }
+        let mut filters = build(None, &stored, 0);
+        // A filter whose parent is gone stays, at the top.
+        for f in &stored {
+            let placed = |list: &[LayerFilter]| {
+                fn any(list: &[LayerFilter], name: &str) -> bool {
+                    list.iter()
+                        .any(|f| f.name.eq_ignore_ascii_case(name) || any(&f.children, name))
+                }
+                any(list, &f.name)
+            };
+            if !placed(&filters) {
+                filters.push(LayerFilter {
+                    name: f.name.clone(),
+                    conditions: Some(f.filter.clone()),
+                    ..Default::default()
+                });
+            }
+        }
+        self.layer_filters = filters;
+    }
+
+    /// Write the session's layer filters into the drawing, one undo step
+    /// labelled `label`; nothing when they are already there.
+    pub(in crate::app) fn persist_layer_filters(&mut self, i: usize, label: &str) {
+        fn flatten(
+            list: &[LayerFilter],
+            parent: Option<&str>,
+            out: &mut Vec<super::layer_filter_store::StoredLayerFilter>,
+        ) {
+            for f in list {
+                out.push(super::layer_filter_store::StoredLayerFilter {
+                    name: f.name.clone(),
+                    parent: parent.map(str::to_owned),
+                    filter: f.to_filter(),
+                });
+                flatten(&f.children, Some(&f.name), out);
+            }
+        }
+        let mut wanted = Vec::new();
+        flatten(&self.layer_filters, None, &mut wanted);
+        let document = &self.tabs[i].scene.document;
+        if super::layer_filter_store::stored_layer_filters(document) == wanted {
+            return;
+        }
+        self.push_undo_snapshot(i, label);
+        super::layer_filter_store::write_layer_filters(&mut self.tabs[i].scene.document, &wanted);
+        self.tabs[i].dirty = true;
+    }
+
     pub(in crate::app) fn dispatch_layer_filter(
         &mut self,
         cmd: &str,
@@ -130,6 +267,7 @@ impl OpenCADStudio {
             .first()
             .map(|token| token.to_ascii_uppercase())
             .unwrap_or_default();
+        self.load_layer_filters(i);
         match sub.as_str() {
             "" => self.list_layer_filters(i),
             "NEW" | "CREATE" => self.new_layer_filter(i, &tokens[1..]),
@@ -148,6 +286,7 @@ impl OpenCADStudio {
                 );
             }
         }
+        self.persist_layer_filters(i, "LAYERFILTER");
         Some(Task::none())
     }
 

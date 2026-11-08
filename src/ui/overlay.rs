@@ -1282,6 +1282,7 @@ pub fn selection_overlay<'a>(
     dividers: Vec<iced::Rectangle>,
     pane_move_rect: Option<iced::Rectangle>,
     pane_drop_rect: Option<iced::Rectangle>,
+    pane_hover: Option<(iced::Rectangle, f32)>,
     nav: NavCursor,
     suppressed: bool,
     hover_locked: bool,
@@ -1322,6 +1323,7 @@ pub fn selection_overlay<'a>(
         dividers,
         pane_move_rect,
         pane_drop_rect,
+        pane_hover,
         nav,
         suppressed,
         hover_locked,
@@ -1406,6 +1408,9 @@ struct SelectionCanvas {
     pane_move_rect: Option<iced::Rectangle>,
     /// The pane under the cursor during a pane move (drop target), highlighted.
     pane_drop_rect: Option<iced::Rectangle>,
+    /// The Model viewport under the cursor (px) and the alpha of its faint
+    /// outline (VPHIGHLIGHT / VPHIGHLIGHTOPACITY). `None` with one viewport.
+    pane_hover: Option<(iced::Rectangle, f32)>,
     /// Which interactive navigation tool is armed. Any of them hides the
     /// crosshair — the viewport is being driven, not drawn on — and each
     /// picks its own cursor in `mouse_interaction`.
@@ -1541,9 +1546,9 @@ fn idle_grip_color(
         document::types::aci_table::aci_to_rgb(visual.grip_dynamic)
             .map(|(r, g, b)| Color::from_rgb8(r, g, b))
             .unwrap_or(palette.primary.base.color)
-    } else if matches!(grip.shape, GripShape::Diamond) {
-        // The table-cell fill grip is light cyan, apart from the cell range's
-        // square grips.
+    } else if matches!(grip.shape, GripShape::Diamond | GripShape::Alignment) {
+        // The table-cell fill grip and the alignment tag are light cyan, apart
+        // from the cell range's square grips.
         Color::from_rgb8(0, 191, 255)
     } else if visual.grip_color > 0 {
         if let Some((r, g, b)) = document::types::aci_table::aci_to_rgb(visual.grip_color) {
@@ -1554,6 +1559,35 @@ fn idle_grip_color(
     } else {
         palette.primary.base.color
     }
+}
+
+/// The five corners of the alignment tag, clockwise from its top left: 0.69
+/// units wide per unit of height, the straight sides ending 62% of the way
+/// down and the point at the bottom.
+fn alignment_tag_points(centre: Point, h: f32) -> [Point; 5] {
+    let half_width = h * 0.69;
+    [
+        Point::new(centre.x - half_width, centre.y - h),
+        Point::new(centre.x + half_width, centre.y - h),
+        Point::new(centre.x + half_width, centre.y + h * 0.24),
+        Point::new(centre.x, centre.y + h),
+        Point::new(centre.x - half_width, centre.y + h * 0.24),
+    ]
+}
+
+/// True when an idle marker paints in its grip colour rather than the
+/// background: an explicitly filled grip, a dynamic-block grip, and the
+/// selectors that are filled by design.
+fn paints_filled(grip: &GripMarker) -> bool {
+    grip.is_filled
+        || grip.is_dynamic
+        || matches!(
+            grip.shape,
+            GripShape::Dropdown
+                | GripShape::DropdownAdjacent
+                | GripShape::Diamond
+                | GripShape::Alignment
+        )
 }
 
 fn draw_grip_marker(
@@ -1628,6 +1662,14 @@ fn draw_grip_marker(
             b.close();
         }),
         GripShape::Circle => canvas::Path::circle(Point::new(sp.x, sp.y), h),
+        GripShape::Alignment => canvas::Path::new(|b| {
+            let corners = alignment_tag_points(sp, h);
+            b.move_to(corners[0]);
+            for corner in &corners[1..] {
+                b.line_to(*corner);
+            }
+            b.close();
+        }),
         GripShape::Diamond => canvas::Path::new(|b| {
             let r = h * 1.25;
             b.move_to(Point::new(sp.x, sp.y - r));
@@ -1682,10 +1724,7 @@ fn draw_grip_marker(
         } else {
             idle_grip_color(grip, palette, visual)
         };
-        let fill = if grip.is_filled || grip.is_dynamic || matches!(
-            grip.shape,
-            GripShape::Dropdown | GripShape::DropdownAdjacent | GripShape::Diamond
-        ) {
+        let fill = if paints_filled(grip) {
             color
         } else {
             palette.background.base.color.scale_alpha(0.7)
@@ -1707,21 +1746,37 @@ fn draw_grip_marker(
 }
 
 impl SelectionCanvas {
-    /// True when the cursor sits on a Model-pane divider (within a few px), so
-    /// `draw` can suppress the CAD crosshair there. The resize cursor itself is
-    /// supplied by the input pane_grid layered above.
+    /// True when the cursor sits on a Model-pane divider, so `draw` can
+    /// suppress the CAD crosshair there. The resize cursor itself is supplied
+    /// by the input pane_grid layered above.
     fn divider_under(&self, cursor: mouse::Cursor, bounds: iced::Rectangle) -> bool {
-        const TOL_PX: f32 = 3.0;
-        let Some(pos) = cursor.position_in(bounds) else {
-            return false;
-        };
-        self.dividers.iter().any(|d| {
-            pos.x >= d.x - TOL_PX
-                && pos.x <= d.x + d.width + TOL_PX
-                && pos.y >= d.y - TOL_PX
-                && pos.y <= d.y + d.height + TOL_PX
-        })
+        let last = self.selection.borrow().input.last_move_pos;
+        cursor_on_divider(&self.dividers, cursor, bounds, last)
     }
+}
+
+/// True when the pointer lies in a divider's grab zone — the band where the
+/// pane_grid above shows its resize arrows. That pane_grid owns the cursor
+/// there: the stack hands this overlay a levitated cursor in `update` and
+/// none at all (`Unavailable`) in `draw`. So the iced cursor is landed, and
+/// when it is missing the viewport's own last pointer position decides;
+/// otherwise the crosshair stays drawn on top of the arrows.
+pub(crate) fn cursor_on_divider(
+    dividers: &[iced::Rectangle],
+    cursor: mouse::Cursor,
+    bounds: iced::Rectangle,
+    last_move_pos: Option<Point>,
+) -> bool {
+    let tol = crate::scene::TILE_RESIZE_LEEWAY_PX * 0.5;
+    let Some(pos) = cursor.land().position_in(bounds).or(last_move_pos) else {
+        return false;
+    };
+    dividers.iter().any(|d| {
+        pos.x >= d.x - tol
+            && pos.x <= d.x + d.width + tol
+            && pos.y >= d.y - tol
+            && pos.y <= d.y + d.height + tol
+    })
 }
 
 // ── Selection overlay frame caches ─────────────────────────────────────────
@@ -2208,6 +2263,26 @@ impl canvas::Program<Message> for SelectionCanvas {
         // under the cursor, and drag a translucent ghost card along the cursor
         // so the pane is visibly "moving".
         layers.push(transient_layer(renderer, bounds, |frame| {
+        // Hovered viewport: a thin outline just inside its edges, in the
+        // accent colour at the user's (low) opacity, like a tiling window
+        // manager marks the window under the pointer.
+        if let Some((r, alpha)) = self.pane_hover.filter(|(_, a)| *a > 0.0) {
+            if self.pane_move_rect.is_none() && r.width > 4.0 && r.height > 4.0 {
+                let accent = theme.palette().primary.base.color;
+                let outline = canvas::Path::rectangle(
+                    Point::new(r.x + 1.0, r.y + 1.0),
+                    iced::Size::new(r.width - 2.0, r.height - 2.0),
+                );
+                frame.stroke(
+                    &outline,
+                    canvas::Stroke {
+                        width: 2.0,
+                        style: canvas::Style::Solid(Color { a: alpha, ..accent }),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
         if let Some(src) = self.pane_move_rect {
             let accent = theme.palette().primary.base.color;
             // Source pane: dimmed + dashed-feel outline (it has been lifted).
@@ -6721,6 +6796,62 @@ mod selection_visual_color_tests {
     use super::*;
 
     #[test]
+    fn alignment_tag_keeps_the_measured_proportions() {
+        let h = 5.0;
+        let corners = alignment_tag_points(Point::new(100.0, 100.0), h);
+        let width = corners[1].x - corners[0].x;
+        let height = corners[3].y - corners[0].y;
+        assert!(
+            (width / height - 0.69).abs() < 1e-6,
+            "0.69 wide per unit tall"
+        );
+        assert!(
+            ((corners[2].y - corners[0].y) / height - 0.62).abs() < 1e-6,
+            "the straight sides end 62% of the way down"
+        );
+        assert_eq!(corners[0].y, corners[1].y, "flat top");
+        assert_eq!(corners[2].y, corners[4].y, "the shoulders share one line");
+        assert!(
+            (corners[3].x - 100.0).abs() < 1e-6,
+            "the point sits on the axis"
+        );
+        assert!(corners[3].y > corners[2].y, "the tag points down");
+    }
+
+    #[test]
+    fn alignment_grip_is_a_filled_cyan_tag() {
+        let tag = GripMarker {
+            pos: Point::ORIGIN,
+            shape: GripShape::Alignment,
+            is_hot: false,
+            is_hovered: false,
+            dir: None,
+            is_plugin: false,
+            is_authoring: false,
+            is_dynamic: false,
+            is_filled: false,
+        };
+        let square = GripMarker {
+            shape: GripShape::Square,
+            ..tag.clone()
+        };
+        let palette = Theme::Dark.palette();
+        let mut visual = SelectionVisualOptions::default();
+        visual.grip_color = 1;
+        assert_eq!(
+            idle_grip_color(&tag, palette, &visual),
+            Color::from_rgb8(0, 191, 255),
+            "the alignment tag keeps its own cyan against a custom grip colour"
+        );
+        assert_eq!(
+            idle_grip_color(&square, palette, &visual),
+            Color::from_rgb8(255, 0, 0)
+        );
+        assert!(paints_filled(&tag), "the tag paints solid, not hollow");
+        assert!(!paints_filled(&square));
+    }
+
+    #[test]
     fn idle_plugin_square_matches_native_custom_color_and_square_paint() {
         let native = GripMarker {
             pos: Point::ORIGIN,
@@ -7066,5 +7197,32 @@ mod grid_mask_tests {
             assert!(!pieces.is_empty(), "axis {axis} must stay outside the wipeout");
             assert!(!pieces.iter().any(crosses), "axis {axis} drawn over the wipeout");
         }
+    }
+}
+
+#[cfg(test)]
+mod divider_cursor_tests {
+    use super::cursor_on_divider;
+    use iced::mouse::Cursor;
+    use iced::{Point, Rectangle};
+
+    #[test]
+    fn the_crosshair_gives_way_where_the_resize_arrows_show() {
+        let bounds = Rectangle { x: 0.0, y: 0.0, width: 800.0, height: 600.0 };
+        let dividers = [Rectangle { x: 399.0, y: 0.0, width: 2.0, height: 600.0 }];
+        // The pane_grid above owns the cursor on its divider: the stack
+        // levitates it for this overlay's update and withholds it from its
+        // draw. Both must still find the divider, across the whole band.
+        for x in [400.0, 396.0, 404.0] {
+            let p = Point::new(x, 300.0);
+            assert!(cursor_on_divider(&dividers, Cursor::Levitating(p), bounds, None), "x = {x}");
+            assert!(
+                cursor_on_divider(&dividers, Cursor::Unavailable, bounds, Some(p)),
+                "draw, x = {x}"
+            );
+        }
+        let off = Point::new(380.0, 300.0);
+        assert!(!cursor_on_divider(&dividers, Cursor::Available(off), bounds, Some(off)));
+        assert!(!cursor_on_divider(&dividers, Cursor::Unavailable, bounds, Some(off)));
     }
 }

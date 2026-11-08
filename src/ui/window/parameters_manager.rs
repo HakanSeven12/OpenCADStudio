@@ -2,7 +2,9 @@
 use crate::app::Message;
 use crate::scene::block_parameters_manager::{self as manager, Group, Row};
 use crate::ui::dock::{self, Chrome, PanelId};
-use iced::widget::{button, canvas, column, container, row, scrollable, text, text_input};
+use iced::widget::{
+    button, canvas, column, container, mouse_area, row, scrollable, text, text_input,
+};
 use iced::{Element, Fill, Length, Point, Rectangle, Size};
 
 /// Every column stays visible in the panel's default width, so the fixed cells
@@ -16,6 +18,60 @@ const COLUMNS: [(f32, &str); 7] = [
     (34.0, "Order"),
     (0.0, "Description"),
 ];
+/// One header the manager's menu can show or hide. `Name` is not among them:
+/// the menu lists it first and disabled, and the pane always draws it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Column {
+    Expression,
+    Value,
+    Type,
+    Show,
+    Order,
+    Description,
+}
+
+impl Column {
+    pub const ALL: [Self; 6] = [
+        Self::Expression,
+        Self::Value,
+        Self::Type,
+        Self::Show,
+        Self::Order,
+        Self::Description,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Expression => "Expression",
+            Self::Value => "Value",
+            Self::Type => "Type",
+            Self::Show => "Show",
+            Self::Order => "Order",
+            Self::Description => "Description",
+        }
+    }
+
+    /// The slot the column owns in `Panel::columns`, one past `Name`.
+    pub fn index(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|column| *column == self)
+            .unwrap_or(0)
+    }
+
+    fn width(self) -> f32 {
+        COLUMNS[self.index() + 1].0
+    }
+
+    fn label(self) -> String {
+        if self == Self::Order {
+            crate::tr!("parameters-manager", "order")
+        } else {
+            crate::t!(self.name()).into_owned()
+        }
+    }
+}
+
 const SPACING: f32 = 2.0;
 
 /// The leading glyph column. Its width is fixed so a row without a glyph keeps
@@ -207,6 +263,11 @@ pub struct Panel {
     pub mode: manager::FilterMode,
     /// Whether the funnel's two-entry menu is open.
     pub filter_menu: bool,
+    /// Which toggleable columns are shown, in `Column::ALL` order. `Name` is
+    /// fixed and owns no slot here.
+    pub columns: [bool; 6],
+    /// Whether the header's column menu is open.
+    pub header_menu: bool,
 }
 
 impl Default for Panel {
@@ -219,6 +280,8 @@ impl Default for Panel {
             search: String::new(),
             mode: manager::FilterMode::All,
             filter_menu: false,
+            columns: [true; 6],
+            header_menu: false,
         }
     }
 }
@@ -326,20 +389,46 @@ fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
             .on_press(Message::ParametersManagerShow(name.to_owned())),
     )
     .width(Length::Fixed(width))
+    .id(iced::widget::Id::from(format!(
+        "parameters-manager-show-{name}"
+    )))
     .into()
 }
 
-fn header_line() -> Element<'static, Message> {
-    let mut cells = vec![glyph_spacer()];
-    cells.extend(COLUMNS.into_iter().map(|(width, name)| {
-        let label = if name == "Order" {
-            crate::tr!("parameters-manager", "order")
-        } else {
-            crate::t!(name).into_owned()
-        };
-        cell(&label, width)
-    }));
+fn header_cell(label: &str, width: f32, id: String) -> Element<'static, Message> {
+    container(cell(label, width))
+        .id(iced::widget::Id::from(id))
+        .into()
+}
+
+fn header_line(panel: &Panel) -> Element<'static, Message> {
+    let mut cells = vec![
+        glyph_spacer(),
+        header_cell(
+            &crate::t!("Name").into_owned(),
+            COLUMNS[0].0,
+            "parameters-manager-header-Name".to_owned(),
+        ),
+    ];
+    for column in Column::ALL {
+        if panel.columns[column.index()] {
+            cells.push(header_cell(
+                &column.label(),
+                column.width(),
+                format!("parameters-manager-header-{}", column.name()),
+            ));
+        }
+    }
     row(cells).spacing(SPACING).into()
+}
+
+/// The header row is the surface the menu opens from; the id sits on the whole
+/// row so a right-click anywhere along the headers reaches it.
+fn header_row(panel: &Panel) -> Element<'static, Message> {
+    container(mouse_area(header_line(panel)).on_right_press(Message::ParametersManagerHeaderMenu))
+        .width(Fill)
+        .id(iced::widget::Id::new("parameters-manager-header-menu"))
+        .into()
 }
 
 fn group_line(group: Group) -> Element<'static, Message> {
@@ -428,6 +517,53 @@ fn filter_menu(panel: &Panel) -> Element<'static, Message> {
         .into()
 }
 
+/// The header's menu: `Name` first and not a choice, then every column the pane
+/// can hide, ticked while it is shown. Picking one toggles it and closes the
+/// menu, as the reference's own list does.
+fn column_menu(panel: &Panel) -> Element<'static, Message> {
+    let mut list = column![].spacing(2);
+    list = list.push(
+        container(text(crate::t!("Name").into_owned()).size(11))
+            .padding([2, 4])
+            .id(iced::widget::Id::new("parameters-manager-column-Name")),
+    );
+    for column in Column::ALL {
+        let shown = panel.columns[column.index()];
+        let tick = container(crate::ui::icons::themed_check_cell::<Message>(shown));
+        let tick = if shown {
+            tick.id(iced::widget::Id::from(format!(
+                "parameters-manager-column-check-{}",
+                column.name()
+            )))
+        } else {
+            tick
+        };
+        list = list.push(
+            container(
+                button(
+                    row![tick, text(column.label()).size(11)]
+                        .spacing(4)
+                        .align_y(iced::Center),
+                )
+                .on_press(Message::ParametersManagerColumn(column))
+                .style(button::text)
+                .padding([2, 4])
+                .width(Fill),
+            )
+            .width(Fill)
+            .id(iced::widget::Id::from(format!(
+                "parameters-manager-column-{}",
+                column.name()
+            ))),
+        );
+    }
+    container(list)
+        .style(container::bordered_box)
+        .padding(4)
+        .width(Fill)
+        .into()
+}
+
 fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element<'static, Message> {
     let name = entry.name.as_str();
     let (expression, value) = if entry.numeric {
@@ -459,30 +595,41 @@ fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element
         Some(kind) => glyph_cell(kind, format!("parameters-manager-glyph-{name}")),
         None => glyph_spacer(),
     };
-    row(vec![
-        glyph,
-        cell(name, COLUMNS[0].0),
-        expression,
-        value,
-        cell(&match entry.type_name {
-            "Polar" => crate::tr!("parameters-manager", "polar"),
-            "Visibility" => crate::tr!("parameters-manager", "visibility"),
-            "Variable" => crate::tr!("parameters-manager", "variable"),
-            name => crate::t!(name).into_owned(),
-        }, COLUMNS[3].0),
-        show_cell(name, entry.show, COLUMNS[4].0),
-        cell(&entry.order, COLUMNS[5].0),
-        description_cell(
+    let mut cells = vec![glyph, cell(name, COLUMNS[0].0)];
+    if panel.columns[Column::Expression.index()] {
+        cells.push(expression);
+    }
+    if panel.columns[Column::Value.index()] {
+        cells.push(value);
+    }
+    if panel.columns[Column::Type.index()] {
+        cells.push(cell(
+            &match entry.type_name {
+                "Polar" => crate::tr!("parameters-manager", "polar"),
+                "Visibility" => crate::tr!("parameters-manager", "visibility"),
+                "Variable" => crate::tr!("parameters-manager", "variable"),
+                name => crate::t!(name).into_owned(),
+            },
+            COLUMNS[3].0,
+        ));
+    }
+    if panel.columns[Column::Show.index()] {
+        cells.push(show_cell(name, entry.show, COLUMNS[4].0));
+    }
+    if panel.columns[Column::Order.index()] {
+        cells.push(cell(&entry.order, COLUMNS[5].0));
+    }
+    if panel.columns[Column::Description.index()] {
+        cells.push(description_cell(
             definition,
             name,
             &entry.description,
             entry.description_writable,
             panel,
             COLUMNS[6].0,
-        ),
-    ])
-    .spacing(SPACING)
-    .into()
+        ));
+    }
+    row(cells).spacing(SPACING).into()
 }
 
 pub fn view(
@@ -493,7 +640,7 @@ pub fn view(
     chrome: Chrome,
 ) -> Element<'static, Message> {
     let listed = manager::displayed(rows, panel.mode, &panel.filter, &panel.search);
-    let mut lines: Vec<Element<'static, Message>> = vec![header_line()];
+    let mut lines: Vec<Element<'static, Message>> = vec![header_row(panel)];
     for group in Group::ALL {
         let group_rows: Vec<&Row> = listed
             .iter()
@@ -512,6 +659,9 @@ pub fn view(
     let mut body = column![container(toolbar(panel)).width(Fill).padding([2, 2])].spacing(2);
     if panel.filter_menu {
         body = body.push(container(filter_menu(panel)).width(Fill).padding([0, 2]));
+    }
+    if panel.header_menu {
+        body = body.push(container(column_menu(panel)).width(Fill).padding([0, 2]));
     }
     dock::frame(
         dock::title_bar(
@@ -1039,5 +1189,208 @@ mod tests {
             PanelId::ParametersManager.default_width(),
             chrome(),
         );
+    }
+
+    fn build(panel: &Panel) -> iced_test::simulator::Simulator<'static, Message> {
+        let width = PanelId::ParametersManager.default_width();
+        iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), panel, document::Handle::new(1), width, chrome()),
+        )
+    }
+
+    /// The pane opens with every toggled column shown and no menu over it.
+    #[test]
+    fn the_header_starts_with_every_toggled_column_shown() {
+        let panel = Panel::default();
+        assert!(
+            panel.columns.iter().all(|&shown| shown),
+            "every column the menu can toggle is shown when the pane opens"
+        );
+        assert!(!panel.header_menu, "with no column menu over the header");
+        let mut ui = build(&panel);
+        for column in Column::ALL {
+            assert!(
+                ui.find(iced::widget::Id::from(format!(
+                    "parameters-manager-header-{}",
+                    column.name()
+                )))
+                .is_ok(),
+                "the header draws {}",
+                column.name()
+            );
+        }
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-header-Name"))
+                .is_ok(),
+            "and Name, which the menu never hides"
+        );
+    }
+
+    /// Right-clicking the header opens the menu the reference offers: Name
+    /// first and fixed, then every toggleable column with whether it is shown.
+    #[test]
+    fn the_header_menu_names_the_fixed_column_and_every_toggle() {
+        let open = Panel {
+            header_menu: true,
+            ..Panel::default()
+        };
+        let mut ui = build(&open);
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-column-Name"))
+                .is_ok(),
+            "the menu lists the fixed column"
+        );
+        for column in Column::ALL {
+            assert!(
+                ui.find(iced::widget::Id::from(format!(
+                    "parameters-manager-column-{}",
+                    column.name()
+                )))
+                .is_ok(),
+                "the menu lists {}",
+                column.name()
+            );
+            assert!(
+                ui.find(iced::widget::Id::from(format!(
+                    "parameters-manager-column-check-{}",
+                    column.name()
+                )))
+                .is_ok(),
+                "and ticks {}, which is shown",
+                column.name()
+            );
+        }
+        let hidden = Panel {
+            header_menu: true,
+            columns: [false; 6],
+            ..Panel::default()
+        };
+        let mut ui = build(&hidden);
+        for column in Column::ALL {
+            assert!(
+                ui.find(iced::widget::Id::from(format!(
+                    "parameters-manager-column-check-{}",
+                    column.name()
+                )))
+                .is_err(),
+                "a hidden column carries no tick"
+            );
+        }
+    }
+
+    /// Hiding a column removes it from the header and from every row; Name is
+    /// not one of the columns the menu can take away.
+    #[test]
+    fn hiding_a_column_takes_its_header_and_cells_out_and_keeps_the_name() {
+        let hidden = Panel {
+            columns: [false; 6],
+            ..Panel::default()
+        };
+        let mut ui = build(&hidden);
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-header-Name"))
+                .is_ok(),
+            "Name stays in the header when every toggle is off"
+        );
+        for column in Column::ALL {
+            assert!(
+                ui.find(iced::widget::Id::from(format!(
+                    "parameters-manager-header-{}",
+                    column.name()
+                )))
+                .is_err(),
+                "{} leaves the header",
+                column.name()
+            );
+        }
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-show-Angle1"))
+                .is_err(),
+            "the Show cell leaves its rows with the column"
+        );
+        assert!(
+            locate(&hidden, "Left edge").is_none(),
+            "and a hidden Description takes the stored text with it"
+        );
+        let mut ui = build(&Panel::default());
+        assert!(
+            ui.find(iced::widget::Id::new("parameters-manager-show-Angle1"))
+                .is_ok(),
+            "a shown Show column draws its cell"
+        );
+    }
+
+    /// The header row is the surface that opens the menu, and choosing an entry
+    /// publishes the column it toggles.
+    #[test]
+    fn the_header_opens_the_menu_and_an_entry_toggles_its_column() {
+        let mut ui = build(&Panel::default());
+        let header = ui
+            .find(iced::widget::Id::new("parameters-manager-header-menu"))
+            .expect("the header row carries the menu surface");
+        let centre = header
+            .visible_bounds()
+            .expect("the header is visible")
+            .center();
+        ui.point_at(centre);
+        ui.simulate([iced::Event::Mouse(iced::mouse::Event::ButtonPressed(
+            iced::mouse::Button::Right,
+        ))]);
+        let opened = ui
+            .into_messages()
+            .filter(|message| matches!(message, Message::ParametersManagerHeaderMenu))
+            .count();
+        assert_eq!(opened, 1, "right-clicking the header opens the menu once");
+
+        let mut ui = build(&Panel {
+            header_menu: true,
+            ..Panel::default()
+        });
+        let entry = ui
+            .find(iced::widget::Id::new("parameters-manager-column-Type"))
+            .expect("the open menu draws the Type entry");
+        let centre = entry
+            .visible_bounds()
+            .expect("the entry is visible")
+            .center();
+        ui.point_at(centre);
+        ui.simulate([
+            iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            )),
+        ]);
+        let published: Vec<_> = ui
+            .into_messages()
+            .filter(|message| matches!(message, Message::ParametersManagerColumn(Column::Type)))
+            .collect();
+        assert_eq!(published.len(), 1, "clicking Type publishes its toggle");
+    }
+
+    #[test]
+    fn the_toggleable_columns_are_the_six_the_menu_offers() {
+        assert_eq!(
+            Column::ALL.map(|column| column.name()),
+            [
+                "Expression",
+                "Value",
+                "Type",
+                "Show",
+                "Order",
+                "Description"
+            ],
+            "Name is fixed and every other header is a toggle"
+        );
+        for (slot, column) in Column::ALL.into_iter().enumerate() {
+            assert_eq!(column.index(), slot, "{} keeps its own slot", column.name());
+            assert_eq!(
+                column.width(),
+                COLUMNS[slot + 1].0,
+                "{} keeps the width of the column it hides",
+                column.name()
+            );
+        }
     }
 }

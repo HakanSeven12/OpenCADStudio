@@ -69,7 +69,10 @@ fn block_close_dialog_explains_the_risk_and_counts_references() {
             (900.0, 700.0),
             dialog(&app),
         );
-        visible(&mut ui, "Save changes to EDIT_ME?");
+        assert!(
+            ui.find("Save changes to EDIT_ME?").is_err(),
+            "the block-close dialog has no per-block line above the body"
+        );
         visible(
             &mut ui,
             "Changes to parameters may update existing block references in ways that are not always obvious. What do you want to do?",

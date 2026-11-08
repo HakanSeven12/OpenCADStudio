@@ -3445,7 +3445,7 @@ mod attedit_dash_tests {
     }
 
     #[test]
-    fn dash_attedit_prompts_when_nothing_is_selected() {
+    fn dash_attedit_asks_whether_to_edit_one_at_a_time() {
         let (mut app, _) = inserts_with_title();
         let _ = app.run_command_line("-ATTEDIT");
 
@@ -3453,12 +3453,28 @@ mod attedit_dash_tests {
         let command = app.tabs[i]
             .active_cmd
             .as_ref()
-            .expect("ATTEDIT must ask for a reference");
-        assert!(
-            command.prompt().contains("Select block"),
-            "prompt was {}",
-            command.prompt()
+            .expect("ATTEDIT must ask its first question");
+        assert_eq!(
+            command.prompt(),
+            "Edit attributes one at a time? [Yes/No] <Y>:"
         );
+    }
+
+    #[test]
+    fn dash_attedit_global_branch_swaps_a_string_after_its_prompts() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT");
+        let _ = app.feed_script_line("N");
+        let _ = app.feed_script_line("N");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("");
+        let _ = app.feed_script_line("old");
+        let _ = app.feed_script_line("new");
+
+        for handle in handles {
+            assert_eq!(attribute(&app, handle).1, "new");
+        }
     }
 
     #[test]
@@ -3468,6 +3484,147 @@ mod attedit_dash_tests {
 
         for handle in handles {
             assert_eq!(attribute(&app, handle), ("SHEET".into(), "old".into()));
+        }
+    }
+
+    fn set_values(app: &mut OpenCADStudio, handles: &[document::Handle], values: &[&str]) {
+        let i = app.active_tab;
+        for (handle, value) in handles.iter().zip(values) {
+            let entity = app.tabs[i]
+                .scene
+                .document
+                .entities_mut()
+                .find(|entity| entity.common().handle == *handle)
+                .expect("insert");
+            let document::EntityType::Insert(insert) = entity else {
+                panic!("not an insert");
+            };
+            insert.attributes[0].set_value(*value);
+        }
+    }
+
+    #[test]
+    fn dash_attedit_replaces_a_string_inside_every_attribute_value() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new");
+
+        for handle in handles {
+            assert_eq!(attribute(&app, handle), ("TITLE".into(), "new".into()));
+        }
+    }
+
+    #[test]
+    fn dash_attedit_replacement_keeps_the_rest_of_each_value() {
+        let (mut app, handles) = inserts_with_title();
+        set_values(&mut app, &handles, &["old north", "old south", "keep"]);
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new");
+
+        assert_eq!(attribute(&app, handles[0]).1, "new north");
+        assert_eq!(attribute(&app, handles[1]).1, "new south");
+        assert_eq!(attribute(&app, handles[2]).1, "keep");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_takes_a_handle_before_the_verb() {
+        let (mut app, handles) = inserts_with_title();
+        let line = format!("-ATTEDIT {:X} REPLACE old new", handles[1].value());
+        let _ = app.run_command_line(&line);
+
+        assert_eq!(attribute(&app, handles[1]).1, "new");
+        assert_eq!(attribute(&app, handles[0]).1, "old");
+        assert_eq!(attribute(&app, handles[2]).1, "old");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_reports_a_string_that_matches_nothing() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT REPLACE zzz new");
+
+        assert!(
+            app.command_line
+                .last_error
+                .as_deref()
+                .unwrap_or("")
+                .contains("zzz"),
+            "error was {:?}",
+            app.command_line.last_error
+        );
+        for handle in handles {
+            assert_eq!(attribute(&app, handle).1, "old");
+        }
+    }
+
+    fn add_note_attributes(app: &mut OpenCADStudio, handles: &[document::Handle]) {
+        let i = app.active_tab;
+        for handle in handles {
+            let entity = app.tabs[i]
+                .scene
+                .document
+                .entities_mut()
+                .find(|entity| entity.common().handle == *handle)
+                .expect("insert");
+            let document::EntityType::Insert(insert) = entity else {
+                panic!("not an insert");
+            };
+            insert
+                .attributes
+                .push(AttributeEntity::new("NOTE".into(), "old".into()));
+        }
+    }
+
+    fn attribute_value(
+        app: &OpenCADStudio,
+        handle: document::Handle,
+        tag: &str,
+    ) -> String {
+        let entity = app.tabs[app.active_tab]
+            .scene
+            .document
+            .get_entity(handle)
+            .expect("insert");
+        let document::EntityType::Insert(insert) = entity else {
+            panic!("not an insert");
+        };
+        insert
+            .attributes
+            .iter()
+            .find(|attr| attr.tag == tag)
+            .map(|attr| attr.get_value().to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn dash_attedit_replacement_filters_by_tag() {
+        let (mut app, handles) = inserts_with_title();
+        add_note_attributes(&mut app, &handles);
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new * TITLE");
+
+        assert_eq!(attribute_value(&app, handles[0], "TITLE"), "new");
+        assert_eq!(attribute_value(&app, handles[0], "NOTE"), "old");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_filters_by_value() {
+        let (mut app, handles) = inserts_with_title();
+        set_values(&mut app, &handles, &["old north", "north old", "keep"]);
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new * * old*");
+
+        assert_eq!(attribute(&app, handles[0]).1, "new north");
+        assert_eq!(attribute(&app, handles[1]).1, "north old");
+        assert_eq!(attribute(&app, handles[2]).1, "keep");
+    }
+
+    #[test]
+    fn dash_attedit_replacement_filters_by_block_name() {
+        let (mut app, handles) = inserts_with_title();
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new OTHERBLOCK");
+        for handle in &handles {
+            assert_eq!(attribute(&app, *handle).1, "old");
+        }
+
+        let _ = app.run_command_line("-ATTEDIT REPLACE old new TITLEBLOCK");
+        for handle in &handles {
+            assert_eq!(attribute(&app, *handle).1, "new");
         }
     }
 }
@@ -6088,6 +6245,145 @@ mod batch4_tests {
             !doc.entities()
                 .any(|entity| matches!(entity, document::EntityType::AttributeEntity(_))),
             "no attribute instance may remain"
+        );
+    }
+
+    #[test]
+    fn attredef_takes_the_reference_attributes_as_the_new_definitions() {
+        use document::entities::{AttributeDefinition, AttributeEntity, Insert};
+        use document::types::Vector3;
+
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let doc = &mut app.tabs[i].scene.document;
+
+        let mut record = document::tables::BlockRecord::new("TAGBLOCK");
+        record.handle = doc.allocate_handle();
+        let owner = record.handle;
+        doc.block_records.add(record).unwrap();
+
+        let mut line = document::entities::Line::new();
+        line.start = Vector3::new(0.0, 0.0, 0.0);
+        line.end = Vector3::new(10.0, 0.0, 0.0);
+        line.common.owner_handle = owner;
+        let line_handle = doc.add_entity(document::EntityType::Line(line)).unwrap();
+
+        let mut definition =
+            AttributeDefinition::new("STATUS".into(), "Status".into(), "DEFAULT".into());
+        definition.insertion_point = Vector3::new(1.0, 1.0, 0.0);
+        definition.alignment_point = definition.insertion_point;
+        definition.height = 2.5;
+        definition.common.owner_handle = owner;
+        let definition_handle = doc
+            .add_entity(document::EntityType::AttributeDefinition(definition.clone()))
+            .unwrap();
+        doc.block_records
+            .get_mut("TAGBLOCK")
+            .unwrap()
+            .entity_handles = vec![line_handle, definition_handle];
+
+        let mut insert = Insert::new("TAGBLOCK", Vector3::new(100.0, 50.0, 0.0));
+        let mut attribute = AttributeEntity::from_definition(&definition, Some("ACTIVE".into()));
+        attribute.insertion_point = Vector3::new(101.0, 51.0, 0.0);
+        attribute.alignment_point = attribute.insertion_point;
+        insert.attributes.push(attribute);
+        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+
+        // The reference is the authority: its value and placement changed.
+        if let Some(document::EntityType::Insert(insert)) = doc.get_entity_mut(insert_handle) {
+            insert.attributes[0].value = "CHANGED".into();
+            insert.attributes[0].insertion_point = Vector3::new(105.0, 52.0, 0.0);
+            insert.attributes[0].alignment_point = Vector3::new(105.0, 52.0, 0.0);
+        }
+
+        let _ = app.run_command_line("ATTREDEF TAGBLOCK");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        let doc = &app.tabs[i].scene.document;
+        let definitions: Vec<_> = doc
+            .entities()
+            .filter_map(|entity| match entity {
+                document::EntityType::AttributeDefinition(definition) => Some(definition),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            definitions.len(),
+            1,
+            "the old definition must be replaced"
+        );
+        let definition = definitions[0];
+        assert_eq!(definition.tag, "STATUS");
+        assert_eq!(
+            definition.default_value, "CHANGED",
+            "the reference value becomes the new default"
+        );
+        assert!(
+            (definition.insertion_point.x - 5.0).abs() < 1e-9
+                && (definition.insertion_point.y - 2.0).abs() < 1e-9,
+            "the placement is folded back into block space: {:?}",
+            definition.insertion_point
+        );
+
+        let Some(document::EntityType::Insert(insert)) = doc.get_entity(insert_handle) else {
+            panic!("reference gone");
+        };
+        assert_eq!(insert.attributes.len(), 1);
+        assert_eq!(insert.attributes[0].value, "CHANGED");
+        assert!(
+            (insert.attributes[0].insertion_point.x - 105.0).abs() < 1e-9
+                && (insert.attributes[0].insertion_point.y - 52.0).abs() < 1e-9,
+            "the synchronised attribute keeps the reference's placement: {:?}",
+            insert.attributes[0].insertion_point
+        );
+    }
+}
+
+#[cfg(test)]
+mod array_zoom_extents_tests {
+    use crate::app::OpenCADStudio;
+    use crate::scene::assoc_array::AssocArraySpec;
+
+    /// Zoom extents (ZOOM E, a double click of the middle button) frames
+    /// every item of an associative array of a rectangle, not only the first:
+    /// the items after the first render as stubs of one prototype, and those
+    /// must count like the wires they stand for.
+    #[test]
+    fn zoom_extents_frames_every_item_of_a_rectangle_array() {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let reply = app.automation_op(r#"{"op":"run","cmd":"RECTANG 0,0 10,5"}"#);
+        assert_eq!(reply["status"], "completed", "{reply}");
+        let i = app.active_tab;
+        let rectangle = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .last()
+            .map(|entity| entity.common().handle)
+            .unwrap();
+        app.handle_assoc_array(
+            vec![rectangle],
+            AssocArraySpec::Rectangular {
+                columns: 4,
+                rows: 4,
+                column_spacing: 20.0,
+                row_spacing: 30.0,
+            },
+        );
+
+        app.tabs[i].scene.fit_all();
+        let (min, max) = app.tabs[i]
+            .scene
+            .camera
+            .borrow()
+            .fitted_model_bounds()
+            .expect("zoom extents fitted the drawing");
+        assert!(min.abs_diff_eq(glam::DVec3::ZERO, 1e-9), "min {min:?}");
+        assert!(
+            max.abs_diff_eq(glam::DVec3::new(70.0, 95.0, 0.0), 1e-9),
+            "max {max:?}, want the last item's far corner (70, 95)"
         );
     }
 }

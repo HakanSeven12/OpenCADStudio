@@ -421,19 +421,15 @@ impl BlockCache {
         solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
     ) -> Self {
         use crate::par::prelude::*;
+        let perf = crate::perf::enabled();
+        let t_all = perf.then(iced::time::Instant::now);
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
         let mut cache = Self::new();
         cache.complex_possible = crate::io::linetypes::defines_complex_lt(doc);
         cache.viewport = viewport;
-        let referenced = collect_referenced_blocks(doc, anno_scale);
-        let mut reference_counts: HashMap<String, usize> = HashMap::default();
-        for entity in doc.entities() {
-            if let EntityType::Insert(insert) = entity {
-                *reference_counts
-                    .entry(insert.block_name.clone())
-                    .or_default() += insert.instance_count();
-            }
-        }
+        let t_refs = perf.then(iced::time::Instant::now);
+        let (referenced, reference_counts) = collect_referenced_blocks(doc, anno_scale);
+        let refs_ms = crate::perf::elapsed_ms(t_refs);
         cache.prototype_blocks = reference_counts
             .into_iter()
             .filter_map(|(name, count)| (count > 1).then_some(name))
@@ -444,6 +440,7 @@ impl BlockCache {
         // builds embarrassingly parallel over the read-only `doc` — no
         // topological ordering required. Metrics are resolved after all
         // definitions exist.
+        let t_defns = perf.then(iced::time::Instant::now);
         cache.defns = referenced
             .par_iter()
             .map(|name| {
@@ -459,11 +456,24 @@ impl BlockCache {
                         viewport,
                         depth_map,
                         solid_snaps,
+                        &HashSet::default(),
                     )),
                 )
             })
             .collect();
+        let defns_ms = crate::perf::elapsed_ms(t_defns);
+        let t_metrics = perf.then(iced::time::Instant::now);
         cache.compute_block_metrics(&referenced);
+        if perf {
+            crate::perf_record!(
+                "[perf] blk_cache-build total={:.1}ms refs={:.1} defns={:.1} metrics={:.1} blocks={}",
+                crate::perf::elapsed_ms(t_all),
+                refs_ms,
+                defns_ms,
+                crate::perf::elapsed_ms(t_metrics),
+                referenced.len(),
+            );
+        }
         cache
     }
 
@@ -478,6 +488,101 @@ impl BlockCache {
         bg_color: [f32; 4],
         viewport: Option<Handle>,
         depth_map: &HashMap<u64, [f32; 2]>,
+    ) -> Self {
+        Self::build_for_block_excluding(
+            doc, block_name, anno_scale, annotation_scale_handle, all_visible,
+            bg_color, viewport, depth_map, &HashSet::default(),
+        )
+    }
+
+    /// This cache with the definitions named in `changed` rebuilt from `doc`
+    /// and the rest shared, for an edit that can only change those (a layer
+    /// switched on or off). The metrics of every definition that nests a
+    /// rebuilt one are worked out again.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn with_rebuilt_blocks(
+        &self,
+        doc: &Document,
+        changed: &HashSet<String>,
+        anno_scale: f32,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        bg_color: [f32; 4],
+        viewport: Option<Handle>,
+        depth_map: &HashMap<u64, [f32; 2]>,
+        solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
+    ) -> Self {
+        use crate::par::prelude::*;
+        let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
+        let mut cache = Self::new();
+        cache.complex_possible = self.complex_possible;
+        cache.viewport = self.viewport;
+        cache.prototype_blocks = self.prototype_blocks.clone();
+        cache.defns = self.defns.clone();
+        let rebuilt: Vec<String> = cache
+            .defns
+            .keys()
+            .filter(|name| changed.iter().any(|c| c.eq_ignore_ascii_case(name)))
+            .cloned()
+            .collect();
+        let defns: Vec<(String, Arc<BlockDefn>)> = rebuilt
+            .par_iter()
+            .map(|name| {
+                (
+                    name.clone(),
+                    Arc::new(build_defn(
+                        doc,
+                        name,
+                        anno_scale,
+                        annotation_scale_handle,
+                        all_visible,
+                        bg_color,
+                        viewport,
+                        depth_map,
+                        solid_snaps,
+                        &HashSet::default(),
+                    )),
+                )
+            })
+            .collect();
+        cache.defns.extend(defns);
+        // Every definition that reaches a rebuilt one through its nesting.
+        let mut affected: HashSet<String> = rebuilt.into_iter().collect();
+        loop {
+            let more: Vec<String> = cache
+                .defns
+                .iter()
+                .filter(|(name, defn)| {
+                    !affected.contains(*name)
+                        && defn.subs.iter().any(|sub| {
+                            matches!(sub, LocalSub::Nested(nref) if affected.contains(&nref.block_name))
+                        })
+                })
+                .map(|(name, _)| name.clone())
+                .collect();
+            if more.is_empty() {
+                break;
+            }
+            affected.extend(more);
+        }
+        let affected: Vec<String> = affected.into_iter().collect();
+        cache.compute_block_metrics(&affected);
+        cache
+    }
+
+    /// Build an isolated preview of a picture without the specified members.
+    /// The resident cache and the document remain unchanged.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn build_for_block_excluding(
+        doc: &Document,
+        block_name: &str,
+        anno_scale: f32,
+        annotation_scale_handle: Option<Handle>,
+        all_visible: bool,
+        bg_color: [f32; 4],
+        viewport: Option<Handle>,
+        depth_map: &HashMap<u64, [f32; 2]>,
+        excluded: &HashSet<Handle>,
     ) -> Self {
         use crate::par::prelude::*;
         let _owners = crate::scene::block_authoring::DictionaryOwners::publish(doc);
@@ -500,6 +605,7 @@ impl BlockCache {
                         viewport,
                         depth_map,
                         &HashMap::default(),
+                        excluded,
                     )),
                 )
             })
@@ -623,12 +729,27 @@ fn block_object_names(doc: &Document, entity: &EntityType, anno_scale: f32) -> V
         .collect()
 }
 
-/// Collect block definitions needed by rendered representations.
-fn collect_referenced_blocks(doc: &Document, anno_scale: f32) -> Vec<String> {
+/// Collect block definitions needed by rendered representations, and, from the
+/// same walk, how many instances each top-level INSERT contributes — the two
+/// disjoint facts the build needs about the same entities. They used to be
+/// gathered by two full passes over `doc.entities()`; on a 1.17 M-entity
+/// drawing each pass is arena-latency bound, so they share one walk.
+fn collect_referenced_blocks(
+    doc: &Document,
+    anno_scale: f32,
+) -> (Vec<String>, HashMap<String, usize>) {
     let mut seen: HashSet<String> = HashSet::default();
     let mut queue: Vec<String> = Vec::new();
+    let mut reference_counts: HashMap<String, usize> = HashMap::default();
 
     for entity in doc.entities() {
+        // Reference counts are top-level INSERTs only, as before: the nested
+        // walk below never reaches this branch.
+        if let EntityType::Insert(insert) = entity {
+            *reference_counts
+                .entry(insert.block_name.clone())
+                .or_default() += insert.instance_count();
+        }
         for name in block_object_names(doc, entity, anno_scale) {
             if seen.insert(name.clone()) {
                 queue.push(name);
@@ -650,7 +771,7 @@ fn collect_referenced_blocks(doc: &Document, anno_scale: f32) -> Vec<String> {
             }
         }
     }
-    seen.into_iter().collect()
+    (seen.into_iter().collect(), reference_counts)
 }
 
 fn referenced_block_tree(doc: &Document, root: &str, anno_scale: f32) -> Vec<String> {
@@ -699,6 +820,7 @@ fn build_defn(
     viewport: Option<Handle>,
     depth_map: &HashMap<u64, [f32; 2]>,
     solid_snaps: &HashMap<Handle, Vec<(glam::DVec3, SnapHint)>>,
+    excluded: &HashSet<Handle>,
 ) -> BlockDefn {
     let complex_possible = crate::io::linetypes::defines_complex_lt(doc);
     let br = match crate::scene::render_graph::block_record_by_name(doc, block_name) {
@@ -724,6 +846,9 @@ fn build_defn(
     let cap = br.entity_handles.len();
     let mut subs: Vec<LocalSub> = Vec::with_capacity(cap);
     for &eh in &br.entity_handles {
+        if excluded.contains(&eh) {
+            continue;
+        }
         let Some(source_entity) = doc.get_entity(eh) else {
             continue;
         };
@@ -4519,5 +4644,52 @@ mod metrics_depth_tests {
         // Subsequent expansion does not warn again because warned set retains it
         let warnings_after = cache.drain_cycle_warnings();
         assert!(warnings_after.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod picture_preview_tests {
+    use super::*;
+
+    #[test]
+    fn command_preview_visibility_does_not_regenerate_table_documents() {
+        let mut scene = crate::scene::Scene::new();
+        let mut table = document::entities::Table::new(document::types::Vector3::ZERO, 1, 1);
+        table.set_cell_text(0, 0, "original");
+        let handle = scene.document.add_entity(EntityType::Table(Box::new(table))).unwrap();
+        let before: Vec<_> = scene.document.entities().cloned().collect();
+        scene.set_command_preview_hidden(&[handle]);
+        assert_eq!(scene.document.entities().cloned().collect::<Vec<_>>(), before);
+        scene.set_command_preview_hidden(&[]);
+        assert_eq!(scene.document.entities().cloned().collect::<Vec<_>>(), before);
+    }
+
+    #[test]
+    fn picture_preview_omits_only_requested_members_without_changing_document() {
+        let mut doc = Document::new();
+        let mut block = document::tables::BlockRecord::new("CELL_PREVIEW");
+        block.handle = doc.allocate_handle();
+        let owner = block.handle;
+        doc.block_records.add(block).unwrap();
+        let mut handles = Vec::new();
+        for y in [0.0, 10.0] {
+            let mut line = document::entities::Line::from_points(
+                document::types::Vector3::new(0.0, y, 0.0),
+                document::types::Vector3::new(10.0, y, 0.0),
+            );
+            line.common.owner_handle = owner;
+            handles.push(doc.add_entity(EntityType::Line(line)).unwrap());
+        }
+        let preview = BlockCache::build_for_block_excluding(
+            &doc, "CELL_PREVIEW", 1.0, None, true, [0.0, 0.0, 0.0, 1.0],
+            None, &HashMap::default(), &[handles[0]].into_iter().collect(),
+        );
+        assert_eq!(preview.defn("CELL_PREVIEW").unwrap().subs.len(), 1);
+        let complete = BlockCache::build_for_block(
+            &doc, "CELL_PREVIEW", 1.0, None, true, [0.0, 0.0, 0.0, 1.0],
+            None, &HashMap::default(),
+        );
+        assert_eq!(complete.defn("CELL_PREVIEW").unwrap().subs.len(), 2);
+        assert!(handles.iter().all(|h| doc.get_entity(*h).is_some()));
     }
 }

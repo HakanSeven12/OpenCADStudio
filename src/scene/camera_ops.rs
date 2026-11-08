@@ -7,6 +7,18 @@ fn rendered_wire_bounds(
     wires: &[WireModel],
     fallback_z: f64,
 ) -> Option<(glam::DVec3, glam::DVec3)> {
+    rendered_wire_bounds_memo(wires, fallback_z, &mut StubBounds::new())
+}
+
+/// Bounds of each stub prototype already measured, by its allocation: an
+/// array of a thousand copies measures its one prototype once.
+type StubBounds = std::collections::HashMap<usize, Option<(glam::DVec3, glam::DVec3)>>;
+
+fn rendered_wire_bounds_memo(
+    wires: &[WireModel],
+    fallback_z: f64,
+    stub_bounds: &mut StubBounds,
+) -> Option<(glam::DVec3, glam::DVec3)> {
     let mut min = glam::DVec3::splat(f64::INFINITY);
     let mut max = glam::DVec3::splat(f64::NEG_INFINITY);
     macro_rules! include_bound {
@@ -20,6 +32,28 @@ fn rendered_wire_bounds(
     }
 
     for wire in wires {
+        // A stub stands for its prototype moved by `delta` (the copies of a
+        // block drawn many times, the items of an array): bound the
+        // prototype in f64 and move that box, rather than the stub's f32 XY
+        // box, which loses a georeferenced drawing's precision and its Z.
+        if let Some(stub) = wire.stub.as_ref() {
+            let key = std::sync::Arc::as_ptr(&stub.prototype) as usize;
+            let prototype = match stub_bounds.get(&key) {
+                Some(bounds) => *bounds,
+                None => {
+                    let bounds =
+                        rendered_wire_bounds_memo(&stub.prototype, fallback_z, stub_bounds);
+                    stub_bounds.insert(key, bounds);
+                    bounds
+                }
+            };
+            if let Some((lo, hi)) = prototype {
+                let delta = glam::DVec3::from_array(stub.delta);
+                include_bound!(lo + delta);
+                include_bound!(hi + delta);
+            }
+            continue;
+        }
         let mut has_precise_position = false;
         let hw = wire.world_width as f64 * 0.5;
 
@@ -1842,6 +1876,7 @@ impl Scene {
         // Infinite display segments do not contribute to drawing extents.
         // Keep their base points as a fallback for otherwise empty drawings.
         let mut infinite_base: Vec<glam::DVec3> = Vec::new();
+        let mut stub_bounds = StubBounds::new();
         for wire in wires.iter() {
             let entity = Self::handle_from_wire_name(&wire.name)
                 .and_then(|handle| self.document.get_entity(handle));
@@ -1849,7 +1884,10 @@ impl Scene {
             // marker carrying just its insertion snap. The content counts
             // through its meshes; the insertion point is no geometry, and a
             // georeferenced block's sits far from what it draws (#1829).
+            // A stub is no such marker: it carries no points of its own but
+            // stands for a copy of the block's wires (array items included).
             if matches!(entity, Some(EntityType::Insert(_)))
+                && wire.stub.is_none()
                 && wire.points.is_empty()
                 && wire.text_verts.is_empty()
             {
@@ -1866,7 +1904,11 @@ impl Scene {
                 );
                 continue;
             }
-            fold!(rendered_wire_bounds(std::slice::from_ref(wire), fallback_z));
+            fold!(rendered_wire_bounds_memo(
+                std::slice::from_ref(wire),
+                fallback_z,
+                &mut stub_bounds
+            ));
         }
 
         // 3D solids render as meshes, not wires: a drawing of only solids has

@@ -57,6 +57,7 @@ pub(crate) mod filter_dialog;
 mod find_replace;
 pub(crate) mod helpers;
 mod history;
+mod layer_filter_store;
 mod layer_filters;
 pub(crate) mod layer_groups;
 pub(crate) mod layer_import;
@@ -67,6 +68,9 @@ mod layers;
 mod measurement;
 mod model_ops;
 mod mtext_editor;
+mod table_cell_edit;
+#[cfg(test)]
+mod table_inplace_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
@@ -794,6 +798,8 @@ pub(super) struct OpenCADStudio {
     /// Named layer filters (LAYERFILTER). A view over the layer table, so it is
     /// kept with the app rather than written to the drawing.
     layer_filters: Vec<layer_filters::LayerFilter>,
+    /// The ribbon's layer list follows the Layer manager's node (LM-25).
+    ribbon_layers_follow_filter: bool,
     /// Which Start-page section is shown when the page is too narrow for all
     /// three side by side and falls back to a tab bar.
     start_section: StartSection,
@@ -1075,6 +1081,9 @@ pub(super) struct OpenCADStudio {
     /// seTtings showed the Hatch panel for the running HATCH / GRADIENT,
     /// even with HPDLGMODE 0.
     hatch_panel_shown: bool,
+    /// The pointer is on the viewport chip's outline switch: the active
+    /// viewport keeps its outline there, so a wheel step shows at once.
+    outline_switch_hover: bool,
     /// The Hatch boundary warning window.
     hatch_boundary_warning: Option<crate::ui::window::hatch_dialogs::BoundaryWarningState>,
     /// MENUBAR: the classic pull-down menus show above the ribbon.
@@ -1441,6 +1450,9 @@ pub(super) struct OpenCADStudio {
     /// near it, the press was a click and the grip stays hot for a second
     /// click to place it.
     grip_engage_press: Option<Point>,
+    /// A point an MTP / M2P modifier resolved while a grip was hot: the next
+    /// grip placement uses it instead of the typed or cursor point.
+    grip_point_override: Option<glam::DVec3>,
     /// Frozen pre-drag wire geometry used only as a visual/reference snapshot.
     ///
     /// It is deliberately NOT added to normal snap candidates: the live entity is
@@ -1850,6 +1862,9 @@ pub(super) struct OpenCADStudio {
     /// paste into a *different* drawing can recreate any that are missing —
     /// otherwise the pasted entities would dangle on a non-existent layer.
     clipboard_deps: ClipboardDeps,
+    /// The document (tab id) the clipboard was copied from: only a paste back
+    /// into it can give a pasted associative array an array of its own.
+    clipboard_source_tab: Option<u64>,
     /// True while the Shift key is held — drives subtractive pick (Shift+click
     /// removes the picked entity from the selection). Tracked from keyboard
     /// modifier-change events since mouse click messages carry no modifiers.
@@ -1859,6 +1874,8 @@ pub(super) struct OpenCADStudio {
     ctrl_down: bool,
     /// Open in-place MText editor (toolbar + text area + live preview), if any.
     mtext_editor: Option<mtext_editor::MTextEditorState>,
+    table_cell_editor: Option<table_cell_edit::TableCellEditor>,
+    table_edit_command_line: bool,
     /// Return rich text to a suspended drawing command.
     command_mtext_input: bool,
     pending_command_editor_text: Option<String>,
@@ -4052,6 +4069,10 @@ pub enum Message {
     ParametersManagerFilterMode(crate::scene::block_parameters_manager::FilterMode),
     /// Toggles the funnel's two-entry menu.
     ParametersManagerFilterMenu,
+    /// Toggles the header's column menu.
+    ParametersManagerHeaderMenu,
+    /// Shows or hides one header column.
+    ParametersManagerColumn(crate::ui::window::parameters_manager::Column),
     ParametersManagerSearch(String),
     ParametersManagerCommit,
     /// The widget focused after a click while a manager cell is open. A click
@@ -4399,6 +4420,10 @@ pub enum Message {
     LayerTreeRenameCancel,
     /// A tree node's eye: all its layers lit, or none of them.
     LayerNodeEye(crate::ui::window::layers::TreeNode),
+    /// The search text as a new property filter (#2610 LM-22a).
+    LayerSaveSearch,
+    /// The ribbon's layer list follows the chosen node, or lists them all.
+    LayerRibbonFollows(bool),
     /// The compact Layer manager toolbar's "…" menu open or closed.
     LayerMoreMenu(bool),
     /// An item of that menu: close it, then do this.
@@ -4525,6 +4550,13 @@ pub enum Message {
     /// Drag-handle pressed on the active pane's controls bar: arm a pane move —
     /// the next pane released over is swapped with the active pane.
     PaneMoveStart,
+    /// Viewport chip: switch the hovered-viewport outline (VPHIGHLIGHT).
+    ViewportHighlightToggle,
+    /// Viewport chip: wheel over the outline switch sets its strength
+    /// (VPHIGHLIGHTOPACITY, percent).
+    ViewportHighlightOpacity(u8),
+    /// The pointer entered (true) or left the viewport chip's outline switch.
+    ViewportOutlineSwitchHover(bool),
     ViewCubeSnap(CubeRegion),
     /// World-frame view snap from a compass cardinal (N/E/S/W), bypassing the
     /// UCS so the compass stays world-aligned.
@@ -5456,6 +5488,7 @@ pub enum Message {
     MTextCaretMove(i32),
     /// Timer tick toggling the preview caret's blink phase.
     MTextCaretBlink,
+    TableEditorClick(iced::Point),
     /// Commit the editor: create or update the MText entity.
     MTextOk,
     /// Apply the buffer to the entity but leave the editor open (the button).
@@ -6118,6 +6151,7 @@ impl OpenCADStudio {
             discussions_loading: false,
             collapsed_property_sections: rustc_hash::FxHashSet::default(),
             layer_filters: Vec::new(),
+            ribbon_layers_follow_filter: false,
             start_section: StartSection::default(),
             start_action_w: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0)),
             history_content: iced::widget::text_editor::Content::new(),
@@ -6256,6 +6290,7 @@ impl OpenCADStudio {
             hatch_prefs: Default::default(),
             hatch_boundary_warning_off: false,
             hatch_panel_shown: false,
+            outline_switch_hover: false,
             hatch_boundary_warning: None,
             show_menu_bar: false,
             ribbon_closed: false,
@@ -6412,6 +6447,7 @@ impl OpenCADStudio {
             grip_history_originals: Vec::new(),
             grip_dirty_before: None,
             grip_engage_press: None,
+            grip_point_override: None,
             grip_reference_wires: Vec::new(),
             grip_text_verts: Vec::new(),
             grip_text_slide: false,
@@ -6583,10 +6619,13 @@ impl OpenCADStudio {
             oops_cache: Vec::new(),
             clipboard_base: glam::DVec3::ZERO,
             clipboard_deps: ClipboardDeps::default(),
+            clipboard_source_tab: None,
             shift_down: false,
             ctrl_down: false,
             cont_anchor: None,
             mtext_editor: None,
+            table_cell_editor: None,
+            table_edit_command_line: false,
             command_mtext_input: false,
             pending_command_editor_text: None,
             text_inline: None,

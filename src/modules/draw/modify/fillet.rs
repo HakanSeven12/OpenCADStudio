@@ -842,10 +842,71 @@ enum FilletEntity {
     Curve(EntityType),
 }
 
+/// Half-length of the stand-in line an XLINE or RAY is filleted and
+/// chamfered as; the piece kept turns back into a ray (`restore_infinite`).
+const INFINITE_REACH: f64 = 1.0e7;
+
+/// An XLINE as a long line through it, a RAY as a long line from its base.
+fn infinite_as_line(e: &EntityType) -> Option<LineEnt> {
+    let (common, base, direction, both_ways) = match e {
+        EntityType::XLine(x) => (&x.common, x.base_point, x.direction, true),
+        EntityType::Ray(r) => (&r.common, r.base_point, r.direction, false),
+        _ => return None,
+    };
+    if direction.length() < 1e-12 {
+        return None;
+    }
+    let reach = direction.normalize() * INFINITE_REACH;
+    let start = if both_ways { base - reach } else { base };
+    let mut line = LineEnt::from_points(start, base + reach);
+    line.common = common.clone();
+    Some(line)
+}
+
+/// A LINE, or an XLINE / RAY as its stand-in line.
+fn line_or_infinite(e: &EntityType) -> Option<LineEnt> {
+    match e {
+        EntityType::Line(l) => Some(l.clone()),
+        other => infinite_as_line(other),
+    }
+}
+
+/// The trimmed stand-in of an XLINE or RAY as the object it is: a ray where
+/// the kept piece still runs to infinity, a line between the ray's base and
+/// the cut otherwise. Anything else comes back unchanged.
+fn restore_infinite(original: Option<&EntityType>, trimmed: EntityType) -> EntityType {
+    let (Some(original), EntityType::Line(line)) = (original, &trimmed) else {
+        return trimmed;
+    };
+    let Some(stand_in) = infinite_as_line(original) else {
+        return trimmed;
+    };
+    let mut far_ends = vec![stand_in.end];
+    if matches!(original, EntityType::XLine(_)) {
+        far_ends.push(stand_in.start);
+    }
+    let is_far = |p: Vector3| far_ends.iter().any(|f| (*f - p).length() < INFINITE_REACH * 1e-9);
+    for (far, cut) in [(line.end, line.start), (line.start, line.end)] {
+        if is_far(far) && (far - cut).length() > 1e-12 {
+            return EntityType::Ray(document::entities::Ray {
+                common: line.common.clone(),
+                base_point: cut,
+                direction: (far - cut).normalize(),
+            });
+        }
+    }
+    trimmed
+}
+
+fn is_infinite(e: Option<&EntityType>) -> bool {
+    matches!(e, Some(EntityType::XLine(_) | EntityType::Ray(_)))
+}
+
 impl FilletEntity {
     fn from_entity(e: &EntityType) -> Option<Self> {
         match e {
             EntityType::Line(l) => Some(Self::Line(l.clone())),
+            EntityType::XLine(_) | EntityType::Ray(_) => infinite_as_line(e).map(Self::Line),
             EntityType::Arc(a) => Some(Self::Arc(a.clone())),
             EntityType::Circle(_) | EntityType::Ellipse(_) | EntityType::Spline(_) => {
                 crate::entities::curve::entity_curve_xy(e).map(|_| Self::Curve(e.clone()))
@@ -2200,9 +2261,18 @@ impl CadCommand for FilletCommand {
                                 }),
                                 _ => None,
                             };
+                            let original1 = self.entity_index.get(&self.all_entities, h1).cloned();
+                            let original2 =
+                                self.entity_index.get(&self.all_entities, handle).cloned();
+                            // An XLINE or RAY is not taken into a polyline.
+                            let joined = joined.filter(|_| {
+                                !is_infinite(original1.as_ref()) && !is_infinite(original2.as_ref())
+                            });
                             if let Some(replacements) = joined {
                                 return self.continue_after_fillet(replacements);
                             }
+                            let new_e1 = restore_infinite(original1.as_ref(), new_e1);
+                            let new_e2 = restore_infinite(original2.as_ref(), new_e2);
                             let mut first_replacements = vec![new_e1];
                             if let Some(arc) = maybe_arc {
                                 first_replacements.push(arc);
@@ -2855,12 +2925,14 @@ impl CadCommand for ChamferCommand {
             }
             ChamferStep::First => {
                 match self.entity_index.get(&self.all_entities, handle) {
-                    Some(EntityType::Line(l)) => {
-                        self.step = ChamferStep::Second {
-                            h1: handle,
-                            l1: l.clone(),
-                            click1: click,
-                        };
+                    Some(e @ (EntityType::Line(_) | EntityType::XLine(_) | EntityType::Ray(_))) => {
+                        if let Some(l) = line_or_infinite(e) {
+                            self.step = ChamferStep::Second {
+                                h1: handle,
+                                l1: l,
+                                click1: click,
+                            };
+                        }
                     }
                     Some(EntityType::LwPolyline(p)) => {
                         if !self.trim {
@@ -2907,13 +2979,7 @@ impl CadCommand for ChamferCommand {
                 let l2 = self
                     .entity_index
                     .get(&self.all_entities, handle)
-                    .and_then(|e| {
-                        if let EntityType::Line(l) = e {
-                            Some(l.clone())
-                        } else {
-                            None
-                        }
-                    });
+                    .and_then(line_or_infinite);
 
                 if let Some(l2) = l2 {
                     match compute_chamfer(&l1, click1, self.dist1, &l2, click, self.dist2) {
@@ -2929,6 +2995,14 @@ impl CadCommand for ChamferCommand {
                                     }
                                 };
                             }
+                            let new_l1 = restore_infinite(
+                                self.entity_index.get(&self.all_entities, h1),
+                                new_l1,
+                            );
+                            let new_l2 = restore_infinite(
+                                self.entity_index.get(&self.all_entities, handle),
+                                new_l2,
+                            );
                             // Single mode adds the chamfer line as a new entity;
                             // Multiple folds it into the first line's replacement
                             // so the command can carry on.
@@ -2972,9 +3046,8 @@ impl CadCommand for ChamferCommand {
                     .entity_index
                     .get(&self.all_entities, handle)
                     .and_then(|e| match e {
-                        EntityType::Line(l) => Some(line_pts(l)),
                         EntityType::LwPolyline(p) => Some(lwpoly_seg_hover_pts(p, click)),
-                        _ => None,
+                        other => line_or_infinite(other).map(|l| line_pts(&l)),
                     });
                 if let Some(pts) = pts {
                     vec![WireModel::solid(
@@ -2993,13 +3066,7 @@ impl CadCommand for ChamferCommand {
                 let l2 = self
                     .entity_index
                     .get(&self.all_entities, handle)
-                    .and_then(|e| {
-                        if let EntityType::Line(l) = e {
-                            Some(l.clone())
-                        } else {
-                            None
-                        }
-                    });
+                    .and_then(line_or_infinite);
                 if let Some(l2) = l2 {
                     if let Some((new_l1, new_l2, cline)) =
                         compute_chamfer(&l1, click1, self.dist1, &l2, click, self.dist2)

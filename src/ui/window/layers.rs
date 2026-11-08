@@ -453,6 +453,8 @@ pub struct LayerPanel {
     pub selected_object_layers: Vec<String>,
     /// LAYERFILTER filters with the layers each one matches.
     pub filters: Vec<(String, Vec<String>)>,
+    /// How deep each of `filters` sits: 0 at the top, 1 under another…
+    pub filter_depths: Vec<u8>,
     /// The layers of FILTER's last result sent here (the Found node).
     pub found_layers: Vec<String>,
     /// The layers whose eye is on: their objects are highlighted in the
@@ -476,6 +478,9 @@ pub struct LayerPanel {
     pub more_menu: bool,
     /// The compact toolbar's search field is open.
     pub search_open: bool,
+    /// The ribbon's layer list follows the chosen node (mirrors the app's
+    /// setting for the footer's box).
+    pub ribbon_follows: bool,
 }
 
 impl Default for LayerPanel {
@@ -521,6 +526,7 @@ impl Default for LayerPanel {
             eye_layers: Vec::new(),
             highlighted: 0,
             highlight_key: None,
+            filter_depths: Vec::new(),
             closed_sections: Vec::new(),
             tree_rename: None,
             tree_focus: false,
@@ -528,6 +534,7 @@ impl Default for LayerPanel {
             drag_over: None,
             more_menu: false,
             search_open: false,
+            ribbon_follows: false,
         }
     }
 }
@@ -609,6 +616,12 @@ impl LayerPanel {
             .collect()
     }
 
+    /// Whether `layer` is in the node chosen in the tree (inverted when the
+    /// tree is): what the ribbon's list follows with LM-25 on.
+    pub fn in_chosen_node(&self, layer: &Layer) -> bool {
+        self.in_view(layer) != self.invert
+    }
+
     /// Whether `layer` belongs to the node shown.
     fn in_view(&self, layer: &Layer) -> bool {
         self.in_node(&self.view, layer)
@@ -681,7 +694,19 @@ impl LayerPanel {
         let section = |rows: &mut Vec<TreeRow>, section: TreeSection, nodes: Vec<TreeNode>| {
             rows.push(TreeRow::Section(section, 1));
             if self.section_open(section) {
-                rows.extend(nodes.into_iter().map(|node| TreeRow::Node(node, 2)));
+                for node in nodes {
+                    // A filter under another sits one deeper (#2610).
+                    let extra = match &node {
+                        TreeNode::Filter(name) => self
+                            .filters
+                            .iter()
+                            .position(|(f, _)| f == name)
+                            .and_then(|at| self.filter_depths.get(at).copied())
+                            .unwrap_or(0),
+                        _ => 0,
+                    };
+                    rows.push(TreeRow::Node(node, 2 + extra));
+                }
             }
         };
         section(
@@ -941,6 +966,7 @@ impl LayerPanel {
     /// Under the table: invert the node, what the eyes light, the current
     /// layer and the node shown with its counts.
     fn tree_footer(&self) -> Element<'_, Message> {
+        let ribbon_follows = self.ribbon_follows;
         let shown = self.visible_indices().len();
         let selected = self.selected_names().len();
         let node = match &self.view {
@@ -982,6 +1008,11 @@ impl LayerPanel {
                     .on_toggle(Message::LayerInvert),
                 lit,
                 iced::widget::Space::new().width(Length::Fill),
+                checkbox(ribbon_follows)
+                    .label(t!("Ribbon list follows the tree"))
+                    .text_size(FONT_SZ)
+                    .size(13)
+                    .on_toggle(Message::LayerRibbonFollows),
                 text(format!("{}:", t!("Current layer")))
                     .size(FONT_SZ)
                     .style(muted_style),
@@ -1572,6 +1603,12 @@ impl LayerPanel {
                     .style(|theme, status| field_style_with_radius(theme, status, 2.0)),
                 // The search text as a filter, edited with FILTER's rows.
                 toolbar_text_btn(t!("Advanced…"), Message::LayerFilterEdit(None)),
+                // The search text kept as a property filter (LM-22a).
+                if self.filter.trim().is_empty() {
+                    Element::from(iced::widget::Space::new().width(0))
+                } else {
+                    toolbar_text_btn(t!("Save as filter"), Message::LayerSaveSearch)
+                },
             ]
             .spacing(4)
             .align_y(iced::Center),
@@ -1607,14 +1644,17 @@ impl LayerPanel {
             .on_press(Message::LayerMoreMenu(!self.more_menu))
             .style(crate::ui::style::form::button_style(self.more_menu))
             .padding([4, 6]);
+        // The overlay takes the "…" button's width unless it is given one,
+        // and iced_aw's BottomStart opens it beside the button, not below.
         let more = iced_aw::DropDown::new(
             more_head,
-            container(iced::widget::Column::with_children(more_items).width(Length::Fixed(190.0)))
+            container(iced::widget::Column::with_children(more_items).width(Length::Fill))
                 .padding([4, 0])
                 .style(crate::ui::color_select::popup_panel_style),
             self.more_menu,
         )
-        .alignment(iced_aw::drop_down::Alignment::BottomStart)
+        .width(Length::Fixed(MORE_MENU_W))
+        .alignment(iced_aw::drop_down::Alignment::Bottom)
         .offset(2.0)
         .on_dismiss(Message::LayerMoreMenu(false));
         let search_btn = button(crate::ui::icons::themed(crate::ui::icons::SEARCH, 12.0))
@@ -2709,6 +2749,8 @@ const COL_OBJECTS: f32 = 60.0;
 const COL_STATUS: f32 = 36.0;
 /// The eye button at the row's end.
 const COL_EYE: f32 = 30.0;
+/// The compact toolbar's "…" menu.
+const MORE_MENU_W: f32 = 190.0;
 
 #[cfg(test)]
 mod column_layout_tests {
@@ -2747,5 +2789,38 @@ mod width_band_tests {
         assert!(narrow.contains(&LayerSortCol::On) && narrow.contains(&LayerSortCol::Color));
         let wide = shown_columns(WidthBand::Wide);
         assert!(wide.contains(&LayerSortCol::Description) && wide.contains(&LayerSortCol::Objects));
+    }
+}
+
+#[cfg(test)]
+mod more_menu_tests {
+    use super::*;
+    use iced_test::Simulator;
+
+    /// #2610: the narrow pallet's "…" menu opens below the button at its own
+    /// width; it had taken the button's ~30 px and showed no items.
+    #[test]
+    fn more_menu_opens_below_at_full_width() {
+        let panel = LayerPanel {
+            more_menu: true,
+            ..LayerPanel::default()
+        };
+        let mut ui = Simulator::with_size(
+            iced::Settings::default(),
+            iced::Size::new(360.0, 600.0),
+            panel.view_content(140.0, 360.0, None),
+        );
+        for label in ["New Filter", "Layer States", "Import...", "Advanced…"] {
+            let bounds = ui
+                .find(label.to_string())
+                .unwrap_or_else(|_| panic!("{label:?} is not in the menu"))
+                .visible_bounds()
+                .unwrap_or_else(|| panic!("{label:?} is not visible"));
+            assert!(bounds.width > 40.0, "{label:?} is squeezed: {bounds:?}");
+            assert!(
+                bounds.y > 24.0,
+                "{label:?} is not below the toolbar: {bounds:?}"
+            );
+        }
     }
 }

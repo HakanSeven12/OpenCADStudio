@@ -117,6 +117,7 @@ struct MTextPreview {
     /// upright; the preview turns them only when drawing, and turns pointer
     /// positions back, so caret and selection stay in the layout frame.
     rotation: (f32, f32),
+    cell: Option<super::super::table_cell_edit::CellCanvas>,
 }
 
 /// Height of the box-width ruler band at the top of the preview.
@@ -174,6 +175,9 @@ impl MTextPreview {
     /// at the real size, Y flipped (world up → screen down).
     fn to_screen(&self, x: f32, y: f32) -> iced::Point {
         let (x, y) = turn(self.rotation, x, y);
+        if let Some(cell) = self.cell {
+            return cell.project(x, y);
+        }
         iced::Point::new(
             MTEXT_PREVIEW_PAD + (x - self.minx) * self.scale,
             self.content_h - (MTEXT_PREVIEW_PAD + (y - self.miny) * self.scale),
@@ -200,8 +204,12 @@ impl MTextPreview {
         if self.boxes.is_empty() {
             return 0;
         }
-        let rx = self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale;
-        let ry = self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale;
+        let (rx, ry) = if let Some(cell) = self.cell {
+            cell.unproject(p)
+        } else {
+            (self.minx + (p.x - MTEXT_PREVIEW_PAD) / self.scale,
+                self.miny + (self.content_h - p.y - MTEXT_PREVIEW_PAD) / self.scale)
+        };
         let (wx, wy) = turn((self.rotation.0, -self.rotation.1), rx, ry);
         let mut best = 0usize;
         let mut best_d = f32::MAX;
@@ -265,6 +273,9 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         match event {
             Event::Mouse(Me::ButtonPressed(Button::Left)) => {
                 if let Some(p) = cursor.position_in(bounds) {
+                    if self.cell.is_some_and(|cell| !cell.contains(p)) {
+                        return Some(Action::publish(Message::TableEditorClick(p)).and_capture());
+                    }
                     if let Some(ruler) = self.ruler.filter(|_| self.on_handle(p)) {
                         state.width_drag = Some((p.x, ruler.right - ruler.left));
                         return Some(Action::capture());
@@ -318,6 +329,8 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         if grabbing {
             iced::mouse::Interaction::ResizingHorizontally
         } else {
+            // No pointer of its own over a cell: any would hide the drawing
+            // under it from the wheel, so zooming there would stop.
             iced::mouse::Interaction::default()
         }
     }
@@ -333,6 +346,15 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
         use iced::widget::canvas::{Frame, Path, Stroke};
         let mut frame = Frame::new(renderer, bounds.size());
         let map = |x: f32, y: f32| self.to_screen(x, y);
+        if let Some(cell) = self.cell {
+            let outline = Path::new(|p| {
+                p.move_to(cell.corners[0]);
+                for corner in &cell.corners[1..] { p.line_to(*corner); }
+                p.close();
+            });
+            frame.fill(&outline, theme.palette().primary.base.color.scale_alpha(0.08));
+            frame.stroke(&outline, Stroke::default().with_color(theme.palette().primary.base.color).with_width(2.0));
+        }
         // Selection highlight behind the glyphs, over the whole line height
         // (descenders and accents included), turned with the text.
         if let Some((a, b)) = self.sel {
@@ -396,6 +418,11 @@ impl iced::widget::canvas::Program<Message> for MTextPreview {
             // empty-editor caret isn't tiny.
             let top = MTEXT_PREVIEW_PAD + self.ruler.map_or(0.0, |_| MTEXT_RULER_H);
             let path = Path::new(|p| {
+                if let Some(cell) = self.cell {
+                    p.move_to(map(0.0, 0.0));
+                    p.line_to(map(0.0, -cell.height));
+                    return;
+                }
                 p.move_to(iced::Point::new(MTEXT_PREVIEW_PAD, top));
                 p.line_to(iced::Point::new(
                     MTEXT_PREVIEW_PAD,
@@ -492,6 +519,24 @@ fn mtext_preview_segments(
         }
     }
     out
+}
+
+/// The existing text surface projected into a table cell at drawing scale.
+pub(super) fn table_cell_editor_overlay(
+    ed: &super::super::mtext_editor::MTextEditorState,
+    cell: super::super::table_cell_edit::CellCanvas,
+    size: (f32, f32),
+) -> Element<'static, Message> {
+    let angle = ed.rotation_input_value().unwrap_or(0.0) as f32;
+    let prog = MTextPreview {
+        segments: mtext_preview_segments(ed), boxes: ed.glyph_boxes.clone(),
+        sel: ed.sel, caret: ed.caret, caret_on: ed.caret_blink_on,
+        minx: 0.0, miny: 0.0, scale: 1.0, content_h: size.1,
+        ruler: None, rotation: (angle.cos(), angle.sin()), cell: Some(cell),
+    };
+    crate::ui::ime_zone::ime_zone(
+        iced::widget::canvas(prog).width(size.0).height(size.1), Message::CommandAppendChar,
+    ).into()
 }
 
 pub(super) fn mtext_editor_overlay<'a>(
@@ -918,6 +963,7 @@ fn mtext_editor_content<'a>(
             content_h,
             ruler,
             rotation,
+            cell: None,
         };
         let cv = canvas(prog)
             .width(iced::Length::Fixed(content_w))
@@ -2650,6 +2696,47 @@ mod measurement_tests {
                 "the list stays between the top edge and the command line: {bounds:?}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod cell_editor_wheel_tests {
+    use super::*;
+    #[test]
+    fn wheel_over_the_typed_in_cell_still_zooms_the_drawing() {
+        let p = |x, y| iced::Point::new(x, y);
+        let cell = crate::app::table_cell_edit::CellCanvas {
+            origin: p(100.0, 100.0),
+            x: iced::Vector::new(1.0, 0.0),
+            y: iced::Vector::new(0.0, 1.0),
+            corners: [p(100.0, 100.0), p(300.0, 100.0), p(300.0, 160.0), p(100.0, 160.0)],
+            height: 60.0,
+        };
+        let editor = MTextPreview {
+            segments: Vec::new(),
+            boxes: Vec::new(),
+            sel: None,
+            caret: 0,
+            caret_on: true,
+            minx: 0.0,
+            miny: 0.0,
+            scale: 1.0,
+            content_h: 600.0,
+            ruler: None,
+            rotation: (1.0, 0.0),
+            cell: Some(cell),
+        };
+        let drawing = mouse_area(Space::new().width(Fill).height(Fill)).on_scroll(Message::ViewportScroll);
+        let mut ui = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(800.0, 600.0),
+            stack![drawing, iced::widget::canvas(editor).width(Fill).height(Fill)],
+        );
+        ui.point_at(p(200.0, 130.0));
+        ui.simulate([Event::Mouse(iced::mouse::Event::WheelScrolled {
+            delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: 1.0 },
+        })]);
+        assert!(ui.into_messages().any(|m| matches!(m, Message::ViewportScroll(_))));
     }
 }
 

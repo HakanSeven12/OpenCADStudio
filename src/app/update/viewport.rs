@@ -1674,6 +1674,19 @@ impl OpenCADStudio {
     }
 
     pub(in crate::app) fn on_viewport_move(&mut self, p: Point) -> Task<Message> {
+        // While a cell is typed in the cursor moves (and pans) as usual but
+        // takes no snaps.
+        let typing = self.table_cell_editor.is_some()
+            && self.tabs[self.active_tab].active_cmd.is_none();
+        let task = self.on_viewport_move_inner(p);
+        if typing {
+            self.tabs[self.active_tab].snap_result = None;
+            self.snap_dwell = None;
+        }
+        task
+    }
+
+    fn on_viewport_move_inner(&mut self, p: Point) -> Task<Message> {
         crate::perf::note_pointer_move();
         // A ribbon dropdown is open over the viewport. Its backdrop
         // cannot swallow cursor motion — in iced 0.14 mouse_area/opaque
@@ -2686,6 +2699,15 @@ impl OpenCADStudio {
                 self.tabs[i].last_cursor_world = snapped;
             }
             let delta = snapped - grip.last_world;
+            // A table grip edits the table as it was when the drag started,
+            // at the cursor: a fill, a break or a column line need not follow
+            // the cursor, so the drag is not rebased onto them.
+            let table_targets: rustc_hash::FxHashSet<Handle> = self
+                .grip_originals
+                .iter()
+                .filter(|(_, entity)| matches!(entity, document::EntityType::Table(_)))
+                .map(|(handle, _)| *handle)
+                .collect();
             let menu_action = match grip.mode {
                 GripEditMode::Lengthen => {
                     Some(crate::scene::model::object::GripMenuAction::Lengthen)
@@ -2743,7 +2765,9 @@ impl OpenCADStudio {
                 grip.targets
                     .iter()
                     .map(|target| {
-                        let apply = if target.is_translate {
+                        let apply = if target.is_translate
+                            && !table_targets.contains(&target.handle)
+                        {
                             GripApply::Translate(delta)
                         } else {
                             GripApply::Absolute(target.last_world + delta)
@@ -2847,9 +2871,48 @@ impl OpenCADStudio {
                         .map(|bulge| (target.handle, target.grip_id, bulge))
                 })
                 .collect();
+            for &handle in &table_targets {
+                let original = self
+                    .grip_originals
+                    .iter()
+                    .find(|(original_handle, _)| *original_handle == handle)
+                    .map(|(_, entity)| entity.clone());
+                if let (Some(original), Some(current)) =
+                    (original, self.tabs[i].scene.document.get_entity_mut(handle))
+                {
+                    *current = original;
+                }
+            }
+            self.tabs[i].scene.table_fill_drag = None;
             for (handle, grip_id, apply) in actions {
+                let fill_point = match &apply {
+                    GripApply::Absolute(point) => Some(*point),
+                    _ => None,
+                };
                 if !rebuilt_arcs.contains(&handle) {
                     self.tabs[i].scene.apply_grip(handle, grip_id, apply);
+                }
+                // A fill shows the cells it reaches, filled or empty.
+                if let (true, Some(point), Some(range)) = (
+                    grip_id == crate::entities::table::CELL_GRIP_FILL
+                        && table_targets.contains(&handle),
+                    fill_point,
+                    crate::entities::table::prop_cell_range(),
+                ) {
+                    if let Some((_, document::EntityType::Table(original))) = self
+                        .grip_originals
+                        .iter()
+                        .find(|(original_handle, _)| *original_handle == handle)
+                    {
+                        let (r0, c0, r1, c1) =
+                            crate::entities::table::fill_span(original, range, point);
+                        self.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
+                            table: handle,
+                            anchor: (r0, c0),
+                            end: (r1, c1),
+                        });
+                        self.tabs[i].scene.table_fill_drag = Some(handle);
+                    }
                 }
             }
             for (handle, vertex_id, original_bulge) in refit_arc_targets {
@@ -2960,6 +3023,9 @@ impl OpenCADStudio {
                 .collect();
             if let Some(active) = self.tabs[i].active_grip.as_mut() {
                 for target in &mut active.targets {
+                    if table_targets.contains(&target.handle) {
+                        continue;
+                    }
                     if let Some((_, world)) = refreshed_targets
                         .iter()
                         .find(|((handle, id), _)| *handle == target.handle && *id == target.grip_id)
@@ -5471,7 +5537,11 @@ impl OpenCADStudio {
         let plugin_grip_active = self.tabs[i].active_plugin_grip.is_some();
         #[cfg(target_arch = "wasm32")]
         let plugin_grip_active = false;
-        if self.tabs[i].active_grip.is_some() || plugin_grip_active {
+        // While MTP / M2P runs from a hot grip, its point picks are clicks
+        // for that modifier, not the grip placement.
+        let grip_owns_press =
+            self.tabs[i].active_grip.is_some() && self.tabs[i].active_cmd.is_none();
+        if grip_owns_press || plugin_grip_active {
             // The press position can be newer than the last ViewportMove.
             // Refresh the custom drag through the native snap/constraint path
             // before consuming the gesture; its release then settles at the
@@ -6166,7 +6236,11 @@ impl OpenCADStudio {
         // press-drag. A bare engaging click (no movement yet) keeps the
         // grip hot so the user can move the cursor and click again to
         // place it. Escape cancels (handled elsewhere).
-        if let Some(grip) = self.tabs[i].active_grip.clone() {
+        if let Some(grip) = self.tabs[i]
+            .active_grip
+            .clone()
+            .filter(|_| self.tabs[i].active_cmd.is_none())
+        {
             // Reset mouse state so the lingering press from the engaging
             // click doesn't read as an in-progress drag on later moves.
             {
@@ -8129,7 +8203,7 @@ properties={:.1}ms picked={}",
         if self.begin_table_cell_edit(i, handle, click_world)
             != crate::modules::annotate::table_cmd::TableCellEditStart::NoCell
         {
-            return Some(Task::none());
+            return Some(self.focus_cmd_input());
         }
         // A constraint dimension edits its parameter from the
         // command line, standing in for the reference's in-place
@@ -8563,6 +8637,9 @@ properties={:.1}ms picked={}",
         &mut self,
         expected_viewport: Option<document::Handle>,
     ) -> Task<Message> {
+        if self.table_cell_editor.is_some() && self.tabs[self.active_tab].active_cmd.is_none() {
+            return self.table_editor_click(self.cursor_pos);
+        }
         let i = self.active_tab;
         if self.tabs[i].scene.active_viewport != expected_viewport
             || (expected_viewport.is_none() && self.tabs[i].scene.current_layout != "Model")
@@ -12518,5 +12595,90 @@ mod stretch_shift_click_tests {
             command.on_enter(),
             crate::command::CmdResult::Cancel
         ));
+    }
+}
+
+#[cfg(test)]
+mod grip_mtp_tests {
+    use super::*;
+    use crate::app::OpenCADStudio;
+    use glam::DVec3;
+
+    /// A selected line (0,0)-(100,0) with its end grip hot (engaging click).
+    fn hot_line_end() -> (OpenCADStudio, Handle) {
+        let mut app = OpenCADStudio::new_for_test();
+        app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        app.tabs[i].scene.selection.borrow_mut().view.vp_size = (800.0, 600.0);
+        let line = document::entities::Line::from_coords(0.0, 0.0, 0.0, 100.0, 0.0, 0.0);
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(line));
+        let _ = app.run_command_line("ZOOM W -50,-150 350,150");
+        app.tabs[i].scene.selected.insert(handle);
+        app.refresh_selected_grips();
+        let end = app.tabs[i]
+            .selected_grips
+            .iter()
+            .find(|g| g.world.distance(DVec3::new(100.0, 0.0, 0.0)) < 1e-9)
+            .expect("end grip")
+            .clone();
+        click(&mut app, end.world);
+        assert!(app.tabs[i].active_grip.is_some(), "the end grip is hot");
+        (app, handle)
+    }
+
+    fn click(app: &mut OpenCADStudio, world: DVec3) {
+        let i = app.active_tab;
+        let bounds = iced::Rectangle::with_size(iced::Size::new(800.0, 600.0));
+        let p = app.tabs[i].scene.camera.borrow().project(world, bounds).unwrap();
+        let p = Point::new(p.x, p.y);
+        let _ = app.on_viewport_move(p);
+        app.tabs[i].scene.selection.borrow_mut().input.last_move_pos = Some(p);
+        let _ = app.on_viewport_left_press();
+        let _ = app.on_viewport_left_release();
+    }
+
+    fn submit(app: &mut OpenCADStudio, text: &str) {
+        app.command_line.input = text.to_string();
+        let _ = app.on_command_submit();
+    }
+
+    fn line_end(app: &OpenCADStudio, handle: Handle) -> DVec3 {
+        let Some(document::EntityType::Line(line)) =
+            app.tabs[app.active_tab].scene.document.get_entity(handle)
+        else {
+            panic!("a line")
+        };
+        DVec3::new(line.end.x, line.end.y, line.end.z)
+    }
+
+    #[test]
+    fn typed_mtp_places_a_hot_grip_midway_between_two_typed_points() {
+        let (mut app, handle) = hot_line_end();
+        let i = app.active_tab;
+        submit(&mut app, "MTP");
+        assert!(app.tabs[i].active_cmd.is_some(), "MTP asks for its first point");
+        submit(&mut app, "200,0");
+        submit(&mut app, "200,100");
+        assert!(app.tabs[i].active_grip.is_none(), "the grip was placed");
+        assert!(app.tabs[i].active_cmd.is_none());
+        let end = line_end(&app, handle);
+        assert!(end.distance(DVec3::new(200.0, 50.0, 0.0)) < 1e-6, "{end:?}");
+        assert_eq!(app.tabs[i].history.undo_stack.len(), 1, "one undo step");
+    }
+
+    #[test]
+    fn clicked_mtp_points_place_a_hot_grip_at_their_midpoint() {
+        let (mut app, handle) = hot_line_end();
+        let i = app.active_tab;
+        app.tabs[i].snap_result = None;
+        app.snapper.snap_enabled = false;
+        let _ = app.update(crate::app::Message::SnapOverrideMtp);
+        assert!(app.tabs[i].active_cmd.is_some(), "the snap menu's MTP starts");
+        click(&mut app, DVec3::new(150.0, 80.0, 0.0));
+        assert!(app.tabs[i].active_grip.is_some(), "the first pick is MTP's, not the grip's");
+        click(&mut app, DVec3::new(250.0, 80.0, 0.0));
+        assert!(app.tabs[i].active_grip.is_none(), "the grip was placed");
+        let end = line_end(&app, handle);
+        assert!(end.distance(DVec3::new(200.0, 80.0, 0.0)) < 0.5, "{end:?}");
     }
 }

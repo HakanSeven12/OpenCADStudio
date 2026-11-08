@@ -1268,6 +1268,7 @@ impl super::OpenCADStudio {
 
     /// Discard the editor without changing the drawing.
     pub(super) fn mtext_cancel(&mut self) {
+        self.close_table_cell_editor();
         self.mtext_editor = None;
         self.command_mtext_input = false;
         self.pending_command_editor_text = None;

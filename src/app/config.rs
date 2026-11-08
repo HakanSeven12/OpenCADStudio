@@ -351,6 +351,9 @@ pub const DEFAULT_PAPER_BG: [u8; 3] = [255, 255, 255];
 /// Standard paper space desk surround [138, 138, 138].
 pub const DEFAULT_DESK_BG: [u8; 3] = [138, 138, 138];
 
+/// Default VPHIGHLIGHTOPACITY: a soft outline that does not compete with the drawing.
+pub const DEFAULT_VIEWPORT_HOVER_OPACITY: u8 = 50;
+
 /// Persistent configuration for Model Space appearance and selection visual effects.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -408,6 +411,12 @@ pub struct ModelSpaceThemeConfig {
     pub grip_hover: u8,
     /// SNAPMARKERSIZE: object-snap marker half-size in pixels (1–20, default 5).
     pub snap_marker_size: u8,
+    /// VPHIGHLIGHT: outline the Model viewport under the cursor when the
+    /// view is split into several.
+    pub viewport_hover_highlight: bool,
+    /// VPHIGHLIGHTOPACITY: strength of that outline in percent (0–100);
+    /// the default keeps it barely visible.
+    pub viewport_hover_opacity: u8,
 }
 
 impl Default for ModelSpaceThemeConfig {
@@ -439,6 +448,8 @@ impl Default for ModelSpaceThemeConfig {
             grip_hot: 0,
             grip_hover: 0,
             snap_marker_size: 5,
+            viewport_hover_highlight: true,
+            viewport_hover_opacity: DEFAULT_VIEWPORT_HOVER_OPACITY,
         }
     }
 }

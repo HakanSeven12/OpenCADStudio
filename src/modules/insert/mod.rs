@@ -195,12 +195,8 @@ impl CadModule for InsertModule {
                         RibbonItem::LabeledTool(ToolDef {
                             id: "PDFSHXTEXT_SETTINGS",
                             label: "Recognition Settings",
-                            icon: IconKind::Svg(include_bytes!(
-                                "../../../assets/icons/options_tool.svg"
-                            )),
-                            event: ModuleEvent::Command(
-                                "PDFSHXTEXT;SETTINGS".to_string(),
-                            ),
+                            icon: IconKind::Svg(crate::ui::icons::GEAR),
+                            event: ModuleEvent::Command("PDFSHXTEXT;SETTINGS".to_string()),
                         }),
                         RibbonItem::LargeTool(ToolDef {
                             id: "TXT2MTXT",

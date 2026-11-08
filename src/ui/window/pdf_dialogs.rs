@@ -2085,13 +2085,10 @@ pub fn view_point_cloud_color_map<'a>(
         .on_press(msg(PdfDialogMsg::MapEven))
         .style(button_style(false))
         .padding([5, 6]);
-    let reverse = button(crate::ui::icons::tool(
-        include_bytes!("../../../assets/icons/modify_reverse.svg"),
-        16.0,
-    ))
-    .on_press(msg(PdfDialogMsg::MapReverse))
-    .style(button_style(false))
-    .padding([4, 6]);
+    let reverse = button(crate::ui::icons::tool(crate::ui::icons::SWAP, 16.0))
+        .on_press(msg(PdfDialogMsg::MapReverse))
+        .style(button_style(false))
+        .padding([4, 6]);
     let mut scheme_rows = column![
         row![scheme, small(t!("New"), PdfDialogMsg::MapNew)]
             .spacing(8)

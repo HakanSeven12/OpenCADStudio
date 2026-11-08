@@ -19,9 +19,9 @@ use rustc_hash::FxHashMap;
 use crate::ui::style::common::{accessible_accent, wcag_contrast};
 use crate::ui::style::ribbon_metrics as metrics;
 
-static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
-static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
-static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
+pub(crate) static TRI_DOWN: &[u8] = include_bytes!("../../assets/icons/ui/tri_down.svg");
+pub(crate) static TRI_UP: &[u8] = include_bytes!("../../assets/icons/ui/tri_up.svg");
+pub(crate) static TRI_RIGHT: &[u8] = include_bytes!("../../assets/icons/ui/tri_right.svg");
 static TRI_LEFT: &[u8] = include_bytes!("../../assets/icons/ui/tri_left.svg");
 static HOME: &[u8] = include_bytes!("../../assets/icons/ui/home.svg");
 pub static UNDO: &[u8] = include_bytes!("../../assets/icons/ui/undo.svg");
@@ -109,6 +109,8 @@ pub static IMAGE: &[u8] = include_bytes!("../../assets/icons/ui/image.svg");
 pub static LOCK: &[u8] = include_bytes!("../../assets/icons/ui/lock.svg");
 pub static EYE: &[u8] = include_bytes!("../../assets/icons/ui/eye.svg");
 pub static EYE_OFF: &[u8] = include_bytes!("../../assets/icons/ui/eye_off.svg");
+/// The eye in blue: show everything (Show All).
+pub static EYE_ALL: &[u8] = include_bytes!("../../assets/icons/ui/eye_all.svg");
 
 // ── Status-bar toggle icons (issue #216) ──────────────────────────────────
 pub static ST_ORTHO: &[u8] = include_bytes!("../../assets/icons/status/ortho.svg");

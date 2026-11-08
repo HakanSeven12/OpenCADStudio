@@ -15,21 +15,16 @@ use crate::app::calc::{AngleMode, Value};
 use crate::app::Message;
 use crate::modules::draw::inquiry::calc_pick::PickKind;
 use crate::ui::dock::{Chrome, PanelId};
+use crate::ui::icons::{SWAP, TRI_DOWN, TRI_UP};
 
 pub const ICON: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/quickcalc.svg");
-pub(super) const POINT: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/point.svg");
+pub(super) const POINT: &[u8] = include_bytes!("../../../../assets/icons/point.svg");
 const DISTANCE: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/distance.svg");
 const ANGLE: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/angle.svg");
 const COPY: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/copy.svg");
 const SEND: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/send.svg");
-pub(super) const CHEVRON_DOWN: &[u8] =
-    include_bytes!("../../../../assets/icons/quickcalc/chevron_down.svg");
-pub(super) const CHEVRON_RIGHT: &[u8] =
-    include_bytes!("../../../../assets/icons/quickcalc/chevron_right.svg");
-const CHEVRON_UP: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/chevron_up.svg");
 const KEYPAD_STANDARD: &[u8] =
     include_bytes!("../../../../assets/icons/quickcalc/keypad_standard.svg");
-const SWAP: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/swap.svg");
 const ERROR: &[u8] = include_bytes!("../../../../assets/icons/quickcalc/error.svg");
 
 /// The heavier weight for keys, section headers and results. The default
@@ -323,9 +318,7 @@ pub(super) fn segmented<'a>(items: Vec<Element<'a, Message>>) -> Element<'a, Mes
 /// title on the left, a chevron on the right that points down while the
 /// section is closed and up while it is open.
 fn section_header<'a>(section: Section, label: String, open: bool) -> Element<'a, Message> {
-    let chevron = icon(if open { CHEVRON_UP } else { CHEVRON_DOWN }, 11.0, |t| {
-        t.muted
-    });
+    let chevron = icon(if open { TRI_UP } else { TRI_DOWN }, 11.0, |t| t.muted);
     let content = row![strong(label, 11.5).width(Fill), chevron]
         .spacing(7)
         .align_y(iced::Center);

@@ -623,6 +623,19 @@ impl OpenCADStudio {
         // DYNCONSTRAINTDISPLAY 0 also keeps a new dynamic dimension off screen.
         self.tabs[i].scene.refresh_hidden_dynamic_dimensions();
         self.tabs[i].scene.refresh_dynamic_dimension_scales(true);
+        // The record the reference keeps from creation: a model-space dimension
+        // names the anonymous block that draws it, and that block holds the
+        // geometry the solve left. Save reuses the same cache.
+        if scope == crate::scene::parametric_constraints::ParametricScope::ModelSpace {
+            if let Some(document::EntityType::Dimension(d)) =
+                self.tabs[i].scene.document.get_entity_mut(dimension)
+            {
+                d.base_mut().common.entity_mode = Some(2);
+            }
+        }
+        crate::modules::draw::modify::explode::bake_dimension_blocks(
+            &mut self.tabs[i].scene.document,
+        );
         self.tabs[i].dirty = true;
         self.tabs[i].active_cmd = None;
         self.tabs[i].snap_result = None;

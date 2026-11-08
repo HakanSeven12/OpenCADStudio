@@ -2114,9 +2114,23 @@ fn a_created_dimension_is_a_complete_record_across_a_save() {
         "the annotation measures the span the constraint was given: {measured}"
     );
     assert!(
-        block.is_empty() && mode.is_none(),
-        "the live document leaves the anonymous block to the writer and carries no mode yet: \
-         {block:?} {mode:?}"
+        block.starts_with("*D"),
+        "the live record names the annotation block it draws: {block:?}"
+    );
+    assert_eq!(
+        mode,
+        Some(2),
+        "a dimension created in model space is a model-space record"
+    );
+    let live = app.tabs[i]
+        .scene
+        .document
+        .block_records
+        .get(&block)
+        .expect("the live document holds the block the dimension names");
+    assert!(
+        !live.entity_handles.is_empty(),
+        "the live annotation block holds the exploded geometry"
     );
 
     // The document prepared the way a worker save prepares it before writing.

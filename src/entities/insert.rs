@@ -120,11 +120,19 @@ fn scale_attribute_for_insert(
     attribute.alignment_point = scale_about(attribute.alignment_point);
 }
 
+/// The insertion point grip drags the whole reference, attributes included.
+fn insert_point_grip(world: Vector3) -> GripDef {
+    GripDef {
+        is_midpoint: true,
+        ..square_grip(0, glam::DVec3::new(world.x, world.y, world.z))
+    }
+}
+
 fn grips(ins: &Insert) -> Vec<GripDef> {
     // `insert_point` is in the OCS defined by `normal`; the grip must sit at
     // the world placement, so map it through the OCS. Identity for +Z.
     let w = Matrix3::arbitrary_axis(ins.normal) * ins.insert_point;
-    let mut out = vec![square_grip(0, glam::DVec3::new(w.x, w.y, w.z))];
+    let mut out = vec![insert_point_grip(w)];
     // One grip per attribute, so an attribute can be moved off the place the
     // block definition put it without dragging the whole block (#1259).
     // Attributes are stored beside the block in world space — the same space
@@ -151,7 +159,7 @@ pub(crate) fn visible_attribute_grips(
     annotation_scale: f32,
 ) -> Vec<GripDef> {
     let w = Matrix3::arbitrary_axis(insert.normal) * insert.insert_point;
-    let mut out = vec![square_grip(0, glam::DVec3::new(w.x, w.y, w.z))];
+    let mut out = vec![insert_point_grip(w)];
     let visibility = document.header.attribute_visibility;
     let block_scale = insert_attribute_block_scale(
         insert,

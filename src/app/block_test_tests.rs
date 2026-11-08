@@ -410,6 +410,37 @@ fn visibility_reference() -> (OpenCADStudio, usize, Handle, usize) {
     (app, test, reference, hidden)
 }
 
+/// The grip read lists the insertion point and the visibility chevron as
+/// separate grips, and the insertion-point grip is the one that moves the whole
+/// reference rather than stretching it.
+#[test]
+fn the_grip_read_separates_the_insertion_point_from_the_visibility_chevron() {
+    use crate::scene::model::object::GripShape;
+    let (mut app, test, reference, _) = visibility_reference();
+    app.tabs[test].scene.select_entity(reference, true);
+    app.refresh_selected_grips();
+    let grips = &app.tabs[test].selected_grips;
+    let base = grips
+        .iter()
+        .find(|grip| grip.shape == GripShape::Square)
+        .expect("the insertion-point grip");
+    assert!(
+        base.is_midpoint,
+        "dragging the insertion point moves the whole reference"
+    );
+    assert!(
+        grips
+            .iter()
+            .any(|grip| grip.id == crate::app::visibility::VIS_GRIP_ID),
+        "the visibility chevron is a grip of its own"
+    );
+    let mut ids: Vec<usize> = grips.iter().map(|grip| grip.id).collect();
+    let total = ids.len();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), total, "every grip has its own id: {grips:?}");
+}
+
 /// A member the definition itself hides is governed by no state, so choosing a
 /// state on a reference leaves it hidden rather than painting it back in.
 #[test]

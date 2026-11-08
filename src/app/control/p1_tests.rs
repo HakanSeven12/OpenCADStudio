@@ -492,6 +492,42 @@ fn entities_copy_to_another_open_document() {
     assert_eq!(r["code"], "document_closed");
 }
 
+/// The copy is recorded in the target before it lands there, so one undo in the
+/// target takes the whole pasted set back and leaves the source drawing alone.
+#[test]
+fn a_copy_to_another_document_undoes_in_the_target_only() {
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.automation_op(r#"{"op":"run","cmd":"CIRCLE 5,5 2"}"#);
+    let handle = app.automation_op(r#"{"op":"query","type":"Circle","detail":"summary"}"#)
+        ["entities"][0]["handle"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"cu1","document_id":{target},"handles":["{handle}"]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+
+    app.active_tab = 1;
+    assert_eq!(count_type(&mut app, "Circle"), 1, "the copy landed");
+    let _ = app.update(crate::app::Message::Undo);
+    assert_eq!(
+        count_type(&mut app, "Circle"),
+        0,
+        "one undo in the target takes the whole copy back"
+    );
+    app.active_tab = 0;
+    assert_eq!(
+        count_type(&mut app, "Circle"),
+        1,
+        "and the source keeps the entity it copied"
+    );
+}
+
 #[test]
 fn a_copied_block_reference_arrives_with_its_definition() {
     let mut app = OpenCADStudio::new_for_test();

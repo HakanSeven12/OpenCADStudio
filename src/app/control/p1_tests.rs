@@ -907,6 +907,121 @@ fn a_copied_dynamic_reference_stays_dynamic_in_the_target() {
     );
 }
 
+/// A copied definition whose member reference carries attribute values points
+/// those values at the attribute definition inside the copied definition, not
+/// at the handle the source drawing gave it.
+#[test]
+fn a_copied_definition_points_its_nested_attribute_at_its_definition() {
+    use document::entities::{AttributeDefinition, AttributeEntity, EntityType, Insert, Line};
+    use document::types::Vector3;
+
+    let mut app = OpenCADStudio::new_for_test();
+    app.automation_op(r#"{"op":"new"}"#);
+    app.tabs[0].scene.define_block_raw(
+        "CHILD",
+        Vector3::ZERO,
+        vec![
+            EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::UNIT_X)),
+            EntityType::AttributeDefinition(AttributeDefinition::new(
+                "PART".into(),
+                "Part".into(),
+                "A1".into(),
+            )),
+        ],
+    );
+    let child_definition = app.tabs[0]
+        .scene
+        .document
+        .block_records
+        .get("CHILD")
+        .expect("the child definition was created")
+        .entity_handles
+        .iter()
+        .copied()
+        .find(|handle| {
+            matches!(
+                app.tabs[0].scene.document.get_entity(*handle),
+                Some(EntityType::AttributeDefinition(_))
+            )
+        })
+        .expect("the child holds its attribute definition");
+    let mut child = Insert::new("CHILD", Vector3::ZERO);
+    let mut attribute = AttributeEntity::new("PART".into(), "A1".into());
+    attribute.attdef_handle = child_definition;
+    child.attributes.push(attribute);
+    let member = app.tabs[0]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(child))
+        .expect("the seeded child reference");
+    let doc = app.automation_op(r#"{"protocol":1,"op":"state"}"#)["document_id"]
+        .as_u64()
+        .unwrap();
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"block_define","request_id":"na1","document_id":{doc},"name":"OUTER","base":[0,0,0],"handles":["{:X}"]}}"#,
+        member.value()
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    let outer = app.automation_op(r#"{"op":"query","type":"Insert","detail":"full"}"#)["entities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entity| entity["block"] == "OUTER")
+        .and_then(|entity| entity["handle"].as_str())
+        .expect("the OUTER reference")
+        .to_owned();
+
+    app.tabs
+        .push(crate::app::tab_document::DocumentTab::new_drawing(99));
+    let target = app.tabs[1].id;
+    // Give the target a handle history of its own, so a source handle that
+    // leaks into the copy cannot pass for a target handle by coincidence.
+    for _ in 0..6 {
+        app.tabs[1].scene.document.allocate_handle();
+    }
+    let r = app.automation_op(&format!(
+        r#"{{"protocol":1,"op":"entities_copy_to","request_id":"na2","document_id":{target},"handles":["{outer}"]}}"#
+    ));
+    assert_eq!(r["ok"], true, "{}", r["error"]);
+    assert_eq!(r["result"]["count"], 1, "{r}");
+
+    let doc = &app.tabs[1].scene.document;
+    let target_child = doc
+        .block_records
+        .get("CHILD")
+        .expect("the child definition travelled")
+        .entity_handles
+        .iter()
+        .copied()
+        .find(|handle| {
+            matches!(doc.get_entity(*handle),
+                Some(EntityType::AttributeDefinition(definition)) if definition.tag == "PART")
+        })
+        .expect("the copied child holds its attribute definition");
+    assert_ne!(
+        target_child, child_definition,
+        "the target gives the definition its own handle"
+    );
+    let outer_record = doc
+        .block_records
+        .get("OUTER")
+        .expect("the outer definition travelled");
+    let nested = outer_record
+        .entity_handles
+        .iter()
+        .filter_map(|handle| match doc.get_entity(*handle) {
+            Some(EntityType::Insert(insert)) if insert.block_name == "CHILD" => Some(insert),
+            _ => None,
+        })
+        .next()
+        .expect("the outer definition holds the child reference");
+    assert_eq!(nested.attributes.len(), 1, "the attribute value travelled");
+    assert_eq!(
+        nested.attributes[0].attdef_handle, target_child,
+        "the value points at the definition in this drawing, not the handle the source gave it"
+    );
+}
+
 /// A copied raster has to arrive registered in the target the way an
 /// interactive paste registers it: the target's own definition of its file,
 /// plus the reactor that links image and definition both ways. A copy that

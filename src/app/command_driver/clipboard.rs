@@ -1049,6 +1049,7 @@ fn merge_blocks_and_mleader_styles(
             for member in crate::scene::block_authoring::members(doc, record) {
                 if let Some(entity) = doc.get_entity_mut(member) {
                     remap_mleader(entity, &records);
+                    remap_insert_attributes(entity, &records);
                 }
             }
         }

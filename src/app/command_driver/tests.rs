@@ -3521,18 +3521,14 @@ mod attedit_dash_tests {
                 ..AttributeDefinition::new("TAG1".into(), "Tag one".into(), String::new())
             })
         };
-        app.tabs[i].scene.define_block_raw(
-            "SYNCED",
-            Vector3::new(0.0, 0.0, 0.0),
-            vec![tag_one()],
-        );
+        app.tabs[i]
+            .scene
+            .define_block_raw("SYNCED", Vector3::new(0.0, 0.0, 0.0), vec![tag_one()]);
         let mut insert = Insert::new("SYNCED", Vector3::new(100.0, 100.0, 0.0));
         insert
             .attributes
             .push(AttributeEntity::new("TAG1".into(), "kept".into()));
-        let reference = app.tabs[i]
-            .scene
-            .add_entity(EntityType::Insert(insert));
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(insert));
         assert!(!reference.is_null(), "the reference is placed");
         app.tabs[i]
             .scene
@@ -3588,6 +3584,55 @@ mod attedit_dash_tests {
                 ("TAG2".into(), "two".into())
             ],
             "the reference follows the definition without losing the value it carried"
+        );
+    }
+
+    /// BATTMAN opens on the drawing's attributed block, counts its references
+    /// and lists the block's definitions in their own order.
+    #[test]
+    fn battman_lists_the_attributed_block_and_its_definitions() {
+        use document::entities::AttributeDefinition;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        let definition = |tag: &str, y: f64| {
+            EntityType::AttributeDefinition(AttributeDefinition {
+                insertion_point: Vector3::new(2.0, y, 0.0),
+                height: 1.0,
+                ..AttributeDefinition::new(tag.into(), format!("{tag} prompt"), String::new())
+            })
+        };
+        app.tabs[i].scene.define_block_raw(
+            "SYNCED",
+            Vector3::new(0.0, 0.0, 0.0),
+            vec![definition("TAG1", 2.0), definition("TAG2", 5.0)],
+        );
+        let reference = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
+            "SYNCED",
+            Vector3::new(100.0, 100.0, 0.0),
+        )));
+        assert!(!reference.is_null(), "the reference is placed");
+
+        let _ = app.dispatch_command("BATTMAN");
+
+        let state = app.attman.as_ref().expect("the manager opens");
+        let blocks: Vec<(&str, usize)> = state
+            .blocks
+            .iter()
+            .map(|b| (b.name.as_str(), b.found))
+            .collect();
+        assert_eq!(
+            blocks,
+            vec![("SYNCED", 1)],
+            "the manager shows the attributed block with its one reference"
+        );
+        let tags: Vec<&str> = state.rows.iter().map(|r| r.original_tag.as_str()).collect();
+        assert_eq!(
+            tags,
+            vec!["TAG1", "TAG2"],
+            "the definitions are listed in the block's own order"
         );
     }
 

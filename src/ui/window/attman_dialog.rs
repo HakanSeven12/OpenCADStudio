@@ -233,20 +233,25 @@ impl AttManState {
 
     /// Load the drafts from the selected row.
     pub fn load_drafts(&mut self) {
-        let num = |v: f64| crate::ui::window::block_palette::short(v);
+        // These fields are typed straight back into the definition, so they
+        // print plain decimals at the drawing's precision rather than the
+        // drawing's formatted unit style.
+        let units = crate::entities::common::unit_context();
+        let length = |v: f64| crate::entities::common::coordinate_text(v, units.luprec);
+        let angle = |v: f64| crate::entities::common::coordinate_text(v.to_degrees(), units.auprec);
         self.drafts = match self.selected_row() {
             Some(row) => {
                 let d = &row.def;
                 Drafts {
                     tag: d.tag.clone(),
-                    height: num(d.height),
-                    rotation: num(d.rotation.to_degrees()),
-                    width: num(d.width_factor),
-                    oblique: num(d.oblique_angle.to_degrees()),
+                    height: length(d.height),
+                    rotation: angle(d.rotation),
+                    width: length(d.width_factor),
+                    oblique: angle(d.oblique_angle),
                     boundary: d
                         .embedded_mtext
                         .as_ref()
-                        .map_or("0".into(), |m| num(m.rectangle_width)),
+                        .map_or_else(|| length(0.0), |m| length(m.rectangle_width)),
                 }
             }
             None => Drafts::default(),
@@ -1035,4 +1040,52 @@ pub fn view<'a>(
             ..Default::default()
         })
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use document::entities::AttributeDefinition;
+
+    fn state_with(def: AttributeDefinition) -> AttManState {
+        AttManState {
+            blocks: vec![AttManBlock {
+                name: "SAMPLE".into(),
+                found: 1,
+                in_space: 1,
+            }],
+            block: 0,
+            rows: vec![AttManRow {
+                handle: document::Handle::NULL,
+                original_tag: def.tag.clone(),
+                live_tag: def.tag.clone(),
+                def,
+            }],
+            removed: Vec::new(),
+            selected: Some(0),
+            tab: EditTab::Attribute,
+            edit_open: true,
+            drafts: Drafts::default(),
+            dirty: false,
+            live_steps: 0,
+            more_columns: false,
+            styles: Vec::new(),
+            layers: Vec::new(),
+            linetypes: Vec::new(),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn the_edit_fields_print_at_drawing_precision() {
+        let mut def = AttributeDefinition::new("TAG".into(), "Prompt".into(), "Default".into());
+        def.height = 2.5;
+        def.width_factor = 1.0;
+        let mut state = state_with(def);
+        state.load_drafts();
+        assert_eq!(state.drafts.height, "2.5000");
+        assert_eq!(state.drafts.width, "1.0000");
+        assert_eq!(state.drafts.boundary, "0.0000");
+        assert_eq!(state.drafts.rotation, "0");
+    }
 }

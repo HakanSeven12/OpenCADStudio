@@ -1,0 +1,33 @@
+name: Wiki
+
+# Rebuilds the GitHub wiki from docs/wiki and the command registry, so the
+# command and system variable reference follows every release (#1049).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check out the wiki
+        run: git clone --depth 1 "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git" wiki
+      - name: Build
+        run: python3 tools/wiki/build.py wiki
+      - name: Publish
+        working-directory: wiki
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || git commit -m "Wiki: rebuild for ${{ github.event.release.tag_name || github.sha }}"
+          git push

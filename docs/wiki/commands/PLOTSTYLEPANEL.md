@@ -1,0 +1,6 @@
+---
+summary: Same as `PLOTSTYLEEDITOR`.
+related: PLOTSTYLEEDITOR
+---
+
+`PLOTSTYLEPANEL` runs [`PLOTSTYLEEDITOR`](PLOTSTYLEEDITOR-Command).

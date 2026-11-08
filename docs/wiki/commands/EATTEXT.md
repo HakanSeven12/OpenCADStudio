@@ -1,0 +1,6 @@
+---
+summary: Same as `DATAEXTRACTION`.
+related: DATAEXTRACTION
+---
+
+`EATTEXT` runs [`DATAEXTRACTION`](DATAEXTRACTION-Command).

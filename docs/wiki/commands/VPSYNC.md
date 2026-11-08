@@ -1,0 +1,6 @@
+---
+summary: Same as `SYNCPVIEWPORTS`.
+related: SYNCPVIEWPORTS
+---
+
+`VPSYNC` runs [`SYNCPVIEWPORTS`](SYNCPVIEWPORTS-Command).

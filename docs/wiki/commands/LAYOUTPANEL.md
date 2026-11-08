@@ -1,0 +1,6 @@
+---
+summary: Same as `LAYOUTMANAGER`.
+related: LAYOUTMANAGER
+---
+
+`LAYOUTPANEL` runs [`LAYOUTMANAGER`](LAYOUTMANAGER-Command).

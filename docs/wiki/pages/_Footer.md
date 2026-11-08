@@ -1,0 +1,1 @@
+Open CAD Studio is free software under the GPL-3.0 licence · [Source code](https://github.com/HakanSeven12/OpenCADStudio) · [Download](https://www.opencadstudio.com/download/) · [Web app](https://www.opencadstudio.com) · [Discussions](https://github.com/HakanSeven12/OpenCADStudio/discussions)

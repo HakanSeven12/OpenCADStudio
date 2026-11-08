@@ -6422,6 +6422,72 @@ mod batch4_tests {
             "0.50 mm is 50 hundredths"
         );
     }
+
+    #[test]
+    fn blockreplace_retargets_references_and_keeps_values_by_tag() {
+        use document::entities::{AttributeEntity, Insert};
+        use document::types::Vector3;
+
+        let mut app = new_app();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        let i = app.active_tab;
+        block_with_attributes(
+            &mut app,
+            "OLDBLOCK",
+            &[("TAG", "Tag?", "OLD"), ("OLDONLY", "Old?", "X")],
+        );
+        block_with_attributes(
+            &mut app,
+            "NEWBLOCK",
+            &[("TAG", "Tag?", "NEW"), ("NEWONLY", "New?", "D")],
+        );
+
+        let doc = &mut app.tabs[i].scene.document;
+        let definition = match doc.get_entity(
+            doc.block_records
+                .get("OLDBLOCK")
+                .unwrap()
+                .entity_handles[1],
+        ) {
+            Some(document::EntityType::AttributeDefinition(definition)) => definition.clone(),
+            _ => panic!("the old definition is there"),
+        };
+        let mut insert = Insert::new("OLDBLOCK", Vector3::new(20.0, 10.0, 0.0));
+        insert
+            .attributes
+            .push(AttributeEntity::from_definition(&definition, Some("KEPT".into())));
+        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+
+        let _ = app.run_command_line("BLOCKREPLACE");
+        let _ = app.feed_active_cmd("OLDBLOCK");
+        let _ = app.feed_active_cmd("NEWBLOCK");
+        assert!(app.command_line.last_error.is_none(), "{}", out(&app));
+
+        let doc = &app.tabs[i].scene.document;
+        let Some(document::EntityType::Insert(insert)) = doc.get_entity(insert_handle) else {
+            panic!("the reference is still there");
+        };
+        assert_eq!(insert.block_name, "NEWBLOCK");
+        let mut tags: Vec<_> = insert
+            .attributes
+            .iter()
+            .map(|attribute| attribute.tag.as_str())
+            .collect();
+        tags.sort_unstable();
+        assert_eq!(tags, ["NEWONLY", "TAG"], "old-only tags are dropped");
+        let tag = insert
+            .attributes
+            .iter()
+            .find(|attribute| attribute.tag == "TAG")
+            .unwrap();
+        assert_eq!(tag.value, "KEPT");
+        let new_only = insert
+            .attributes
+            .iter()
+            .find(|attribute| attribute.tag == "NEWONLY")
+            .unwrap();
+        assert_eq!(new_only.value, "D");
+    }
 }
 
 #[cfg(test)]

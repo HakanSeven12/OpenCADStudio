@@ -1170,6 +1170,8 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("QSELECT")
             // XPLODE takes its property overrides on one line.
             || tokens[0].eq_ignore_ascii_case("XPLODE")
+            // BLOCKREPLACE's picked pair arrives as one private apply line.
+            || tokens[0].eq_ignore_ascii_case("_BLOCKREPLACE_APPLY")
             || tokens[0].eq_ignore_ascii_case("LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("-LAYERFILTER")
             || tokens[0].eq_ignore_ascii_case("LAYERGROUP")

@@ -972,6 +972,8 @@ inventory::submit!(crate::command::CommandRegistration {
         "-ATTEDIT",
         // Redefine a block's attribute definitions from an existing reference.
         "ATTREDEF",
+        // Retarget every reference of one block to another definition.
+        "BLOCKREPLACE",
         // Script forms of the table commands.
         "-LAYER",
         "-PURGE",

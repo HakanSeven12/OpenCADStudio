@@ -13,6 +13,7 @@ pub mod readable;
 pub mod ribbon_metrics;
 pub mod row_button;
 pub mod scale_manager;
+pub mod studio_theme;
 pub mod style_list;
 pub mod style_manager;
 pub mod tablestyle;

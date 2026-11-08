@@ -1,41 +1,22 @@
 //! Readable interface text and icon colours in every theme.
 //!
-//! iced's themes (other than Light and Dark) are code-editor colour schemes
-//! whose foreground was chosen to be soft for long reading, not for small
-//! interface labels. Desktop and CAD applications keep interface text near
-//! white on dark and near black on light; a theme only changes background
-//! and accent. [`ui_theme`] does the same for OCS: it keeps a theme's
-//! background and its primary, success, warning and danger colours, and
-//! replaces only its text colour by [`text_for`].
-//!
-//! Secondary text is not faded with alpha but mixed towards the background
-//! only as far as it stays clearly readable ([`muted_text`]), and accents
+//! Every theme keeps its own text colour. Secondary text is not faded with
+//! alpha but mixed towards the background only as far as it stays clearly
+//! readable ([`muted_text`]), and accents
 //! drawn as text or icons are pushed towards the text colour until they
 //! read ([`icon_accent`], [`accent_in_hue`]).
 
-use iced::theme::palette::Seed;
 use iced::{Color, Theme};
 
 use super::chrome;
 use super::common::{wcag_contrast, wcag_luminance};
 
-/// Interface text on a dark background: near white, since pure white glares
-/// on a very dark background.
-pub const TEXT_ON_DARK: Color = Color::from_rgb(
-    0xF0 as f32 / 255.0,
-    0xF0 as f32 / 255.0,
-    0xF0 as f32 / 255.0,
-);
-/// Interface text on a light background: near black.
-pub const TEXT_ON_LIGHT: Color = Color::from_rgb(
-    0x1A as f32 / 255.0,
-    0x1A as f32 / 255.0,
-    0x1A as f32 / 255.0,
-);
 /// A background with a WCAG relative luminance above this is light.
 pub const LIGHT_BACKGROUND_LUMINANCE: f32 = 0.5;
-/// The least contrast secondary text keeps on every surface it is drawn on.
-pub const MUTED_MIN_CONTRAST: f32 = 7.0;
+/// The least contrast secondary text (labels, panel titles, tab labels)
+/// keeps on every surface it is drawn on: WCAG AA for body text. A theme
+/// whose own text reads below that keeps its text unfaded.
+pub const MUTED_MIN_CONTRAST: f32 = 4.5;
 /// How far secondary text is mixed towards the background at most: the
 /// 0.68 alpha it used to be drawn at.
 pub const MUTED_MAX_FADE: f32 = 0.32;
@@ -43,52 +24,11 @@ pub const MUTED_MAX_FADE: f32 = 0.32;
 /// graphical objects. (Accents drawn as text keep the 4.5:1 of body text,
 /// see `common::readable_accent`.)
 pub const ICON_ACCENT_MIN_CONTRAST: f32 = 3.0;
-/// The name of the theme the user edits colour by colour: its text colour
-/// is the user's own choice and is left as it is.
-const USER_THEME: &str = "Custom";
-
-/// The interface text colour for a theme whose background is `background`.
-pub fn text_for(background: Color) -> Color {
-    if wcag_luminance(background) > LIGHT_BACKGROUND_LUMINANCE {
-        TEXT_ON_LIGHT
-    } else {
-        TEXT_ON_DARK
-    }
-}
-
-/// `base` with its text colour replaced by [`text_for`] its background, so
-/// every iced widget and every OCS style that reads the palette gets
-/// readable text. Background and accents are kept; the name is kept, so the
-/// theme is still saved, listed and recognised as `base` (see
-/// [`base_theme`]). The user's own Custom theme is returned unchanged.
-pub fn ui_theme(base: &Theme) -> Theme {
-    let name = base.to_string();
-    if name == USER_THEME {
-        return base.clone();
-    }
-    let seed = base.seed();
-    let text = text_for(seed.background);
-    if seed.text == text {
-        return base.clone();
-    }
-    Theme::custom(name, Seed { text, ..seed })
-}
-
-/// The theme the user chose, for a theme that [`ui_theme`] may have made:
-/// the built-in or Fusion theme of the same name, or `theme` itself. Match
-/// on this, not on the theme iced hands a style function.
-pub fn base_theme(theme: &Theme) -> Theme {
-    match theme {
-        Theme::Custom(_) => {
-            crate::app::config::builtin_theme(&theme.to_string()).unwrap_or_else(|| theme.clone())
-        }
-        builtin => builtin.clone(),
-    }
-}
-
 /// The least contrast a hint (an input's placeholder, an empty-list note)
-/// keeps: WCAG AA for body text. Lower than [`MUTED_MIN_CONTRAST`] so a
-/// placeholder still looks different from a typed value.
+/// keeps: WCAG AA for body text, as for [`MUTED_MIN_CONTRAST`]. A hint may
+/// fade further ([`HINT_MAX_FADE`]), so a placeholder still looks different
+/// from a typed value; on a theme with little contrast to spare the two can
+/// meet at that floor.
 pub const HINT_MIN_CONTRAST: f32 = 4.5;
 /// How far a hint is mixed towards the background at most: about the 0.48
 /// alpha placeholders used to be drawn at.
@@ -210,10 +150,13 @@ fn faded_text(theme: &Theme, max_fade: f32, min_contrast: f32) -> Color {
 fn work_out_faded_text(theme: &Theme, max_fade: f32, min_contrast: f32) -> Color {
     let background = theme.palette().background.base;
     let surfaces = reading_surfaces(theme);
-    const STEPS: u8 = 32;
-    (0..=STEPS)
+    // One step size for every strength, so a hint and a label that both
+    // stop at the same contrast floor stop on the same colour.
+    const STEP: f32 = 0.01;
+    let steps = (max_fade / STEP).round() as u16;
+    (0..=steps)
         .rev()
-        .map(|step| max_fade * f32::from(step) / f32::from(STEPS))
+        .map(|step| f32::from(step) * STEP)
         .map(|fade| chrome::mix(background.text, background.color, fade))
         .find(|color| worst_contrast_on(*color, &surfaces) >= min_contrast)
         .unwrap_or(background.text)
@@ -233,9 +176,10 @@ pub fn hint_text(theme: &Theme) -> Color {
     faded_text(theme, HINT_MAX_FADE, HINT_MIN_CONTRAST)
 }
 
-/// `color` as secondary text: itself when it already reads at
-/// [`MUTED_MIN_CONTRAST`] on every reading surface, otherwise
-/// [`muted_text`]. Kept per theme and colour, as [`faded_text`] is: the
+/// `color` as secondary chrome text (labels, panel titles, tab labels):
+/// itself when it already reads at [`MUTED_MIN_CONTRAST`] on every chrome
+/// surface it is drawn on, otherwise moved towards the text colour only
+/// as far as that takes, so the shades keep their order. Kept per theme and colour, as [`faded_text`] is: the
 /// chrome's tab and title text ask for it on every draw.
 pub fn at_least_muted(color: Color, theme: &Theme) -> Color {
     type Key = ([ColorBits; 3], ColorBits);
@@ -248,13 +192,77 @@ pub fn at_least_muted(color: Color, theme: &Theme) -> Color {
     })
 }
 
+/// A chrome surface (bar, panel, hover, border) `step` of OKLCH lightness
+/// away from the theme's background: lighter on a dark theme, darker on a
+/// light one, past the background for a negative `step`. Hue is the
+/// background's; chroma scales with the lightness (see `CHROMA_POWER`),
+/// reduced further only as far as sRGB needs. The text colour has no part
+/// in it. Kept per background and step, as the chrome asks on every draw.
+pub fn surface(theme: &Theme, step: f32) -> Color {
+    type Key = (ColorBits, u32);
+    thread_local! {
+        static CACHE: std::cell::RefCell<rustc_hash::FxHashMap<Key, Color>> =
+            std::cell::RefCell::new(rustc_hash::FxHashMap::default());
+    }
+    let background = theme.palette().background.base.color;
+    cached(&CACHE, (color_bits(background), step.to_bits()), || {
+        work_out_surface(background, step)
+    })
+}
+
+/// [`surface`] without the cache.
+fn work_out_surface(background: Color, step: f32) -> Color {
+    let [from, a, b] = to_oklab(background);
+    let towards = if wcag_luminance(background) > LIGHT_BACKGROUND_LUMINANCE {
+        -1.0
+    } else {
+        1.0
+    };
+    let lightness = (from + towards * step).clamp(0.0, 1.0);
+    // Chroma grows and shrinks with the lightness, as the design's shades
+    // do (a lighter panel of a blue-grey theme is a bluer grey); the
+    // power is fitted to the Studio Dark design, within 2 levels.
+    const CHROMA_POWER: f32 = 0.6;
+    let scale = if from > 0.01 {
+        (lightness / from).powf(CHROMA_POWER)
+    } else {
+        1.0
+    };
+    let (a, b) = (a * scale, b * scale);
+    const CHROMA_STEPS: u16 = 20;
+    (0..=CHROMA_STEPS)
+        .rev()
+        .map(|k| f32::from(k) / f32::from(CHROMA_STEPS))
+        .find_map(|keep| from_oklab([lightness, a * keep, b * keep]))
+        .unwrap_or(if towards > 0.0 {
+            Color::WHITE
+        } else {
+            Color::BLACK
+        })
+}
+
 /// [`at_least_muted`] without the cache.
 fn work_out_at_least_muted(color: Color, theme: &Theme) -> Color {
-    if worst_contrast_on(color, &reading_surfaces(theme)) >= MUTED_MIN_CONTRAST {
-        color
-    } else {
-        muted_text(theme)
-    }
+    let surfaces = chrome_text_surfaces(theme);
+    let text = theme.palette().background.base.text;
+    // Fine steps: a level that has to move stops just past the floor, so
+    // two levels that both move keep their order.
+    const STEPS: u16 = 200;
+    (0..=STEPS)
+        .map(|step| chrome::mix(color, text, f32::from(step) / f32::from(STEPS)))
+        .find(|color| worst_contrast_on(*color, &surfaces) >= MUTED_MIN_CONTRAST)
+        .unwrap_or(text)
+}
+
+/// The chrome surfaces secondary chrome text sits on: the bars, the panel
+/// title strip, the ribbon and popups, and an opened panel.
+fn chrome_text_surfaces(theme: &Theme) -> [Color; 4] {
+    [
+        chrome::bar(theme),
+        chrome::title_bar(theme),
+        chrome::panel(theme),
+        chrome::open_panel(theme),
+    ]
 }
 
 /// A text style in [`muted_text`].
@@ -355,67 +363,52 @@ fn from_oklab([lightness, a, b]: [f32; 3]) -> Option<Color> {
 mod tests {
     use super::*;
 
-    fn hex(color: Color) -> String {
-        let [r, g, b, _] = color.into_rgba8();
-        format!("#{r:02x}{g:02x}{b:02x}")
-    }
-
-    /// Text on the window background and the menu bar.
-    const PAGE_TEXT_MIN: f32 = 10.0;
-    /// Text on any reading surface (also the weak shade, panel title and
-    /// ribbon panel).
-    const READING_TEXT_MIN: f32 = 7.0;
-    /// Text on a hovered, pressed or opened surface.
-    const STATE_TEXT_MIN: f32 = 4.5;
-
     fn every_theme() -> Vec<Theme> {
         crate::app::config::all_themes()
     }
 
     #[test]
-    fn text_reads_on_every_surface_of_every_theme() {
-        for base in every_theme() {
-            let ui = ui_theme(&base);
-            let text = ui.palette().background.base.text;
-            let [page, _, bar, ..] = reading_surfaces(&ui);
-            for surface in [page, bar] {
-                let ratio = wcag_contrast(text, surface);
-                assert!(
-                    ratio >= PAGE_TEXT_MIN,
-                    "{base}: text {ratio:.1}:1 on the page"
-                );
-            }
-            let reading = worst_contrast_on(text, &reading_surfaces(&ui));
-            assert!(reading >= READING_TEXT_MIN, "{base}: text {reading:.1}:1");
-            let state = worst_contrast_on(text, &state_surfaces(&ui));
-            assert!(
-                state >= STATE_TEXT_MIN,
-                "{base}: text {state:.1}:1 in a state"
-            );
-        }
-    }
-
-    #[test]
     fn muted_and_hint_text_read_and_stay_opaque() {
         for base in every_theme() {
-            let ui = ui_theme(&base);
+            let ui = base.clone();
             let surfaces = reading_surfaces(&ui);
             let muted = muted_text(&ui);
             let hint = hint_text(&ui);
             assert_eq!((muted.a, hint.a), (1.0, 1.0), "{base}");
+            // A theme whose own text reads below the floor keeps that text.
+            let text = ui.palette().background.base.text;
+            let floor = |min: f32, on: &[Color]| min.min(worst_contrast_on(text, on)) - 0.01;
             let ratio = worst_contrast_on(muted, &surfaces);
-            assert!(ratio >= MUTED_MIN_CONTRAST, "{base}: muted {ratio:.1}:1");
-            let ratio = worst_contrast_on(hint, &surfaces);
-            assert!(ratio >= HINT_MIN_CONTRAST, "{base}: hint {ratio:.1}:1");
-            // The ribbon's own muted levels are no weaker.
-            for color in [
+            assert!(
+                ratio >= floor(MUTED_MIN_CONTRAST, &surfaces),
+                "{base}: muted {ratio:.1}:1"
+            );
+            let hint_ratio = worst_contrast_on(hint, &surfaces);
+            assert!(
+                hint_ratio >= floor(HINT_MIN_CONTRAST, &surfaces),
+                "{base}: hint {hint_ratio:.1}:1"
+            );
+            // A hint is never stronger than a label.
+            assert!(hint_ratio <= ratio + 0.01, "{base}: hint above muted");
+            // The ribbon's own levels read on the chrome they sit on, and
+            // keep their order: labels, panel titles, tab labels.
+            let chrome_surfaces = chrome_text_surfaces(&ui);
+            let levels = [
                 chrome::muted(&ui),
                 chrome::title_text(&ui),
                 chrome::tab_text(&ui),
-            ] {
-                let ratio = worst_contrast_on(color, &surfaces);
-                assert!(ratio >= MUTED_MIN_CONTRAST, "{base}: chrome {ratio:.1}:1");
+            ]
+            .map(|color| worst_contrast_on(color, &chrome_surfaces));
+            for ratio in levels {
+                assert!(
+                    ratio >= floor(MUTED_MIN_CONTRAST, &chrome_surfaces),
+                    "{base}: chrome {ratio:.1}:1"
+                );
             }
+            assert!(
+                levels[0] <= levels[1] + 0.05 && levels[1] <= levels[2] + 0.05,
+                "{base}: chrome levels {levels:?}"
+            );
         }
     }
 
@@ -423,7 +416,7 @@ mod tests {
     /// strengths, also when themes take turns.
     #[test]
     fn faded_text_is_kept_per_theme() {
-        let themes: Vec<Theme> = every_theme().iter().map(ui_theme).collect();
+        let themes: Vec<Theme> = every_theme();
         for _ in 0..2 {
             for theme in &themes {
                 for (fade, contrast) in [
@@ -449,10 +442,57 @@ mod tests {
         }
     }
 
+    /// The chrome's surfaces in the order they step away from the bars.
+    fn surfaces_in_order(theme: &Theme) -> [Color; 7] {
+        [
+            chrome::bar(theme),
+            chrome::title_bar(theme),
+            chrome::panel(theme),
+            chrome::open_panel(theme),
+            chrome::hover(theme),
+            chrome::border(theme),
+            chrome::hover_border(theme),
+        ]
+    }
+
+    #[test]
+    fn chrome_surfaces_do_not_follow_the_text_colour() {
+        for base in every_theme() {
+            let seed = base.seed();
+            for text in [
+                Color::WHITE,
+                Color::BLACK,
+                Color::from_rgb8(0x80, 0x40, 0x40),
+            ] {
+                let other =
+                    Theme::custom("Other text", iced::theme::palette::Seed { text, ..seed });
+                assert_eq!(
+                    surfaces_in_order(&base),
+                    surfaces_in_order(&other),
+                    "{base}"
+                );
+                assert_eq!(chrome::page(&base), chrome::page(&other), "{base}");
+            }
+        }
+    }
+
+    /// In every theme each surface is a visible step from the one before:
+    /// panels stand off the bars, hover off the panel, borders off both.
+    #[test]
+    fn chrome_surfaces_step_apart_in_every_theme() {
+        for base in every_theme() {
+            let theme = base.clone();
+            let lightness = surfaces_in_order(&theme).map(|color| to_oklab(color)[0]);
+            for pair in lightness.windows(2) {
+                assert!((pair[1] - pair[0]).abs() >= 0.02, "{base}: {lightness:?}");
+            }
+        }
+    }
+
     #[test]
     fn icon_accents_read_on_the_ribbon() {
         for base in every_theme() {
-            let ui = ui_theme(&base);
+            let ui = base.clone();
             let p = ui.palette();
             for accent in [
                 p.primary.base.color,
@@ -477,7 +517,7 @@ mod tests {
             b.atan2(a).to_degrees()
         }
         for base in every_theme() {
-            let ui = ui_theme(&base);
+            let ui = base.clone();
             let panel = chrome::panel(&ui);
             let p = ui.palette();
             for accent in [
@@ -495,8 +535,8 @@ mod tests {
                 }
             }
         }
-        // Oxocarbon's red, 2.9:1 on its ribbon, stays a red.
-        let ui = ui_theme(&Theme::Oxocarbon);
+        // Oxocarbon's red stays a red where it has to lighten.
+        let ui = Theme::Oxocarbon;
         let red = icon_accent(ui.palette().danger.base.color, &ui);
         let [r, g, b, _] = red.into_rgba8();
         assert!(r > 230 && g < 80 && b < 60, "#{r:02x}{g:02x}{b:02x}");
@@ -513,114 +553,6 @@ mod tests {
         ] {
             let back = from_oklab(to_oklab(color)).unwrap();
             assert_eq!(back.into_rgba8(), color.into_rgba8());
-        }
-    }
-
-    #[test]
-    fn ui_theme_keeps_background_accents_and_name() {
-        for base in every_theme() {
-            let ui = ui_theme(&base);
-            let (before, after) = (base.seed(), ui.seed());
-            assert_eq!(after.background, before.background, "{base}");
-            assert_eq!(after.primary, before.primary, "{base}");
-            assert_eq!(after.success, before.success, "{base}");
-            assert_eq!(after.warning, before.warning, "{base}");
-            assert_eq!(after.danger, before.danger, "{base}");
-            assert_eq!(ui.to_string(), base.to_string());
-            assert_eq!(after.text, text_for(before.background), "{base}");
-        }
-    }
-
-    #[test]
-    fn the_chosen_theme_is_found_again_and_keeps_its_canvas_and_selection() {
-        for base in every_theme() {
-            let ui = ui_theme(&base);
-            assert_eq!(base_theme(&ui), base, "{base}");
-            // Saving keeps the name; loading it gives the same theme.
-            assert_eq!(
-                crate::app::config::builtin_theme(&ui.to_string()),
-                Some(base.clone())
-            );
-            assert_eq!(
-                crate::app::config::theme_canvas_background(&ui),
-                crate::app::config::theme_canvas_background(&base),
-                "{base}"
-            );
-            assert_eq!(
-                crate::ui::overlay::theme_selection_colors(&ui),
-                crate::ui::overlay::theme_selection_colors(&base),
-                "{base}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_users_own_theme_keeps_its_text() {
-        let seed = Seed {
-            text: Color::from_rgb(0.5, 0.2, 0.2),
-            ..Theme::Dark.seed()
-        };
-        let custom = Theme::custom(USER_THEME, seed);
-        assert_eq!(ui_theme(&custom), custom);
-    }
-
-    /// Contrast of the new text per surface. Run with `--ignored --nocapture`.
-    #[test]
-    #[ignore = "prints contrast per surface"]
-    fn print_contrast_per_surface() {
-        println!("| Theme | base | weak | strong | bar | title bar | panel | open panel | hover |");
-        println!("|---|---|---|---|---|---|---|---|---|");
-        for base in crate::app::config::all_themes() {
-            let ui = ui_theme(&base);
-            let text = ui.palette().background.base.text;
-            let cells: Vec<String> = text_surfaces(&ui)
-                .into_iter()
-                .map(|s| format!("{:.1}", wcag_contrast(text, s)))
-                .collect();
-            println!("| {base} | {} |", cells.join(" | "));
-        }
-    }
-
-    /// The contrast table of the report: text, muted text and icon accents,
-    /// worst surface, before and after. Run with `--ignored --nocapture`.
-    #[test]
-    #[ignore = "prints the contrast table"]
-    fn print_contrast_table() {
-        println!(
-            "| Theme | text before | text after | muted before | muted after | primary | success | warning | danger |"
-        );
-        println!("|---|---|---|---|---|---|---|---|---|");
-        for base in crate::app::config::all_themes() {
-            let ui = ui_theme(&base);
-            let before_text = base.palette().background.base.text;
-            let after_text = ui.palette().background.base.text;
-            // Muted text used to be the text at 0.68 alpha over the surface:
-            // its worst case is the text mixed 32 % towards each surface.
-            let before_muted = text_surfaces(&base)
-                .into_iter()
-                .map(|s| wcag_contrast(chrome::mix(before_text, s, MUTED_MAX_FADE), s))
-                .fold(f32::MAX, f32::min);
-            let accent = |c: Color| {
-                let panel = chrome::panel(&ui);
-                format!(
-                    "{:.1} → {:.1}",
-                    wcag_contrast(c, chrome::panel(&base)),
-                    wcag_contrast(icon_accent(c, &ui), panel)
-                )
-            };
-            let p = ui.palette();
-            println!(
-                "| {base} | {} {:.1} | {} {:.1} | {before_muted:.1} | {:.1} | {} | {} | {} | {} |",
-                hex(before_text),
-                worst_contrast(before_text, &base),
-                hex(after_text),
-                worst_contrast(after_text, &ui),
-                worst_contrast(muted_text(&ui), &ui),
-                accent(p.primary.base.color),
-                accent(p.success.base.color),
-                accent(p.warning.base.color),
-                accent(p.danger.base.color),
-            );
         }
     }
 }

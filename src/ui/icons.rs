@@ -176,7 +176,7 @@ fn large_art(bytes: &'static [u8]) -> Option<&'static [u8]> {
 ///   one;
 /// - below it, the 16 px drawing, unless that drawing scaled to the slot's
 ///   physical size would get thicker lines than the ribbon has while the
-///   32 px drawing would not. A 20 or 22 px slot at 150 % is 30 or 33 px,
+///   32 px drawing would not. A 20 or 22 px slot at 125 % is 25 or 28 px,
 ///   where the 16 px drawing's lines turn 2 px and the ribbon's are 1 px.
 ///
 /// The ribbon's own 16 px and 32 px slots never switch.
@@ -1817,13 +1817,14 @@ mod tests {
 
     /// A slot between 16 and 32 px (the dock rail's 20 px, a minimized
     /// panel button's 22 px) keeps the ribbon's line weight: the 32 px
-    /// drawing where the 16 px one would turn 2 px while the ribbon is 1 px.
+    /// drawing where the 16 px one would turn 2 px while the ribbon is 1 px
+    /// (at 125 %); from 150 % the ribbon is 2 px too.
     #[test]
     fn slots_between_the_sizes_keep_the_ribbons_line_weight() {
         let rail = |scale: f32| prefers_large_art((20.0 * scale).round() as u32, scale);
         assert!(!rail(1.0), "100 %: 16 px drawing, 1 px lines");
-        assert!(!rail(1.25), "125 %: 16 px drawing, 1 px lines");
-        assert!(rail(1.5), "150 %: 32 px drawing keeps 1 px lines");
+        assert!(rail(1.25), "125 %: 32 px drawing keeps 1 px lines");
+        assert!(!rail(1.5), "150 %: the ribbon is 2 px too");
         assert!(!rail(1.75), "175 %: the ribbon is 2 px too");
         assert!(!rail(2.0), "200 %: the ribbon is 2 px too");
         let button = |scale: f32| prefers_large_art((22.0 * scale).round() as u32, scale);
@@ -1832,7 +1833,7 @@ mod tests {
             button(1.25),
             "125 %: 28 px would turn the 16 px drawing 2 px"
         );
-        assert!(button(1.5), "150 %: 32 px drawing keeps 1 px lines");
+        assert!(!button(1.5), "150 %: the ribbon is 2 px too");
         assert!(!button(2.0), "200 %: the ribbon is 2 px too");
         // The ribbon's own sizes never switch.
         for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {

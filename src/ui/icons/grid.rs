@@ -9,14 +9,14 @@
 //! [`fit`] rewrites an icon for an exact physical size `N` instead, the way
 //! font hinting does for glyphs, before it is rasterised:
 //!
-//! - Every line gets the same weight `W`: 1 px below 175 %, 2 px from 175 %
+//! - Every line gets the same weight `W`: 1 px below 150 %, 2 px from 150 %
 //!   up (see [`line_weight`]). A stroke's points move to the centre of the
 //!   pixel column the art's pixel lands in (or onto a pixel edge for an even
 //!   `W`); curve control points move with their point.
 //! - Fill edges, mask and clip edges map through the same grid as the
 //!   strokes, so fills and lines keep their order: where one art pixel
 //!   becomes two screen pixels a 1 px gap may open beside a line, and from
-//!   175 % (2 px lines over 1.75 px art pixels) a line may reach 1 px into
+//!   150 % (2 px lines over 1.5 px art pixels) a line may reach 1 px into
 //!   its neighbour, but lines and fills never trade places.
 //! - Small filled rectangles (grips) keep one size everywhere —
 //!   `round(w × s)` px, never 2 × 3 next to 3 × 3 — centred where they were,
@@ -42,9 +42,9 @@ pub(super) fn art_size(text: &str) -> Option<u32> {
 }
 
 /// The weight of every line, in physical px, at scale `s` (physical px per
-/// art px): 1 below 1.75, 2 from 1.75 up, and so on.
+/// art px), rounded: 1 below 1.5, 2 from 1.5 up, 3 from 2.5, and so on.
 pub(super) fn line_weight(s: f64) -> u32 {
-    ((s + 0.25).floor() as u32).max(1)
+    ((s + 0.5).floor() as u32).max(1)
 }
 
 /// The art (`art` px square) rewritten as `n` × `n` physical px with every
@@ -593,9 +593,10 @@ mod tests {
     fn line_weight_follows_the_scale() {
         assert_eq!(line_weight(1.0), 1);
         assert_eq!(line_weight(1.25), 1);
-        assert_eq!(line_weight(1.5), 1);
+        assert_eq!(line_weight(1.5), 2);
         assert_eq!(line_weight(1.75), 2);
         assert_eq!(line_weight(2.0), 2);
+        assert_eq!(line_weight(2.5), 3);
         assert_eq!(line_weight(0.875), 1);
     }
 
@@ -679,8 +680,8 @@ mod tests {
     fn a_fill_inside_a_frame_never_overlaps_it() {
         // A stroked frame round a fill that fills it exactly. When one art
         // pixel becomes two screen pixels, a 1 px line cannot fill both, so
-        // a 1 px gap may open on one side. From 175 % lines are 2 px while
-        // an art pixel is only 1.75 px, so a line may reach 1 px into the
+        // a 1 px gap may open on one side. From 150 % lines are 2 px while
+        // an art pixel is only 1.5 px, so a line may reach 1 px into the
         // fill next to it, but never further.
         let source = r##"<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" stroke-width="1"><path d="M2.5 2.5H29.5V29.5H2.5Z" fill="none" stroke="#ffffff"/><path d="M3 3H29V29H3Z" fill="#ffffff" fill-opacity="0.12"/></svg>"##;
         for n in [24, 28, 40, 48, 56, 64] {

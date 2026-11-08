@@ -466,7 +466,7 @@ impl OpenCADStudio {
                     self.ui_theme.palette =
                         crate::app::config::UiThemePalette::from_iced(resolved.seed());
                     self.theme_color_inputs = self.ui_theme.palette.hex_values();
-                    self.active_theme = crate::ui::style::readable::ui_theme(&resolved);
+                    self.active_theme = resolved;
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
                     self.command_line.push_output(
@@ -483,7 +483,7 @@ impl OpenCADStudio {
                     self.ui_theme.name = t.to_string();
                     self.ui_theme.palette = crate::app::config::UiThemePalette::from_iced(t.seed());
                     self.theme_color_inputs = self.ui_theme.palette.hex_values();
-                    self.active_theme = crate::ui::style::readable::ui_theme(&t);
+                    self.active_theme = t.clone();
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
                     self.command_line

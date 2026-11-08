@@ -275,23 +275,14 @@ pub fn all_themes() -> Vec<iced::Theme> {
         .iter()
         .cloned()
         .chain(crate::ui::style::fusion_theme::fusion_themes())
+        .chain(crate::ui::style::studio_theme::studio_themes())
         .collect()
 }
 
 pub fn builtin_theme(name: &str) -> Option<iced::Theme> {
-    // Style code asks for this while drawing (`readable::base_theme`), and
-    // building every theme generates the Fusion palettes, so the list is
-    // made once. The first theme of a name wins, as a search would.
-    thread_local! {
-        static BY_NAME: rustc_hash::FxHashMap<String, iced::Theme> = {
-            let mut by_name = rustc_hash::FxHashMap::default();
-            for theme in all_themes() {
-                by_name.entry(theme.to_string()).or_insert(theme);
-            }
-            by_name
-        };
-    }
-    BY_NAME.with(|by_name| by_name.get(name).cloned())
+    all_themes()
+        .into_iter()
+        .find(|theme| theme.to_string() == name)
 }
 
 fn color_to_rgb(color: iced::Color) -> [u8; 3] {
@@ -516,9 +507,6 @@ impl ModelSpaceThemeConfig {
 
 /// Default canvas background for a given theme variant.
 pub fn theme_canvas_background(theme: &iced::Theme) -> [u8; 3] {
-    // Match the theme the user chose, not the readable copy `ui_theme` made.
-    let base = crate::ui::style::readable::base_theme(theme);
-    let theme = &base;
     match theme {
         iced::Theme::Light => [255, 255, 255],
         iced::Theme::SolarizedLight => [253, 246, 227],
@@ -542,7 +530,9 @@ pub fn theme_canvas_background(theme: &iced::Theme) -> [u8; 3] {
         // rule: black chrome is paired with a white canvas, so falling
         // through to the palette below would paint model space black and
         // undo the whole point of the theme.
-        other => match crate::ui::style::fusion_theme::fusion_canvas(other) {
+        other => match crate::ui::style::fusion_theme::fusion_canvas(other)
+            .or_else(|| crate::ui::style::studio_theme::studio_canvas(other))
+        {
             Some(rgb) => rgb,
             None => color_to_rgb(other.palette().background.base.color),
         },
@@ -578,6 +568,7 @@ pub fn parse_theme_name(s: &str) -> Option<iced::Theme> {
         "FERRA" => Some(iced::Theme::Ferra),
         "FUSIONBLACK" => Some(crate::ui::style::fusion_theme::fusion_black()),
         "FUSIONWHITE" => Some(crate::ui::style::fusion_theme::fusion_white()),
+        "STUDIODARK" => Some(crate::ui::style::studio_theme::studio_dark()),
         _ => None,
     }
 }

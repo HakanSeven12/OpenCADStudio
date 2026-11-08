@@ -10601,7 +10601,7 @@ impl OpenCADStudio {
                 self.ui_theme.name = theme.to_string();
                 self.ui_theme.palette = crate::app::config::UiThemePalette::from_iced(theme.seed());
                 self.theme_color_inputs = self.ui_theme.palette.hex_values();
-                self.active_theme = crate::ui::style::readable::ui_theme(&theme);
+                self.active_theme = theme;
                 self.sync_model_space_theme(true);
                 self.persist_settings_if_changed();
                 Task::none()
@@ -11319,15 +11319,14 @@ impl OpenCADStudio {
                     self.ui_theme.palette =
                         crate::app::config::UiThemePalette::from_iced(theme.seed());
                     self.theme_color_inputs = self.ui_theme.palette.hex_values();
-                    self.active_theme = crate::ui::style::readable::ui_theme(&theme);
+                    self.active_theme = theme;
                 } else {
                     self.ui_theme.name = "Custom".to_string();
                     if let Some(saved) = self.saved_custom_palette {
                         self.ui_theme.palette = saved;
                         self.theme_color_inputs = saved.hex_values();
                     }
-                    self.active_theme =
-                        crate::ui::style::readable::ui_theme(&self.ui_theme.to_iced());
+                    self.active_theme = self.ui_theme.to_iced();
                 }
                 self.sync_model_space_theme(true);
                 self.persist_settings_if_changed();
@@ -11341,8 +11340,7 @@ impl OpenCADStudio {
                 self.theme_color_inputs[index] = value.clone();
                 if self.ui_theme.palette.set_hex(index, &value) {
                     self.ui_theme.name = "Custom".to_string();
-                    self.active_theme =
-                        crate::ui::style::readable::ui_theme(&self.ui_theme.to_iced());
+                    self.active_theme = self.ui_theme.to_iced();
                     self.sync_model_space_theme(true);
                     self.persist_settings_if_changed();
                 }

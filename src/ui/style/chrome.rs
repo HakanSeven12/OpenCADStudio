@@ -1,8 +1,14 @@
 //! Colour tokens of the window chrome (ribbon, menu bar and their popups).
-//! Every token mixes the theme's background and text colours, so the chrome
-//! follows any iced or Fusion theme: `mix(bg, fg, t)` per channel, clamped.
-//! A negative `t` goes past the background, darker on a dark theme and
-//! lighter on a light one.
+//!
+//! The surfaces (bars, panels, hover, borders) come from the theme's
+//! background alone: its OKLCH lightness moved a fixed step, lighter on a
+//! dark theme and darker on a light one, with its hue kept (see
+//! [`super::readable::surface`]). The text colour has no part in them, so a
+//! theme's text can change without the ribbon changing shade. The steps are
+//! those of the prototype design, the Studio Dark theme.
+//!
+//! The text tokens mix the theme's background and text colours:
+//! `mix(bg, fg, t)` per channel, clamped, and are kept readable.
 
 use iced::{Color, Theme};
 
@@ -17,49 +23,55 @@ pub fn mix(bg: Color, fg: Color, t: f32) -> Color {
     }
 }
 
+/// A text colour: the background mixed towards the text by `t`.
 fn token(theme: &Theme, t: f32) -> Color {
     let background = theme.palette().background.base;
     mix(background.color, background.text, t)
 }
 
-/// Lines between bars; the darkest recess.
+/// A surface `step` of OKLCH lightness away from the background.
+fn surface(theme: &Theme, step: f32) -> Color {
+    super::readable::surface(theme, step)
+}
+
+/// Lines between bars; the darkest recess (a step back from the bars).
 pub fn page(theme: &Theme) -> Color {
-    token(theme, -0.10)
+    surface(theme, -0.070)
 }
 
 /// Menu-bar and tab-row background.
 pub fn bar(theme: &Theme) -> Color {
-    token(theme, 0.0)
+    theme.palette().background.base.color
 }
 
 /// Panel title strip.
 pub fn title_bar(theme: &Theme) -> Color {
-    token(theme, 0.056)
+    surface(theme, 0.039)
 }
 
 /// Ribbon tool area, active tab, popups.
 pub fn panel(theme: &Theme) -> Color {
-    token(theme, 0.111)
+    surface(theme, 0.073)
 }
 
 /// Panel body while its slide-out is open and unpinned.
 pub fn open_panel(theme: &Theme) -> Color {
-    token(theme, 0.162)
+    surface(theme, 0.107)
 }
 
 /// Hover and pressed background.
 pub fn hover(theme: &Theme) -> Color {
-    token(theme, 0.207)
+    surface(theme, 0.135)
 }
 
 /// Popup and control borders.
 pub fn border(theme: &Theme) -> Color {
-    token(theme, 0.267)
+    surface(theme, 0.175)
 }
 
 /// Hover outline of buttons.
 pub fn hover_border(theme: &Theme) -> Color {
-    token(theme, 0.308)
+    surface(theme, 0.199)
 }
 
 /// Section labels, shortcut text.

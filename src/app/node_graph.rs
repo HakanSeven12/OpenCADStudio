@@ -9,6 +9,8 @@
 //! group the panel folds ("Start X/Y/Z"), carrying a point. Linking two
 //! headers or two groups copies every value across.
 
+mod data;
+mod expr;
 pub(crate) mod ops;
 
 #[cfg(test)]

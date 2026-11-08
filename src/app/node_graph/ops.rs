@@ -7,7 +7,7 @@
 //! did (in-place edits restored from their snapshots, created objects
 //! erased), so evaluating twice never moves an object twice.
 
-use super::AppHost;
+use super::{data, AppHost};
 use crate::command::EntityTransform;
 use crate::scene::model::solid_history;
 use document::{EntityType, Handle};
@@ -37,6 +37,23 @@ const fn host(
         inputs,
         outputs,
         eval: Eval::Host,
+    }
+}
+
+/// A node computed from its inputs alone, in the application's library.
+const fn pure(
+    name: &'static str,
+    category: &'static str,
+    inputs: &'static [graph::ops::Input],
+    outputs: &'static [&'static str],
+    eval: fn(&[Value], &dyn graph::Host) -> Vec<Value>,
+) -> Spec {
+    Spec {
+        name,
+        category,
+        inputs,
+        outputs,
+        eval: Eval::Pure(eval),
     }
 }
 
@@ -509,6 +526,33 @@ pub const LIBRARY: &[Spec] = &[
         &["points"],
     ),
     host("Intersect", "Curve", &[v("a"), v("b")], &["points"]),
+    // ── Generic data (see `data`), under the graph's own categories ──────
+    pure("Expression", "Math",
+        &[s("expression", "a + b"), n("a", 0.0), n("b", 0.0), n("c", 0.0), n("d", 0.0), n("x", 0.0), n("y", 0.0)],
+        RESULT, data::expression),
+    pure("Interpolate Values", "Math", &[l("x list"), l("y list"), n("x", 0.0)], &["y"], data::interpolate_values),
+    pure("Choose", "Logic",
+        &[n("index", 0.0), l("option 0"), l("option 1"), l("option 2"), l("option 3"), l("option 4")],
+        &["value"], data::choose),
+    pure("Filter", "List", &[l("list"), s("condition", "x > 0")], &["in", "out", "index"], data::filter),
+    pure("Cull Pattern", "List", &[l("list"), l("pattern")], &["list"], data::cull_pattern),
+    pure("Repeat List", "List", &[l("list"), n("times", 2.0), n("length", 0.0)], &["list"], data::repeat_list),
+    pure("Zip", "List", &[l("a"), l("b"), l("c"), l("d")], &["rows"], data::zip),
+    pure("Weave", "List", &[l("a"), l("b")], &["list"], data::weave),
+    pure("Cross Reference", "List", &[l("a"), l("b")], &["a", "b"], data::cross_reference),
+    pure("Graft", "List", &[l("list")], &["list"], data::graft),
+    pure("Flatten Once", "List", &[l("list")], &["list"], data::flatten_once),
+    pure("List Depth", "List", &[l("list")], &["depth"], data::list_depth),
+    pure("Format Number", "Text",
+        &[n("value", 0.0), n("decimals", 2.0), n("digits", 1.0), n("group size", 0.0), s("separator", ","),
+            s("decimal mark", ".")],
+        RESULT, data::format_number_node),
+    pure("Format Text", "Text", &[s("template", "P-{a:00}"), v("a"), v("b"), v("c"), v("d")], RESULT,
+        data::format_text_node),
+    host("Read CSV", "Text", &[s("path", ""), b("header", true)],
+        &["column 1", "column 2", "column 3", "column 4", "column 5", "column 6", "column 7", "column 8",
+            "rows", "count"]),
+    host("Write CSV", "Text", &[l("rows"), s("path", ""), s("separator", ",")], &["text", "written"]),
 ];
 
 /// Upper bound on generated point counts, as in the graph's own library.
@@ -590,6 +634,22 @@ impl AppHost<'_> {
         let objects =
             |handles: Vec<Handle>| vec![Value::Array(handles.into_iter().map(object).collect())];
         match spec.name {
+            "Read CSV" => {
+                let header = graph::value::boolean(&a[1]).unwrap_or(true);
+                match self.file_path(&text(&a[0])).and_then(|path| std::fs::read_to_string(path).ok()) {
+                    Some(source) => data::csv_outputs(&source, header),
+                    None => vec![Value::Null; data::CSV_COLUMNS + 2],
+                }
+            }
+            "Write CSV" => {
+                let separator = match text(&a[2]) {
+                    separator if separator.is_empty() => ",".to_owned(),
+                    separator => separator,
+                };
+                let csv = data::csv_text(&list(&a[0]), &separator);
+                let written = self.file_path(&text(&a[1])).is_some_and(|path| write_text(&path, &csv));
+                vec![Value::String(csv), Value::Bool(written)]
+            }
             "Selected Objects" => objects(
                 self.scene()
                     .selected_entities()
@@ -1641,6 +1701,20 @@ impl AppHost<'_> {
         Value::Null
     }
 
+    /// The file `path` names: as given when absolute, otherwise next to the
+    /// drawing (once it has been saved).
+    fn file_path(&self, path: &str) -> Option<std::path::PathBuf> {
+        let path = std::path::Path::new(path.trim());
+        if path.as_os_str().is_empty() {
+            return None;
+        }
+        if path.is_absolute() {
+            return Some(path.to_owned());
+        }
+        let drawing = self.app.tabs[self.i].current_path.as_ref()?;
+        Some(drawing.parent()?.join(path))
+    }
+
     /// [`create`](Self::create) from an `entities_create` definition.
     fn build(&mut self, definition: Value) -> Value {
         let built = crate::entity_creation::build_entity(&definition, Some(&self.scene().document));
@@ -1665,4 +1739,19 @@ impl AppHost<'_> {
         tab.dirty = true;
         object(h)
     }
+}
+
+/// Writes `contents` to a `.csv` or `.txt` file, leaving it alone when it
+/// already holds them, so evaluating again does not touch the file. Other
+/// extensions are refused: a graph should not overwrite arbitrary files.
+fn write_text(path: &std::path::Path, contents: &str) -> bool {
+    let allowed = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("csv") || ext.eq_ignore_ascii_case("txt"));
+    if !allowed {
+        return false;
+    }
+    std::fs::read_to_string(path).is_ok_and(|current| current == contents)
+        || std::fs::write(path, contents).is_ok()
 }

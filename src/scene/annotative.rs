@@ -19,6 +19,28 @@ use document::types::{Vector2, Vector3};
 use document::{Document, Handle};
 use std::borrow::Cow;
 
+static SELECTION_ANNO_DISPLAY: std::sync::atomic::AtomicI16 = std::sync::atomic::AtomicI16::new(1);
+static ANNO_MONITOR: std::sync::atomic::AtomicI16 = std::sync::atomic::AtomicI16::new(-2);
+
+/// SELECTIONANNODISPLAY, a profile setting: 1 shows a selected annotative
+/// object's other scale representations dimmed, 0 hides them.
+pub(crate) fn selection_anno_display() -> i16 {
+    SELECTION_ANNO_DISPLAY.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn set_selection_anno_display(value: i16) {
+    SELECTION_ANNO_DISPLAY.store(value.clamp(0, 1), std::sync::atomic::Ordering::Relaxed);
+}
+
+/// ANNOMONITOR, a profile setting.
+pub(crate) fn anno_monitor() -> i16 {
+    ANNO_MONITOR.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn set_anno_monitor(value: i16) {
+    ANNO_MONITOR.store(value.clamp(-2, 2), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// MSLTSCALE: whether model-space linetypes follow the annotation scale. A
 /// drawing that doesn't store the variable gets its default, on.
 pub fn model_linetypes_follow_annotation(doc: &Document) -> bool {
@@ -646,11 +668,60 @@ pub fn remove_annotation_context_for_scale(
         set_entity_annotative(doc, entity, false);
         return true;
     }
+    let removed_default = match doc.objects.get(&leaf_h) {
+        Some(ObjectType::ObjectContextData(leaf)) if leaf.is_default => Some(leaf.scale),
+        _ => None,
+    };
     doc.objects.remove(&leaf_h);
     if let Some(ObjectType::Dictionary(coll)) = doc.objects.get_mut(&coll_h) {
         coll.entries.retain(|(_, h)| *h != leaf_h);
     }
+    // The object's own data is its default representation's. When that one
+    // goes, the first remaining representation becomes the default and the
+    // object takes its placement and size.
+    if let Some(old_scale) = removed_default {
+        promote_default_context(doc, entity, coll_h, old_scale);
+    }
     true
+}
+
+fn promote_default_context(doc: &mut Document, entity: Handle, coll_h: Handle, old_scale: Handle) {
+    let Some(next) = as_dict(doc, coll_h).and_then(|c| c.entries.first().map(|(_, h)| *h)) else {
+        return;
+    };
+    let new_scale = match doc.objects.get_mut(&next) {
+        Some(ObjectType::ObjectContextData(leaf)) => {
+            leaf.is_default = true;
+            leaf.scale
+        }
+        _ => return,
+    };
+    let inverse = |doc: &Document, scale: Handle| match doc.objects.get(&scale) {
+        Some(ObjectType::Scale(scale)) => Some(scale.inverse_factor()),
+        _ => None,
+    };
+    let ratio = match (inverse(doc, new_scale), inverse(doc, old_scale)) {
+        (Some(new), Some(old)) if old.abs() > 1e-12 && (new / old).is_finite() && new / old > 0.0 => {
+            new / old
+        }
+        _ => 1.0,
+    };
+    let Some(current) = doc.get_entity(entity) else {
+        return;
+    };
+    let mut placed = entity_for_annotation_context(doc, current, Some(new_scale)).into_owned();
+    match &mut placed {
+        EntityType::Text(text) => text.height *= ratio,
+        EntityType::MText(mtext) => {
+            mtext.height *= ratio;
+            mtext.rectangle_width *= ratio;
+        }
+        EntityType::AttributeDefinition(attribute) => attribute.height *= ratio,
+        _ => {}
+    }
+    if let Some(slot) = doc.get_entity_mut(entity) {
+        *slot = placed;
+    }
 }
 
 /// Resolve an entity's `ACDB_ANNOTATIONSCALES` collection dictionary handle, if

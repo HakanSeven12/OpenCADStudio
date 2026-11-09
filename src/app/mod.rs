@@ -2169,6 +2169,12 @@ pub(super) struct OpenCADStudio {
     /// The entity the Annotation Object Scale dialog is editing (its per-object
     /// annotation-scale membership).
     anno_object_scale_target: Option<document::types::Handle>,
+    /// The other objects the dialog edits together with the target.
+    anno_object_scale_extra: Vec<document::types::Handle>,
+    /// The scale list window asks which default list Reset restores.
+    scale_reset_asking: bool,
+    /// The Annotation Object Scale window's staged edits.
+    anno_object_scale: crate::ui::style::anno_object_scale::State,
     /// Open transaction for the scale manager — restored if the window closes
     /// without Apply, mirroring the style managers' staging.
     scale_stage: Option<crate::app::style_ops::ScaleStage>,
@@ -4709,8 +4715,32 @@ pub enum Message {
     HyperlinkCancel,
     /// Toggle whether the dialog's object has a representation for this scale.
     AnnoObjectScaleToggle(String),
+    /// Annotation Object Scale window: list only the shared scales.
+    AnnoObjectScaleCommon(bool),
+    /// Annotation Object Scale window: pick a scale in the list.
+    AnnoObjectScaleSelect(String),
+    /// Annotation Object Scale window: open the list of scales to add.
+    AnnoObjectScaleAdd,
+    /// Annotation Object Scale window: tick a scale to add.
+    AnnoObjectScaleAddToggle(String),
+    /// Annotation Object Scale window: add the ticked scales to the list.
+    AnnoObjectScaleAddOk,
+    /// Annotation Object Scale window: leave the Add list unchanged.
+    AnnoObjectScaleAddCancel,
+    /// Annotation Object Scale window: take the selected scale off the list.
+    AnnoObjectScaleDelete,
+    /// Annotation Object Scale window: apply the staged edits.
+    AnnoObjectScaleOk,
     /// Select a scale row in the manager (loads it into the editor).
     ScaleManagerSelect(String),
+    /// Move the selected scale one place up (-1) or down (1) in the list.
+    ScaleManagerMove(i32),
+    /// Ask which default scale list to restore.
+    ScaleManagerReset,
+    /// Restore the metric (0), imperial (1) or both (2) lists; 3 cancels.
+    ScaleManagerResetChoice(u8),
+    /// Apply the staged list and close the window.
+    ScaleManagerOk,
     /// Add a new scale to the list (staged) and select it for editing.
     ScaleManagerNew,
     /// Duplicate the selected scale under a unique name (staged).
@@ -6794,6 +6824,9 @@ impl OpenCADStudio {
             scale_manager_drawing_buf: String::new(),
             scale_rename: None,
             anno_object_scale_target: None,
+            anno_object_scale_extra: Vec::new(),
+            anno_object_scale: Default::default(),
+            scale_reset_asking: false,
             scale_rename_buf: String::new(),
             scale_stage: None,
             table_insert: Default::default(),

@@ -765,6 +765,77 @@ impl Scene {
         (wires, hatches)
     }
 
+    /// ANNOMONITOR 1: a yellow alert badge with an exclamation bar beside
+    /// the text of every dimension whose association no longer resolves
+    /// (measured: 17 x 11 px, 5 px right of the text, a quarter of the text
+    /// height above its middle; nothing at 0, -1 or -2). Screen size.
+    pub(super) fn anno_monitor_overlay(&self, pixel: f64) -> Vec<HatchModel> {
+        if crate::scene::annotative::anno_monitor() != 1 {
+            return Vec::new();
+        }
+        let block = self.content_render_block_handle();
+        let dimensions: Vec<Handle> = self
+            .document
+            .objects
+            .values()
+            .filter_map(|object| match object {
+                document::objects::ObjectType::Associative(object) => match &object.data {
+                    document::objects::AssociativeData::DimensionAssociation(association) => {
+                        Some(association.dimension)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        let mut out = Vec::new();
+        for handle in dimensions {
+            let Some(entity) = self.document.get_entity(handle) else {
+                continue;
+            };
+            if entity.common().owner_handle != block || self.entity_temporarily_hidden(handle) {
+                continue;
+            }
+            let broken = self
+                .dimension_association_status(handle)
+                .iter()
+                .any(|(_, status)| !matches!(status, crate::scene::dimension_assoc::ReferenceStatus::Resolved));
+            if !broken {
+                continue;
+            }
+            let Some((middle, width, height)) = crate::entities::dimension::as_dimension(entity)
+                .and_then(|dim| crate::entities::dimension::text_box(dim, &self.document))
+            else {
+                continue;
+            };
+            let left = middle.x + width * 0.5 + 5.0 * pixel;
+            let centre = middle.y + 0.25 * height;
+            let rect = |x0: f64, y0: f64, x1: f64, y1: f64| {
+                let z = middle.z as f32;
+                [
+                    glam::Vec3::new(x0 as f32, y0 as f32, z),
+                    glam::Vec3::new(x1 as f32, y0 as f32, z),
+                    glam::Vec3::new(x1 as f32, y1 as f32, z),
+                    glam::Vec3::new(x0 as f32, y1 as f32, z),
+                ]
+            };
+            let badge = rect(left, centre - 5.5 * pixel, left + 17.0 * pixel, centre + 5.5 * pixel);
+            let bar = rect(
+                left + 7.0 * pixel,
+                centre - 2.5 * pixel,
+                left + 10.0 * pixel,
+                centre + 4.5 * pixel,
+            );
+            if let Some(model) = Self::indicator_box(&badge, [0.996, 0.851, 0.004, 1.0]) {
+                out.push(model);
+            }
+            if let Some(model) = Self::indicator_box(&bar, [0.08, 0.08, 0.08, 1.0]) {
+                out.push(model);
+            }
+        }
+        out
+    }
+
     fn indicator_box(corners: &[glam::Vec3; 4], color: [f32; 4]) -> Option<HatchModel> {
         let ring: Vec<[f64; 2]> = corners.iter().map(|c| [c.x as f64, c.y as f64]).collect();
         let mut model = Self::area_preview_hatch(&[ring], false)?;

@@ -874,12 +874,13 @@ impl OpenCADStudio {
                 })
             }
             super::super::ModalKind::ScaleManager => {
-                let tab = &self.tabs[self.active_tab];
+                let i = self.active_tab;
+                let tab = &self.tabs[i];
                 let scales: Vec<(String, String)> = tab
                     .scene
-                    .scale_list()
+                    .scale_names_in_list_order()
                     .into_iter()
-                    .map(|(name, _, _)| {
+                    .map(|name| {
                         let ratio = tab
                             .scene
                             .scale_paper_drawing(&name)
@@ -889,8 +890,36 @@ impl OpenCADStudio {
                     })
                     .collect();
                 let current = tab.scene.document.header.current_annotation_scale.clone();
-                sized_flow(ex, 520, 360, |flow| {
+                let selected = &self.scale_manager_selected;
+                let at = scales.iter().position(|(name, _)| name.eq_ignore_ascii_case(selected));
+                let header = &tab.scene.document.header;
+                let paper_unit: i16 = if matches!(header.insertion_units, 1..=3 | 8..=10 | 21..=24) {
+                    1
+                } else {
+                    4
+                };
+                let units = tab
+                    .scene
+                    .scale_paper_drawing(selected)
+                    .map(|(paper, drawing)| {
+                        crate::ui::style::scale_manager::units_line(
+                            paper,
+                            drawing,
+                            paper_unit,
+                            header.insertion_units,
+                        )
+                    })
+                    .unwrap_or_default();
+                let list = crate::ui::style::scale_manager::ListState {
+                    can_up: at.is_some_and(|at| at > 0),
+                    can_down: at.is_some_and(|at| at + 1 < scales.len()),
+                    can_delete: at.is_some() && !self.anno_scale_referenced(i, selected),
+                    units,
+                    reset_asking: self.scale_reset_asking,
+                };
+                sized_flow(ex, 620, 380, |flow| {
                     crate::ui::style::scale_manager::view_window(
+                        list.clone(),
                         &scales,
                         &self.scale_manager_selected,
                         &current,
@@ -904,17 +933,9 @@ impl OpenCADStudio {
             }
             super::super::ModalKind::AnnoObjectScale => {
                 let tab = &self.tabs[self.active_tab];
-                let entity = self.anno_object_scale_target;
-                // Which scales the object currently has a representation for.
-                let members: Vec<document::types::Handle> = entity
-                    .map(|h| {
-                        crate::scene::annotative::object_scale_memberships(&tab.scene.document, h)
-                            .into_iter()
-                            .map(|(_, sh)| sh)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let label = entity
+                let objects = self.anno_object_scale.staged.len();
+                let label = self
+                    .anno_object_scale_target
                     .and_then(|h| tab.scene.document.get_entity(h))
                     .map(|e| match e {
                         document::EntityType::Text(_) => "TEXT",
@@ -923,24 +944,24 @@ impl OpenCADStudio {
                         document::EntityType::MultiLeader(_) => "MULTILEADER",
                         _ => "OBJECT",
                     })
+                    .map(|label| if objects > 1 { "MULTIPLE" } else { label })
                     .unwrap_or("—");
-                let scales: Vec<(String, String, bool)> = tab
+                let scales: Vec<(String, f64, f64)> = tab
                     .scene
-                    .scale_list()
+                    .scale_names_in_list_order()
                     .into_iter()
-                    .map(|(name, _, _)| {
-                        let sh = tab.scene.scale_object_handle(&name);
-                        let ratio = tab
-                            .scene
-                            .scale_paper_drawing(&name)
-                            .map(|(p, d)| format!("{p}:{d}"))
-                            .unwrap_or_default();
-                        let is_member = sh.map(|h| members.contains(&h)).unwrap_or(false);
-                        (name, ratio, is_member)
+                    .filter_map(|name| {
+                        let (paper, drawing) = tab.scene.scale_paper_drawing(&name)?;
+                        Some((name, paper, drawing))
                     })
                     .collect();
-                sized_flow(ex, 360, 420, |flow| {
-                    crate::ui::style::anno_object_scale::view_window(label, &scales, flow)
+                sized_flow(ex, 420, 420, |flow| {
+                    crate::ui::style::anno_object_scale::view_window(
+                        &self.anno_object_scale,
+                        label,
+                        &scales,
+                        flow,
+                    )
                 })
             }
             super::super::ModalKind::InsertTable => sized_flow(ex, 860, 560, |flow| {

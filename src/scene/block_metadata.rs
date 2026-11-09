@@ -36,7 +36,7 @@ pub(crate) fn hyperlink(document: &Document, name: &str) -> (String, String) {
         .unwrap_or_default()
 }
 
-fn ensure_application(document: &mut Document, app: &str) {
+pub(crate) fn ensure_application(document: &mut Document, app: &str) {
     if !document.app_ids.contains(app) {
         let mut entry = document::tables::AppId::new(app);
         entry.handle = document.allocate_handle();

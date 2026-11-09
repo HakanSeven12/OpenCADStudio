@@ -6830,6 +6830,12 @@ impl Scene {
         if self.has_own_scales() {
             return false;
         }
+        self.add_default_scales();
+        true
+    }
+
+    /// Add the standard scale set, skipping names the drawing already has.
+    fn add_default_scales(&mut self) {
         let unit_factor = self.default_scale_unit_factor();
         for &(label, factor) in self.default_scales() {
             // Fallback labels are "paper:drawing"; parse them for tidy whole
@@ -6845,6 +6851,192 @@ impl Scene {
             self.add_scale(label, paper, drawing / unit_factor);
         }
         self.bump_scale_epoch();
+    }
+
+    /// The scale list of the reference's new metric drawing, in its order:
+    /// its template's scales stored in metres (the first, `1:1000`, its unit
+    /// scale), then the standard list with the names they clash with
+    /// suffixed `_1`. The current annotation scale is `1:1_1`.
+    const NEW_DRAWING_SCALES: &'static [(&'static str, f64, f64)] = &[
+        ("1:1000", 1.0, 1.0),
+        ("1:1", 1.0, 0.001),
+        ("1:2", 1.0, 0.002),
+        ("1:5", 1.0, 0.005),
+        ("1:10", 1.0, 0.01),
+        ("1:20", 1.0, 0.02),
+        ("1:50", 1.0, 0.05),
+        ("1:100", 1.0, 0.1),
+        ("1:1_1", 1.0, 1.0),
+        ("1:2_1", 1.0, 2.0),
+        ("1:4", 1.0, 4.0),
+        ("1:5_1", 1.0, 5.0),
+        ("1:8", 1.0, 8.0),
+        ("1:10_1", 1.0, 10.0),
+        ("1:16", 1.0, 16.0),
+        ("1:20_1", 1.0, 20.0),
+        ("1:30", 1.0, 30.0),
+        ("1:40", 1.0, 40.0),
+        ("1:50_1", 1.0, 50.0),
+        ("1:100_1", 1.0, 100.0),
+        ("2:1", 2.0, 1.0),
+        ("4:1", 4.0, 1.0),
+        ("8:1", 8.0, 1.0),
+        ("10:1", 10.0, 1.0),
+        ("100:1", 100.0, 1.0),
+    ];
+
+    /// A new drawing's own scale list (see `NEW_DRAWING_SCALES`).
+    pub(crate) fn populate_new_drawing_scales(&mut self) {
+        if self.has_own_scales() {
+            return;
+        }
+        for (index, &(name, paper, drawing)) in Self::NEW_DRAWING_SCALES.iter().enumerate() {
+            self.add_scale(name, paper, drawing);
+            if let Some(handle) = self.scale_object_handle(name) {
+                if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
+                    scale.is_unit_scale = index == 0;
+                }
+            }
+        }
+        self.document.header.current_annotation_scale = "1:1_1".to_string();
+    }
+
+    /// `-SCALELISTEDIT` Reset: every scale except `keep` goes, then the
+    /// standard set is added after the kept ones.
+    pub fn reset_scale_list(&mut self, keep: &[String]) {
+        let imperial = self.prefers_imperial_scales() == Some(true);
+        self.reset_scale_list_to(keep, !imperial, imperial);
+    }
+
+    /// Reset to the metric list, the imperial one or both (the Edit
+    /// Drawing Scales window asks which), keeping the names in `keep`.
+    pub fn reset_scale_list_to(&mut self, keep: &[String], metric: bool, imperial: bool) {
+        let names = self.scale_names_in_list_order();
+        for name in names {
+            if !keep.iter().any(|kept| kept.eq_ignore_ascii_case(&name)) {
+                self.remove_scale(&name);
+            }
+        }
+        if metric {
+            self.add_metric_reset_scales();
+        }
+        if imperial {
+            for &(label, factor) in Self::DEFAULT_IMPERIAL_SCALES {
+                self.add_scale(label, 1.0, 1.0 / factor);
+            }
+        }
+        self.bump_scale_epoch();
+    }
+
+    fn add_metric_reset_scales(&mut self) {
+        // The reference's metric default list: the drawing's unit scale,
+        // named by the millimetres one drawing unit holds (1:1000 for
+        // metres), then the standard ratios as they are; a name the list
+        // keeps is not added again.
+        let unit = self.default_scale_unit_factor();
+        let unit_name = {
+            let text = format!("{unit:.6}");
+            format!("1:{}", text.trim_end_matches('0').trim_end_matches('.'))
+        };
+        if self.add_scale(&unit_name, 1.0, 1.0) {
+            if let Some(handle) = self.scale_object_handle(&unit_name) {
+                if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
+                    scale.is_unit_scale = true;
+                }
+            }
+        }
+        for &(name, paper, drawing) in Self::STANDARD_METRIC_RATIOS {
+            self.add_scale(name, paper, drawing);
+        }
+    }
+
+    /// Moves a scale one place up (`-1`) or down (`1`) in the drawing's list.
+    pub fn move_scale(&mut self, name: &str, step: i32) -> bool {
+        let Some(list) = self.scalelist_dict_handle() else {
+            return false;
+        };
+        let Some(handle) = self.scale_object_handle(name) else {
+            return false;
+        };
+        let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get_mut(&list) else {
+            return false;
+        };
+        let Some(at) = dictionary.entries.iter().position(|(_, h)| *h == handle) else {
+            return false;
+        };
+        let to = at as i64 + i64::from(step);
+        if to < 0 || to as usize >= dictionary.entries.len() {
+            return false;
+        }
+        dictionary.entries.swap(at, to as usize);
+        self.bump_scale_epoch();
+        true
+    }
+
+    /// The standard metric scale list, ratios as they are, in its order.
+    const STANDARD_METRIC_RATIOS: &'static [(&'static str, f64, f64)] = &[
+        ("1:1", 1.0, 1.0),
+        ("1:2", 1.0, 2.0),
+        ("1:4", 1.0, 4.0),
+        ("1:5", 1.0, 5.0),
+        ("1:8", 1.0, 8.0),
+        ("1:10", 1.0, 10.0),
+        ("1:16", 1.0, 16.0),
+        ("1:20", 1.0, 20.0),
+        ("1:30", 1.0, 30.0),
+        ("1:40", 1.0, 40.0),
+        ("1:50", 1.0, 50.0),
+        ("1:100", 1.0, 100.0),
+        ("2:1", 2.0, 1.0),
+        ("4:1", 4.0, 1.0),
+        ("8:1", 8.0, 1.0),
+        ("10:1", 10.0, 1.0),
+        ("100:1", 100.0, 1.0),
+    ];
+
+    /// The drawing's own scale names in the order its scale list holds them;
+    /// the substituted standard set when it holds none.
+    pub fn scale_names_in_list_order(&self) -> Vec<String> {
+        let listed: Vec<String> = self
+            .scalelist_dict_handle()
+            .and_then(|handle| match self.document.objects.get(&handle) {
+                Some(ObjectType::Dictionary(dictionary)) => Some(
+                    dictionary
+                        .entries
+                        .iter()
+                        .filter_map(|(_, handle)| match self.document.objects.get(handle) {
+                            Some(ObjectType::Scale(scale))
+                                if !scale.is_temporary
+                                    && !scale.name.contains('|')
+                                    && !scale.name.to_ascii_uppercase().ends_with("_XREF") =>
+                            {
+                                Some(scale.name.clone())
+                            }
+                            _ => None,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if listed.is_empty() {
+            self.scale_list().into_iter().map(|(name, _, _)| name).collect()
+        } else {
+            listed
+        }
+    }
+
+    /// Give an existing scale a new ratio.
+    pub fn redefine_scale(&mut self, name: &str, paper: f64, drawing: f64) -> bool {
+        let Some(handle) = self.scale_object_handle(name) else {
+            return false;
+        };
+        if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
+            scale.paper_units = paper;
+            scale.drawing_units = drawing;
+        }
+        self.bump_scale_epoch();
+        self.invalidate_annotation_dependencies();
         true
     }
 
@@ -7340,12 +7532,22 @@ impl Scene {
     /// of its default representation). `None` for anything else.
     pub(crate) fn annotative_text_height_factor(&self, handle: Handle) -> Option<f64> {
         let entity = self.document.get_entity(handle)?;
-        if !matches!(entity, EntityType::Text(_) | EntityType::MText(_))
-            || !crate::scene::annotative::is_annotative(&self.document, entity)
+        if !matches!(
+            entity,
+            EntityType::Text(_) | EntityType::MText(_) | EntityType::AttributeDefinition(_)
+        ) || !crate::scene::annotative::is_annotative(&self.document, entity)
         {
             return None;
         }
-        let scale = self.displayed_annotation_scale_handle();
+        // The representation shown: the current scale's, else the object's
+        // default one (a scale the object lacks shows it at that scale).
+        let scale = crate::scene::annotative::active_object_context_for_scale(
+            &self.document,
+            handle,
+            self.displayed_annotation_scale_handle(),
+        )
+        .map(|context| context.scale)
+        .or_else(|| self.displayed_annotation_scale_handle());
         let model_per_paper = scale
             .and_then(|scale| match self.document.objects.get(&scale) {
                 Some(ObjectType::Scale(scale)) => Some(1.0 / self.effective_scale_factor(scale)),

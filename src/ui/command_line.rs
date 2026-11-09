@@ -302,6 +302,9 @@ pub enum EntryKind {
     Output,
     Error,
     Info,
+    /// A row of a listing (`?` tables): drawn in a fixed-width font so its
+    /// space-padded columns line up.
+    Table,
 }
 
 /// Per-logical-line entry kinds for the selectable full-history editor.
@@ -497,6 +500,10 @@ impl CommandLine {
     }
     pub fn push_output(&mut self, msg: &str) {
         self.push(EntryKind::Output, msg.to_string());
+    }
+    /// One row of a space-aligned listing (`?` tables); see [`EntryKind::Table`].
+    pub fn push_table(&mut self, row: &str) {
+        self.push(EntryKind::Table, row.to_string());
     }
     pub fn push_error(&mut self, msg: &str) {
         self.error_revision = self.error_revision.wrapping_add(1);
@@ -985,6 +992,8 @@ impl CommandLine {
                             weight: iced::font::Weight::Bold,
                             ..self.font
                         });
+                    } else if kind == EntryKind::Table {
+                        txt = txt.font(iced::Font::MONOSPACE);
                     }
                     txt
                 };
@@ -1633,7 +1642,7 @@ fn history_color(theme: &Theme, kind: &EntryKind) -> Color {
     let palette = theme.palette();
     match kind {
         EntryKind::Command => text_color(theme),
-        EntryKind::Output => text_color(theme).scale_alpha(0.72),
+        EntryKind::Output | EntryKind::Table => text_color(theme).scale_alpha(0.72),
         EntryKind::Error => palette.danger.base.color,
         EntryKind::Info => user_text_color().unwrap_or_else(|| {
             accessible_accent_threshold(
@@ -1654,6 +1663,7 @@ fn history_highlight_format(
         color: Some(history_color(theme, kind)),
         font: match kind {
             EntryKind::Error => Some(iced::Font::DEFAULT.weight(iced::font::Weight::Bold)),
+            EntryKind::Table => Some(iced::Font::MONOSPACE),
             _ => None,
         },
     }

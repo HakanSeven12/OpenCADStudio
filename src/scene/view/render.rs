@@ -4493,6 +4493,7 @@ impl Scene {
         mix(annotation_scale.to_bits() as u64);
         mix(u64::from(content_viewport));
         mix(u64::from(all_visible));
+        mix(crate::scene::annotative::selection_anno_display() as u64);
         mix(self.active_viewport.map_or(0, |handle| handle.value()));
         mix(crate::scene::text::sdf_atlas::generation());
         for component in bg {
@@ -4612,7 +4613,12 @@ impl Scene {
                 continue;
             }
 
-            if !crate::scene::annotative::is_annotative(&self.document, entity) {
+            // SELECTIONANNODISPLAY: a selected annotative object shows its
+            // other scale representations; a hovered one does not.
+            if !selected
+                || crate::scene::annotative::selection_anno_display() == 0
+                || !crate::scene::annotative::is_annotative(&self.document, entity)
+            {
                 continue;
             }
 
@@ -4665,11 +4671,20 @@ impl Scene {
                     content_viewport.then_some(1.0),
                     self.reference_only.handles(),
                 );
+                // Dimmed: the selection colour halfway to the background,
+                // without the selected object's own highlight (measured: the
+                // other scales draw only in the halo colour).
+                let dim = [
+                    tint[0] + (bg[0] - tint[0]) * 0.5,
+                    tint[1] + (bg[1] - tint[1]) * 0.5,
+                    tint[2] + (bg[2] - tint[2]) * 0.5,
+                    tint[3],
+                ];
                 for wire in &mut context_wires {
-                    wire.color = tint;
-                    wire.selected = selected;
+                    wire.color = dim;
+                    wire.selected = false;
                     for vertex in &mut wire.text_verts {
-                        vertex.color = [tint[0], tint[1], tint[2], vertex.color[3]];
+                        vertex.color = [dim[0], dim[1], dim[2], vertex.color[3]];
                     }
                 }
                 wires.extend(context_wires);
@@ -5077,7 +5092,9 @@ impl Scene {
         };
         let (indicator_wires, indicator_hatches) = if show_live_overlay {
             let pixel = 2.0 * inst.camera.ortho_size() as f64 / f64::from(full.height.max(1.0));
-            self.table_indicator_overlay(pixel)
+            let (wires, mut hatches) = self.table_indicator_overlay(pixel);
+            hatches.extend(self.anno_monitor_overlay(pixel));
+            (wires, hatches)
         } else {
             (Vec::new(), Vec::new())
         };

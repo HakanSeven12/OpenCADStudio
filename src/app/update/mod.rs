@@ -6807,6 +6807,7 @@ impl OpenCADStudio {
                 // Snapshot so New / Copy / Delete / edits revert if closed
                 // without Apply.
                 self.scale_stage_begin();
+                self.scale_reset_asking = false;
                 // Fallback scales are virtual (no real objects), so they can't
                 // be edited or renamed. Materialise the standard set into real
                 // staged objects so the manager behaves like a drawing with its
@@ -6833,29 +6834,103 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AnnoObjectScaleOpen => {
-                // The dialog edits a single object's per-scale memberships.
+                // The dialog edits the selected objects' per-scale memberships.
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if handles.len() == 1 {
-                    let ok = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handles[0])
-                        .is_some_and(crate::scene::annotative::supports_annotation_context);
-                    if ok {
-                        self.anno_object_scale_target = Some(handles[0]);
-                        self.active_modal = Some(crate::app::ModalKind::AnnoObjectScale);
-                    } else {
-                        self.command_line.push_info(
-                            crate::t!("The selected object does not support annotation scales.")
-                                .as_ref(),
-                        );
-                    }
-                } else {
+                let handles: Vec<_> = self
+                    .property_target_handles(i)
+                    .into_iter()
+                    .filter(|handle| {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(*handle)
+                            .is_some_and(crate::scene::annotative::supports_annotation_context)
+                    })
+                    .collect();
+                if handles.is_empty() {
                     self.command_line.push_info(
-                        crate::t!("Select one object first, then run OBJECTSCALE.").as_ref(),
+                        crate::t!("The selected object does not support annotation scales.")
+                            .as_ref(),
                     );
+                } else {
+                    self.anno_object_scale_target = Some(handles[0]);
+                    self.anno_object_scale_extra = handles[1..].to_vec();
+                    let document = &self.tabs[i].scene.document;
+                    self.anno_object_scale = crate::ui::style::anno_object_scale::State {
+                        staged: handles
+                            .iter()
+                            .map(|handle| {
+                                let names = crate::scene::annotative::object_scale_memberships(
+                                    document, *handle,
+                                )
+                                .into_iter()
+                                .map(|(name, _)| name)
+                                .collect();
+                                (*handle, names)
+                            })
+                            .collect(),
+                        ..Default::default()
+                    };
+                    self.active_modal = Some(crate::app::ModalKind::AnnoObjectScale);
                 }
+                Task::none()
+            }
+            Message::AnnoObjectScaleCommon(common) => {
+                self.anno_object_scale.common_only = common;
+                Task::none()
+            }
+            Message::AnnoObjectScaleSelect(name) => {
+                self.anno_object_scale.selected = Some(name);
+                Task::none()
+            }
+            Message::AnnoObjectScaleAdd => {
+                self.anno_object_scale.adding = Some(Vec::new());
+                Task::none()
+            }
+            Message::AnnoObjectScaleAddToggle(name) => {
+                if let Some(ticked) = self.anno_object_scale.adding.as_mut() {
+                    if let Some(at) = ticked.iter().position(|t| t.eq_ignore_ascii_case(&name)) {
+                        ticked.remove(at);
+                    } else {
+                        ticked.push(name);
+                    }
+                }
+                Task::none()
+            }
+            Message::AnnoObjectScaleAddCancel => {
+                self.anno_object_scale.adding = None;
+                Task::none()
+            }
+            Message::AnnoObjectScaleAddOk => {
+                // The ticked scales go to every edited object lacking them,
+                // in the drawing's list order.
+                let ticked = self.anno_object_scale.adding.take().unwrap_or_default();
+                let order = self.tabs[self.active_tab].scene.scale_names_in_list_order();
+                for name in order
+                    .iter()
+                    .filter(|name| ticked.iter().any(|t| t.eq_ignore_ascii_case(name)))
+                {
+                    for (_, scales) in &mut self.anno_object_scale.staged {
+                        if !scales.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                            scales.push(name.clone());
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::AnnoObjectScaleDelete => {
+                if self.anno_object_scale.can_delete() {
+                    if let Some(name) = self.anno_object_scale.selected.take() {
+                        for (_, scales) in &mut self.anno_object_scale.staged {
+                            scales.retain(|s| !s.eq_ignore_ascii_case(&name));
+                        }
+                    }
+                }
+                Task::none()
+            }
+            Message::AnnoObjectScaleOk => {
+                self.apply_anno_object_scale();
+                self.close_active_modal();
                 Task::none()
             }
             Message::PropHyperlinkOpen => {
@@ -6966,19 +7041,36 @@ impl OpenCADStudio {
                 }
                 if let Some(sh) = self.tabs[i].scene.scale_handle_ensuring(&name) {
                     self.push_undo_snapshot(i, "OBJECTSCALE");
+                    let mut targets = vec![entity];
+                    targets.extend(self.anno_object_scale_extra.iter().copied());
+                    targets.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
                     let doc = &mut self.tabs[i].scene.document;
-                    let is_member = crate::scene::annotative::object_scale_memberships(doc, entity)
-                        .iter()
-                        .any(|(_, h)| *h == sh);
-                    if is_member {
-                        crate::scene::annotative::remove_annotation_context_for_scale(
-                            doc, entity, sh,
-                        );
-                    } else {
-                        crate::scene::annotative::create_annotation_context(doc, entity, sh);
+                    let has = |doc: &document::Document, handle| {
+                        crate::scene::annotative::object_scale_memberships(doc, handle)
+                            .iter()
+                            .any(|(_, h)| *h == sh)
+                    };
+                    // A scale every object has is taken off them all (none
+                    // loses its last scale); otherwise the others get it.
+                    let all = targets.iter().all(|handle| has(doc, *handle));
+                    for handle in &targets {
+                        if all {
+                            if crate::scene::annotative::object_scale_memberships(doc, *handle).len() > 1 {
+                                crate::scene::annotative::remove_annotation_context_for_scale(
+                                    doc, *handle, sh,
+                                );
+                            }
+                        } else if !has(doc, *handle) {
+                            crate::scene::annotative::create_annotation_context(doc, *handle, sh);
+                        }
                     }
                     self.tabs[i].dirty = true;
-                    self.invalidate_property_targets(i, &[entity]);
+                    let changes: Vec<_> = targets
+                        .iter()
+                        .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+                        .collect();
+                    self.tabs[i].scene.bump_entities(&changes);
+                    self.invalidate_property_targets(i, &targets);
                     self.refresh_properties();
                 } else {
                     self.command_line
@@ -7079,6 +7171,51 @@ impl OpenCADStudio {
                 }
                 Task::none()
             }
+            Message::ScaleManagerMove(step) => {
+                self.scale_apply_current();
+                let i = self.active_tab;
+                let selected = self.scale_manager_selected.clone();
+                if self.tabs[i].scene.move_scale(&selected, step) {
+                    self.scale_stage_mark();
+                }
+                Task::none()
+            }
+            Message::ScaleManagerReset => {
+                self.scale_reset_asking = true;
+                Task::none()
+            }
+            Message::ScaleManagerResetChoice(choice) => {
+                self.scale_reset_asking = false;
+                if choice < 3 {
+                    // Reset takes effect at once, as the reference's does:
+                    // the scales in use stay, the rest go, the chosen default
+                    // list is added after them.
+                    self.scale_apply_current();
+                    let i = self.active_tab;
+                    let keep: Vec<String> = self.tabs[i]
+                        .scene
+                        .scale_names_in_list_order()
+                        .into_iter()
+                        .filter(|name| self.anno_scale_referenced(i, name))
+                        .collect();
+                    self.tabs[i]
+                        .scene
+                        .reset_scale_list_to(&keep, choice != 1, choice != 0);
+                    self.scale_stage_mark();
+                    self.scale_stage_commit();
+                    let first = self.tabs[i].scene.scale_names_in_list_order().into_iter().next();
+                    if let Some(first) = first {
+                        self.load_scale_editor(&first);
+                    }
+                }
+                Task::none()
+            }
+            Message::ScaleManagerOk => {
+                self.scale_apply_current();
+                self.scale_stage_commit();
+                self.close_active_modal();
+                Task::none()
+            }
             Message::ScaleManagerApply => {
                 // Fold the editor into the selected scale, then commit the staged
                 // transaction (this edit plus any New / Copy / Delete since open)
@@ -7097,14 +7234,17 @@ impl OpenCADStudio {
                     .header
                     .current_annotation_scale
                     .clone();
+                // A scale in use is never deleted.
                 if !sel.is_empty()
                     && !sel.eq_ignore_ascii_case(&cur)
-                    && self.tabs[i].scene.remove_scale(&sel)
+                    && self.tabs[i].scene.scale_in_use_count(&sel) == 0
                 {
-                    self.scale_manager_selected.clear();
-                    self.scale_manager_paper_buf.clear();
-                    self.scale_manager_drawing_buf.clear();
-                    self.scale_stage_mark();
+                    if self.tabs[i].scene.remove_scale(&sel) {
+                        self.scale_manager_selected.clear();
+                        self.scale_manager_paper_buf.clear();
+                        self.scale_manager_drawing_buf.clear();
+                        self.scale_stage_mark();
+                    }
                 }
                 Task::none()
             }

@@ -3,6 +3,8 @@ use crate::command::CadCommand;
 use iced::Task;
 use std::path::PathBuf;
 
+mod anno_scaling;
+pub(crate) use anno_scaling::{anno_monitor, selection_anno_display, set_anno_monitor, set_selection_anno_display};
 mod attdef;
 mod attman;
 mod block_cmdline;
@@ -332,6 +334,9 @@ impl OpenCADStudio {
         };
         let resolved = self.resolve_alias(cmd);
         let cmd = resolved.as_deref().unwrap_or(cmd);
+        if let Some(task) = self.dispatch_anno_scaling(cmd, i) {
+            return Some(task);
+        }
         if let Some(task) = self.dispatch_block_editor_vars(cmd, i) {
             return Some(task);
         }

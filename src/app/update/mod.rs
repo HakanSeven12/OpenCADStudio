@@ -13278,15 +13278,14 @@ impl OpenCADStudio {
                     &self.tabs[i].scene.document,
                     definition,
                 );
+                use crate::ui::window::parameters_manager::Cell;
                 let Some(row) = rows
                     .iter()
                     .find(|row| row.name.eq_ignore_ascii_case(&name))
-                    .filter(|row| {
-                        if cell == crate::ui::window::parameters_manager::Cell::Description {
-                            row.description_writable
-                        } else {
-                            row.numeric
-                        }
+                    .filter(|row| match cell {
+                        Cell::Description => row.description_writable,
+                        Cell::Order => row.order_writable,
+                        Cell::Expression | Cell::Value => row.numeric,
                     })
                 else {
                     // Nothing to open here, so nothing stays open: a cell left on
@@ -13304,7 +13303,11 @@ impl OpenCADStudio {
                     return Task::none();
                 };
                 let name = row.name.clone();
-                let description = row.description.clone();
+                let opened = match cell {
+                    Cell::Description => row.description.clone(),
+                    Cell::Order => row.order.clone(),
+                    Cell::Expression | Cell::Value => String::new(),
+                };
                 let panel = &mut self.tabs[i].parameters_panel;
                 panel.editing = Some(crate::ui::window::parameters_manager::Edit {
                     definition,
@@ -13313,16 +13316,11 @@ impl OpenCADStudio {
                     name,
                     cell,
                 });
-                // A description field opens on the text it replaces, as an
-                // in-place edit does; a numeric field starts empty so a typed
-                // number replaces the printed one without first deleting it.
-                if cell == crate::ui::window::parameters_manager::Cell::Description {
-                    panel.edit_buf = description.clone();
-                    panel.edit_original = description;
-                } else {
-                    panel.edit_buf.clear();
-                    panel.edit_original.clear();
-                }
+                // A text field opens on the text it replaces, as an in-place
+                // edit does; a numeric field starts empty so a typed number
+                // replaces the printed one without first deleting it.
+                panel.edit_buf = opened.clone();
+                panel.edit_original = opened;
                 iced::widget::operation::focus(
                     crate::ui::window::parameters_manager::edit_input_id(),
                 )
@@ -13381,9 +13379,7 @@ impl OpenCADStudio {
                     let Some(edit) = panel.editing.as_ref() else {
                         return Task::none();
                     };
-                    let description =
-                        edit.cell == crate::ui::window::parameters_manager::Cell::Description;
-                    let typed = if description {
+                    let typed = if edit.cell.is_text() {
                         panel.edit_buf != panel.edit_original
                     } else {
                         !panel.edit_buf.trim().is_empty()

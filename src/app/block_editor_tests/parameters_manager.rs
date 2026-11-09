@@ -91,6 +91,10 @@ fn a_visibility_row_names_the_parameter_and_prints_no_number() {
         !found.description_writable,
         "a visibility row names no parameter component whose text it could write"
     );
+    assert!(
+        !found.order_writable,
+        "a visibility row has no parameter order to write"
+    );
 }
 
 #[test]
@@ -383,6 +387,134 @@ fn a_description_undone_under_the_open_field_is_not_written_back() {
     );
 }
 
+/// The order column ranks a parameter, not a row: both rows of a polar
+/// parameter print the rank typed on either of them, and the list keeps its
+/// alphabetical order because the rank is not a display position yet.
+#[test]
+fn an_order_ranks_the_whole_parameter() {
+    let (mut app, tab, definition) = open(
+        &[
+            "BPARAMETER POLAR 0,0 10,0 5,2",
+            "BPARAMETER LINEAR 0,0 3,4 6,6",
+        ],
+        &[],
+    );
+    answer(&mut app, "Distance1", Cell::Order, "2");
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").order,
+        "2",
+        "the typed rank is what the definition keeps"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Angle1").order,
+        "2",
+        "the other row of the same parameter prints the same rank"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance2").order,
+        "",
+        "a rank given to one parameter leaves the other unranked"
+    );
+    let rows = manager::rows(&app.tabs[tab].scene.document, definition);
+    assert_eq!(
+        rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+        ["Angle1", "Distance1", "Distance2"],
+        "the rank does not reorder the listed rows"
+    );
+}
+
+#[test]
+fn an_emptied_order_cell_clears_the_rank() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Order, "3");
+    answer(&mut app, "Distance1", Cell::Order, "");
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").order,
+        "",
+        "an emptied cell clears the rank"
+    );
+    let _ = app.update(Message::Undo);
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").order,
+        "3",
+        "and one undo step brings it back"
+    );
+}
+
+#[test]
+fn an_untouched_order_waits_for_its_own_field() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Order, "3");
+    let _ = app.update(Message::ParametersManagerEdit(
+        "Distance1".to_owned(),
+        Cell::Order,
+    ));
+    let _ = app.update(Message::ParametersManagerFocus(None));
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_some(),
+        "a field that has not been typed into stays open with the rank it shows"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").order,
+        "3",
+        "and writes nothing while it stays open"
+    );
+    let _ = app.update(Message::ParametersManagerInput(String::new()));
+    let _ = app.update(Message::ParametersManagerFocus(None));
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").order,
+        "",
+        "an emptied order is a rank to clear, so moving the click away commits it"
+    );
+}
+
+#[test]
+fn a_non_integer_order_is_refused_and_writes_nothing() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Order, "1.5");
+    assert_eq!(
+        app.command_line.last_error.as_deref(),
+        Some("Specify a whole-number parameter order."),
+        "the refusal says what the cell takes"
+    );
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_some(),
+        "the field stays open with the text to correct"
+    );
+    assert_eq!(
+        printed(&app, tab, definition, "Distance1").order,
+        "",
+        "and nothing is written"
+    );
+}
+
+/// The rank lives beside the parameter object in the drawing, so closing the
+/// session and reading the file back lists the same order column.
+#[test]
+fn the_order_survives_a_dxf_round_trip() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &[]);
+    answer(&mut app, "Distance1", Cell::Order, "3");
+    let path =
+        std::env::temp_dir().join(format!("ocs_parameters_order_{}.dxf", std::process::id()));
+    crate::io::save(&app.tabs[tab].scene.document, &path).expect("save the drawing");
+    let reopened = crate::io::load_file(&path).expect("reopen the drawing");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(
+        row(&manager::rows(&reopened, definition), "Distance1").order,
+        "3",
+        "the rank is kept in the file, not only in the open session"
+    );
+    let parameter = crate::scene::block_actions::all_parameters(&reopened, definition)[0].handle;
+    assert!(
+        matches!(
+            reopened.objects.get(&parameter),
+            Some(document::objects::ObjectType::DynamicBlock(object))
+                if object.xdictionary_handle.is_some()
+        ),
+        "the parameter names the dictionary that holds its rank, so another reader finds it"
+    );
+}
+
 #[test]
 fn a_polar_parameters_two_rows_keep_their_own_descriptions() {
     let (mut app, tab, definition) = open(&["BPARAMETER POLAR 0,0 10,0 5,2"], &[]);
@@ -428,6 +560,54 @@ fn an_attribute_row_opens_no_description_field() {
         manager::rows(&app.tabs[tab].scene.document, definition),
         before,
         "and nothing is written"
+    );
+}
+
+#[test]
+fn an_attribute_row_opens_no_order_field() {
+    let (mut app, tab, definition) = open(&["BPARAMETER LINEAR 0,0 10,0 6,6"], &["TAG1"]);
+    let before = manager::rows(&app.tabs[tab].scene.document, definition);
+    assert!(
+        !row(&before, "TAG1").order_writable,
+        "an attribute row has no parameter rank to keep"
+    );
+    assert!(
+        row(&before, "Distance1").order_writable,
+        "a parameter row keeps a rank"
+    );
+    answer(&mut app, "TAG1", Cell::Order, "2");
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_none(),
+        "an attribute's row opens no order field"
+    );
+    assert_eq!(
+        manager::rows(&app.tabs[tab].scene.document, definition),
+        before,
+        "and nothing is written"
+    );
+}
+
+/// A point's axes print a position rather than a number the manager writes, but
+/// the parameter itself still takes a rank, so its order cell opens.
+#[test]
+fn a_point_row_opens_its_order_field() {
+    let (mut app, tab, definition) = open(&["BPARAMETER POINT 0,0 5,5"], &[]);
+    let name = manager::rows(&app.tabs[tab].scene.document, definition)
+        .into_iter()
+        .find(|row| row.type_name == "Point")
+        .expect("the placed point parameter gets a row")
+        .name;
+    let _ = app.update(Message::ParametersManagerEdit(name.clone(), Cell::Order));
+    assert!(
+        app.tabs[tab].parameters_panel.editing.is_some(),
+        "the point row opens an order field even though its numeric cells stay printed"
+    );
+    let _ = app.update(Message::ParametersManagerInput("1".to_owned()));
+    let _ = app.update(Message::ParametersManagerCommit);
+    assert_eq!(
+        printed(&app, tab, definition, &name).order,
+        "1",
+        "and the typed rank is kept"
     );
 }
 

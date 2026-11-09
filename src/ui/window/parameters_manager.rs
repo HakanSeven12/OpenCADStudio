@@ -228,6 +228,16 @@ pub enum Cell {
     Expression,
     Value,
     Description,
+    Order,
+}
+
+impl Cell {
+    /// Whether the cell opens on the text it replaces. A numeric cell opens
+    /// empty, so an untouched field writes nothing; a text cell can be emptied
+    /// on purpose, so moving the click away is a write of its text.
+    pub fn is_text(self) -> bool {
+        matches!(self, Self::Description | Self::Order)
+    }
 }
 
 /// The cell a manager edit is open on, and the parameter it writes. The panel is
@@ -341,14 +351,15 @@ fn number_cell(
     .into()
 }
 
-/// A description cell: a row that names parameter text opens an in-place field
+/// A text cell: a row that names parameter text opens an in-place field
 /// carrying the text it will replace; a row that names none keeps the printed
-/// cell. The writable cell fills the flexible Description column, so the click
+/// cell. A zero width fills the flexible Description column, so the click
 /// target stays the whole cell as the pane grows.
-fn description_cell(
+fn text_cell(
     definition: document::Handle,
     name: &str,
     value: &str,
+    which: Cell,
     writable: bool,
     panel: &Panel,
     width: f32,
@@ -356,28 +367,31 @@ fn description_cell(
     if !writable {
         return cell(value, width);
     }
-    if panel.is_open(definition, name, Cell::Description) {
-        return container(
+    if panel.is_open(definition, name, which) {
+        let field = container(
             text_input(" ", &panel.edit_buf)
                 .id(edit_input_id())
                 .on_input(Message::ParametersManagerInput)
                 .on_submit(Message::ParametersManagerCommit)
                 .size(11),
-        )
-        .width(Fill)
-        .into();
+        );
+        return if width > 0.0 {
+            field.width(Length::Fixed(width)).into()
+        } else {
+            field.width(Fill).into()
+        };
     }
-    container(
+    let printed = container(
         button(text(if value.is_empty() { " " } else { value }.to_owned()).size(11))
             .width(Fill)
             .clip(true)
-            .on_press(Message::ParametersManagerEdit(
-                name.to_owned(),
-                Cell::Description,
-            )),
-    )
-    .width(Fill)
-    .into()
+            .on_press(Message::ParametersManagerEdit(name.to_owned(), which)),
+    );
+    if width > 0.0 {
+        printed.width(Length::Fixed(width)).into()
+    } else {
+        printed.width(Fill).into()
+    }
 }
 
 fn show_cell(name: &str, show: bool, width: f32) -> Element<'static, Message> {
@@ -615,13 +629,22 @@ fn row_line(entry: &Row, panel: &Panel, definition: document::Handle) -> Element
         cells.push(show_cell(name, entry.show, COLUMNS[4].0));
     }
     if panel.columns[Column::Order.index()] {
-        cells.push(cell(&entry.order, COLUMNS[5].0));
+        cells.push(text_cell(
+            definition,
+            name,
+            &entry.order,
+            Cell::Order,
+            entry.order_writable,
+            panel,
+            COLUMNS[5].0,
+        ));
     }
     if panel.columns[Column::Description.index()] {
-        cells.push(description_cell(
+        cells.push(text_cell(
             definition,
             name,
             &entry.description,
+            Cell::Description,
             entry.description_writable,
             panel,
             COLUMNS[6].0,
@@ -705,7 +728,8 @@ mod tests {
                 type_name: "Polar",
                 numeric: true,
                 show: true,
-                order: String::new(),
+                order: "2".into(),
+                order_writable: true,
                 description: "Left edge".into(),
                 description_writable: true,
             },
@@ -718,6 +742,7 @@ mod tests {
                 numeric: false,
                 show: true,
                 order: String::new(),
+                order_writable: true,
                 description: String::new(),
                 description_writable: true,
             },
@@ -730,6 +755,7 @@ mod tests {
                 numeric: false,
                 show: true,
                 order: String::new(),
+                order_writable: false,
                 description: String::new(),
                 description_writable: false,
             },
@@ -1074,6 +1100,7 @@ mod tests {
             numeric: true,
             show: true,
             order: String::new(),
+            order_writable: true,
             description: String::new(),
             description_writable: true,
         });
@@ -1149,6 +1176,49 @@ mod tests {
         assert!(
             attribute.find(edit_input_id()).is_err(),
             "an attribute row has no parameter text to edit"
+        );
+    }
+
+    #[test]
+    fn the_order_field_opens_only_on_a_parameter_row() {
+        let definition = document::Handle::new(1);
+        let width = PanelId::ParametersManager.default_width();
+        let open = |name: &str| Panel {
+            editing: Some(Edit {
+                definition,
+                parameter: document::Handle::new(9),
+                component: crate::scene::model::object::BlockParameterComponent::Angle,
+                name: name.to_owned(),
+                cell: Cell::Order,
+            }),
+            edit_buf: "3".to_owned(),
+            ..Panel::default()
+        };
+        let mut parameter = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), &open("Angle1"), definition, width, chrome()),
+        );
+        assert!(
+            parameter.find(edit_input_id()).is_ok(),
+            "the order cell of a parameter opens its own field"
+        );
+        assert!(
+            locate(&Panel::default(), "2").is_some(),
+            "a closed order cell prints the stored rank"
+        );
+        assert!(
+            locate(&open("Angle1"), "2").is_none(),
+            "and the open field replaces the rank it is editing"
+        );
+        let mut attribute = iced_test::simulator::Simulator::with_size(
+            Default::default(),
+            iced::Size::new(width, 800.0),
+            view(&sample(), &open("TAG1"), definition, width, chrome()),
+        );
+        assert!(
+            attribute.find(edit_input_id()).is_err(),
+            "an attribute row has no parameter order to edit"
         );
     }
 

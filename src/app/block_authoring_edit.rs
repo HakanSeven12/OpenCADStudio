@@ -501,12 +501,10 @@ impl OpenCADStudio {
             return Task::none();
         };
         let typed = self.tabs[i].parameters_panel.edit_buf.clone();
-        let editing_description =
-            edit.cell == crate::ui::window::parameters_manager::Cell::Description;
         // Opening a numeric cell and leaving it alone writes nothing; an empty
-        // field is the sign that nothing was typed into it. A description cell
-        // opens on its text, so an emptied field is a text to write.
-        if !editing_description && typed.trim().is_empty() {
+        // field is the sign that nothing was typed into it. A text cell opens
+        // on its text, so an emptied field is a text to write.
+        if !edit.cell.is_text() && typed.trim().is_empty() {
             self.clear_parameters_manager_cell(i);
             return Task::none();
         }
@@ -526,41 +524,46 @@ impl OpenCADStudio {
             return Task::none();
         }
         let mut staged = self.tabs[i].scene.document.clone();
-        let written = if editing_description {
-            manager::write_description(
+        let written = match edit.cell {
+            crate::ui::window::parameters_manager::Cell::Description => manager::write_description(
                 &mut staged,
                 definition,
                 edit.parameter,
                 edit.component,
                 &typed,
-            )
-        } else {
-            // The cells print in the drawing's units, so a typed value is read
-            // back in them too.
-            crate::entities::common::set_unit_context(
-                crate::entities::common::UnitContext::from_header(
-                    &self.tabs[i].scene.document.header,
-                ),
-            );
-            let Some(value) = crate::app::block_parameter_properties::parse_value(&typed) else {
-                // A refusal from the cell itself leaves the field open with what
-                // was typed in it, so the number only has to be corrected, not
-                // retyped. A refusal after the field has gone away has nothing
-                // left to correct.
-                if !keep_open {
-                    self.clear_parameters_manager_cell(i);
-                }
-                self.command_line
-                    .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
-                return Task::none();
-            };
-            manager::write_number(
-                &mut staged,
-                definition,
-                edit.parameter,
-                edit.component,
-                value,
-            )
+            ),
+            crate::ui::window::parameters_manager::Cell::Order => {
+                manager::write_order(&mut staged, definition, edit.parameter, &typed)
+            }
+            crate::ui::window::parameters_manager::Cell::Expression
+            | crate::ui::window::parameters_manager::Cell::Value => {
+                // The cells print in the drawing's units, so a typed value is
+                // read back in them too.
+                crate::entities::common::set_unit_context(
+                    crate::entities::common::UnitContext::from_header(
+                        &self.tabs[i].scene.document.header,
+                    ),
+                );
+                let Some(value) = crate::app::block_parameter_properties::parse_value(&typed) else {
+                    // A refusal from the cell itself leaves the field open with
+                    // what was typed in it, so the number only has to be
+                    // corrected, not retyped. A refusal after the field has gone
+                    // away has nothing left to correct.
+                    if !keep_open {
+                        self.clear_parameters_manager_cell(i);
+                    }
+                    self.command_line
+                        .push_error(crate::t!("Specify a finite numeric parameter value.").as_ref());
+                    return Task::none();
+                };
+                manager::write_number(
+                    &mut staged,
+                    definition,
+                    edit.parameter,
+                    edit.component,
+                    value,
+                )
+            }
         };
         match written {
             Ok(true) => {

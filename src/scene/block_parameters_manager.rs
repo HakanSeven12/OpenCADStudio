@@ -42,6 +42,10 @@ pub struct Row {
     pub numeric: bool,
     pub show: bool,
     pub order: String,
+    /// Whether the row's `Order` cell names a parameter rank the manager writes
+    /// back. A lookup, a visibility parameter and an attribute are not a
+    /// parameter object of the definition, so their order cell stays as printed.
+    pub order_writable: bool,
     pub description: String,
     /// Whether the row's `Description` cell names parameter text the manager
     /// writes back. A lookup, a visibility parameter and an attribute name no
@@ -114,7 +118,8 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
                 type_name,
                 numeric: writable(&p, field.component),
                 show: field.show,
-                order: String::new(),
+                order: order_text(doc, p.handle),
+                order_writable: true,
                 description: field.description.to_owned(),
                 description_writable: description_field(p.polar, p.xy, field.component).is_some(),
             });
@@ -159,6 +164,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             numeric: false,
             show,
             order: String::new(),
+            order_writable: false,
             description: String::new(),
             description_writable: false,
         });
@@ -183,6 +189,7 @@ fn attribute_rows(doc: &Document, definition: Handle) -> Vec<Row> {
             numeric: false,
             show: true,
             order: String::new(),
+            order_writable: false,
             description: String::new(),
             description_writable: false,
         })
@@ -414,6 +421,62 @@ pub fn write_number(
         Part::End,
         document::types::Vector3::new(at.x, at.y, at.z),
     )
+}
+
+const ORDER_RECORD: &str = "OPENCAD_PARAMETERS_MANAGER";
+const ORDER_CODE: i32 = 90;
+/// A row that names no parameter object has nowhere to keep a rank.
+pub const NO_ORDER: &str = "This row has no order to edit.";
+
+/// The rank a parameter keeps beside its own object, or `None` while unranked.
+fn stored_order(doc: &Document, parameter: Handle) -> Option<i32> {
+    doc.xrecord(parameter, ORDER_RECORD)?.get_i32(ORDER_CODE)
+}
+
+fn order_text(doc: &Document, parameter: Handle) -> String {
+    stored_order(doc, parameter).map_or_else(String::new, |rank| rank.to_string())
+}
+
+/// Write a row's rank onto the parameter it names. The rank belongs to the
+/// parameter as a whole, so both rows of a polar or XY parameter print the same
+/// number, and it is kept in the parameter's own extension dictionary so it
+/// travels with the drawing. An empty cell clears the rank.
+pub fn write_order(
+    doc: &mut Document,
+    definition: Handle,
+    parameter: Handle,
+    text: &str,
+) -> Result<bool, &'static str> {
+    actions::all_parameters(doc, definition)
+        .into_iter()
+        .find(|p| p.handle == parameter)
+        .ok_or(NO_ORDER)?;
+    let text = text.trim();
+    let rank = if text.is_empty() {
+        None
+    } else {
+        Some(
+            text.parse::<i32>()
+                .map_err(|_| "Specify a whole-number parameter order.")?,
+        )
+    };
+    if stored_order(doc, parameter) == rank {
+        return Ok(false);
+    }
+    let record = doc.ensure_xrecord(parameter, ORDER_RECORD);
+    let dictionary = doc.extension_dictionary_handle(parameter).ok_or(NO_ORDER)?;
+    if let Some(ObjectType::XRecord(record)) = doc.objects.get_mut(&record) {
+        record.remove_by_code(ORDER_CODE);
+        if let Some(rank) = rank {
+            record.add_int32(ORDER_CODE, rank);
+        }
+    }
+    // The writers emit an object's extension dictionary from the object itself,
+    // so the parameter has to name the dictionary it now owns.
+    if let Some(ObjectType::DynamicBlock(object)) = doc.objects.get_mut(&parameter) {
+        object.xdictionary_handle = Some(dictionary);
+    }
+    Ok(true)
 }
 
 const NO_DESCRIPTION: &str = "This row has no description to edit.";

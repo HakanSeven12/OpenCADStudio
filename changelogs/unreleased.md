@@ -11,10 +11,13 @@
 
 * **Parameter Order:** The Parameters Manager's Order cell takes a whole-number rank for the parameter its row names; both rows of an XY or polar parameter print the same rank; an emptied cell clears it; the listed rows stay alphabetical.
 * **`EATTEDIT`:** The command reaches the editor `ATTEDIT` opens, on a selected block reference or after the pick, and completes from the command line.
+* **`-LINETYPE`:** The command-line form creates, renames and deletes linetypes as well as listing, loading and setting them, with quoted names for scripts.
 
 ### 🐛 Bug Fixes
 
 * **`ATTSYNC`:** A named block is synchronised directly instead of starting the interactive prompt; references rebuild from the definition in order, keep the values their tags carried, and a newly defined tag takes its default.
 * **Block Editor Parameter Sets:** A box or pair set abandoned before its action steps restores the definition it started from, so a rerun does not author a second parameter.
 * **Attribute Definition Editor:** Card headings use the palettes' muted label colour and the pick buttons draw a dotted square over a crosshair.
+* **Linetypes in Use:** `PURGE` keeps a linetype that a multiline style, multileader, table border or saved layer state still uses, and plugin deletes also respect block attributes; renaming a linetype updates attributes, multiline styles and saved layer states; plugins can no longer create a linetype whose name has a comma or whose pattern starts with a gap.
+* **`LINETYPE SET`:** The next object drawn takes the new current linetype, and the ribbon shows it straight away.
 * **Attribute Manager:** The live toggle reads Auto preview changes; Constant shows as a disabled mode pill and the second tab reads Text Options; the properties tab lists a read-only Plot style row reporting the default.

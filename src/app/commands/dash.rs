@@ -23,12 +23,87 @@ fn run(name: &str, args: &[&str]) -> Result<PromptStep, PromptStep> {
     )))
 }
 
+/// A `.lin`-style list of lengths, such as `1.5,-0.25,0,-0.75`.
+fn parse_linetype_pattern(text: &str) -> Option<Vec<f64>> {
+    text.split(',')
+        .map(|length| length.trim().parse::<f64>().ok())
+        .collect()
+}
+
 /// `name` matches one of the comma-separated, wildcard-capable `list`.
 fn listed(name: &str, list: &str) -> bool {
     list.split(',')
         .map(str::trim)
         .filter(|pattern| !pattern.is_empty())
         .any(|pattern| wildcard_match(name, pattern))
+}
+
+/// Split a command line into words, keeping a `"double quoted"` run (which may
+/// be empty or hold spaces) as one word without its quotes.
+pub(super) fn split_quoted(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word: Option<String> = None;
+    let mut quoted = false;
+    for c in line.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                word.get_or_insert_with(String::new);
+            }
+            c if c.is_whitespace() && !quoted => words.extend(word.take()),
+            c => word.get_or_insert_with(String::new).push(c),
+        }
+    }
+    words.extend(word);
+    words
+}
+
+const LINETYPE_OPTIONS: [(&str, &str); 6] = [
+    ("?", "?"),
+    ("Create", "CREATE"),
+    ("Delete", "DELETE"),
+    ("Load", "LOAD"),
+    ("Rename", "RENAME"),
+    ("Set", "SET"),
+];
+
+fn linetype_flow() -> PromptFlow {
+    flow(|q| {
+        let option = q.keyword(
+            crate::t!("-LINETYPE  Enter an option [?/Create/Delete/Load/Rename/Set]:").into_owned(),
+            None,
+            &LINETYPE_OPTIONS,
+        )?;
+        if matches!(option, "?" | "LOAD") {
+            return run("-LINETYPE", &[option]);
+        }
+        let name = q.text(
+            crate::t!("-LINETYPE  Enter linetype name:").into_owned(),
+            None,
+        )?;
+        match option {
+            "CREATE" => {
+                let description = q.text(
+                    crate::t!("-LINETYPE  Enter description <none>:").into_owned(),
+                    Some(String::new()),
+                )?;
+                let pattern = q.text(
+                    crate::t!("-LINETYPE  Enter pattern, for example 1.5,-0.25,0,-0.75:")
+                        .into_owned(),
+                    None,
+                )?;
+                run("-LINETYPE", &[option, &name, &description, &pattern])
+            }
+            "RENAME" => {
+                let new = q.text(
+                    crate::t!("-LINETYPE  Enter new linetype name:").into_owned(),
+                    None,
+                )?;
+                run("-LINETYPE", &[option, &name, &new])
+            }
+            _ => run("-LINETYPE", &[option, &name]),
+        }
+    })
 }
 
 const LAYER_OPTIONS: [(&str, &str); 19] = [
@@ -788,6 +863,11 @@ impl OpenCADStudio {
     /// they start the prompt sequence; with the answers they finish it.
     pub(super) fn dispatch_dash(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let (verb, rest) = cmd.split_once(' ').unwrap_or((cmd, ""));
+        let verb = if verb.eq_ignore_ascii_case("-LINETYPE") {
+            "-LINETYPE"
+        } else {
+            verb
+        };
         let start = |app: &mut Self, command: ScriptPromptCommand| {
             app.command_line.push_info(&command.prompt());
             app.command_line.set_step_options(command.options());
@@ -812,6 +892,15 @@ impl OpenCADStudio {
                     self,
                     ScriptPromptCommand::new("-LAYER", layer_flow(current)),
                 );
+            }
+            "-LINETYPE" if rest.is_empty() => {
+                start(self, ScriptPromptCommand::new("-LINETYPE", linetype_flow()))
+            }
+            "-LINETYPE" => {
+                // A prompt run arrives as a JSON array, a typed line as words.
+                let args: Vec<String> =
+                    serde_json::from_str(rest).unwrap_or_else(|_| split_quoted(rest));
+                task = self.dash_linetype(i, &args);
             }
             "-PURGE" if rest.is_empty() => {
                 start(self, ScriptPromptCommand::new("-PURGE", purge_flow()))
@@ -987,6 +1076,109 @@ impl OpenCADStudio {
         self.tabs[i].dirty = true;
         self.commit_layer_undo(i, undo);
         self.refresh_layer_panel();
+    }
+
+    /// The answers of `-LINETYPE`. List, Load and Set are the `LINETYPE`
+    /// options; Create, Delete and Rename go through the linetype service.
+    fn dash_linetype(&mut self, i: usize, args: &[String]) -> Task<Message> {
+        use crate::scene::linetype_service as service;
+        let usage = |app: &mut Self| {
+            app.command_line.push_info(
+                crate::t!("Usage: -LINETYPE CREATE <name> [description] <pattern> | RENAME <old> <new> | DELETE <name> | LIST | LOAD | SET <name>").as_ref(),
+            );
+        };
+        let option = args.first().map(|s| s.to_uppercase()).unwrap_or_default();
+        let arg = |n: usize| args.get(n).map(String::as_str).unwrap_or("");
+        let report = |app: &mut Self, error: service::LinetypeError| {
+            app.command_line.push_error(&format!("-LINETYPE: {error}"));
+        };
+        match (option.as_str(), args.len()) {
+            ("?" | "LIST", 1) => return self.dispatch_command("LINETYPE LIST"),
+            ("L" | "LOAD", 1) => return self.dispatch_command("LINETYPE LOAD"),
+            ("S" | "SET", 2) => {
+                return self.dispatch_command(&format!("LINETYPE SET \"{}\"", arg(1)));
+            }
+            ("C" | "CREATE", 3 | 4) => {
+                let (description, pattern_text) = if args.len() == 4 {
+                    (arg(2), arg(3))
+                } else {
+                    ("", arg(2))
+                };
+                let Some(pattern) = parse_linetype_pattern(pattern_text) else {
+                    self.command_line.push_error(
+                        crate::tf!("-LINETYPE: \"{pattern_text}\" is not a list of lengths.")
+                            .as_ref(),
+                    );
+                    return Task::none();
+                };
+                let document = &self.tabs[i].scene.document;
+                match service::plan_create(document, arg(1), description, &pattern) {
+                    Err(error) => report(self, error),
+                    Ok(linetype) => {
+                        let name = linetype.name.clone();
+                        self.push_undo_snapshot(i, "LINETYPE");
+                        match service::apply_create(&mut self.tabs[i].scene.document, linetype) {
+                            Err(error) => {
+                                self.discard_last_undo_entry(i);
+                                report(self, error);
+                            }
+                            Ok(_) => {
+                                self.command_line.push_output(
+                                    crate::tf!("Linetype \"{name}\" created.").as_ref(),
+                                );
+                                self.finish_linetype_change(i, &[name]);
+                            }
+                        }
+                    }
+                }
+            }
+            ("R" | "RENAME", 3) => {
+                let document = &self.tabs[i].scene.document;
+                match service::plan_rename(document, arg(1), arg(2)) {
+                    Err(error) => report(self, error),
+                    Ok(rename) => {
+                        self.push_undo_snapshot(i, "LINETYPE");
+                        match service::apply_rename(&mut self.tabs[i].scene.document, &rename) {
+                            Err(error) => {
+                                self.discard_last_undo_entry(i);
+                                report(self, error);
+                            }
+                            Ok(_) => {
+                                let (old, new) = (rename.old, rename.new);
+                                self.command_line.push_output(
+                                    crate::tf!("Linetype \"{old}\" renamed to \"{new}\".").as_ref(),
+                                );
+                                self.finish_linetype_change(i, &[old, new]);
+                            }
+                        }
+                    }
+                }
+            }
+            ("D" | "DELETE", 2) => {
+                let document = &self.tabs[i].scene.document;
+                match service::plan_delete(document, arg(1)) {
+                    Err(error) => report(self, error),
+                    Ok(linetype) => {
+                        self.push_undo_snapshot(i, "LINETYPE");
+                        service::apply_delete(&mut self.tabs[i].scene.document, &linetype);
+                        let name = linetype.name;
+                        self.command_line
+                            .push_output(crate::tf!("Linetype \"{name}\" deleted.").as_ref());
+                        self.finish_linetype_change(i, &[name]);
+                    }
+                }
+            }
+            _ => usage(self),
+        }
+        Task::none()
+    }
+
+    fn finish_linetype_change(&mut self, i: usize, names: &[String]) {
+        self.tabs[i].dirty = true;
+        self.tabs[i].scene.invalidate_layer_dependencies(names);
+        self.tabs[i].scene.bump_geometry();
+        self.sync_ribbon_layers();
+        self.sync_ribbon_from_selection();
     }
 
     fn dash_layer(&mut self, i: usize, args: &[String]) -> Task<Message> {

@@ -1918,44 +1918,9 @@ impl<'a> HostSession<'a> {
         &mut self,
         operation: ocs_plugin_api::host::TableOperation,
     ) -> Result<Handle, String> {
+        use crate::scene::linetype_service as service;
         use ocs_plugin_api::host::TableOperation;
-        let protected = |name: &str| {
-            ["CONTINUOUS", "BYLAYER", "BYBLOCK"].contains(&name.trim().to_uppercase().as_str())
-        };
-        let check_pattern = |pattern: &[f64]| -> Result<(), String> {
-            if !(2..=12).contains(&pattern.len()) {
-                return Err("a linetype pattern needs 2 to 12 elements".to_owned());
-            }
-            if pattern.iter().any(|v| !v.is_finite() || v.abs() > 1.0e6) {
-                return Err("linetype pattern lengths must be finite and within 1e6".to_owned());
-            }
-            if !pattern.iter().any(|v| *v >= 0.0) || !pattern.iter().any(|v| *v < 0.0) {
-                return Err(
-                    "a linetype pattern needs at least one dash or dot and one gap".to_owned(),
-                );
-            }
-            if pattern.iter().map(|v| v.abs()).sum::<f64>() <= 0.0 {
-                return Err("a linetype pattern must have a nonzero length".to_owned());
-            }
-            Ok(())
-        };
-        let build = |lt: &mut document::tables::LineType, pattern: &[f64]| {
-            lt.elements = pattern
-                .iter()
-                .map(|length| document::tables::linetype::LineTypeElement {
-                    length: *length,
-                    complex: None,
-                })
-                .collect();
-            lt.pattern_length = pattern.iter().map(|v| v.abs()).sum();
-        };
-        let check_description = |text: &str| {
-            if text.chars().any(|c| c.is_control()) || text.chars().count() > 255 {
-                Err("a linetype description must be text of at most 255 characters".to_owned())
-            } else {
-                Ok(())
-            }
-        };
+        let refused = |error: service::LinetypeError| error.to_string();
         // Loading the standard linetypes first means a name that already exists as a
         // standard pattern (Dashed, Center, ...) is seen as taken.
         crate::io::linetypes::populate_document(self.document_mut());
@@ -1965,22 +1930,12 @@ impl<'a> HostSession<'a> {
                 description,
                 pattern,
             } => {
-                let name = validated_symbol_name(&name, "a linetype name")?;
-                if self.document().line_types.contains(&name) {
-                    return Err(format!("linetype {name:?} already exists"));
-                }
-                check_pattern(&pattern)?;
-                check_description(&description)?;
+                let linetype = service::plan_create(self.document(), &name, &description, &pattern)
+                    .map_err(refused)?;
                 self.push_undo("Create linetype");
-                let mut lt = document::tables::LineType::new(name.clone());
-                lt.description = description;
-                build(&mut lt, &pattern);
-                let handle = self.document_mut().allocate_handle();
-                lt.handle = handle;
-                self.document_mut()
-                    .line_types
-                    .add(lt)
-                    .map_err(|e| format!("the linetype could not be created: {e}"))?;
+                let name = linetype.name.clone();
+                let handle =
+                    service::apply_create(self.document_mut(), linetype).map_err(refused)?;
                 self.finish_linetype_change(&[name]);
                 Ok(handle)
             }
@@ -1989,130 +1944,36 @@ impl<'a> HostSession<'a> {
                 description,
                 pattern,
             } => {
-                let existing = self
-                    .document()
-                    .line_types
-                    .get(name.trim())
-                    .cloned()
-                    .ok_or_else(|| format!("linetype {:?} does not exist", name.trim()))?;
-                if protected(&existing.name) || existing.xref_dependent {
-                    return Err(format!("linetype {:?} cannot be changed", existing.name));
-                }
-                if existing.elements.iter().any(|e| e.complex.is_some()) {
-                    return Err(
-                        "a linetype with text or shape elements cannot be changed from a script"
-                            .to_owned(),
-                    );
-                }
-                if description.is_none() && pattern.is_none() {
-                    return Err("no linetype properties to change".to_owned());
-                }
-                if let Some(text) = &description {
-                    check_description(text)?;
-                }
-                if let Some(pattern) = &pattern {
-                    check_pattern(pattern)?;
-                }
+                let linetype = service::plan_modify(
+                    self.document(),
+                    &name,
+                    description.as_deref(),
+                    pattern.as_deref(),
+                )
+                .map_err(refused)?;
                 self.push_undo("Modify linetype");
-                let mut lt = existing.clone();
-                if let Some(text) = description {
-                    lt.description = text;
-                }
-                if let Some(pattern) = &pattern {
-                    build(&mut lt, pattern);
-                }
-                if let Some(slot) = self.document_mut().line_types.get_mut(&existing.name) {
-                    *slot = lt;
-                }
-                self.finish_linetype_change(&[existing.name.clone()]);
-                Ok(existing.handle)
+                let name = linetype.name.clone();
+                let handle = service::apply_modify(self.document_mut(), linetype);
+                self.finish_linetype_change(&[name]);
+                Ok(handle)
             }
             TableOperation::LinetypeRename { from, to } => {
-                let existing = self
-                    .document()
-                    .line_types
-                    .get(from.trim())
-                    .cloned()
-                    .ok_or_else(|| format!("linetype {:?} does not exist", from.trim()))?;
-                if protected(&existing.name) || existing.xref_dependent {
-                    return Err(format!("linetype {:?} cannot be renamed", existing.name));
-                }
-                let to = validated_symbol_name(&to, "a linetype name")?;
-                if existing.name.eq_ignore_ascii_case(&to) {
+                if from.trim() != to.trim() && from.trim().eq_ignore_ascii_case(to.trim()) {
                     return Err("the new linetype name matches the current one (a case-only change is not supported)".to_owned());
                 }
-                if self.document().line_types.contains(&to) {
-                    return Err(format!("linetype {to:?} already exists"));
-                }
+                let rename = service::plan_rename(self.document(), &from, &to).map_err(refused)?;
                 self.push_undo("Rename linetype");
-                let old = existing.name.clone();
-                let handle = existing.handle;
-                let doc = self.document_mut();
-                let mut lt = existing;
-                lt.name = to.clone();
-                doc.line_types.remove(&old);
-                doc.line_types
-                    .add(lt)
-                    .map_err(|e| format!("the linetype could not be renamed: {e}"))?;
-                for layer in doc.layers.iter_mut() {
-                    if layer.line_type.eq_ignore_ascii_case(&old) {
-                        layer.line_type = to.clone();
-                    }
-                }
-                for entity in doc.entities_mut() {
-                    if entity.common().linetype.eq_ignore_ascii_case(&old) {
-                        entity.common_mut().linetype = to.clone();
-                    }
-                }
-                if doc.header.current_linetype_name.eq_ignore_ascii_case(&old) {
-                    doc.header.current_linetype_name = to.clone();
-                }
-                self.finish_linetype_change(&[old, to]);
+                let handle =
+                    service::apply_rename(self.document_mut(), &rename).map_err(refused)?;
+                self.finish_linetype_change(&[rename.old, rename.new]);
                 Ok(handle)
             }
             TableOperation::LinetypeDelete { name } => {
-                let existing = self
-                    .document()
-                    .line_types
-                    .get(name.trim())
-                    .cloned()
-                    .ok_or_else(|| format!("linetype {:?} does not exist", name.trim()))?;
-                if protected(&existing.name) || existing.xref_dependent {
-                    return Err(format!("linetype {:?} cannot be deleted", existing.name));
-                }
-                let doc = self.document();
-                let in_use = doc
-                    .header
-                    .current_linetype_name
-                    .eq_ignore_ascii_case(&existing.name)
-                    || doc
-                        .layers
-                        .iter()
-                        .any(|layer| layer.line_type.eq_ignore_ascii_case(&existing.name))
-                    || doc.entities().any(|entity| {
-                        entity
-                            .common()
-                            .linetype
-                            .eq_ignore_ascii_case(&existing.name)
-                    })
-                    || doc.dim_styles.iter().any(|style| {
-                        [
-                            style.dimltex_handle,
-                            style.dimltex1_handle,
-                            style.dimltex2_handle,
-                        ]
-                        .contains(&existing.handle)
-                    });
-                if in_use {
-                    return Err(format!(
-                        "linetype {:?} is current or still in use",
-                        existing.name
-                    ));
-                }
+                let linetype = service::plan_delete(self.document(), &name).map_err(refused)?;
                 self.push_undo("Delete linetype");
-                self.document_mut().line_types.remove(&existing.name);
-                self.finish_linetype_change(&[existing.name]);
-                Ok(existing.handle)
+                let handle = service::apply_delete(self.document_mut(), &linetype);
+                self.finish_linetype_change(&[linetype.name]);
+                Ok(handle)
             }
             _ => Err("unsupported table operation".to_owned()),
         }
@@ -2124,6 +1985,10 @@ impl<'a> HostSession<'a> {
             .scene
             .invalidate_layer_dependencies(names);
         self.app.tabs[self.tab].scene.bump_geometry();
+        if self.tab == self.app.active_tab {
+            self.app.sync_ribbon_layers();
+            self.app.sync_ribbon_from_selection();
+        }
         self.publish_document_view();
     }
 
@@ -5543,6 +5408,69 @@ mod tests {
     use document::entities::{Line, Point};
     use document::xdata::XDataValue;
     use ocs_plugin_api::host::DocumentReader;
+
+    /// Plugins get the service's rules: an attribute counts as a use, and a
+    /// rename reaches it, as they do on the command line.
+    #[test]
+    fn linetype_operations_follow_the_shared_rules() {
+        use ocs_plugin_api::host::TableOperation as Op;
+        let create = |name: &str, pattern: &[f64]| Op::LinetypeCreate {
+            name: name.to_owned(),
+            description: String::new(),
+            pattern: pattern.to_vec(),
+        };
+        let rename = |from: &str, to: &str| Op::LinetypeRename {
+            from: from.to_owned(),
+            to: to.to_owned(),
+        };
+        let mut app = OpenCADStudio::new_for_test();
+        app.tabs[0].is_start = false;
+        let mut host = HostSession::new(&mut app, 0);
+
+        assert!(host
+            .linetype_operation(create("Gap First", &[-1.0, 1.0]))
+            .is_err());
+        assert!(host
+            .linetype_operation(create("Comma,Name", &[1.0, -1.0]))
+            .is_err());
+        assert!(
+            host.linetype_operation(create("dashed", &[1.0, -1.0]))
+                .is_err(),
+            "a standard name is taken"
+        );
+        let created = host
+            .linetype_operation(create("Posts", &[12.0, -3.0, 2.0, -3.0]))
+            .unwrap();
+        let stored = host.document().line_types.get("Posts").unwrap();
+        assert_eq!(stored.handle, created);
+        assert_eq!(stored.pattern_length, 20.0);
+
+        assert!(
+            host.linetype_operation(rename("Posts", "POSTS")).is_err(),
+            "a plugin still cannot change only the case"
+        );
+
+        let mut attribute = document::entities::AttributeEntity::new("TAG".into(), "VALUE".into());
+        attribute.common.linetype = "Posts".into();
+        let mut insert = document::entities::Insert::new("HOLDER", document::Vector3::ZERO);
+        insert.attributes.push(attribute);
+        let insert = host
+            .document_mut()
+            .add_entity(EntityType::Insert(insert))
+            .unwrap();
+        let delete = |name: &str| Op::LinetypeDelete {
+            name: name.to_owned(),
+        };
+        let refusal = host.linetype_operation(delete("Posts")).unwrap_err();
+        assert!(refusal.contains("PURGE"), "{refusal}");
+
+        let renamed = host.linetype_operation(rename("Posts", "Rails")).unwrap();
+        assert_eq!(renamed, created, "the handle survives");
+        let Some(EntityType::Insert(insert)) = host.document().get_entity(insert) else {
+            panic!("the insert is gone");
+        };
+        assert_eq!(insert.attributes[0].common.linetype, "Rails");
+    }
 
     #[test]
     fn selection_query_is_live_and_replacement_is_validated() {

@@ -24,6 +24,7 @@ pub(crate) mod block_parameters_manager;
 pub(crate) mod block_point_parameter;
 pub(crate) mod block_properties_table;
 pub mod block_service;
+pub mod linetype_service;
 pub mod block_visibility;
 pub mod cache;
 pub mod compare;

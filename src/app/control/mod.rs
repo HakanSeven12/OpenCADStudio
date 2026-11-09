@@ -617,7 +617,7 @@ impl OpenCADStudio {
             "documents":self.tabs.iter().map(|t|json!({"id":t.id,"title":t.tab_title,"path":t.current_path,"dirty":t.dirty,"revision":t.edit_revision,"start":t.is_start})).collect::<Vec<_>>(),
             "selection":tab.scene.selected_handles_in_order().iter().map(|h|format!("{:X}",h.value())).collect::<Vec<_>>(),
             "selection_revision":self.control.selection_revision,
-            "command":command,"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
+            "command":command,"command_owner_client_id":self.control.owner.as_ref().filter(|(owner_tab,_)|*owner_tab==tab.id).map(|(_,owner)|owner.clone()),"modal":self.active_modal.as_ref().map(|m|format!("{m:?}")),
             "tool_windows":self.tool_windows.iter().map(|t|format!("{:?}",t.kind)).collect::<Vec<_>>(),
             "layout":tab.scene.current_layout,
             "block_editor":tab.active_block_edit
@@ -1061,14 +1061,24 @@ impl OpenCADStudio {
                 req["name"].as_str(),
                 Some("dialog_answer") | Some("dialog_ok") | Some("dialog_cancel") | Some("close_modal")
             );
+        // Another client's command ends only on an explicit `force`; a command
+        // the user holds stays cancellable, as Esc is (#2484).
+        let cancels_foreign_command = op == "cancel"
+            && req["force"].as_bool() != Some(true)
+            && self
+                .control
+                .owner
+                .as_ref()
+                .is_some_and(|(owner_tab, owner)| *owner_tab == tab.id && *owner != client);
         if tab.active_cmd.is_some()
-            && (self.control.owner.as_ref() != Some(&(tab.id, client.clone()))
-                || matches!(
-                    op,
-                    "run" | "start" | "new" | "open" | "activate" | "switch_document"
-                ))
-            && op != "cancel"
-            && !answers_attribute_form
+            && (cancels_foreign_command
+                || (self.control.owner.as_ref() != Some(&(tab.id, client.clone()))
+                    || matches!(
+                        op,
+                        "run" | "start" | "new" | "open" | "activate" | "switch_document"
+                    ))
+                    && op != "cancel"
+                    && !answers_attribute_form)
         {
             // Say who holds the command: the client that started it, or the
             // user (no client) when it was started or taken over in the window.
@@ -4638,6 +4648,35 @@ mod tests {
         let next = request(&mut app, json!({"op":"start","cmd":"LINE"}));
         assert_eq!(next["status"], "waiting_input", "{next}");
     }
+    #[test]
+    fn cancel_of_another_clients_command_needs_force() {
+        let mut app = OpenCADStudio::new_for_test();
+        request(&mut app, json!({"op":"new"}));
+        let id = app.control_state()["document_id"].clone();
+        let send = |app: &mut OpenCADStudio, extra: Value| {
+            let mut req = json!({
+                "protocol":1,
+                "request_id":format!("force-{}", app.control.serial),
+                "document_id":id.clone(),
+            });
+            req.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let (reply, task) = app.control_request(req);
+            app.drive_headless_task(task).unwrap();
+            reply
+        };
+        send(&mut app, json!({"op":"start","cmd":"LINE","client_id":"a"}));
+        assert_eq!(app.control_state()["command_owner_client_id"], "a");
+        let refused = send(&mut app, json!({"op":"cancel","client_id":"b"}));
+        assert_eq!(refused["code"], "command_busy");
+        assert_eq!(refused["owner_client_id"], "a");
+        assert!(!app.control_state()["command"].is_null());
+        let forced = send(&mut app, json!({"op":"cancel","client_id":"b","force":true}));
+        assert_ne!(forced["code"], "command_busy");
+        assert!(app.control_state()["command"].is_null());
+    }
+
     #[test]
     fn direct_user_input_takes_command_ownership() {
         let mut app = OpenCADStudio::new_for_test();

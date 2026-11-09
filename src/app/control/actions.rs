@@ -3535,6 +3535,7 @@ impl OpenCADStudio {
             // The open dialog's OK button.
             "dialog_ok" => match self.active_modal {
                 Some(crate::app::ModalKind::Unsaved) => Message::UnsavedDialogSave,
+                Some(crate::app::ModalKind::BlockEditChanges) => Message::BlockEditChangesSave,
                 Some(crate::app::ModalKind::XrefAttach) => {
                     Message::XrefAttach(crate::ui::window::xref_attach::XrefAttachMsg::Apply)
                 }
@@ -3602,6 +3603,13 @@ impl OpenCADStudio {
                         Message::UnsavedDialogDiscard
                     } else {
                         Message::UnsavedDialogCancel
+                    }
+                }
+                Some(crate::app::ModalKind::BlockEditChanges) => {
+                    if name == "dialog_discard" {
+                        Message::BlockEditChangesDiscard
+                    } else {
+                        Message::BlockEditChangesCancel
                     }
                 }
                 _ => return Err(failure("no_dialog", "No dialog with that button is open")),

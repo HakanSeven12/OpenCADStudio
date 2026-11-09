@@ -4734,6 +4734,60 @@ mod tests {
     }
 
     #[test]
+    fn block_edit_changes_dialog_is_answerable_through_the_automation_bridge() {
+        use crate::app::ModalKind;
+        use document::entities::{Insert, Line};
+        use document::types::Vector3;
+        use document::EntityType;
+
+        let mut app = OpenCADStudio::new_for_test();
+        assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
+        let i = app.active_tab;
+        app.tabs[i].scene.define_block_raw(
+            "EDIT_ME",
+            Vector3::ZERO,
+            vec![EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::UNIT_X,
+            ))],
+        );
+        let reference = app.tabs[i]
+            .scene
+            .document
+            .add_entity(EntityType::Insert(Insert::new("EDIT_ME", Vector3::ZERO)))
+            .unwrap();
+        app.tabs[i].dirty = false;
+
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+        assert!(app.tabs[i].active_block_edit.is_some());
+        let drawn = request(&mut app, json!({"op":"run","cmd":"LINE 0,0 5,0"}));
+        assert_eq!(drawn["ok"], true, "{drawn}");
+
+        let _ = app.dispatch_command("BCLOSE");
+        assert_eq!(app.active_modal, Some(ModalKind::BlockEditChanges));
+        let cancelled = request(&mut app, json!({"op":"action","name":"dialog_cancel"}));
+        assert_eq!(cancelled["ok"], true, "{cancelled}");
+        assert!(app.tabs[i].active_block_edit.is_some());
+
+        let _ = app.dispatch_command("BCLOSE");
+        assert_eq!(app.active_modal, Some(ModalKind::BlockEditChanges));
+        let discarded = request(&mut app, json!({"op":"action","name":"dialog_discard"}));
+        assert_eq!(discarded["ok"], true, "{discarded}");
+        assert!(app.tabs[i].active_block_edit.is_none());
+
+        let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
+        assert!(app.tabs[i].active_block_edit.is_some());
+        let drawn = request(&mut app, json!({"op":"run","cmd":"LINE 5,0 10,0"}));
+        assert_eq!(drawn["ok"], true, "{drawn}");
+
+        let _ = app.dispatch_command("BCLOSE");
+        assert_eq!(app.active_modal, Some(ModalKind::BlockEditChanges));
+        let saved = request(&mut app, json!({"op":"action","name":"dialog_ok"}));
+        assert_ne!(saved["code"], "no_dialog", "{saved}");
+        assert!(app.tabs[i].active_block_edit.is_none());
+    }
+
+    #[test]
     fn pending_request_id_reuse_rejects_changed_payload() {
         let mut app = OpenCADStudio::new_for_test();
         app.main_window = Some(iced::window::Id::unique());

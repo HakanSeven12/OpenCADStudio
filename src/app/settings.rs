@@ -1515,7 +1515,7 @@ impl Default for UserSettings {
             offset_gap_type: 0,
             trim_extend_quick: true,
             match_mode: crate::entities::match_props::MatchOpts::DEFAULT_MODE,
-            measuregeom_quick: true,
+            measuregeom_quick: false,
             revcloud_create_mode: 1,
             revcloud_arc_variance: true,
             revcloud_grips: true,

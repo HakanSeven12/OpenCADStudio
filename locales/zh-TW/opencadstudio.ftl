@@ -7275,6 +7275,30 @@ measurement =
     .different-line = 請選取不同的直線。
     .invalid-point = 請指定座標為有限值的點。
     .degenerate-ray = 射線端點必須與角度頂點不同。
+    .distance = Distance = { $value }
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
+    .first-line = { $command }  Select first line or [Points] (smaller angle):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
+    .lines = Lines
+    .points = Points
+    .invalid-radius = Select a circle or arc with a finite, positive radius.
+    .invalid-line = Select a nonzero, finite line.
+    .different-line = Select a different line.
+    .invalid-point = Specify a point with finite coordinates.
+    .degenerate-ray = The ray endpoint must differ from the angle vertex.
     .quick = 快速
     .quick-prompt = { $command }  將游標移至幾何圖形上方；按一下以回報，按 Enter 結束：
     .quick-horizontal = 水平 = { $value }

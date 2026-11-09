@@ -7193,9 +7193,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Mesafe = { $value }
-    .angle-start = { $command }  Specify vertex point or [Lines]:
+    .angle-start = Yay, çember, çizgi seçin veya <Köşeyi belirtin>:
     .first-line = { $command }  Select first line or [Points] (smaller angle):
-    .second-line = { $command }  Select second line (smaller angle):
+    .second-line = İkinci çizgiyi seçin:
+    .angle-vertex = Açının köşesini belirtin:
+    .angle-first-end = Açının ilk uç noktasını belirtin:
+    .angle-second-end = Açının ikinci uç noktasını belirtin:
+    .lines-parallel = Çizgiler paralel.
+    .not-a-line = Seçilen nesne bir çizgi değil.
+    .not-line-arc-circle = Seçilen nesne bir çizgi, yay veya çember değil.
+    .angle-invalid-object =
+        {"*"}Geçersiz seçim*
+        Bir nokta veya Specify bekleniyor
+    .angle-invalid-second =
+        {"*"}Geçersiz seçim*
+        Tek bir nesne bekleniyor.
+    .arc-endpoints-equal = Yayın uç noktaları aynı.
     .lines = Lines
     .points = Points
     .invalid-radius = Select a circle or arc with a finite, positive radius.

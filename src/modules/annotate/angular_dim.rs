@@ -861,6 +861,40 @@ impl CadCommand for AngularDimensionCommand {
     }
 }
 
+/// What MEASUREGEOM's Angle reads from a picked object: a line (or a
+/// straight polyline segment), an arc (or an arc segment) with its sweep in
+/// degrees, or a circle.
+pub(crate) enum PickedShape {
+    Line { direction: DVec3 },
+    Arc { sweep: f64 },
+    Circle { center: DVec3 },
+}
+
+/// The line, arc or circle under `click`, as DIMANGULAR picks it.
+pub(crate) fn picked_shape(entity: &EntityType, click: DVec3) -> Option<PickedShape> {
+    Some(match picked_curve(entity, click)? {
+        PickedCurve::Line { start, end, .. } => PickedShape::Line {
+            direction: (end - start).normalize(),
+        },
+        PickedCurve::Arc {
+            center,
+            first,
+            second,
+            normal,
+            ..
+        } => {
+            // Counter-clockwise about the normal from the start to the end.
+            let (a, b) = (first - center, second - center);
+            let mut sweep = a.cross(b).dot(normal).atan2(a.dot(b)).to_degrees();
+            if sweep <= 0.0 {
+                sweep += 360.0;
+            }
+            PickedShape::Arc { sweep }
+        }
+        PickedCurve::Circle { center, .. } => PickedShape::Circle { center },
+    })
+}
+
 fn picked_curve(entity: &EntityType, click: DVec3) -> Option<PickedCurve> {
     let point = |value: Vector3| DVec3::new(value.x, value.y, value.z);
     let normal = |value: Vector3| DVec3::new(value.x, value.y, value.z);

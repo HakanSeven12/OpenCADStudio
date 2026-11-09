@@ -2259,12 +2259,13 @@ fn entity_at_typed_point(
                     _ => continue,
                 },
                 // A text or an ellipse answers by its extent, the way a click
-                // inside it picks it.
+                // inside it picks it; a point by its location.
                 None if matches!(
                     entity,
                     document::EntityType::Text(_)
                         | document::EntityType::MText(_)
                         | document::EntityType::Ellipse(_)
+                        | document::EntityType::Point(_)
                 ) =>
                 {
                     let dx = (bounds.min.x - point.x)

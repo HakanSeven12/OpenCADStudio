@@ -79,6 +79,37 @@ impl OpenCADStudio {
         }
     }
 
+    /// `MEASUREMODE [value]`, a profile setting: 1 starts MEASUREGEOM in
+    /// quick measure (its Mode answer). Anything but 0 or 1 is refused and
+    /// asked for again.
+    pub(super) fn measure_mode_setvar(&mut self, value: Option<&str>) {
+        use crate::modules::draw::inquiry::measuregeom::{quick_default, set_quick_default};
+        let ask = |app: &mut Self| {
+            let (name, current) = ("MEASUREMODE", u8::from(quick_default()));
+            app.command_line
+                .push_output(&crate::tf!("Enter new value for {name} <{current}>:"));
+            app.pending_setvar = Some("MEASUREMODE".to_string());
+        };
+        let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+            ask(self);
+            return;
+        };
+        match value {
+            "0" | "1" => {
+                let quick = value == "1";
+                if quick != quick_default() {
+                    set_quick_default(quick);
+                    self.save_config();
+                }
+            }
+            _ => {
+                self.command_line
+                    .push_rejection(crate::t!("Requires 0 or 1 only.").as_ref());
+                ask(self);
+            }
+        }
+    }
+
     /// `OFFSETGAPTYPE [value]`, a profile setting: 0 extends, 1 fillets and
     /// 2 chamfers the corners of a polyline offset outward. A value outside
     /// 0–2 is refused and asked for again.

@@ -49,9 +49,10 @@ pub fn tool() -> ToolDef {
 
 // ── Mode option (profile) ──────────────────────────────────────────────────
 
-static QUICK_DEFAULT: AtomicBool = AtomicBool::new(true);
+static QUICK_DEFAULT: AtomicBool = AtomicBool::new(false);
 
-/// "Always default to quick measure behavior?" — MEASUREGEOM's Mode answer.
+/// MEASUREMODE, a profile value: "Always default to quick measure
+/// behavior?" — MEASUREGEOM's Mode answer. Off for a new profile.
 pub fn quick_default() -> bool {
     QUICK_DEFAULT.load(Ordering::Relaxed)
 }
@@ -106,6 +107,9 @@ pub struct MeasureGeomCommand {
     name: &'static str,
     hovered: Option<(Handle, EntityType)>,
     first_line: Option<(Handle, DVec3)>,
+    /// Angle from a picked circle: the vertex is its centre and the first
+    /// endpoint the pick point, so Enter at the second endpoint measures 0.
+    angle_from_circle: bool,
     mode: Mode,
     /// The option prompt's default: the last option chosen.
     last: &'static str,
@@ -154,6 +158,7 @@ impl MeasureGeomCommand {
             name: "MEASUREGEOM",
             hovered: None,
             first_line: None,
+            angle_from_circle: false,
             mode: if quick_default() {
                 Mode::Quick
             } else {
@@ -199,7 +204,7 @@ impl MeasureGeomCommand {
     pub fn angle() -> Self {
         Self {
             name: "MEASUREANGLE",
-            mode: Mode::Angle,
+            mode: Mode::AngleLines,
             ..Self::new()
         }
     }
@@ -208,6 +213,7 @@ impl MeasureGeomCommand {
     fn reset(&mut self) {
         self.hovered = None;
         self.first_line = None;
+        self.angle_from_circle = false;
         self.points.clear();
         self.segs.clear();
         self.arc = false;
@@ -258,7 +264,7 @@ impl MeasureGeomCommand {
         self.volume = option == "Volume";
         self.mode = match option {
             "Radius" => Mode::Radius,
-            "Angle" => Mode::Angle,
+            "Angle" => Mode::AngleLines,
             "ARea" | "Volume" => Mode::Area,
             "Quick" => Mode::Quick,
             "Mode" => Mode::AskMode,
@@ -345,6 +351,18 @@ impl MeasureGeomCommand {
             dir: self.heading(),
         };
         CmdResult::NeedPoint
+    }
+
+    /// Leave Angle without a measurement, printing `message` if any: back
+    /// to the option prompt (MEASUREGEOM) or out of MEASUREANGLE.
+    fn leave_angle(&mut self, message: Option<String>) -> CmdResult {
+        let message = message.unwrap_or_default();
+        let result = self.done(message.clone());
+        self.last_result = None;
+        if message.is_empty() && self.name == "MEASUREGEOM" {
+            return CmdResult::NeedPoint;
+        }
+        result
     }
 
     fn keyword_error() -> CmdResult {
@@ -1520,19 +1538,21 @@ impl CadCommand for MeasureGeomCommand {
                     (_, true) => crate::tr!("measurement", "next-point-multiple-close"),
                 }
             }
-            Mode::Angle => match self.points.len() {
-                0 => return crate::tr!("measurement", "angle-start", command = self.name),
-                1 => t!("MEASUREGEOM  Specify first ray point:").into_owned(),
-                _ => t!("MEASUREGEOM  Specify second ray point:").into_owned(),
-            },
+            Mode::Angle => {
+                return match self.points.len() {
+                    0 => crate::tr!("measurement", "angle-vertex"),
+                    1 => crate::tr!("measurement", "angle-first-end"),
+                    _ => crate::tr!("measurement", "angle-second-end"),
+                }
+            }
             Mode::Radius => {
                 t!("MEASUREGEOM  Select arc, circle, or circular region edge:").into_owned()
             }
             Mode::AngleLines => {
                 return if self.first_line.is_none() {
-                    crate::tr!("measurement", "first-line", command = self.name)
+                    crate::tr!("measurement", "angle-start")
                 } else {
-                    crate::tr!("measurement", "second-line", command = self.name)
+                    crate::tr!("measurement", "second-line")
                 }
             }
         }
@@ -1555,8 +1575,7 @@ impl CadCommand for MeasureGeomCommand {
         match self.mode {
             Mode::Quick => true,
             Mode::Distance | Mode::Area => self.step == AreaStep::Points,
-            Mode::Angle => self.points.is_empty(),
-            Mode::AngleLines => self.first_line.is_none(),
+            Mode::Angle | Mode::AngleLines => true,
             _ => false,
         }
     }
@@ -1616,14 +1635,6 @@ impl CadCommand for MeasureGeomCommand {
                 keyword: "M".into(),
             }],
             Mode::Distance if self.multiple => self.chain_options(),
-            Mode::Angle if self.points.is_empty() => vec![CmdOption {
-                label: crate::tr!("measurement", "lines"),
-                keyword: "LINES".into(),
-            }],
-            Mode::AngleLines if self.first_line.is_none() => vec![CmdOption {
-                label: crate::tr!("measurement", "points"),
-                keyword: "POINTS".into(),
-            }],
             _ => Vec::new(),
         }
     }
@@ -1647,7 +1658,9 @@ impl CadCommand for MeasureGeomCommand {
                     _ => return Some(CmdResult::ReportError(t!("Invalid option keyword.").into_owned())),
                 };
                 set_quick_default(quick);
-                self.mode = Mode::Choose;
+                // Yes goes straight on to quick measure; No to the option
+                // prompt, which then offers Mode again.
+                self.mode = if quick { Mode::Quick } else { Mode::Choose };
                 return Some(CmdResult::NeedPoint);
             }
             Mode::Area => return self.area_text(&input),
@@ -1670,22 +1683,25 @@ impl CadCommand for MeasureGeomCommand {
             }
             _ => {}
         }
-        if self.mode == Mode::Angle
-            && self.points.is_empty()
-            && matches!(input.as_str(), "L" | "LINES")
-        {
-            self.mode = Mode::AngleLines;
-            return Some(CmdResult::NeedPoint);
+        // Angle's prompts take no keyword: a word is refused, the object
+        // prompts naming what they expect.
+        match self.mode {
+            // A typed point picks the object under it.
+            Mode::AngleLines if Self::is_point_text(&input) => None,
+            Mode::AngleLines if self.first_line.is_none() => Some(CmdResult::ReportError(
+                crate::tr!("measurement", "angle-invalid-object"),
+            )),
+            Mode::AngleLines => Some(CmdResult::ReportError(crate::tr!(
+                "measurement",
+                "angle-invalid-second"
+            ))),
+            Mode::Angle if Self::is_point_text(&input) => None,
+            Mode::Angle if self.points.len() < 2 => {
+                Some(CmdResult::ReportError(t!("Invalid point.").into_owned()))
+            }
+            Mode::Angle => Some(Self::keyword_error()),
+            _ => None,
         }
-        if self.mode == Mode::AngleLines
-            && self.first_line.is_none()
-            && matches!(input.as_str(), "P" | "POINTS")
-        {
-            self.mode = Mode::Angle;
-            self.hovered = None;
-            return Some(CmdResult::NeedPoint);
-        }
-        None
     }
 
     fn needs_entity_pick(&self) -> bool {
@@ -1775,20 +1791,31 @@ impl CadCommand for MeasureGeomCommand {
                 None => CmdResult::ReportError(crate::tr!("measurement", "invalid-radius")),
             },
             Mode::AngleLines => {
-                let Some(direction) = picked.as_ref().and_then(Self::line_direction) else {
-                    return CmdResult::ReportError(crate::tr!("measurement", "invalid-line"));
-                };
-                if let Some((first_handle, first)) = self.first_line {
-                    if first_handle == handle {
-                        return CmdResult::ReportError(crate::tr!("measurement", "different-line"));
-                    }
-                    match Self::line_angle(first, direction) {
+                use crate::modules::annotate::angular_dim::{picked_shape, PickedShape};
+                let shape = picked.as_ref().and_then(|e| picked_shape(e, point));
+                if let Some((_, first)) = self.first_line {
+                    let Some(PickedShape::Line { direction }) = shape else {
+                        return CmdResult::ReportError(crate::tr!("measurement", "not-a-line"));
+                    };
+                    // The same line again or a parallel one measures nothing.
+                    return match Self::line_angle(first, direction).filter(|a| *a > 1e-9) {
                         Some(angle) => self.done(Self::angle_value_msg(angle)),
-                        None => CmdResult::ReportError(crate::tr!("measurement", "invalid-line")),
+                        None => self.done(crate::tr!("measurement", "lines-parallel")),
+                    };
+                }
+                match shape {
+                    Some(PickedShape::Line { direction }) => {
+                        self.first_line = Some((handle, direction));
+                        CmdResult::NeedPoint
                     }
-                } else {
-                    self.first_line = Some((handle, direction));
-                    CmdResult::NeedPoint
+                    Some(PickedShape::Arc { sweep }) => self.done(Self::angle_value_msg(sweep)),
+                    Some(PickedShape::Circle { center }) => {
+                        self.mode = Mode::Angle;
+                        self.angle_from_circle = true;
+                        self.points = vec![center, point];
+                        CmdResult::NeedPoint
+                    }
+                    None => CmdResult::ReportError(crate::tr!("measurement", "not-line-arc-circle")),
                 }
             }
             _ => CmdResult::NeedPoint,
@@ -1906,6 +1933,18 @@ impl CadCommand for MeasureGeomCommand {
                 AreaStep::Points if self.arc || self.total_offered() => self.finish_boundary(),
                 AreaStep::Points => Self::keyword_error(),
             },
+            // Enter at the object prompt measures from a vertex; at the
+            // second line, the vertex or the first endpoint it leaves Angle.
+            Mode::AngleLines if self.first_line.is_none() => {
+                self.mode = Mode::Angle;
+                CmdResult::NeedPoint
+            }
+            Mode::AngleLines => self.leave_angle(None),
+            Mode::Angle if self.points.len() < 2 => self.leave_angle(None),
+            // The second endpoint defaults to the first: a circle's angle is
+            // 0, the vertex path has no angle.
+            Mode::Angle if self.angle_from_circle => self.done(Self::angle_value_msg(0.0)),
+            Mode::Angle => self.leave_angle(Some(crate::tr!("measurement", "arc-endpoints-equal"))),
             _ => CmdResult::Cancel,
         }
     }
@@ -2104,6 +2143,7 @@ mod measurement_tests {
     fn invalid_angle_points_do_not_advance_and_survey_precision_is_retained() {
         units();
         let mut command = MeasureGeomCommand::angle();
+        command.on_enter();
         let vertex = DVec3::new(500000.001, 600000.002, 100.0);
         assert!(matches!(
             command.on_point(DVec3::NAN),
@@ -2129,6 +2169,7 @@ mod measurement_tests {
     fn angle_preview_two_rays_and_live_value() {
         units();
         let mut command = MeasureGeomCommand::angle();
+        command.on_enter();
         command.on_point(DVec3::ZERO);
         assert!(command.measurement_readout(DVec3::Y).is_none());
         command.on_point(DVec3::X);
@@ -2150,7 +2191,6 @@ mod measurement_tests {
     fn two_lines_smaller_angle_and_invalid_selections() {
         units();
         let mut command = MeasureGeomCommand::angle();
-        command.on_text_input("LINES");
         assert!(command.needs_entity_pick());
         assert!(matches!(
             pick(&mut command, line(Vector3::ZERO), 1),
@@ -2159,10 +2199,6 @@ mod measurement_tests {
         assert!(matches!(
             pick(&mut command, line(Vector3::UNIT_X), 1),
             CmdResult::NeedPoint
-        ));
-        assert!(matches!(
-            pick(&mut command, line(Vector3::UNIT_X), 1),
-            CmdResult::ReportError(_)
         ));
         assert!(matches!(
             pick(

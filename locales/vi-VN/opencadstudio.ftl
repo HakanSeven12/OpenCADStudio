@@ -7277,9 +7277,22 @@ block-def =
 # Transient geometry inquiry readouts.
 measurement =
     .distance = Khoảng cách = { $value }
-    .angle-start = { $command } Chỉ định điểm đỉnh hoặc [Đường]:
+    .angle-start = Select arc, circle, line, or <Specify vertex>:
     .first-line = { $command }  Chọn đường thẳng thứ nhất hoặc [Điểm] (góc nhỏ hơn):
-    .second-line = { $command }  Chọn đường thẳng thứ hai (góc nhỏ hơn):
+    .second-line = Select second line:
+    .angle-vertex = Specify angle vertex:
+    .angle-first-end = Specify first angle endpoint:
+    .angle-second-end = Specify second angle endpoint:
+    .lines-parallel = Lines are parallel.
+    .not-a-line = Object selected is not a line.
+    .not-line-arc-circle = Object selected is not a line, arc or circle.
+    .angle-invalid-object =
+        {"*"}Invalid selection*
+        Expects a point or Specify
+    .angle-invalid-second =
+        {"*"}Invalid selection*
+        Expects a single object.
+    .arc-endpoints-equal = Arc endpoints equal.
     .lines = Đường thẳng
     .points = Điểm
     .invalid-radius = Chọn một đường tròn hoặc cung có bán kính dương, hữu hạn.

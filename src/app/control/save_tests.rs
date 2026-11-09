@@ -113,8 +113,19 @@ fn control_save_current_path_respects_another_editors_lock() {
         let original = std::fs::read(&path).unwrap();
         let mut app = OpenCADStudio::new_for_test();
         let opened = request(&mut app, json!({"op":"open","path":path}));
-        assert_eq!(opened["ok"], true, "{opened}");
+        // Upstream reports the lock diagnostic as a failed control reply,
+        // while still opening the drawing with its edit-conflict guard.
+        assert_eq!(opened["ok"], false, "{opened}");
+        assert!(opened["error"]
+            .as_str()
+            .unwrap()
+            .contains("Opened read-only against other editors"));
         let i = app.active_tab;
+        assert_eq!(app.tabs[i].current_path.as_ref(), Some(&path));
+        assert_eq!(
+            app.tabs[i].disk_fingerprint,
+            Some(FileFingerprint::capture(&path).unwrap())
+        );
         assert!(app.tabs[i].edit_lock_conflict);
         if windowed {
             app.main_window = Some(iced::window::Id::unique());
@@ -547,13 +558,26 @@ fn control_save_file_alias_refuses_retargeting_before_worker_or_completion() {
                 // until the logical alias has changed to the other file.
                 let mut stream = iced_runtime::task::into_stream(task).unwrap();
                 let action = iced::futures::executor::block_on(stream.next()).unwrap();
-                let iced_runtime::Action::Output(crate::app::Message::SaveFinished(outcome)) =
-                    action
-                else {
-                    panic!("expected the native save completion");
+                let iced_runtime::Action::Output(message) = action else {
+                    panic!("expected a control output");
+                };
+                let crate::app::Message::ControlStep(_, step) = &message else {
+                    panic!("expected the tracked control step");
+                };
+                let crate::app::Message::SaveFinished(outcome) = step.as_ref() else {
+                    panic!("expected the native save completion inside ControlStep");
                 };
                 assert!(outcome.result.is_ok(), "{:?}", outcome.result);
-                iced::Task::done(crate::app::Message::SaveFinished(outcome))
+                // Replay the real wrapper and remaining ControlTaskDone in
+                // order through the existing driver after retargeting.
+                let mut replay = iced::Task::done(message);
+                while let Some(action) = iced::futures::executor::block_on(stream.next()) {
+                    let iced_runtime::Action::Output(message) = action else {
+                        panic!("expected the remaining control output");
+                    };
+                    replay = replay.chain(iced::Task::done(message));
+                }
+                replay
             } else {
                 task
             };

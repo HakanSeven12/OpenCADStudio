@@ -3168,7 +3168,7 @@ mod tests {
             "the insert's scale reaches the child's own height: {child}"
         );
         assert!(
-            (child["rotation"].as_f64().unwrap() - 0.523599).abs() < 1e-5,
+            (child["rotation"].as_f64().unwrap() - std::f64::consts::FRAC_PI_6).abs() < 1e-5,
             "the child carries its own rotation, in radians: {child}"
         );
     }
@@ -3494,7 +3494,9 @@ mod tests {
         // Arc angles are degrees on the wire, radians in the entity.
         let q = app.automation_op(r#"{"op":"query","type":"Arc","detail":"full"}"#);
         let start = q["entities"][0]["start_angle"].as_f64().unwrap();
-        assert!((start - std::f64::consts::FRAC_PI_2).abs() < 1e-9 || true);
+        assert!(start.abs() < 1e-9);
+        let end = q["entities"][0]["end_angle"].as_f64().unwrap();
+        assert!((end - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
 
         // The named layer was created and the entities live on it.
         let layers = app.automation_op(r#"{"op":"layers"}"#);

@@ -3257,7 +3257,6 @@ mod copytolayer_tests {
 
 #[cfg(test)]
 mod selection_history_tests {
-    use super::super::*;
     use crate::app::OpenCADStudio;
     use crate::command::StepInput;
     use document::entities::Line;
@@ -3344,7 +3343,6 @@ mod selection_history_tests {
 
 #[cfg(test)]
 mod dash_layer_properties_tests {
-    use super::super::*;
     use crate::app::OpenCADStudio;
 
     fn app_with_layer() -> OpenCADStudio {
@@ -3397,7 +3395,6 @@ mod dash_layer_properties_tests {
 
 #[cfg(test)]
 mod attedit_dash_tests {
-    use super::super::*;
     use crate::app::OpenCADStudio;
     use document::entities::{AttributeEntity, Insert};
     use document::types::Vector3;
@@ -3952,7 +3949,6 @@ mod attedit_dash_tests {
 
 #[cfg(test)]
 mod layer_filter_tests {
-    use super::super::*;
     use crate::app::OpenCADStudio;
 
     fn app_with_layers() -> OpenCADStudio {
@@ -4052,7 +4048,6 @@ mod layer_filter_tests {
 
 #[cfg(test)]
 mod dim_update_regen_tests {
-    use super::super::*;
     use crate::app::OpenCADStudio;
     use crate::entities::dimension::as_dimension;
     use document::entities::Dimension;
@@ -6720,7 +6715,6 @@ mod batch4_tests {
         );
         assert!(app.command_line.last_error.is_none(), "{}", out(&app));
 
-        use document::Entity as _;
         let doc = &app.tabs[i].scene.document;
         assert!(
             doc.get_entity(insert_handle).is_none(),

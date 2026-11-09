@@ -16270,7 +16270,6 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
 
     #[test]
     fn quad_panels_register_replace_per_owner_and_reject_foreign() {
-        use ocs_plugin_api::host::HostApi;
 
         let mut app = OpenCADStudio::new_for_test();
         app.tabs[0].is_start = false;
@@ -16938,7 +16937,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         );
 
         {
-            let mut host = HostSession::new(&mut app, 0);
+            let host = HostSession::new(&mut app, 0);
             assert_eq!(
                 host.document().entities().count(),
                 3,
@@ -16973,7 +16972,7 @@ step('undo_move', lambda: M.move([u], (0, 0, 0), (7, 0, 0)))
         // ONE undo step round-trips the original display set.
         app.undo_steps(1);
         {
-            let mut host = HostSession::new(&mut app, 0);
+            let host = HostSession::new(&mut app, 0);
             assert_eq!(host.document().entities().count(), 3, "nothing added or removed");
             let EntityType::Spline(spline) =
                 host.document().get_entity(handles[1]).expect("the spline keeps its handle")

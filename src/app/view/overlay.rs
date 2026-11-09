@@ -2832,7 +2832,7 @@ mod quad_view_tests {
         ui.simulate([Event::Mouse(iced::mouse::Event::CursorMoved {
             position: iced::Point::new(300.0, 225.0),
         })]);
-        ui.click("MO");
+        ui.click("MO").expect("MO button should be clickable");
         let messages: Vec<_> = ui.into_messages().collect();
         assert!(messages
             .iter()
@@ -2863,7 +2863,7 @@ mod quad_view_tests {
                 + crate::ui::popup::quad_overlay::QUAD_TILE_GAP,
             "the second tile's glyph centres a tile plus a gap right of the anchor"
         );
-        ui.click("CO");
+        ui.click("CO").expect("CO button should be clickable");
         let messages: Vec<_> = ui.into_messages().collect();
         assert!(messages.iter().any(|m| matches!(
             m,

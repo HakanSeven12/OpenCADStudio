@@ -354,7 +354,6 @@ fn synthetic_window_grip_edits_undo_and_redo_the_whole_drawing() {
             let context = format!("mirrored={mirrored} role={role}");
             let (mut app, plain, flipped, id) = window();
             let insert = if mirrored { flipped } else { plain };
-            let before = app.tabs[app.active_tab].scene.document.clone();
             let depth = app.tabs[app.active_tab].history.undo_stack.len();
             drag(&mut app, insert, id, role, 20.);
             assert_eq!(

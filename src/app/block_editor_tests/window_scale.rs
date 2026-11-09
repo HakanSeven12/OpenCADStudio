@@ -1,4 +1,3 @@
-use super::*;
 use crate::scene::block_actions as actions;
 use document::{Document, EntityType, Handle};
 use glam::DVec3;

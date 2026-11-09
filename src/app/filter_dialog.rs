@@ -739,7 +739,6 @@ impl OpenCADStudio {
             | FilterMsg::SaveAsCommit
             | FilterMsg::DeleteSaved
             | FilterMsg::SaveLayerFilter
-            | FilterMsg::LayerParent(_)
             | FilterMsg::ShowLayers
             | FilterMsg::PickObject
             | FilterMsg::FromLayer(_)

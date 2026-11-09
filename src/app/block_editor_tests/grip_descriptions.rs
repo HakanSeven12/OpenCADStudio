@@ -271,7 +271,7 @@ fn block_editor_lookup_visibility_and_component_grips_use_owned_description_text
             .into_iter()
             .find(|item| item.handle == parameter)
             .unwrap();
-        for (index, (part, _)) in item.grips.iter().enumerate() {
+        for (index, _) in item.grips.iter().enumerate() {
             let grip = app.tabs[i]
                 .selected_grips
                 .iter()

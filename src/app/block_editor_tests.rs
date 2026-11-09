@@ -3376,7 +3376,6 @@ fn action_type_list_appears_when_only_a_lookup_parameter_is_placed() {
     begin(&mut app, reference);
     let _ = app.dispatch_command("BACTIONBARMODE 0");
     let _ = app.run_command_line("BPARAMETER LOOKUP 1,1");
-    let i = app.active_tab;
     let _ = app.dispatch_command("BACTIONTOOL");
     let prompt = app.command_line.history.last().unwrap().text.clone();
     assert!(prompt.contains("Lookup"), "{prompt}");
@@ -5852,7 +5851,7 @@ fn visibility_creation_from_the_command_line_asks_about_existing_objects() {
         created.visible_blocks, parameter.states[0].visible_blocks,
         "Enter keeps what the current state shows"
     );
-    drop(parameter);
+    let _ = parameter;
     let member = members(&app)[0];
     let _ = app.dispatch_command("BVSTATE");
     feed(&mut app, "N");
@@ -7232,7 +7231,6 @@ fn saving_from_the_block_editor_ends_the_definition_after_its_body() {
 #[test]
 fn undoing_and_redoing_a_block_editor_save_keeps_the_terminator_after_the_body() {
     let (mut app, reference) = fixture();
-    let i = app.active_tab;
     begin(&mut app, reference);
     circle(&mut app, 1.0);
     let _ = app.dispatch_command("BSAVE");
@@ -9436,7 +9434,7 @@ fn block_runtime_native_roles_drag_cancel_undo_redo_and_preserve_relocated_grips
 
 #[test]
 fn alignment_parameter_defaults_to_perpendicular_and_accepts_an_explicit_type() {
-    use crate::scene::block_orientation_parameter::{self as orientation, Kind};
+    use crate::scene::block_orientation_parameter as orientation;
     use document::objects::{DynamicBlockData, ObjectType};
     let (mut app, reference) = fixture();
     begin(&mut app, reference);

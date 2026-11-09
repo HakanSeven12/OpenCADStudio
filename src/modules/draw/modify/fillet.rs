@@ -2454,7 +2454,7 @@ impl CadCommand for FilletCommand {
     }
     fn on_enter(&mut self) -> CmdResult {
         // Enter at the radius or trim prompt accepts its default.
-        if self.wants_text_input() {
+        if self.input_kind().wants_text() {
             return self.on_text_input("").unwrap_or(CmdResult::NeedPoint);
         }
         CmdResult::Cancel
@@ -3129,7 +3129,7 @@ impl CadCommand for ChamferCommand {
     }
     fn on_enter(&mut self) -> CmdResult {
         // Enter at the distance prompts accepts its default.
-        if self.wants_text_input() {
+        if self.input_kind().wants_text() {
             return self.on_text_input("").unwrap_or(CmdResult::NeedPoint);
         }
         CmdResult::Cancel

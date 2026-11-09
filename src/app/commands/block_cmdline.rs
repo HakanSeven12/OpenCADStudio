@@ -213,7 +213,6 @@ impl OpenCADStudio {
 
     /// [`Self::attsync_block`], opening its own undo step only when `undo`.
     pub(in crate::app) fn attsync_block_with(&mut self, i: usize, block: &str, undo: bool) {
-        use document::Entity as _;
         let doc = &self.tabs[i].scene.document;
         let attdefs = block_attribute_definitions(doc, block);
         let base = crate::scene::render_graph::block_base_point(doc, block);
@@ -482,7 +481,6 @@ impl OpenCADStudio {
     /// tags only the new block defines take their default; tags only the old
     /// block had are dropped.
     pub(in crate::app) fn blockreplace(&mut self, i: usize, old: &str, new: &str) {
-        use document::Entity as _;
         let doc = &self.tabs[i].scene.document;
         let Some(old_name) = doc
             .block_records

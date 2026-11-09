@@ -655,7 +655,7 @@ fn a_redundant_origin_move_does_not_cancel_click_move_click() {
     let i = tab(&app);
     let start = canvas_screen_of(&app, [3.0, 3.0, 0.0]);
     left_press_at(&mut app, start);
-    app.move_plugin_grip_drag(i, glam::DVec3::new(3.0, 3.0, 0.0));
+    let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(3.0, 3.0, 0.0));
     left_release_at(&mut app, start, false);
     let active = app.tabs[i]
         .active_plugin_grip
@@ -2420,7 +2420,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
         undo_before,
         "the per-move re-derivation records zero history"
     );
-    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    let host = crate::app::plugin_host::HostSession::new(&mut app, i);
     let EntityType::Spline(spline) = host
         .document()
         .get_entity(handles[1])
@@ -2447,7 +2447,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
     // The identity stamps and the designation ride untouched mid-drag
     // (the stamp read goes through its own host session).
     for handle in &handles {
-        let mut session = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let session = crate::app::plugin_host::HostSession::new(&mut app, i);
         assert!(session.read_record(*handle, "PLUGIN_ALIGN_DISPLAY").is_some());
     }
     for handle in &handles {
@@ -2470,7 +2470,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
         "the last step is the re-stage's own label"
     );
     {
-        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let host = crate::app::plugin_host::HostSession::new(&mut app, i);
         let EntityType::Spline(spline) = host
             .document()
             .get_entity(handles[1])
@@ -2490,7 +2490,7 @@ fn descriptor_begin_engages_and_moves_restage_in_place() {
     let _ = app.update(Message::Undo);
     assert_eq!(undo_entry_count(&app), undo_before);
     {
-        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let host = crate::app::plugin_host::HostSession::new(&mut app, i);
         let EntityType::Spline(spline) = host
             .document()
             .get_entity(handles[1])
@@ -2734,7 +2734,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
     let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(90.0, 30.0, 0.0));
     assert_eq!(events.borrow().len(), 1, "the move stayed local");
     {
-        let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+        let host = crate::app::plugin_host::HostSession::new(&mut app, i);
         let EntityType::Spline(spline) = host
             .document()
             .get_entity(handles[1])
@@ -2757,7 +2757,7 @@ fn descriptor_moves_refused_by_the_model_keep_the_last_good_design() {
     );
     // The legal move after the refusal re-derives fully (the drag lives on).
     let _ = app.move_plugin_grip_drag(i, glam::DVec3::new(300.0, 11.0, 0.0));
-    let mut host = crate::app::plugin_host::HostSession::new(&mut app, i);
+    let host = crate::app::plugin_host::HostSession::new(&mut app, i);
     let EntityType::Spline(spline) = host
         .document()
         .get_entity(handles[1])

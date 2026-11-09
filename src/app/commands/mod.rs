@@ -1805,7 +1805,7 @@ mod marquee_cancel_tests {
     #[test]
     fn plugin_quad_pick_delivers_to_owner_and_unknown_panel_errors() {
         use ocs_plugin_api::dialog::{QuadActionDef, QuadItemDef, QuadPanelDef};
-        use ocs_plugin_api::host::{CustomGripResponse, HostApi};
+        use ocs_plugin_api::host::CustomGripResponse;
         use ocs_plugin_api::ribbon::owned::OwnedIconKind;
 
         let mut app = fresh();

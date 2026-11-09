@@ -215,7 +215,7 @@ and stable; branch on it, not on message text.
 
 | Code | Meaning | Retryable |
 |---|---|---|
-| `stale_state`, `session_changed` | The caller's snapshot is behind | yes — refresh `state`, retry once with a new `request_id` |
+| `stale_state`, `session_changed` | The caller's snapshot is behind | yes — nothing ran, so refresh `state` and retry once; the same `request_id` is safe. Do not echo `camera_revision` on edits |
 | `document_required`, `document_not_active`, `document_closed` | Envelope addressing problem | yes (refresh state) |
 | `document_dirty` | Closing would lose unsaved changes | no — resend with `"discard":true` to confirm |
 | `entity_absent` | A listed handle does not exist (the message names them) | refresh and re-read |

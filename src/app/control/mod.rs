@@ -966,7 +966,7 @@ impl OpenCADStudio {
                 .is_some_and(|v| v != tab.scene.camera_generation)
         {
             return (
-                json!({"ok":false,"status":"failed","code":"stale_state","error":"Refresh state before editing","state":self.control_state()}),
+                json!({"ok":false,"status":"failed","code":"stale_state","error":"Nothing ran. Read state (ocs_read op state) and retry, omitting revision or using state.revision","state":self.control_state()}),
                 Task::none(),
             );
         }

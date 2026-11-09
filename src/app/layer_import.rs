@@ -191,7 +191,7 @@ impl OpenCADStudio {
                 Ok(document) => {
                     // The whole path, as the mockup's Source field shows it.
                     self.layer_import_open(path.display().to_string(), &document);
-                    return self.layers_dialog_to_front();
+                    return Task::none();
                 }
                 Err(why) => self
                     .command_line

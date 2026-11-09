@@ -547,6 +547,10 @@ impl OpenCADStudio {
             "LAYERS" => {
                 self.pallet_as_window(crate::ui::dock::PanelId::Layers);
                 self.open_layers_pallet();
+                // Already in a window of its own, perhaps behind the main one.
+                if let Some(raise) = self.raise_pallet_window(crate::ui::dock::PanelId::Layers) {
+                    return Some(Task::batch([raise, self.finish_dispatch(cmd)]));
+                }
             }
 
             // SCRIPT <path> — run a command script: each non-comment

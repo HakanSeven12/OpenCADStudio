@@ -1606,6 +1606,9 @@ pub(super) struct OpenCADStudio {
     /// Desktop: the windows of their own (tool dialogs and pallets).
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) os_windows: Vec<tool_windows::OsWindow>,
+    /// Desktop: the window that has the focus, main or of its own.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) focused_window: Option<window::Id>,
     /// Pointer position over a floating title bar (bar-local), and where
     /// its open menu was asked for.
     pub(crate) dock_float_pointer: iced::Point,
@@ -6575,6 +6578,8 @@ impl OpenCADStudio {
             tool_drag: None,
             #[cfg(not(target_arch = "wasm32"))]
             os_windows: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            focused_window: None,
             dock_float_pointer: iced::Point::ORIGIN,
             dock_float_menu_at: iced::Point::ORIGIN,
             dock_drag: None,

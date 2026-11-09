@@ -1199,6 +1199,12 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::SpaceMouseFocus(id, focused) => {
+                #[cfg(not(target_arch = "wasm32"))]
+                if focused {
+                    self.focused_window = Some(id);
+                } else if self.focused_window == Some(id) {
+                    self.focused_window = None;
+                }
                 if Some(id) == self.main_window {
                     self.spacemouse_focused = focused;
                 }
@@ -4548,6 +4554,12 @@ impl OpenCADStudio {
 
             Message::ToggleLayers => {
                 if self.show_layers {
+                    // In a window of its own it may be behind the main one,
+                    // the only place this can be pressed from: bring it up.
+                    if let Some(raise) = self.raise_pallet_window(crate::ui::dock::PanelId::Layers)
+                    {
+                        return raise;
+                    }
                     return self.on_dock(crate::ui::dock::DockMsg::Close(
                         crate::ui::dock::PanelId::Layers,
                     ));
@@ -12812,8 +12824,7 @@ impl OpenCADStudio {
             Message::LayerMoreRun(msg) => {
                 let i = self.active_tab;
                 self.tabs[i].layers.more_menu = false;
-                let task = self.update(*msg);
-                Task::batch([task, self.layers_dialog_to_front()])
+                self.update(*msg)
             }
             Message::LayerSearchOpen(open) => {
                 let i = self.active_tab;

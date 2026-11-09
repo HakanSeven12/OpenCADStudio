@@ -616,6 +616,32 @@ impl CadCommand for InsertBlockCommand {
                 .iter()
                 .map(|n| crate::command::CmdOption::new(n, n))
                 .collect(),
+            Step::Point => {
+                let mut opts = vec![
+                    crate::command::CmdOption::new("Basepoint", "B"),
+                    crate::command::CmdOption::new("Scale", "S"),
+                    crate::command::CmdOption::new("X", "X"),
+                    crate::command::CmdOption::new("Y", "Y"),
+                    crate::command::CmdOption::new("Z", "Z"),
+                    crate::command::CmdOption::new("Rotate", "R"),
+                ];
+                if self.mode == Mode::Classic {
+                    opts.push(crate::command::CmdOption::new("Explode", "E"));
+                    opts.push(crate::command::CmdOption::new("Repeat", "RE"));
+                }
+                opts
+            }
+            Step::ScaleX | Step::XyzX => {
+                let mut opts = vec![crate::command::CmdOption::new("Corner", "C")];
+                if matches!(self.step, Step::ScaleX) {
+                    opts.push(crate::command::CmdOption::new("XYZ", "XYZ"));
+                }
+                opts
+            }
+            Step::YesNo(_) => vec![
+                crate::command::CmdOption::new("Yes", "Y"),
+                crate::command::CmdOption::new("No", "N"),
+            ],
             _ => Vec::new(),
         }
     }

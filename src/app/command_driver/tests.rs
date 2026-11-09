@@ -6950,6 +6950,7 @@ mod array_zoom_extents_tests {
                 column_spacing: 20.0,
                 row_spacing: 30.0,
             },
+            None,
         );
 
         app.tabs[i].scene.fit_all();
@@ -6964,5 +6965,51 @@ mod array_zoom_extents_tests {
             max.abs_diff_eq(glam::DVec3::new(70.0, 95.0, 0.0), 1e-9),
             "max {max:?}, want the last item's far corner (70, 95)"
         );
+    }
+}
+
+/// Batch 5: the missions that were still open on HEAD.
+#[cfg(test)]
+mod batch5_tests {
+    use crate::app::OpenCADStudio;
+
+    fn new_app() -> OpenCADStudio {
+        let mut app = OpenCADStudio::new_for_test();
+        let _ = app.automation_op(r#"{"op":"new"}"#);
+        app
+    }
+
+    #[test]
+    fn classic_insert_advertises_its_point_keywords_as_structured_options() {
+        use crate::command::CadCommand;
+        use crate::modules::insert::insert_block::InsertBlockCommand;
+
+        let command = InsertBlockCommand::classic_for_block(
+            "ATTREQ_BP".to_string(),
+            Vec::new(),
+            String::new(),
+        );
+        let options = command.options();
+        let keywords: Vec<&str> = options.iter().map(|option| option.keyword.as_str()).collect();
+        assert_eq!(keywords, ["B", "S", "X", "Y", "Z", "R", "E", "RE"]);
+        let labels: Vec<&str> = options.iter().map(|option| option.label.as_str()).collect();
+        assert!(labels.contains(&"Basepoint"));
+        assert!(labels.contains(&"Scale"));
+        assert!(labels.contains(&"Rotate"));
+        assert!(labels.contains(&"Explode"));
+        assert!(labels.contains(&"Repeat"));
+
+        let scale_options = InsertBlockCommand::classic_for_block(
+            "ATTREQ_BP".to_string(),
+            Vec::new(),
+            String::new(),
+        );
+        let step = {
+            // Reach the ScaleX step: choose a point, then answer the prompts.
+            let mut command = scale_options;
+            let _ = command.on_point(glam::DVec3::ZERO);
+            command
+        };
+        assert_eq!(step.options().len(), 2);
     }
 }

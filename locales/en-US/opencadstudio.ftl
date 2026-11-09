@@ -3428,11 +3428,13 @@ draw =
     .arc-specify-start-point-of-arc = ARC  Specify start point of arc:
     .arc-specify-second-point-of-arc = ARC  Specify second point of arc:
     .arc-specify-end-point-of-arc = ARC  Specify end point of arc:
+    .arc-specify-end-point-of-arc-ctrl = ARC  Specify end point of arc (hold Ctrl to switch direction):
     .arc-specify-center-point-of-arc = ARC  Specify center point of arc:
-    .arc-specify-included-angle = ARC  Specify included angle:
-    .arc-specify-length-of-chord = ARC  Specify length of chord:
-    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Specify tangent direction for the start point of arc:
-    .arc-specify-radius-of-arc = ARC  Specify radius of arc:
+    .arc-specify-center-point-of-arc-ctrl = ARC  Specify center point of arc (hold Ctrl to switch direction):
+    .arc-specify-included-angle = ARC  Specify included angle (hold Ctrl to switch direction):
+    .arc-specify-length-of-chord = ARC  Specify length of chord (hold Ctrl to switch direction):
+    .arc-specify-tangent-direction-for-the-start-point-of-arc = ARC  Specify tangent direction for the start point of arc (hold Ctrl to switch direction):
+    .arc-specify-radius-of-arc = ARC  Specify radius of arc (hold Ctrl to switch direction):
     .chord-length = chord Length
 
 modify =

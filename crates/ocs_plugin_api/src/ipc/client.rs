@@ -802,9 +802,11 @@ impl HostApi for PluginHostApi {
         // API v14: identity + design descriptor in, reference-only display
         // handles out. A staged write mutates the document: the cached
         // snapshot invalidates like every write path.
-        match self.client.request(PluginRequest::StagePluginClassInstance {
-            instance: instance.clone(),
-        }) {
+        match self
+            .client
+            .request(PluginRequest::StagePluginClassInstance {
+                instance: instance.clone(),
+            }) {
             Ok(PluginResponse::StagePluginClassInstanceResult(result)) => {
                 if result.is_ok() {
                     self.document_cache = OnceCell::new();

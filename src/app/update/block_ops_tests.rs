@@ -224,7 +224,9 @@ fn fixture_dimension_reference(app: &mut OpenCADStudio) -> String {
     dimension.base.style_name = "BO_ARROWSTYLE".to_string();
     app.tabs[i]
         .scene
-        .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(dimension))));
+        .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(
+            dimension,
+        ))));
     name.to_string()
 }
 
@@ -244,7 +246,9 @@ fn fixture_dimension_name_reference(app: &mut OpenCADStudio) -> String {
     dimension.base.style_name = "BO_ARROWNAMESTYLE".to_string();
     app.tabs[i]
         .scene
-        .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(dimension))));
+        .add_entity(EntityType::Dimension(Box::new(Dimension::Aligned(
+            dimension,
+        ))));
     name.to_string()
 }
 
@@ -1283,7 +1287,10 @@ fn control_entities_create_lands_in_the_definition_open_in_the_editor() {
         .as_ref()
         .map(|h| h.main.undo_stack.len())
         .unwrap_or(app.tabs[i].history.undo_stack.len());
-    assert_eq!(main_depth_after, main_depth, "no drawing undo entry may be pushed");
+    assert_eq!(
+        main_depth_after, main_depth,
+        "no drawing undo entry may be pushed"
+    );
     let _ = app.dispatch_command("BEDIT_DISCARD");
     assert!(
         app.tabs[i].scene.document.get_entity(created).is_none(),
@@ -1307,7 +1314,11 @@ fn control_entities_create_refuses_nesting_the_open_definition_inside_itself() {
     );
     assert_eq!(response["ok"], false, "{response}");
     assert_eq!(response["code"], "block_cycle", "{response}");
-    assert_eq!(entity_count(&app), depth, "nothing from the batch may be added");
+    assert_eq!(
+        entity_count(&app),
+        depth,
+        "nothing from the batch may be added"
+    );
     let _ = app.dispatch_command("BEDIT_DISCARD");
 }
 
@@ -1335,7 +1346,10 @@ fn definition_children_are_selectable_while_their_editor_is_open() {
             Vector3::ZERO,
             vec![
                 line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
-                EntityType::Insert(Insert::new("BO_CLOSED".to_string(), Vector3::new(2.0, 0.0, 0.0))),
+                EntityType::Insert(Insert::new(
+                    "BO_CLOSED".to_string(),
+                    Vector3::new(2.0, 0.0, 0.0),
+                )),
             ],
         );
     }
@@ -1366,7 +1380,9 @@ fn definition_children_are_selectable_while_their_editor_is_open() {
     let grips = control_request(&mut app, json!({"op":"grips"}));
     assert_eq!(grips["ok"], true, "{grips}");
     assert!(
-        grips["grips"].as_array().is_some_and(|grips| !grips.is_empty()),
+        grips["grips"]
+            .as_array()
+            .is_some_and(|grips| !grips.is_empty()),
         "the selected definition child must enumerate its grips: {grips}"
     );
 
@@ -1425,14 +1441,21 @@ fn locked_purge_keeps_unresolved_xref_dependent_symbols() {
     for name in ["Grid Plan|GRID", "Unused"] {
         doc.layers.add(Layer::new(name)).unwrap();
     }
-    doc.line_types.add(LineType::new("Grid Plan|DASHED")).unwrap();
-    doc.text_styles.add(TextStyle::new("Grid Plan|NOTES")).unwrap();
+    doc.line_types
+        .add(LineType::new("Grid Plan|DASHED"))
+        .unwrap();
+    doc.text_styles
+        .add(TextStyle::new("Grid Plan|NOTES"))
+        .unwrap();
     let _ = app.dispatch_command("PURGE ALL");
     let doc = &app.tabs[i].scene.document;
     assert!(doc.layers.get("Grid Plan|GRID").is_some());
     assert!(doc.line_types.get("Grid Plan|DASHED").is_some());
     assert!(doc.text_styles.get("Grid Plan|NOTES").is_some());
-    assert!(doc.layers.get("Unused").is_none(), "a plain unused layer still purges");
+    assert!(
+        doc.layers.get("Unused").is_none(),
+        "a plain unused layer still purges"
+    );
 }
 
 #[test]
@@ -1457,9 +1480,18 @@ fn purge_keeps_symbols_used_only_by_an_inserted_attribute() {
     app.tabs[i].scene.add_entity(EntityType::Insert(insert));
     let _ = app.dispatch_command("PURGE ALL");
     let doc = &app.tabs[i].scene.document;
-    assert!(doc.layers.get("TITLE").is_some(), "purged the attribute's layer");
-    assert!(doc.line_types.get("TITLE_DASH").is_some(), "purged the attribute's linetype");
-    assert!(doc.text_styles.get("TITLE_TEXT").is_some(), "purged the attribute's text style");
+    assert!(
+        doc.layers.get("TITLE").is_some(),
+        "purged the attribute's layer"
+    );
+    assert!(
+        doc.line_types.get("TITLE_DASH").is_some(),
+        "purged the attribute's linetype"
+    );
+    assert!(
+        doc.text_styles.get("TITLE_TEXT").is_some(),
+        "purged the attribute's text style"
+    );
 }
 
 #[test]
@@ -1485,8 +1517,14 @@ fn purge_keeps_the_current_layer_and_dimstyle_linetypes() {
     let _ = app.dispatch_command("PURGE LINETYPES");
     let doc = &app.tabs[i].scene.document;
     assert!(doc.layers.get("WORK").is_some(), "purged the current layer");
-    assert!(doc.line_types.get("DIM_DASH").is_some(), "purged a dimstyle's linetype");
-    assert!(doc.layers.get("Unused").is_none(), "a plain unused layer still purges");
+    assert!(
+        doc.line_types.get("DIM_DASH").is_some(),
+        "purged a dimstyle's linetype"
+    );
+    assert!(
+        doc.layers.get("Unused").is_none(),
+        "a plain unused layer still purges"
+    );
 }
 
 #[test]
@@ -1506,8 +1544,10 @@ fn purge_keeps_text_styles_used_only_by_leader_and_table_styles() {
         let mut leader_style = MultiLeaderStyle::new("BO_LEADER");
         leader_style.handle = doc.allocate_handle();
         leader_style.text_style_handle = Some(leader_text_handle);
-        doc.objects
-            .insert(leader_style.handle, ObjectType::MultiLeaderStyle(leader_style));
+        doc.objects.insert(
+            leader_style.handle,
+            ObjectType::MultiLeaderStyle(leader_style),
+        );
         let mut table_style = TableStyle::new("BO_TABLE");
         table_style.handle = doc.allocate_handle();
         table_style.data_row_style.text_style_name = "TABLE_TEXT".to_string();
@@ -1517,9 +1557,18 @@ fn purge_keeps_text_styles_used_only_by_leader_and_table_styles() {
     // ALL would purge the unused styles first and their text styles with them.
     let _ = app.dispatch_command("PURGE STYLES");
     let doc = &app.tabs[i].scene.document;
-    assert!(doc.text_styles.get("LEADER_TEXT").is_some(), "purged a multileader style's text style");
-    assert!(doc.text_styles.get("TABLE_TEXT").is_some(), "purged a table style's text style");
-    assert!(doc.text_styles.get("UNUSED_TEXT").is_none(), "a plain unused text style still purges");
+    assert!(
+        doc.text_styles.get("LEADER_TEXT").is_some(),
+        "purged a multileader style's text style"
+    );
+    assert!(
+        doc.text_styles.get("TABLE_TEXT").is_some(),
+        "purged a table style's text style"
+    );
+    assert!(
+        doc.text_styles.get("UNUSED_TEXT").is_none(),
+        "a plain unused text style still purges"
+    );
 }
 
 #[test]
@@ -1870,7 +1919,11 @@ fn state_names_the_definition_open_in_the_editor() {
     assert_eq!(app.control_state()["block_editor"], json!(null));
     begin_bedit(&mut app, insert);
     let state = app.control_state();
-    assert_eq!(state["block_editor"]["name"], json!("BEDIT_STATE"), "{state}");
+    assert_eq!(
+        state["block_editor"]["name"],
+        json!("BEDIT_STATE"),
+        "{state}"
+    );
     assert_eq!(
         state["block_editor"]["handle"],
         json!(format!("{:X}", record_handle(&app, "BEDIT_STATE").value())),

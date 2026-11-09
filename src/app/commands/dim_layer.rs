@@ -43,7 +43,10 @@ impl OpenCADStudio {
     pub(super) fn dispatch_dim_layer(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
         let (name, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        if !name.trim_start_matches(['_', '.']).eq_ignore_ascii_case(NAME) {
+        if !name
+            .trim_start_matches(['_', '.'])
+            .eq_ignore_ascii_case(NAME)
+        {
             return None;
         }
         let value = value.trim();

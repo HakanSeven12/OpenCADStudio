@@ -32,10 +32,18 @@ const MISC: &str = "Misc";
 const DRAWING_PROPERTIES: [Property; 15] = [
     p("AcDxDwgSummaryDwgAuthor", "Author", DRAWING),
     p("AcDxDwgSummaryDwgComments", "Comments", DRAWING),
-    p("AcDxDwgSummaryDwgRevisionNumber", "Drawing Revision Number", DRAWING),
+    p(
+        "AcDxDwgSummaryDwgRevisionNumber",
+        "Drawing Revision Number",
+        DRAWING,
+    ),
     p("AcDxDwgSummaryDwgAccessed", "File Accessed", DRAWING),
     p("AcDxDwgSummaryDwgCreated", "File Created", DRAWING),
-    p("AcDxDwgSummaryDwgLastSavedBy", "File Last Saved By", DRAWING),
+    p(
+        "AcDxDwgSummaryDwgLastSavedBy",
+        "File Last Saved By",
+        DRAWING,
+    ),
     p("AcDxDwgSummaryDwgLocation", "File Location", DRAWING),
     p("AcDxDwgSummaryDwgModified", "File Modified", DRAWING),
     p("AcDxDwgSummaryDwgName", "File Name", DRAWING),
@@ -44,7 +52,11 @@ const DRAWING_PROPERTIES: [Property; 15] = [
     p("AcDxDwgSummaryDwgKeywords", "Keywords", DRAWING),
     p("AcDxDwgSummaryDwgSubject", "Subject", DRAWING),
     p("AcDxDwgSummaryDwgTitle", "Title", DRAWING),
-    p("AcDxDwgSummaryDwgTotalEditingTime", "Total Editing Time", DRAWING),
+    p(
+        "AcDxDwgSummaryDwgTotalEditingTime",
+        "Total Editing Time",
+        DRAWING,
+    ),
 ];
 
 const ENTITY_PROPERTIES: [Property; 10] = [
@@ -277,8 +289,7 @@ fn local_date_time(time: std::time::SystemTime) -> String {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|value| value.as_secs_f64())
         .unwrap_or_default();
-    let julian =
-        seconds / 86_400.0 + 2_440_587.5 + crate::entities::field::utc_offset_days();
+    let julian = seconds / 86_400.0 + 2_440_587.5 + crate::entities::field::utc_offset_days();
     document::fields::format_dt_in(
         document::fields::julian_parts(julian),
         "%c",
@@ -455,7 +466,11 @@ pub(crate) fn value(entity: &EntityType, key: &str, facts: &DrawingFacts) -> Str
             "Length" | "Area" => {
                 use crate::entities::traits::MassPropsCalc;
                 let props = polyline.mass_props();
-                lin(if key == "Area" { props.area } else { props.perimeter })
+                lin(if key == "Area" {
+                    props.area
+                } else {
+                    props.perimeter
+                })
             }
             _ => String::new(),
         },

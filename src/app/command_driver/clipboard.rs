@@ -210,14 +210,19 @@ impl OpenCADStudio {
                 }
             }
         }
-        let hatch_detached = self.tabs[i].active_cmd.as_ref().is_some_and(|cmd| cmd.name() == "TRIM")
+        let hatch_detached = self.tabs[i]
+            .active_cmd
+            .as_ref()
+            .is_some_and(|cmd| cmd.name() == "TRIM")
             && matches!(
                 self.tabs[i].scene.document.get_entity(handle),
                 Some(document::EntityType::Hatch(hatch)) if hatch.is_associative
             )
-            && new_entities.iter().any(|entity| matches!(
-                entity, document::EntityType::Hatch(hatch) if !hatch.is_associative
-            ));
+            && new_entities.iter().any(|entity| {
+                matches!(
+                    entity, document::EntityType::Hatch(hatch) if !hatch.is_associative
+                )
+            });
         let label = self.history_label_from_active_cmd(i, "TRIM");
         self.push_undo_snapshot(i, label);
         // Apply one-to-one edits in place. Erase/add with the same handle
@@ -553,7 +558,10 @@ pub(crate) fn mleader_handles(m: &mut document::entities::MultiLeader) -> Vec<&m
     handles
 }
 
-pub(crate) fn remap_mleader(entity: &mut document::EntityType, map: &std::collections::HashMap<Handle, Handle>) {
+pub(crate) fn remap_mleader(
+    entity: &mut document::EntityType,
+    map: &std::collections::HashMap<Handle, Handle>,
+) {
     if let document::EntityType::MultiLeader(m) = entity {
         for h in mleader_handles(m) {
             *h = h
@@ -794,7 +802,8 @@ fn ensure_pasted_image_reactors(
         }
     }
     for handle in images {
-        let Some(document::EntityType::RasterImage(image)) = scene.document.get_entity(handle) else {
+        let Some(document::EntityType::RasterImage(image)) = scene.document.get_entity(handle)
+        else {
             continue;
         };
         let mut entity = document::EntityType::RasterImage(image.clone());
@@ -1009,15 +1018,20 @@ pub(crate) fn eed_app_map(
 /// Re-point a copied entity's verbatim EED at this drawing's APPIDs. A block
 /// whose application the map does not know names no APPID here, and a DWG
 /// carrying one is rejected outright by the reference program, so it goes.
-pub(crate) fn remap_eed_apps(entity: &mut document::EntityType, apps: &rustc_hash::FxHashMap<u64, u64>) {
+pub(crate) fn remap_eed_apps(
+    entity: &mut document::EntityType,
+    apps: &rustc_hash::FxHashMap<u64, u64>,
+) {
     let remap = |xdata: &mut document::xdata::ExtendedData| {
-        xdata.raw_dwg_eed.retain_mut(|(app, _)| match apps.get(app) {
-            Some(&target) => {
-                *app = target;
-                true
-            }
-            None => false,
-        });
+        xdata
+            .raw_dwg_eed
+            .retain_mut(|(app, _)| match apps.get(app) {
+                Some(&target) => {
+                    *app = target;
+                    true
+                }
+                None => false,
+            });
     };
     remap(&mut entity.common_mut().extended_data);
     if let document::EntityType::Insert(insert) = entity {
@@ -1924,7 +1938,9 @@ mod paste_entities_kernel_tests {
             document::types::Vector3::new(10.0, 0.0, 0.0),
         );
         seed_line.common.layer = "WALLS".to_string();
-        let seed_handle = seed.add_entity(document::EntityType::Line(seed_line)).unwrap();
+        let seed_handle = seed
+            .add_entity(document::EntityType::Line(seed_line))
+            .unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[seed_handle]);
 
         let mut dst = document::Document::new();
@@ -2044,8 +2060,12 @@ mod paste_entities_kernel_tests {
         image_definition.handle = definition;
         seed.objects
             .insert(definition, ObjectType::ImageDefinition(image_definition));
-        let mut image =
-            document::entities::RasterImage::new("fx.bmp", document::types::Vector3::ZERO, 8.0, 8.0);
+        let mut image = document::entities::RasterImage::new(
+            "fx.bmp",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
         image.definition_handle = Some(definition);
         let source = seed
             .add_entity(document::EntityType::RasterImage(image))
@@ -2170,7 +2190,12 @@ mod paste_entities_kernel_tests {
         let source = app.tabs[source_tab]
             .scene
             .add_entity(document::EntityType::RasterImage(
-                document::entities::RasterImage::new("fx.bmp", document::types::Vector3::ZERO, 8.0, 8.0),
+                document::entities::RasterImage::new(
+                    "fx.bmp",
+                    document::types::Vector3::ZERO,
+                    8.0,
+                    8.0,
+                ),
             ));
         let (source_definition, source_reactor) =
             assert_pasted_image_reactor(&app.tabs[source_tab].scene.document, source);
@@ -2417,7 +2442,8 @@ mod paste_entities_kernel_tests {
         ));
         roundtrip.entries.push(XRecordEntry::handle(360, content));
         roundtrip.synchronize_object_references();
-        let mut table_content = document::entities::Table::new(document::types::Vector3::ZERO, 2, 2);
+        let mut table_content =
+            document::entities::Table::new(document::types::Vector3::ZERO, 2, 2);
         table_content.common.handle = content;
         table_content.common.owner_handle = record;
         seed.objects
@@ -2548,12 +2574,16 @@ mod paste_entities_kernel_tests {
             .add_entity(document::EntityType::MultiLeader(Box::new(m)))
             .unwrap();
         let nested = seed.get_entity(source).unwrap().clone();
-        define_block_raw_doc(&mut seed, "OUTER", document::types::Vector3::ZERO, &[nested]);
+        define_block_raw_doc(
+            &mut seed,
+            "OUTER",
+            document::types::Vector3::ZERO,
+            &[nested],
+        );
         let insert = seed
-            .add_entity(document::EntityType::Insert(document::entities::Insert::new(
-                "OUTER",
-                document::types::Vector3::ZERO,
-            )))
+            .add_entity(document::EntityType::Insert(
+                document::entities::Insert::new("OUTER", document::types::Vector3::ZERO),
+            ))
             .unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[source, insert]);
         let mut dst = document::Document::new();
@@ -2806,8 +2836,12 @@ mod paste_entities_kernel_tests {
         // only an INSERT of OUTER is copied.
         let mut table = document::entities::Table::new(document::types::Vector3::ZERO, 2, 2);
         table.rows[0].cells[0].contents = vec![document::entities::CellContent::block(cell_block)];
-        let mut image =
-            document::entities::RasterImage::new("fx.bmp", document::types::Vector3::ZERO, 8.0, 8.0);
+        let mut image = document::entities::RasterImage::new(
+            "fx.bmp",
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
         image.definition_handle = Some(definition);
         define_block_raw_doc(
             &mut seed,
@@ -2819,10 +2853,9 @@ mod paste_entities_kernel_tests {
             ],
         );
         let insert = seed
-            .add_entity(document::EntityType::Insert(document::entities::Insert::new(
-                "OUTER",
-                document::types::Vector3::ZERO,
-            )))
+            .add_entity(document::EntityType::Insert(
+                document::entities::Insert::new("OUTER", document::types::Vector3::ZERO),
+            ))
             .unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[insert]);
 
@@ -2886,11 +2919,15 @@ mod paste_entities_kernel_tests {
     fn remaps_leader_annotation_link_to_pasted_handles() {
         let mut seed = document::Document::new();
         let note = seed
-            .add_entity(document::EntityType::MText(Box::new(document::entities::MText::new())))
+            .add_entity(document::EntityType::MText(Box::new(
+                document::entities::MText::new(),
+            )))
             .unwrap();
         let mut leader = document::entities::Leader::default();
         leader.annotation_handle = note;
-        let leader_handle = seed.add_entity(document::EntityType::Leader(leader)).unwrap();
+        let leader_handle = seed
+            .add_entity(document::EntityType::Leader(leader))
+            .unwrap();
         let (entities, deps) = copy_to_clipboard_kernel(&seed, &[leader_handle, note]);
 
         let mut dst = document::Document::new();
@@ -3040,12 +3077,16 @@ mod headless_reuse_proof_tests {
         src_line.common.layer = "WALLS".to_string();
         src_line.common.linetype_scale = 2.5;
         src_line.thickness = 1.25;
-        let src = doc_b.add_entity(document::EntityType::Line(src_line)).unwrap();
+        let src = doc_b
+            .add_entity(document::EntityType::Line(src_line))
+            .unwrap();
         let mut dst_line = document::entities::Line::new();
         dst_line.common.layer = "0".to_string();
         dst_line.common.linetype_scale = 1.0;
         dst_line.thickness = 0.0;
-        let dst = doc_b.add_entity(document::EntityType::Line(dst_line)).unwrap();
+        let dst = doc_b
+            .add_entity(document::EntityType::Line(dst_line))
+            .unwrap();
 
         let count = match_layer_kernel(&mut doc_b, &[dst], src).expect("match layer");
         assert_eq!(count, 1);

@@ -1,8 +1,6 @@
 //! Handle order inside a block definition: one handle per record, in file order.
 
-use document::entities::{
-    CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind, Line,
-};
+use document::entities::{CenterMarkAssociation, CenterMarkSource, CenterMarkSourceKind, Line};
 use document::types::{Handle, Vector3};
 use document::EntityType;
 
@@ -10,10 +8,7 @@ use crate::scene::{CreateBlockOptions, Scene};
 use crate::ui::window::block_definition::BlockObjectMode;
 
 fn line(x: f64) -> EntityType {
-    EntityType::Line(Line::from_points(
-        Vector3::ZERO,
-        Vector3::new(x, 0.0, 0.0),
-    ))
+    EntityType::Line(Line::from_points(Vector3::ZERO, Vector3::new(x, 0.0, 0.0)))
 }
 
 fn assert_ends_after_body(document: &document::Document, name: &str) {
@@ -38,7 +33,10 @@ fn assert_ends_after_body(document: &document::Document, name: &str) {
         "the ENDBLK handle follows the body: marker {marker}, body {body:?}, end {end}"
     );
     assert!(
-        matches!(document.get_entity(Handle::new(end)), Some(EntityType::BlockEnd(_))),
+        matches!(
+            document.get_entity(Handle::new(end)),
+            Some(EntityType::BlockEnd(_))
+        ),
         "the record's end handle names an ENDBLK entity"
     );
 }
@@ -136,7 +134,10 @@ fn a_redefined_definition_ends_after_its_new_body() {
         hyperlink_desc: String::new(),
         redefine,
     };
-    let first = scene.document.add_entity(line(1.0)).expect("the first line");
+    let first = scene
+        .document
+        .add_entity(line(1.0))
+        .expect("the first line");
     scene
         .create_block_with_options(options(vec![first], false))
         .expect("the definition is created");
@@ -146,7 +147,10 @@ fn a_redefined_definition_ends_after_its_new_body() {
         .get("REDEFINED")
         .expect("the record is added")
         .block_end_handle;
-    let second = scene.document.add_entity(line(2.0)).expect("the second line");
+    let second = scene
+        .document
+        .add_entity(line(2.0))
+        .expect("the second line");
     scene
         .create_block_with_options(options(vec![second], true))
         .expect("the definition is redefined");
@@ -240,11 +244,7 @@ fn a_raw_redefine_also_ends_after_its_new_body() {
         .expect("the record is added")
         .block_end_handle;
     scene
-        .redefine_block_raw(
-            "RAW_REDEFINE",
-            Vector3::ZERO,
-            vec![line(2.0), line(3.0)],
-        )
+        .redefine_block_raw("RAW_REDEFINE", Vector3::ZERO, vec![line(2.0), line(3.0)])
         .expect("the definition is redefined");
     assert_ends_after_body(&scene.document, "RAW_REDEFINE");
     assert!(

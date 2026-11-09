@@ -160,7 +160,10 @@ impl Sub {
 
     /// The step asks for the chord direction (Angle → Radius, Radius → Angle).
     pub(crate) fn is_chord_step(self) -> bool {
-        matches!(self, Sub::ArcAngleRadiusDir { .. } | Sub::ArcRadiusAngleDir { .. })
+        matches!(
+            self,
+            Sub::ArcAngleRadiusDir { .. } | Sub::ArcRadiusAngleDir { .. }
+        )
     }
 
     /// A typed value (an angle in degrees for the angle steps).
@@ -217,7 +220,12 @@ impl Sub {
     }
 
     /// The chord direction (degrees) of a chord step.
-    pub(crate) fn arc_chord(self, degrees: f64, a: DVec2, tangent: Option<Vec2>) -> Option<ArcStep> {
+    pub(crate) fn arc_chord(
+        self,
+        degrees: f64,
+        a: DVec2,
+        tangent: Option<Vec2>,
+    ) -> Option<ArcStep> {
         let p = a + DVec2::from_angle(degrees.to_radians());
         arc_for(self, a, p, tangent).map(|(e, bulge)| ArcStep::Arc(e, bulge))
     }
@@ -295,7 +303,10 @@ impl Sub {
         use crate::command::CmdOption;
         match self {
             Sub::ArcAngleEnd { .. } => {
-                vec![CmdOption::new("CEnter", "CE"), CmdOption::new("Radius", "R")]
+                vec![
+                    CmdOption::new("CEnter", "CE"),
+                    CmdOption::new("Radius", "R"),
+                ]
             }
             Sub::ArcCenterEnd { .. } => {
                 vec![CmdOption::new("Angle", "A"), CmdOption::new("Length", "L")]

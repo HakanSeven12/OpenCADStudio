@@ -47,11 +47,7 @@ fn synthetic_wires(prefix: &str, count: usize) -> Vec<WireModel> {
             let points: Vec<[f64; 3]> = (0..POINTS_PER_WIRE)
                 .map(|p| {
                     let t = p as f64 * 0.25;
-                    [
-                        wire as f64 * 100.0 + t,
-                        (t * 0.1).sin() * 25.0,
-                        0.0,
-                    ]
+                    [wire as f64 * 100.0 + t, (t * 0.1).sin() * 25.0, 0.0]
                 })
                 .collect();
             let key_vertices = points.clone();

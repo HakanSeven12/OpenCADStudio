@@ -11,8 +11,9 @@ use document::{Document, Handle};
 fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     match document
         .objects
-        .get(&super::block_authoring::definition_dictionary(document, definition)?)?
-    {
+        .get(&super::block_authoring::definition_dictionary(
+            document, definition,
+        )?)? {
         ObjectType::Dictionary(dictionary) => dictionary.get("ACAD_ENHANCEDBLOCK"),
         _ => None,
     }
@@ -162,11 +163,7 @@ pub(crate) fn create(
     Ok(parameter)
 }
 
-pub(crate) fn reframe(
-    document: &mut Document,
-    definition: Handle,
-    transform: &Transform,
-) -> usize {
+pub(crate) fn reframe(document: &mut Document, definition: Handle, transform: &Transform) -> usize {
     let Some(graph) = graph_handle(document, definition) else {
         return 0;
     };
@@ -178,7 +175,11 @@ pub(crate) fn reframe(
     for (handle, grip_id) in owned {
         if let Some(ObjectType::DynamicBlock(object)) = document.objects.get_mut(&handle) {
             if let DynamicBlockData::PointParameter(parameter) = &mut object.data {
-                super::block_actions::reframe_value(&mut parameter.parameter.parameter.element.eval, parameter.parameter.definition_point.z, transform);
+                super::block_actions::reframe_value(
+                    &mut parameter.parameter.parameter.element.eval,
+                    parameter.parameter.definition_point.z,
+                    transform,
+                );
                 parameter.parameter.definition_point =
                     transform.apply(parameter.parameter.definition_point);
                 parameter.definition_label_point =
@@ -207,7 +208,6 @@ mod tests {
     use super::*;
     use crate::scene::{block_visibility, Scene};
     use document::{entities::Line, EntityType};
-
 
     fn fixture() -> (Scene, Handle) {
         let mut scene = Scene::new();

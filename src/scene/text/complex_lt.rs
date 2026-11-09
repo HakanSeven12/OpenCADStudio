@@ -391,8 +391,7 @@ fn apply_stretched(
                     };
                     // Upright text that would read upside down turns half a
                     // turn about the middle of its box, so it keeps its place.
-                    let flipped =
-                        *rot_mode == LtRotation::Upright && reads_upside_down(fwd_angle);
+                    let flipped = *rot_mode == LtRotation::Upright && reads_upside_down(fwd_angle);
                     if flipped {
                         fwd_angle += std::f32::consts::PI;
                     }
@@ -506,7 +505,7 @@ fn apply_stretched(
                 fill_tris: vec![],
                 fill_tris_low: Vec::new(),
 
-            ..Default::default()
+                ..Default::default()
             }
         })
         .collect();
@@ -795,9 +794,16 @@ mod upright_tests {
     }
 
     fn bounds(points: &[[f32; 2]]) -> [f32; 4] {
-        points.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| {
-            [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]
-        })
+        points
+            .iter()
+            .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |b, p| {
+                [
+                    b[0].min(p[0]),
+                    b[1].min(p[1]),
+                    b[2].max(p[0]),
+                    b[3].max(p[1]),
+                ]
+            })
     }
 
     #[test]

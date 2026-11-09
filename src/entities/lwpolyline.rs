@@ -1,14 +1,12 @@
 use document::entities::{LwPolyline, LwVertex};
-use kernel::geom2d::{
-    Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2,
-};
+use kernel::geom2d::{Curve, Polyline, PolylineVertex, RectangleFrame, Tolerance, Vec2};
 
 use crate::t;
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_prop as edit, format_area, format_length, parse_f64,
-    rectangle_grip, ro_prop as ro, square_grip, stepper_prop as stepper, VARIES_LABEL,
+    edit_prop as edit, format_area, format_length, parse_f64, rectangle_grip, ro_prop as ro,
+    square_grip, stepper_prop as stepper, VARIES_LABEL,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{extrusion_wall_tris, RenderEntity, RenderObject};
@@ -584,7 +582,10 @@ fn centerline_metadata(
 
 /// Split at vertex `idx`: a closed polyline re-opens there (one piece); an
 /// open one splits into two (interior vertices only). `None` when invalid.
-pub(crate) fn break_at_vertex(p: &document::LwPolyline, idx: usize) -> Option<Vec<document::EntityType>> {
+pub(crate) fn break_at_vertex(
+    p: &document::LwPolyline,
+    idx: usize,
+) -> Option<Vec<document::EntityType>> {
     use document::EntityType;
     let n = p.vertices.len();
     if n < 3 || idx >= n {
@@ -879,7 +880,12 @@ fn segment_points(pline: &LwPolyline) -> Vec<([f64; 2], f64)> {
 /// given as (vertex, bulge) pairs, ids from `first_id`. The marker is a small
 /// box rotated along the chord direction so the shape itself signals which
 /// way the segment runs.
-pub(crate) fn mid_grips(points: &[([f64; 2], f64)], closed: bool, elev: f64, first_id: usize) -> Vec<GripDef> {
+pub(crate) fn mid_grips(
+    points: &[([f64; 2], f64)],
+    closed: bool,
+    elev: f64,
+    first_id: usize,
+) -> Vec<GripDef> {
     let n = points.len();
     let seg_count = if closed { n } else { n.saturating_sub(1) };
     (0..seg_count)
@@ -906,7 +912,12 @@ pub(crate) fn mid_grips(points: &[([f64; 2], f64)], closed: bool, elev: f64, fir
 /// Drag of the mid grip of segment `seg`: a straight segment translates both
 /// its endpoints (the shared vertices carry the neighbouring segments along);
 /// an arc segment takes the bulge that puts its midpoint at the new spot.
-pub(crate) fn apply_mid_grip(points: &mut [([f64; 2], f64)], closed: bool, seg: usize, apply: GripApply) {
+pub(crate) fn apply_mid_grip(
+    points: &mut [([f64; 2], f64)],
+    closed: bool,
+    seg: usize,
+    apply: GripApply,
+) {
     let n = points.len();
     let count = if closed { n } else { n.saturating_sub(1) };
     if seg >= count {

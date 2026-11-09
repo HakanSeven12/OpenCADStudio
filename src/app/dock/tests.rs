@@ -1880,18 +1880,22 @@ fn block_properties_table_offers_to_discard_and_close_on_an_unusable_cell() {
             .as_ref()
             .expect("keeping editing leaves the work in place");
         assert!(!state.confirm_close, "the offer is gone");
-        assert!(state.error.is_some(), "the diagnosis stays where it was read");
+        assert!(
+            state.error.is_some(),
+            "the diagnosis stays where it was read"
+        );
         assert_eq!(state.rows[0][0], "wide");
         assert!(
             try_find_in_view(&app, "Discard & close").is_none(),
             "and the screen agrees"
         );
         let _ = app.update(Message::BlockPropertiesTable(A::Apply));
-        assert!(app
-            .block_properties_table
-            .as_ref()
-            .expect("the refusal offers the way out again")
-            .confirm_close);
+        assert!(
+            app.block_properties_table
+                .as_ref()
+                .expect("the refusal offers the way out again")
+                .confirm_close
+        );
         let _ = app.update(Message::BlockPropertiesTable(A::DiscardClose));
         assert!(app.block_properties_table.is_none());
         assert!(app.active_modal.is_none(), "the dialog actually leaves");
@@ -2002,10 +2006,7 @@ fn block_properties_table_palette_dialog_authors_rows() {
         authoring_click(&mut app, point);
         let point = find_in_view(&app, "Add Row");
         authoring_click(&mut app, point);
-        assert_eq!(
-            app.block_properties_table.as_ref().unwrap().rows.len(),
-            1
-        );
+        assert_eq!(app.block_properties_table.as_ref().unwrap().rows.len(), 1);
         let _ = app.update(Message::BlockPropertiesTable(A::Cell(0, 0, "2.5".into())));
         let point = find_in_view(&app, "OK");
         authoring_click(&mut app, point);
@@ -2211,11 +2212,7 @@ fn block_edit_entry_dialog_answers_an_empty_name_when_ok_is_clicked() {
     let _ = app.update(Message::BlockEditPickerName(String::new()));
     assert!(app.block_edit_picker.as_ref().unwrap().error.is_none());
     assert!(
-        try_find_in_view(
-            &app,
-            "The name must be at least one character long."
-        )
-        .is_none(),
+        try_find_in_view(&app, "The name must be at least one character long.").is_none(),
         "nothing is said before the button is pressed"
     );
     let point = find_in_view(&app, "OK");
@@ -2224,7 +2221,9 @@ fn block_edit_entry_dialog_answers_an_empty_name_when_ok_is_clicked() {
         point,
         &[
             iced::Event::Mouse(iced::mouse::Event::ButtonPressed(iced::mouse::Button::Left)),
-            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(iced::mouse::Button::Left)),
+            iced::Event::Mouse(iced::mouse::Event::ButtonReleased(
+                iced::mouse::Button::Left,
+            )),
         ],
     );
     assert_eq!(
@@ -2233,11 +2232,7 @@ fn block_edit_entry_dialog_answers_an_empty_name_when_ok_is_clicked() {
         "the click reached the dialog"
     );
     assert!(
-        try_find_in_view(
-            &app,
-            "The name must be at least one character long."
-        )
-        .is_some(),
+        try_find_in_view(&app, "The name must be at least one character long.").is_some(),
         "the reason is on screen"
     );
     assert_eq!(app.active_modal, Some(ModalKind::BlockEditPicker));
@@ -2451,13 +2446,19 @@ fn labelled_strip_tabs_are_as_long_as_their_names() {
     app.show_browser = false;
     let _ = app.on_dock(DockMsg::EdgeMenuToggle(DockSide::Left, PanelId::Browser));
     let (icons, _) = app.dock_strip_layout(DockSide::Left);
-    assert!(icons.iter().flat_map(|g| &g.cells).all(|&h| h == STRIP_CELL_H));
+    assert!(icons
+        .iter()
+        .flat_map(|g| &g.cells)
+        .all(|&h| h == STRIP_CELL_H));
     let _ = app.on_dock(DockMsg::StripLabels(true));
     let (labelled, plus_top) = app.dock_strip_layout(DockSide::Left);
     // A tab holds its icon and name, stacked like a tab bar: a short strip,
     // not one that stretches down the whole edge.
     let tabs: Vec<f32> = labelled.iter().flat_map(|g| g.cells.clone()).collect();
-    assert!(tabs.iter().all(|&h| h > STRIP_CELL_H && h < 200.0), "{tabs:?}");
+    assert!(
+        tabs.iter().all(|&h| h > STRIP_CELL_H && h < 200.0),
+        "{tabs:?}"
+    );
     assert!(plus_top < app.dock_workspace_size().1 / 2.0, "{plus_top}");
     let _ = app.on_dock(DockMsg::StripLabels(false));
     assert_eq!(app.dock_strip_layout(DockSide::Left).0, icons);
@@ -2714,7 +2715,10 @@ fn toolpalettes_commands_transparency_and_distinct_from_authoring_palettes() {
 
     // Start an active command (e.g. LINE)
     let _ = app.dispatch_command("LINE");
-    assert_eq!(app.tabs[i].active_cmd.as_ref().map(|c| c.name()), Some("LINE"));
+    assert_eq!(
+        app.tabs[i].active_cmd.as_ref().map(|c| c.name()),
+        Some("LINE")
+    );
 
     // Verify commands are transparent and do not cancel running command
     assert!(crate::app::commands::is_transparent("TOOLPALETTES"));

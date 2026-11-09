@@ -18,8 +18,9 @@ fn visibility_set_row_keeps_every_object_visible_in_the_first_state() {
     feed(&mut app, "0,0");
     feed(&mut app, "");
 
-    let parameter = crate::scene::block_visibility::parameter(&app.tabs[i].scene.document, definition)
-        .expect("the row authors the visibility parameter");
+    let parameter =
+        crate::scene::block_visibility::parameter(&app.tabs[i].scene.document, definition)
+            .expect("the row authors the visibility parameter");
     assert!(
         !parameter.all_blocks.is_empty(),
         "the state set has to carry the definition's objects before it can show them"

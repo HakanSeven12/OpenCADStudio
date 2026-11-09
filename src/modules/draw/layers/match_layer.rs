@@ -18,9 +18,7 @@ pub fn laycur_tool() -> ToolDef {
     ToolDef {
         id: "LAYCUR",
         label: "Change to Current Layer",
-        icon: IconKind::Svg(include_bytes!(
-            "../../../../assets/icons/layers/laycur.svg"
-        )),
+        icon: IconKind::Svg(include_bytes!("../../../../assets/icons/layers/laycur.svg")),
         event: ModuleEvent::Command("LAYCUR".to_string()),
     }
 }

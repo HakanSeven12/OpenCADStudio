@@ -71,7 +71,9 @@ fn main() {
         }
         let per_call_ms = started.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;
         best = best.min(per_call_ms);
-        println!("navigation_selection_bounds: run {run} {ITERATIONS} calls: {per_call_ms:.4} ms/call");
+        println!(
+            "navigation_selection_bounds: run {run} {ITERATIONS} calls: {per_call_ms:.4} ms/call"
+        );
     }
 
     assert_eq!(scene.document.entities().count(), LINES);

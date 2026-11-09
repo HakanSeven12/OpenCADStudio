@@ -152,7 +152,11 @@ impl CircleCommand {
         match self.step {
             StepCR::Center => crate::tr!("hatch-cmd", "circle-center"),
             StepCR::Radius(_) => {
-                crate::tr!("hatch-cmd", "circle-radius", radius = format(self.default_r))
+                crate::tr!(
+                    "hatch-cmd",
+                    "circle-radius",
+                    radius = format(self.default_r)
+                )
             }
             StepCR::Diameter(_) => crate::tr!(
                 "hatch-cmd",

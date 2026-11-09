@@ -45,7 +45,9 @@ impl OpenCADStudio {
     pub(in crate::app) fn open_purge_dialog(&mut self) {
         let nested = self.purge_dialog.as_ref().is_none_or(|state| state.nested);
         self.purge_dialog = Some(State {
-            items: self.purge_lists().map(|names| names.into_iter().map(|n| (n, false)).collect()),
+            items: self
+                .purge_lists()
+                .map(|names| names.into_iter().map(|n| (n, false)).collect()),
             nested,
         });
         self.active_modal = Some(ModalKind::Purge);

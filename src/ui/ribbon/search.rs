@@ -291,9 +291,7 @@ impl Ribbon {
             .chain((0..self.modules.len()).filter(|i| *i != self.active));
         for index in tabs {
             let module = &self.modules[index];
-            if module.id() == "layout"
-                || self.contextual_off(module.id())
-                || self.tab_hidden(index)
+            if module.id() == "layout" || self.contextual_off(module.id()) || self.tab_hidden(index)
             {
                 continue;
             }

@@ -12,8 +12,8 @@ use iced::{Background, Border, Element, Fill, Length, Theme};
 
 use crate::app::Message;
 use crate::entities::common::{coordinate_text, parse_length};
-use crate::scene::WireModel;
 use crate::modules::draw::units;
+use crate::scene::WireModel;
 use crate::t;
 use crate::ui::style::common::muted_style;
 use crate::ui::style::form::{button_style, dialog_button, field_style, form_radio};
@@ -348,14 +348,10 @@ pub fn view_window<'a>(
         .width(Length::Fixed(150.0))
         .height(Length::Fixed(92.0))
         .style(crate::ui::window::pdf_dialogs::well_style);
-    let name_section = container(
-        row![name_column, preview]
-            .spacing(12)
-            .align_y(iced::Center),
-    )
-    .padding([8, 10])
-    .width(Fill)
-    .style(crate::ui::window::pdf_dialogs::card_style);
+    let name_section = container(row![name_column, preview].spacing(12).align_y(iced::Center))
+        .padding([8, 10])
+        .width(Fill)
+        .style(crate::ui::window::pdf_dialogs::card_style);
 
     // ── Group: Base Point ─────────────────────────────────────────────────────
     let base_onscreen = labeled_checkbox(

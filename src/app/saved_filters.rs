@@ -173,11 +173,7 @@ pub(crate) fn delete_saved_filter(document: &mut Document, name: &str) -> bool {
     let Some(ObjectType::Dictionary(d)) = document.objects.get_mut(&dictionary) else {
         return false;
     };
-    let Some(at) = d
-        .entries
-        .iter()
-        .position(|(key, _)| same_name(key, name))
-    else {
+    let Some(at) = d.entries.iter().position(|(key, _)| same_name(key, name)) else {
         return false;
     };
     let (_, handle) = d.entries.remove(at);

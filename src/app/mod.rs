@@ -8,25 +8,21 @@ pub(crate) mod config;
 #[cfg(not(target_arch = "wasm32"))]
 pub use automation::{export_headless, run_batch, serve};
 mod annotation_data;
-mod extraction_catalog;
 mod array_grips;
-mod block_actions;
-mod block_parameter_properties;
-mod insert_attributes;
-#[cfg(test)]
-mod insert_attributes_tests;
-mod block_alignment;
-mod block_feedback;
-mod block_cycle_order;
-mod block_grip_set;
-mod block_construction;
-mod block_constraint_status;
 mod block_action_bars;
+mod block_actions;
+mod block_alignment;
 mod block_authoring_edit;
+mod block_constraint_status;
+mod block_construction;
+mod block_cycle_order;
 mod block_editor;
 #[cfg(test)]
 mod block_editor_tests;
+mod block_feedback;
+mod block_grip_set;
 mod block_lookup;
+mod block_parameter_properties;
 mod block_properties;
 mod block_properties_table;
 #[cfg(test)]
@@ -38,6 +34,10 @@ mod block_test_tests;
 mod block_visibility;
 pub(crate) mod calc;
 mod command_driver;
+mod extraction_catalog;
+mod insert_attributes;
+#[cfg(test)]
+mod insert_attributes_tests;
 pub(crate) use command_driver::{
     copy_to_clipboard_kernel, define_block_raw_doc, paste_entities_kernel, PasteSpace,
 };
@@ -50,8 +50,8 @@ mod dimension_convert_tests;
 #[cfg(test)]
 mod dimension_preview_tests;
 mod dock;
-mod tab_document;
 mod drafting_settings;
+mod drawing_properties;
 pub(crate) mod expr_eval;
 pub(crate) mod filter_dialog;
 mod find_replace;
@@ -68,54 +68,54 @@ mod layers;
 mod measurement;
 mod model_ops;
 mod mtext_editor;
-mod table_cell_edit;
-#[cfg(test)]
-mod table_inplace_tests;
 #[cfg(test)]
 mod mtext_follows_style_tests;
 #[cfg(test)]
 mod mtext_style_from_selection_tests;
 mod navigation;
+pub(crate) mod node_graph;
 #[cfg(test)]
 mod object_isolation_tests;
-pub(crate) mod node_graph;
 mod options_session;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod plugin_host;
 mod presspull_ops;
-mod drawing_properties;
-mod purge_dialog;
-mod rename_dialog;
 mod properties;
-mod quick_calc;
+mod purge_dialog;
 #[cfg(test)]
 mod qselect_tests;
+mod quick_calc;
 mod recent;
 mod record_api;
+mod rename_dialog;
 mod saved_filters;
 pub(crate) mod settings;
-pub(crate) mod tool_windows;
 mod shortcuts;
 mod startup;
 pub(crate) mod style_ops;
+mod tab_document;
+mod table_cell_edit;
+#[cfg(test)]
+mod table_inplace_tests;
 mod text_inline;
-mod text_style_draft;
-pub(crate) mod text_style_users;
 #[cfg(test)]
 mod text_style_data_tests;
+mod text_style_draft;
 #[cfg(test)]
 mod text_style_font_picker_tests;
 #[cfg(test)]
+mod text_style_layout_tests;
+#[cfg(test)]
 mod text_style_manager_tests;
 #[cfg(test)]
-mod text_style_update_tests;
-#[cfg(test)]
-mod text_style_layout_tests;
+mod text_style_pending_tests;
 #[cfg(test)]
 mod text_style_ui_tests;
 #[cfg(test)]
-mod text_style_pending_tests;
+mod text_style_update_tests;
+pub(crate) mod text_style_users;
 mod tolerance_dialog;
+pub(crate) mod tool_windows;
 mod update;
 pub(crate) use update::style_import::{style_exists as style_import_exists, StyleImportDraft};
 #[cfg(test)]
@@ -941,7 +941,10 @@ pub(super) struct OpenCADStudio {
     table_cell_format: Option<crate::ui::window::table_cell_dialog::CellFormatState>,
     /// A data format waiting on the invalid data type warning, and the
     /// cells whose values read as no such type.
-    table_cell_warning: Option<(crate::ui::window::table_cell_dialog::CellFormatState, Vec<String>)>,
+    table_cell_warning: Option<(
+        crate::ui::window::table_cell_dialog::CellFormatState,
+        Vec<String>,
+    )>,
     /// A value typed into a cell that waits on the data type question.
     table_cell_entry: Option<commands::table_cells::CellEntry>,
     /// The next cell step puts its value in without the data type question
@@ -1690,7 +1693,8 @@ pub(super) struct OpenCADStudio {
     /// State backing an active declarative plugin modal dialog.
     pub(crate) plugin_dialog_state: Option<crate::ui::window::plugin_dialog::PluginDialogState>,
     /// Persistent dockable side panels registered by plugins.
-    pub(crate) plugin_panels: std::collections::BTreeMap<String, crate::ui::window::plugin_panel::PluginPanelState>,
+    pub(crate) plugin_panels:
+        std::collections::BTreeMap<String, crate::ui::window::plugin_panel::PluginPanelState>,
     /// Numeric mapping for PanelId::Plugin(u32).
     pub(crate) plugin_panel_ids: std::collections::HashMap<String, u32>,
     pub(crate) plugin_panel_by_num: std::collections::HashMap<u32, String>,
@@ -2633,22 +2637,16 @@ mod dim_style_refs_serde {
     use rustc_hash::FxHashMap;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    pub fn serialize<S>(
-        map: &FxHashMap<Handle, String>,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(map: &FxHashMap<Handle, String>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut pairs: Vec<(Handle, String)> =
-            map.iter().map(|(k, v)| (*k, v.clone())).collect();
+        let mut pairs: Vec<(Handle, String)> = map.iter().map(|(k, v)| (*k, v.clone())).collect();
         pairs.sort_by_key(|(h, _)| h.value());
         pairs.serialize(serializer)
     }
 
-    pub fn deserialize<'de, D>(
-        deserializer: D,
-    ) -> Result<FxHashMap<Handle, String>, D::Error>
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<FxHashMap<Handle, String>, D::Error>
     where
         D: Deserializer<'de>,
     {
@@ -2839,7 +2837,8 @@ impl ClipboardDeps {
                 if !objects.is_empty() {
                     let mut annotation_scales = Vec::new();
                     for (_, object) in &objects {
-                        let document::objects::ObjectType::ObjectContextData(context) = object else {
+                        let document::objects::ObjectType::ObjectContextData(context) = object
+                        else {
                             continue;
                         };
                         if annotation_scales
@@ -3059,7 +3058,10 @@ impl ClipboardDeps {
     /// Snapshot every block definition the `entities` reference through an
     /// INSERT, walking nested INSERTs transitively. Model/paper space and
     /// xref blocks are skipped — those aren't portable definitions.
-    fn capture_blocks(doc: &document::Document, entities: &[document::EntityType]) -> Vec<BlockDef> {
+    fn capture_blocks(
+        doc: &document::Document,
+        entities: &[document::EntityType],
+    ) -> Vec<BlockDef> {
         use document::EntityType;
         use rustc_hash::FxHashSet;
         let mut seen: FxHashSet<String> = FxHashSet::default();
@@ -3644,10 +3646,7 @@ pub enum Message {
     WebFileCached(u64, crate::io::WebOpenOutcome, Result<(), String>),
     FileOpened(
         u64,
-        Result<
-            (String, PathBuf, Document, crate::scene::DerivedCaches),
-            crate::io::OpenLoadError,
-        >,
+        Result<(String, PathBuf, Document, crate::scene::DerivedCaches), crate::io::OpenLoadError>,
     ),
     RecoveryClose,
     RecoveryAttempt,
@@ -5002,15 +5001,27 @@ pub enum Message {
     },
     /// User committed a geometry/common field edit (Enter pressed).
     PropGeomCommit(&'static str),
-    PropBlockInput { key: crate::scene::model::object::BlockParameterKey, value: String },
+    PropBlockInput {
+        key: crate::scene::model::object::BlockParameterKey,
+        value: String,
+    },
     PropBlockCommit(crate::scene::model::object::BlockParameterKey),
-    PropBlockChoice { key: crate::scene::model::object::BlockParameterKey, index: usize },
+    PropBlockChoice {
+        key: crate::scene::model::object::BlockParameterKey,
+        index: usize,
+    },
     /// Open or close the dynamic-value list of one row. It carries the surface
     /// it was clicked on, so the same row's two copies toggle independently.
-    PropBlockPickerToggle { key: crate::scene::model::object::BlockParameterKey, quick: bool },
+    PropBlockPickerToggle {
+        key: crate::scene::model::object::BlockParameterKey,
+        quick: bool,
+    },
     /// The list's overlay dismissed itself: a click outside it, or the same
     /// Escape whose global shortcut arrives a moment later.
-    PropBlockPickerDismiss { key: crate::scene::model::object::BlockParameterKey, quick: bool },
+    PropBlockPickerDismiss {
+        key: crate::scene::model::object::BlockParameterKey,
+        quick: bool,
+    },
 
     /// Toggle a collapsed coordinate group ("Position", "Scale", …) open or
     /// closed in the Properties panel, keyed `section:base`.
@@ -6969,7 +6980,9 @@ impl OpenCADStudio {
 
     /// Open a declarative plugin modal dialog.
     pub(crate) fn open_plugin_dialog(&mut self, def: ocs_plugin_api::dialog::DialogDef) {
-        self.plugin_dialog_state = Some(crate::ui::window::plugin_dialog::PluginDialogState::new(def));
+        self.plugin_dialog_state = Some(crate::ui::window::plugin_dialog::PluginDialogState::new(
+            def,
+        ));
         self.active_modal = Some(ModalKind::PluginDialog);
     }
 

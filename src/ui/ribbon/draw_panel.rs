@@ -46,21 +46,19 @@ const CLOSE_DELAY: Duration = Duration::from_millis(300);
 
 /// Command, label and icon of every slide-out tool and its submenu options.
 pub(crate) fn tools() -> impl Iterator<Item = (&'static str, &'static str, &'static [u8])> {
-    extras::all()
-        .flat_map(PanelExtras::tools)
-        .flat_map(|tool| {
-            let icon = match tool.tool.icon {
-                IconKind::Svg(icon) => Some(icon),
-                IconKind::Glyph(_) => None,
-            };
-            icon.into_iter().flat_map(move |icon| {
-                std::iter::once((tool.command(), tool.tool.label, icon)).chain(
-                    tool.options
-                        .iter()
-                        .map(move |(cmd, label)| (*cmd, *label, icon)),
-                )
-            })
+    extras::all().flat_map(PanelExtras::tools).flat_map(|tool| {
+        let icon = match tool.tool.icon {
+            IconKind::Svg(icon) => Some(icon),
+            IconKind::Glyph(_) => None,
+        };
+        icon.into_iter().flat_map(move |icon| {
+            std::iter::once((tool.command(), tool.tool.label, icon)).chain(
+                tool.options
+                    .iter()
+                    .map(move |(cmd, label)| (*cmd, *label, icon)),
+            )
         })
+    })
 }
 
 pub(super) fn panel_for_dropdown(id: &str) -> Option<&'static PanelExtras> {
@@ -438,7 +436,10 @@ fn launcher_of_height<'a>(panel: &PanelExtras, height: f32) -> Option<Element<'a
         .width(LAUNCHER_W)
         .height(height)
         .padding(0),
-        make_tip(super::widgets::tool_tip_text(&t!(panel.dialog_label), dialog)),
+        make_tip(super::widgets::tool_tip_text(
+            &t!(panel.dialog_label),
+            dialog,
+        )),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(400))
@@ -654,15 +655,10 @@ fn text_layers<'a>(ribbon: &Ribbon) -> Element<'a, Message> {
     ]
     .spacing(6)
     .align_y(iced::Center);
-    let list = DropdownList::with_options(
-        layers,
-        Length::Fixed(list_height),
-        Length::Fill,
-        1.0,
-        0.0,
-    )
-    .selected(initial_selected)
-    .on_escape(Message::CloseRibbonDropdown);
+    let list =
+        DropdownList::with_options(layers, Length::Fixed(list_height), Length::Fill, 1.0, 0.0)
+            .selected(initial_selected)
+            .on_escape(Message::CloseRibbonDropdown);
     column![title, list].spacing(4).into()
 }
 
@@ -793,7 +789,10 @@ fn fade_row<'a>(fade: i32, panel_id: &'static str) -> Element<'a, Message> {
     let amount = fade.unsigned_abs().min(90) as u8;
     let switch = tooltip(
         switch,
-        make_tip(super::widgets::tool_tip_text(&t!("Xref fading"), "XDWGFADECTL")),
+        make_tip(super::widgets::tool_tip_text(
+            &t!("Xref fading"),
+            "XDWGFADECTL",
+        )),
         tooltip::Position::Bottom,
     )
     .delay(Duration::from_millis(400))
@@ -932,9 +931,7 @@ fn options_list<'a>(
         })
         .collect();
     let dd_list = DropdownList::new(rows).on_escape(Message::CloseRibbonDropdown);
-    let list = container(dd_list)
-        .style(popup_panel_style)
-        .width(OPTIONS_W);
+    let list = container(dd_list).style(popup_panel_style).width(OPTIONS_W);
     let list = opaque(
         mouse_area(list)
             .on_enter(Message::RibbonSlideOut(SlideOutMsg::OverSubmenu(true)))

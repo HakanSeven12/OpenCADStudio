@@ -791,7 +791,10 @@ impl Grippable for Hatch {
                     GripApply::Translate(delta) => (delta.x, delta.y),
                 };
                 let origin = self.pattern_origin();
-                self.set_pattern_origin(document::types::Vector2::new(origin.x + dx, origin.y + dy));
+                self.set_pattern_origin(document::types::Vector2::new(
+                    origin.x + dx,
+                    origin.y + dy,
+                ));
                 return;
             }
             id += 1;
@@ -1319,4 +1322,3 @@ fn edit_boundary_vertex(
         _ => {}
     }
 }
-

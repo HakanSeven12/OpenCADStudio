@@ -79,7 +79,11 @@ impl CopyCommand {
     /// step of `delta` apart, or with Fit spread so the last lands on it.
     fn array_offsets(&self, delta: DVec3) -> Vec<DVec3> {
         let n = self.array_count.unwrap_or(2).max(2);
-        let step = if self.array_fit { delta / (n - 1) as f64 } else { delta };
+        let step = if self.array_fit {
+            delta / (n - 1) as f64
+        } else {
+            delta
+        };
         (1..n).map(|k| step * k as f64).collect()
     }
 }
@@ -359,7 +363,11 @@ impl CadCommand for CopyCommand {
         };
         let mut out: Vec<WireModel> = offsets
             .iter()
-            .flat_map(|offset| self.wire_models.iter().map(move |w| w.translated(offset.as_vec3())))
+            .flat_map(|offset| {
+                self.wire_models
+                    .iter()
+                    .map(move |w| w.translated(offset.as_vec3()))
+            })
             .collect();
         out.push(WireModel::solid(
             "rubber_band".into(),
@@ -401,10 +409,16 @@ mod tests {
                 .map(|w| w.points[0][0])
                 .collect()
         };
-        assert_eq!(starts(&mut cmd, DVec3::new(10.0, 0.0, 0.0)), vec![10.0, 20.0, 30.0]);
+        assert_eq!(
+            starts(&mut cmd, DVec3::new(10.0, 0.0, 0.0)),
+            vec![10.0, 20.0, 30.0]
+        );
         assert!(keywords(&cmd).contains(&"F".to_string()));
         let _ = cmd.on_text_input("F");
-        assert_eq!(starts(&mut cmd, DVec3::new(30.0, 0.0, 0.0)), vec![10.0, 20.0, 30.0]);
+        assert_eq!(
+            starts(&mut cmd, DVec3::new(30.0, 0.0, 0.0)),
+            vec![10.0, 20.0, 30.0]
+        );
         match cmd.on_point(DVec3::new(30.0, 0.0, 0.0)) {
             CmdResult::BatchCopy(_, transforms) => {
                 let xs: Vec<f64> = transforms
@@ -414,7 +428,11 @@ mod tests {
                         _ => panic!("translate"),
                     })
                     .collect();
-                assert_eq!(xs, vec![10.0, 20.0, 30.0], "Fit: the last copy on the picked point");
+                assert_eq!(
+                    xs,
+                    vec![10.0, 20.0, 30.0],
+                    "Fit: the last copy on the picked point"
+                );
             }
             _ => panic!("the array places its copies"),
         }

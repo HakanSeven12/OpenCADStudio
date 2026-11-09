@@ -40,9 +40,11 @@ pub fn menu_entries<'a>(flags: QuadStatusFlags) -> Vec<Entry<'a>> {
     let on_select = quad_row("Offer the quad for a selection", flags.on_select, |on| {
         Message::QuadOption(crate::QuadOptionMsg::OnSelect(on))
     });
-    let on_right_click = quad_row("Right-click in the void opens it", flags.on_right_click, |on| {
-        Message::QuadOption(crate::QuadOptionMsg::OnRightClick(on))
-    });
+    let on_right_click = quad_row(
+        "Right-click in the void opens it",
+        flags.on_right_click,
+        |on| Message::QuadOption(crate::QuadOptionMsg::OnRightClick(on)),
+    );
     let suppress = quad_row(
         "Suppress the hover quad while selected",
         flags.suppress_hover_when_selection,

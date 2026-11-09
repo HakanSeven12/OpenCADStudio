@@ -78,8 +78,16 @@ fn fonts() -> &'static SysFonts {
 /// `family` naming `face` itself: with the [`STYLE_SEP`] style of a bold or
 /// italic face.
 fn face_family(face: &fontdb::FaceInfo, family: &str) -> String {
-    let b = if face.weight.0 >= fontdb::Weight::SEMIBOLD.0 { "b" } else { "" };
-    let i = if face.style != fontdb::Style::Normal { "i" } else { "" };
+    let b = if face.weight.0 >= fontdb::Weight::SEMIBOLD.0 {
+        "b"
+    } else {
+        ""
+    };
+    let i = if face.style != fontdb::Style::Normal {
+        "i"
+    } else {
+        ""
+    };
     if b.is_empty() && i.is_empty() {
         family.to_string()
     } else {
@@ -281,7 +289,13 @@ fn canonical_family_name_uncached(family: &str) -> Option<String> {
                 "Liberation Sans Narrow",
             ]
         } else {
-            &["TeX Gyre Heros", "Nimbus Sans", "Helvetica", "Arial", "Liberation Sans"]
+            &[
+                "TeX Gyre Heros",
+                "Nimbus Sans",
+                "Helvetica",
+                "Arial",
+                "Liberation Sans",
+            ]
         };
         for twin in twins {
             if let Some(matched) = families.iter().find(|&f| f.eq_ignore_ascii_case(twin)) {
@@ -350,8 +364,16 @@ pub fn styled_family(family: &str, bold: bool, italic: bool) -> Option<String> {
     let db = fonts().db.lock().unwrap();
     let face = db.face(db.query(&fontdb::Query {
         families: &[fontdb::Family::Name(&canonical)],
-        weight: if bold { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL },
-        style: if italic { fontdb::Style::Italic } else { fontdb::Style::Normal },
+        weight: if bold {
+            fontdb::Weight::BOLD
+        } else {
+            fontdb::Weight::NORMAL
+        },
+        style: if italic {
+            fontdb::Style::Italic
+        } else {
+            fontdb::Style::Normal
+        },
         ..Default::default()
     })?)?;
     let bold = bold && face.weight.0 >= fontdb::Weight::SEMIBOLD.0;
@@ -378,7 +400,11 @@ fn face_id_weighted(family: &str, weight: fontdb::Weight) -> Option<fontdb::ID> 
     let query = fontdb::Query {
         families: &[fontdb::Family::Name(&canonical)],
         weight: if bold { fontdb::Weight::BOLD } else { weight },
-        style: if italic { fontdb::Style::Italic } else { fontdb::Style::Normal },
+        style: if italic {
+            fontdb::Style::Italic
+        } else {
+            fontdb::Style::Normal
+        },
         ..Default::default()
     };
     fonts().db.lock().unwrap().query(&query)
@@ -390,12 +416,22 @@ pub fn face_file(family: &str, bold: bool, italic: bool) -> Option<String> {
     let db = fonts().db.lock().unwrap();
     let id = db.query(&fontdb::Query {
         families: &[fontdb::Family::Name(family)],
-        weight: if bold { fontdb::Weight::BOLD } else { fontdb::Weight::NORMAL },
-        style: if italic { fontdb::Style::Italic } else { fontdb::Style::Normal },
+        weight: if bold {
+            fontdb::Weight::BOLD
+        } else {
+            fontdb::Weight::NORMAL
+        },
+        style: if italic {
+            fontdb::Style::Italic
+        } else {
+            fontdb::Style::Normal
+        },
         ..Default::default()
     })?;
     match &db.face(id)?.source {
-        fontdb::Source::File(path) => Some(path.file_name()?.to_string_lossy().to_ascii_lowercase()),
+        fontdb::Source::File(path) => {
+            Some(path.file_name()?.to_string_lossy().to_ascii_lowercase())
+        }
         _ => None,
     }
 }
@@ -700,4 +736,3 @@ mod tests {
         );
     }
 }
-

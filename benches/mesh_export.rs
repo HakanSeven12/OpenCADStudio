@@ -25,8 +25,8 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use OpenCADStudio::io::stl::build_stl;
 use OpenCADStudio::io::step::build_step;
+use OpenCADStudio::io::stl::build_stl;
 use OpenCADStudio::scene::model::mesh_model::MeshModel;
 
 /// Cells per side; two triangles per cell.
@@ -116,7 +116,10 @@ fn main() {
             None => stl_digest = Some(run_digest),
         }
         stl_best = stl_best.min(seconds);
-        println!("mesh_export: stl run {run}: {seconds:.4} s, {} bytes", bytes.len());
+        println!(
+            "mesh_export: stl run {run}: {seconds:.4} s, {} bytes",
+            bytes.len()
+        );
     }
 
     let mut step_best = f64::MAX;
@@ -137,7 +140,10 @@ fn main() {
         let run_digest = digest(data_section(&text).as_bytes());
         match step_digest {
             Some(previous) => {
-                assert_eq!(run_digest, previous, "STEP data section is stable across runs")
+                assert_eq!(
+                    run_digest, previous,
+                    "STEP data section is stable across runs"
+                )
             }
             None => step_digest = Some(run_digest),
         }

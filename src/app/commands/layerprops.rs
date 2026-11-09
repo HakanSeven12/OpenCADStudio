@@ -105,10 +105,8 @@ impl OpenCADStudio {
                             .push_output(crate::t!("LAYER: layers thawed.").as_ref());
                     }
                     "LOCK" | "LO" => {
-                        let names: Vec<String> = parts[1..]
-                            .iter()
-                            .map(|name| (*name).to_string())
-                            .collect();
+                        let names: Vec<String> =
+                            parts[1..].iter().map(|name| (*name).to_string()).collect();
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 l.flags.locked = true;
@@ -122,10 +120,8 @@ impl OpenCADStudio {
                             .push_output(crate::t!("LAYER: layers locked.").as_ref());
                     }
                     "UNLOCK" | "UL" => {
-                        let names: Vec<String> = parts[1..]
-                            .iter()
-                            .map(|name| (*name).to_string())
-                            .collect();
+                        let names: Vec<String> =
+                            parts[1..].iter().map(|name| (*name).to_string()).collect();
                         for name in &parts[1..] {
                             if let Some(l) = self.tabs[i].scene.document.layers.get_mut(name) {
                                 l.flags.locked = false;
@@ -1021,8 +1017,9 @@ impl OpenCADStudio {
                                 self.push_undo_snapshot(i, "TABLESTYLE NEW");
                                 let mut style = TableStyle::standard();
                                 style.name = name.clone();
-                                let nh =
-                                    document::Handle::new(self.tabs[i].scene.document.next_handle());
+                                let nh = document::Handle::new(
+                                    self.tabs[i].scene.document.next_handle(),
+                                );
                                 style.handle = nh;
                                 self.tabs[i]
                                     .scene
@@ -1060,20 +1057,23 @@ impl OpenCADStudio {
                                     doc.header.current_table_style_name = name.clone();
                                     self.push_undo_snapshot(i, "TABLESTYLE SET");
                                     self.tabs[i].dirty = true;
-                                    self.command_line
-                                        .push_output(&crate::tf!("Table style set to '{name}'.").as_ref());
+                                    self.command_line.push_output(
+                                        &crate::tf!("Table style set to '{name}'.").as_ref(),
+                                    );
                                 }
                                 None => {
                                     self.command_line.push_error(
-                                        crate::tf!("TABLESTYLE: no table style named '{name}'.").as_ref(),
+                                        crate::tf!("TABLESTYLE: no table style named '{name}'.")
+                                            .as_ref(),
                                     );
                                 }
                             }
                         }
                     }
                     _ => {
-                        self.command_line
-                            .push_error(crate::t!("Usage: TABLESTYLE [LIST|NEW <name>|SET <name>]").as_ref());
+                        self.command_line.push_error(
+                            crate::t!("Usage: TABLESTYLE [LIST|NEW <name>|SET <name>]").as_ref(),
+                        );
                     }
                 }
             }
@@ -1139,8 +1139,9 @@ impl OpenCADStudio {
                                 self.push_undo_snapshot(i, "MLSTYLE NEW");
                                 let mut style = MLineStyle::standard();
                                 style.name = name.clone();
-                                let nh =
-                                    document::Handle::new(self.tabs[i].scene.document.next_handle());
+                                let nh = document::Handle::new(
+                                    self.tabs[i].scene.document.next_handle(),
+                                );
                                 style.handle = nh;
                                 self.tabs[i]
                                     .scene
@@ -1444,8 +1445,10 @@ impl OpenCADStudio {
                             })
                             .collect();
                         if name.is_empty() {
-                            self.command_line
-                                .push_error(crate::t!("Usage: MLEADERSTYLE NEW <name> [property value …]").as_ref());
+                            self.command_line.push_error(
+                                crate::t!("Usage: MLEADERSTYLE NEW <name> [property value …]")
+                                    .as_ref(),
+                            );
                         } else if parts[2..].len() % 2 != 0 {
                             self.command_line.push_error(
                                 crate::t!("MLEADERSTYLE: name each option and its value in pairs, e.g. NEW NOTE-2.5 TEXT 2.5 ARROW CLOSED.").as_ref(),
@@ -1492,7 +1495,11 @@ impl OpenCADStudio {
                                     crate::tf!(
                                         "MLEADERSTYLE: '{}' created{}{}.",
                                         name,
-                                        if applied_options.is_empty() { "" } else { " with " },
+                                        if applied_options.is_empty() {
+                                            ""
+                                        } else {
+                                            " with "
+                                        },
                                         applied_options.join(", ")
                                     )
                                     .as_ref(),
@@ -1530,9 +1537,9 @@ impl OpenCADStudio {
                                         .as_ref(),
                                     );
                                 }
-                                Err(why) => self.command_line.push_error(
-                                    crate::tf!("MLEADERSTYLE: {why}").as_ref(),
-                                ),
+                                Err(why) => self
+                                    .command_line
+                                    .push_error(crate::tf!("MLEADERSTYLE: {why}").as_ref()),
                             }
                         }
                     }
@@ -2089,10 +2096,14 @@ fn mleader_handles(doc: &document::Document) -> Vec<document::Handle> {
 
 /// Push the current style settings onto every multileader that uses it.
 fn reapply_mleader_style(doc: &mut document::Document, style_handle: document::Handle) -> usize {
-    let Some(style) = doc.objects.get(&style_handle).and_then(|object| match object {
-        document::objects::ObjectType::MultiLeaderStyle(style) => Some(style.clone()),
-        _ => None,
-    }) else {
+    let Some(style) = doc
+        .objects
+        .get(&style_handle)
+        .and_then(|object| match object {
+            document::objects::ObjectType::MultiLeaderStyle(style) => Some(style.clone()),
+            _ => None,
+        })
+    else {
         return 0;
     };
     let handles: Vec<document::Handle> = doc

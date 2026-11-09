@@ -287,7 +287,10 @@ fn f64_at(e: &[u8], at: usize) -> Option<f64> {
 /// The text style a text element uses: the id in its text style linkage
 /// (the four bytes after `04 20 e6 04 00 00`).
 fn text_style_id(e: &[u8]) -> Option<u32> {
-    let at = e.windows(6).position(|w| w == [0x04, 0x20, 0xe6, 0x04, 0x00, 0x00])? + 6;
+    let at = e
+        .windows(6)
+        .position(|w| w == [0x04, 0x20, 0xe6, 0x04, 0x00, 0x00])?
+        + 6;
     u32_at(e, at)
 }
 
@@ -305,7 +308,10 @@ fn text_style_table(nm: &[&[u8]]) -> Vec<(u32, String, String)> {
                     if !out.iter().any(|(i, ..)| *i == id) {
                         // The style's font: its number and kind at byte 40.
                         let font = e.get(40..42).and_then(|f| {
-                            fonts.iter().find(|(n, k, _)| [*n, *k] == [f[0], f[1]]).map(|(_, k, name)| (*k, name))
+                            fonts
+                                .iter()
+                                .find(|(n, k, _)| [*n, *k] == [f[0], f[1]])
+                                .map(|(_, k, name)| (*k, name))
                         });
                         out.push((id, name, font_file(font)));
                     }
@@ -369,7 +375,9 @@ fn dim_style_table(nm: &[&[u8]], s: f64) -> Vec<DgnDimStyle> {
                     id,
                     name,
                     text_style: u32_at(e, 56).unwrap_or(0),
-                    font: u32_at(e, 56).and_then(|t| fonts.get(&t).copied()).unwrap_or((0, 0)),
+                    font: u32_at(e, 56)
+                        .and_then(|t| fonts.get(&t).copied())
+                        .unwrap_or((0, 0)),
                     text_height,
                     arrow: real(408) * text_height,
                     ext_offset: real(152) * text_height,
@@ -411,9 +419,11 @@ fn font_table(nm: &[&[u8]]) -> Vec<(u8, u8, String)> {
         match kind(e) {
             96 => table = u32_at(e, 12).unwrap_or(0),
             95 if table == 2 => {
-                let (Some(&number), Some(&kind), Some(len)) =
-                    (e.get(40), e.get(41), e.get(44..46).map(|b| u16::from_le_bytes([b[0], b[1]])))
-                else {
+                let (Some(&number), Some(&kind), Some(len)) = (
+                    e.get(40),
+                    e.get(41),
+                    e.get(44..46).map(|b| u16::from_le_bytes([b[0], b[1]])),
+                ) else {
                     continue;
                 };
                 let units: Vec<u16> = e
@@ -422,7 +432,13 @@ fn font_table(nm: &[&[u8]]) -> Vec<(u8, u8, String)> {
                     .chunks_exact(2)
                     .map(|c| u16::from_le_bytes([c[0], c[1]]))
                     .collect();
-                out.push((number, kind, String::from_utf16_lossy(&units).trim_end_matches(char::from(0)).to_string()));
+                out.push((
+                    number,
+                    kind,
+                    String::from_utf16_lossy(&units)
+                        .trim_end_matches(char::from(0))
+                        .to_string(),
+                ));
             }
             _ => {}
         }
@@ -594,9 +610,13 @@ fn bspline_geom(order: usize, poles: Vec<[f64; 3]>, closed: bool) -> DgnGeom {
             closed,
         };
     }
-    let mut ctrl: Vec<[f64; 3]> = (0..distinct + degree).map(|i| poles[i % distinct]).collect();
+    let mut ctrl: Vec<[f64; 3]> = (0..distinct + degree)
+        .map(|i| poles[i % distinct])
+        .collect();
     let count = ctrl.len() + order;
-    let mut knots: Vec<f64> = (0..count).map(|i| (i + 1) as f64 / (count + 1) as f64).collect();
+    let mut knots: Vec<f64> = (0..count)
+        .map(|i| (i + 1) as f64 / (count + 1) as f64)
+        .collect();
     let (lo, hi) = (knots[degree], knots[ctrl.len()]);
     let same = |a: f64, b: f64| (a - b).abs() < 1e-12;
     // Knot insertion (Boehm) of t until it is a degree-fold knot.
@@ -616,7 +636,9 @@ fn bspline_geom(order: usize, poles: Vec<[f64; 3]>, closed: bool) -> DgnGeom {
                 next.push(ctrl[i - 1]);
             } else {
                 let a = (t - knots[i]) / (knots[i + degree] - knots[i]);
-                next.push(std::array::from_fn(|c| (1.0 - a) * ctrl[i - 1][c] + a * ctrl[i][c]));
+                next.push(std::array::from_fn(|c| {
+                    (1.0 - a) * ctrl[i - 1][c] + a * ctrl[i][c]
+                }));
             }
         }
         ctrl = next;
@@ -627,7 +649,10 @@ fn bspline_geom(order: usize, poles: Vec<[f64; 3]>, closed: bool) -> DgnGeom {
     // The domain clamped: an order-fold knot at each end, the poles that
     // span it.
     let first = knots.iter().position(|k| same(*k, lo)).unwrap_or(1).max(1);
-    let last = knots.iter().rposition(|k| same(*k, hi)).unwrap_or(knots.len() - 1);
+    let last = knots
+        .iter()
+        .rposition(|k| same(*k, hi))
+        .unwrap_or(knots.len() - 1);
     let mut clamped = vec![lo];
     clamped.extend_from_slice(&knots[first..=last]);
     clamped.push(hi);
@@ -843,7 +868,8 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 Some(s) => By::Own(s),
             },
             geom,
-            filled: matches!(kind(e), 6 | 14) && e.windows(4).any(|w| w == [0x07, 0x10, 0x41, 0x00]),
+            filled: matches!(kind(e), 6 | 14)
+                && e.windows(4).any(|w| w == [0x07, 0x10, 0x41, 0x00]),
             construction: false,
         };
         let stroke = Some((color, -1.0));
@@ -865,7 +891,9 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
             7 => {
                 let n = u32_at(e, 104).unwrap_or(0) as usize;
                 let texts = run.get(index + 1..index + 1 + n).is_some_and(|parts| {
-                    parts.iter().all(|p| p.len() >= 104 && kind(p) == 17 && is_component(p))
+                    parts
+                        .iter()
+                        .all(|p| p.len() >= 104 && kind(p) == 17 && is_component(p))
                 });
                 if texts {
                     // 2D: justification 118, origin 152 (the node's
@@ -876,7 +904,11 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                         element(DgnGeom::TextNode {
                             lines: Vec::new(),
                             origin,
-                            just: if d3 { 0 } else { e.get(118).copied().unwrap_or(0) },
+                            just: if d3 {
+                                0
+                            } else {
+                                e.get(118).copied().unwrap_or(0)
+                            },
                             line_spacing: None,
                         }),
                     );
@@ -934,7 +966,9 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                 let pts3: Vec<[f64; 3]> = (0..n).filter_map(|k| p3(112 + k * stride)).collect();
                 let pts: Vec<[f64; 2]> = pts3.iter().map(|p| plan(*p)).collect();
                 if pts.len() >= 2 {
-                    collect.push(element(DgnGeom::Points(pts3.iter().map(|p| at3(*p)).collect())));
+                    collect.push(element(DgnGeom::Points(
+                        pts3.iter().map(|p| at3(*p)).collect(),
+                    )));
                     let mut pb = PathBuilder::default();
                     pb.move_to(pts[0]);
                     for p in &pts[1..] {
@@ -1215,7 +1249,10 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                         .iter()
                         .position(|&p| kind(p) == 101 && u32_at(p, 116) == Some(family))?;
                     let mut values = Vec::new();
-                    for &d in parts[header + 1..].iter().take_while(|&&p| kind(p) == data_kind) {
+                    for &d in parts[header + 1..]
+                        .iter()
+                        .take_while(|&&p| kind(p) == data_kind)
+                    {
                         let count = u32_at(d, 104)? as usize;
                         values.extend(d.get(120..)?.chunks_exact(size).take(count));
                     }
@@ -1228,8 +1265,10 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                     .iter()
                     .map(|c| f64::from_le_bytes([c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7]]))
                     .collect();
-                let points: Vec<[f64; 3]> =
-                    coords.chunks_exact(3).map(|c| at3([c[0], c[1], c[2]])).collect();
+                let points: Vec<[f64; 3]> = coords
+                    .chunks_exact(3)
+                    .map(|c| at3([c[0], c[1], c[2]]))
+                    .collect();
                 let numbers: Vec<i32> = numbers
                     .iter()
                     .map(|c| i32::from_le_bytes([c[0], c[1], c[2], c[3]]))
@@ -1240,7 +1279,8 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                     .split(|&k| k == 0)
                     .filter(|l| {
                         l.len() >= 3
-                            && l.iter().all(|k| (k.unsigned_abs() as usize) <= points.len())
+                            && l.iter()
+                                .all(|k| (k.unsigned_abs() as usize) <= points.len())
                     })
                     .map(|l| l.to_vec())
                     .collect();
@@ -1302,7 +1342,13 @@ fn read_run(run: &[&[u8]], styles: &Styles, xf: &Xf) -> Raw {
                     if poles.len() == count && count >= order && order >= 2 {
                         let poles: Vec<[f64; 3]> = poles.iter().map(|p| at3(*p)).collect();
                         let geom = bspline_geom(order, poles, closed);
-                        if let DgnGeom::Spline { degree, knots, poles, .. } = &geom {
+                        if let DgnGeom::Spline {
+                            degree,
+                            knots,
+                            poles,
+                            ..
+                        } = &geom
+                        {
                             let plan_poles: Vec<[f64; 2]> =
                                 poles.iter().map(|p| [p[0], p[1]]).collect();
                             let pts = bspline_points(degree + 1, &plan_poles, knots, 24 * count);
@@ -1762,7 +1808,10 @@ fn linked_strings(e: &[u8]) -> Vec<(u32, String)> {
             .map(|n| at + 4 + n)
             .unwrap_or(e.len());
         let subtype = at.checked_sub(8).and_then(|p| u32_at(e, p)).unwrap_or(0);
-        out.push((subtype, String::from_utf8_lossy(&e[at + 4..end]).to_string()));
+        out.push((
+            subtype,
+            String::from_utf8_lossy(&e[at + 4..end]).to_string(),
+        ));
         from = end.max(at + 4);
     }
     out

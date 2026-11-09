@@ -1959,7 +1959,10 @@ impl InteractionCandidates {
 
     pub fn get(&self, index: usize) -> Option<&WireModel> {
         match &self.wire_indices {
-            Some(indices) => indices.get(index).copied().and_then(|wire| self.wires.slot(wire)),
+            Some(indices) => indices
+                .get(index)
+                .copied()
+                .and_then(|wire| self.wires.slot(wire)),
             None => self.wires.slot(index as u32),
         }
     }
@@ -2977,8 +2980,7 @@ mod area_query_tests {
         );
 
         let full = InteractionCandidates::all(Arc::clone(&arc)).materialize_stubs();
-        let local =
-            InteractionCandidates::all_near(Arc::clone(&arc), aperture).materialize_stubs();
+        let local = InteractionCandidates::all_near(Arc::clone(&arc), aperture).materialize_stubs();
 
         // Everything the aperture could actually hit, from either expansion.
         let reachable = |c: &InteractionCandidates| {
@@ -2986,10 +2988,7 @@ mod area_query_tests {
                 .iter()
                 .filter(|w| {
                     let [x0, y0, x1, y1] = w.aabb.map(f64::from);
-                    !(x1 < aperture[0]
-                        || x0 > aperture[2]
-                        || y1 < aperture[1]
-                        || y0 > aperture[3])
+                    !(x1 < aperture[0] || x0 > aperture[2] || y1 < aperture[1] || y0 > aperture[3])
                 })
                 .map(|w| w.name.clone())
                 .collect();

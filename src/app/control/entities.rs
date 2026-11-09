@@ -433,9 +433,9 @@ impl OpenCADStudio {
 
         // World → block space translates `base` onto the block origin; the
         // inverse places the Insert so entities keep their world position.
-        let world_to_block = document::types::Transform::from_translation(document::types::Vector3::new(
-            -base.x, -base.y, -base.z,
-        ));
+        let world_to_block = document::types::Transform::from_translation(
+            document::types::Vector3::new(-base.x, -base.y, -base.z),
+        );
         let block_to_world = document::types::Transform::from_translation(insert_at);
         self.push_undo_snapshot(i, "BLOCKDEFINE");
         // CF-01.3 (barcode re-import): `replace:true` drops the previous
@@ -468,7 +468,14 @@ impl OpenCADStudio {
             .iter()
             .map(|session| session.br_handle)
             .collect();
-        self.push_undo_snapshot(i, crate::app::tab_document::HistoryLabel::formatted(format!("Delete block {name}"), "delete-block", name.to_owned().into()));
+        self.push_undo_snapshot(
+            i,
+            crate::app::tab_document::HistoryLabel::formatted(
+                format!("Delete block {name}"),
+                "delete-block",
+                name.to_owned().into(),
+            ),
+        );
         let options = crate::scene::block_service::DeleteOptions {
             force,
             open_edits: &open_edits,

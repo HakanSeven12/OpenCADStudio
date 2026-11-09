@@ -273,7 +273,8 @@ impl MeshMaterial {
                 diffuse[2],
                 entity_color[3] * opacity,
             ],
-            diffuse_by_object: material.diffuse_color.flag != 1 || material.diffuse_color.rgb.is_none(),
+            diffuse_by_object: material.diffuse_color.flag != 1
+                || material.diffuse_color.rgb.is_none(),
             ambient: [ambient[0], ambient[1], ambient[2]],
             specular: [specular[0], specular[1], specular[2]],
             gloss: material.specular_gloss_factor.clamp(0.0, 1.0) as f32,

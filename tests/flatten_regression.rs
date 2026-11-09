@@ -115,7 +115,8 @@ fn already_flat_and_unsupported_return_none() {
     flat_line.start = Vector3::new(0.0, 0.0, 0.0);
     flat_line.end = Vector3::new(3.0, 4.0, 0.0);
     assert!(flatten_entity_z(&EntityType::Line(flat_line)).is_none());
-    let ray = document::entities::Ray::new(Vector3::new(0.0, 0.0, 5.0), Vector3::new(0.0, 0.0, 1.0));
+    let ray =
+        document::entities::Ray::new(Vector3::new(0.0, 0.0, 5.0), Vector3::new(0.0, 0.0, 1.0));
     assert!(flatten_entity_z(&EntityType::Ray(ray)).is_none());
 }
 

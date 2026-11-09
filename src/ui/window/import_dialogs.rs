@@ -130,7 +130,13 @@ pub const FORMATS: [ImportFormat; 22] = [
     format("NX", "*.prt", &["prt"], 1, Support::No),
     format("Parasolid Binary", "*.x_b", &["x_b"], 1, Support::No),
     format("Parasolid Text", "*.x_t", &["x_t"], 1, Support::No),
-    format("Pro/ENGINEER", "*.prt*; *.asm*", &["prt", "asm"], 1, Support::No),
+    format(
+        "Pro/ENGINEER",
+        "*.prt*; *.asm*",
+        &["prt", "asm"],
+        1,
+        Support::No,
+    ),
     format("Pro/ENGINEER Granite", "*.g", &["g"], 1, Support::No),
     format("Pro/ENGINEER Neutral", "*.neu*", &["neu"], 1, Support::No),
     format("Rhino", "*.3dm", &["3dm"], 1, Support::No),
@@ -141,7 +147,13 @@ pub const FORMATS: [ImportFormat; 22] = [
         1,
         Support::No,
     ),
-    format("STEP", "*.ste; *.stp; *.step", &["ste", "stp", "step"], 1, Support::Yes),
+    format(
+        "STEP",
+        "*.ste; *.stp; *.step",
+        &["ste", "stp", "step"],
+        1,
+        Support::Yes,
+    ),
     format("All Files", "*.*", &["*"], 2, Support::ByExtension),
 ];
 
@@ -297,7 +309,11 @@ fn tile_style(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Styl
 }
 
 /// Help, Cancel and the named action (inactive while `ok` is `None`).
-fn footer<'a>(help: &'static str, action: std::borrow::Cow<'static, str>, ok: Option<Message>) -> Element<'a, Message> {
+fn footer<'a>(
+    help: &'static str,
+    action: std::borrow::Cow<'static, str>,
+    ok: Option<Message>,
+) -> Element<'a, Message> {
     row![
         button(text("?").size(12))
             .on_press(msg(ImportDialogMsg::Help(help)))
@@ -372,9 +388,13 @@ pub fn view_import_file<'a>(
         file = file.push(chips);
     }
     if let Some(error) = &state.error {
-        file = file.push(text(error.clone()).size(11).style(|theme: &Theme| text::Style {
-            color: Some(theme.palette().danger.base.color),
-        }));
+        file = file.push(
+            text(error.clone())
+                .size(11)
+                .style(|theme: &Theme| text::Style {
+                    color: Some(theme.palette().danger.base.color),
+                }),
+        );
     }
 
     let search = state.search.trim().to_lowercase();
@@ -464,9 +484,7 @@ pub fn view_import_file<'a>(
                 None => String::new(),
             })
             .size(11)
-            .style(|_: &Theme| text::Style {
-                color: Some(AMBER),
-            }),
+            .style(|_: &Theme| text::Style { color: Some(AMBER) }),
         ]
         .spacing(8),
     );
@@ -525,7 +543,12 @@ pub fn view_tds_import<'a>(
                     },
                     ..Default::default()
                 }),
-            text(crate::tr!("import-3ds", "summary", objects = (state.objects.len().saturating_sub(1) as i64), materials = (state.materials as i64)))
+            text(crate::tr!(
+                "import-3ds",
+                "summary",
+                objects = (state.objects.len().saturating_sub(1) as i64),
+                materials = (state.materials as i64)
+            ))
             .size(11)
             .style(muted_style)
             .width(Fill),
@@ -543,17 +566,33 @@ pub fn view_tds_import<'a>(
 
     let kinds = ["", "Mesh", "Light", "Camera", "Global"];
     let mut filters = row![].spacing(4).align_y(iced::Center);
-    for (k, label) in [crate::tr!("import-3ds", "all"), crate::tr!("import-3ds", "mesh"), crate::tr!("import-3ds", "light"), crate::tr!("import-3ds", "camera"), crate::tr!("import-3ds", "general")]
-        .into_iter()
-        .enumerate()
+    for (k, label) in [
+        crate::tr!("import-3ds", "all"),
+        crate::tr!("import-3ds", "mesh"),
+        crate::tr!("import-3ds", "light"),
+        crate::tr!("import-3ds", "camera"),
+        crate::tr!("import-3ds", "general"),
+    ]
+    .into_iter()
+    .enumerate()
     {
-        filters = filters.push(chip(label, state.filter == k, msg(ImportDialogMsg::TdsFilter(k))));
+        filters = filters.push(chip(
+            label,
+            state.filter == k,
+            msg(ImportDialogMsg::TdsFilter(k)),
+        ));
     }
     let search = state.search.trim().to_lowercase();
     let mut rows = column![row![
         Space::new().width(Length::Fixed(22.0)),
-        text(crate::tr!("import-3ds", "name")).size(11).style(muted_style).width(Fill),
-        text(crate::tr!("import-3ds", "type")).size(11).style(muted_style).width(Length::Fixed(150.0)),
+        text(crate::tr!("import-3ds", "name"))
+            .size(11)
+            .style(muted_style)
+            .width(Fill),
+        text(crate::tr!("import-3ds", "type"))
+            .size(11)
+            .style(muted_style)
+            .width(Length::Fixed(150.0)),
     ]]
     .spacing(2);
     for (k, (name, kind, materials)) in state.objects.iter().enumerate() {
@@ -564,11 +603,19 @@ pub fn view_tds_import<'a>(
         if !search.is_empty() && !name.to_lowercase().contains(&search) {
             continue;
         }
-        let shown_name = if global { crate::tr!("import-3ds", "global") } else { name.clone() };
+        let shown_name = if global {
+            crate::tr!("import-3ds", "global")
+        } else {
+            name.clone()
+        };
         let shown_kind = if global {
             String::new()
         } else if *kind == "Mesh" {
-            format!("{} · {}", tds_kind(kind), crate::tr!("import-3ds", "materials", n = (*materials as i64)))
+            format!(
+                "{} · {}",
+                tds_kind(kind),
+                crate::tr!("import-3ds", "materials", n = (*materials as i64))
+            )
         } else {
             tds_kind(kind)
         };
@@ -579,7 +626,10 @@ pub fn view_tds_import<'a>(
                     .on_toggle(move |v| msg(ImportDialogMsg::TdsCheck(k, v)))
                     .size(14),
                 text(shown_name).size(12).width(Fill),
-                text(shown_kind).size(11).style(muted_style).width(Length::Fixed(150.0)),
+                text(shown_kind)
+                    .size(11)
+                    .style(muted_style)
+                    .width(Length::Fixed(150.0)),
             ]
             .spacing(8)
             .align_y(iced::Center),
@@ -628,13 +678,20 @@ pub fn view_tds_import<'a>(
         crate::tr!("import-3ds", "layers"),
         column![
             stacked(
-                [crate::tr!("import-3ds", "by-object"), crate::tr!("import-3ds", "by-material"), crate::tr!("import-3ds", "by-color"), crate::tr!("import-3ds", "single")]
-                    .into_iter()
-                    .enumerate()
-                    .map(|(k, label)| (label, state.layers == k, msg(ImportDialogMsg::TdsLayers(k))))
-                    .collect()
+                [
+                    crate::tr!("import-3ds", "by-object"),
+                    crate::tr!("import-3ds", "by-material"),
+                    crate::tr!("import-3ds", "by-color"),
+                    crate::tr!("import-3ds", "single")
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(k, label)| (label, state.layers == k, msg(ImportDialogMsg::TdsLayers(k))))
+                .collect()
             ),
-            text(layer_notes[state.layers.min(3)].clone()).size(11).style(muted_style),
+            text(layer_notes[state.layers.min(3)].clone())
+                .size(11)
+                .style(muted_style),
         ]
         .spacing(8),
     );
@@ -664,10 +721,18 @@ pub fn view_tds_import<'a>(
     .spacing(6)
     .align_y(iced::Center);
     if !any {
-        actions = actions.push(text(crate::tr!("import-3ds", "reason")).size(11).style(muted_style));
+        actions = actions.push(
+            text(crate::tr!("import-3ds", "reason"))
+                .size(11)
+                .style(muted_style),
+        );
     }
     actions = actions
-        .push(dialog_button(crate::tr!("import-3ds", "cancel"), Message::CloseModal, false))
+        .push(dialog_button(
+            crate::tr!("import-3ds", "cancel"),
+            Message::CloseModal,
+            false,
+        ))
         .push(dialog_button_styled_opt(
             crate::tr!("import-3ds", "import"),
             any.then(|| msg(ImportDialogMsg::TdsOk)),
@@ -677,7 +742,9 @@ pub fn view_tds_import<'a>(
         top,
         row![
             container(objects).width(Length::FillPortion(3)),
-            column![layers, multi].spacing(10).width(Length::FillPortion(2)),
+            column![layers, multi]
+                .spacing(10)
+                .width(Length::FillPortion(2)),
         ]
         .spacing(10),
         actions,
@@ -710,39 +777,50 @@ pub fn view_tds_material<'a>(
     let Some((name, materials)) = state.queue.first() else {
         return Space::new().into();
     };
-    let badge = container(crate::ui::icons::themed_primary(crate::ui::icons::MESH, 18.0))
-        .width(34)
-        .height(34)
-        .center_x(34)
-        .center_y(34)
-        .style(|theme: &Theme| container::Style {
-            background: Some(Background::Color(
-                theme.palette().primary.base.color.scale_alpha(0.13),
-            )),
-            border: Border {
-                radius: 17.0.into(),
-                ..Default::default()
-            },
+    let badge = container(crate::ui::icons::themed_primary(
+        crate::ui::icons::MESH,
+        18.0,
+    ))
+    .width(34)
+    .height(34)
+    .center_x(34)
+    .center_y(34)
+    .style(|theme: &Theme| container::Style {
+        background: Some(Background::Color(
+            theme.palette().primary.base.color.scale_alpha(0.13),
+        )),
+        border: Border {
+            radius: 17.0.into(),
             ..Default::default()
-        });
-    let mut chips = row![text(crate::tr!("import-3ds", "materials", n = (materials.len() as i64)))
-        .size(11)
-        .style(muted_style)]
+        },
+        ..Default::default()
+    });
+    let mut chips = row![text(crate::tr!(
+        "import-3ds",
+        "materials",
+        n = (materials.len() as i64)
+    ))
+    .size(11)
+    .style(muted_style)]
     .spacing(6)
     .align_y(iced::Center);
     for (material, color) in materials {
         chips = chips.push(
-            container(row![material_swatch(*color), text(material.as_str()).size(11)].spacing(4).align_y(iced::Center))
-                .padding([1, 7])
-                .style(|theme: &Theme| container::Style {
-                    background: Some(Background::Color(theme.palette().background.base.color)),
-                    border: Border {
-                        width: 1.0,
-                        radius: 9.0.into(),
-                        color: theme.palette().background.strong.color,
-                    },
-                    ..Default::default()
-                }),
+            container(
+                row![material_swatch(*color), text(material.as_str()).size(11)]
+                    .spacing(4)
+                    .align_y(iced::Center),
+            )
+            .padding([1, 7])
+            .style(|theme: &Theme| container::Style {
+                background: Some(Background::Color(theme.palette().background.base.color)),
+                border: Border {
+                    width: 1.0,
+                    radius: 9.0.into(),
+                    color: theme.palette().background.strong.color,
+                },
+                ..Default::default()
+            }),
         );
     }
     let object = container(
@@ -768,12 +846,17 @@ pub fn view_tds_material<'a>(
     let chosen = state.material.checked_sub(1).and_then(|k| materials.get(k));
     let head_label = |entry: Option<&(String, Option<[u8; 3]>)>| -> Element<'a, Message> {
         match entry {
-            Some((material, color)) => row![material_swatch(*color), text(material.clone()).size(12)]
-                .spacing(6)
-                .align_y(iced::Center)
-                .into(),
+            Some((material, color)) => {
+                row![material_swatch(*color), text(material.clone()).size(12)]
+                    .spacing(6)
+                    .align_y(iced::Center)
+                    .into()
+            }
             None if choosing => text(crate::tr!("import-3ds-alert", "none")).size(12).into(),
-            None => text(crate::tr!("import-3ds-alert", "none")).size(12).style(muted_style).into(),
+            None => text(crate::tr!("import-3ds-alert", "none"))
+                .size(12)
+                .style(muted_style)
+                .into(),
         }
     };
     let head = button(
@@ -801,7 +884,9 @@ pub fn view_tds_material<'a>(
         }
         iced_aw::DropDown::new(
             head,
-            container(list).style(crate::ui::color_select::popup_panel_style).padding(2),
+            container(list)
+                .style(crate::ui::color_select::popup_panel_style)
+                .padding(2),
             true,
         )
         .alignment(iced_aw::drop_down::Alignment::Bottom)
@@ -827,7 +912,11 @@ pub fn view_tds_material<'a>(
                 ]
                 .into_iter()
                 .enumerate()
-                .map(|(k, label)| (label, state.choice == k, Some(msg(ImportDialogMsg::TdsMatChoice(k)))))
+                .map(|(k, label)| (
+                    label,
+                    state.choice == k,
+                    Some(msg(ImportDialogMsg::TdsMatChoice(k)))
+                ))
                 .collect()
             ),
             row![
@@ -856,7 +945,11 @@ pub fn view_tds_material<'a>(
     .padding([4, 10]);
     let mut remaining = column![row![remember]].spacing(8);
     if !state.remember {
-        remaining = remaining.push(text(crate::tr!("import-3ds-alert", "remember-note")).size(11).style(muted_style));
+        remaining = remaining.push(
+            text(crate::tr!("import-3ds-alert", "remember-note"))
+                .size(11)
+                .style(muted_style),
+        );
     }
     column![
         object,
@@ -898,7 +991,10 @@ pub(crate) fn warning_badge<'a>() -> Element<'a, Message> {
 
 /// A texture map a 3D Studio import did not find: the file and the material
 /// that comes in without it.
-pub fn view_tds_map<'a>(map: &'a (String, String), sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+pub fn view_tds_map<'a>(
+    map: &'a (String, String),
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let (file, material) = map;
     let badge = warning_badge();
     let chip = container(
@@ -923,14 +1019,20 @@ pub fn view_tds_map<'a>(map: &'a (String, String), sizing: crate::ui::modal::Mod
         row![
             badge,
             column![
-                text(crate::tr!("import-3ds-map", "heading")).size(13).font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::DEFAULT
-                }),
+                text(crate::tr!("import-3ds-map", "heading"))
+                    .size(13)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
                 chip,
-                text(crate::tr!("import-3ds-map", "note", material = material.as_str()))
-                    .size(11)
-                    .style(muted_style),
+                text(crate::tr!(
+                    "import-3ds-map",
+                    "note",
+                    material = material.as_str()
+                ))
+                .size(11)
+                .style(muted_style),
             ]
             .spacing(8),
         ]
@@ -1143,7 +1245,10 @@ pub fn view_dgn_import<'a>(
     for (dgn, dwg) in &state.mapping[state.mapping_tab.min(3)] {
         table = table.push(row![
             text(dgn.clone()).size(11).width(Fill),
-            text("\u{2192}").size(11).style(muted_style).width(Length::Fixed(24.0)),
+            text("\u{2192}")
+                .size(11)
+                .style(muted_style)
+                .width(Length::Fixed(24.0)),
             text(dwg.clone()).size(11).width(Fill),
         ]);
     }
@@ -1155,7 +1260,9 @@ pub fn view_dgn_import<'a>(
                 true,
                 msg(ImportDialogMsg::DgnMappingTab(state.mapping_tab))
             )],
-            text(t!("Standard mapping setup.")).size(11).style(muted_style),
+            text(t!("Standard mapping setup."))
+                .size(11)
+                .style(muted_style),
             segmented(
                 tabs.iter()
                     .enumerate()
@@ -1169,9 +1276,11 @@ pub fn view_dgn_import<'a>(
                     .collect()
             ),
             scrollable(table).height(Length::Fixed(250.0)),
-            text(t!("The preview shows the selected setup's effect on this file."))
-                .size(11)
-                .style(muted_style),
+            text(t!(
+                "The preview shows the selected setup's effect on this file."
+            ))
+            .size(11)
+            .style(muted_style),
         ]
         .spacing(8),
     );

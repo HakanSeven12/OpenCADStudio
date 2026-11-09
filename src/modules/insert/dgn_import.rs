@@ -87,7 +87,9 @@ pub struct Converted {
 /// A DGN weight (0-31) as a lineweight (1/100 mm), as the Standard mapping
 /// converts it.
 pub fn lineweight_of(weight: u32) -> i16 {
-    const TABLE: [i16; 15] = [0, 13, 30, 40, 53, 70, 80, 100, 106, 120, 140, 158, 158, 158, 200];
+    const TABLE: [i16; 15] = [
+        0, 13, 30, 40, 53, 70, 80, 100, 106, 120, 140, 158, 158, 158, 200,
+    ];
     TABLE.get(weight as usize).copied().unwrap_or(211)
 }
 
@@ -231,7 +233,10 @@ fn plane_normal(points: &[P3]) -> Option<P3> {
         n[2] += (p[0] - q[0]) * (p[1] + q[1]);
     }
     let len = norm(n);
-    let span = points.iter().map(|p| norm(sub(*p, points[0]))).fold(0.0, f64::max);
+    let span = points
+        .iter()
+        .map(|p| norm(sub(*p, points[0])))
+        .fold(0.0, f64::max);
     if !(len > 1e-12 * span * span) {
         return flat(points).then_some([0.0, 0.0, 1.0]);
     }
@@ -240,13 +245,18 @@ fn plane_normal(points: &[P3]) -> Option<P3> {
         n = [-n[0], -n[1], -n[2]];
     }
     let off = |p: &P3| dot(sub(*p, points[0]), n).abs();
-    points.iter().all(|p| off(p) <= 1e-6 * span.max(1e-12)).then_some(n)
+    points
+        .iter()
+        .all(|p| off(p) <= 1e-6 * span.max(1e-12))
+        .then_some(n)
 }
 
 /// True when every point is at the first one's z.
 fn flat(points: &[P3]) -> bool {
     let z = points.first().map_or(0.0, |p| p[2]);
-    points.iter().all(|p| (p[2] - z).abs() <= 1e-9 * z.abs().max(1.0))
+    points
+        .iter()
+        .all(|p| (p[2] - z).abs() <= 1e-9 * z.abs().max(1.0))
 }
 
 /// The points as a polyline: at one z a 2D polyline at that elevation
@@ -293,7 +303,9 @@ fn turned_about_minus_z(points: &[P3], bulges: &[f64]) -> Option<(Vec<P3>, Vec<f
 /// [`polyline`] and its filling [`solid_hatch`], about -z when `by_winding`
 /// and the outline winds clockwise.
 fn outline(points: &[P3], bulges: &[f64], filled: bool, by_winding: bool) -> Vec<EntityType> {
-    let turned = by_winding.then(|| turned_about_minus_z(points, bulges)).flatten();
+    let turned = by_winding
+        .then(|| turned_about_minus_z(points, bulges))
+        .flatten();
     let (points, bulges) = match &turned {
         Some((p, b)) => (p.as_slice(), b.as_slice()),
         None => (points, bulges),
@@ -500,7 +512,9 @@ fn color_code(color: By<crate::scene::model::underlay_vector::DgnColor>) -> u16 
 /// the first time.
 fn text_style(geom: &DgnGeom, import: &DgnImport, styles: &mut Vec<(String, String)>) -> String {
     match geom {
-        DgnGeom::Text { style: Some(id), .. } => match import.text_styles.iter().find(|(i, ..)| i == id) {
+        DgnGeom::Text {
+            style: Some(id), ..
+        } => match import.text_styles.iter().find(|(i, ..)| i == id) {
             Some((_, name, font)) if !name.eq_ignore_ascii_case("Standard") => {
                 let name = symbol_name(name);
                 if !styles.iter().any(|s| s.0 == name) {
@@ -541,7 +555,11 @@ fn text_entity(geom: &DgnGeom, style: &str) -> Option<EntityType> {
     let mut t = Text::with_value(text.clone(), v3(*origin))
         .with_height(*height)
         .with_rotation(rotation.rem_euclid(std::f64::consts::TAU));
-    t.width_factor = if *width_factor > 0.0 { *width_factor } else { 1.0 };
+    t.width_factor = if *width_factor > 0.0 {
+        *width_factor
+    } else {
+        1.0
+    };
     t.style = style.to_string();
     let (h, v) = just_parts(*just);
     if (h, v) != (0, 2) {
@@ -676,7 +694,11 @@ fn mtext_of_node(
             m.rectangle_height = None;
         }
         None => {
-            let last = lines.iter().filter_map(text_line).last().map_or(first, |l| l.1);
+            let last = lines
+                .iter()
+                .filter_map(text_line)
+                .last()
+                .map_or(first, |l| l.1);
             m.line_spacing_style = LineSpacingStyle::AtLeast;
             m.line_spacing_factor = 1.0;
             m.rectangle_height = Some(height + dot(sub(first, last), up).max(0.0));
@@ -703,7 +725,10 @@ fn arc_entity(center: P3, u: P3, v: P3, start: f64, sweep: f64) -> Vec<EntityTyp
             circle.normal = v3(normal);
             return vec![EntityType::Circle(circle)];
         }
-        let (a0, a1) = (ocs_angle(normal, at(start)), ocs_angle(normal, at(start + sweep)));
+        let (a0, a1) = (
+            ocs_angle(normal, at(start)),
+            ocs_angle(normal, at(start + sweep)),
+        );
         // The arc runs counter-clockwise about its normal.
         let ccw = (sweep > 0.0) != flipped;
         let (from, to) = if ccw { (a0, a1) } else { (a1, a0) };
@@ -734,9 +759,17 @@ fn arc_entity(center: P3, u: P3, v: P3, start: f64, sweep: f64) -> Vec<EntityTyp
             (u, lv / lu, Box::new(|t: f64| -t))
         }
     } else if ccw {
-        (v.map(|c| -c), lu / lv, Box::new(|t: f64| t + std::f64::consts::FRAC_PI_2))
+        (
+            v.map(|c| -c),
+            lu / lv,
+            Box::new(|t: f64| t + std::f64::consts::FRAC_PI_2),
+        )
     } else {
-        (v.map(|c| -c), lu / lv, Box::new(|t: f64| -t - std::f64::consts::FRAC_PI_2))
+        (
+            v.map(|c| -c),
+            lu / lv,
+            Box::new(|t: f64| -t - std::f64::consts::FRAC_PI_2),
+        )
     };
     let mut e = Ellipse::from_center_axes(v3(center), v3(major), ratio);
     e.normal = v3(normal);
@@ -794,7 +827,11 @@ fn dim_style_values(import: &DgnImport, ds: &DgnDimStyle, k: f64, name: &str) ->
     s.dimcen = ds.center * k;
     s.dimscale = ds.scale;
     let bits = ds.accuracy & 0x7f;
-    let places = if bits == 0 { 0 } else { bits.trailing_zeros() as i16 + 1 };
+    let places = if bits == 0 {
+        0
+    } else {
+        bits.trailing_zeros() as i16 + 1
+    };
     s.dimdec = places;
     s.dimtdec = places;
     s.dimadec = i16::from(ds.angle_places);
@@ -893,9 +930,17 @@ fn dimension_entity(
             let gaps = if layout.in_line { 3.0 } else { 1.0 };
             let beside = layout.arrow + gaps * layout.gap + width / 2.0;
             let fits = length >= layout.arrow + gaps * layout.gap + width;
-            let third = if fits && beside > length / 2.0 { 2.0 } else { 1.0 };
+            let third = if fits && beside > length / 2.0 {
+                2.0
+            } else {
+                1.0
+            };
             let mid = a0 + sweep * third / 3.0;
-            let arc = [vertex[0] + radius * mid.cos(), vertex[1] + radius * mid.sin(), vertex[2]];
+            let arc = [
+                vertex[0] + radius * mid.cos(),
+                vertex[1] + radius * mid.sin(),
+                vertex[2],
+            ];
             let dvec = |p: P3| glam::DVec3::from_array(p);
             crate::modules::annotate::angular_dim::angular_three_point_entity(
                 dvec(vertex),
@@ -966,7 +1011,11 @@ fn dimension_settings(
     look: &DgnDimLook,
     style: Option<&DgnDimStyle>,
     color: u16,
-) -> (String, Vec<(i16, document::xdata::XDataValue)>, DimTextLayout) {
+) -> (
+    String,
+    Vec<(i16, document::xdata::XDataValue)>,
+    DimTextLayout,
+) {
     use crate::entities::dim_override as ov;
     use document::xdata::XDataValue::{Integer16, Real};
     let own = dgn_font(import, look.font);
@@ -982,7 +1031,11 @@ fn dimension_settings(
     let text = format!(r"{{{font}\C{color};<>}}");
     let scale = style.map(|s| s.scale).filter(|s| *s > 0.0).unwrap_or(1.0);
     let length = |v: f64| v / (scale * scale);
-    let gap = length(if look.text_outside { look.gap } else { look.margin });
+    let gap = length(if look.text_outside {
+        look.gap
+    } else {
+        look.margin
+    });
     let horizontal = i16::from(style.is_some_and(|s| s.horizontal_text));
     let mut overrides = vec![
         (ov::DIMCEN, Real(0.0)),
@@ -1040,7 +1093,11 @@ fn polyfaces(points: &[P3], loops: &[Vec<i32>]) -> Vec<EntityType> {
             (1..n - 1)
                 .map(|k| {
                     let (first, last) = (corners[0], corners[k + 1]);
-                    vec![(first.0, first.1 && k == 1), corners[k], (last.0, last.1 && k == n - 2)]
+                    vec![
+                        (first.0, first.1 && k == 1),
+                        corners[k],
+                        (last.0, last.1 && k == n - 2),
+                    ]
                 })
                 .collect()
         };
@@ -1081,9 +1138,17 @@ fn polyfaces(points: &[P3], loops: &[Vec<i32>]) -> Vec<EntityType> {
 fn insert_entity(block: String, m: [f64; 4], origin: P3, z_scale: f64) -> EntityType {
     let det = m[0] * m[3] - m[1] * m[2];
     let mirrored = det < 0.0;
-    let m = if mirrored { [-m[0], -m[1], m[2], m[3]] } else { m };
+    let m = if mirrored {
+        [-m[0], -m[1], m[2], m[3]]
+    } else {
+        m
+    };
     let sx = m[0].hypot(m[2]);
-    let sy = if sx > 0.0 { (m[0] * m[3] - m[1] * m[2]) / sx } else { 1.0 };
+    let sy = if sx > 0.0 {
+        (m[0] * m[3] - m[1] * m[2]) / sx
+    } else {
+        1.0
+    };
     let (point, z) = if mirrored {
         (Vector3::new(-origin[0], origin[1], -origin[2]), -z_scale)
     } else {
@@ -1280,9 +1345,11 @@ impl<'a> Converter<'a> {
                 let (text, overrides, layout) =
                     dimension_settings(self.import, *kind, look, record, color_code(element.color));
                 let style = dim_style_name(self.import, *style);
-                dimension_entity(*kind, points, *offset, axes, &style, text, &overrides, &layout)
-                    .into_iter()
-                    .collect()
+                dimension_entity(
+                    *kind, points, *offset, axes, &style, text, &overrides, &layout,
+                )
+                .into_iter()
+                .collect()
             }
             DgnGeom::Mesh { points, loops } => polyfaces(points, loops),
             DgnGeom::Leader { points, style } => {
@@ -1314,7 +1381,10 @@ impl<'a> Converter<'a> {
                         center[2],
                     ]
                 };
-                vec![polyline(&[at(*start), at(*start + *sweep)], &[(*sweep / 4.0).tan()])]
+                vec![polyline(
+                    &[at(*start), at(*start + *sweep)],
+                    &[(*sweep / 4.0).tan()],
+                )]
             }
             DgnGeom::Arc {
                 center,
@@ -1385,8 +1455,16 @@ impl<'a> Converter<'a> {
             DgnGeom::CellGroup { parts, .. } if self.in_definition => {
                 self.elements(parts, true, copy, depth + 1)
             }
-            DgnGeom::CellGroup { name, origin, parts } => {
-                let base = if name.is_empty() { "AnonymousCell" } else { name.as_str() };
+            DgnGeom::CellGroup {
+                name,
+                origin,
+                parts,
+            } => {
+                let base = if name.is_empty() {
+                    "AnonymousCell"
+                } else {
+                    name.as_str()
+                };
                 let block = self.unique(&block_name(base));
                 let local = crate::scene::model::underlay_vector::scaled_elements(
                     parts,
@@ -1469,7 +1547,12 @@ fn curve_fit_points(pts: &[P3]) -> Vec<P3> {
     }
     let mut u = vec![0.0];
     for k in 1..n {
-        u.push(u[k - 1] + dot(sub(pts[k], pts[k - 1]), sub(pts[k], pts[k - 1])).sqrt().max(1e-4));
+        u.push(
+            u[k - 1]
+                + dot(sub(pts[k], pts[k - 1]), sub(pts[k], pts[k - 1]))
+                    .sqrt()
+                    .max(1e-4),
+        );
     }
     // Each coordinate's slope at the points 2..n-3 (Akima).
     let slopes: Vec<Vec<f64>> = (0..3)
@@ -1574,7 +1657,10 @@ pub fn convert(import: &DgnImport, sub_units: bool, explode_text_nodes: bool) ->
             .map(|(name, elements)| (name.to_ascii_uppercase(), elements.as_slice()))
             .collect(),
         copies: HashMap::new(),
-        names: cells.iter().map(|(name, _)| block_name(name).to_ascii_uppercase()).collect(),
+        names: cells
+            .iter()
+            .map(|(name, _)| block_name(name).to_ascii_uppercase())
+            .collect(),
         next_number: HashMap::new(),
         in_definition: false,
         construction: HashMap::new(),
@@ -1728,11 +1814,7 @@ pub struct DgnImportSettings {
 static SETTINGS: std::sync::Mutex<Option<DgnImportSettings>> = std::sync::Mutex::new(None);
 
 pub fn settings() -> DgnImportSettings {
-    SETTINGS
-        .lock()
-        .ok()
-        .and_then(|s| *s)
-        .unwrap_or_default()
+    SETTINGS.lock().ok().and_then(|s| *s).unwrap_or_default()
 }
 
 pub fn set_settings(mut settings: DgnImportSettings) {
@@ -1784,8 +1866,10 @@ impl DgnImportCommand {
         if path.is_empty() {
             return CmdResult::NeedPoint;
         }
-        let models = crate::scene::model::underlay_vector::dgn_import_models(&path)
-            .filter(|m| !m.is_empty() && crate::scene::model::underlay_vector::dgn_import(&path, &m[0]).is_some());
+        let models = crate::scene::model::underlay_vector::dgn_import_models(&path).filter(|m| {
+            !m.is_empty()
+                && crate::scene::model::underlay_vector::dgn_import(&path, &m[0]).is_some()
+        });
         let Some(models) = models else {
             return CmdResult::ReportError("Invalid or unsupported DGN file.".to_string());
         };
@@ -1802,7 +1886,11 @@ impl DgnImportCommand {
             self.step = Step::ListModels;
             return CmdResult::NeedPoint;
         }
-        let name = if text.is_empty() { self.models[0].as_str() } else { text };
+        let name = if text.is_empty() {
+            self.models[0].as_str()
+        } else {
+            text
+        };
         match self.models.iter().find(|m| m.eq_ignore_ascii_case(name)) {
             Some(found) => {
                 self.model = found.clone();
@@ -1910,14 +1998,12 @@ impl CadCommand for DgnImportCommand {
             }
             Step::Conversion => self.accept_conversion(text),
             Step::Mapping => self.accept_mapping(text),
-            Step::ListMappings => {
-                match self.list(text, &["Standard"], Step::Mapping) {
-                    CmdResult::ReportMeasurement(lines) => {
-                        CmdResult::ReportMeasurement(format!("Import mapping setups:\n{lines}"))
-                    }
-                    other => other,
+            Step::ListMappings => match self.list(text, &["Standard"], Step::Mapping) {
+                CmdResult::ReportMeasurement(lines) => {
+                    CmdResult::ReportMeasurement(format!("Import mapping setups:\n{lines}"))
                 }
-            }
+                other => other,
+            },
         })
     }
 

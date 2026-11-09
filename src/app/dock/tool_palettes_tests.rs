@@ -37,7 +37,15 @@ fn fixture_dynamic_block(app: &mut crate::app::OpenCADStudio) -> String {
     let doc = &mut app.tabs[i].scene.document;
     let p = crate::scene::block_actions::all_parameters(doc, definition)[0].handle;
     let target = doc.block_records.get(name).unwrap().entity_handles[0];
-    crate::scene::block_actions::create(doc, definition, crate::scene::block_actions::Kind::Move, p, &[target], glam::DVec3::ZERO).unwrap();
+    crate::scene::block_actions::create(
+        doc,
+        definition,
+        crate::scene::block_actions::Kind::Move,
+        p,
+        &[target],
+        glam::DVec3::ZERO,
+    )
+    .unwrap();
     let _ = app.dispatch_command("BEDIT_SAVE");
     let _ = app.dispatch_command("BCLOSE");
     name.to_string()
@@ -333,7 +341,10 @@ fn cross_drawing_insertion_imports_block_and_dependencies() {
         .document
         .entities()
         .find(|e| matches!(e, EntityType::Insert(ins) if ins.block_name == "EQUIPMENT"));
-    assert!(inserted.is_some(), "INSERT entity must exist in new drawing");
+    assert!(
+        inserted.is_some(),
+        "INSERT entity must exist in new drawing"
+    );
     if let Some(EntityType::Insert(ins)) = inserted {
         assert_eq!(ins.insert_point.x, 15.0);
         assert_eq!(ins.insert_point.y, 25.0);
@@ -355,7 +366,10 @@ fn dynamic_block_preservation_across_drawings() {
         .map(|br| br.handle)
         .expect("DYN_VALVE exists");
     assert!(
-        app.tabs[tab0].scene.document.is_dynamic_block(record_handle),
+        app.tabs[tab0]
+            .scene
+            .document
+            .is_dynamic_block(record_handle),
         "DYN_VALVE must be recognized as dynamic in Tab 0"
     );
 
@@ -523,14 +537,32 @@ fn selected_tool_preserves_mirrored_axis_scales_on_insertion() {
     source.set_y_scale(3.);
     source.set_z_scale(4.);
     source.rotation = 0.5;
-    let handle = app.tabs[i].scene.document.add_entity(EntityType::Insert(source)).unwrap();
+    let handle = app.tabs[i]
+        .scene
+        .document
+        .add_entity(EntityType::Insert(source))
+        .unwrap();
     app.tabs[i].scene.select_entity(handle, true);
     assert_eq!(app.add_selected_blocks_to_tool_palette(), 1);
     let _ = app.update(Message::TabNew);
     let j = app.active_tab;
     let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::new(20., 30., 0.)));
-    let inserted = app.tabs[j].scene.document.entities().find_map(|e| if let EntityType::Insert(i) = e { Some(i) } else { None }).unwrap();
-    assert_eq!([inserted.x_scale(), inserted.y_scale(), inserted.z_scale()], [-2., 3., 4.]);
+    let inserted = app.tabs[j]
+        .scene
+        .document
+        .entities()
+        .find_map(|e| {
+            if let EntityType::Insert(i) = e {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    assert_eq!(
+        [inserted.x_scale(), inserted.y_scale(), inserted.z_scale()],
+        [-2., 3., 4.]
+    );
     assert!((inserted.rotation - 0.5).abs() < 1e-9);
 }
 
@@ -554,13 +586,24 @@ fn recursive_tool_import_is_refused_before_creating_dependencies() {
     let mut app = fresh();
     define_block(&mut app, "CONTAINER");
     let i = app.active_tab;
-    app.tabs[i].scene.define_block_raw("OUTER_TOOL", Vector3::ZERO,
-        vec![EntityType::Insert(Insert::new("CONTAINER", Vector3::ZERO))]);
+    app.tabs[i].scene.define_block_raw(
+        "OUTER_TOOL",
+        Vector3::ZERO,
+        vec![EntityType::Insert(Insert::new("CONTAINER", Vector3::ZERO))],
+    );
     assert!(app.add_block_to_tool_palette("OUTER_TOOL"));
     let _ = app.update(Message::TabNew);
     let j = app.active_tab;
     define_block(&mut app, "CONTAINER");
-    app.tabs[j].scene.block_edit_block = Some(app.tabs[j].scene.document.block_records.get("CONTAINER").unwrap().handle);
+    app.tabs[j].scene.block_edit_block = Some(
+        app.tabs[j]
+            .scene
+            .document
+            .block_records
+            .get("CONTAINER")
+            .unwrap()
+            .handle,
+    );
     let before = app.tabs[j].scene.document.clone();
     let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::ZERO));
     assert_eq!(app.tabs[j].scene.document, before);
@@ -578,11 +621,30 @@ fn imported_dynamic_tool_evaluates_its_remapped_action_targets() {
     let _ = app.insert_from_tool_palette(0, Some(glam::DVec3::ZERO));
     let doc = &app.tabs[j].scene.document;
     let definition = doc.block_records.get(&name).unwrap().handle;
-    let insert = doc.entities().find_map(|e| match e { EntityType::Insert(i) if i.block_name == name => Some(i.common.handle), _ => None }).unwrap();
+    let insert = doc
+        .entities()
+        .find_map(|e| match e {
+            EntityType::Insert(i) if i.block_name == name => Some(i.common.handle),
+            _ => None,
+        })
+        .unwrap();
     let parameter = &actions::all_parameters(doc, definition)[0];
-    let evaluated = actions::instance::evaluate(doc, insert, parameter.handle, parameter.end * 2.).unwrap().unwrap();
-    let EntityType::Insert(reference) = evaluated.get_entity(insert).unwrap() else { panic!() };
-    let line = evaluated.entities_in_block(&reference.block_name).find_map(|e| if let EntityType::Line(l) = e { Some(l) } else { None }).unwrap();
+    let evaluated = actions::instance::evaluate(doc, insert, parameter.handle, parameter.end * 2.)
+        .unwrap()
+        .unwrap();
+    let EntityType::Insert(reference) = evaluated.get_entity(insert).unwrap() else {
+        panic!()
+    };
+    let line = evaluated
+        .entities_in_block(&reference.block_name)
+        .find_map(|e| {
+            if let EntityType::Line(l) = e {
+                Some(l)
+            } else {
+                None
+            }
+        })
+        .unwrap();
     assert!(line.start.distance(&Vector3::new(6., 2., 0.)) < 1e-8);
     assert!(line.end.distance(&Vector3::new(16., 2., 0.)) < 1e-8);
 }

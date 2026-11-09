@@ -1071,8 +1071,7 @@ fn build_shaped(family: &str, text: &str) -> Option<ShapedRun> {
                 let face_index = fs.db_mut().face(g.font_id).map(|f| f.index).unwrap_or(0);
                 if let Some(font) = fs.get_font(g.font_id, g.font_weight) {
                     if let Ok(face) = ttf_parser::Face::parse(font.data(), face_index) {
-                        primary_metrics =
-                            Some((face.units_per_em() as f32, capital_units(&face)));
+                        primary_metrics = Some((face.units_per_em() as f32, capital_units(&face)));
                         break;
                     }
                 }

@@ -148,10 +148,9 @@ fn main() {
             if run >= WARMUP {
                 times.push(elapsed.as_secs_f64());
                 match reference {
-                    Some(previous) => assert_eq!(
-                        found, previous,
-                        "{name}: segment digest moved between runs"
-                    ),
+                    Some(previous) => {
+                        assert_eq!(found, previous, "{name}: segment digest moved between runs")
+                    }
                     None => reference = Some(found),
                 }
             }

@@ -173,7 +173,11 @@ fn block_grip_description_hover_dwell_guards_and_native_visibility_are_independe
     assert!(app.hovered_dynamic_grip_tip().is_none());
     hover.started -= std::time::Duration::from_millis(600);
     app.grip_hover = Some(hover.clone());
-    assert!(app.hovered_dynamic_grip_tip().unwrap().1.contains(AUTHORED_DESCRIPTION));
+    assert!(app
+        .hovered_dynamic_grip_tip()
+        .unwrap()
+        .1
+        .contains(AUTHORED_DESCRIPTION));
     metadata::set_visible(
         &mut app.tabs[i].scene.document,
         definition,
@@ -182,7 +186,10 @@ fn block_grip_description_hover_dwell_guards_and_native_visibility_are_independe
     )
     .unwrap();
     assert!(
-        app.hovered_dynamic_grip_tip().unwrap().1.contains(AUTHORED_DESCRIPTION),
+        app.hovered_dynamic_grip_tip()
+            .unwrap()
+            .1
+            .contains(AUTHORED_DESCRIPTION),
         "Show Properties does not hide an enabled grip's help"
     );
     app.grip_hover.as_mut().unwrap().document += 1;

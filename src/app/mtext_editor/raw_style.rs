@@ -92,7 +92,10 @@ fn width_code(raw: &str, range: &Range<usize>) -> Result<f64, EditError> {
         .ok_or(EditError::ObjectDefault)
 }
 
-fn text_style<'a>(doc: &'a document::Document, name: &str) -> Option<&'a document::tables::TextStyle> {
+fn text_style<'a>(
+    doc: &'a document::Document,
+    name: &str,
+) -> Option<&'a document::tables::TextStyle> {
     doc.text_styles.iter().find(|s| {
         s.name.eq_ignore_ascii_case(name)
             || (name.trim().is_empty() && s.name.eq_ignore_ascii_case("Standard"))

@@ -4332,8 +4332,7 @@ mod tests {
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|block| block["type"] == "image"
-                    && block["data"] == "capture-png"));
+                .any(|block| block["type"] == "image" && block["data"] == "capture-png"));
         }
     }
 

@@ -524,10 +524,7 @@ impl Scene {
         Self::matchprop_glow_with_layers(wires, [(8.0, 0.035), (5.0, 0.065), (2.5, 0.11)])
     }
 
-    fn matchprop_glow_with_layers(
-        wires: &[WireModel],
-        layers: [(f32, f32); 3],
-    ) -> Vec<WireModel> {
+    fn matchprop_glow_with_layers(wires: &[WireModel], layers: [(f32, f32); 3]) -> Vec<WireModel> {
         let mut glow = Vec::with_capacity(wires.len() * 3);
         for wire in wires {
             // Layer translucent, widened copies over the resident entity. Its
@@ -634,9 +631,7 @@ impl Scene {
             let Some(e) = self.document.get_entity(eh) else {
                 continue;
             };
-            if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_))
-                || e.common().invisible
-            {
+            if matches!(e, EntityType::Block(_) | EntityType::BlockEnd(_)) || e.common().invisible {
                 continue;
             }
             out.extend(self.tessellate_one(e));
@@ -689,10 +684,7 @@ const INDICATOR_EDGE: [f32; 4] = [235.0 / 255.0, 235.0 / 255.0, 235.0 / 255.0, 1
 impl Scene {
     /// Row and column labels round every selected table, and the picked
     /// range's outline in the table whose cells are picked. Screen only.
-    pub(super) fn table_indicator_overlay(
-        &self,
-        pixel: f64,
-    ) -> (Vec<WireModel>, Vec<HatchModel>) {
+    pub(super) fn table_indicator_overlay(&self, pixel: f64) -> (Vec<WireModel>, Vec<HatchModel>) {
         let mut wires = Vec::new();
         let mut hatches = Vec::new();
         let picked = self.table_cells_handle();
@@ -735,7 +727,11 @@ impl Scene {
                 edges.push(a.to_array());
                 edges.push(b.to_array());
             }
-            let edge_color = if cell_mode { INDICATOR_EDGE } else { self.selection_color };
+            let edge_color = if cell_mode {
+                INDICATOR_EDGE
+            } else {
+                self.selection_color
+            };
             let mut edge_wire = WireModel::solid(name.clone(), edges, edge_color, false);
             edge_wire.plot_visible = false;
             edge_wire.text_verts = Self::indicator_text(&indicator);

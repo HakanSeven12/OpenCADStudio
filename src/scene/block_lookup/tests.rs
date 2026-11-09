@@ -1,6 +1,6 @@
 use super::*;
-mod multiple_outputs;
 mod expressions;
+mod multiple_outputs;
 mod rename;
 use crate::scene::{block_basepoint, block_distance_parameter as distance, render_graph, Scene};
 use document::{
@@ -264,11 +264,25 @@ fn lookup_reverse_selection_evaluates_saved_reference_geometry() {
         .unwrap();
 
     let mut hidden = document.clone();
-    let grips = crate::scene::block_grips::config::locations(&hidden, definition, lookup).unwrap().into_iter().map(|g| (g.role, g.handle, g.point, g.key_point, g.direction)).collect::<Vec<_>>();
-    crate::scene::block_authoring::metadata::set_visible(&mut hidden, definition, lookup, false).unwrap();
+    let grips = crate::scene::block_grips::config::locations(&hidden, definition, lookup)
+        .unwrap()
+        .into_iter()
+        .map(|g| (g.role, g.handle, g.point, g.key_point, g.direction))
+        .collect::<Vec<_>>();
+    crate::scene::block_authoring::metadata::set_visible(&mut hidden, definition, lookup, false)
+        .unwrap();
     assert!(reference_property(&hidden, insert).is_none());
-    assert_eq!(crate::scene::block_grips::config::locations(&hidden, definition, lookup).unwrap().into_iter().map(|g| (g.role, g.handle, g.point, g.key_point, g.direction)).collect::<Vec<_>>(), grips);
-    let hidden_evaluated = evaluate_reference_choice(&hidden, insert, "Large").unwrap().unwrap();
+    assert_eq!(
+        crate::scene::block_grips::config::locations(&hidden, definition, lookup)
+            .unwrap()
+            .into_iter()
+            .map(|g| (g.role, g.handle, g.point, g.key_point, g.direction))
+            .collect::<Vec<_>>(),
+        grips
+    );
+    let hidden_evaluated = evaluate_reference_choice(&hidden, insert, "Large")
+        .unwrap()
+        .unwrap();
     assert!(reference_property(&hidden_evaluated, insert).is_none());
 
     let initial = reference_property(&document, insert).unwrap();
@@ -314,7 +328,9 @@ fn lookup_reverse_selection_evaluates_saved_reference_geometry() {
     assert_eq!(unsupported, before);
     // Simulate a retained imported binding without authoring it through Apply.
     let (handle, _) = table(&unsupported, definition, lookup).unwrap().unwrap();
-    let ObjectType::DynamicBlock(object) = unsupported.objects.get_mut(&handle).unwrap() else { panic!() };
+    let ObjectType::DynamicBlock(object) = unsupported.objects.get_mut(&handle).unwrap() else {
+        panic!()
+    };
     object.data = DynamicBlockData::LookupAction(malformed);
     let before = unsupported.clone();
     assert!(evaluate_reference_choice(&unsupported, insert, "Large").is_err());
@@ -331,38 +347,91 @@ fn lookup_and_property_table_rows_preserve_changed_bases_in_drawing_and_test_con
             add_distance(&mut document, definition);
             let p = actions::all_parameters(&document, definition).remove(0);
             let line = document.block_records.get("LOOKUP").unwrap().entity_handles[0];
-            actions::create(&mut document, definition, actions::Kind::Move, p.handle, &[line], DVec3::ZERO).unwrap();
+            actions::create(
+                &mut document,
+                definition,
+                actions::Kind::Move,
+                p.handle,
+                &[line],
+                DVec3::ZERO,
+            )
+            .unwrap();
             if lookup {
                 let lookup = create(&mut document, definition, Vector3::ZERO).unwrap();
                 let draft = draft(&document, definition, lookup);
                 apply_table(&mut document, definition, lookup, draft).unwrap();
             } else {
                 let columns = table::columns(&document, definition);
-                table::apply(&mut document, definition, &columns, &[vec![2.], vec![4.]], false).unwrap();
+                table::apply(
+                    &mut document,
+                    definition,
+                    &columns,
+                    &[vec![2.], vec![4.]],
+                    false,
+                )
+                .unwrap();
             }
-            let insert = document.add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO))).unwrap();
+            let insert = document
+                .add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO)))
+                .unwrap();
             let baseline = document.clone();
-            let input = actions::Value::Frame { base: DVec3::new(-2., 0., 0.), end: p.end };
+            let input = actions::Value::Frame {
+                base: DVec3::new(-2., 0., 0.),
+                end: p.end,
+            };
             document = if testing {
-                actions::instance::evaluate_test_value(&document, &baseline, definition, insert, p.handle, input)
-            } else { actions::instance::evaluate_value(&document, insert, p.handle, input) }.unwrap().unwrap();
+                actions::instance::evaluate_test_value(
+                    &document, &baseline, definition, insert, p.handle, input,
+                )
+            } else {
+                actions::instance::evaluate_value(&document, insert, p.handle, input)
+            }
+            .unwrap()
+            .unwrap();
             for row in [0, 1, 0] {
                 document = if lookup {
                     let label = if row == 0 { "Small" } else { "Large" };
-                    if testing { evaluate_test_choice(&document, &baseline, insert, label) }
-                    else { evaluate_reference_choice(&document, insert, label) }
+                    if testing {
+                        evaluate_test_choice(&document, &baseline, insert, label)
+                    } else {
+                        evaluate_reference_choice(&document, insert, label)
+                    }
                 } else {
-                    let columns = table::table(&document, definition).unwrap().unwrap().columns;
-                    if testing { actions::instance::evaluate_test_table_row(&document, &baseline, insert, &columns, row) }
-                    else { actions::instance::evaluate_table_row(&document, insert, &columns, row) }
-                }.unwrap().unwrap();
+                    let columns = table::table(&document, definition)
+                        .unwrap()
+                        .unwrap()
+                        .columns;
+                    if testing {
+                        actions::instance::evaluate_test_table_row(
+                            &document, &baseline, insert, &columns, row,
+                        )
+                    } else {
+                        actions::instance::evaluate_table_row(&document, insert, &columns, row)
+                    }
+                }
+                .unwrap()
+                .unwrap();
                 let frame = actions::instance::frame(&document, insert, &p).unwrap();
                 assert_eq!(frame.base, DVec3::new(-2., 0., 0.));
-                assert_eq!(frame.end, DVec3::new(if row == 0 { 0. } else { 2. }, 0., 0.));
-                let EntityType::Insert(reference) = document.get_entity(insert).unwrap() else { panic!() };
-                let member = document.block_records.get(&reference.block_name).unwrap().entity_handles[0];
-                let EntityType::Line(line) = document.get_entity(member).unwrap() else { panic!() };
-                assert_eq!(line.start, Vector3::new(if row == 0 { -2. } else { 0. }, 0., 0.));
+                assert_eq!(
+                    frame.end,
+                    DVec3::new(if row == 0 { 0. } else { 2. }, 0., 0.)
+                );
+                let EntityType::Insert(reference) = document.get_entity(insert).unwrap() else {
+                    panic!()
+                };
+                let member = document
+                    .block_records
+                    .get(&reference.block_name)
+                    .unwrap()
+                    .entity_handles[0];
+                let EntityType::Line(line) = document.get_entity(member).unwrap() else {
+                    panic!()
+                };
+                assert_eq!(
+                    line.start,
+                    Vector3::new(if row == 0 { -2. } else { 0. }, 0., 0.)
+                );
             }
         }
     }
@@ -621,9 +690,11 @@ fn a_lookup_output_that_matches_no_row_prints_nothing() {
             other => panic!("expected a read-only lookup row, got {other:?}"),
         })
         .expect("the lookup output has a property row");
-    assert_eq!(value, "", "the cell shows the table's own column name: {value:?}");
+    assert_eq!(
+        value, "",
+        "the cell shows the table's own column name: {value:?}"
+    );
 }
-
 
 #[test]
 fn lookup_rows_publish_transported_linear_frames() {
@@ -634,35 +705,86 @@ fn lookup_rows_publish_transported_linear_frames() {
             let (mut document, definition) = fixture();
             add_distance(&mut document, definition);
             let parent = actions::all_parameters(&document, definition)[0].handle;
-            let child = distance::create(&mut document, definition, distance::Kind::Linear,
-                Vector3::new(0., 5., 0.), Vector3::new(10., 5., 0.), Vector3::new(5., 7., 0.)).unwrap();
-            let ObjectType::DynamicBlock(object) = document.objects.get_mut(&child).unwrap() else { panic!() };
-            let DynamicBlockData::LinearParameter(parameter) = &mut object.data else { panic!() };
+            let child = distance::create(
+                &mut document,
+                definition,
+                distance::Kind::Linear,
+                Vector3::new(0., 5., 0.),
+                Vector3::new(10., 5., 0.),
+                Vector3::new(5., 7., 0.),
+            )
+            .unwrap();
+            let ObjectType::DynamicBlock(object) = document.objects.get_mut(&child).unwrap() else {
+                panic!()
+            };
+            let DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
+                panic!()
+            };
             parameter.parameter.parameter.chain_actions = chained;
             let line = document.block_records.get("LOOKUP").unwrap().entity_handles[0];
-            actions::create(&mut document, definition, actions::Kind::Move, parent, &[child], DVec3::ZERO).unwrap();
-            actions::create(&mut document, definition, actions::Kind::Move, child, &[line], DVec3::ZERO).unwrap();
+            actions::create(
+                &mut document,
+                definition,
+                actions::Kind::Move,
+                parent,
+                &[child],
+                DVec3::ZERO,
+            )
+            .unwrap();
+            actions::create(
+                &mut document,
+                definition,
+                actions::Kind::Move,
+                child,
+                &[line],
+                DVec3::ZERO,
+            )
+            .unwrap();
             let lookup = create(&mut document, definition, Vector3::ZERO).unwrap();
             let table = draft(&document, definition, lookup);
             apply_table(&mut document, definition, lookup, table).unwrap();
-            let child_parameter = actions::all_parameters(&document, definition).into_iter().find(|p| p.handle == child).unwrap();
-            let insert = document.add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO))).unwrap();
+            let child_parameter = actions::all_parameters(&document, definition)
+                .into_iter()
+                .find(|p| p.handle == child)
+                .unwrap();
+            let insert = document
+                .add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO)))
+                .unwrap();
             let baseline = document.clone();
             for (label, offset) in [("Large", DVec3::X * 2.), ("Small", DVec3::ZERO)] {
-                document = if testing { evaluate_test_choice(&document, &baseline, insert, label) }
-                    else { evaluate_reference_choice(&document, insert, label) }.unwrap().unwrap();
+                document = if testing {
+                    evaluate_test_choice(&document, &baseline, insert, label)
+                } else {
+                    evaluate_reference_choice(&document, insert, label)
+                }
+                .unwrap()
+                .unwrap();
                 let frame = actions::instance::frame(&document, insert, &child_parameter).unwrap();
                 assert_eq!(frame.base, child_parameter.base + offset);
                 assert_eq!(frame.end, child_parameter.end + offset);
-                let EntityType::Insert(reference) = document.get_entity(insert).unwrap() else { panic!() };
-                let member = document.block_records.get(&reference.block_name).unwrap().entity_handles[0];
-                let EntityType::Line(line) = document.get_entity(member).unwrap() else { panic!() };
-                assert_eq!(line.start, if chained { Vector3::new(offset.x, offset.y, offset.z) } else { Vector3::ZERO });
+                let EntityType::Insert(reference) = document.get_entity(insert).unwrap() else {
+                    panic!()
+                };
+                let member = document
+                    .block_records
+                    .get(&reference.block_name)
+                    .unwrap()
+                    .entity_handles[0];
+                let EntityType::Line(line) = document.get_entity(member).unwrap() else {
+                    panic!()
+                };
+                assert_eq!(
+                    line.start,
+                    if chained {
+                        Vector3::new(offset.x, offset.y, offset.z)
+                    } else {
+                        Vector3::ZERO
+                    }
+                );
             }
         }
     }
 }
-
 
 #[test]
 fn property_table_rows_preserve_independent_transported_linear_input() {
@@ -673,36 +795,117 @@ fn property_table_rows_preserve_independent_transported_linear_input() {
             let (mut document, definition) = fixture();
             add_distance(&mut document, definition);
             let parent = actions::all_parameters(&document, definition)[0].handle;
-            let child = distance::create(&mut document, definition, distance::Kind::Linear,
-                Vector3::new(0., 5., 0.), Vector3::new(10., 5., 0.), Vector3::new(5., 7., 0.)).unwrap();
-            let ObjectType::DynamicBlock(object) = document.objects.get_mut(&child).unwrap() else { panic!() };
-            let DynamicBlockData::LinearParameter(parameter) = &mut object.data else { panic!() };
+            let child = distance::create(
+                &mut document,
+                definition,
+                distance::Kind::Linear,
+                Vector3::new(0., 5., 0.),
+                Vector3::new(10., 5., 0.),
+                Vector3::new(5., 7., 0.),
+            )
+            .unwrap();
+            let ObjectType::DynamicBlock(object) = document.objects.get_mut(&child).unwrap() else {
+                panic!()
+            };
+            let DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
+                panic!()
+            };
             parameter.parameter.parameter.chain_actions = chained;
             let line = document.block_records.get("LOOKUP").unwrap().entity_handles[0];
-            actions::create(&mut document, definition, actions::Kind::Move, parent, &[child], DVec3::ZERO).unwrap();
-            actions::create(&mut document, definition, actions::Kind::Move, child, &[line], DVec3::ZERO).unwrap();
-            let columns = table::columns(&document, definition).into_iter().filter(|column| column.handle == parent).collect::<Vec<_>>();
+            actions::create(
+                &mut document,
+                definition,
+                actions::Kind::Move,
+                parent,
+                &[child],
+                DVec3::ZERO,
+            )
+            .unwrap();
+            actions::create(
+                &mut document,
+                definition,
+                actions::Kind::Move,
+                child,
+                &[line],
+                DVec3::ZERO,
+            )
+            .unwrap();
+            let columns = table::columns(&document, definition)
+                .into_iter()
+                .filter(|column| column.handle == parent)
+                .collect::<Vec<_>>();
             assert_eq!(columns.len(), 1);
-            table::apply(&mut document, definition, &columns, &[vec![2.], vec![4.]], false).unwrap();
-            let target = actions::all_parameters(&document, definition).into_iter().find(|p| p.handle == child).unwrap();
-            let first = document.add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO))).unwrap();
-            let second = document.add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::UNIT_X * 50.))).unwrap();
+            table::apply(
+                &mut document,
+                definition,
+                &columns,
+                &[vec![2.], vec![4.]],
+                false,
+            )
+            .unwrap();
+            let target = actions::all_parameters(&document, definition)
+                .into_iter()
+                .find(|p| p.handle == child)
+                .unwrap();
+            let first = document
+                .add_entity(EntityType::Insert(Insert::new("LOOKUP", Vector3::ZERO)))
+                .unwrap();
+            let second = document
+                .add_entity(EntityType::Insert(Insert::new(
+                    "LOOKUP",
+                    Vector3::UNIT_X * 50.,
+                )))
+                .unwrap();
             let baseline = document.clone();
             let input = actions::Value::Point(target.end + DVec3::X * 3.);
-            document = if testing { actions::instance::evaluate_test_value(&document, &baseline, definition, first, child, input) }
-                else { actions::instance::evaluate_value(&document, first, child, input) }.unwrap().unwrap();
+            document = if testing {
+                actions::instance::evaluate_test_value(
+                    &document, &baseline, definition, first, child, input,
+                )
+            } else {
+                actions::instance::evaluate_value(&document, first, child, input)
+            }
+            .unwrap()
+            .unwrap();
             for (row, offset) in [(1, DVec3::X * 2.), (0, DVec3::ZERO)] {
-                let columns = table::table(&document, definition).unwrap().unwrap().columns;
-                document = if testing { actions::instance::evaluate_test_table_row(&document, &baseline, first, &columns, row) }
-                    else { actions::instance::evaluate_table_row(&document, first, &columns, row) }.unwrap().unwrap();
+                let columns = table::table(&document, definition)
+                    .unwrap()
+                    .unwrap()
+                    .columns;
+                document = if testing {
+                    actions::instance::evaluate_test_table_row(
+                        &document, &baseline, first, &columns, row,
+                    )
+                } else {
+                    actions::instance::evaluate_table_row(&document, first, &columns, row)
+                }
+                .unwrap()
+                .unwrap();
                 let frame = actions::instance::frame(&document, first, &target).unwrap();
                 assert_eq!(frame.base, target.base + offset);
                 assert_eq!(frame.end, target.end + offset + DVec3::X * 3.);
-                assert_eq!(actions::instance::frame(&document, second, &target).unwrap(), actions::instance::ParameterFrame { base: target.base, end: target.end });
-                let EntityType::Insert(reference) = document.get_entity(first).unwrap() else { panic!() };
-                let member = document.block_records.get(&reference.block_name).unwrap().entity_handles[0];
-                let EntityType::Line(line) = document.get_entity(member).unwrap() else { panic!() };
-                assert_eq!(line.start, Vector3::new(3. + if chained { offset.x } else { 0. }, 0., 0.));
+                assert_eq!(
+                    actions::instance::frame(&document, second, &target).unwrap(),
+                    actions::instance::ParameterFrame {
+                        base: target.base,
+                        end: target.end
+                    }
+                );
+                let EntityType::Insert(reference) = document.get_entity(first).unwrap() else {
+                    panic!()
+                };
+                let member = document
+                    .block_records
+                    .get(&reference.block_name)
+                    .unwrap()
+                    .entity_handles[0];
+                let EntityType::Line(line) = document.get_entity(member).unwrap() else {
+                    panic!()
+                };
+                assert_eq!(
+                    line.start,
+                    Vector3::new(3. + if chained { offset.x } else { 0. }, 0., 0.)
+                );
             }
         }
     }

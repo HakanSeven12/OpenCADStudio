@@ -1006,7 +1006,10 @@ fn a_complex_circle_holds_whole_stretched_periods_and_full_size_glyphs() {
     let handle = add(&mut document, EntityType::Circle(circle));
     let (count, spacing) = circle_glyphs(&document, handle, 2.0);
     assert_eq!(count, 8);
-    assert!((spacing - std::f64::consts::FRAC_PI_2).abs() < 0.02, "{spacing}");
+    assert!(
+        (spacing - std::f64::consts::FRAC_PI_2).abs() < 0.02,
+        "{spacing}"
+    );
 }
 
 #[test]

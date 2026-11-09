@@ -9,7 +9,6 @@ pub(crate) mod content_browser;
 pub(crate) mod create_block;
 pub(crate) mod design_center;
 pub(crate) mod dgn_import;
-pub(crate) mod tds_import;
 pub(crate) mod edit_block;
 pub(crate) mod hyperlink_cmd;
 pub(crate) mod image_transparency;
@@ -27,6 +26,7 @@ pub(crate) mod pdf_shx_text;
 pub(crate) mod picker;
 mod snap_underlays;
 pub(crate) mod solid3d_cmds;
+pub(crate) mod tds_import;
 mod underlay_layers;
 pub(crate) mod wblock;
 pub(crate) mod xadjust;
@@ -251,9 +251,7 @@ impl CadModule for InsertModule {
                         RibbonItem::LabeledTool(
                             crate::modules::annotate::data_link::download_tool(),
                         ),
-                        RibbonItem::LabeledTool(
-                            crate::modules::annotate::data_link::upload_tool(),
-                        ),
+                        RibbonItem::LabeledTool(crate::modules::annotate::data_link::upload_tool()),
                         RibbonItem::LabeledTool(ToolDef {
                             label: "Extract Data",
                             ..crate::modules::annotate::data_extract::tool()

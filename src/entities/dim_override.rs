@@ -507,7 +507,11 @@ pub fn named_var(name: &str) -> Option<(i16, VarKind)> {
 pub fn parse_var_value(kind: VarKind, text: &str) -> Option<XDataValue> {
     let text = text.trim();
     match kind {
-        VarKind::Real => text.parse().ok().filter(|v: &f64| v.is_finite()).map(XDataValue::Real),
+        VarKind::Real => text
+            .parse()
+            .ok()
+            .filter(|v: &f64| v.is_finite())
+            .map(XDataValue::Real),
         VarKind::Int => text
             .parse()
             .ok()

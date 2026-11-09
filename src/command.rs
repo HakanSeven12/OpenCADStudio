@@ -1830,7 +1830,11 @@ pub enum CmdResult {
         definition: Handle,
         action: Handle,
         expected: Box<document::objects::ObjectType>,
-        point_choices: Option<(crate::scene::block_actions::Kind, i32, Vec<(Handle, i32, String)>)>,
+        point_choices: Option<(
+            crate::scene::block_actions::Kind,
+            i32,
+            Vec<(Handle, i32, String)>,
+        )>,
         targets: Vec<Handle>,
         frame: Option<Vec<DVec3>>,
         rotate_only: Option<Vec<Handle>>,
@@ -1855,7 +1859,11 @@ pub enum CmdResult {
         kind: crate::scene::block_actions::Kind,
         parameter: Handle,
         xy_key_point: Option<crate::scene::block_actions::XyKeyPoint>,
-        point_choices: Option<(crate::scene::block_actions::Kind, i32, Vec<(Handle, i32, String)>)>,
+        point_choices: Option<(
+            crate::scene::block_actions::Kind,
+            i32,
+            Vec<(Handle, i32, String)>,
+        )>,
         targets: Vec<Handle>,
         location: DVec3,
         frame: Option<Vec<DVec3>>,
@@ -1975,7 +1983,10 @@ pub enum CmdResult {
     /// object, or none when the pick was left with Enter or Esc.
     TableTemplatePick(Option<Handle>),
     /// Turn a layer off (or back on) and keep the command for its next pick.
-    SetLayerOn { layer: String, on: bool },
+    SetLayerOn {
+        layer: String,
+        on: bool,
+    },
     /// Command is still waiting for the next point; show updated prompt.
     NeedPoint,
     /// Update the committed-segment wire (normal colour) and keep collecting points.
@@ -3379,7 +3390,10 @@ pub trait CadCommand: Send {
     }
 
     /// Called when a modal dialog is submitted or cancelled.
-    fn on_dialog_response(&mut self, _response: ocs_plugin_api::dialog::DialogResponse) -> CmdResult {
+    fn on_dialog_response(
+        &mut self,
+        _response: ocs_plugin_api::dialog::DialogResponse,
+    ) -> CmdResult {
         CmdResult::Cancel
     }
 
@@ -4024,7 +4038,12 @@ pub trait CadCommand: Send {
     }
 
     /// Pending panel updates buffered during interactive command execution.
-    fn take_pending_panel_updates(&mut self) -> Vec<(String, std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>)> {
+    fn take_pending_panel_updates(
+        &mut self,
+    ) -> Vec<(
+        String,
+        std::collections::HashMap<String, ocs_plugin_api::dialog::DialogValue>,
+    )> {
         Vec::new()
     }
 }
@@ -4049,8 +4068,7 @@ inventory::collect!(CommandRegistration);
 
 /// One-line summary of a command or system variable from its wiki page.
 pub fn command_summary(name: &str) -> Option<&'static str> {
-    static SUMMARIES: &[(&str, &str)] =
-        include!(concat!(env!("OUT_DIR"), "/command_summaries.rs"));
+    static SUMMARIES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/command_summaries.rs"));
     let name = name.trim_start_matches(['\'', '_']).to_ascii_uppercase();
     SUMMARIES
         .binary_search_by(|(key, _)| (*key).cmp(name.as_str()))
@@ -4088,7 +4106,10 @@ mod constraint_registry_tests {
             .filter_map(|(_, target)| target.trim().strip_prefix('*'))
             .filter(|target| !names.iter().any(|name| name.eq_ignore_ascii_case(target)))
             .collect();
-        assert!(unknown.is_empty(), "alias targets missing from the registry: {unknown:?}");
+        assert!(
+            unknown.is_empty(),
+            "alias targets missing from the registry: {unknown:?}"
+        );
     }
 
     /// Ensures every constraint command remains discoverable by autocomplete

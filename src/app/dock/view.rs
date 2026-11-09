@@ -300,7 +300,9 @@ impl OpenCADStudio {
                 // Labelled, the pallet's name reads upward under its icon.
                 let glyph: Element<'_, Message> = if labels {
                     column![
-                        container(glyph).center_x(Fill).height(Length::Fixed(STRIP_CELL_H - 4.0)),
+                        container(glyph)
+                            .center_x(Fill)
+                            .height(Length::Fixed(STRIP_CELL_H - 4.0)),
                         iced::widget::canvas(crate::ui::dock::VerticalLabel {
                             text: t!(id.title()).into_owned(),
                             centered: true,
@@ -511,7 +513,9 @@ impl OpenCADStudio {
                     self.parameter_placement_error("FLIP"),
                     if self.block_editor_preferences.action_bars {
                         Some("Use the Lookup parameter action bar, or set BACTIONBARMODE to 0.")
-                    } else { self.lookup_table_error() },
+                    } else {
+                        self.lookup_table_error()
+                    },
                     self.properties_table_error(),
                     self.action_error(Some(crate::scene::block_actions::Kind::Move)),
                     self.action_error(Some(crate::scene::block_actions::Kind::Scale)),
@@ -589,12 +593,14 @@ impl OpenCADStudio {
                     .scene
                     .active_viewport
                     .filter(|_| tab.scene.current_layout != "Model");
-                tab.layers.view_panel(self.layer_name_col_w, width, chrome, active_vp)
+                tab.layers
+                    .view_panel(self.layer_name_col_w, width, chrome, active_vp)
             }
             crate::ui::dock::PanelId::Laywalk => self.layer_walk_view(tab, width, chrome),
             crate::ui::dock::PanelId::QuickCalc => self.quick_calc_view(tab, width, chrome),
             crate::ui::dock::PanelId::CommandHistory => {
-                self.command_line.history_panel(&self.history_content, width, chrome)
+                self.command_line
+                    .history_panel(&self.history_content, width, chrome)
             }
             crate::ui::dock::PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
@@ -1269,12 +1275,16 @@ fn dock_edge_menu(
             Space::new().width(12).height(12).into()
         };
         rows.push(
-            button(row![text(label).size(12).width(Fill), check].spacing(8).align_y(iced::Center))
-                .on_press(Message::Dock(DockMsg::StripLabels(on)))
-                .style(menu_row_style)
-                .padding([5, 8])
-                .width(Fill)
-                .into(),
+            button(
+                row![text(label).size(12).width(Fill), check]
+                    .spacing(8)
+                    .align_y(iced::Center),
+            )
+            .on_press(Message::Dock(DockMsg::StripLabels(on)))
+            .style(menu_row_style)
+            .padding([5, 8])
+            .width(Fill)
+            .into(),
         );
     }
     menu_frame(column(rows).spacing(1).padding(4).into())

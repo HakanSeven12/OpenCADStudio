@@ -99,8 +99,9 @@ pub(crate) struct Parameter<'a> {
 fn graph_handle(document: &Document, definition: Handle) -> Option<Handle> {
     match document
         .objects
-        .get(&super::block_authoring::definition_dictionary(document, definition)?)?
-    {
+        .get(&super::block_authoring::definition_dictionary(
+            document, definition,
+        )?)? {
         ObjectType::Dictionary(dictionary) => dictionary.get("ACAD_ENHANCEDBLOCK"),
         _ => None,
     }
@@ -585,11 +586,7 @@ pub(crate) fn graphic(parameter: &Parameter<'_>) -> Graphic {
     result
 }
 
-pub(crate) fn reframe(
-    document: &mut Document,
-    definition: Handle,
-    transform: &Transform,
-) -> usize {
+pub(crate) fn reframe(document: &mut Document, definition: Handle, transform: &Transform) -> usize {
     let Some(graph) = graph_handle(document, definition) else {
         return 0;
     };
@@ -619,7 +616,11 @@ pub(crate) fn reframe(
                 }
                 _ => continue,
             };
-            super::block_actions::reframe_value(&mut native.parameter.element.eval, native.definition_end_point.z, transform);
+            super::block_actions::reframe_value(
+                &mut native.parameter.element.eval,
+                native.definition_end_point.z,
+                transform,
+            );
             native.definition_base_point = transform.apply(native.definition_base_point);
             native.definition_end_point = transform.apply(native.definition_end_point);
             for point in [
@@ -827,9 +828,15 @@ mod tests {
             }
         }
         let (ObjectType::DynamicBlock(old), ObjectType::DynamicBlock(new)) =
-            (&before.objects[&graph], &scene.document.objects[&graph]) else { panic!("Expected authoring graphs") };
+            (&before.objects[&graph], &scene.document.objects[&graph])
+        else {
+            panic!("Expected authoring graphs")
+        };
         let (DynamicBlockData::EvaluationGraph(old), DynamicBlockData::EvaluationGraph(new)) =
-            (&old.data, &new.data) else { panic!("Expected evaluation graph data") };
+            (&old.data, &new.data)
+        else {
+            panic!("Expected evaluation graph data")
+        };
         assert_eq!(&new.nodes[..old.nodes.len()], &old.nodes);
         assert_eq!(&new.edges[..old.edges.len()], &old.edges);
         assert_native(&scene.document, &handles);

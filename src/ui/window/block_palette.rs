@@ -1571,12 +1571,7 @@ mod tests {
         )
         .expect("headless renderer");
         let size = iced::Size::new(300.0, 100_000.0);
-        let mut ui = UserInterface::build(
-            element,
-            size,
-            Cache::default(),
-            &mut renderer,
-        );
+        let mut ui = UserInterface::build(element, size, Cache::default(), &mut renderer);
         let mut find = Selector::find(label);
         ui.operate(&renderer, &mut widget::operation::black_box(&mut find));
         match widget::Operation::finish(&find) {

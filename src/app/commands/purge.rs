@@ -56,8 +56,7 @@ pub(crate) fn purge_pass(
     // the same rule in `block_service::protected_reason`.
     let xref_dependent = |name: &str, flagged: bool| flagged || name.contains('|');
     let insert_attributes = || {
-        doc
-            .entities()
+        doc.entities()
             .filter_map(|e| match e {
                 document::EntityType::Insert(ins) => Some(ins.attributes.iter()),
                 _ => None,
@@ -78,10 +77,7 @@ pub(crate) fn purge_pass(
         })
         // The current layer is never purged, empty or not.
         .chain(std::iter::once(
-            doc
-                .header
-                .current_layer_name
-                .to_uppercase(),
+            doc.header.current_layer_name.to_uppercase(),
         ))
         .collect();
     // Text styles: entity references plus every dimension
@@ -97,18 +93,8 @@ pub(crate) fn purge_pass(
             _ => None,
         })
         .chain(insert_attributes().map(|a| a.text_style.clone()))
-        .chain(std::iter::once(
-            doc
-                .header
-                .current_text_style_name
-                .clone(),
-        ))
-        .chain(
-            doc
-                .dim_styles
-                .iter()
-                .map(|ds| ds.dimtxsty.clone()),
-        )
+        .chain(std::iter::once(doc.header.current_text_style_name.clone()))
+        .chain(doc.dim_styles.iter().map(|ds| ds.dimtxsty.clone()))
         .filter(|s| !s.is_empty())
         .map(|s| s.to_uppercase())
         .collect();
@@ -188,26 +174,15 @@ pub(crate) fn purge_pass(
                 Some(lt.clone())
             }
         })
-        .chain(
-            doc
-                .layers
-                .iter()
-                .map(|l| l.line_type.clone()),
-        )
-        .chain(std::iter::once(
-            doc
-                .header
-                .current_linetype_name
-                .clone(),
-        ))
+        .chain(doc.layers.iter().map(|l| l.line_type.clone()))
+        .chain(std::iter::once(doc.header.current_linetype_name.clone()))
         .filter(|s| !s.is_empty())
         .map(|s| s.to_uppercase())
         .collect();
 
     // Build removal lists (still immutable)
     let layer_remove: Vec<String> = if do_layers {
-        doc
-            .layers
+        doc.layers
             .iter()
             .filter(|l| {
                 l.name != "0"
@@ -220,8 +195,7 @@ pub(crate) fn purge_pass(
         vec![]
     };
     let style_remove: Vec<String> = if do_styles {
-        doc
-            .text_styles
+        doc.text_styles
             .iter()
             // Unnamed shape-file records serve complex linetypes
             // and are never listed for purging.
@@ -242,8 +216,7 @@ pub(crate) fn purge_pass(
     };
     let lt_remove: Vec<String> = if do_lts {
         let standard = ["Continuous", "ByLayer", "ByBlock"];
-        doc
-            .line_types
+        doc.line_types
             .iter()
             .filter(|lt| {
                 !standard.iter().any(|s| s.eq_ignore_ascii_case(&lt.name))
@@ -284,7 +257,9 @@ pub(crate) fn purge_pass(
                 // next pass.
                 let children = format!("{}$", name.to_uppercase());
                 !keep(name)
-                    && !names.iter().any(|n| n.to_uppercase().starts_with(&children))
+                    && !names
+                        .iter()
+                        .any(|n| n.to_uppercase().starts_with(&children))
                     && !style_in_use(doc, StyleKind::Dim, name, active_mleader)
             })
             .cloned()
@@ -314,9 +289,7 @@ pub(crate) fn purge_pass(
             .objects
             .values()
             .filter_map(|o| match o {
-                ObjectType::Group(g)
-                    if g.entities.iter().all(|h| doc.get_entity(*h).is_none()) =>
-                {
+                ObjectType::Group(g) if g.entities.iter().all(|h| doc.get_entity(*h).is_none()) => {
                     Some(g.name.clone())
                 }
                 _ => None,
@@ -357,15 +330,18 @@ pub(crate) fn purge_pass(
             .map(|br| br.handle)
             .collect();
         const TOL: f64 = 1e-10;
-        for e in doc.entities().filter(|e| spaces.contains(&e.common().owner_handle)) {
+        for e in doc
+            .entities()
+            .filter(|e| spaces.contains(&e.common().owner_handle))
+        {
             let (kind, label) = match e {
                 EntityType::Line(l) if (l.end - l.start).length() <= TOL => (ZERO_LENGTH, "LINE"),
                 EntityType::Arc(a) if a.radius.abs() <= TOL => (ZERO_LENGTH, "ARC"),
                 EntityType::Circle(c) if c.radius.abs() <= TOL => (ZERO_LENGTH, "CIRCLE"),
                 EntityType::LwPolyline(p)
-                    if p.vertices.windows(2).all(|w| {
-                        (w[1].location - w[0].location).length() <= TOL
-                    }) =>
+                    if p.vertices
+                        .windows(2)
+                        .all(|w| (w[1].location - w[0].location).length() <= TOL) =>
                 {
                     (ZERO_LENGTH, "LWPOLYLINE")
                 }

@@ -490,8 +490,15 @@ impl BlockCache {
         depth_map: &HashMap<u64, [f32; 2]>,
     ) -> Self {
         Self::build_for_block_excluding(
-            doc, block_name, anno_scale, annotation_scale_handle, all_visible,
-            bg_color, viewport, depth_map, &HashSet::default(),
+            doc,
+            block_name,
+            anno_scale,
+            annotation_scale_handle,
+            all_visible,
+            bg_color,
+            viewport,
+            depth_map,
+            &HashSet::default(),
         )
     }
 
@@ -863,7 +870,9 @@ fn build_defn(
         // anonymous block and mark all but the active state's entities
         // invisible — honouring the flag is what shows a single profile
         // instead of every variant stacked on top of each other.
-        if entity.common().invisible || crate::scene::block_construction::is_construction(entity.common()) {
+        if entity.common().invisible
+            || crate::scene::block_construction::is_construction(entity.common())
+        {
             continue;
         }
         // A sub-entity on a layer that is off or frozen must not render, same
@@ -875,11 +884,8 @@ fn build_defn(
         // here (`None`), so one walked space cannot bake its hides into the
         // block definitions every other space draws. Graph walks apply the
         // walk per instance instead.
-        if crate::scene::render_graph::block_member_layer_hidden(
-            doc,
-            &entity.common().layer,
-            None,
-        ) {
+        if crate::scene::render_graph::block_member_layer_hidden(doc, &entity.common().layer, None)
+        {
             continue;
         }
         // Annotative scale representation: bake only the current scale's copy
@@ -999,7 +1005,7 @@ fn inline_wire_point_cost(wire: &LocalWire) -> Option<usize> {
         && wire.pattern_stations.is_empty()
         && wire.world_width == 0.0
         && matches!(wire.complex_walk, ComplexWalk::None))
-        .then_some(wire.points.len())
+    .then_some(wire.points.len())
 }
 
 fn build_nested_ref(
@@ -2846,9 +2852,7 @@ fn resolve_wire_color(lw: &LocalWire, ctx: &ExpandCtx) -> [f32; 4] {
     // Do not fade those a second time; an explicitly coloured child still
     // needs the current INSERT-layer fade applied here.
     let inherited_color = lw.color_is_byblock || lw.color_l0;
-    if !ctx.selected
-        && (lw.layer_locked || (ctx.insert_layer_locked && !inherited_color))
-    {
+    if !ctx.selected && (lw.layer_locked || (ctx.insert_layer_locked && !inherited_color)) {
         color = fade_toward_bg(color, ctx.bg_color);
     }
     color
@@ -4163,7 +4167,8 @@ mod bg_resolution_tests {
             b: 255,
         });
         assert_eq!(adapt_to_bg(mask, LIGHT), mask);
-        let seven = crate::scene::convert::tess_util::aci_to_rgba(&document::types::Color::Index(7));
+        let seven =
+            crate::scene::convert::tess_util::aci_to_rgba(&document::types::Color::Index(7));
         assert_eq!(adapt_to_bg(seven, LIGHT), [0.0, 0.0, 0.0, 1.0]);
     }
 }
@@ -4656,12 +4661,21 @@ mod picture_preview_tests {
         let mut scene = crate::scene::Scene::new();
         let mut table = document::entities::Table::new(document::types::Vector3::ZERO, 1, 1);
         table.set_cell_text(0, 0, "original");
-        let handle = scene.document.add_entity(EntityType::Table(Box::new(table))).unwrap();
+        let handle = scene
+            .document
+            .add_entity(EntityType::Table(Box::new(table)))
+            .unwrap();
         let before: Vec<_> = scene.document.entities().cloned().collect();
         scene.set_command_preview_hidden(&[handle]);
-        assert_eq!(scene.document.entities().cloned().collect::<Vec<_>>(), before);
+        assert_eq!(
+            scene.document.entities().cloned().collect::<Vec<_>>(),
+            before
+        );
         scene.set_command_preview_hidden(&[]);
-        assert_eq!(scene.document.entities().cloned().collect::<Vec<_>>(), before);
+        assert_eq!(
+            scene.document.entities().cloned().collect::<Vec<_>>(),
+            before
+        );
     }
 
     #[test]
@@ -4681,13 +4695,26 @@ mod picture_preview_tests {
             handles.push(doc.add_entity(EntityType::Line(line)).unwrap());
         }
         let preview = BlockCache::build_for_block_excluding(
-            &doc, "CELL_PREVIEW", 1.0, None, true, [0.0, 0.0, 0.0, 1.0],
-            None, &HashMap::default(), &[handles[0]].into_iter().collect(),
+            &doc,
+            "CELL_PREVIEW",
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
+            &[handles[0]].into_iter().collect(),
         );
         assert_eq!(preview.defn("CELL_PREVIEW").unwrap().subs.len(), 1);
         let complete = BlockCache::build_for_block(
-            &doc, "CELL_PREVIEW", 1.0, None, true, [0.0, 0.0, 0.0, 1.0],
-            None, &HashMap::default(),
+            &doc,
+            "CELL_PREVIEW",
+            1.0,
+            None,
+            true,
+            [0.0, 0.0, 0.0, 1.0],
+            None,
+            &HashMap::default(),
         );
         assert_eq!(complete.defn("CELL_PREVIEW").unwrap().subs.len(), 2);
         assert!(handles.iter().all(|h| doc.get_entity(*h).is_some()));

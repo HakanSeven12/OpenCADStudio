@@ -32,10 +32,11 @@ impl XplodeOverrides {
             };
             match key.as_str() {
                 "COLOR" | "COLOUR" | "C" => {
-                    overrides.color =
-                        Some(crate::ui::window::attman_dialog::parse_color(value).ok_or_else(
-                            || crate::tf!("XPLODE: \"{value}\" is not a colour.").to_string(),
-                        )?);
+                    overrides.color = Some(
+                        crate::ui::window::attman_dialog::parse_color(value).ok_or_else(|| {
+                            crate::tf!("XPLODE: \"{value}\" is not a colour.").to_string()
+                        })?,
+                    );
                 }
                 "LAYER" | "LA" => overrides.layer = Some(value.to_string()),
                 "LINETYPE" | "LT" => overrides.linetype = Some(value.to_string()),
@@ -320,15 +321,17 @@ impl OpenCADStudio {
                         .selected_entities()
                         .iter()
                         .filter(|(_, e)| {
-                            matches!(e, document::EntityType::Text(_) | document::EntityType::MText(_))
+                            matches!(
+                                e,
+                                document::EntityType::Text(_) | document::EntityType::MText(_)
+                            )
                         })
                         .map(|(h, _)| *h)
                         .collect();
                     let scope = (!handles.is_empty()).then_some(handles);
                     let removed = self.remove_textmasks(i, scope);
-                    self.command_line.push_output(
-                        crate::tf!("TEXTMASK: removed {removed} mask(s).").as_ref(),
-                    );
+                    self.command_line
+                        .push_output(crate::tf!("TEXTMASK: removed {removed} mask(s).").as_ref());
                     return Some(Task::none());
                 }
                 if first.eq_ignore_ascii_case("OFFSET") {
@@ -340,9 +343,8 @@ impl OpenCADStudio {
                                 &value.to_string(),
                             );
                             self.tabs[i].dirty = true;
-                            self.command_line.push_output(
-                                crate::tf!("TEXTMASK offset = {value}").as_ref(),
-                            );
+                            self.command_line
+                                .push_output(crate::tf!("TEXTMASK offset = {value}").as_ref());
                         }
                         Some(_) => self.command_line.push_error(
                             crate::t!("TEXTMASK OFFSET: use a positive distance.").as_ref(),
@@ -364,7 +366,10 @@ impl OpenCADStudio {
                     .selected_entities()
                     .iter()
                     .filter(|(_, e)| {
-                        matches!(e, document::EntityType::Text(_) | document::EntityType::MText(_))
+                        matches!(
+                            e,
+                            document::EntityType::Text(_) | document::EntityType::MText(_)
+                        )
                     })
                     .map(|(h, _)| *h)
                     .filter(|handle| !self.tabs[i].scene.is_layer_locked(*handle))
@@ -498,7 +503,9 @@ impl OpenCADStudio {
                     .selected_entities()
                     .iter()
                     .filter_map(|(h, e)| match e {
-                        document::EntityType::Text(t) if !self.tabs[i].scene.is_layer_locked(*h) => {
+                        document::EntityType::Text(t)
+                            if !self.tabs[i].scene.is_layer_locked(*h) =>
+                        {
                             Some((*h, t.insertion_point.x, t.insertion_point.y))
                         }
                         _ => None,
@@ -981,10 +988,22 @@ impl OpenCADStudio {
                                     let entity_wires = self.tabs[i].scene.wire_models_for(&[*h]);
                                     for w in &entity_wires {
                                         let [x0, y0, x1, y1] = w.aabb.map(f64::from);
-                                        if x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite() {
+                                        if x0.is_finite()
+                                            && y0.is_finite()
+                                            && x1.is_finite()
+                                            && y1.is_finite()
+                                        {
                                             windows.push((
-                                                glam::DVec3::new(x0 - 1e-4, y0 - 1e-4, f64::NEG_INFINITY),
-                                                glam::DVec3::new(x1 + 1e-4, y1 + 1e-4, f64::INFINITY),
+                                                glam::DVec3::new(
+                                                    x0 - 1e-4,
+                                                    y0 - 1e-4,
+                                                    f64::NEG_INFINITY,
+                                                ),
+                                                glam::DVec3::new(
+                                                    x1 + 1e-4,
+                                                    y1 + 1e-4,
+                                                    f64::INFINITY,
+                                                ),
                                             ));
                                         }
                                     }
@@ -1312,13 +1331,16 @@ impl OpenCADStudio {
                 // for the hatch trim solver. A multiline is trimmed but never
                 // cuts (#2068).
                 let mut entities = self.tabs[i].scene.visible_entities_for_edit(|entity| {
-                    is_trim_boundary_entity(entity) || matches!(entity, document::EntityType::MLine(_))
+                    is_trim_boundary_entity(entity)
+                        || matches!(entity, document::EntityType::MLine(_))
                 });
                 let mut seen: std::collections::HashSet<document::Handle> =
                     entities.iter().map(|(handle, _)| *handle).collect();
                 for handle in self.tabs[i].scene.visible_hatch_handles_for_edit() {
                     if seen.insert(handle) {
-                        if let Some(entity) = self.tabs[i].scene.document.get_entity(handle).cloned() {
+                        if let Some(entity) =
+                            self.tabs[i].scene.document.get_entity(handle).cloned()
+                        {
                             entities.push((handle, entity));
                         }
                     }
@@ -1334,11 +1356,9 @@ impl OpenCADStudio {
                     .map(|(handle, _)| handle)
                     .collect();
                 let all_entities: Vec<_> = entities.into_iter().map(|(_, e)| e).collect();
-                let visible_inserts = self.tabs[i]
-                    .scene
-                    .visible_entities_for_edit(|entity| {
-                        matches!(entity, document::EntityType::Insert(_))
-                    });
+                let visible_inserts = self.tabs[i].scene.visible_entities_for_edit(|entity| {
+                    matches!(entity, document::EntityType::Insert(_))
+                });
                 let document = &self.tabs[i].scene.document;
                 let block_boundaries = visible_inserts
                     .into_iter()
@@ -1375,7 +1395,9 @@ impl OpenCADStudio {
 
             "EXTRIM" => {
                 use crate::modules::draw::modify::trim::{is_trim_boundary_entity, ExtrimCommand};
-                let all = self.tabs[i].scene.visible_entities_for_edit(is_trim_boundary_entity);
+                let all = self.tabs[i]
+                    .scene
+                    .visible_entities_for_edit(is_trim_boundary_entity);
                 let new_cmd = ExtrimCommand::new(all);
                 self.command_line.push_info(&new_cmd.prompt());
                 self.tabs[i].active_cmd = Some(Box::new(new_cmd));
@@ -1383,8 +1405,9 @@ impl OpenCADStudio {
 
             "EXTEND" => {
                 use crate::modules::draw::modify::trim::{is_trim_boundary_entity, ExtendCommand};
-                let entities =
-                    self.tabs[i].scene.visible_entities_for_edit(is_trim_boundary_entity);
+                let entities = self.tabs[i]
+                    .scene
+                    .visible_entities_for_edit(is_trim_boundary_entity);
                 let initial_edges: Vec<document::Handle> = self.tabs[i]
                     .scene
                     .selected_entities()
@@ -1825,7 +1848,11 @@ impl OpenCADStudio {
                             "Select objects or [Disassociated]:",
                             "Disassociated",
                             "D",
-                            || crate::command::CmdResult::Dispatch("_DIMREASSOCIATE_DISASSOCIATED".into()),
+                            || {
+                                crate::command::CmdResult::Dispatch(
+                                    "_DIMREASSOCIATE_DISASSOCIATED".into(),
+                                )
+                            },
                         )
                     };
                     self.command_line.push_info(&sel.prompt());
@@ -1871,7 +1898,9 @@ impl OpenCADStudio {
                             };
                             let kind = match dimension {
                                 document::entities::Dimension::Linear(_)
-                                | document::entities::Dimension::Aligned(_) => ReassociateKind::Linear,
+                                | document::entities::Dimension::Aligned(_) => {
+                                    ReassociateKind::Linear
+                                }
                                 document::entities::Dimension::Angular3Pt(_) => {
                                     ReassociateKind::Angular3
                                 }
@@ -1932,12 +1961,10 @@ impl OpenCADStudio {
                 .filter(|(_, entity)| match entity {
                     document::EntityType::Insert(ins) => {
                         let (x, y, z) = (ins.x_scale(), ins.y_scale(), ins.z_scale());
-                        let uniform =
-                            x > 0.0 && (x - y).abs() <= 1e-10 && (x - z).abs() <= 1e-10;
+                        let uniform = x > 0.0 && (x - y).abs() <= 1e-10 && (x - z).abs() <= 1e-10;
                         if !uniform {
-                            self.command_line.push_output(
-                                "The object is not uniformly and positively scaled.",
-                            );
+                            self.command_line
+                                .push_output("The object is not uniformly and positively scaled.");
                         }
                         uniform
                     }
@@ -2053,7 +2080,8 @@ impl OpenCADStudio {
             .selected_entities()
             .into_iter()
             .filter(|(handle, entity)| {
-                matches!(entity, document::EntityType::Dimension(_)) && !scene.is_layer_locked(*handle)
+                matches!(entity, document::EntityType::Dimension(_))
+                    && !scene.is_layer_locked(*handle)
             })
             .map(|(handle, _)| handle)
             .collect()
@@ -2140,11 +2168,7 @@ impl OpenCADStudio {
 
     /// Screen-space bounds of one entity in the same coordinate space the
     /// WIPEOUT command uses.
-    fn textmask_bounds(
-        &self,
-        i: usize,
-        handle: document::Handle,
-    ) -> Option<([f32; 3], [f32; 3])> {
+    fn textmask_bounds(&self, i: usize, handle: document::Handle) -> Option<([f32; 3], [f32; 3])> {
         let wires = self.tabs[i].scene.wire_models_for(&[handle]);
         let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
         for wire in &wires {
@@ -2168,12 +2192,7 @@ impl OpenCADStudio {
                     * text.height
                     * 0.6
                     * text.width_factor.abs().max(1e-6);
-                (
-                    text.insertion_point,
-                    width,
-                    text.height,
-                    text.rotation,
-                )
+                (text.insertion_point, width, text.height, text.rotation)
             }
             document::EntityType::MText(text) => {
                 let width = if text.rectangle_width > 0.0 {
@@ -2260,8 +2279,7 @@ impl OpenCADStudio {
                 max[1] as f64 + pad,
                 min[2] as f64,
             );
-            let mask = self
-                .tabs[i]
+            let mask = self.tabs[i]
                 .scene
                 .add_entity_clone(document::EntityType::Wipeout(
                     document::entities::Wipeout::from_corners(c1, c2),
@@ -2284,11 +2302,7 @@ impl OpenCADStudio {
     /// Remove the masks for the given texts (or for every masked text when no
     /// scope is given) and drop the association record. Returns the number of
     /// masks removed.
-    fn remove_textmasks(
-        &mut self,
-        i: usize,
-        scope: Option<Vec<document::Handle>>,
-    ) -> usize {
+    fn remove_textmasks(&mut self, i: usize, scope: Option<Vec<document::Handle>>) -> usize {
         let texts: Vec<document::Handle> = scope.unwrap_or_else(|| {
             self.tabs[i]
                 .scene

@@ -135,7 +135,10 @@ pub fn view<'a>(
         row![
             button(
                 row![
-                    crate::ui::icons::themed_primary(include_bytes!("../../../assets/icons/dim_linear.svg"), 14.0),
+                    crate::ui::icons::themed_primary(
+                        include_bytes!("../../../assets/icons/dim_linear.svg"),
+                        14.0
+                    ),
                     text(crate::tr!("dim-inspect", "select")).size(11)
                 ]
                 .spacing(6)
@@ -189,7 +192,11 @@ pub fn view<'a>(
             .style(button_style(false))
             .padding([5, 11]),
         Space::new().width(Fill),
-        dialog_button_styled_opt(crate::t!("Cancel"), Some(Message::CloseModal), button::secondary),
+        dialog_button_styled_opt(
+            crate::t!("Cancel"),
+            Some(Message::CloseModal),
+            button::secondary
+        ),
         dialog_button_styled_opt(
             crate::t!("OK"),
             Some(msg(DimInspectMsg::Ok)),

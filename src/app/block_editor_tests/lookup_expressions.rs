@@ -80,36 +80,21 @@ fn block_lookup_dialog_names_an_empty_cell_without_blaming_control_characters() 
     let _ = app.update(Message::BlockLookup(A::Cell(0, 1, String::new())));
     let _ = app.update(Message::BlockLookup(A::Audit));
     assert_eq!(
-        app.block_lookup
-            .as_ref()
-            .unwrap()
-            .error
-            .as_deref()
-            .unwrap(),
+        app.block_lookup.as_ref().unwrap().error.as_deref().unwrap(),
         "Each cell must be a finite number.",
         "an empty cell is reported as the cell it is"
     );
     let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "   ".into())));
     let _ = app.update(Message::BlockLookup(A::Audit));
     assert_eq!(
-        app.block_lookup
-            .as_ref()
-            .unwrap()
-            .error
-            .as_deref()
-            .unwrap(),
+        app.block_lookup.as_ref().unwrap().error.as_deref().unwrap(),
         "Each cell must be a finite number.",
         "spaces are an empty cell too"
     );
     let _ = app.update(Message::BlockLookup(A::Cell(0, 1, "Small\u{1}".into())));
     let _ = app.update(Message::BlockLookup(A::Audit));
     assert_eq!(
-        app.block_lookup
-            .as_ref()
-            .unwrap()
-            .error
-            .as_deref()
-            .unwrap(),
+        app.block_lookup.as_ref().unwrap().error.as_deref().unwrap(),
         "Complete each cell without control characters.",
         "the control-character message stays for the case it names"
     );
@@ -140,14 +125,18 @@ fn an_invalid_lookup_table_offers_to_discard_and_close() {
         .as_ref()
         .expect("keeping editing leaves the work in place");
     assert!(!state.confirm_close, "the offer is gone");
-    assert!(state.error.is_some(), "the diagnosis stays where it was read");
+    assert!(
+        state.error.is_some(),
+        "the diagnosis stays where it was read"
+    );
     assert_eq!(state.drafts[0].edited.expressions[1], "");
     let _ = app.update(Message::BlockLookup(A::Apply));
-    assert!(app
-        .block_lookup
-        .as_ref()
-        .expect("the refusal offers the way out again")
-        .confirm_close);
+    assert!(
+        app.block_lookup
+            .as_ref()
+            .expect("the refusal offers the way out again")
+            .confirm_close
+    );
     let _ = app.update(Message::BlockLookup(A::DiscardClose));
     assert!(app.block_lookup.is_none());
     assert!(app.active_modal.is_none(), "the dialog actually leaves");

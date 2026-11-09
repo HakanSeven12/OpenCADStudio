@@ -248,18 +248,12 @@ pub fn handle_plugin_request(
                 host.validate_parametric_chain(&chain, tolerance),
             )
         }
-        RegisterPluginClass { class } => {
-            PluginResponse::RegisterPluginClassResult(host.register_plugin_class(
-                &plugin_id,
-                &class,
-            ))
-        }
-        StagePluginClassInstance { instance } => {
-            PluginResponse::StagePluginClassInstanceResult(host.stage_plugin_class_instance(
-                &plugin_id,
-                &instance,
-            ))
-        }
+        RegisterPluginClass { class } => PluginResponse::RegisterPluginClassResult(
+            host.register_plugin_class(&plugin_id, &class),
+        ),
+        StagePluginClassInstance { instance } => PluginResponse::StagePluginClassInstanceResult(
+            host.stage_plugin_class_instance(&plugin_id, &instance),
+        ),
         PluginClassInstanceProperties { handle } => {
             PluginResponse::PluginClassInstancePropertiesResult(
                 host.plugin_class_instance_properties(handle),

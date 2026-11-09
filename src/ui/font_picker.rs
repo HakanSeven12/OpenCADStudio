@@ -453,11 +453,13 @@ fn entry_row<'a>(
         );
     } else if let FontChoice::Stroke(file) = &entry.choice {
         if *file != entry.choice.label() {
-            line = line.push(text(file.clone()).size(10).style(move |theme: &Theme| {
-                text::Style {
-                    color: Some(secondary_text(theme, active)),
-                }
-            }));
+            line = line.push(
+                text(file.clone())
+                    .size(10)
+                    .style(move |theme: &Theme| text::Style {
+                        color: Some(secondary_text(theme, active)),
+                    }),
+            );
         }
     }
     button(line)

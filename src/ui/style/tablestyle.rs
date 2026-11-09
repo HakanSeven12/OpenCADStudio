@@ -51,7 +51,10 @@ fn choice_list<'a>(
     if !options.iter().any(|option| option.code == current) {
         options.push(choice(current, Cow::Owned(current.to_string())));
     }
-    let selected = options.iter().find(|option| option.code == current).cloned();
+    let selected = options
+        .iter()
+        .find(|option| option.code == current)
+        .cloned();
     pick_list(selected, options, |option| option.to_string())
         .on_select(move |option: EnumChoice| on_select(option.code))
         .text_size(size as f32)
@@ -127,20 +130,18 @@ const ALIGNMENTS: [(&str, &str); 9] = [
 ];
 
 const LINE_WEIGHTS: [i16; 24] = [
-    0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158,
-    200, 211,
+    0, 5, 9, 13, 15, 18, 20, 25, 30, 35, 40, 50, 53, 60, 70, 80, 90, 100, 106, 120, 140, 158, 200,
+    211,
 ];
 
 fn line_weight_choices() -> Vec<EnumChoice> {
-    let mut list = vec![
-        choice("-1", t!("ByLayer")),
-        choice("-2", t!("ByBlock")),
-    ];
-    list.extend(
-        LINE_WEIGHTS
-            .iter()
-            .map(|w| choice(w.to_string(), Cow::Owned(format!("{:.2} mm", *w as f64 / 100.0)))),
-    );
+    let mut list = vec![choice("-1", t!("ByLayer")), choice("-2", t!("ByBlock"))];
+    list.extend(LINE_WEIGHTS.iter().map(|w| {
+        choice(
+            w.to_string(),
+            Cow::Owned(format!("{:.2} mm", *w as f64 / 100.0)),
+        )
+    }));
     list
 }
 
@@ -150,7 +151,9 @@ fn edge_color_code(color: &document::types::Color) -> String {
         C::ByBlock => "0".into(),
         C::ByLayer => "256".into(),
         C::Index(index) => index.to_string(),
-        other => other.index().map_or_else(|| "0".into(), |index| index.to_string()),
+        other => other
+            .index()
+            .map_or_else(|| "0".into(), |index| index.to_string()),
     }
 }
 
@@ -360,12 +363,48 @@ impl canvas::Program<Message> for TablePreviewCanvas {
                 let (x0, x1, x2) = (left, left + w, left + 2.0 * w);
                 let (y0, y1, y2) = (top, top + h, top + 2.0 * h);
                 let e = &cell.edges;
-                stroke_edge(&mut frame, Point::new(x0, y0), Point::new(x2, y0), &e[0], ink);
-                stroke_edge(&mut frame, Point::new(x0, y1), Point::new(x2, y1), &e[1], ink);
-                stroke_edge(&mut frame, Point::new(x0, y2), Point::new(x2, y2), &e[2], ink);
-                stroke_edge(&mut frame, Point::new(x0, y0), Point::new(x0, y2), &e[3], ink);
-                stroke_edge(&mut frame, Point::new(x1, y0), Point::new(x1, y2), &e[4], ink);
-                stroke_edge(&mut frame, Point::new(x2, y0), Point::new(x2, y2), &e[5], ink);
+                stroke_edge(
+                    &mut frame,
+                    Point::new(x0, y0),
+                    Point::new(x2, y0),
+                    &e[0],
+                    ink,
+                );
+                stroke_edge(
+                    &mut frame,
+                    Point::new(x0, y1),
+                    Point::new(x2, y1),
+                    &e[1],
+                    ink,
+                );
+                stroke_edge(
+                    &mut frame,
+                    Point::new(x0, y2),
+                    Point::new(x2, y2),
+                    &e[2],
+                    ink,
+                );
+                stroke_edge(
+                    &mut frame,
+                    Point::new(x0, y0),
+                    Point::new(x0, y2),
+                    &e[3],
+                    ink,
+                );
+                stroke_edge(
+                    &mut frame,
+                    Point::new(x1, y0),
+                    Point::new(x1, y2),
+                    &e[4],
+                    ink,
+                );
+                stroke_edge(
+                    &mut frame,
+                    Point::new(x2, y0),
+                    Point::new(x2, y2),
+                    &e[5],
+                    ink,
+                );
             }
             PreviewLayout::Table {
                 widths,
@@ -428,10 +467,34 @@ impl canvas::Program<Message> for TablePreviewCanvas {
                             .unwrap_or_default();
                         draw_cell_text(&mut frame, cell, content, rect, size, ink);
                         let e = &cell.edges;
-                        stroke_edge(&mut frame, Point::new(x0, y0), Point::new(x1, y0), &e[0], ink);
-                        stroke_edge(&mut frame, Point::new(x0, y1), Point::new(x1, y1), &e[2], ink);
-                        stroke_edge(&mut frame, Point::new(x0, y0), Point::new(x0, y1), &e[3], ink);
-                        stroke_edge(&mut frame, Point::new(x1, y0), Point::new(x1, y1), &e[5], ink);
+                        stroke_edge(
+                            &mut frame,
+                            Point::new(x0, y0),
+                            Point::new(x1, y0),
+                            &e[0],
+                            ink,
+                        );
+                        stroke_edge(
+                            &mut frame,
+                            Point::new(x0, y1),
+                            Point::new(x1, y1),
+                            &e[2],
+                            ink,
+                        );
+                        stroke_edge(
+                            &mut frame,
+                            Point::new(x0, y0),
+                            Point::new(x0, y1),
+                            &e[3],
+                            ink,
+                        );
+                        stroke_edge(
+                            &mut frame,
+                            Point::new(x1, y0),
+                            Point::new(x1, y1),
+                            &e[5],
+                            ink,
+                        );
                     }
                 }
             }
@@ -464,7 +527,12 @@ fn table_preview(v: &TableStyleView<'_>, style: &TableStyle) -> PreviewLayout {
             texts: table
                 .rows
                 .iter()
-                .map(|row| row.cells.iter().map(|cell| cell.text_value().to_string()).collect())
+                .map(|row| {
+                    row.cells
+                        .iter()
+                        .map(|cell| cell.text_value().to_string())
+                        .collect()
+                })
                 .collect(),
             merged: table
                 .merged_ranges
@@ -581,7 +649,10 @@ fn cell_style_bar<'a>(v: &TableStyleView<'a>, style: &TableStyle) -> Element<'a,
     }
     column![
         row![
-            text(t!("Cell style")).size(11).style(primary_style).width(140),
+            text(t!("Cell style"))
+                .size(11)
+                .style(primary_style)
+                .width(140),
             choice_list(v.cell, options, 170.0, 11, Message::TableStyleCellSelect),
         ]
         .spacing(8)
@@ -619,7 +690,10 @@ fn properties_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Co
     let format = &data.content_format;
     let data_type = format!("{}/{}", format.value_data_type, format.value_unit_type);
     column![
-        field_row(t!("Fill color"), cell_color(v, "fillcolor", &data.background_color, true)),
+        field_row(
+            t!("Fill color"),
+            cell_color(v, "fillcolor", &data.background_color, true)
+        ),
         field_row(
             t!("Alignment"),
             choice_list(
@@ -642,7 +716,10 @@ fn properties_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Co
                 }
             })
         ),
-        field_row(t!("Format"), cell_input("format", v.cell_format, "%lu2%pr3")),
+        field_row(
+            t!("Format"),
+            cell_input("format", v.cell_format, "%lu2%pr3")
+        ),
         field_row(
             t!("Type"),
             choice_list(
@@ -657,7 +734,10 @@ fn properties_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Co
             )
         ),
         text(t!("Margins")).size(11).style(primary_style),
-        field_row(t!("Horizontal"), cell_input("hmargin", v.cell_hmargin, "1.5")),
+        field_row(
+            t!("Horizontal"),
+            cell_input("hmargin", v.cell_hmargin, "1.5")
+        ),
         field_row(t!("Vertical"), cell_input("vmargin", v.cell_vmargin, "1.5")),
         checkbox(data.merge_all())
             .label(t!("Merge cells on row/column creation"))
@@ -692,8 +772,14 @@ fn text_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Column<'
                 }
             )
         ),
-        field_row(t!("Text height"), cell_input("height", v.cell_height, "4.5")),
-        field_row(t!("Text color"), cell_color(v, "textcolor", &format.content_color, false)),
+        field_row(
+            t!("Text height"),
+            cell_input("height", v.cell_height, "4.5")
+        ),
+        field_row(
+            t!("Text color"),
+            cell_color(v, "textcolor", &format.content_color, false)
+        ),
         field_row(t!("Text angle"), cell_input("angle", v.cell_angle, "0")),
     ]
     .spacing(8)
@@ -706,7 +792,9 @@ fn borders_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Colum
         v.linetypes
             .iter()
             .filter(|(name, _)| !name.eq_ignore_ascii_case("ByBlock"))
-            .map(|(name, handle)| choice(format!("{:X}", handle.value()), Cow::Owned(name.clone()))),
+            .map(|(name, handle)| {
+                choice(format!("{:X}", handle.value()), Cow::Owned(name.clone()))
+            }),
     );
     let names = [
         t!("Top"),
@@ -733,7 +821,10 @@ fn borders_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Colum
         let grid = data.grid(mask);
         let weight = grid.map_or(-2, |grid| grid.border.line_weight.value());
         let linetype = grid.map_or(0, |grid| grid.line_type.value());
-        let color = grid.map_or_else(|| "0".to_string(), |grid| edge_color_code(&grid.border.color));
+        let color = grid.map_or_else(
+            || "0".to_string(),
+            |grid| edge_color_code(&grid.border.color),
+        );
         let double = grid.is_some_and(|grid| {
             grid.border.border_type == document::objects::TableBorderType::Double
         });
@@ -752,8 +843,20 @@ fn borders_page<'a>(v: &TableStyleView<'a>, cell: &NamedTableCellStyle) -> Colum
                     .size(13)
                     .text_size(10)
                     .width(118),
-                choice_list(&weight.to_string(), line_weight_choices(), 82.0, 10, edit("lw")),
-                choice_list(&format!("{linetype:X}"), linetypes.clone(), 92.0, 10, edit("linetype")),
+                choice_list(
+                    &weight.to_string(),
+                    line_weight_choices(),
+                    82.0,
+                    10,
+                    edit("lw")
+                ),
+                choice_list(
+                    &format!("{linetype:X}"),
+                    linetypes.clone(),
+                    92.0,
+                    10,
+                    edit("linetype")
+                ),
                 choice_list(&color, edge_color_choices(), 78.0, 10, edit("color")),
                 checkbox(double)
                     .on_toggle(move |on| Message::TableStyleEdgeEdit {

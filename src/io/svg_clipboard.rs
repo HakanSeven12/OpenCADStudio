@@ -23,7 +23,9 @@ pub fn selection_svg(scene: &Scene, handles: &[Handle]) -> Option<String> {
     let all = scene.entity_wires();
     let wires: Vec<&WireModel> = all
         .iter()
-        .filter(|wire| Scene::handle_from_wire_name(&wire.name).is_some_and(|h| wanted.contains(&h)))
+        .filter(|wire| {
+            Scene::handle_from_wire_name(&wire.name).is_some_and(|h| wanted.contains(&h))
+        })
         .collect();
     wires_svg(&wires)
 }
@@ -51,7 +53,11 @@ pub fn wires_svg(wires: &[&WireModel]) -> Option<String> {
         }
         // Drawn light on the dark canvas, white reads as black on paper.
         let [r, g, b, _] = wire.color;
-        let (r, g, b) = if r > 0.9 && g > 0.9 && b > 0.9 { (0.0, 0.0, 0.0) } else { (r, g, b) };
+        let (r, g, b) = if r > 0.9 && g > 0.9 && b > 0.9 {
+            (0.0, 0.0, 0.0)
+        } else {
+            (r, g, b)
+        };
         let byte = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
         let _ = writeln!(
             body,
@@ -82,8 +88,14 @@ mod tests {
         wire.points = vec![[0.0, 0.0, 0.0], [10.0, 5.0, 0.0]];
         wire.color = [1.0, 0.0, 0.0, 1.0];
         let svg = wires_svg(&[&wire]).unwrap();
-        assert!(svg.contains(r#"width="10mm" height="5mm" viewBox="0 -5 10 5""#), "{svg}");
-        assert!(svg.contains(r##"<path d="M0 -0 L10 -5" stroke="#ff0000"/>"##), "{svg}");
+        assert!(
+            svg.contains(r#"width="10mm" height="5mm" viewBox="0 -5 10 5""#),
+            "{svg}"
+        );
+        assert!(
+            svg.contains(r##"<path d="M0 -0 L10 -5" stroke="#ff0000"/>"##),
+            "{svg}"
+        );
         // And reads back as geometry.
         assert!(crate::io::svg_import::read(svg.as_bytes(), [100.0, 100.0]).is_ok());
     }

@@ -525,8 +525,8 @@ pub fn menu_line_item(
     icon: Option<&'static [u8]>,
 ) -> MenuItem {
     let enabled = line.is_some();
-    let mut item = MenuItem::new(label, MenuAction::MenuLine(line.unwrap_or_default()))
-        .enabled(enabled);
+    let mut item =
+        MenuItem::new(label, MenuAction::MenuLine(line.unwrap_or_default())).enabled(enabled);
     if !hint.is_empty() {
         item = item.hint(hint);
     }
@@ -1356,16 +1356,31 @@ pub fn customize_rows(rows: Vec<MenuRow>, custom: &MenuCustomization) -> Vec<Men
     for row in rows {
         let row = match row {
             MenuRow::Item(item) if !item.default && hidden(&item_key(&item)) => continue,
-            MenuRow::Submenu { id, label, icon, items, open } => {
+            MenuRow::Submenu {
+                id,
+                label,
+                icon,
+                items,
+                open,
+            } => {
                 if hidden(&format!("{id:?}")) {
                     continue;
                 }
                 let items: Vec<MenuItem> = if id == SubmenuId::RecentInput {
                     items
                 } else {
-                    items.into_iter().filter(|item| !hidden(&item_key(item))).collect()
+                    items
+                        .into_iter()
+                        .filter(|item| !hidden(&item_key(item)))
+                        .collect()
                 };
-                MenuRow::Submenu { id, label, icon, items, open }
+                MenuRow::Submenu {
+                    id,
+                    label,
+                    icon,
+                    items,
+                    open,
+                }
             }
             row => row,
         };
@@ -1388,14 +1403,21 @@ pub fn customize_rows(rows: Vec<MenuRow>, custom: &MenuCustomization) -> Vec<Men
     }
     out.push(MenuRow::Separator);
     out.push(MenuRow::Item(
-        MenuItem::new(crate::tr!("context-menu", "customize"), MenuAction::Customize)
-            .icon(MenuIcon::Chrome(crate::ui::icons::GEAR)),
+        MenuItem::new(
+            crate::tr!("context-menu", "customize"),
+            MenuAction::Customize,
+        )
+        .icon(MenuIcon::Chrome(crate::ui::icons::GEAR)),
     ));
     // No separator leads, ends or doubles up once rows are gone.
     let mut tidy: Vec<MenuRow> = Vec::with_capacity(out.len());
     for row in out {
         let separator = matches!(row, MenuRow::Separator);
-        if separator && tidy.last().is_none_or(|last| matches!(last, MenuRow::Separator)) {
+        if separator
+            && tidy
+                .last()
+                .is_none_or(|last| matches!(last, MenuRow::Separator))
+        {
             continue;
         }
         tidy.push(row);
@@ -1447,9 +1469,15 @@ mod customization_tests {
         assert!(!shown.contains(&"Undo".to_string()) && !shown.contains(&"COPYCLIP".to_string()));
         assert!(shown.contains(&"Redo".to_string()));
         // Repeat, Recent Input, separator, then the user's command.
-        assert!(matches!(&rows[3], MenuRow::Item(item) if item.action == MenuAction::Command("OFFSET".into())));
-        assert!(matches!(rows.last(), Some(MenuRow::Item(item)) if item.action == MenuAction::Customize));
-        assert!(!rows.windows(2).any(|pair| matches!(pair, [MenuRow::Separator, MenuRow::Separator])));
+        assert!(
+            matches!(&rows[3], MenuRow::Item(item) if item.action == MenuAction::Command("OFFSET".into()))
+        );
+        assert!(
+            matches!(rows.last(), Some(MenuRow::Item(item)) if item.action == MenuAction::Customize)
+        );
+        assert!(!rows
+            .windows(2)
+            .any(|pair| matches!(pair, [MenuRow::Separator, MenuRow::Separator])));
     }
 
     /// #2619: a "--" entry draws a separator between the user's commands.
@@ -1470,6 +1498,8 @@ mod customization_tests {
             .position(|row| matches!(row, MenuRow::Item(item) if item.action == MenuAction::Command("OFFSET".into())))
             .unwrap();
         assert!(matches!(rows[at + 1], MenuRow::Separator));
-        assert!(matches!(&rows[at + 2], MenuRow::Item(item) if item.action == MenuAction::Command("TRIM".into())));
+        assert!(
+            matches!(&rows[at + 2], MenuRow::Item(item) if item.action == MenuAction::Command("TRIM".into()))
+        );
     }
 }

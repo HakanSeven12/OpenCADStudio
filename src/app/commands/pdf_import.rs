@@ -154,7 +154,9 @@ impl OpenCADStudio {
                 | document::entities::ImageDisplayFlags::USE_CLIPPING_BOUNDARY
                 | document::entities::ImageDisplayFlags::TRANSPARENCY_ON;
             raster.common.layer = image.layer.clone();
-            result.entities.push(document::EntityType::RasterImage(raster));
+            result
+                .entities
+                .push(document::EntityType::RasterImage(raster));
         }
         for (name, color) in &result.layers {
             if !scene.document.layers.contains(name) {
@@ -185,8 +187,10 @@ impl OpenCADStudio {
                 .define_block_from_owned_entities(result.entities, &name, glam::DVec3::ZERO)
                 .is_ok()
             {
-                let mut insert =
-                    document::entities::Insert::new(name, document::types::Vector3::new(0.0, 0.0, 0.0));
+                let mut insert = document::entities::Insert::new(
+                    name,
+                    document::types::Vector3::new(0.0, 0.0, 0.0),
+                );
                 insert.common.layer = current_layer;
                 scene.add_entity(document::EntityType::Insert(insert));
             }

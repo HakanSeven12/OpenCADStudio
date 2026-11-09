@@ -2066,11 +2066,8 @@ impl Scene {
         // emitted first so LessEqual layering keeps it underneath.
         let mut backdrop: Option<HatchModel> = None;
         if let Some(e) = entity {
-            let mut style = crate::scene::view::render::render_style_for_viewport(
-                &self.document,
-                e,
-                viewport,
-            );
+            let mut style =
+                crate::scene::view::render::render_style_for_viewport(&self.document, e, viewport);
             style.0 = crate::scene::view::render::adapt_to_bg(style.0, hatch_bg);
             m.aci = style.4;
             m.line_weight_px = style.3;
@@ -2095,7 +2092,9 @@ impl Scene {
                         m.angle_offset = dxf.pattern_angle as f32;
                         m.scale = dxf.pattern_scale as f32;
                     }
-                    model::hatch_model::HatchPattern::Gradient { angle_deg, shift, .. } => {
+                    model::hatch_model::HatchPattern::Gradient {
+                        angle_deg, shift, ..
+                    } => {
                         *angle_deg = dxf.gradient_color.angle.to_degrees() as f32;
                         *shift = dxf.gradient_color.shift as f32;
                     }
@@ -2167,8 +2166,14 @@ impl Scene {
             self.bg_color
         };
         let depth_map = self.draw_depth_map();
-        let constraint_display = (self.constraint_shading_active() && self.block_edit_block == Some(target_block))
-            .then(|| (self.block_constraint_report(target_block), self.constraint_palette()));
+        let constraint_display = (self.constraint_shading_active()
+            && self.block_edit_block == Some(target_block))
+        .then(|| {
+            (
+                self.block_constraint_report(target_block),
+                self.constraint_palette(),
+            )
+        });
         let mut models: Vec<HatchModel> = self
             .hatches
             .iter()
@@ -2192,10 +2197,17 @@ impl Scene {
                     tint_selected,
                 );
                 if let Some((report, palette)) = &constraint_display {
-                    if let Some(mut color) = self.constraint_display_color(report, handle, palette) {
+                    if let Some(mut color) = self.constraint_display_color(report, handle, palette)
+                    {
                         color[3] = model.color[3];
                         model.color = color;
-                        if let crate::scene::model::hatch_model::HatchPattern::Gradient { color2, .. } = &mut model.pattern { *color2 = color; }
+                        if let crate::scene::model::hatch_model::HatchPattern::Gradient {
+                            color2,
+                            ..
+                        } = &mut model.pattern
+                        {
+                            *color2 = color;
+                        }
                     }
                 }
                 backdrop.into_iter().chain(std::iter::once(model))
@@ -2458,8 +2470,15 @@ impl Scene {
         include_preview_hidden: bool,
         plot_only: bool,
     ) -> Vec<(Handle, HatchModel)> {
-        let constraint_display = (!plot_only && self.constraint_shading_active() && self.block_edit_block == Some(layout_block))
-            .then(|| (self.block_constraint_report(layout_block), self.constraint_palette()));
+        let constraint_display = (!plot_only
+            && self.constraint_shading_active()
+            && self.block_edit_block == Some(layout_block))
+        .then(|| {
+            (
+                self.block_constraint_report(layout_block),
+                self.constraint_palette(),
+            )
+        });
         let depth_map = self.draw_depth_map();
         let visibility_reveal = if plot_only {
             rustc_hash::FxHashSet::default()
@@ -2510,14 +2529,11 @@ impl Scene {
                     return matches!(entity, EntityType::Insert(_))
                         && targets.contains(&common.handle);
                 }
-                let block_uses: Vec<_> = crate::scene::render_graph::entity_render_block_uses(
-                    document,
-                    entity,
-                    1.0,
-                )
-                .into_iter()
-                .filter(|block_use| block_use.active)
-                .collect();
+                let block_uses: Vec<_> =
+                    crate::scene::render_graph::entity_render_block_uses(document, entity, 1.0)
+                        .into_iter()
+                        .filter(|block_use| block_use.active)
+                        .collect();
                 if block_uses.is_empty() {
                     true
                 } else {
@@ -2558,10 +2574,18 @@ impl Scene {
                     return;
                 };
                 if let Some((report, palette)) = &constraint_display {
-                    if let Some(mut color) = self.constraint_display_color(report, context.root_handle, palette) {
+                    if let Some(mut color) =
+                        self.constraint_display_color(report, context.root_handle, palette)
+                    {
                         color[3] = model.color[3];
                         model.color = color;
-                        if let crate::scene::model::hatch_model::HatchPattern::Gradient { color2, .. } = &mut model.pattern { *color2 = color; }
+                        if let crate::scene::model::hatch_model::HatchPattern::Gradient {
+                            color2,
+                            ..
+                        } = &mut model.pattern
+                        {
+                            *color2 = color;
+                        }
                     }
                 }
                 model.aci = style.4;
@@ -2835,7 +2859,9 @@ impl Scene {
     /// Compute the 2D (XY) boundary polygon for a Wipeout entity.
     /// Wipeout fill boundary as small f32 offsets from the returned world_origin
     /// (the insertion point, kept in f64).
-    pub(super) fn wipeout_boundary_2d(wo: &document::entities::Wipeout) -> ([f64; 2], Vec<[f32; 2]>) {
+    pub(super) fn wipeout_boundary_2d(
+        wo: &document::entities::Wipeout,
+    ) -> ([f64; 2], Vec<[f32; 2]>) {
         let origin = [wo.insertion_point.x, wo.insertion_point.y];
         let plane = kernel::space::Plane::from_axes(
             [
@@ -4412,7 +4438,11 @@ mod attribute_instantiation_tests {
     #[test]
     fn the_fill_carries_every_declared_attribute_in_definition_order() {
         let mut scene = Scene::new();
-        let mut constant = definition("CONST", "fixed", document::types::Vector3::new(0.0, 5.0, 0.0));
+        let mut constant = definition(
+            "CONST",
+            "fixed",
+            document::types::Vector3::new(0.0, 5.0, 0.0),
+        );
         constant.flags.constant = true;
         scene.define_block_raw(
             "ATTRIB_MIXED",

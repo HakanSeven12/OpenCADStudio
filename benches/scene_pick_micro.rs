@@ -90,12 +90,8 @@ fn install_interaction_index(scene: &Scene) {
     };
     scene.mark_interaction_index_pending(epoch, source);
     let index = Arc::new(InteractionIndex::build(&wires));
-    let installed = scene.install_prepared_interaction_index(
-        epoch,
-        source,
-        Arc::downgrade(&wires),
-        index,
-    );
+    let installed =
+        scene.install_prepared_interaction_index(epoch, source, Arc::downgrade(&wires), index);
     assert!(installed, "prepared interaction index must install");
 }
 
@@ -157,9 +153,8 @@ fn bench_cached_query() -> u64 {
     for run in 0..(WARMUP + RUNS) {
         let t = Instant::now();
         for _ in 0..CACHED_QUERIES {
-            checksum = checksum.wrapping_add(
-                scene.interaction_candidates_xy(WORLD_AABB).iter().count() as u64,
-            );
+            checksum = checksum
+                .wrapping_add(scene.interaction_candidates_xy(WORLD_AABB).iter().count() as u64);
         }
         let dt = t.elapsed();
         if run >= WARMUP {
@@ -188,8 +183,8 @@ fn bench_edit_query() -> u64 {
             handles.iter().map(|&h| (h, ChangeKind::Modified)).collect();
         // Untimed settle round: builds entity_index and the overlay caches.
         scene.bump_entities(&changes);
-        let warm = scene
-            .interaction_candidate_handles(&scene.interaction_candidates_xy(WORLD_AABB));
+        let warm =
+            scene.interaction_candidate_handles(&scene.interaction_candidates_xy(WORLD_AABB));
         assert!(
             warm.is_some_and(|set| !set.is_empty()),
             "warm candidate resolution must return handles"
@@ -217,7 +212,10 @@ fn bench_edit_query() -> u64 {
 }
 
 fn main() {
-    println!("== s6: click_hits_all cycle over {} overlapping wires ==", WIRE_COUNT);
+    println!(
+        "== s6: click_hits_all cycle over {} overlapping wires ==",
+        WIRE_COUNT
+    );
     let c1 = bench_click_hits_all();
     println!("== s5: warm interaction_candidates_xy over 12000 wires ==");
     let c2 = bench_cached_query();

@@ -220,8 +220,9 @@ impl OpenCADStudio {
         let host = self.tabs[i].current_path.clone();
         if let Some(host) = host.as_deref() {
             if crate::modules::insert::xattach::is_self_attach(host, &full, host.parent()) {
-                self.command_line
-                    .push_rejection("Error: Possible circular reference to current drawing. *Invalid*");
+                self.command_line.push_rejection(
+                    "Error: Possible circular reference to current drawing. *Invalid*",
+                );
                 return;
             }
         }

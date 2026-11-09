@@ -109,7 +109,11 @@ fn t_rebuild() -> u64 {
     for slot in 0..LABELS_PER_REBUILD {
         labels.push(i18n::translate(LABELS[slot % LABELS.len()]));
     }
-    digest(labels.iter().flat_map(|label| label.as_bytes().iter().copied().map(u64::from)))
+    digest(
+        labels
+            .iter()
+            .flat_map(|label| label.as_bytes().iter().copied().map(u64::from)),
+    )
 }
 
 fn tr_rebuild() -> u64 {
@@ -117,7 +121,11 @@ fn tr_rebuild() -> u64 {
     for _ in 0..TR_LOOKUPS_PER_REBUILD {
         labels.push(OpenCADStudio::tr!("ribbon-tab", "draw"));
     }
-    digest(labels.iter().flat_map(|label| label.as_bytes().iter().copied().map(u64::from)))
+    digest(
+        labels
+            .iter()
+            .flat_map(|label| label.as_bytes().iter().copied().map(u64::from)),
+    )
 }
 
 fn main() {

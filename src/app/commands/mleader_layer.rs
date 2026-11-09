@@ -43,7 +43,10 @@ impl OpenCADStudio {
     pub(super) fn dispatch_mleader_layer(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let rest = cmd.strip_prefix("SETVAR ").map(str::trim).unwrap_or(cmd);
         let (name, value) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
-        if !name.trim_start_matches(['_', '.']).eq_ignore_ascii_case(NAME) {
+        if !name
+            .trim_start_matches(['_', '.'])
+            .eq_ignore_ascii_case(NAME)
+        {
             return None;
         }
         let value = value.trim();
@@ -51,8 +54,11 @@ impl OpenCADStudio {
             let current = self
                 .mleader_layer(i)
                 .unwrap_or_else(|| crate::tr!("mleader-layer", "use-current"));
-            self.command_line
-                .push_output(&crate::tr!("mleader-layer", "prompt", current = current));
+            self.command_line.push_output(&crate::tr!(
+                "mleader-layer",
+                "prompt",
+                current = current
+            ));
             self.pending_setvar = Some(NAME.to_string());
         } else {
             self.set_mleader_layer(i, value.trim_matches('"'));

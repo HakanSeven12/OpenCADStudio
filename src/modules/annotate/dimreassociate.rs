@@ -233,9 +233,13 @@ impl CadCommand for DimReassociateCommand {
             Some(ReassociateKind::Angular3) if whole => {
                 self.apply(ReassociateTarget::Arc(handle), true)
             }
-            Some(ReassociateKind::Angular2) => {
-                self.apply(ReassociateTarget::Line { index: step, object: handle }, false)
-            }
+            Some(ReassociateKind::Angular2) => self.apply(
+                ReassociateTarget::Line {
+                    index: step,
+                    object: handle,
+                },
+                false,
+            ),
             Some(ReassociateKind::Radial) => self.apply(ReassociateTarget::Radial(handle), true),
             _ => CmdResult::NeedPoint,
         }

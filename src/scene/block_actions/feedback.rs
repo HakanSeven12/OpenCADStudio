@@ -123,7 +123,10 @@ pub(crate) fn value_markers(doc: &Document, p: &Parameter, value: Value) -> Vec<
         _ => {}
     }
     points.retain(|point| point.is_finite());
-    points.into_iter().map(|point| grip_position(p, Value::Point(point))).collect()
+    points
+        .into_iter()
+        .map(|point| grip_position(p, Value::Point(point)))
+        .collect()
 }
 
 pub(crate) fn dependencies(doc: &Document, definition: Handle, selected: Handle) -> Vec<Handle> {

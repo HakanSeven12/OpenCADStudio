@@ -19,18 +19,19 @@ fn dirty_definition_edit() -> OpenCADStudio {
     app.tabs[i].scene.define_block_raw(
         "EDIT_ME",
         document::types::Vector3::ZERO,
-        vec![document::EntityType::Line(document::entities::Line::from_points(
-            document::types::Vector3::ZERO,
-            document::types::Vector3::UNIT_X,
-        ))],
+        vec![document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::ZERO,
+                document::types::Vector3::UNIT_X,
+            ),
+        )],
     );
     let reference = app.tabs[i]
         .scene
         .document
-        .add_entity(document::EntityType::Insert(document::entities::Insert::new(
-            "EDIT_ME",
-            document::types::Vector3::ZERO,
-        )))
+        .add_entity(document::EntityType::Insert(
+            document::entities::Insert::new("EDIT_ME", document::types::Vector3::ZERO),
+        ))
         .unwrap();
     let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
     let _ = app.automation_op(r#"{"op":"run","cmd":"CIRCLE 1,0 2"}"#);
@@ -64,11 +65,7 @@ fn block_close_dialog_explains_the_risk_and_counts_references() {
     with_ui_test(|| {
         let app = dirty_definition_edit();
         assert_eq!(app.modal_title(), "Block - Save Parameter Changes?");
-        let mut ui = Simulator::with_size(
-            iced::Settings::default(),
-            (900.0, 700.0),
-            dialog(&app),
-        );
+        let mut ui = Simulator::with_size(iced::Settings::default(), (900.0, 700.0), dialog(&app));
         assert!(
             ui.find("Save changes to EDIT_ME?").is_err(),
             "the block-close dialog has no per-block line above the body"

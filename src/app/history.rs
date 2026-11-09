@@ -366,14 +366,23 @@ impl OpenCADStudio {
             .chain(sets_after)
             .map(|set| set.scope)
         {
-            if parametric_constraints.iter().any(|entry| entry.scope == scope) {
+            if parametric_constraints
+                .iter()
+                .any(|entry| entry.scope == scope)
+            {
                 continue;
             }
-            let find = |sets: &[crate::scene::parametric_constraints::ParametricConstraintSet]| {
-                sets.iter().find(|set| set.scope == scope).cloned().unwrap_or_else(|| {
-                    crate::scene::parametric_constraints::ParametricConstraintSet::new(scope)
-                })
-            };
+            let find =
+                |sets: &[crate::scene::parametric_constraints::ParametricConstraintSet]| {
+                    sets.iter()
+                        .find(|set| set.scope == scope)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            crate::scene::parametric_constraints::ParametricConstraintSet::new(
+                                scope,
+                            )
+                        })
+                };
             let before = find(&pending.parametric_constraints_before);
             let after = find(sets_after);
             // A set can change without its constraint list changing: dropping
@@ -981,15 +990,13 @@ impl OpenCADStudio {
         if matches!(
             entity,
             EntityType::Block(_) | EntityType::BlockEnd(_) | EntityType::Table(_)
-        )
-            || matches!(
-                entity,
-                EntityType::Extended(extended) if matches!(
-                    extended.data,
-                    document::entities::ExtendedEntityData::SectionObject(_)
-                )
+        ) || matches!(
+            entity,
+            EntityType::Extended(extended) if matches!(
+                extended.data,
+                document::entities::ExtendedEntityData::SectionObject(_)
             )
-        {
+        ) {
             return false;
         }
         let layer = entity.common().layer.clone();
@@ -1263,7 +1270,10 @@ impl OpenCADStudio {
                     // re-inserts it — so both sides must be inspected.
                     layout_touched |=
                         matches!(entry.before, Some(document::objects::ObjectType::Layout(_)))
-                            || matches!(entry.after, Some(document::objects::ObjectType::Layout(_)));
+                            || matches!(
+                                entry.after,
+                                Some(document::objects::ObjectType::Layout(_))
+                            );
                     scale_touched |=
                         matches!(entry.before, Some(document::objects::ObjectType::Scale(_)))
                             || matches!(entry.after, Some(document::objects::ObjectType::Scale(_)));
@@ -1551,10 +1561,7 @@ impl OpenCADStudio {
                     // delta rides to the redo stack (it still holds the after
                     // side) — no current-state capture needed.
                     layer_panel_changed |= d.structure.as_ref().is_some_and(|structure| {
-                        matches!(
-                            structure,
-                            StructureSnapshot::Layers(_)
-                        ) || structure.is_full()
+                        matches!(structure, StructureSnapshot::Layers(_)) || structure.is_full()
                     }) || d.active_layer.is_some()
                         || d.entities.iter().any(|(_, before, after)| {
                             before
@@ -1566,7 +1573,10 @@ impl OpenCADStudio {
                         });
                     had_full |= d.structure.as_ref().is_some_and(StructureSnapshot::is_full);
                     changes.extend(self.apply_delta_state(i, &mut d, true));
-                    step_view = d.view.clone().map(|view| (view, d.current_layout_after.clone()));
+                    step_view = d
+                        .view
+                        .clone()
+                        .map(|view| (view, d.current_layout_after.clone()));
                     self.tabs[i]
                         .history
                         .redo_stack
@@ -1653,10 +1663,7 @@ impl OpenCADStudio {
                     native_graph_changed |=
                         !d.parametric_constraints.is_empty() || d.named_parameters.is_some();
                     layer_panel_changed |= d.structure.as_ref().is_some_and(|structure| {
-                        matches!(
-                            structure,
-                            StructureSnapshot::Layers(_)
-                        ) || structure.is_full()
+                        matches!(structure, StructureSnapshot::Layers(_)) || structure.is_full()
                     }) || d.active_layer.is_some()
                         || d.entities.iter().any(|(_, before, after)| {
                             before
@@ -1668,7 +1675,10 @@ impl OpenCADStudio {
                         });
                     had_full |= d.structure.as_ref().is_some_and(StructureSnapshot::is_full);
                     changes.extend(self.apply_delta_state(i, &mut d, false));
-                    step_view = d.view.clone().map(|view| (view, d.current_layout_after.clone()));
+                    step_view = d
+                        .view
+                        .clone()
+                        .map(|view| (view, d.current_layout_after.clone()));
                     self.tabs[i]
                         .history
                         .undo_stack

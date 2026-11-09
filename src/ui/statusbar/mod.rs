@@ -361,8 +361,17 @@ impl StatusBar {
             );
         }
         if let Some(enabled) = constraint_status {
-            pills.push(tip(toggle_pill(include_bytes!("../../../assets/icons/constrain/fixed.svg"), enabled,
-                Message::ToggleBlockConstraintStatus), t!("Constraint status display (BCONSTATUSMODE)")).into());
+            pills.push(
+                tip(
+                    toggle_pill(
+                        include_bytes!("../../../assets/icons/constrain/fixed.svg"),
+                        enabled,
+                        Message::ToggleBlockConstraintStatus,
+                    ),
+                    t!("Constraint status display (BCONSTATUSMODE)"),
+                )
+                .into(),
+            );
         }
         // Each click removes one flagged constraint.
         if parametric_conflicts > 0 {
@@ -1418,7 +1427,10 @@ mod coords_width_tests {
         // so far, so the bar does not flip between one and two rows.
         let bar = StatusBar::new();
         assert_eq!(bar.coords_pill_chars(1, "1 5/16\", -9'-6 55/64\", 0\""), 25);
-        assert_eq!(bar.coords_pill_chars(1, "302'-5 9/32\", -175'-9 27/64\", 0\""), 32);
+        assert_eq!(
+            bar.coords_pill_chars(1, "302'-5 9/32\", -175'-9 27/64\", 0\""),
+            32
+        );
         assert_eq!(bar.coords_pill_chars(1, "1\", 2\", 0\""), 32);
         // Another mode measures afresh.
         assert_eq!(bar.coords_pill_chars(2, "10' < 45d"), 9);

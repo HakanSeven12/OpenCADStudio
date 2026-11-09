@@ -46,7 +46,9 @@ pub fn serialize_document(doc: &Document, ext: &str) -> Result<Vec<u8>, String> 
         } else {
             doc
         };
-        return DxfWriter::new(doc).write_to_vec().map_err(|e| e.to_string());
+        return DxfWriter::new(doc)
+            .write_to_vec()
+            .map_err(|e| e.to_string());
     }
     if let Some(format) = external_format(&ext) {
         return write_external(doc, format, false);
@@ -86,10 +88,12 @@ pub fn external_format_by_label(label: &str) -> Option<&'static (dyn Format + Sy
 
 /// The listed converter for files with extension `ext`, if any.
 pub fn external_format(ext: &str) -> Option<&'static (dyn Format + Sync)> {
-    EXTERNAL_FORMATS
-        .iter()
-        .copied()
-        .find(|format| format.extensions().iter().any(|e| e.eq_ignore_ascii_case(ext)))
+    EXTERNAL_FORMATS.iter().copied().find(|format| {
+        format
+            .extensions()
+            .iter()
+            .any(|e| e.eq_ignore_ascii_case(ext))
+    })
 }
 
 /// Filename gate shared by browser drop and URL opening. Matches the reader's
@@ -109,18 +113,26 @@ pub fn write_external(
     format: &dyn Format,
     allow_loss: bool,
 ) -> Result<Vec<u8>, String> {
-    let (bytes, losses) = format.write(doc).map_err(|e| format!("{}: {e}", format.name()))?;
+    let (bytes, losses) = format
+        .write(doc)
+        .map_err(|e| format!("{}: {e}", format.name()))?;
     if losses.is_empty() || allow_loss {
         return Ok(bytes);
     }
     let lost: Vec<&str> = losses.iter().map(|loss| loss.message.as_str()).collect();
-    Err(format!("{} cannot carry over: {}", format.name(), lost.join("; ")))
+    Err(format!(
+        "{} cannot carry over: {}",
+        format.name(),
+        lost.join("; ")
+    ))
 }
 
 /// What writing `doc` with `format` would lose, so the user can be asked
 /// before the save.
 pub fn external_losses(doc: &Document, format: &dyn Format) -> Result<Vec<String>, String> {
-    let (_, losses) = format.write(doc).map_err(|e| format!("{}: {e}", format.name()))?;
+    let (_, losses) = format
+        .write(doc)
+        .map_err(|e| format!("{}: {e}", format.name()))?;
     Ok(losses.into_iter().map(|loss| loss.message).collect())
 }
 
@@ -324,7 +336,12 @@ mod tests {
     #[test]
     fn ifccad_names_pass_the_shared_web_open_filter() {
         for name in [
-            "plan.ifccad", "PLAN.IFCCAD", "plan.ifcx", "PLAN.IFCX", "plan.dwg", "PLAN.DXF",
+            "plan.ifccad",
+            "PLAN.IFCCAD",
+            "plan.ifcx",
+            "PLAN.IFCX",
+            "plan.dwg",
+            "PLAN.DXF",
         ] {
             assert!(is_drawing_name(name), "{name}");
         }

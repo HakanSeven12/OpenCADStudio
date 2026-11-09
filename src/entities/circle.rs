@@ -175,9 +175,21 @@ fn properties(circle: &Circle) -> Vec<PropSection> {
             edit(t!("Diameter").as_ref(), "diameter", r * 2.0),
             edit(t!("Circumference").as_ref(), "circumference", 2.0 * PI * r),
             edit(t!("Area").as_ref(), "area", PI * r * r),
-            ro(t!("Normal X").as_ref(), "normal_x", format_decimal(circle.normal.x)),
-            ro(t!("Normal Y").as_ref(), "normal_y", format_decimal(circle.normal.y)),
-            ro(t!("Normal Z").as_ref(), "normal_z", format_decimal(circle.normal.z)),
+            ro(
+                t!("Normal X").as_ref(),
+                "normal_x",
+                format_decimal(circle.normal.x),
+            ),
+            ro(
+                t!("Normal Y").as_ref(),
+                "normal_y",
+                format_decimal(circle.normal.y),
+            ),
+            ro(
+                t!("Normal Z").as_ref(),
+                "normal_z",
+                format_decimal(circle.normal.z),
+            ),
         ],
     }]
 }

@@ -270,7 +270,11 @@ pub fn view<'a>(
             .style(button_style(false))
             .padding([5, 11]),
         Space::new().width(Fill),
-        dialog_button_styled_opt(crate::t!("Cancel"), Some(Message::CloseModal), button::secondary),
+        dialog_button_styled_opt(
+            crate::t!("Cancel"),
+            Some(Message::CloseModal),
+            button::secondary
+        ),
         dialog_button_styled_opt(
             crate::tr!("pdf-password", "open"),
             (!state.input.is_empty()).then(|| msg(PdfPasswordMsg::Ok)),
@@ -279,11 +283,17 @@ pub fn view<'a>(
     ]
     .spacing(6)
     .align_y(iced::Center);
-    column![file_card(&state.path), steps(state.stage), password, session, footer]
-        .spacing(10)
-        .padding([10, 12])
-        .width(sizing.width)
-        .into()
+    column![
+        file_card(&state.path),
+        steps(state.stage),
+        password,
+        session,
+        footer
+    ]
+    .spacing(10)
+    .padding([10, 12])
+    .width(sizing.width)
+    .into()
 }
 
 /// The password field, focused when the window opens and after each step.

@@ -12,13 +12,13 @@ pub mod diameter_dim;
 pub mod dim_baseline;
 pub mod dim_cmd;
 pub mod dim_continue;
+pub mod dim_distribute;
 pub mod dim_inspect;
 pub mod dimbreak;
 pub mod dimedit;
-pub mod dimoverride;
 pub mod dimjogline;
+pub mod dimoverride;
 pub mod dimreassociate;
-pub mod dim_distribute;
 pub mod dimspace;
 pub mod dimtedit;
 pub mod field_cmd;
@@ -35,8 +35,8 @@ pub mod table_cmd;
 pub mod text;
 pub mod text_edit;
 pub mod textedit;
-pub mod txt2mtxt;
 pub mod tolerance_cmd;
+pub mod txt2mtxt;
 
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem, StyleKey};
 
@@ -44,18 +44,46 @@ use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem, StyleKey};
 /// and Draw tabs so both list the same set.
 pub fn dimension_menu_items() -> Vec<(&'static str, &'static str, IconKind)> {
     vec![
-        (linear_dim::tool().id, linear_dim::tool().label, linear_dim::tool().icon),
-        (aligned_dim::tool().id, aligned_dim::tool().label, aligned_dim::tool().icon),
-        (angular_dim::tool().id, angular_dim::tool().label, angular_dim::tool().icon),
-        (arc_length_dim::tool().id, arc_length_dim::tool().label, arc_length_dim::tool().icon),
-        (radius_dim::tool().id, radius_dim::tool().label, radius_dim::tool().icon),
+        (
+            linear_dim::tool().id,
+            linear_dim::tool().label,
+            linear_dim::tool().icon,
+        ),
+        (
+            aligned_dim::tool().id,
+            aligned_dim::tool().label,
+            aligned_dim::tool().icon,
+        ),
+        (
+            angular_dim::tool().id,
+            angular_dim::tool().label,
+            angular_dim::tool().icon,
+        ),
+        (
+            arc_length_dim::tool().id,
+            arc_length_dim::tool().label,
+            arc_length_dim::tool().icon,
+        ),
+        (
+            radius_dim::tool().id,
+            radius_dim::tool().label,
+            radius_dim::tool().icon,
+        ),
         (
             jogged_radius_dim::tool().id,
             jogged_radius_dim::tool().label,
             jogged_radius_dim::tool().icon,
         ),
-        (diameter_dim::tool().id, diameter_dim::tool().label, diameter_dim::tool().icon),
-        (ordinate_dim::tool().id, ordinate_dim::tool().label, ordinate_dim::tool().icon),
+        (
+            diameter_dim::tool().id,
+            diameter_dim::tool().label,
+            diameter_dim::tool().icon,
+        ),
+        (
+            ordinate_dim::tool().id,
+            ordinate_dim::tool().label,
+            ordinate_dim::tool().icon,
+        ),
         (qdim::tool().id, qdim::tool().label, qdim::tool().icon),
     ]
 }
@@ -66,16 +94,37 @@ fn annotate_dimension_items() -> Vec<(&'static str, &'static str, IconKind)> {
         (linear_dim::tool().id, "Linear", linear_dim::tool().icon),
         (aligned_dim::tool().id, "Aligned", aligned_dim::tool().icon),
         (angular_dim::tool().id, "Angular", angular_dim::tool().icon),
-        (arc_length_dim::tool().id, "Arc Length", arc_length_dim::tool().icon),
+        (
+            arc_length_dim::tool().id,
+            "Arc Length",
+            arc_length_dim::tool().icon,
+        ),
         (radius_dim::tool().id, "Radius", radius_dim::tool().icon),
-        (diameter_dim::tool().id, "Diameter", diameter_dim::tool().icon),
-        (jogged_radius_dim::tool().id, "Jogged", jogged_radius_dim::tool().icon),
-        (ordinate_dim::tool().id, "Ordinate", ordinate_dim::tool().icon),
+        (
+            diameter_dim::tool().id,
+            "Diameter",
+            diameter_dim::tool().icon,
+        ),
+        (
+            jogged_radius_dim::tool().id,
+            "Jogged",
+            jogged_radius_dim::tool().icon,
+        ),
+        (
+            ordinate_dim::tool().id,
+            "Ordinate",
+            ordinate_dim::tool().icon,
+        ),
     ]
 }
 
 /// A small Dimensions-panel button running `command`.
-fn dim_tool(id: &'static str, label: &'static str, icon: &'static [u8], command: &str) -> crate::modules::ToolDef {
+fn dim_tool(
+    id: &'static str,
+    label: &'static str,
+    icon: &'static [u8],
+    command: &str,
+) -> crate::modules::ToolDef {
     crate::modules::ToolDef {
         id,
         label,
@@ -90,7 +139,11 @@ pub fn text_height_label(height: f64) -> String {
     text.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-fn text_tool(id: &'static str, label: &'static str, icon: &'static [u8]) -> crate::modules::ToolDef {
+fn text_tool(
+    id: &'static str,
+    label: &'static str,
+    icon: &'static [u8],
+) -> crate::modules::ToolDef {
     crate::modules::ToolDef {
         id,
         label,
@@ -180,14 +233,44 @@ impl CadModule for AnnotateModule {
                             manager_cmd: Some("DIMSTYLE"),
                             rows: vec![
                                 vec![
-                                    dim_tool("DIMBREAK", "Break", include_bytes!("../../../assets/icons/dim_break.svg"), "DIMBREAK"),
-                                    dim_tool("DIMSPACE", "Adjust Space", include_bytes!("../../../assets/icons/dim_space.svg"), "DIMSPACE"),
-                                    dim_tool("DIMJOGLINE", "Jog Line", include_bytes!("../../../assets/icons/dim_jog.svg"), "DIMJOGLINE"),
+                                    dim_tool(
+                                        "DIMBREAK",
+                                        "Break",
+                                        include_bytes!("../../../assets/icons/dim_break.svg"),
+                                        "DIMBREAK",
+                                    ),
+                                    dim_tool(
+                                        "DIMSPACE",
+                                        "Adjust Space",
+                                        include_bytes!("../../../assets/icons/dim_space.svg"),
+                                        "DIMSPACE",
+                                    ),
+                                    dim_tool(
+                                        "DIMJOGLINE",
+                                        "Jog Line",
+                                        include_bytes!("../../../assets/icons/dim_jog.svg"),
+                                        "DIMJOGLINE",
+                                    ),
                                 ],
                                 vec![
-                                    dim_tool("DIMINSPECT", "Inspect", include_bytes!("../../../assets/icons/find.svg"), "DIMINSPECT"),
-                                    dim_tool("DIMSTYLE_APPLY", "Update", include_bytes!("../../../assets/icons/ui/refresh.svg"), r#"-DIMSTYLE ["APPLY"]"#),
-                                    dim_tool("DIMREASSOCIATE", "Reassociate", include_bytes!("../../../assets/icons/sync.svg"), "DIMREASSOCIATE"),
+                                    dim_tool(
+                                        "DIMINSPECT",
+                                        "Inspect",
+                                        include_bytes!("../../../assets/icons/find.svg"),
+                                        "DIMINSPECT",
+                                    ),
+                                    dim_tool(
+                                        "DIMSTYLE_APPLY",
+                                        "Update",
+                                        include_bytes!("../../../assets/icons/ui/refresh.svg"),
+                                        r#"-DIMSTYLE ["APPLY"]"#,
+                                    ),
+                                    dim_tool(
+                                        "DIMREASSOCIATE",
+                                        "Reassociate",
+                                        include_bytes!("../../../assets/icons/sync.svg"),
+                                        "DIMREASSOCIATE",
+                                    ),
                                 ],
                             ],
                         },
@@ -209,8 +292,16 @@ impl CadModule for AnnotateModule {
                             label: "",
                             icon: dim_continue::tool().icon,
                             items: vec![
-                                (dim_continue::tool().id, "Continue", dim_continue::tool().icon),
-                                (dim_baseline::tool().id, "Baseline", dim_baseline::tool().icon),
+                                (
+                                    dim_continue::tool().id,
+                                    "Continue",
+                                    dim_continue::tool().icon,
+                                ),
+                                (
+                                    dim_baseline::tool().id,
+                                    "Baseline",
+                                    dim_baseline::tool().icon,
+                                ),
                             ],
                             default: "DIMCONTINUE",
                         },

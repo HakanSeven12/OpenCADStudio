@@ -63,7 +63,10 @@ fn clear_cells(t: &mut Table, (r0, c0, r1, c1): (usize, usize, usize, usize)) {
     for r in r0..=r1 {
         for c in c0..=c1 {
             if let Some(cell) = t.cell_mut(r, c) {
-                if !cell.state.intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY) {
+                if !cell
+                    .state
+                    .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
+                {
                     cell.set_text("");
                 }
             }
@@ -72,7 +75,11 @@ fn clear_cells(t: &mut Table, (r0, c0, r1, c1): (usize, usize, usize, usize)) {
 }
 
 impl OpenCADStudio {
-    pub(in crate::app) fn dispatch_table_cells(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
+    pub(in crate::app) fn dispatch_table_cells(
+        &mut self,
+        cmd: &str,
+        i: usize,
+    ) -> Option<Task<Message>> {
         if !cmd.starts_with("_TCELL") {
             return None;
         }
@@ -93,121 +100,124 @@ impl OpenCADStudio {
             self.open_table_cell_editor(cells.table, r0, c0);
             return Some(self.unfocus_widgets());
         }
-        let (label, edit): (&str, Box<dyn Fn(&mut Table) -> Option<(usize, usize, usize, usize)>>) =
-            match cmd {
-                "_TCELLROWABOVE" => (
-                    "TABLE INSERT ROW",
+        let (label, edit): (
+            &str,
+            Box<dyn Fn(&mut Table) -> Option<(usize, usize, usize, usize)>>,
+        ) = match cmd {
+            "_TCELLROWABOVE" => (
+                "TABLE INSERT ROW",
+                Box::new(move |t| {
+                    let n = r1 - r0 + 1;
+                    insert_rows_like(t, r0, r0, n);
+                    Some((r0 + n, c0, r1 + n, c1))
+                }),
+            ),
+            "_TCELLROWBELOW" => (
+                "TABLE INSERT ROW",
+                Box::new(move |t| {
+                    insert_rows_like(t, r1, r1 + 1, r1 - r0 + 1);
+                    Some((r0, c0, r1, c1))
+                }),
+            ),
+            "_TCELLDELROWS" => (
+                "TABLE DELETE ROW",
+                Box::new(move |t| {
+                    if r1 - r0 + 1 >= t.rows.len() {
+                        return None;
+                    }
+                    for row in (r0..=r1).rev() {
+                        t.remove_row(row);
+                    }
+                    let row = r0.min(t.rows.len() - 1);
+                    Some((row, c0, row, c0))
+                }),
+            ),
+            "_TCELLCOLLEFT" | "_TCELLCOLRIGHT" => {
+                let left = cmd == "_TCELLCOLLEFT";
+                (
+                    "TABLE INSERT COLUMN",
                     Box::new(move |t| {
-                        let n = r1 - r0 + 1;
-                        insert_rows_like(t, r0, r0, n);
-                        Some((r0 + n, c0, r1 + n, c1))
-                    }),
-                ),
-                "_TCELLROWBELOW" => (
-                    "TABLE INSERT ROW",
-                    Box::new(move |t| {
-                        insert_rows_like(t, r1, r1 + 1, r1 - r0 + 1);
-                        Some((r0, c0, r1, c1))
-                    }),
-                ),
-                "_TCELLDELROWS" => (
-                    "TABLE DELETE ROW",
-                    Box::new(move |t| {
-                        if r1 - r0 + 1 >= t.rows.len() {
-                            return None;
+                        let n = c1 - c0 + 1;
+                        if left {
+                            insert_columns_like(t, c0, c0, n);
+                            Some((r0, c0 + n, r1, c1 + n))
+                        } else {
+                            insert_columns_like(t, c1, c1 + 1, n);
+                            Some((r0, c0, r1, c1))
                         }
-                        for row in (r0..=r1).rev() {
-                            t.remove_row(row);
-                        }
-                        let row = r0.min(t.rows.len() - 1);
-                        Some((row, c0, row, c0))
                     }),
-                ),
-                "_TCELLCOLLEFT" | "_TCELLCOLRIGHT" => {
-                    let left = cmd == "_TCELLCOLLEFT";
-                    (
-                        "TABLE INSERT COLUMN",
-                        Box::new(move |t| {
-                            let n = c1 - c0 + 1;
-                            if left {
-                                insert_columns_like(t, c0, c0, n);
-                                Some((r0, c0 + n, r1, c1 + n))
-                            } else {
-                                insert_columns_like(t, c1, c1 + 1, n);
-                                Some((r0, c0, r1, c1))
+                )
+            }
+            "_TCELLDELCOLS" => (
+                "TABLE DELETE COLUMN",
+                Box::new(move |t| {
+                    if c1 - c0 + 1 >= t.columns.len() {
+                        return None;
+                    }
+                    for column in (c0..=c1).rev() {
+                        t.remove_column(column);
+                    }
+                    let column = c0.min(t.columns.len() - 1);
+                    Some((r0, column, r0, column))
+                }),
+            ),
+            "_TCELLMERGE" => (
+                "TABLE MERGE",
+                Box::new(move |t| {
+                    if r0 == r1 && c0 == c1 {
+                        return None;
+                    }
+                    t.merge_cells(CellRange::new(r0, c0, r1, c1));
+                    Some((r0, c0, r1, c1))
+                }),
+            ),
+            "_TCELLUNMERGE" => (
+                "TABLE UNMERGE",
+                Box::new(move |t| {
+                    let merged: Vec<(usize, usize)> = (r0..=r1)
+                        .flat_map(|r| (c0..=c1).map(move |c| (r, c)))
+                        .filter(|&(r, c)| {
+                            crate::entities::table::widen_to_merged(t, (r, c, r, c)) != (r, c, r, c)
+                        })
+                        .collect();
+                    if merged.is_empty() {
+                        return None;
+                    }
+                    for (row, column) in merged {
+                        t.unmerge_cell(row, column);
+                    }
+                    Some((r0, c0, r1, c1))
+                }),
+            ),
+            "_TCELLLOCK" => (
+                "TABLE CELL LOCK",
+                Box::new(move |t| {
+                    let lock = CellStateFlags::CONTENT_LOCKED | CellStateFlags::FORMAT_LOCKED;
+                    // Unlocked if every picked cell is locked, locked otherwise.
+                    let all = (r0..=r1).all(|r| {
+                        (c0..=c1)
+                            .all(|c| t.cell(r, c).is_some_and(|cell| cell.state.contains(lock)))
+                    });
+                    for r in r0..=r1 {
+                        for c in c0..=c1 {
+                            if let Some(cell) = t.cell_mut(r, c) {
+                                cell.state.set(lock, !all);
                             }
-                        }),
-                    )
-                }
-                "_TCELLDELCOLS" => (
-                    "TABLE DELETE COLUMN",
-                    Box::new(move |t| {
-                        if c1 - c0 + 1 >= t.columns.len() {
-                            return None;
                         }
-                        for column in (c0..=c1).rev() {
-                            t.remove_column(column);
-                        }
-                        let column = c0.min(t.columns.len() - 1);
-                        Some((r0, column, r0, column))
-                    }),
-                ),
-                "_TCELLMERGE" => (
-                    "TABLE MERGE",
-                    Box::new(move |t| {
-                        if r0 == r1 && c0 == c1 {
-                            return None;
-                        }
-                        t.merge_cells(CellRange::new(r0, c0, r1, c1));
-                        Some((r0, c0, r1, c1))
-                    }),
-                ),
-                "_TCELLUNMERGE" => (
-                    "TABLE UNMERGE",
-                    Box::new(move |t| {
-                        let merged: Vec<(usize, usize)> = (r0..=r1)
-                            .flat_map(|r| (c0..=c1).map(move |c| (r, c)))
-                            .filter(|&(r, c)| {
-                                crate::entities::table::widen_to_merged(t, (r, c, r, c)) != (r, c, r, c)
-                            })
-                            .collect();
-                        if merged.is_empty() {
-                            return None;
-                        }
-                        for (row, column) in merged {
-                            t.unmerge_cell(row, column);
-                        }
-                        Some((r0, c0, r1, c1))
-                    }),
-                ),
-                "_TCELLLOCK" => (
-                    "TABLE CELL LOCK",
-                    Box::new(move |t| {
-                        let lock = CellStateFlags::CONTENT_LOCKED | CellStateFlags::FORMAT_LOCKED;
-                        // Unlocked if every picked cell is locked, locked otherwise.
-                        let all = (r0..=r1).all(|r| {
-                            (c0..=c1).all(|c| t.cell(r, c).is_some_and(|cell| cell.state.contains(lock)))
-                        });
-                        for r in r0..=r1 {
-                            for c in c0..=c1 {
-                                if let Some(cell) = t.cell_mut(r, c) {
-                                    cell.state.set(lock, !all);
-                                }
-                            }
-                        }
-                        Some((r0, c0, r1, c1))
-                    }),
-                ),
-                // Delete with cells picked: their contents go, the table stays.
-                "_TCELLCLEAR" => (
-                    "TABLE CLEAR CELLS",
-                    Box::new(move |t| {
-                        clear_cells(t, (r0, c0, r1, c1));
-                        Some((r0, c0, r1, c1))
-                    }),
-                ),
-                _ => return None,
-            };
+                    }
+                    Some((r0, c0, r1, c1))
+                }),
+            ),
+            // Delete with cells picked: their contents go, the table stays.
+            "_TCELLCLEAR" => (
+                "TABLE CLEAR CELLS",
+                Box::new(move |t| {
+                    clear_cells(t, (r0, c0, r1, c1));
+                    Some((r0, c0, r1, c1))
+                }),
+            ),
+            _ => return None,
+        };
         let handle = cells.table;
         if self.tabs[i].scene.is_layer_locked(handle) {
             self.command_line.push_info("1 was on a locked layer.");
@@ -231,11 +241,13 @@ impl OpenCADStudio {
             .scene
             .bump_entities(&[(handle, crate::scene::ChangeKind::Modified)]);
         self.tabs[i].dirty = true;
-        self.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
-            table: handle,
-            anchor: (range.0, range.1),
-            end: (range.2, range.3),
-        });
+        self.tabs[i]
+            .scene
+            .select_table_cells(crate::scene::TableCellSelection {
+                table: handle,
+                anchor: (range.0, range.1),
+                end: (range.2, range.3),
+            });
         self.refresh_properties();
         Some(self.finish_dispatch(cmd))
     }
@@ -247,7 +259,8 @@ impl OpenCADStudio {
     pub(in crate::app) fn picked_cell_positions(&self, i: usize) -> Vec<(usize, usize)> {
         let scene = &self.tabs[i].scene;
         if let Some(cells) = scene.table_cells {
-            if let Some(document::EntityType::Table(table)) = scene.document.get_entity(cells.table) {
+            if let Some(document::EntityType::Table(table)) = scene.document.get_entity(cells.table)
+            {
                 let (r0, c0, r1, c1) =
                     crate::entities::table::widen_to_merged(table, cells.range());
                 return (r0..=r1)
@@ -282,7 +295,11 @@ impl OpenCADStudio {
     /// skipping the covered parts of merged cells. Tab in the last cell adds a
     /// row like the last one (its own undo step).
     pub(in crate::app) fn table_cell_tab(&mut self, forward: bool) -> Option<Task<Message>> {
-        self.table_cell_step(if forward { CellStep::Next } else { CellStep::Previous })
+        self.table_cell_step(if forward {
+            CellStep::Next
+        } else {
+            CellStep::Previous
+        })
     }
 
     /// Enter in a cell's editor: the typed text goes into the cell and the
@@ -299,7 +316,13 @@ impl OpenCADStudio {
         column: usize,
         text: String,
     ) {
-        self.table_cell_entry = Some(CellEntry { handle, row, column, text, step: CellStep::Down });
+        self.table_cell_entry = Some(CellEntry {
+            handle,
+            row,
+            column,
+            text,
+            step: CellStep::Down,
+        });
         self.active_modal = Some(crate::app::ModalKind::TableCellEntry);
         self.reset_modal_geometry();
     }
@@ -336,7 +359,8 @@ impl OpenCADStudio {
             entry.column,
         );
         if change_type {
-            let (data_type, unit_type, picture) = crate::entities::table::entered_value_type(&entry.text);
+            let (data_type, unit_type, picture) =
+                crate::entities::table::entered_value_type(&entry.text);
             command = command.with_value_type(data_type, unit_type, &picture);
         }
         use crate::command::CadCommand;
@@ -346,7 +370,9 @@ impl OpenCADStudio {
         // The value comes back selected: typing replaces it.
         if !change_type {
             let input = iced::widget::Id::new(crate::ui::command_line::CMD_INPUT_ID);
-            return self.focus_cmd_input().chain(iced::widget::operation::select_all(input));
+            return self
+                .focus_cmd_input()
+                .chain(iced::widget::operation::select_all(input));
         }
         self.table_cell_entry_typed = true;
         self.table_cell_step(entry.step).unwrap_or_else(Task::none)
@@ -375,7 +401,13 @@ impl OpenCADStudio {
         };
         if !fits && !self.table_cell_entry_typed {
             self.tabs[i].active_cmd = None;
-            self.table_cell_entry = Some(CellEntry { handle, row, column, text, step });
+            self.table_cell_entry = Some(CellEntry {
+                handle,
+                row,
+                column,
+                text,
+                step,
+            });
             self.active_modal = Some(crate::app::ModalKind::TableCellEntry);
             self.reset_modal_geometry();
             return Some(Task::none());
@@ -388,7 +420,8 @@ impl OpenCADStudio {
             self.feed_command(crate::command::StepInput::Text(text))
         };
         self.tabs[i].active_cmd = None;
-        let Some(document::EntityType::Table(table)) = self.tabs[i].scene.document.get_entity(handle)
+        let Some(document::EntityType::Table(table)) =
+            self.tabs[i].scene.document.get_entity(handle)
         else {
             return Some(committed);
         };
@@ -403,9 +436,7 @@ impl OpenCADStudio {
         let mut next = None;
         match step {
             CellStep::Next => next = (start + 1..count).find(|&index| owner(index)),
-            CellStep::Previous if start > 0 => {
-                next = (0..start).rev().find(|&index| owner(index))
-            }
+            CellStep::Previous if start > 0 => next = (0..start).rev().find(|&index| owner(index)),
             CellStep::Previous => {}
             CellStep::Down => {
                 let (_, _, r1, _) =
@@ -443,12 +474,14 @@ impl OpenCADStudio {
             }
             None => (row, column),
         };
-        let Some(document::EntityType::Table(table)) = self.tabs[i].scene.document.get_entity(handle)
+        let Some(document::EntityType::Table(table)) =
+            self.tabs[i].scene.document.get_entity(handle)
         else {
             return Some(committed);
         };
-        let command =
-            crate::modules::annotate::table_cmd::TableCellEditCommand::new(handle, table, row, column);
+        let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+            handle, table, row, column,
+        );
         use crate::command::CadCommand;
         self.command_line.push_info(&command.prompt());
         self.tabs[i].active_cmd = Some(Box::new(command));
@@ -468,7 +501,11 @@ pub(in crate::app) struct CellEntry {
 impl CellEntry {
     /// The cell's name, as the column letters and row number show it.
     pub(in crate::app) fn cell_name(&self) -> String {
-        format!("{}{}", super::field::column_letters(self.column), self.row + 1)
+        format!(
+            "{}{}",
+            super::field::column_letters(self.column),
+            self.row + 1
+        )
     }
 }
 
@@ -656,7 +693,9 @@ impl OpenCADStudio {
                 self.edit_picked_table(i, "TABLE CELL ALIGNMENT", |table| {
                     let mut changed = false;
                     for &(row, column) in &picked {
-                        if let Some(cell) = table.cell_mut(row, column).filter(|c| format_editable(c)) {
+                        if let Some(cell) =
+                            table.cell_mut(row, column).filter(|c| format_editable(c))
+                        {
                             let style = cell.style.get_or_insert_with(Default::default);
                             style.alignment = code;
                             style.property_flags.insert(
@@ -684,7 +723,9 @@ impl OpenCADStudio {
                 self.edit_picked_table(i, "TABLE CELL FORMAT", |table| {
                     let mut changed = false;
                     for &(row, column) in &picked {
-                        if let Some(cell) = table.cell_mut(row, column).filter(|c| format_editable(c)) {
+                        if let Some(cell) =
+                            table.cell_mut(row, column).filter(|c| format_editable(c))
+                        {
                             crate::entities::table::release_content_format(
                                 cell,
                                 document::entities::table::CellStylePropertyFlags::DATA_TYPE,
@@ -722,7 +763,9 @@ impl OpenCADStudio {
                 let Some(block) = document
                     .block_records
                     .iter()
-                    .find(|record| record.name.eq_ignore_ascii_case(rest) && !record.name.starts_with('*'))
+                    .find(|record| {
+                        record.name.eq_ignore_ascii_case(rest) && !record.name.starts_with('*')
+                    })
                     .map(|record| record.handle)
                 else {
                     self.command_line
@@ -733,7 +776,9 @@ impl OpenCADStudio {
                 self.edit_picked_table(i, "TABLE CELL BLOCK", |table| {
                     let mut changed = false;
                     for &(row, column) in &picked {
-                        if let Some(cell) = table.cell_mut(row, column).filter(|c| content_editable(c)) {
+                        if let Some(cell) =
+                            table.cell_mut(row, column).filter(|c| content_editable(c))
+                        {
                             cell.contents =
                                 vec![document::entities::table::CellContent::block(block)];
                             cell.cell_type = document::entities::table::CellType::Block;
@@ -778,7 +823,11 @@ impl OpenCADStudio {
                         .map(|(_, cell)| cell)
                 };
                 let label = |(row, column): (usize, usize)| {
-                    format!("{}{}", crate::entities::table::column_label(column), row + 1)
+                    format!(
+                        "{}{}",
+                        crate::entities::table::column_label(column),
+                        row + 1
+                    )
                 };
                 let formula = match (function.as_str(), points.as_slice()) {
                     ("EQUATION", _) => {
@@ -794,12 +843,13 @@ impl OpenCADStudio {
                         else {
                             return Some(Task::none());
                         };
-                        let command = crate::modules::annotate::table_cmd::TableCellEditCommand::new(
-                            table_handle,
-                            table,
-                            r0,
-                            c0,
-                        );
+                        let command =
+                            crate::modules::annotate::table_cmd::TableCellEditCommand::new(
+                                table_handle,
+                                table,
+                                r0,
+                                c0,
+                            );
                         start(self, Box::new(command));
                         return Some(Task::none());
                     }
@@ -833,7 +883,8 @@ impl OpenCADStudio {
                     }
                     ("CELL", [point, ..]) => {
                         let Some(cell) = cell_at(self, *point) else {
-                            self.command_line.push_error(crate::t!("Invalid cell.").as_ref());
+                            self.command_line
+                                .push_error(crate::t!("Invalid cell.").as_ref());
                             return Some(Task::none());
                         };
                         format!("={}", label(cell))
@@ -841,7 +892,8 @@ impl OpenCADStudio {
                     (_, [first, second, ..]) => {
                         let (Some(a), Some(b)) = (cell_at(self, *first), cell_at(self, *second))
                         else {
-                            self.command_line.push_error(crate::t!("Invalid cell.").as_ref());
+                            self.command_line
+                                .push_error(crate::t!("Invalid cell.").as_ref());
                             return Some(Task::none());
                         };
                         let from = (a.0.min(b.0), a.1.min(b.1));
@@ -883,16 +935,14 @@ impl OpenCADStudio {
     /// from the first one, each cell keeping the link.
     pub(in crate::app) fn link_picked_cells(&mut self, link: document::Handle) {
         let i = self.active_tab;
-        let rows = match crate::app::annotation_data::read_data_link(
-            &self.tabs[i].scene.document,
-            link,
-        ) {
-            Ok(rows) => rows,
-            Err(error) => {
-                self.command_line.push_error(&error);
-                return;
-            }
-        };
+        let rows =
+            match crate::app::annotation_data::read_data_link(&self.tabs[i].scene.document, link) {
+                Ok(rows) => rows,
+                Err(error) => {
+                    self.command_line.push_error(&error);
+                    return;
+                }
+            };
         let Some(cells) = self.tabs[i].scene.table_cells else {
             return;
         };
@@ -1052,9 +1102,11 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
-        if let Some(state) = self.table_cell_borders.as_mut().filter(|_| {
-            self.active_modal == Some(crate::app::ModalKind::TableCellBorders)
-        }) {
+        if let Some(state) = self
+            .table_cell_borders
+            .as_mut()
+            .filter(|_| self.active_modal == Some(crate::app::ModalKind::TableCellBorders))
+        {
             match message {
                 M::Lineweight(value) => state.lineweight = value,
                 M::Linetype(value) => state.linetype = value,
@@ -1064,7 +1116,9 @@ impl OpenCADStudio {
                 M::Edges(set) => match set {
                     BorderSet::All | BorderSet::None => state.sets = vec![set],
                     _ => {
-                        state.sets.retain(|s| !matches!(s, BorderSet::All | BorderSet::None));
+                        state
+                            .sets
+                            .retain(|s| !matches!(s, BorderSet::All | BorderSet::None));
                         if let Some(at) = state.sets.iter().position(|s| *s == set) {
                             state.sets.remove(at);
                         } else {
@@ -1072,9 +1126,9 @@ impl OpenCADStudio {
                         }
                     }
                 },
-                M::Help => self.command_line.push_info(
-                    crate::tr!("table-cells", "borders-help").as_str(),
-                ),
+                M::Help => self
+                    .command_line
+                    .push_info(crate::tr!("table-cells", "borders-help").as_str()),
                 M::Ok => {
                     let state = self.table_cell_borders.take().expect("open");
                     self.close_active_modal();
@@ -1084,9 +1138,11 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
-        if let Some(state) = self.table_cell_block.as_mut().filter(|_| {
-            self.active_modal == Some(crate::app::ModalKind::TableCellBlock)
-        }) {
+        if let Some(state) = self
+            .table_cell_block
+            .as_mut()
+            .filter(|_| self.active_modal == Some(crate::app::ModalKind::TableCellBlock))
+        {
             match message {
                 M::BlockName(name) => {
                     state.name = name;
@@ -1132,9 +1188,11 @@ impl OpenCADStudio {
             }
             return Task::none();
         }
-        if let Some(state) = self.table_cell_format.as_mut().filter(|_| {
-            self.active_modal == Some(crate::app::ModalKind::TableCellFormat)
-        }) {
+        if let Some(state) = self
+            .table_cell_format
+            .as_mut()
+            .filter(|_| self.active_modal == Some(crate::app::ModalKind::TableCellFormat))
+        {
             match message {
                 M::FormatKind(kind) => {
                     state.kind = kind.min(8);
@@ -1203,15 +1261,15 @@ impl OpenCADStudio {
                 M::Delete => {
                     if let Some(p) = state.selected {
                         state.order.remove(p);
-                        state.selected = (!state.order.is_empty())
-                            .then(|| p.min(state.order.len() - 1));
+                        state.selected =
+                            (!state.order.is_empty()).then(|| p.min(state.order.len() - 1));
                     }
                 }
                 M::Layout(bits) => state.layout = bits,
                 M::ContentSpacing(value) => state.spacing = value,
-                M::Help => self.command_line.push_info(
-                    crate::tr!("table-cells", "contents-help").as_str(),
-                ),
+                M::Help => self
+                    .command_line
+                    .push_info(crate::tr!("table-cells", "contents-help").as_str()),
                 M::Ok => {
                     let state = self.table_cell_contents.take().expect("open");
                     self.close_active_modal();
@@ -1307,7 +1365,11 @@ impl OpenCADStudio {
         let weight = parse_lineweight(&state.lineweight);
         let spacing = crate::entities::common::parse_f64(&state.spacing).unwrap_or(0.0);
         let hide = state.sets.contains(&BorderSet::None);
-        let sets = if hide { vec![BorderSet::All] } else { state.sets.clone() };
+        let sets = if hide {
+            vec![BorderSet::All]
+        } else {
+            state.sets.clone()
+        };
         let has = |set: BorderSet| sets.contains(&BorderSet::All) || sets.contains(&set);
         let chosen = |row: usize, column: usize, last_row: usize, last_column: usize| -> E {
             let mut edges = E::empty();
@@ -1321,13 +1383,21 @@ impl OpenCADStudio {
             if outside_or(row == r0, BorderSet::Top, BorderSet::InsideHorizontal) {
                 edges |= E::TOP;
             }
-            if outside_or(last_row == r1, BorderSet::Bottom, BorderSet::InsideHorizontal) {
+            if outside_or(
+                last_row == r1,
+                BorderSet::Bottom,
+                BorderSet::InsideHorizontal,
+            ) {
                 edges |= E::BOTTOM;
             }
             if outside_or(column == c0, BorderSet::Left, BorderSet::InsideVertical) {
                 edges |= E::LEFT;
             }
-            if outside_or(last_column == c1, BorderSet::Right, BorderSet::InsideVertical) {
+            if outside_or(
+                last_column == c1,
+                BorderSet::Right,
+                BorderSet::InsideVertical,
+            ) {
                 edges |= E::RIGHT;
             }
             edges
@@ -1414,7 +1484,11 @@ fn format_preview(
             }
         }
         2 => {
-            let picture = if picture.is_empty() { "M/d/yyyy" } else { &picture };
+            let picture = if picture.is_empty() {
+                "M/d/yyyy"
+            } else {
+                &picture
+            };
             document::fields::format_dt((2026, 11, 2, 14, 30, 0), picture)
         }
         6 => document.format_point_with_picture([2.58, 5.37, 0.0], &picture),
@@ -1458,9 +1532,8 @@ impl OpenCADStudio {
             }
             _ => None,
         };
-        let (name, scale, rotation, autofit) = current.unwrap_or_else(|| {
-            (names.first().cloned().unwrap_or_default(), 1.0, 0.0, true)
-        });
+        let (name, scale, rotation, autofit) =
+            current.unwrap_or_else(|| (names.first().cloned().unwrap_or_default(), 1.0, 0.0, true));
         self.table_cell_block = Some(CellBlockState {
             names,
             name,
@@ -1505,7 +1578,10 @@ impl OpenCADStudio {
                 crate::entities::table::cell_data_category(data_type, unit_type)
             })
             .unwrap_or("General");
-        let kind = FORMAT_KINDS.iter().position(|name| *name == category).unwrap_or(4);
+        let kind = FORMAT_KINDS
+            .iter()
+            .position(|name| *name == category)
+            .unwrap_or(4);
         let mut state = CellFormatState {
             kind,
             unit: 0,
@@ -1535,7 +1611,11 @@ impl OpenCADStudio {
     /// The Cell Block settings on the picked cells: the block as their
     /// content, the cell alignment, and the scale (or fitted to the cell)
     /// and rotation. A block that does not fit grows its row.
-    fn apply_cell_block(&mut self, i: usize, state: crate::ui::window::table_cell_dialog::CellBlockState) {
+    fn apply_cell_block(
+        &mut self,
+        i: usize,
+        state: crate::ui::window::table_cell_dialog::CellBlockState,
+    ) {
         let name = if state.path.is_empty() {
             state.name.clone()
         } else {
@@ -1601,16 +1681,22 @@ impl OpenCADStudio {
             let mut changed = false;
             for &(row, column) in &picked {
                 let editable = table.cell(row, column).is_some_and(|cell| {
-                    !cell
-                        .state
-                        .intersects(CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY)
+                    !cell.state.intersects(
+                        CellStateFlags::CONTENT_LOCKED | CellStateFlags::CONTENT_READ_ONLY,
+                    )
                 });
                 if !editable {
                     continue;
                 }
-                let margins = table.rows.get(row).zip(table.cell(row, column)).map(|(r, cell)| {
-                    let margin = |property: P| {
-                        crate::entities::table::style_for_property(table, r, column, cell, property)
+                let margins = table
+                    .rows
+                    .get(row)
+                    .zip(table.cell(row, column))
+                    .map(|(r, cell)| {
+                        let margin = |property: P| {
+                            crate::entities::table::style_for_property(
+                                table, r, column, cell, property,
+                            )
                             .map(|style| {
                                 if property == P::MARGIN_TOP {
                                     style.margin_top
@@ -1619,9 +1705,9 @@ impl OpenCADStudio {
                                 }
                             })
                             .unwrap_or(table_v_margin)
-                    };
-                    margin(P::MARGIN_TOP) + margin(P::MARGIN_BOTTOM)
-                });
+                        };
+                        margin(P::MARGIN_TOP) + margin(P::MARGIN_BOTTOM)
+                    });
                 let Some(cell) = table.cell_mut(row, column) else {
                     continue;
                 };
@@ -1703,7 +1789,9 @@ impl OpenCADStudio {
         let invalid: Vec<String> = values
             .iter()
             .filter(|(_, value)| matches!(value, Some(TypedValue::Invalid)))
-            .map(|((row, column), _)| format!("{}{}", super::field::column_letters(*column), row + 1))
+            .map(|((row, column), _)| {
+                format!("{}{}", super::field::column_letters(*column), row + 1)
+            })
             .collect();
         if !invalid.is_empty() && !confirmed {
             self.table_cell_warning = Some((owned, invalid));
@@ -1758,13 +1846,21 @@ mod table_cell_ribbon_tests {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let handle = app.tabs[i].scene.add_entity(document::EntityType::Table(Box::new(Table::new(Vector3::ZERO, 3, 3))));
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Table(Box::new(Table::new(
+                Vector3::ZERO,
+                3,
+                3,
+            ))));
         let _ = app.update(Message::Noop);
-        app.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
-            table: handle,
-            anchor: (1, 1),
-            end: (2, 2),
-        });
+        app.tabs[i]
+            .scene
+            .select_table_cells(crate::scene::TableCellSelection {
+                table: handle,
+                anchor: (1, 1),
+                end: (2, 2),
+            });
         (app, i, handle)
     }
 
@@ -1777,19 +1873,35 @@ mod table_cell_ribbon_tests {
         assert_eq!(app.ribbon.tab_state("table_cell"), ("table_cell", true));
         app.tabs[i].scene.table_cells = None;
         let _ = app.update(Message::Noop);
-        assert_eq!(app.ribbon.tab_state("table_cell"), (before, false), "the previous tab comes back");
+        assert_eq!(
+            app.ribbon.tab_state("table_cell"),
+            (before, false),
+            "the previous tab comes back"
+        );
     }
 
     #[test]
     fn the_palette_alignment_buttons_align_the_picked_cells() {
         let (mut app, i, handle) = app_with_cells_picked();
         let tl = crate::ui::ribbon::table_cell_alignments().remove(0);
-        let _ = app.update(Message::RibbonToolClick { tool_id: tl.id.to_string(), event: tl.event.clone() });
-        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle) else {
+        let _ = app.update(Message::RibbonToolClick {
+            tool_id: tl.id.to_string(),
+            event: tl.event.clone(),
+        });
+        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle)
+        else {
             panic!("table")
         };
-        let align = |r: usize, c: usize| t.cell(r, c).and_then(|c| c.style.as_ref()).map(|s| s.alignment);
-        assert_eq!((align(1, 1), align(2, 2)), (Some(1), Some(1)), "Top Left on every picked cell");
+        let align = |r: usize, c: usize| {
+            t.cell(r, c)
+                .and_then(|c| c.style.as_ref())
+                .map(|s| s.alignment)
+        };
+        assert_eq!(
+            (align(1, 1), align(2, 2)),
+            (Some(1), Some(1)),
+            "Top Left on every picked cell"
+        );
         assert_ne!(align(0, 0), Some(1), "cells outside the pick keep theirs");
     }
 }
@@ -1809,22 +1921,37 @@ mod tests {
                 t.set_cell_text(r, c, "x");
             }
         }
-        t.cell_mut(1, 1).unwrap().state.insert(CellStateFlags::CONTENT_LOCKED);
+        t.cell_mut(1, 1)
+            .unwrap()
+            .state
+            .insert(CellStateFlags::CONTENT_LOCKED);
         let i = app.active_tab;
-        let handle = app.tabs[i].scene.add_entity(document::EntityType::Table(Box::new(t)));
-        app.tabs[i].scene.select_table_cells(crate::scene::TableCellSelection {
-            table: handle,
-            anchor: (1, 0),
-            end: (2, 1),
-        });
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Table(Box::new(t)));
+        app.tabs[i]
+            .scene
+            .select_table_cells(crate::scene::TableCellSelection {
+                table: handle,
+                anchor: (1, 0),
+                end: (2, 1),
+            });
         let _ = app.update(Message::DeleteSelected);
-        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle) else {
+        let Some(document::EntityType::Table(t)) = app.tabs[i].scene.document.get_entity(handle)
+        else {
             panic!("Delete on picked cells must keep the table");
         };
         let text = |r: usize, c: usize| t.cell(r, c).unwrap().text_value().to_string();
-        assert_eq!((text(1, 0), text(2, 0), text(2, 1)), (String::new(), String::new(), String::new()));
+        assert_eq!(
+            (text(1, 0), text(2, 0), text(2, 1)),
+            (String::new(), String::new(), String::new())
+        );
         assert_eq!(text(1, 1), "x", "a locked cell keeps its contents");
-        assert_eq!((text(0, 0), text(1, 2)), ("x".into(), "x".into()), "cells outside the pick stay");
+        assert_eq!(
+            (text(0, 0), text(1, 2)),
+            ("x".into(), "x".into()),
+            "cells outside the pick stay"
+        );
     }
 
     fn table() -> Table {
@@ -1842,7 +1969,9 @@ mod tests {
     }
 
     fn text(t: &Table, r: usize, c: usize) -> String {
-        t.cell(r, c).map(|cell| cell.text_value().to_string()).unwrap_or_default()
+        t.cell(r, c)
+            .map(|cell| cell.text_value().to_string())
+            .unwrap_or_default()
     }
 
     #[test]
@@ -1864,14 +1993,33 @@ mod tests {
     fn insert_left_and_rows_above_below_follow_the_picked_span() {
         let mut t = table();
         insert_columns_like(&mut t, 1, 1, 3);
-        assert_eq!((text(&t, 0, 0), text(&t, 0, 1), text(&t, 0, 4)), ("00".into(), String::new(), "01".into()));
+        assert_eq!(
+            (text(&t, 0, 0), text(&t, 0, 1), text(&t, 0, 4)),
+            ("00".into(), String::new(), "01".into())
+        );
         // picked rows 1..=2: two rows below row 2, two above row 1
         let mut t = table();
         insert_rows_like(&mut t, 2, 3, 2);
         assert_eq!(t.rows.len(), 6);
-        assert_eq!((text(&t, 2, 0), text(&t, 3, 0), text(&t, 4, 0), text(&t, 5, 0)), ("20".into(), String::new(), String::new(), "30".into()));
+        assert_eq!(
+            (
+                text(&t, 2, 0),
+                text(&t, 3, 0),
+                text(&t, 4, 0),
+                text(&t, 5, 0)
+            ),
+            ("20".into(), String::new(), String::new(), "30".into())
+        );
         let mut t = table();
         insert_rows_like(&mut t, 1, 1, 2);
-        assert_eq!((text(&t, 0, 0), text(&t, 1, 0), text(&t, 2, 0), text(&t, 3, 0)), ("00".into(), String::new(), String::new(), "10".into()));
+        assert_eq!(
+            (
+                text(&t, 0, 0),
+                text(&t, 1, 0),
+                text(&t, 2, 0),
+                text(&t, 3, 0)
+            ),
+            ("00".into(), String::new(), String::new(), "10".into())
+        );
     }
 }

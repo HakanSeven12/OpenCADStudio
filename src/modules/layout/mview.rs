@@ -162,7 +162,10 @@ impl MviewCommand {
         let Some(a) = self.last2() else {
             return CmdResult::NeedPoint;
         };
-        match self.arc_sub.arc_point(DVec2::new(pt.x, pt.y), a, self.polygon_last_tangent) {
+        match self
+            .arc_sub
+            .arc_point(DVec2::new(pt.x, pt.y), a, self.polygon_last_tangent)
+        {
             Some(step) => self.arc_step(step),
             None => CmdResult::NeedPoint,
         }
@@ -194,7 +197,9 @@ impl MviewCommand {
     /// VPCLIP chord direction (degrees) for the arc option being answered.
     fn arc_chord(&mut self, degrees: f64) -> Option<CmdResult> {
         let a = self.last2()?;
-        let step = self.arc_sub.arc_chord(degrees, a, self.polygon_last_tangent)?;
+        let step = self
+            .arc_sub
+            .arc_chord(degrees, a, self.polygon_last_tangent)?;
         Some(self.arc_step(step))
     }
 

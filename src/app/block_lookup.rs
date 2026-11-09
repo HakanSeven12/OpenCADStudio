@@ -55,7 +55,14 @@ impl OpenCADStudio {
             self.tabs[i].scene.clear_preview_wire();
             return Task::none();
         }
-        self.push_undo_snapshot(i, super::tab_document::HistoryLabel::formatted(format!("{} parameter", kind.name()), "parameter", super::tab_document::HistoryLabel::Message(kind.name())));
+        self.push_undo_snapshot(
+            i,
+            super::tab_document::HistoryLabel::formatted(
+                format!("{} parameter", kind.name()),
+                "parameter",
+                super::tab_document::HistoryLabel::Message(kind.name()),
+            ),
+        );
         let parameter = match kind {
             Kind::Basepoint => {
                 block_basepoint::create(&mut self.tabs[i].scene.document, definition, location)
@@ -157,7 +164,10 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         let i = self.active_tab;
         if self.tabs[i].id != document
-            || self.tabs[i].active_block_edit_session().map(|s| s.br_handle) != Some(definition)
+            || self.tabs[i]
+                .active_block_edit_session()
+                .map(|s| s.br_handle)
+                != Some(definition)
         {
             self.command_line.push_error(
                 crate::t!("The action's Block Editor session is no longer active.").as_ref(),
@@ -342,7 +352,10 @@ impl OpenCADStudio {
             return Task::none();
         }
         if changed {
-            self.push_undo_snapshot(i, super::tab_document::HistoryLabel::Message("Lookup tables"));
+            self.push_undo_snapshot(
+                i,
+                super::tab_document::HistoryLabel::Message("Lookup tables"),
+            );
             self.tabs[i].scene.document = working;
             self.tabs[i].scene.bump_geometry();
             self.tabs[i].dirty = true;

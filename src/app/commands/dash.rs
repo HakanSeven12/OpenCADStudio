@@ -17,7 +17,10 @@ fn flow(
 
 /// The finished answers as the `-NAME [...]` line the dispatcher runs.
 fn run(name: &str, args: &[&str]) -> Result<PromptStep, PromptStep> {
-    Ok(PromptStep::Run(format!("{name} {}", serde_json::json!(args))))
+    Ok(PromptStep::Run(format!(
+        "{name} {}",
+        serde_json::json!(args)
+    )))
 }
 
 /// `name` matches one of the comma-separated, wildcard-capable `list`.
@@ -62,8 +65,11 @@ fn layer_flow(current: String) -> PromptFlow {
         )?;
         let current_list = |q: &mut PromptAnswers| {
             q.text(
-                crate::t!("-LAYER  Enter name list of layer(s) <%{name}>:", name = current)
-                    .into_owned(),
+                crate::t!(
+                    "-LAYER  Enter name list of layer(s) <%{name}>:",
+                    name = current
+                )
+                .into_owned(),
                 Some(current.clone()),
             )
         };
@@ -95,8 +101,14 @@ fn layer_flow(current: String) -> PromptFlow {
                 run("-LAYER", &[option, &names])
             }
             "RENAME" => {
-                let old = q.text(crate::t!("-LAYER  Enter old layer name:").into_owned(), None)?;
-                let new = q.text(crate::t!("-LAYER  Enter new layer name:").into_owned(), None)?;
+                let old = q.text(
+                    crate::t!("-LAYER  Enter old layer name:").into_owned(),
+                    None,
+                )?;
+                let new = q.text(
+                    crate::t!("-LAYER  Enter new layer name:").into_owned(),
+                    None,
+                )?;
                 run("-LAYER", &[option, &old, &new])
             }
             "COLOR" => {
@@ -254,8 +266,11 @@ struct StyleDefaults {
 fn style_flow(current: String, styles: Vec<StyleDefaults>) -> PromptFlow {
     flow(move |q| {
         let name = q.text(
-            crate::t!("-STYLE  Enter name of text style or [?] <%{name}>:", name = current)
-                .into_owned(),
+            crate::t!(
+                "-STYLE  Enter name of text style or [?] <%{name}>:",
+                name = current
+            )
+            .into_owned(),
             Some(current.clone()),
         )?;
         if name == "?" {
@@ -282,17 +297,27 @@ fn style_flow(current: String, styles: Vec<StyleDefaults>) -> PromptFlow {
             Some(base.font.clone()),
         )?;
         let height = q.number(
-            crate::t!("-STYLE  Specify height of text <%{value}>:", value = base.height)
-                .into_owned(),
+            crate::t!(
+                "-STYLE  Specify height of text <%{value}>:",
+                value = base.height
+            )
+            .into_owned(),
             base.height,
         )?;
         let width = q.number(
-            crate::t!("-STYLE  Specify width factor <%{value}>:", value = base.width).into_owned(),
+            crate::t!(
+                "-STYLE  Specify width factor <%{value}>:",
+                value = base.width
+            )
+            .into_owned(),
             base.width,
         )?;
         let oblique = q.number(
-            crate::t!("-STYLE  Specify obliquing angle <%{value}>:", value = base.oblique)
-                .into_owned(),
+            crate::t!(
+                "-STYLE  Specify obliquing angle <%{value}>:",
+                value = base.oblique
+            )
+            .into_owned(),
             base.oblique,
         )?;
         let backwards = q.yes_no(
@@ -360,8 +385,7 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
                     true,
                 )?;
                 let name = q.text(
-                    crate::t!("-DIMSTYLE  Enter name for new dimension style or [?]:")
-                        .into_owned(),
+                    crate::t!("-DIMSTYLE  Enter name for new dimension style or [?]:").into_owned(),
                     None,
                 )?;
                 if name == "?" {
@@ -375,14 +399,15 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
             "APPLY" => run("-DIMSTYLE", &["APPLY"]),
             "SAVE" => {
                 let name = q.text(
-                    crate::t!("-DIMSTYLE  Enter name for new dimension style or [?]:")
-                        .into_owned(),
+                    crate::t!("-DIMSTYLE  Enter name for new dimension style or [?]:").into_owned(),
                     None,
                 )?;
                 if name == "?" {
                     return run("-DIMSTYLE", &["?", "*"]);
                 }
-                if existing.iter().any(|style| style.eq_ignore_ascii_case(&name))
+                if existing
+                    .iter()
+                    .any(|style| style.eq_ignore_ascii_case(&name))
                     && !q.yes_no(
                         crate::t!(
                             "-DIMSTYLE  That name is already in use, redefine it? [Yes/No] <No>:"
@@ -397,8 +422,10 @@ fn dimstyle_flow(current: String, existing: Vec<String>) -> PromptFlow {
             }
             "RESTORE" => {
                 let name = q.text(
-                    crate::t!("-DIMSTYLE  Enter a dimension style name, [?] or <select dimension>:")
-                        .into_owned(),
+                    crate::t!(
+                        "-DIMSTYLE  Enter a dimension style name, [?] or <select dimension>:"
+                    )
+                    .into_owned(),
                     Some(String::new()),
                 )?;
                 if name == "?" {
@@ -461,8 +488,11 @@ fn layout_flow(current: String, next: String) -> PromptFlow {
                 let source = named(q, "-LAYOUT  Enter name of layout to copy <%{name}>:")?;
                 let copy = format!("{source} (2)");
                 let name = q.text(
-                    crate::t!("-LAYOUT  Enter layout name for copy <%{name}>:", name = copy)
-                        .into_owned(),
+                    crate::t!(
+                        "-LAYOUT  Enter layout name for copy <%{name}>:",
+                        name = copy
+                    )
+                    .into_owned(),
                     Some(copy.clone()),
                 )?;
                 run("-LAYOUT", &[option, &source, &name])
@@ -481,7 +511,10 @@ fn layout_flow(current: String, next: String) -> PromptFlow {
             }
             "RENAME" => {
                 let old = named(q, "-LAYOUT  Enter layout to rename <%{name}>:")?;
-                let new = q.text(crate::t!("-LAYOUT  Enter new layout name:").into_owned(), None)?;
+                let new = q.text(
+                    crate::t!("-LAYOUT  Enter new layout name:").into_owned(),
+                    None,
+                )?;
                 run("-LAYOUT", &[option, &old, &new])
             }
             "SET" => {
@@ -524,8 +557,11 @@ fn plot_flow(d: PlotDefaults) -> PromptFlow {
             )?;
         }
         let device = q.text(
-            crate::t!("-PLOT  Enter an output device name <%{name}>:", name = "PDF")
-                .into_owned(),
+            crate::t!(
+                "-PLOT  Enter an output device name <%{name}>:",
+                name = "PDF"
+            )
+            .into_owned(),
             Some("PDF".into()),
         )?;
         if detailed {
@@ -612,7 +648,11 @@ fn plot_flow(d: PlotDefaults) -> PromptFlow {
                 req.insert("fit".into(), true.into());
             } else {
                 let scale = scale.replace('=', ":");
-                let ratio = if scale.contains(':') { scale } else { format!("1:{scale}") };
+                let ratio = if scale.contains(':') {
+                    scale
+                } else {
+                    format!("1:{scale}")
+                };
                 req.insert("scale".into(), ratio.into());
             }
             let offset = q.text(
@@ -684,7 +724,13 @@ fn plot_flow(d: PlotDefaults) -> PromptFlow {
         if to_file {
             let safe: String = layout
                 .chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .collect();
             let file = format!("{}-{safe}.{ext}", d.stem);
             let path = q.text(
@@ -703,7 +749,10 @@ fn plot_flow(d: PlotDefaults) -> PromptFlow {
         )? {
             return Ok(PromptStep::Finish);
         }
-        Ok(PromptStep::Run(format!("-PLOT {}", serde_json::Value::Object(req))))
+        Ok(PromptStep::Run(format!(
+            "-PLOT {}",
+            serde_json::Value::Object(req)
+        )))
     })
 }
 
@@ -732,8 +781,16 @@ impl OpenCADStudio {
                     task = self.dash_layer(i, &args);
                 }
                 // -LAYER keeps asking for options until an empty Enter.
-                let current = self.tabs[i].scene.document.header.current_layer_name.clone();
-                start(self, ScriptPromptCommand::new("-LAYER", layer_flow(current)));
+                let current = self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_layer_name
+                    .clone();
+                start(
+                    self,
+                    ScriptPromptCommand::new("-LAYER", layer_flow(current)),
+                );
             }
             "-PURGE" if rest.is_empty() => {
                 start(self, ScriptPromptCommand::new("-PURGE", purge_flow()))
@@ -784,7 +841,10 @@ impl OpenCADStudio {
                     })
                     .collect();
                 let current = doc.header.current_text_style_name.clone();
-                start(self, ScriptPromptCommand::new("-STYLE", style_flow(current, styles)));
+                start(
+                    self,
+                    ScriptPromptCommand::new("-STYLE", style_flow(current, styles)),
+                );
             }
             "-STYLE" => self.dash_style(i, &args),
             "-DIMSTYLE" if rest.is_empty() => {
@@ -810,7 +870,10 @@ impl OpenCADStudio {
             "-LAYOUT" if rest.is_empty() => {
                 let current = self.tabs[i].scene.current_layout.clone();
                 let next = Self::next_layout_name(&self.tabs[i].scene.layout_names());
-                start(self, ScriptPromptCommand::new("-LAYOUT", layout_flow(current, next)));
+                start(
+                    self,
+                    ScriptPromptCommand::new("-LAYOUT", layout_flow(current, next)),
+                );
             }
             "-LAYOUT" => return Some(self.dash_layout(i, &args)),
             // The web plots through the PLOT dialog's download.
@@ -907,7 +970,12 @@ impl OpenCADStudio {
 
     fn dash_layer(&mut self, i: usize, args: &[String]) -> Task<Message> {
         let arg = |n: usize| args.get(n).cloned().unwrap_or_default();
-        let current = self.tabs[i].scene.document.header.current_layer_name.clone();
+        let current = self.tabs[i]
+            .scene
+            .document
+            .header
+            .current_layer_name
+            .clone();
         match arg(0).as_str() {
             "?" => {
                 let info: Vec<String> = self.tabs[i]
@@ -1018,27 +1086,28 @@ impl OpenCADStudio {
             }
             "MATERIAL" => {
                 let name = arg(1);
-                let material = if name.is_empty() || name.eq_ignore_ascii_case("BYLAYER") {
-                    document::Handle::NULL
-                } else {
-                    let found = self.tabs[i].scene.document.objects.iter().find_map(
-                        |(handle, object)| match object {
-                            document::objects::ObjectType::Material(m)
-                                if m.name.eq_ignore_ascii_case(&name) =>
-                            {
-                                Some(*handle)
-                            }
-                            _ => None,
-                        },
-                    );
-                    let Some(handle) = found else {
-                        self.command_line.push_error(
-                            crate::tf!("LAYER: material '{}' not found.", name).as_ref(),
+                let material =
+                    if name.is_empty() || name.eq_ignore_ascii_case("BYLAYER") {
+                        document::Handle::NULL
+                    } else {
+                        let found = self.tabs[i].scene.document.objects.iter().find_map(
+                            |(handle, object)| match object {
+                                document::objects::ObjectType::Material(m)
+                                    if m.name.eq_ignore_ascii_case(&name) =>
+                                {
+                                    Some(*handle)
+                                }
+                                _ => None,
+                            },
                         );
-                        return Task::none();
+                        let Some(handle) = found else {
+                            self.command_line.push_error(
+                                crate::tf!("LAYER: material '{}' not found.", name).as_ref(),
+                            );
+                            return Task::none();
+                        };
+                        handle
                     };
-                    handle
-                };
                 let names = self.listed_layers(i, &arg(2));
                 self.edit_layers(i, "LAYER MATERIAL", &names, move |layer| {
                     layer.material = material
@@ -1067,8 +1136,11 @@ impl OpenCADStudio {
                 let mut names = self.listed_layers(i, &arg(1));
                 if option == "FREEZE" && names.contains(&current) {
                     self.command_line.push_error(
-                        crate::tf!("Cannot freeze layer \"{}\". It is the CURRENT layer.", current)
-                            .as_ref(),
+                        crate::tf!(
+                            "Cannot freeze layer \"{}\". It is the CURRENT layer.",
+                            current
+                        )
+                        .as_ref(),
                     );
                     names.retain(|name| name != &current);
                 }
@@ -1126,7 +1198,11 @@ impl OpenCADStudio {
         let doc = &self.tabs[i].scene.document;
         let current = doc.header.current_dimstyle_name.clone();
         let annotative = crate::scene::annotative::dim_style_is_annotative(doc, &current);
-        let yes_no = if annotative { crate::t!("Yes") } else { crate::t!("No") };
+        let yes_no = if annotative {
+            crate::t!("Yes")
+        } else {
+            crate::t!("No")
+        };
         self.command_line.push_info(
             crate::t!(
                 "-DIMSTYLE  Current dimension style: %{name}   Annotative: %{annotative}",
@@ -1316,7 +1392,12 @@ impl OpenCADStudio {
         let arg = |n: usize| args.get(n).cloned().unwrap_or_default();
         let layouts = self.tabs[i].scene.layout_names();
         // Layout names are matched without case, as typed in scripts.
-        let find = |name: &str| layouts.iter().find(|l| l.eq_ignore_ascii_case(name)).cloned();
+        let find = |name: &str| {
+            layouts
+                .iter()
+                .find(|l| l.eq_ignore_ascii_case(name))
+                .cloned()
+        };
         let missing = |app: &mut Self, name: &str| {
             app.command_line
                 .push_error(crate::tf!("Layout '{}' does not exist", name).as_ref());
@@ -1392,7 +1473,10 @@ mod tests {
             "-RENAME LA TMP1 KEEP",
         ] {
             let _ = app.update(Message::ScriptLine(line.into()));
-            assert!(app.tabs[app.active_tab].active_cmd.is_none(), "{line} still asks");
+            assert!(
+                app.tabs[app.active_tab].active_cmd.is_none(),
+                "{line} still asks"
+            );
         }
         let doc = &app.tabs[app.active_tab].scene.document;
         let layer = doc.layers.get("SCANTEST").expect("-LAYER Make");
@@ -1400,7 +1484,10 @@ mod tests {
         assert_eq!(doc.header.current_layer_name, "SCANTEST");
         assert!(doc.layers.get("KEEP").is_some_and(|l| l.flags.off));
         assert!(doc.layers.get("TMP2").is_none(), "-PURGE by name");
-        assert_eq!(doc.text_styles.get("ROMANS").unwrap().font_file, "romans.shx");
+        assert_eq!(
+            doc.text_styles.get("ROMANS").unwrap().font_file,
+            "romans.shx"
+        );
         assert_eq!(doc.header.current_text_style_name, "ROMANS");
     }
 }

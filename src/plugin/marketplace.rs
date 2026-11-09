@@ -74,7 +74,9 @@ impl Release {
     /// folder per plugin.
     fn bundle_assets(&self) -> impl Iterator<Item = &Asset> {
         let suffix = format!("-{}.zip", platform_suffix());
-        self.assets.iter().filter(move |a| a.name.ends_with(&suffix))
+        self.assets
+            .iter()
+            .filter(move |a| a.name.ends_with(&suffix))
     }
 
     /// True when this release ships an installable package for this platform.
@@ -362,7 +364,9 @@ fn bundle_packages(bytes: &[u8]) -> Result<Vec<Package>, String> {
         zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("bundle: {e}"))?;
     let mut files = Vec::new();
     for index in 0..archive.len() {
-        let mut file = archive.by_index(index).map_err(|e| format!("bundle: {e}"))?;
+        let mut file = archive
+            .by_index(index)
+            .map_err(|e| format!("bundle: {e}"))?;
         let Some(path) = file.enclosed_name().filter(|_| file.is_file()) else {
             continue;
         };
@@ -427,14 +431,10 @@ fn checked_manifest(toml_text: &str) -> Result<external::ExternalPlugin, String>
 
     if ocs_plugin_api::version_info::uses_acadrust_gate(manifest.api_version) {
         let Some(source) = manifest.acadrust_source.as_deref() else {
-            return Err(
-                "Release has no codec source; cannot verify ABI compatibility".to_string(),
-            );
+            return Err("Release has no codec source; cannot verify ABI compatibility".to_string());
         };
         if source.is_empty() {
-            return Err(
-                "Release has no codec source; cannot verify ABI compatibility".to_string(),
-            );
+            return Err("Release has no codec source; cannot verify ABI compatibility".to_string());
         }
         if !ocs_plugin_api::version_info::acadrust_sources_compatible(
             source,
@@ -485,7 +485,8 @@ fn write_package(package: Package, repository: &str) -> Result<String, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let ext = external_lib_ext();
     let is_library = |path: &Path| {
-        path.parent().is_none_or(|parent| parent.as_os_str().is_empty())
+        path.parent()
+            .is_none_or(|parent| parent.as_os_str().is_empty())
             && path.extension().is_some_and(|e| e == ext)
     };
     let (lib_name, lib_bytes) = package

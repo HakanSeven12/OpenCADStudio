@@ -379,9 +379,12 @@ pub fn edge_on_face_point(
         let inside = (0..=64)
             .map(|k| base + view * (low + (high - low) * k as f64 / 64.0))
             .filter(|candidate| {
-                profile.plane.project(candidate.to_array()).is_some_and(|local| {
-                    contains(&boundary, local, Tolerance::new(BOUNDARY_TOLERANCE))
-                })
+                profile
+                    .plane
+                    .project(candidate.to_array())
+                    .is_some_and(|local| {
+                        contains(&boundary, local, Tolerance::new(BOUNDARY_TOLERANCE))
+                    })
             })
             .collect::<Vec<_>>();
         if let Some(middle) = inside.get(inside.len() / 2) {

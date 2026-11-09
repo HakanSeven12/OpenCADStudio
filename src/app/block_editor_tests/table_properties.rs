@@ -82,7 +82,8 @@ fn table_fixture_with_limits(
         else {
             panic!()
         };
-        let document::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data else {
+        let document::objects::DynamicBlockData::LinearParameter(parameter) = &mut object.data
+        else {
             panic!()
         };
         parameter.value_set.flags = 8;
@@ -491,7 +492,9 @@ fn block_table_properties_reject_shared_scratch_references_and_edit_nested_rows(
     assert_eq!(row(&app).1, 2);
     assert_eq!(
         crate::scene::block_parameter_properties::current_table_row(
-            &app.tabs[i].scene.document, None, other,
+            &app.tabs[i].scene.document,
+            None,
+            other,
         ),
         Some(0),
     );
@@ -659,7 +662,8 @@ fn a_value_list_is_not_painted_when_its_grip_is_gone() {
         "the open list hangs from the grip while the grip is drawn"
     );
     let doc = &mut app.tabs[i].scene.document;
-    let Some(document::objects::ObjectType::DynamicBlock(native)) = doc.objects.get_mut(&table) else {
+    let Some(document::objects::ObjectType::DynamicBlock(native)) = doc.objects.get_mut(&table)
+    else {
         panic!("the fixture's table is a dynamic block object");
     };
     let document::objects::DynamicBlockData::PropertiesTable(rows) = &mut native.data else {
@@ -1096,7 +1100,8 @@ fn block_table_row_history_preserves_transported_linear_frames() {
 
 #[test]
 fn drawing1_dxf_and_berb_dwg_stretch_grips_evaluate_without_error() {
-    let dxf_path = r"C:\Users\Atelier La Medina\AppData\Local\Temp\Rar$DRa40168.24845.rartemp\Drawing1.dxf";
+    let dxf_path =
+        r"C:\Users\Atelier La Medina\AppData\Local\Temp\Rar$DRa40168.24845.rartemp\Drawing1.dxf";
     if std::path::Path::new(dxf_path).exists() {
         let doc = document::DxfReader::from_file(std::path::Path::new(dxf_path))
             .unwrap()

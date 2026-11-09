@@ -321,10 +321,8 @@ impl OpenCADStudio {
         );
         if let Some(event) = event {
             self.issue_phase(tab, ocs_plugin_api::host::CustomGripPhase::Settle, event);
-            self.plugin_grip_deliveries.begin_settle_watch(
-                self.plugin_grip_settle_watchdog,
-                std::time::Instant::now(),
-            );
+            self.plugin_grip_deliveries
+                .begin_settle_watch(self.plugin_grip_settle_watchdog, std::time::Instant::now());
         } else {
             // The owner vanished mid-drag: end as a cancel.
             let _ = self.cancel_plugin_grip_drag();
@@ -744,7 +742,9 @@ impl OpenCADStudio {
             crate::plugin::quad::retain_alive(|plugin| {
                 !self.disabled_plugins.contains(plugin)
                     && crate::plugin::external::with_manager(|manager| {
-                        !manager.grip_endpoint(plugin).is_some_and(|(_, _, alive)| !alive)
+                        !manager
+                            .grip_endpoint(plugin)
+                            .is_some_and(|(_, _, alive)| !alive)
                     })
             });
             for i in 0..self.tabs.len() {
@@ -857,7 +857,9 @@ impl OpenCADStudio {
                 return;
             }
         };
-        let Some(declaration) = self.tabs[tab].plugin_classes.find(&plugin, &binding.class_id)
+        let Some(declaration) = self.tabs[tab]
+            .plugin_classes
+            .find(&plugin, &binding.class_id)
         else {
             refuse(format!("class {:?} not registered", binding.class_id));
             return;
@@ -898,9 +900,7 @@ impl OpenCADStudio {
         }
         let handles = Self::instance_display_set(self, tab, &binding);
         if handles.is_empty() {
-            refuse(
-                "no stamped display set resolves for the instance's identity stamp".to_owned(),
-            );
+            refuse("no stamped display set resolves for the instance's identity stamp".to_owned());
             return;
         }
         self.plugin_grip_descriptor_drag = Some(crate::plugin::grip_points::DescriptorGripDrag {
@@ -954,64 +954,62 @@ impl OpenCADStudio {
         let tolerance = drag.tolerance;
         let handles = drag.handles.clone();
         match reanchor_profile_chain(&chain, segment, drag.anchor, constrained) {
-            Ok(reanchored) => match crate::parametric::build_display_entities(
-                &reanchored,
-                tolerance,
-            ) {
-                Ok((fresh, _carriers)) if fresh.len() == handles.len() => {
-                    // The honest lane (the seat test's own arms): clone the
-                    // live entities — identity, layer and the XDATA stamp ride
-                    // along — and patch ONLY the geometry from the re-derived
-                    // carriers. The count-staged set stays the drag's handles.
-                    let document = &self.tabs[tab].scene.document;
-                    let mut pairs: Vec<(document::Handle, document::EntityType)> =
-                        Vec::with_capacity(handles.len());
-                    let mut refused: Option<String> = None;
-                    for (slot, fresh_entity) in handles.iter().zip(fresh.iter()) {
-                        let Some(current) = document.get_entity(*slot) else {
-                            refused = Some(format!("staged entity {slot:?} is no longer live"));
-                            break;
-                        };
-                        let mut patched = current.clone();
-                        if let Err(reason) =
-                            patch_carrier_geometry(&mut patched, fresh_entity)
-                        {
-                            refused = Some(reason);
-                            break;
-                        }
-                        pairs.push((*slot, patched));
-                    }
-                    match refused {
-                        None => {
-                            let live = crate::plugin::grip_points::DescriptorGripDrag {
-                                chain: reanchored,
-                                ..drag
+            Ok(reanchored) => {
+                match crate::parametric::build_display_entities(&reanchored, tolerance) {
+                    Ok((fresh, _carriers)) if fresh.len() == handles.len() => {
+                        // The honest lane (the seat test's own arms): clone the
+                        // live entities — identity, layer and the XDATA stamp ride
+                        // along — and patch ONLY the geometry from the re-derived
+                        // carriers. The count-staged set stays the drag's handles.
+                        let document = &self.tabs[tab].scene.document;
+                        let mut pairs: Vec<(document::Handle, document::EntityType)> =
+                            Vec::with_capacity(handles.len());
+                        let mut refused: Option<String> = None;
+                        for (slot, fresh_entity) in handles.iter().zip(fresh.iter()) {
+                            let Some(current) = document.get_entity(*slot) else {
+                                refused = Some(format!("staged entity {slot:?} is no longer live"));
+                                break;
                             };
-                            self.plugin_grip_descriptor_drag = Some(live);
-                            // The live-geometry machinery: same handles,
-                            // originals stashed once, zero history steps.
-                            self.apply_plugin_grip_live_geometry(tab, &pairs);
+                            let mut patched = current.clone();
+                            if let Err(reason) = patch_carrier_geometry(&mut patched, fresh_entity)
+                            {
+                                refused = Some(reason);
+                                break;
+                            }
+                            pairs.push((*slot, patched));
                         }
-                        Some(reason) => Self::note_descriptor_refusal(
-                            self,
-                            format!("the display set cannot be patched in place: {reason}"),
-                        ),
+                        match refused {
+                            None => {
+                                let live = crate::plugin::grip_points::DescriptorGripDrag {
+                                    chain: reanchored,
+                                    ..drag
+                                };
+                                self.plugin_grip_descriptor_drag = Some(live);
+                                // The live-geometry machinery: same handles,
+                                // originals stashed once, zero history steps.
+                                self.apply_plugin_grip_live_geometry(tab, &pairs);
+                            }
+                            Some(reason) => Self::note_descriptor_refusal(
+                                self,
+                                format!("the display set cannot be patched in place: {reason}"),
+                            ),
+                        }
                     }
-                }
-                Ok((fresh, _)) => Self::note_descriptor_refusal(
-                    self,
-                    format!(
-                        "the re-derived entity count {} differs from the staged set {}; the \
+                    Ok((fresh, _)) => Self::note_descriptor_refusal(
+                        self,
+                        format!(
+                            "the re-derived entity count {} differs from the staged set {}; the \
                          count-stable restage cannot apply",
-                        fresh.len(),
-                        handles.len()
+                            fresh.len(),
+                            handles.len()
+                        ),
                     ),
-                ),
-                Err(reason) => Self::note_descriptor_refusal(
-                    self,
-                    format!("the re-derivation's own gates refuse the move: {reason}"),
-                ),
-            },
+                    Err(reason) => Self::note_descriptor_refusal(
+                        self,
+                        format!("the re-derivation's own gates refuse the move: {reason}"),
+                    ),
+                }
+            }
             Err(reason) => Self::note_descriptor_refusal(self, reason),
         }
     }
@@ -1044,8 +1042,7 @@ impl OpenCADStudio {
                     }
                     match record.values.get(1) {
                         Some(XDataValue::String(linkage)) => {
-                            !binding.design_record.is_empty()
-                                && linkage == &binding.design_record
+                            !binding.design_record.is_empty() && linkage == &binding.design_record
                         }
                         None => binding.design_record.is_empty(),
                         Some(_) => false,
@@ -1163,7 +1160,9 @@ pub(in crate::app) fn reanchor_profile_chain(
         return Err("the re-anchor serves the profile sheet only".to_owned());
     }
     let Some(_) = chain.segments.get(segment) else {
-        return Err(format!("drive segment {segment} is out of the design's range"));
+        return Err(format!(
+            "drive segment {segment} is out of the design's range"
+        ));
     };
     let mut edited = chain.clone();
     {
@@ -1213,11 +1212,7 @@ pub(in crate::app) fn reanchor_profile_chain(
                         return None;
                     }
                     let scaled = scale_ramp(&current, scale);
-                    Some(
-                        h0
-                            + length
-                                * crate::parametric::ramp_integral(&scaled, 1.0),
-                    )
+                    Some(h0 + length * crate::parametric::ramp_integral(&scaled, 1.0))
                 };
                 let scale = solve_by_bisection(voice, 1.0, cursor.y)?;
                 seg.def.ramp = scale_ramp(&current, scale);
@@ -1252,8 +1247,7 @@ pub(in crate::app) fn reanchor_profile_chain(
             .ok()
             .flatten()
             .ok_or_else(|| {
-                "the re-anchored front does not sample (the design left its own domain)"
-                    .to_owned()
+                "the re-anchored front does not sample (the design left its own domain)".to_owned()
             })?;
         for j in (segment + 1)..n {
             let slope = joint.direction[1] / joint.direction[0];
@@ -1295,7 +1289,10 @@ pub(in crate::app) fn ramp_with_unit_integral(ramp: &Ramp, w_target: f64) -> Res
             let d = *degree as usize;
             let mut next = *coeffs;
             next[d] += delta * (d as f64 + 1.0);
-            Ok(Ramp::Polynomial { degree: *degree, coeffs: next })
+            Ok(Ramp::Polynomial {
+                degree: *degree,
+                coeffs: next,
+            })
         }
         Ramp::Piecewise { count, knots } => {
             let active = (*count).clamp(1, knots.len() as u32) as usize;
@@ -1311,7 +1308,10 @@ pub(in crate::app) fn ramp_with_unit_integral(ramp: &Ramp, w_target: f64) -> Res
                 let gain = (span * 0.5 + (1.0 - knots[m].0)).max(1e-12);
                 next[m].1 += delta / gain;
             }
-            Ok(Ramp::Piecewise { count: *count, knots: next })
+            Ok(Ramp::Piecewise {
+                count: *count,
+                knots: next,
+            })
         }
         Ramp::Sampled { n, values } => {
             let count = (*n).clamp(1, values.len() as u32) as usize;
@@ -1322,7 +1322,10 @@ pub(in crate::app) fn ramp_with_unit_integral(ramp: &Ramp, w_target: f64) -> Res
                 let step = 1.0 / (count - 1) as f64;
                 next[count - 1] += delta * 2.0 / step;
             }
-            Ok(Ramp::Sampled { n: *n, values: next })
+            Ok(Ramp::Sampled {
+                n: *n,
+                values: next,
+            })
         }
     }
 }
@@ -1338,19 +1341,28 @@ pub(in crate::app) fn ramp_with_end_value(ramp: &Ramp, end_value: f64) -> Ramp {
             let mut next = *coeffs;
             let lower: f64 = coeffs[..d].iter().sum();
             next[d] = end_value - lower;
-            Ramp::Polynomial { degree: *degree, coeffs: next }
+            Ramp::Polynomial {
+                degree: *degree,
+                coeffs: next,
+            }
         }
         Ramp::Piecewise { count, knots } => {
             let active = (*count).clamp(1, knots.len() as u32) as usize;
             let mut next = *knots;
             next[active - 1].1 = end_value;
-            Ramp::Piecewise { count: *count, knots: next }
+            Ramp::Piecewise {
+                count: *count,
+                knots: next,
+            }
         }
         Ramp::Sampled { n, values } => {
             let count = (*n).clamp(1, values.len() as u32) as usize;
             let mut next = values.clone();
             next[count - 1] = end_value;
-            Ramp::Sampled { n: *n, values: next }
+            Ramp::Sampled {
+                n: *n,
+                values: next,
+            }
         }
     }
 }

@@ -132,12 +132,7 @@ struct BlockTextBatch {
 }
 
 impl BlockTextBatch {
-    fn flush(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        out: &mut Vec<BlockTextGpu>,
-    ) {
+    fn flush(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, out: &mut Vec<BlockTextGpu>) {
         if self.draws.is_empty() {
             return;
         }

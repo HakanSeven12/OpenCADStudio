@@ -67,7 +67,11 @@ fn build_step() -> String {
     // A one-triangle manifold solid in the z = 0 plane, offset by `dx`.
     let triangle = |out: &mut String, next: &mut u64, dx: f64| {
         let p0 = emit(out, next, format!("CARTESIAN_POINT('',({dx},0.,0.))"));
-        let p1 = emit(out, next, format!("CARTESIAN_POINT('',({},0.,0.))", dx + 1.0));
+        let p1 = emit(
+            out,
+            next,
+            format!("CARTESIAN_POINT('',({},0.,0.))", dx + 1.0),
+        );
         let p2 = emit(out, next, format!("CARTESIAN_POINT('',({dx},1.,0.))"));
         let v0 = emit(out, next, format!("VERTEX_POINT('',#{p0})"));
         let v1 = emit(out, next, format!("VERTEX_POINT('',#{p1})"));
@@ -88,10 +92,18 @@ fn build_step() -> String {
         let o12 = emit(out, next, format!("ORIENTED_EDGE('',*,*,#{e12},.T.)"));
         let o20 = emit(out, next, format!("ORIENTED_EDGE('',*,*,#{e20},.T.)"));
         let loop_ = emit(out, next, format!("EDGE_LOOP('',(#{o01},#{o12},#{o20}))"));
-        let axis = emit(out, next, format!("AXIS2_PLACEMENT_3D('',#{p0},#{z},#{d01})"));
+        let axis = emit(
+            out,
+            next,
+            format!("AXIS2_PLACEMENT_3D('',#{p0},#{z},#{d01})"),
+        );
         let plane = emit(out, next, format!("PLANE('',#{axis})"));
         let bound = emit(out, next, format!("FACE_OUTER_BOUND('',#{loop_},.T.)"));
-        let face = emit(out, next, format!("ADVANCED_FACE('',(#{bound}),#{plane},.T.)"));
+        let face = emit(
+            out,
+            next,
+            format!("ADVANCED_FACE('',(#{bound}),#{plane},.T.)"),
+        );
         let shell = emit(out, next, format!("CLOSED_SHELL('',(#{face}))"));
         emit(out, next, format!("MANIFOLD_SOLID_BREP('',#{shell})"))
     };
@@ -172,7 +184,10 @@ fn build_step() -> String {
         let nauo = emit(
             &mut out,
             &mut next,
-            format!("NEXT_ASSEMBLY_USAGE_OCCURRENCE('N{o}','','',#{parent_def},#{})", child_defs[child]),
+            format!(
+                "NEXT_ASSEMBLY_USAGE_OCCURRENCE('N{o}','','',#{parent_def},#{})",
+                child_defs[child]
+            ),
         );
         let shape = emit(
             &mut out,
@@ -264,7 +279,11 @@ fn main() {
         bytes.len(),
         first.products.len(),
         first.roots.len(),
-        first.products.iter().map(|p| p.children.len()).sum::<usize>(),
+        first
+            .products
+            .iter()
+            .map(|p| p.children.len())
+            .sum::<usize>(),
         first.products.iter().map(|p| p.bodies.len()).sum::<usize>(),
     );
     let expected = sink(&first);

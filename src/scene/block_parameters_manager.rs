@@ -148,11 +148,7 @@ fn parameter_rows(doc: &Document, definition: Handle) -> Vec<Row> {
         };
         // Rows are keyed by name, and the list sorts case-insensitively, so a
         // lookup that differs only in case from a parameter is the same row.
-        if name.is_empty()
-            || rows
-                .iter()
-                .any(|row| row.name.eq_ignore_ascii_case(&name))
-        {
+        if name.is_empty() || rows.iter().any(|row| row.name.eq_ignore_ascii_case(&name)) {
             continue;
         }
         rows.push(Row {

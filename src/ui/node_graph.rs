@@ -174,7 +174,10 @@ impl ObjectKind {
                 | (ObjectKind::MLine, EntityType::MLine(_))
                 | (ObjectKind::MultiLeader, EntityType::MultiLeader(_))
                 | (ObjectKind::Helix, EntityType::Helix(_))
-                | (ObjectKind::AttributeDefinition, EntityType::AttributeDefinition(_))
+                | (
+                    ObjectKind::AttributeDefinition,
+                    EntityType::AttributeDefinition(_)
+                )
                 | (ObjectKind::Table, EntityType::Table(_))
                 | (ObjectKind::Polyline2D, EntityType::Polyline2D(_))
                 | (ObjectKind::Mesh, EntityType::Mesh(_))
@@ -259,9 +262,9 @@ impl ObjectKind {
             ObjectKind::Text => {
                 EntityType::Text(e::Text::with_value("Text", origin).with_height(2.5))
             }
-            ObjectKind::MText => {
-                EntityType::MText(Box::new(e::MText::with_value("MText", origin).with_height(2.5)))
-            }
+            ObjectKind::MText => EntityType::MText(Box::new(
+                e::MText::with_value("MText", origin).with_height(2.5),
+            )),
             ObjectKind::Spline => EntityType::Spline(e::Spline::from_fit_points(vec![
                 origin,
                 point(5.0, 5.0),
@@ -284,7 +287,9 @@ impl ObjectKind {
                 point(10.0, 10.0),
                 point(0.0, 10.0),
             )),
-            ObjectKind::Leader => EntityType::Leader(e::Leader::two_point(origin, point(10.0, 5.0))),
+            ObjectKind::Leader => {
+                EntityType::Leader(e::Leader::two_point(origin, point(10.0, 5.0)))
+            }
             ObjectKind::Tolerance => {
                 EntityType::Tolerance(e::Tolerance::with_text(origin, "{\\Fgdt;j}%%v0.1"))
             }
@@ -326,16 +331,19 @@ impl ObjectKind {
             // One leader with MText content, in the current multileader style.
             ObjectKind::MultiLeader => {
                 let name = &document.header.current_mleader_style_name;
-                let style = document.objects.iter().find_map(|(handle, object)| match object {
-                    document::objects::ObjectType::MultiLeaderStyle(style)
-                        if style.name.eq_ignore_ascii_case(name) =>
-                    {
-                        let mut style = style.clone();
-                        style.handle = *handle;
-                        Some(style)
-                    }
-                    _ => None,
-                });
+                let style = document
+                    .objects
+                    .iter()
+                    .find_map(|(handle, object)| match object {
+                        document::objects::ObjectType::MultiLeaderStyle(style)
+                            if style.name.eq_ignore_ascii_case(name) =>
+                        {
+                            let mut style = style.clone();
+                            style.handle = *handle;
+                            Some(style)
+                        }
+                        _ => None,
+                    });
                 EntityType::MultiLeader(Box::new(
                     crate::modules::annotate::mleader_cmd::build_mleader(
                         "MText",
@@ -390,7 +398,9 @@ impl ObjectKind {
                 mesh.m_vertex_count = 3;
                 mesh.n_vertex_count = 3;
                 mesh.vertices = (0..9)
-                    .map(|i| e::PolygonMeshVertex::at(point(5.0 * (i / 3) as f64, 5.0 * (i % 3) as f64)))
+                    .map(|i| {
+                        e::PolygonMeshVertex::at(point(5.0 * (i / 3) as f64, 5.0 * (i % 3) as f64))
+                    })
                     .collect();
                 EntityType::PolygonMesh(mesh)
             }
@@ -401,7 +411,14 @@ impl ObjectKind {
                     .iter()
                     .map(|[x, y, z]| mesh.add_vertex_xyz(x * 10.0, y * 10.0, z * 10.0))
                     .collect();
-                for [a, b, c, d] in [[0, 3, 2, 1], [4, 5, 6, 7], [0, 1, 5, 4], [1, 2, 6, 5], [2, 3, 7, 6], [3, 0, 4, 7]] {
+                for [a, b, c, d] in [
+                    [0, 3, 2, 1],
+                    [4, 5, 6, 7],
+                    [0, 1, 5, 4],
+                    [1, 2, 6, 5],
+                    [2, 3, 7, 6],
+                    [3, 0, 4, 7],
+                ] {
                     mesh.add_quad(v[a], v[b], v[c], v[d]);
                 }
                 EntityType::PolyfaceMesh(mesh)
@@ -479,7 +496,11 @@ pub enum RowWidget {
     Coordinate,
     /// A coordinate group's summary row; its label folds the components.
     Group,
-    Slider { min: f64, max: f64, step: f64 },
+    Slider {
+        min: f64,
+        max: f64,
+        step: f64,
+    },
     Toggle,
 }
 
@@ -632,7 +653,11 @@ fn node_tip(name: String, spec: Option<&Spec>) -> String {
     match spec {
         Some(spec) => {
             let inputs: Vec<&str> = spec.inputs.iter().map(|input| input.name).collect();
-            format!("{name}\n{} -> {}", inputs.join(", "), spec.outputs.join(", "))
+            format!(
+                "{name}\n{} -> {}",
+                inputs.join(", "),
+                spec.outputs.join(", ")
+            )
         }
         None => name,
     }
@@ -968,11 +993,9 @@ impl Graph {
 
     /// Whether `row` shows: not folded into a closed coordinate group.
     fn is_shown(&self, id: NodeId, row: &NodeRow) -> bool {
-        row.group.as_ref().is_none_or(|group| {
-            self.ui
-                .get(&id)
-                .is_some_and(|ui| ui.open.contains(group))
-        })
+        row.group
+            .as_ref()
+            .is_none_or(|group| self.ui.get(&id).is_some_and(|ui| ui.open.contains(group)))
     }
 
     /// Row centre of `field`, relative to the node's top. Rows of a collapsed
@@ -1109,10 +1132,7 @@ impl Graph {
             for section in node_sections.iter().filter(|s| self.is_open(id, s)) {
                 for row in &section.rows {
                     let typed = !matches!(row.widget, RowWidget::Slider { .. } | RowWidget::Toggle);
-                    if typed
-                        && row.input
-                        && self.is_shown(id, row)
-                        && !driven.contains(&row.field)
+                    if typed && row.input && self.is_shown(id, row) && !driven.contains(&row.field)
                     {
                         fields.push(Port {
                             node: id,
@@ -1453,7 +1473,11 @@ impl Graph {
     }
 
     /// The input and output port dots of `node_row`, or gaps.
-    fn port_views(&self, id: NodeId, node_row: &NodeRow) -> (Element<'_, Message>, Element<'_, Message>) {
+    fn port_views(
+        &self,
+        id: NodeId,
+        node_row: &NodeRow,
+    ) -> (Element<'_, Message>, Element<'_, Message>) {
         let port = Port {
             node: id,
             field: node_row.field.clone(),
@@ -1862,7 +1886,10 @@ impl Zoomed<'_> {
         let mut find = FindFocused::default();
         self.run(tree, content, renderer, &mut find);
         let id = find.0?;
-        self.fields.iter().find(|port| field_id(port) == id).cloned()
+        self.fields
+            .iter()
+            .find(|port| field_id(port) == id)
+            .cloned()
     }
 
     /// Focuses `port` and selects its text.
@@ -1881,7 +1908,11 @@ impl Zoomed<'_> {
     /// The field Tab goes to from `from`: the next on the same card, wrapping
     /// at its ends.
     fn tab_target(&self, from: &Port, backward: bool) -> Option<Port> {
-        let card: Vec<&Port> = self.fields.iter().filter(|port| port.node == from.node).collect();
+        let card: Vec<&Port> = self
+            .fields
+            .iter()
+            .filter(|port| port.node == from.node)
+            .collect();
         let at = card.iter().position(|port| *port == from)?;
         let count = card.len();
         let next = if backward { at + count - 1 } else { at + 1 } % count;
@@ -1966,7 +1997,9 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
             event,
             iced::Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
         );
-        let before = pressed.then(|| self.focused(tree, content, renderer)).flatten();
+        let before = pressed
+            .then(|| self.focused(tree, content, renderer))
+            .flatten();
         self.content.as_widget_mut().update(
             &mut tree.children[0],
             event,
@@ -1987,7 +2020,11 @@ impl Widget<Message, Theme, iced::Renderer> for Zoomed<'_> {
             event,
             iced::Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
         ) {
-            let entered = tree.state.downcast_mut::<ZoomedState>().select_on_release.take();
+            let entered = tree
+                .state
+                .downcast_mut::<ZoomedState>()
+                .select_on_release
+                .take();
             if let Some(port) = entered {
                 self.run(tree, content, renderer, &mut SelectField(field_id(&port)));
                 shell.request_redraw();

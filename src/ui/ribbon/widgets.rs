@@ -1651,7 +1651,11 @@ fn large_item<'a>(
                         style_ctx.mleader_layer,
                         style_ctx.mleader_layer_color,
                         open_dd.as_deref() == Some(MLEADER_LAYER_COMBO),
-                        format!("{}\n{} MLEADERLAYER", t!("Multileader Layer"), t!("Command:")),
+                        format!(
+                            "{}\n{} MLEADERLAYER",
+                            t!("Multileader Layer"),
+                            t!("Command:")
+                        ),
                     ))
                     .width(Fill)
                     .into(),
@@ -1783,9 +1787,13 @@ fn text_find_box<'a>(value: &str) -> Element<'a, Message> {
     .on_press(Message::RibbonTextFindSubmit)
     .style(move |theme: &Theme, status| tool_btn_style(theme, false, status))
     .padding(3);
-    let search = tooltip(search, make_tip(t!("Find text").into_owned()), TipPos::Bottom)
-        .delay(Duration::from_millis(400))
-        .style(tip_style);
+    let search = tooltip(
+        search,
+        make_tip(t!("Find text").into_owned()),
+        TipPos::Bottom,
+    )
+    .delay(Duration::from_millis(400))
+    .style(tip_style);
     row![input, search]
         .spacing(2)
         .align_y(iced::Center)
@@ -1804,7 +1812,11 @@ fn text_height_box<'a>(value: &str) -> Element<'a, Message> {
         .width(Fill);
     let input = tooltip(
         input,
-        make_tip(format!("{}\n{} TEXTSIZE", t!("Text Height"), t!("Command:"))),
+        make_tip(format!(
+            "{}\n{} TEXTSIZE",
+            t!("Text Height"),
+            t!("Command:")
+        )),
         TipPos::Bottom,
     )
     .delay(Duration::from_millis(400))

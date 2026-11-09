@@ -363,7 +363,9 @@ fn handle_host_request(
             };
             match result {
                 Some(Ok(b)) => HostResponse::Bool(b),
-                Some(Err(_)) => HostResponse::Error("is_selection_gathering() panicked".to_string()),
+                Some(Err(_)) => {
+                    HostResponse::Error("is_selection_gathering() panicked".to_string())
+                }
                 None => HostResponse::Error(format!("unknown interactive command {command_id}")),
             }
         }
@@ -378,7 +380,9 @@ fn handle_host_request(
             };
             match result {
                 Some(Ok(b)) => HostResponse::Bool(b),
-                Some(Err(_)) => HostResponse::Error("accepts_drag_selection() panicked".to_string()),
+                Some(Err(_)) => {
+                    HostResponse::Error("accepts_drag_selection() panicked".to_string())
+                }
                 None => HostResponse::Error(format!("unknown interactive command {command_id}")),
             }
         }
@@ -393,7 +397,9 @@ fn handle_host_request(
             };
             match result {
                 Some(Ok(b)) => HostResponse::Bool(b),
-                Some(Err(_)) => HostResponse::Error("selection_rejects_locked_layers() panicked".to_string()),
+                Some(Err(_)) => {
+                    HostResponse::Error("selection_rejects_locked_layers() panicked".to_string())
+                }
                 None => HostResponse::Error(format!("unknown interactive command {command_id}")),
             }
         }
@@ -416,11 +422,9 @@ fn handle_host_request(
             let result = {
                 let registry = interactive.borrow();
                 registry.get(&command_id).and_then(|cmd| {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        cmd.modal_dialog()
-                    }))
-                    .ok()
-                    .flatten()
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.modal_dialog()))
+                        .ok()
+                        .flatten()
                 })
             };
             HostResponse::ModalDialog(result)
@@ -667,11 +671,9 @@ fn handle_host_request_v4(
             let result = {
                 let registry = interactive.borrow();
                 registry.get(&command_id).and_then(|cmd| {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        cmd.modal_dialog()
-                    }))
-                    .ok()
-                    .flatten()
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cmd.modal_dialog()))
+                        .ok()
+                        .flatten()
                 })
             };
             Some(HostResponse::ModalDialog(result))

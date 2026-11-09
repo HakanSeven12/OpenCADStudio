@@ -227,9 +227,7 @@ impl CadCommand for ExtrudeCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            ExtrudeStep::Pick => {
-                t!("EXTRUDE  Select objects to extrude or [MOde]:").into_owned()
-            }
+            ExtrudeStep::Pick => t!("EXTRUDE  Select objects to extrude or [MOde]:").into_owned(),
             ExtrudeStep::Mode => format!(
                 "{} <{}>:",
                 t!("EXTRUDE  Creation mode [Solid/Surface]"),
@@ -889,9 +887,7 @@ impl CadCommand for PresspullCommand {
 
     fn prompt(&self) -> String {
         match self.step {
-            PresspullStep::Pick => {
-                t!("PRESSPULL  Select object or bounded area:").into_owned()
-            }
+            PresspullStep::Pick => t!("PRESSPULL  Select object or bounded area:").into_owned(),
             PresspullStep::Multiple => t!(
                 "PRESSPULL  Select additional objects or bounded areas [Undo] (Enter for height):"
             )
@@ -1438,9 +1434,7 @@ impl CadCommand for RevolveCommand {
     }
     fn prompt(&self) -> String {
         match self.step {
-            RevolveStep::Pick => {
-                t!("REVOLVE  Select objects to revolve or [MOde]:").into_owned()
-            }
+            RevolveStep::Pick => t!("REVOLVE  Select objects to revolve or [MOde]:").into_owned(),
             RevolveStep::Mode => format!(
                 "{} <{}>:",
                 t!("REVOLVE  Creation mode [Solid/Surface]"),

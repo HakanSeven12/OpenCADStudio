@@ -151,14 +151,12 @@ impl EditLease {
             use std::os::windows::fs::OpenOptionsExt;
             options.attributes(windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN);
         }
-        let mut sidecar = options
-            .open(&lock_path)
-            .map_err(|error| {
-                EditLeaseError::Unavailable(format!(
-                    "Could not create edit lock {}: {error}",
-                    lock_path.display()
-                ))
-            })?;
+        let mut sidecar = options.open(&lock_path).map_err(|error| {
+            EditLeaseError::Unavailable(format!(
+                "Could not create edit lock {}: {error}",
+                lock_path.display()
+            ))
+        })?;
 
         match sidecar.try_lock() {
             Ok(()) => {}

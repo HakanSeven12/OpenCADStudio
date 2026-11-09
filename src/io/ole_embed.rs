@@ -39,8 +39,8 @@ const PORTABLE_FORMATS: [image::ImageFormat; 3] = [
 #[cfg(target_os = "windows")]
 pub fn insert_object_dialog() -> Result<std::path::PathBuf, String> {
     use windows_sys::Win32::System::Ole::{
-        OleInitialize, OleUIInsertObjectW, IOF_DISABLEDISPLAYASICON,
-        IOF_DISABLELINK, IOF_SELECTCREATEFROMFILE, OLEUIINSERTOBJECTW, OLEUI_OK,
+        OleInitialize, OleUIInsertObjectW, IOF_DISABLEDISPLAYASICON, IOF_DISABLELINK,
+        IOF_SELECTCREATEFROMFILE, OLEUIINSERTOBJECTW, OLEUI_OK,
     };
     // The window takes at most MAX_PATH characters.
     let mut file = vec![0u16; 260];
@@ -68,7 +68,9 @@ pub fn insert_object_dialog() -> Result<std::path::PathBuf, String> {
         }
     }
     let len = file.iter().position(|&c| c == 0).unwrap_or(file.len());
-    Ok(std::path::PathBuf::from(String::from_utf16_lossy(&file[..len])))
+    Ok(std::path::PathBuf::from(String::from_utf16_lossy(
+        &file[..len],
+    )))
 }
 
 /// A raster image prepared for embedding: encoded bytes plus the metadata the

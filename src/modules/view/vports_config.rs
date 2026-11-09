@@ -16,7 +16,11 @@ pub fn dropdown() -> RibbonItem {
             (
                 $cmd,
                 $label,
-                IconKind::Svg(include_bytes!(concat!("../../../assets/icons/vports_", $icon, ".svg"))),
+                IconKind::Svg(include_bytes!(concat!(
+                    "../../../assets/icons/vports_",
+                    $icon,
+                    ".svg"
+                ))),
             )
         };
     }

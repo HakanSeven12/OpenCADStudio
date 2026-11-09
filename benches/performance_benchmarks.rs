@@ -59,9 +59,8 @@ use OpenCADStudio::scene::{ChangeKind, Scene};
 use OpenCADStudio::snap::Snapper;
 use OpenCADStudio::ui::icons::{self, CHECK};
 use OpenCADStudio::ui::overlay::{
-    grid_segments, selection_overlay, CrosshairOptions, GridCanvasState, GridKey,
-    GridParams, GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions,
-    UcsIconParams,
+    grid_segments, selection_overlay, CrosshairOptions, GridCanvasState, GridKey, GridParams,
+    GridStyle, GripMarker, NavCursor, OstTrackPoint, SelectionVisualOptions, UcsIconParams,
 };
 use OpenCADStudio::ui::properties::LinetypeItem;
 use OpenCADStudio::ui::ribbon::{LayerInfo, Ribbon};
@@ -1030,7 +1029,11 @@ fn bench_ui_grid_geometry(runner: &mut BenchmarkRunner) {
             },
         ];
         let key_for = |pane: usize| {
-            GridKey::from_grids(std::slice::from_ref(&grids[pane]), clips[pane], GridStyle::default())
+            GridKey::from_grids(
+                std::slice::from_ref(&grids[pane]),
+                clips[pane],
+                GridStyle::default(),
+            )
         };
 
         let state = GridCanvasState::default();

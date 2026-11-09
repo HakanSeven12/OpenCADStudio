@@ -596,7 +596,10 @@ mod tests {
             document::types::Color::Index(3)
         );
         assert!(app.mtext_commit());
-        assert_eq!(mt_of(&app, h).common.color, document::types::Color::Index(3));
+        assert_eq!(
+            mt_of(&app, h).common.color,
+            document::types::Color::Index(3)
+        );
         assert_eq!(mt_of(&app, h).value, r"\pxqc,t4;a{\C1;b}");
     }
 

@@ -111,7 +111,12 @@ impl std::fmt::Display for Choice {
 fn choices(keys: &[&str]) -> Vec<Choice> {
     keys.iter()
         .enumerate()
-        .map(|(code, key)| Choice(code as u8, crate::i18n::loader().get_attr("hatch-panel", key)))
+        .map(|(code, key)| {
+            Choice(
+                code as u8,
+                crate::i18n::loader().get_attr("hatch-panel", key),
+            )
+        })
         .collect()
 }
 
@@ -183,7 +188,11 @@ fn preview<'a>(settings: &HatchSettings) -> Element<'a, Message> {
         .into()
 }
 
-pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -> Element<'a, Message> {
+pub fn view<'a>(
+    settings: HatchSettings,
+    drafts: &Drafts,
+    layers: Vec<String>,
+) -> Element<'a, Message> {
     let tr = |key: &str| crate::i18n::loader().get_attr("hatch-panel", key);
     let kinds = choices(&["solid", "gradient", "pattern", "user-defined"]);
     let kind = form::labeled_pick_list(
@@ -200,7 +209,12 @@ pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -
                 .iter()
                 .map(|entry| entry.name.clone())
                 .collect();
-            fill = fill.push(list(tr("pattern"), patterns, name.clone(), HatchPanelMsg::Pattern));
+            fill = fill.push(list(
+                tr("pattern"),
+                patterns,
+                name.clone(),
+                HatchPanelMsg::Pattern,
+            ));
         }
         HatchFill::Gradient(gradient, invert) => {
             let names: Vec<String> = GradientKind::CHOICES
@@ -241,26 +255,38 @@ pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -
             .push(list(
                 tr("color"),
                 colors,
-                settings.color.clone().map_or_else(current_label, color_label),
+                settings
+                    .color
+                    .clone()
+                    .map_or_else(current_label, color_label),
                 HatchPanelMsg::Color,
             ))
             .push(list(
                 tr("background"),
                 backgrounds,
-                settings.background.clone().map_or_else(none_label, color_label),
+                settings
+                    .background
+                    .clone()
+                    .map_or_else(none_label, color_label),
                 HatchPanelMsg::Background,
             ));
     }
     fill = fill.push(field(
         tr("angle"),
-        drafts.angle.clone().unwrap_or_else(|| number(settings.angle_deg)),
+        drafts
+            .angle
+            .clone()
+            .unwrap_or_else(|| number(settings.angle_deg)),
         HatchPanelMsg::Angle,
     ));
     match settings.fill {
         HatchFill::Pattern(_) => {
             fill = fill.push(field(
                 tr("scale"),
-                drafts.scale.clone().unwrap_or_else(|| number(settings.scale)),
+                drafts
+                    .scale
+                    .clone()
+                    .unwrap_or_else(|| number(settings.scale)),
                 HatchPanelMsg::Scale,
             ));
         }
@@ -281,16 +307,25 @@ pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -
         }
         _ => {}
     }
-    if matches!(settings.fill, HatchFill::Pattern(_) | HatchFill::User { .. }) {
+    if matches!(
+        settings.fill,
+        HatchFill::Pattern(_) | HatchFill::User { .. }
+    ) {
         fill = fill
             .push(field(
                 tr("origin-x"),
-                drafts.origin_x.clone().unwrap_or_else(|| number(settings.origin[0])),
+                drafts
+                    .origin_x
+                    .clone()
+                    .unwrap_or_else(|| number(settings.origin[0])),
                 HatchPanelMsg::OriginX,
             ))
             .push(field(
                 tr("origin-y"),
-                drafts.origin_y.clone().unwrap_or_else(|| number(settings.origin[1])),
+                drafts
+                    .origin_y
+                    .clone()
+                    .unwrap_or_else(|| number(settings.origin[1])),
                 HatchPanelMsg::OriginY,
             ));
     }
@@ -329,10 +364,19 @@ pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -
     };
     let gap = field(
         tr("gap-tolerance"),
-        drafts.gap.clone().unwrap_or_else(|| number(settings.gap_tolerance)),
+        drafts
+            .gap
+            .clone()
+            .unwrap_or_else(|| number(settings.gap_tolerance)),
         HatchPanelMsg::Gap,
     );
-    let orders = choices(&["order-none", "order-back", "order-front", "order-behind", "order-in-front"]);
+    let orders = choices(&[
+        "order-none",
+        "order-back",
+        "order-front",
+        "order-behind",
+        "order-in-front",
+    ]);
     let draw_order = form::labeled_pick_list(
         tr("draw-order").into(),
         orders.clone(),
@@ -351,14 +395,25 @@ pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -
     let transparency = field(
         tr("transparency"),
         drafts.transparency.clone().unwrap_or_else(|| {
-            settings.transparency.map(|t| t.to_string()).unwrap_or_default()
+            settings
+                .transparency
+                .map(|t| t.to_string())
+                .unwrap_or_default()
         }),
         HatchPanelMsg::Transparency,
     );
     let buttons = row![
         iced::widget::Space::new().width(Length::Fill),
-        dialog_button(crate::tr!("hatch-panel", "cancel"), Message::HatchPanel(HatchPanelMsg::Cancel), false),
-        dialog_button(crate::tr!("hatch-panel", "ok"), Message::HatchPanel(HatchPanelMsg::Accept), true),
+        dialog_button(
+            crate::tr!("hatch-panel", "cancel"),
+            Message::HatchPanel(HatchPanelMsg::Cancel),
+            false
+        ),
+        dialog_button(
+            crate::tr!("hatch-panel", "ok"),
+            Message::HatchPanel(HatchPanelMsg::Accept),
+            true
+        ),
     ]
     .spacing(6);
     let body = column![
@@ -370,10 +425,22 @@ pub fn view<'a>(settings: HatchSettings, drafts: &Drafts, layers: Vec<String>) -
         form::section_label(tr("islands").into()),
         island_row,
         form::hdivider(Length::Fill),
-        check(tr("associative"), settings.associative, HatchPanelMsg::Associative),
+        check(
+            tr("associative"),
+            settings.associative,
+            HatchPanelMsg::Associative
+        ),
         check(tr("separate"), settings.separate, HatchPanelMsg::Separate),
-        check(tr("keep-boundaries"), settings.keep_boundaries, HatchPanelMsg::KeepBoundaries),
-        check(tr("annotative"), settings.annotative, HatchPanelMsg::Annotative),
+        check(
+            tr("keep-boundaries"),
+            settings.keep_boundaries,
+            HatchPanelMsg::KeepBoundaries
+        ),
+        check(
+            tr("annotative"),
+            settings.annotative,
+            HatchPanelMsg::Annotative
+        ),
         gap,
         draw_order,
         layer,

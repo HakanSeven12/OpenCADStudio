@@ -249,7 +249,11 @@ fn arc_aligned_text_render(data: &ArcAlignedTextData) -> RenderEntity {
         let (axis_x, axis_y, normal) = plane_axes(data.normal);
         // The centre in the text plane's own coordinates.
         let dot = |a: Vector3, b: Vector3| a.x * b.x + a.y * b.y + a.z * b.z;
-        let (cx, cy, elevation) = (dot(center, axis_x), dot(center, axis_y), dot(center, normal));
+        let (cx, cy, elevation) = (
+            dot(center, axis_x),
+            dot(center, axis_y),
+            dot(center, normal),
+        );
         let size = data.text_size.abs();
         let x_scale = data.x_scale.abs().max(0.01);
         // Outward text stands on the arc reading clockwise; inward text hangs
@@ -366,7 +370,10 @@ fn arc_aligned_text_render(data: &ArcAlignedTextData) -> RenderEntity {
     RenderEntity {
         pick_tris: Vec::new(),
         object: RenderObject::Text(runs),
-        snap_pts: vec![(glam::DVec3::new(center.x, center.y, center.z), SnapHint::Center)],
+        snap_pts: vec![(
+            glam::DVec3::new(center.x, center.y, center.z),
+            SnapHint::Center,
+        )],
         tangent_geoms: vec![],
         key_vertices: vec![[center.x, center.y, center.z]],
         fill_tris: vec![],
@@ -1639,8 +1646,16 @@ fn properties(entity: &ExtendedEntity) -> Vec<PropSection> {
         ExtendedEntityData::Arch(data) => vec![PropSection {
             title: t!("Class").into_owned(),
             props: vec![
-                ro_prop(t!("Class").as_ref(), "ext_arch_class", data.dxf_name.clone()),
-                ro_prop(t!("Kind").as_ref(), "ext_arch_kind", format!("{:?}", data.kind)),
+                ro_prop(
+                    t!("Class").as_ref(),
+                    "ext_arch_class",
+                    data.dxf_name.clone(),
+                ),
+                ro_prop(
+                    t!("Kind").as_ref(),
+                    "ext_arch_kind",
+                    format!("{:?}", data.kind),
+                ),
             ],
         }],
         ExtendedEntityData::ArcAlignedText(data) => arc_text_properties(data),

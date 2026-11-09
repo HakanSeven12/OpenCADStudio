@@ -554,16 +554,11 @@ impl OpenCADStudio {
             // linetype handle draws ByBlock), then the drawing's linetypes.
             let ltype_names: Vec<String> = ["ByLayer".to_string(), "ByBlock".to_string()]
                 .into_iter()
-                .chain(
-                    doc.line_types
-                        .iter()
-                        .map(|l| l.name.clone())
-                        .filter(|n| {
-                            !n.is_empty()
-                                && !n.eq_ignore_ascii_case("ByLayer")
-                                && !n.eq_ignore_ascii_case("ByBlock")
-                        }),
-                )
+                .chain(doc.line_types.iter().map(|l| l.name.clone()).filter(|n| {
+                    !n.is_empty()
+                        && !n.eq_ignore_ascii_case("ByLayer")
+                        && !n.eq_ignore_ascii_case("ByBlock")
+                }))
                 .collect();
             // Arrowheads are blocks; the closed-filled default has no
             // block, so seed the list with it and add the arrowhead
@@ -982,13 +977,27 @@ impl OpenCADStudio {
                     xref_rows(&mut sections, ins, &br.xref_path, factor, overrides);
                 }
                 // A dynamic block's visibility states, picked like its grip.
-                let baseline = self.tabs[i].block_test.as_ref().filter(|test| test.insert == handle).map(|test| test.baseline.as_ref());
-                let mut custom_properties = crate::scene::block_parameter_properties::properties(doc, baseline, self.tabs[i].id, handle);
+                let baseline = self.tabs[i]
+                    .block_test
+                    .as_ref()
+                    .filter(|test| test.insert == handle)
+                    .map(|test| test.baseline.as_ref());
+                let mut custom_properties = crate::scene::block_parameter_properties::properties(
+                    doc,
+                    baseline,
+                    self.tabs[i].id,
+                    handle,
+                );
                 if let Some(session) = self.nested_block_property_session(i, handle) {
-                    custom_properties.extend(Self::indexed_visibility_property(doc, self.tabs[i].id, handle));
+                    custom_properties.extend(Self::indexed_visibility_property(
+                        doc,
+                        self.tabs[i].id,
+                        handle,
+                    ));
                     for property in &mut custom_properties {
                         match &mut property.value {
-                            PropValue::BlockNumber { key, .. } | PropValue::BlockChoice { key, .. } => {
+                            PropValue::BlockNumber { key, .. }
+                            | PropValue::BlockChoice { key, .. } => {
                                 key.editor_session = Some(session);
                             }
                             _ => {}
@@ -997,14 +1006,35 @@ impl OpenCADStudio {
                 } else if self.tabs[i].active_block_edit_session().is_some() {
                     for property in &mut custom_properties {
                         property.value = match &property.value {
-                            crate::scene::model::object::PropValue::BlockNumber { value, description, .. } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip { value: value.clone(), tooltip: description.clone() },
-                            crate::scene::model::object::PropValue::BlockChoice { selected, options, description, .. } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip { value: crate::ui::properties::choice_cell_text(options, *selected), tooltip: description.clone() },
+                            crate::scene::model::object::PropValue::BlockNumber {
+                                value,
+                                description,
+                                ..
+                            } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                                value: value.clone(),
+                                tooltip: description.clone(),
+                            },
+                            crate::scene::model::object::PropValue::BlockChoice {
+                                selected,
+                                options,
+                                description,
+                                ..
+                            } => crate::scene::model::object::PropValue::ReadOnlyWithTooltip {
+                                value: crate::ui::properties::choice_cell_text(options, *selected),
+                                tooltip: description.clone(),
+                            },
                             value => value.clone(),
                         };
                     }
                     if let Some(mut visibility) = Self::visibility_property(doc, handle) {
-                        if let PropValue::ChoiceWithTooltip { selected, tooltip, .. } = visibility.value {
-                            visibility.value = PropValue::ReadOnlyWithTooltip { value: selected, tooltip };
+                        if let PropValue::ChoiceWithTooltip {
+                            selected, tooltip, ..
+                        } = visibility.value
+                        {
+                            visibility.value = PropValue::ReadOnlyWithTooltip {
+                                value: selected,
+                                tooltip,
+                            };
                             custom_properties.push(visibility);
                         }
                     }
@@ -1477,10 +1507,11 @@ impl OpenCADStudio {
                             cell,
                         ))
                         .filter(|picture| {
-                            !picture.is_empty() || local(CellStylePropertyFlags::DATA_FORMAT).is_some()
+                            !picture.is_empty()
+                                || local(CellStylePropertyFlags::DATA_FORMAT).is_some()
                         })
-                            .or_else(|| document_row_style.map(|style| style.format_string.clone()))
-                            .unwrap_or_default();
+                        .or_else(|| document_row_style.map(|style| style.format_string.clone()))
+                        .unwrap_or_default();
                         update_row_text(&mut sections, "tbl_cell_format", format);
                         let data_type = cell
                             .contents
@@ -1593,8 +1624,10 @@ impl OpenCADStudio {
                         // The picked-cell rows the table alone cannot resolve.
                         if crate::entities::table::prop_cell_range().is_some() {
                             // A field shows the text it evaluates to.
-                            if let Some(field) =
-                                cell.contents.first().and_then(|content| content.field_handle)
+                            if let Some(field) = cell
+                                .contents
+                                .first()
+                                .and_then(|content| content.field_handle)
                             {
                                 if let Some(text) = crate::entities::field::cell_text(
                                     doc,
@@ -1640,7 +1673,10 @@ impl OpenCADStudio {
                             let (border_color, border_lw) = match local_border {
                                 Some(border) => (border.color, border.line_weight),
                                 None => document_row_style.map_or(
-                                    (document::types::Color::ByBlock, document::types::LineWeight::ByBlock),
+                                    (
+                                        document::types::Color::ByBlock,
+                                        document::types::LineWeight::ByBlock,
+                                    ),
                                     |style| (style.top_border.color, style.top_border.line_weight),
                                 ),
                             };
@@ -1691,7 +1727,13 @@ impl OpenCADStudio {
                             );
                             let margin = |property, fallback: f64, left: bool| {
                                 local(property)
-                                    .map(|style| if left { style.margin_left } else { style.margin_top })
+                                    .map(|style| {
+                                        if left {
+                                            style.margin_left
+                                        } else {
+                                            style.margin_top
+                                        }
+                                    })
                                     .unwrap_or(fallback)
                             };
                             update_row_text(
@@ -1712,8 +1754,13 @@ impl OpenCADStudio {
                                     false,
                                 )),
                             );
-                            if crate::entities::table::cell_value_type(row, column_index, table, cell)
-                                .is_none()
+                            if crate::entities::table::cell_value_type(
+                                row,
+                                column_index,
+                                table,
+                                cell,
+                            )
+                            .is_none()
                             {
                                 if let Some(style) = document_row_style {
                                     update_row_text(
@@ -2055,7 +2102,10 @@ impl OpenCADStudio {
         let mut rows = crate::app::plugin_host::rows_from_schema(&binding);
         if !binding.design_record.is_empty() {
             if let Ok((_, entries)) = crate::app::plugin_host::find_design_record_entries(
-                self, i, handle, &binding.design_record,
+                self,
+                i,
+                handle,
+                &binding.design_record,
             ) {
                 if let Ok(read_rows) =
                     crate::app::plugin_host::rows_from_entries(&binding, &entries)
@@ -2198,15 +2248,17 @@ impl OpenCADStudio {
                 .get_entity(cur_handles[0])
                 .and_then(|entity| match entity {
                     document::EntityType::LwPolyline(polyline) => Some(polyline.vertices.len()),
-                    document::EntityType::Polyline2D(polyline) => Some(
-                        crate::entities::polyline::polyline2d_frame_indices(polyline).len(),
-                    ),
+                    document::EntityType::Polyline2D(polyline) => {
+                        Some(crate::entities::polyline::polyline2d_frame_indices(polyline).len())
+                    }
                     document::EntityType::PolygonMesh(mesh) => Some(mesh.vertices.len()),
                     document::EntityType::Polyline3D(polyline) => Some(
                         crate::entities::polyline::polyline3d_control_vertex_count(polyline),
                     ),
                     document::EntityType::Leader(leader) => Some(leader.vertices.len()),
-                    document::EntityType::Face3D(face) => Some(if face.is_triangle() { 3 } else { 4 }),
+                    document::EntityType::Face3D(face) => {
+                        Some(if face.is_triangle() { 3 } else { 4 })
+                    }
                     document::EntityType::Spline(spline) => {
                         Some(if crate::entities::spline::shows_fit_points(spline) {
                             spline.fit_points.len()
@@ -2234,9 +2286,7 @@ impl OpenCADStudio {
         // Picked table cells: the panel shows the first picked cell.
         let mut prop_vertex = prop_vertex;
         let mut picked_range = None;
-        if let (Some(cells), [handle]) =
-            (self.tabs[i].scene.table_cells, cur_handles.as_slice())
-        {
+        if let (Some(cells), [handle]) = (self.tabs[i].scene.table_cells, cur_handles.as_slice()) {
             if let (true, Some(document::EntityType::Table(table))) = (
                 cells.table == *handle,
                 self.tabs[i].scene.document.get_entity(*handle),
@@ -2452,7 +2502,8 @@ impl OpenCADStudio {
                                                     .document
                                                     .current_entity_transparency(),
                                             ),
-                                        options: crate::scene::creation_style::transparency_options(),
+                                        options: crate::scene::creation_style::transparency_options(
+                                        ),
                                     },
                                 },
                                 read_only(
@@ -2651,14 +2702,22 @@ impl OpenCADStudio {
                         annotation_scale_handle,
                         prop_vertex,
                     );
-                    if let Some(definition) = self.tabs[i].active_block_edit_session().map(|s| s.br_handle) {
+                    if let Some(definition) = self.tabs[i]
+                        .active_block_edit_session()
+                        .map(|s| s.br_handle)
+                    {
                         if source_entity.common().owner_handle == definition {
-                            let status = self.tabs[i].scene.block_constraint_entity_status(definition, handle);
+                            let status = self.tabs[i]
+                                .scene
+                                .block_constraint_entity_status(definition, handle);
                             sections.push(crate::scene::model::object::PropSection {
                                 title: crate::t!("Constraints").into_owned(),
                                 props: vec![crate::scene::model::object::Property {
-                                    label: crate::t!("Constraint status").into_owned(), field: "block_constraint_status",
-                                    value: PropValue::ReadOnly(crate::t!(status.label()).into_owned()),
+                                    label: crate::t!("Constraint status").into_owned(),
+                                    field: "block_constraint_status",
+                                    value: PropValue::ReadOnly(
+                                        crate::t!(status.label()).into_owned(),
+                                    ),
                                 }],
                             });
                         }
@@ -2824,30 +2883,64 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                 }) {
                     use crate::scene::model::object::{PropSection, PropValue, Property};
                     panel.title = item.name.clone();
-                    panel.sections = vec![PropSection {
-                        title: crate::t!("Geometry").into_owned(),
-                        props: self.tabs[i].active_block_edit_session()
-                            .and_then(|session| crate::scene::block_authoring::metadata::read(&self.tabs[i].scene.document, session.br_handle, item.handle).ok())
-                            .map(|metadata| {
-                                let mut props: Vec<Property> = metadata.text.into_iter().map(|text| {
-                                    use crate::scene::block_authoring::metadata::Field;
-                                    let label = match text.field {
-                                        Field::BaseStateLabel => crate::tr!("block-flip", "base-state-label"),
-                                        Field::FlippedStateLabel => crate::tr!("block-flip", "flipped-state-label"),
-                                        _ => crate::t!(text.label).into_owned(),
-                                    };
-                                    Property { label, field: text.field.key(), value: PropValue::PlainText(text.value.to_owned()) }
-                                }).collect();
-                                if let Some(visible) = metadata.visible {
-                                    props.push(Property { label: crate::t!("Show in Properties").into_owned(), field: "authoring_show_properties", value: PropValue::BoolToggle { field: "authoring_show_properties", value: visible } });
-                                }
-                                props
-                            }).unwrap_or_else(|| vec![Property {
-                                label: crate::t!("Parameter name").into_owned(), field: "authoring_name", value: PropValue::ReadOnly(item.name.clone()),
-                            }]).into_iter()
-                        .chain(item.grips.into_iter().map(|(part, point)| {
-                            Property {
-                                label: crate::t!(match part {
+                    panel.sections =
+                        vec![PropSection {
+                            title: crate::t!("Geometry").into_owned(),
+                            props: self.tabs[i]
+                                .active_block_edit_session()
+                                .and_then(|session| {
+                                    crate::scene::block_authoring::metadata::read(
+                                        &self.tabs[i].scene.document,
+                                        session.br_handle,
+                                        item.handle,
+                                    )
+                                    .ok()
+                                })
+                                .map(|metadata| {
+                                    let mut props: Vec<Property> = metadata
+                                        .text
+                                        .into_iter()
+                                        .map(|text| {
+                                            use crate::scene::block_authoring::metadata::Field;
+                                            let label = match text.field {
+                                                Field::BaseStateLabel => {
+                                                    crate::tr!("block-flip", "base-state-label")
+                                                }
+                                                Field::FlippedStateLabel => {
+                                                    crate::tr!("block-flip", "flipped-state-label")
+                                                }
+                                                _ => crate::t!(text.label).into_owned(),
+                                            };
+                                            Property {
+                                                label,
+                                                field: text.field.key(),
+                                                value: PropValue::PlainText(text.value.to_owned()),
+                                            }
+                                        })
+                                        .collect();
+                                    if let Some(visible) = metadata.visible {
+                                        props.push(Property {
+                                            label: crate::t!("Show in Properties").into_owned(),
+                                            field: "authoring_show_properties",
+                                            value: PropValue::BoolToggle {
+                                                field: "authoring_show_properties",
+                                                value: visible,
+                                            },
+                                        });
+                                    }
+                                    props
+                                })
+                                .unwrap_or_else(|| {
+                                    vec![Property {
+                                        label: crate::t!("Parameter name").into_owned(),
+                                        field: "authoring_name",
+                                        value: PropValue::ReadOnly(item.name.clone()),
+                                    }]
+                                })
+                                .into_iter()
+                                .chain(item.grips.into_iter().map(|(part, point)| {
+                                    Property {
+                                        label: crate::t!(match part {
                                     crate::scene::block_authoring::edit::Part::Point => "Position",
                                     crate::scene::block_authoring::edit::Part::Base => "Base point",
                                     crate::scene::block_authoring::edit::Part::End => "End point",
@@ -2855,82 +2948,185 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         "Reference point",
                                     _ => "Label position",
                                 })
-                                .into_owned(),
-                                field: "authoring_grip_position",
-                                value: PropValue::ReadOnly(format!(
-                                    "{:.4}, {:.4}, {:.4}",
-                                    point.x, point.y, point.z
-                                )),
-                            }
-                        }))
-                        .collect(),
-                    }];
-                    if let Some(document::objects::ObjectType::DynamicBlock(object)) = self.tabs[i].scene.document.objects.get(&item.handle) {
-                        if let document::objects::DynamicBlockData::AlignmentParameter(parameter) = &object.data {
-                            panel.sections.push(PropSection { title: crate::t!("Alignment").into_owned(), props: vec![Property {
-                                label: crate::t!("Alignment type").into_owned(), field: "authoring_alignment_type",
-                                value: PropValue::Choice { selected: crate::t!(if parameter.align_perpendicular { "Perpendicular" } else { "Tangent" }).into_owned(),
-                                    options: vec![crate::t!("Tangent").into_owned(), crate::t!("Perpendicular").into_owned()] },
-                            }] });
+                                        .into_owned(),
+                                        field: "authoring_grip_position",
+                                        value: PropValue::ReadOnly(format!(
+                                            "{:.4}, {:.4}, {:.4}",
+                                            point.x, point.y, point.z
+                                        )),
+                                    }
+                                }))
+                                .collect(),
+                        }];
+                    if let Some(document::objects::ObjectType::DynamicBlock(object)) =
+                        self.tabs[i].scene.document.objects.get(&item.handle)
+                    {
+                        if let document::objects::DynamicBlockData::AlignmentParameter(parameter) =
+                            &object.data
+                        {
+                            panel.sections.push(PropSection {
+                                title: crate::t!("Alignment").into_owned(),
+                                props: vec![Property {
+                                    label: crate::t!("Alignment type").into_owned(),
+                                    field: "authoring_alignment_type",
+                                    value: PropValue::Choice {
+                                        selected: crate::t!(if parameter.align_perpendicular {
+                                            "Perpendicular"
+                                        } else {
+                                            "Tangent"
+                                        })
+                                        .into_owned(),
+                                        options: vec![
+                                            crate::t!("Tangent").into_owned(),
+                                            crate::t!("Perpendicular").into_owned(),
+                                        ],
+                                    },
+                                }],
+                            });
                         }
                     }
-                    if let Some(count) = self.tabs[i].active_block_edit_session().and_then(|session| crate::scene::block_grips::config::count(&self.tabs[i].scene.document, session.br_handle, item.handle)) {
-                        panel.sections.push(PropSection { title: crate::t!("Grips").into_owned(), props: vec![Property { label: crate::t!("Number of grips").into_owned(), field: "authoring_grip_count", value: PropValue::EditText(count.to_string()) }] });
+                    if let Some(count) =
+                        self.tabs[i]
+                            .active_block_edit_session()
+                            .and_then(|session| {
+                                crate::scene::block_grips::config::count(
+                                    &self.tabs[i].scene.document,
+                                    session.br_handle,
+                                    item.handle,
+                                )
+                            })
+                    {
+                        panel.sections.push(PropSection {
+                            title: crate::t!("Grips").into_owned(),
+                            props: vec![Property {
+                                label: crate::t!("Number of grips").into_owned(),
+                                field: "authoring_grip_count",
+                                value: PropValue::EditText(count.to_string()),
+                            }],
+                        });
                     }
-                    if let Some(grips) = self.tabs[i].active_block_edit_session().and_then(|session| crate::scene::block_grips::config::locations(&self.tabs[i].scene.document, session.br_handle, item.handle).ok()) {
+                    if let Some(grips) =
+                        self.tabs[i]
+                            .active_block_edit_session()
+                            .and_then(|session| {
+                                crate::scene::block_grips::config::locations(
+                                    &self.tabs[i].scene.document,
+                                    session.br_handle,
+                                    item.handle,
+                                )
+                                .ok()
+                            })
+                    {
                         let fields = super::block_grip_set::native_grip_fields();
                         for grip in grips {
                             let (x, y) = fields[grip.role];
-                            panel.sections.push(PropSection { title: crate::t!(match grip.role { 0 => "Base grip location", 1 => "End grip location", 2 => "X grip location", _ => "Y grip location" }).into_owned(), props: vec![
-                                Property { label: "X".into(), field: x, value: PropValue::EditText(grip.point.x.to_string()) },
-                                Property { label: "Y".into(), field: y, value: PropValue::EditText(grip.point.y.to_string()) },
-                            ] });
+                            panel.sections.push(PropSection {
+                                title: crate::t!(match grip.role {
+                                    0 => "Base grip location",
+                                    1 => "End grip location",
+                                    2 => "X grip location",
+                                    _ => "Y grip location",
+                                })
+                                .into_owned(),
+                                props: vec![
+                                    Property {
+                                        label: "X".into(),
+                                        field: x,
+                                        value: PropValue::EditText(grip.point.x.to_string()),
+                                    },
+                                    Property {
+                                        label: "Y".into(),
+                                        field: y,
+                                        value: PropValue::EditText(grip.point.y.to_string()),
+                                    },
+                                ],
+                            });
                         }
                     }
-                    if let Some(base) = crate::scene::block_actions::options::base(&self.tabs[i].scene.document, item.handle) {
+                    if let Some(base) = crate::scene::block_actions::options::base(
+                        &self.tabs[i].scene.document,
+                        item.handle,
+                    ) {
                         let mut props = vec![Property {
                             label: crate::t!("Dependent base point").into_owned(),
                             field: "authoring_action_base_dependent",
-                            value: PropValue::BoolToggle { field: "authoring_action_base_dependent", value: base.dependent },
+                            value: PropValue::BoolToggle {
+                                field: "authoring_action_base_dependent",
+                                value: base.dependent,
+                            },
                         }];
                         if base.dependent {
                             props.extend([
-                                Property { label: crate::t!("Base offset X").into_owned(), field: "authoring_action_base_offset_x", value: PropValue::EditText(base.offset.x.to_string()) },
-                                Property { label: crate::t!("Base offset Y").into_owned(), field: "authoring_action_base_offset_y", value: PropValue::EditText(base.offset.y.to_string()) },
+                                Property {
+                                    label: crate::t!("Base offset X").into_owned(),
+                                    field: "authoring_action_base_offset_x",
+                                    value: PropValue::EditText(base.offset.x.to_string()),
+                                },
+                                Property {
+                                    label: crate::t!("Base offset Y").into_owned(),
+                                    field: "authoring_action_base_offset_y",
+                                    value: PropValue::EditText(base.offset.y.to_string()),
+                                },
                             ]);
                         } else {
                             props.extend([
-                                Property { label: crate::t!("Base X").into_owned(), field: "authoring_action_base_x", value: PropValue::EditText(base.base_point.x.to_string()) },
-                                Property { label: crate::t!("Base Y").into_owned(), field: "authoring_action_base_y", value: PropValue::EditText(base.base_point.y.to_string()) },
+                                Property {
+                                    label: crate::t!("Base X").into_owned(),
+                                    field: "authoring_action_base_x",
+                                    value: PropValue::EditText(base.base_point.x.to_string()),
+                                },
+                                Property {
+                                    label: crate::t!("Base Y").into_owned(),
+                                    field: "authoring_action_base_y",
+                                    value: PropValue::EditText(base.base_point.y.to_string()),
+                                },
                             ]);
                         }
-                        panel.sections.push(PropSection { title: crate::t!("Action base point").into_owned(), props });
+                        panel.sections.push(PropSection {
+                            title: crate::t!("Action base point").into_owned(),
+                            props,
+                        });
                     }
                     if let Some(offsets) = crate::scene::block_actions::options::offsets(
-                        &self.tabs[i].scene.document, item.handle) {
+                        &self.tabs[i].scene.document,
+                        item.handle,
+                    ) {
                         panel.sections.push(PropSection {
                             title: crate::t!("Action overrides").into_owned(),
                             props: vec![
                                 Property {
                                     label: crate::t!("Distance multiplier").into_owned(),
                                     field: "authoring_action_multiplier",
-                                    value: PropValue::EditText(offsets.distance_multiplier.to_string()),
+                                    value: PropValue::EditText(
+                                        offsets.distance_multiplier.to_string(),
+                                    ),
                                 },
                                 Property {
                                     label: crate::t!("Angle offset (degrees)").into_owned(),
                                     field: "authoring_action_angle",
-                                    value: PropValue::EditText(offsets.angle_offset.to_degrees().to_string()),
+                                    value: PropValue::EditText(
+                                        offsets.angle_offset.to_degrees().to_string(),
+                                    ),
                                 },
                             ],
                         });
                     }
-                    if let Some(definition) = self.tabs[i].active_block_edit_session().map(|session| session.br_handle) {
+                    if let Some(definition) = self.tabs[i]
+                        .active_block_edit_session()
+                        .map(|session| session.br_handle)
+                    {
                         if let Some(names) = crate::scene::block_actions::chain::labels(
-                            &self.tabs[i].scene.document, definition, item.handle) {
+                            &self.tabs[i].scene.document,
+                            definition,
+                            item.handle,
+                        ) {
                             let value = match names.as_slice() {
                                 [] => String::new(),
-                                [name] if name.trim() == name && !name.starts_with('[') => name.clone(),
-                                _ => serde_json::to_string(&names).expect("action names serialize as JSON strings"),
+                                [name] if name.trim() == name && !name.starts_with('[') => {
+                                    name.clone()
+                                }
+                                _ => serde_json::to_string(&names)
+                                    .expect("action names serialize as JSON strings"),
                             };
                             panel.sections.push(PropSection {
                                 title: crate::t!("Action chain").into_owned(),
@@ -3040,7 +3236,11 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                 };
                                 props.extend([
                                     Property {
-                                        label: crate::tr!("block-value-set", "use-min", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "use-min",
+                                            label = component.as_str()
+                                        ),
                                         field: minimum_enabled,
                                         value: PropValue::BoolToggle {
                                             field: minimum_enabled,
@@ -3048,7 +3248,11 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "use-max", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "use-max",
+                                            label = component.as_str()
+                                        ),
                                         field: maximum_enabled,
                                         value: PropValue::BoolToggle {
                                             field: maximum_enabled,
@@ -3056,7 +3260,11 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "use-increment", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "use-increment",
+                                            label = component.as_str()
+                                        ),
                                         field: increment_enabled,
                                         value: PropValue::BoolToggle {
                                             field: increment_enabled,
@@ -3064,7 +3272,11 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "use-list", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "use-list",
+                                            label = component.as_str()
+                                        ),
                                         field: values_enabled,
                                         value: PropValue::BoolToggle {
                                             field: values_enabled,
@@ -3072,22 +3284,38 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                                         },
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "min", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "min",
+                                            label = component.as_str()
+                                        ),
                                         field: minimum,
                                         value: PropValue::EditText(value_set.minimum.to_string()),
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "max", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "max",
+                                            label = component.as_str()
+                                        ),
                                         field: maximum,
                                         value: PropValue::EditText(value_set.maximum.to_string()),
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "increment", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "increment",
+                                            label = component.as_str()
+                                        ),
                                         field: increment,
                                         value: PropValue::EditText(value_set.increment.to_string()),
                                     },
                                     Property {
-                                        label: crate::tr!("block-value-set", "values", label = component.as_str()),
+                                        label: crate::tr!(
+                                            "block-value-set",
+                                            "values",
+                                            label = component.as_str()
+                                        ),
                                         field: values,
                                         value: PropValue::EditText(
                                             value_set
@@ -3118,7 +3346,9 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                 generation.wrapping_add(1)
             };
             if panel.selected_handles() == new_handles {
-                if let Some(section) = self.batch_block_property_section(i, &new_handles, panel.block_batch_generation) {
+                if let Some(section) =
+                    self.batch_block_property_section(i, &new_handles, panel.block_batch_generation)
+                {
                     panel.sections.push(section);
                 }
             }
@@ -3164,11 +3394,30 @@ filter={:.1} local={:.1} aggregate={:.1} entities={}",
                 && property_handles
                     .iter()
                     .all(|handle| self.tabs[i].scene.is_layer_locked(*handle));
-            if property_handles.iter().any(|handle| self.tabs[i].scene.document.get_entity(*handle)
-                .is_some_and(|entity| crate::scene::block_construction::is_construction(entity.common()))) {
-                set_row(&mut panel.sections, "color", crate::t!("Construction geometry").into_owned());
-                set_row(&mut panel.sections, "layer", crate::t!("Construction geometry").into_owned());
-                set_row(&mut panel.sections, "linetype", crate::t!("Dashed").into_owned());
+            if property_handles.iter().any(|handle| {
+                self.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(*handle)
+                    .is_some_and(|entity| {
+                        crate::scene::block_construction::is_construction(entity.common())
+                    })
+            }) {
+                set_row(
+                    &mut panel.sections,
+                    "color",
+                    crate::t!("Construction geometry").into_owned(),
+                );
+                set_row(
+                    &mut panel.sections,
+                    "layer",
+                    crate::t!("Construction geometry").into_owned(),
+                );
+                set_row(
+                    &mut panel.sections,
+                    "linetype",
+                    crate::t!("Dashed").into_owned(),
+                );
                 panel.field_key_by_id = crate::ui::properties::build_field_key_map(&panel.sections);
             }
             if locked_only {
@@ -3403,8 +3652,11 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         let tab = &mut self.tabs[i];
         match drag_key {
             Some(key) if tab.drag_start_grips.as_ref().map(|(k, ..)| *k) != Some(key) => {
-                tab.drag_start_grips =
-                    Some((key, tab.selected_grips.clone(), tab.selected_grip_handles.clone()));
+                tab.drag_start_grips = Some((
+                    key,
+                    tab.selected_grips.clone(),
+                    tab.selected_grip_handles.clone(),
+                ));
             }
             Some(_) => {}
             None => tab.drag_start_grips = None,
@@ -3505,22 +3757,35 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                             if polyline.flags.bits() & 2 != 0 =>
                         {
                             let n = polyline.vertices.len();
-                            let original = |i: usize| polyline.vertices[i % n].flags.bits() & 1 == 0;
+                            let original =
+                                |i: usize| polyline.vertices[i % n].flags.bits() & 1 == 0;
                             Some(
                                 segments
                                     .iter()
                                     .flat_map(|&k| {
-                                        let before = (0..=k).rev().find(|&i| original(i)).unwrap_or(k);
-                                        let after = (k + 1..k + 1 + n).find(|&i| original(i)).unwrap_or(k + 1) % n;
+                                        let before =
+                                            (0..=k).rev().find(|&i| original(i)).unwrap_or(k);
+                                        let after = (k + 1..k + 1 + n)
+                                            .find(|&i| original(i))
+                                            .unwrap_or(k + 1)
+                                            % n;
                                         [before, after]
                                     })
                                     .collect(),
                             )
                         }
-                        (document::EntityType::LwPolyline(_) | document::EntityType::Polyline2D(_), Some(segments)) => {
+                        (
+                            document::EntityType::LwPolyline(_)
+                            | document::EntityType::Polyline2D(_),
+                            Some(segments),
+                        ) => {
                             let n = match entity {
-                                document::EntityType::LwPolyline(polyline) => polyline.vertices.len(),
-                                document::EntityType::Polyline2D(polyline) => polyline.vertices.len(),
+                                document::EntityType::LwPolyline(polyline) => {
+                                    polyline.vertices.len()
+                                }
+                                document::EntityType::Polyline2D(polyline) => {
+                                    polyline.vertices.len()
+                                }
                                 _ => 0,
                             }
                             .max(1);
@@ -3534,7 +3799,10 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                         _ => None,
                     };
                 for grip in self.entity_grips_for(i, handle).unwrap_or_default() {
-                    if segment_grips.as_ref().is_some_and(|ids| !ids.contains(&grip.id)) {
+                    if segment_grips
+                        .as_ref()
+                        .is_some_and(|ids| !ids.contains(&grip.id))
+                    {
                         continue;
                     }
                     handles.push(handle);
@@ -3652,7 +3920,8 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         if let document::EntityType::Dimension(dim) = contextual.as_ref() {
             if matches!(
                 &**dim,
-                document::entities::Dimension::Linear(_) | document::entities::Dimension::Aligned(_)
+                document::entities::Dimension::Linear(_)
+                    | document::entities::Dimension::Aligned(_)
             ) && !dim.base().text_user_positioned
             {
                 let anno_scale = annotation_scale_handle
@@ -3980,7 +4249,10 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 let names = crate::app::annotation_data::data_link_entries(document);
                 let mut name = stem.clone();
                 let mut n = 1;
-                while names.iter().any(|(known, _)| known.eq_ignore_ascii_case(&name)) {
+                while names
+                    .iter()
+                    .any(|(known, _)| known.eq_ignore_ascii_case(&name))
+                {
                     n += 1;
                     name = format!("{stem} ({n})");
                 }
@@ -4124,9 +4396,11 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         // Apply it after the generic ribbon style so ordinary LINE entities
         // keep the existing path while centre lines honour their settings.
         let center_line =
-            document::entities::CenterLineAssociation::read(&entity.common().extended_data).is_some();
+            document::entities::CenterLineAssociation::read(&entity.common().extended_data)
+                .is_some();
         let center_mark =
-            document::entities::CenterMarkAssociation::read(&entity.common().extended_data).is_some();
+            document::entities::CenterMarkAssociation::read(&entity.common().extended_data)
+                .is_some();
         if center_line || center_mark {
             let settings = self.tabs[i].scene.centerline_settings();
             // CENTERLAYER: "." is the current layer; a named layer is made
@@ -4139,7 +4413,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
             // CENTERLTYPE: empty is CENTER2, "." the current linetype.
             let linetype = match settings.linetype.trim() {
                 "" => "CENTER2".to_string(),
-                "." => self.tabs[i].scene.document.header.current_linetype_name.clone(),
+                "." => self.tabs[i]
+                    .scene
+                    .document
+                    .header
+                    .current_linetype_name
+                    .clone(),
                 other => other.to_string(),
             };
             crate::io::linetypes::ensure_catalog_linetype(
@@ -4165,10 +4444,12 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
                 &self.tabs[i].scene.document,
                 &text.style,
             ),
-            document::EntityType::MText(text) => crate::scene::annotative::text_style_is_annotative(
-                &self.tabs[i].scene.document,
-                &text.style,
-            ),
+            document::EntityType::MText(text) => {
+                crate::scene::annotative::text_style_is_annotative(
+                    &self.tabs[i].scene.document,
+                    &text.style,
+                )
+            }
             document::EntityType::AttributeEntity(attribute) => {
                 crate::scene::annotative::text_style_is_annotative(
                     &self.tabs[i].scene.document,
@@ -4186,7 +4467,9 @@ handles={handles_ms:.1} panel={:.1} ribbon={ribbon_ms:.1} tail={:.1} selected={}
         if text_style_annotative {
             match &mut entity {
                 document::EntityType::MText(text) => text.is_annotative = true,
-                document::EntityType::AttributeEntity(attribute) => attribute.flags.annotative = true,
+                document::EntityType::AttributeEntity(attribute) => {
+                    attribute.flags.annotative = true
+                }
                 document::EntityType::AttributeDefinition(attribute) => {
                     attribute.flags.annotative = true
                 }
@@ -4323,8 +4606,12 @@ fn make_sections_read_only(
             | PropValue::LinetypeChoice(value)
             | PropValue::HatchPatternChoice(value) => value.clone(),
             PropValue::BlockNumber { value, .. } => value.clone(),
-            PropValue::BlockChoice { selected, options, .. } => options.get(*selected).cloned().unwrap_or_default(),
-            PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => selected.clone(),
+            PropValue::BlockChoice {
+                selected, options, ..
+            } => options.get(*selected).cloned().unwrap_or_default(),
+            PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => {
+                selected.clone()
+            }
             PropValue::EditChoice { value, .. } => value.clone(),
             PropValue::ColorChoice(color) => match color {
                 document::types::Color::None => "None".to_string(),
@@ -4362,7 +4649,10 @@ fn make_sections_read_only(
         };
         property.field = "locked_read_only";
         property.value = if let PropValue::ChoiceWithTooltip { tooltip, .. } = &property.value {
-            PropValue::ReadOnlyWithTooltip { value: text, tooltip: tooltip.clone() }
+            PropValue::ReadOnlyWithTooltip {
+                value: text,
+                tooltip: tooltip.clone(),
+            }
         } else {
             PropValue::ReadOnly(text)
         };
@@ -4669,16 +4959,29 @@ fn merge_prop_value(
 
     match (left, right) {
         (
-            PropValue::ChoiceWithTooltip { options, tooltip, .. },
-            PropValue::ChoiceWithTooltip { options: other_options, tooltip: other_tooltip, .. },
+            PropValue::ChoiceWithTooltip {
+                options, tooltip, ..
+            },
+            PropValue::ChoiceWithTooltip {
+                options: other_options,
+                tooltip: other_tooltip,
+                ..
+            },
         ) => {
             let mut merged_options = options.clone();
             for option in other_options {
-                if !merged_options.contains(option) { merged_options.push(option.clone()); }
+                if !merged_options.contains(option) {
+                    merged_options.push(option.clone());
+                }
             }
             PropValue::ChoiceWithTooltip {
-                selected: VARIES_LABEL.into(), options: merged_options,
-                tooltip: if tooltip == other_tooltip { tooltip.clone() } else { String::new() },
+                selected: VARIES_LABEL.into(),
+                options: merged_options,
+                tooltip: if tooltip == other_tooltip {
+                    tooltip.clone()
+                } else {
+                    String::new()
+                },
             }
         }
         (PropValue::LayerChoice(_), PropValue::LayerChoice(_)) => {
@@ -5085,7 +5388,9 @@ fn update_row_text(
             | PropValue::PlainText(current)
             | PropValue::Hyperlink(current) => *current = value,
             PropValue::ReadOnlyWithTooltip { value: current, .. } => *current = value,
-            PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => *selected = value,
+            PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => {
+                *selected = value
+            }
             _ => {}
         }
         return;
@@ -6357,7 +6662,11 @@ mod aggregation_tests {
 #[cfg(test)]
 mod arrow_tip_grips_tests {
     use crate::app::OpenCADStudio;
-    use document::{entities::{Dimension, DimensionLinear}, types::Vector3, EntityType};
+    use document::{
+        entities::{Dimension, DimensionLinear},
+        types::Vector3,
+        EntityType,
+    };
     use glam::DVec3;
 
     #[test]
@@ -6365,18 +6674,28 @@ mod arrow_tip_grips_tests {
         let mut app = OpenCADStudio::new_for_test();
         let i = app.active_tab;
         let mut d = DimensionLinear::horizontal(
-            Vector3::new(10.0, 10.0, 0.0), Vector3::new(30.0, 10.0, 0.0),
+            Vector3::new(10.0, 10.0, 0.0),
+            Vector3::new(30.0, 10.0, 0.0),
         );
         d.definition_point = Vector3::new(10.0, 20.0, 0.0);
         let dim = Dimension::Linear(d);
         let text = crate::entities::dimension::dimension_text_grip_position(
-            &dim, &app.tabs[i].scene.document, app.tabs[i].scene.annotation_scale as f64,
-        ).expect("automatic text placement");
-        let handle = app.tabs[i].scene.add_entity(EntityType::Dimension(Box::new(dim)));
+            &dim,
+            &app.tabs[i].scene.document,
+            app.tabs[i].scene.annotation_scale as f64,
+        )
+        .expect("automatic text placement");
+        let handle = app.tabs[i]
+            .scene
+            .add_entity(EntityType::Dimension(Box::new(dim)));
         app.tabs[i].scene.selected.insert(handle);
         app.refresh_selected_grips();
         let grips = &app.tabs[i].selected_grips;
-        assert_eq!(grips.len(), 6, "selected dimension must retain both arrow-tip grips");
+        assert_eq!(
+            grips.len(),
+            6,
+            "selected dimension must retain both arrow-tip grips"
+        );
         let text_grip = grips.iter().find(|g| g.id == 3).unwrap();
         assert!(text_grip.world.distance(DVec3::new(text.x, text.y, text.z)) < 1e-9);
         assert!(!text_grip.is_midpoint);

@@ -69,15 +69,18 @@ fn fixture() -> Fixture {
         .add_entity(EntityType::MText(Box::new(model)))
         .unwrap();
     let record = scene.document.ensure_xrecord(model, APP);
-    if let Some(document::objects::ObjectType::XRecord(x)) = scene.document.objects.get_mut(&record) {
+    if let Some(document::objects::ObjectType::XRecord(x)) = scene.document.objects.get_mut(&record)
+    {
         use document::objects::{XRecordEntry, XRecordValue};
         x.entries = vec![
             XRecordEntry::new(1, XRecordValue::String("kapcsolat".into())),
             XRecordEntry::new(40, XRecordValue::Double(0.125)),
         ];
     }
-    let one = anno::ensure_scale_object(&mut scene.document, &document::objects::Scale::scale_1_1());
-    let two = anno::ensure_scale_object(&mut scene.document, &document::objects::Scale::scale_1_2());
+    let one =
+        anno::ensure_scale_object(&mut scene.document, &document::objects::Scale::scale_1_1());
+    let two =
+        anno::ensure_scale_object(&mut scene.document, &document::objects::Scale::scale_1_2());
     assert!(anno::create_annotation_context(
         &mut scene.document,
         model,

@@ -197,10 +197,12 @@ impl Face {
                 Some(_) => ttf_glyph::glyph_source(family, ch),
                 None => ttf_glyph::fallback_source(ch),
             },
-            Face::Shx { path, .. } => match shx::font_glyph(path, ch as u16).or_else(|| shx_missing_glyph(path, ch)) {
-                Some(_) => None,
-                None => ttf_glyph::fallback_source(ch),
-            },
+            Face::Shx { path, .. } => {
+                match shx::font_glyph(path, ch as u16).or_else(|| shx_missing_glyph(path, ch)) {
+                    Some(_) => None,
+                    None => ttf_glyph::fallback_source(ch),
+                }
+            }
             Face::WithBig { primary, big } => {
                 if ttf_glyph::is_full_width(ch) && shx::bigfont_glyph(big, ch).is_some() {
                     return None;

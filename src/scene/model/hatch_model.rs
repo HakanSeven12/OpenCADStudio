@@ -424,7 +424,9 @@ impl HatchModel {
         // the span containment tests. Small boundaries keep the kernel's
         // direct path; the grid costs more than it saves there.
         let edge_index = EdgeIndex::build(&edges);
-        let mut query = edge_index.as_ref().map(|index| EdgeQuery::new(index, edges.len()));
+        let mut query = edge_index
+            .as_ref()
+            .map(|index| EdgeQuery::new(index, edges.len()));
 
         // ── AABB of the boundary in world coords.
         let mut min_x = f64::INFINITY;
@@ -647,8 +649,12 @@ impl EdgeIndex {
         if edges.len() < 64 {
             return None;
         }
-        let (mut min_x, mut max_x, mut min_y, mut max_y) =
-            (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        let (mut min_x, mut max_x, mut min_y, mut max_y) = (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        );
         for &(a, b) in edges {
             for [x, y] in [a, b] {
                 min_x = min_x.min(x);
@@ -905,7 +911,12 @@ impl<'a> EdgeQuery<'a> {
 
     /// Whether `point` lies inside the boundary — the kernel's `contains`,
     /// with the edge sweep and the ray casts enumerated through the grid.
-    fn contains(&mut self, point: [f64; 2], boundary: &[KernelCurve], tolerance: Tolerance) -> bool {
+    fn contains(
+        &mut self,
+        point: [f64; 2],
+        boundary: &[KernelCurve],
+        tolerance: Tolerance,
+    ) -> bool {
         let linear = tolerance.linear();
         // A midpoint between two boundary crossings sits between points on
         // edges, so it is inside the grid; the kernel fallback below only
@@ -1108,7 +1119,10 @@ mod tests {
         let tolerance = Tolerance::new(CLIP_TOLERANCE_LINEAR);
 
         let dirs: [[f64; 2]; 3] = [
-            [std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2],
+            [
+                std::f64::consts::FRAC_1_SQRT_2,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ],
             [0.0, 1.0],
             [1.0, 0.0],
         ];

@@ -246,7 +246,10 @@ impl Scene {
                         [p[0], p[1]]
                     };
                     let corners = [corner(0), corner(1), corner(2)];
-                    if corners.iter().any(|p| !p[0].is_finite() || !p[1].is_finite()) {
+                    if corners
+                        .iter()
+                        .any(|p| !p[0].is_finite() || !p[1].is_finite())
+                    {
                         continue;
                     }
                     let clipped = clip_polygon_to_rect(&corners, vp_x0, vp_y0, vp_x1, vp_y1);
@@ -283,10 +286,7 @@ impl Scene {
                 // A text-only wire (TEXT / MTEXT carry no stroke `points` since
                 // text went SDF-only) has nothing to pre-reject on, so gate both
                 // rejections on the glyphs too or it never reaches the sheet.
-                if !any_near
-                    && !aabb_hits
-                    && projected_text.is_empty()
-                    && projected_fill.is_empty()
+                if !any_near && !aabb_hits && projected_text.is_empty() && projected_fill.is_empty()
                 {
                     continue;
                 }
@@ -838,7 +838,9 @@ impl Scene {
             let generators = set
                 .instance_source
                 .as_ref()
-                .map_or(set.curved_gens.as_slice(), |source| source.curved_gens.as_slice());
+                .map_or(set.curved_gens.as_slice(), |source| {
+                    source.curved_gens.as_slice()
+                });
             for generator in generators {
                 // A block instance's source is block-local: place it first, so
                 // the contour is taken against the world view direction.

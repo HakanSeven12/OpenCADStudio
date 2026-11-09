@@ -35,8 +35,8 @@ use std::hint::black_box;
 use std::time::{Duration, Instant};
 
 use ocs_plugin_api::host::{
-    CurveSegmentDef, MAX_PLUGIN_LIVE_ENTITIES, ParametricChain, ParametricPlane,
-    ParametricSegment, Ramp,
+    CurveSegmentDef, ParametricChain, ParametricPlane, ParametricSegment, Ramp,
+    MAX_PLUGIN_LIVE_ENTITIES,
 };
 use OpenCADStudio::parametric::{build_display_entities, sample_chain};
 
@@ -144,7 +144,10 @@ fn sampled_cosine_kappa(r: f64, n: usize) -> Ramp {
             (1.0 / r) * 0.5 * (1.0 - (PI * xi).cos())
         })
         .collect();
-    Ramp::Sampled { n: n as u32, values }
+    Ramp::Sampled {
+        n: n as u32,
+        values,
+    }
 }
 
 /// The welded chain of lines + dense SAMPLED-ramp sections, the seams
@@ -169,10 +172,7 @@ fn welded_sampled_chain(
         let joint = sample_chain(front, total)
             .unwrap_or_else(|e| panic!("the sampled fixture's front samples: {e}"))
             .expect("the front's own end samples");
-        (
-            joint.point,
-            joint.direction[1].atan2(joint.direction[0]),
-        )
+        (joint.point, joint.direction[1].atan2(joint.direction[0]))
     };
     for _ in 0..pairs {
         segments.push(ParametricSegment {
@@ -246,8 +246,7 @@ fn stage_and_time(chain: &ParametricChain, label: &str) -> (Duration, usize) {
     let mut total = Duration::ZERO;
     for _ in 0..RUNS {
         let start = Instant::now();
-        black_box(build_display_entities(chain, 1e-3))
-            .unwrap_or_else(|e| panic!("{label}: {e}"));
+        black_box(build_display_entities(chain, 1e-3)).unwrap_or_else(|e| panic!("{label}: {e}"));
         total += start.elapsed();
     }
     (total / RUNS as u32, count)
@@ -262,8 +261,7 @@ fn stage_once(chain: &ParametricChain, label: &str) -> (Duration, usize) {
             .unwrap_or_else(|e| panic!("{label} warmup: {e}"));
     }
     let start = Instant::now();
-    black_box(build_display_entities(chain, 1e-3))
-        .unwrap_or_else(|e| panic!("{label}: {e}"));
+    black_box(build_display_entities(chain, 1e-3)).unwrap_or_else(|e| panic!("{label}: {e}"));
     (start.elapsed(), count)
 }
 
@@ -287,9 +285,7 @@ fn main() {
     // Budget 2: the chord-heavy fixture (~200 entities at 1e-3).
     let chord_chain = welded_chain(-300.0, 2.0, 60.0, CHORD_PAIRS, spiral_section);
     let (elapsed, chord_count) = stage_once(&chord_chain, "chord-heavy chain");
-    println!(
-        "staging (chord-heavy {CHORD_PAIRS}-pair, {chord_count} entities): {elapsed:?}"
-    );
+    println!("staging (chord-heavy {CHORD_PAIRS}-pair, {chord_count} entities): {elapsed:?}");
 
     // Budget 3: sample latency under 1 us.
     let total: f64 = chain.segments.iter().map(|s| s.def.length).sum();

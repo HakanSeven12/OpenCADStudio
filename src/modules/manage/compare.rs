@@ -22,7 +22,11 @@ pub struct CompareCommand {
 }
 
 impl CompareCommand {
-    pub fn new(comparison: Comparison, names: (String, String), report: std::path::PathBuf) -> Self {
+    pub fn new(
+        comparison: Comparison,
+        names: (String, String),
+        report: std::path::PathBuf,
+    ) -> Self {
         Self {
             comparison,
             current: None,
@@ -83,7 +87,8 @@ impl CadCommand for CompareCommand {
             return crate::tf!("COMPARE  Report file <{path}>:").into_owned();
         }
         let comparison = &self.comparison;
-        let (added, removed, modified) = (comparison.added, comparison.removed, comparison.modified);
+        let (added, removed, modified) =
+            (comparison.added, comparison.removed, comparison.modified);
         let position = match self.current {
             Some(index) => {
                 let d = &comparison.differences[index];

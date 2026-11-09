@@ -132,18 +132,16 @@ fn sample<'a>(state: &CellBordersState) -> Element<'a, Message> {
             let left = edge_chosen(&state.sets, c == 0, false, BorderSet::Left);
             let right = edge_chosen(&state.sets, c + 1 == columns, false, BorderSet::Right);
             let none = state.sets.contains(&BorderSet::None);
-            let cell = container(
-                column![
-                    edge_bar(top && !none, true),
-                    row![
-                        edge_bar(left && !none, false),
-                        Space::new().width(Fill).height(Fill),
-                        edge_bar(right && !none, false),
-                    ]
-                    .height(Fill),
-                    edge_bar(bottom && !none, true),
-                ],
-            )
+            let cell = container(column![
+                edge_bar(top && !none, true),
+                row![
+                    edge_bar(left && !none, false),
+                    Space::new().width(Fill).height(Fill),
+                    edge_bar(right && !none, false),
+                ]
+                .height(Fill),
+                edge_bar(bottom && !none, true),
+            ])
             .width(Length::Fixed(54.0))
             .height(Length::Fixed(30.0));
             line = line.push(cell);
@@ -163,9 +161,11 @@ fn edge_bar<'a>(on: bool, horizontal: bool) -> Element<'a, Message> {
         ..Default::default()
     });
     if horizontal {
-        bar.width(Fill).height(Length::Fixed(if on { 3.0 } else { 1.0 }))
+        bar.width(Fill)
+            .height(Length::Fixed(if on { 3.0 } else { 1.0 }))
     } else {
-        bar.height(Fill).width(Length::Fixed(if on { 3.0 } else { 1.0 }))
+        bar.height(Fill)
+            .width(Length::Fixed(if on { 3.0 } else { 1.0 }))
     }
     .into()
 }
@@ -187,14 +187,16 @@ fn list<'a>(
 ) -> Element<'a, Message> {
     use crate::ui::properties::LocalizedChoice;
     let options: Vec<LocalizedChoice> = options.iter().cloned().map(LocalizedChoice::new).collect();
-    pick_list(Some(LocalizedChoice::new(selected.to_string())), options, |value| {
-        value.to_string()
-    })
+    pick_list(
+        Some(LocalizedChoice::new(selected.to_string())),
+        options,
+        |value| value.to_string(),
+    )
     .on_select(move |value: LocalizedChoice| msg(on(value.raw)))
-        .text_size(11)
-        .padding([3, 6])
-        .width(Fill)
-        .into()
+    .text_size(11)
+    .padding([3, 6])
+    .width(Fill)
+    .into()
 }
 
 fn footer<'a>() -> Element<'a, Message> {
@@ -204,7 +206,11 @@ fn footer<'a>() -> Element<'a, Message> {
             .style(button_style(false))
             .padding([5, 11]),
         Space::new().width(Fill),
-        dialog_button_styled_opt(crate::t!("Cancel"), Some(Message::CloseModal), button::secondary),
+        dialog_button_styled_opt(
+            crate::t!("Cancel"),
+            Some(Message::CloseModal),
+            button::secondary
+        ),
         dialog_button_styled_opt(
             crate::t!("OK"),
             Some(msg(TableCellDialogMsg::Ok)),
@@ -288,8 +294,14 @@ pub fn view_borders<'a>(
                 ]
                 .spacing(4),
                 row![
-                    set(BorderSet::InsideHorizontal, crate::tr!("table-cells", "inside-horizontal")),
-                    set(BorderSet::InsideVertical, crate::tr!("table-cells", "inside-vertical")),
+                    set(
+                        BorderSet::InsideHorizontal,
+                        crate::tr!("table-cells", "inside-horizontal")
+                    ),
+                    set(
+                        BorderSet::InsideVertical,
+                        crate::tr!("table-cells", "inside-vertical")
+                    ),
                 ]
                 .spacing(4),
             ]
@@ -314,7 +326,11 @@ pub fn view_contents<'a>(
     use TableCellDialogMsg as M;
     let mut items = column![].spacing(2);
     if state.order.is_empty() {
-        items = items.push(text(crate::tr!("table-cells", "empty")).size(11).style(muted_style));
+        items = items.push(
+            text(crate::tr!("table-cells", "empty"))
+                .size(11)
+                .style(muted_style),
+        );
     }
     for (position, &index) in state.order.iter().enumerate() {
         let label = state.items.get(index).cloned().unwrap_or_default();
@@ -340,7 +356,11 @@ pub fn view_contents<'a>(
         row![
             container(items).width(Fill),
             column![
-                tool(crate::tr!("table-cells", "move-up"), M::Up, picked && state.selected != Some(0)),
+                tool(
+                    crate::tr!("table-cells", "move-up"),
+                    M::Up,
+                    picked && state.selected != Some(0)
+                ),
                 tool(
                     crate::tr!("table-cells", "move-down"),
                     M::Down,
@@ -473,7 +493,10 @@ impl CellFormatState {
     pub fn read_picture(&mut self, picture: &str) {
         let digits = |key: &str| -> Option<usize> {
             let at = picture.find(key)? + key.len();
-            let n: String = picture[at..].chars().take_while(|c| c.is_ascii_digit()).collect();
+            let n: String = picture[at..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
             n.parse().ok()
         };
         if let Some(n) = digits("%pr") {
@@ -500,7 +523,10 @@ impl CellFormatState {
             self.append = false;
         }
         if let Some(code) = digits("%ds") {
-            self.decimal = DECIMAL_SEPARATORS.iter().position(|c| *c as usize == code).unwrap_or(0);
+            self.decimal = DECIMAL_SEPARATORS
+                .iter()
+                .position(|c| *c as usize == code)
+                .unwrap_or(0);
         }
         if let Some(code) = digits("%th") {
             self.thousands = THOUSANDS_SEPARATORS
@@ -553,7 +579,10 @@ impl CellFormatState {
     fn units(&self) -> Vec<&'static str> {
         match self.kind {
             0 => ANGLE_FORMATS.iter().map(|(name, _)| *name).collect(),
-            3 | 6 => document::fields::FORMULA_FORMATS.iter().map(|(name, _)| *name).collect(),
+            3 | 6 => document::fields::FORMULA_FORMATS
+                .iter()
+                .map(|(name, _)| *name)
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -584,7 +613,9 @@ impl CellFormatState {
             0 => ANGLE_FORMATS[self.unit.min(6)].1.to_string(),
             1 | 5 => "%lu2".to_string(),
             2 => return self.date.clone(),
-            3 | 6 => document::fields::FORMULA_FORMATS[self.unit.min(6)].1.to_string(),
+            3 | 6 => document::fields::FORMULA_FORMATS[self.unit.min(6)]
+                .1
+                .to_string(),
             _ => return String::new(),
         };
         if base.is_empty() {
@@ -613,7 +644,11 @@ impl CellFormatState {
         if decimal != '.' {
             picture.push_str(&format!("%ds{}", decimal as u32));
         }
-        let zeros = if self.feet_inches() { self.zeros } else { self.zeros & 12 };
+        let zeros = if self.feet_inches() {
+            self.zeros
+        } else {
+            self.zeros & 12
+        };
         if zeros != 0 {
             picture.push_str(&format!("%zs{zeros}"));
         }
@@ -640,7 +675,11 @@ impl CellFormatState {
 }
 
 fn input<'a>(value: &str, on: Option<fn(String) -> TableCellDialogMsg>) -> Element<'a, Message> {
-    let mut field = text_input("", value).size(11).padding([4, 8]).width(Fill).style(field_style);
+    let mut field = text_input("", value)
+        .size(11)
+        .padding([4, 8])
+        .width(Fill)
+        .style(field_style);
     if let Some(on) = on {
         field = field.on_input(move |v| msg(on(v)));
     }
@@ -716,7 +755,10 @@ pub fn view_block<'a>(
         row![
             column![text(crate::tr!("table-cells", "alignment")).size(11), pad].spacing(6),
             column![
-                labelled(crate::tr!("table-cells", "scale"), input(&state.scale, scale_input)),
+                labelled(
+                    crate::tr!("table-cells", "scale"),
+                    input(&state.scale, scale_input)
+                ),
                 row![
                     Space::new().width(Length::Fixed(118.0)),
                     chip(
@@ -763,24 +805,35 @@ fn choice_list<'a>(
 /// The invalid data type warning: the cells whose values read as no value
 /// of the chosen type, which converting empties; Cancel leaves every cell
 /// as it was.
-pub fn view_warning<'a>(cells: &'a [String], sizing: crate::ui::modal::ModalSizing) -> Element<'a, Message> {
+pub fn view_warning<'a>(
+    cells: &'a [String],
+    sizing: crate::ui::modal::ModalSizing,
+) -> Element<'a, Message> {
     let mut chips = row![].spacing(4);
     for cell in cells.iter().take(8) {
         chips = chips.push(chip(cell.clone(), false, Message::Noop));
     }
     if cells.len() > 8 {
-        chips = chips.push(text(format!("+{}", cells.len() - 8)).size(11).style(muted_style));
+        chips = chips.push(
+            text(format!("+{}", cells.len() - 8))
+                .size(11)
+                .style(muted_style),
+        );
     }
     column![
         row![
             crate::ui::window::import_dialogs::warning_badge(),
             column![
-                text(crate::tr!("table-cells", "warning-heading")).size(13).font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::DEFAULT
-                }),
+                text(crate::tr!("table-cells", "warning-heading"))
+                    .size(13)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
                 chips,
-                text(crate::tr!("table-cells", "warning-note")).size(11).style(muted_style),
+                text(crate::tr!("table-cells", "warning-note"))
+                    .size(11)
+                    .style(muted_style),
             ]
             .spacing(8),
         ]
@@ -836,12 +889,17 @@ pub fn view_entry<'a>(
         row![
             crate::ui::window::import_dialogs::warning_badge(),
             column![
-                text(crate::tr!("table-cells", "entry-heading")).size(13).font(iced::Font {
-                    weight: iced::font::Weight::Bold,
-                    ..iced::Font::DEFAULT
-                }),
-                row![chip(cell, false, Message::Noop), chip(value.to_string(), true, Message::Noop)]
-                    .spacing(4),
+                text(crate::tr!("table-cells", "entry-heading"))
+                    .size(13)
+                    .font(iced::Font {
+                        weight: iced::font::Weight::Bold,
+                        ..iced::Font::DEFAULT
+                    }),
+                row![
+                    chip(cell, false, Message::Noop),
+                    chip(value.to_string(), true, Message::Noop)
+                ]
+                .spacing(4),
             ]
             .spacing(8),
         ]
@@ -881,7 +939,9 @@ pub fn view_format<'a>(
         .padding([8, 10])
         .width(Fill)
         .style(|theme: &iced::Theme| container::Style {
-            background: Some(iced::Background::Color(theme.palette().background.weak.color)),
+            background: Some(iced::Background::Color(
+                theme.palette().background.weak.color,
+            )),
             border: iced::Border {
                 radius: 4.0.into(),
                 ..Default::default()
@@ -958,7 +1018,10 @@ pub fn view_format<'a>(
                     .padding([4, 12]),
             );
         }
-        settings = settings.push(labelled(crate::tr!("table-cells", "list-separator"), separators));
+        settings = settings.push(labelled(
+            crate::tr!("table-cells", "list-separator"),
+            separators,
+        ));
         settings = settings.push(
             row![
                 chip("X".to_string(), state.axes[0], msg(M::Axis(0))),
@@ -1030,15 +1093,29 @@ pub fn view_format<'a>(
                     crate::tr!("table-cells", "conversion"),
                     input(&state.conversion, conversion)
                 ),
-                labelled(crate::tr!("table-cells", "prefix"), input(&state.prefix, prefix)),
-                labelled(crate::tr!("table-cells", "suffix"), input(&state.suffix, suffix)),
+                labelled(
+                    crate::tr!("table-cells", "prefix"),
+                    input(&state.prefix, prefix)
+                ),
+                labelled(
+                    crate::tr!("table-cells", "suffix"),
+                    input(&state.suffix, suffix)
+                ),
                 labelled(crate::tr!("table-cells", "decimal-separator"), decimals),
                 labelled(crate::tr!("table-cells", "thousands-separator"), thousands),
                 row![
                     zero(4, crate::tr!("table-cells", "zero-leading"), true),
                     zero(8, crate::tr!("table-cells", "zero-trailing"), true),
-                    zero(1, crate::tr!("table-cells", "zero-feet"), state.feet_inches()),
-                    zero(2, crate::tr!("table-cells", "zero-inches"), state.feet_inches()),
+                    zero(
+                        1,
+                        crate::tr!("table-cells", "zero-feet"),
+                        state.feet_inches()
+                    ),
+                    zero(
+                        2,
+                        crate::tr!("table-cells", "zero-inches"),
+                        state.feet_inches()
+                    ),
                 ]
                 .spacing(6)
                 .align_y(iced::Center),
@@ -1048,7 +1125,9 @@ pub fn view_format<'a>(
     }
     if matches!(state.kind, 4 | 7 | 8) {
         settings = settings.push(
-            text(crate::tr!("table-cells", "no-format-settings")).size(11).style(muted_style),
+            text(crate::tr!("table-cells", "no-format-settings"))
+                .size(11)
+                .style(muted_style),
         );
     }
     let body = row![

@@ -8,8 +8,8 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use rustc_hash::FxHashMap as HashMap;
 
@@ -20,7 +20,7 @@ use iced::{Background, Border, Color, Element, Fill, Length, Padding, Theme};
 use crate::app::Message;
 use crate::modules::{CadModule, IconKind, RibbonGroup, RibbonItem, ToolDef};
 use crate::plugin::all_ribbon_modules;
-use crate::ui::properties::{LinetypeItem, linetype_display_name, lw_options};
+use crate::ui::properties::{linetype_display_name, lw_options, LinetypeItem};
 
 mod draw_panel;
 pub(crate) mod extras;
@@ -30,11 +30,11 @@ mod color_dropdown;
 mod context_tools;
 mod visibility_panel;
 pub use context_tools::{
-    UnderlayContext, pdf_underlay_tools, point_cloud_tools, table_cell_alignments, table_cell_tools,
-    xref_tools,
+    pdf_underlay_tools, point_cloud_tools, table_cell_alignments, table_cell_tools, xref_tools,
+    UnderlayContext,
 };
-pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 use widgets::{StyleContext, *};
+pub(crate) use widgets::{REDO_HISTORY_ID, UNDO_HISTORY_ID};
 mod app_menu;
 mod collapse;
 mod floating;
@@ -52,16 +52,17 @@ use crate::ui::style::{chrome, ribbon_metrics as metrics};
 use crate::ui::wrap_bar::{PosReport, WrapBar, WrapFlow};
 pub use app_menu::{works_without_drawing, APP_MENU_ID};
 pub use collapse::CollapseMode;
-pub use layout::CustomPanel;
 use collapse::{CollapsePanels, Panel};
 pub use draw_panel::SlideOutMsg;
 pub use floating::FloatMsg;
 pub use keytips::{
-    KeyTipInput, KeyTipStep, active as keytips_active, clear_alt_alone as keytip_clear_alt_alone,
+    active as keytips_active, clear_alt_alone as keytip_clear_alt_alone,
     key_pressed as keytip_key_pressed, key_released as keytip_key_released,
     note_command_finished as keytip_note_command_finished,
     note_focus_changed as keytip_note_focus_changed, pointer_pressed as keytip_pointer_pressed,
+    KeyTipInput, KeyTipStep,
 };
+pub use layout::CustomPanel;
 pub use layout::{
     default_qat, FloatingPanel, MinimizePref, QatBuiltin, QatItem, RibbonLayout, RibbonMinimize,
 };
@@ -667,7 +668,8 @@ impl Ribbon {
         if !panels.is_empty() {
             self.modules.push(Box::new(UserModule::new(&panels)));
         }
-        if let Some(index) = active_id.and_then(|id| self.modules.iter().position(|m| m.id() == id)) {
+        if let Some(index) = active_id.and_then(|id| self.modules.iter().position(|m| m.id() == id))
+        {
             self.active = index;
         } else if self.active >= self.modules.len() {
             self.active = self.modules.len().saturating_sub(1);
@@ -1267,9 +1269,7 @@ impl Ribbon {
             |mut acc, (i, module)| {
                 // The Layout module no longer has a ribbon tab — its paper-space
                 // tools live in the right-edge side toolbar (see ui::side_toolbar).
-                if module.id() == "layout"
-                    || self.contextual_off(module.id())
-                    || self.tab_hidden(i)
+                if module.id() == "layout" || self.contextual_off(module.id()) || self.tab_hidden(i)
                 {
                     return acc;
                 }
@@ -1450,7 +1450,9 @@ impl Ribbon {
             let line = self.layout.minimize == RibbonMinimize::Tabs;
             ribbon = ribbon.push(self.qat_below_row(is_start, undo_count, redo_count, line));
         }
-        keytips::ribbon_area(ribbon_menu::RightPress::new(PosReport::new(RIBBON_ID, ribbon)))
+        keytips::ribbon_area(ribbon_menu::RightPress::new(PosReport::new(
+            RIBBON_ID, ribbon,
+        )))
     }
 
     /// The menu row with the search box at its right end.
@@ -1733,10 +1735,7 @@ impl Ribbon {
             let (anchor, layer_name) = target
                 .split_once(':')
                 .unwrap_or((target, self.active_layer.as_str()));
-            let layer = self
-                .layer_infos
-                .iter()
-                .find(|l| l.name == layer_name)?;
+            let layer = self.layer_infos.iter().find(|l| l.name == layer_name)?;
             let color = layer.stored_color;
             let panel = color_dropdown::layer_color_dropdown_panel(
                 color,
@@ -1914,7 +1913,8 @@ impl Ribbon {
             (on, DropdownRow::item(item, label, msg))
         };
         let mut initial_selected: Option<usize> = None;
-        let mut rows: Vec<DropdownRow<'_, Message>> = Vec::with_capacity(self.layer_infos.len() + 1);
+        let mut rows: Vec<DropdownRow<'_, Message>> =
+            Vec::with_capacity(self.layer_infos.len() + 1);
         let (on_cur, first_row) = entry(String::new(), t!("Use Current").into_owned(), None);
         if on_cur {
             initial_selected = Some(0);
@@ -1928,21 +1928,21 @@ impl Ribbon {
             rows.push(row);
         }
         let list_height = ((self.layer_infos.len() + 1) as f32 * 24.0).min(260.0);
-        let list = DropdownList::with_options(
-            rows,
-            Length::Fixed(list_height),
-            Length::Fill,
-            1.0,
-            0.0,
-        )
-        .selected(initial_selected)
-        .on_escape(Message::CloseRibbonDropdown);
+        let list =
+            DropdownList::with_options(rows, Length::Fixed(list_height), Length::Fill, 1.0, 0.0)
+                .selected(initial_selected)
+                .on_escape(Message::CloseRibbonDropdown);
         let panel = container(list)
             .style(popup_panel_style)
             .padding(2)
             .width(Length::Fixed(W));
         let (align_right, h_pad, top) = self.dd_anchor(id, W, win.0);
-        dropdown_backdrop(position_ribbon_dropdown(panel.into(), align_right, h_pad, top))
+        dropdown_backdrop(position_ribbon_dropdown(
+            panel.into(),
+            align_right,
+            h_pad,
+            top,
+        ))
     }
 
     /// The layer list under the layer combo `id` (the ribbon's or the Quick
@@ -2057,16 +2057,10 @@ impl Ribbon {
             .on_input(Message::RibbonLayerFilterChanged)
             .size(11)
             .padding([4, 6]);
-        let list = DropdownList::with_options(
-            rows,
-            Length::Fixed(list_h),
-            Length::Fill,
-            0.0,
-            0.0,
-        )
-        .selected(initial_selected)
-        .query(self.layer_filter.clone())
-        .on_escape(Message::CloseRibbonDropdown);
+        let list = DropdownList::with_options(rows, Length::Fixed(list_h), Length::Fill, 0.0, 0.0)
+            .selected(initial_selected)
+            .query(self.layer_filter.clone())
+            .on_escape(Message::CloseRibbonDropdown);
         let state_manager = button(
             row![
                 crate::ui::icons::themed_arrow_right(9.0),
@@ -2294,9 +2288,7 @@ impl Ribbon {
                 }
                 let check: Element<'_, Message> = crate::ui::icons::themed_check_cell(is_cur);
                 let disp = linetype_display_name(&lt.name);
-                let name_col = text(disp.clone())
-                    .size(11)
-                    .width(Length::Fixed(90.0));
+                let name_col = text(disp.clone()).size(11).width(Length::Fixed(90.0));
                 let art_col = text(lt.art.clone()).size(9).style(muted_text_style);
                 let msg = Message::RibbonLinetypeChanged(lt.name);
                 let btn = button(
@@ -2312,15 +2304,10 @@ impl Ribbon {
             })
             .collect();
 
-        let dd_list = DropdownList::with_options(
-            rows,
-            Length::Fixed(200.0),
-            Length::Fill,
-            0.0,
-            0.0,
-        )
-        .selected(initial_selected)
-        .on_escape(Message::CloseRibbonDropdown);
+        let dd_list =
+            DropdownList::with_options(rows, Length::Fixed(200.0), Length::Fill, 0.0, 0.0)
+                .selected(initial_selected)
+                .on_escape(Message::CloseRibbonDropdown);
         let list = container(dd_list)
             .style(popup_panel_style)
             .width(Length::Fixed(220.0));
@@ -2408,8 +2395,7 @@ fn dropdown_list<'a>(
     let mut rows: Vec<DropdownRow<Message>> = Vec::with_capacity(items.len() + 1);
     if let Some(header) = &header {
         rows.push(DropdownRow::header(
-            container(text(header.clone()).size(10).style(muted_text_style))
-                .padding([4, 10]),
+            container(text(header.clone()).size(10).style(muted_text_style)).padding([4, 10]),
         ));
     }
     let mut initial_selected: Option<usize> = None;
@@ -2538,7 +2524,13 @@ fn render_group<'a>(
                     RibbonItem::LabeledTool(_) | RibbonItem::LabeledDropdown { .. }
                 )
             }) {
-                below.push(widgets::render_row_item(next, active_tool, open_dd, last_cmd, state));
+                below.push(widgets::render_row_item(
+                    next,
+                    active_tool,
+                    open_dd,
+                    last_cmd,
+                    state,
+                ));
             }
             items_row.push(widgets::render_large_with(item, &ctx, below));
             continue;
@@ -2726,7 +2718,7 @@ impl Default for Ribbon {
 #[cfg(test)]
 mod tests {
     use super::widgets::is_active_tool;
-    use super::{CollapseMode, Ribbon, RibbonLayout, StyleContext, panel_measure_key};
+    use super::{panel_measure_key, CollapseMode, Ribbon, RibbonLayout, StyleContext};
     use crate::modules::{IconKind, ModuleEvent, RibbonGroup, RibbonItem, ToolDef};
     use rustc_hash::FxHashMap;
 
@@ -2943,12 +2935,10 @@ mod tests {
             .iter()
             .position(|module| module.id() == "draw")
             .unwrap();
-        assert!(
-            !ribbon
-                .modules
-                .iter()
-                .any(|module| module.id() == "block_test")
-        );
+        assert!(!ribbon
+            .modules
+            .iter()
+            .any(|module| module.id() == "block_test"));
         let ordinary: Vec<_> = ribbon.groups_for(draw).map(|group| group.title).collect();
         assert!(!ordinary.contains(&"Close"));
         ribbon.set_block_editing(true);
@@ -3095,12 +3085,18 @@ impl UserModule {
                     .commands
                     .iter()
                     .map(|command| {
-                        let verb = command.split_whitespace().next().unwrap_or("").to_ascii_uppercase();
+                        let verb = command
+                            .split_whitespace()
+                            .next()
+                            .unwrap_or("")
+                            .to_ascii_uppercase();
                         let (label, icon) = known
                             .get(&command.to_ascii_uppercase())
                             .or_else(|| known.get(&verb))
                             .copied()
-                            .unwrap_or_else(|| (leak(command), IconKind::Svg(crate::ui::icons::LIST)));
+                            .unwrap_or_else(|| {
+                                (leak(command), IconKind::Svg(crate::ui::icons::LIST))
+                            });
                         RibbonItem::LargeTool(ToolDef {
                             id: leak(command),
                             label,

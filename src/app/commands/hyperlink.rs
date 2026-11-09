@@ -86,7 +86,9 @@ impl OpenCADStudio {
                 self.attach_pasted_hyperlink(i, &parse_handles(handles), url.trim());
                 Some(Task::none())
             }
-            "-HYPERLINK" => Some(self.start_hyperlink_command(i, Box::new(DashHyperlinkCommand::new()))),
+            "-HYPERLINK" => {
+                Some(self.start_hyperlink_command(i, Box::new(DashHyperlinkCommand::new())))
+            }
             "_HYPERLINKDIALOG" => {
                 let handles = parse_handles(rest);
                 self.tabs[i].scene.deselect_all();
@@ -101,7 +103,11 @@ impl OpenCADStudio {
                 let entries: Vec<(Handle, Link)> = parse_handles(rest)
                     .into_iter()
                     .filter_map(|handle| {
-                        let link = self.tabs[i].scene.document.get_entity(handle).and_then(Link::of)?;
+                        let link = self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(handle)
+                            .and_then(Link::of)?;
                         Some((handle, link))
                     })
                     .collect();
@@ -111,8 +117,12 @@ impl OpenCADStudio {
                     return Some(Task::none());
                 }
                 for (n, (_, link)) in entries.iter().enumerate() {
-                    self.command_line
-                        .push_output(&format!("{}.  {} ({})", n + 1, link.url, link.text));
+                    self.command_line.push_output(&format!(
+                        "{}.  {} ({})",
+                        n + 1,
+                        link.url,
+                        link.text
+                    ));
                 }
                 let entries = entries.into_iter().map(|(h, link)| (h, link.url)).collect();
                 Some(self.start_hyperlink_command(i, Box::new(HyperlinkRemovePick::new(entries))))
@@ -125,7 +135,11 @@ impl OpenCADStudio {
                 let message = if handles.len() == 1 {
                     crate::tr!("hyperlink-cmd", "deleted-one")
                 } else {
-                    format!("{} {}", handles.len(), crate::tr!("hyperlink-cmd", "deleted-many"))
+                    format!(
+                        "{} {}",
+                        handles.len(),
+                        crate::tr!("hyperlink-cmd", "deleted-many")
+                    )
                 };
                 self.command_line.push_output(&message);
                 Some(Task::none())
@@ -168,7 +182,11 @@ impl OpenCADStudio {
                     self.pending_setvar = Some("HYPERLINKBASE".into());
                     return Some(Task::none());
                 }
-                let value = if rest == "." { String::new() } else { rest.to_string() };
+                let value = if rest == "." {
+                    String::new()
+                } else {
+                    rest.to_string()
+                };
                 if value != current {
                     self.push_undo_snapshot(i, "HYPERLINKBASE");
                     let document = &mut self.tabs[i].scene.document;
@@ -284,13 +302,21 @@ impl OpenCADStudio {
         let base = self.hyperlink_base(i);
         self.hyperlink_editor_block = None;
         self.hyperlink_editor_handles = handles;
-        self.hyperlink_editor_url = if view_target { String::new() } else { link.address() };
+        self.hyperlink_editor_url = if view_target {
+            String::new()
+        } else {
+            link.address()
+        };
         self.hyperlink_editor_description = link.text.clone();
         self.hyperlink_editor_mixed = mixed;
         self.hyperlink_editor_dirty = false;
         self.hyperlink_options = HyperlinkOptions {
             view_target,
-            view: if view_target { link.location.clone() } else { String::new() },
+            view: if view_target {
+                link.location.clone()
+            } else {
+                String::new()
+            },
             views: self.hyperlink_views(i),
             // A new link is stored relative where it can be; an existing one
             // keeps the form it has.
@@ -339,7 +365,10 @@ impl OpenCADStudio {
         }
     }
 
-    pub(in crate::app) fn update_hyperlink_dialog(&mut self, message: HyperlinkMsg) -> Task<Message> {
+    pub(in crate::app) fn update_hyperlink_dialog(
+        &mut self,
+        message: HyperlinkMsg,
+    ) -> Task<Message> {
         let options = &mut self.hyperlink_options;
         match message {
             HyperlinkMsg::ViewTarget(on) => {
@@ -413,7 +442,9 @@ impl OpenCADStudio {
             ]);
             rectangle.close();
             rectangle.common.layer = AREA_LAYER.to_string();
-            if let Some(handle) = self.commit_entity_handle_preserve_layer(document::EntityType::Polyline3D(rectangle)) {
+            if let Some(handle) = self
+                .commit_entity_handle_preserve_layer(document::EntityType::Polyline3D(rectangle))
+            {
                 handles = vec![handle];
             }
         }

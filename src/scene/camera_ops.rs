@@ -291,7 +291,11 @@ impl Scene {
 
     /// Restores a model-space view into a paper-space viewport: its camera,
     /// a copy of the view's background (or none) and the view's visual style.
-    pub fn restore_named_view_in_viewport(&mut self, view: &document::tables::View, viewport: Handle) {
+    pub fn restore_named_view_in_viewport(
+        &mut self,
+        view: &document::tables::View,
+        viewport: Handle,
+    ) {
         let mut camera = self.navigation_camera();
         named_view_camera(view, &mut camera);
         self.apply_navigation_camera(camera);
@@ -662,7 +666,11 @@ impl Scene {
         let camera = self.camera.borrow();
         let height = 2.0 * f64::from(camera.ortho_size());
         let pixel = self.world_per_pixel().map_or(0.0, f64::from);
-        ([camera.target.x, camera.target.y], [height * aspect, height], pixel)
+        (
+            [camera.target.x, camera.target.y],
+            [height * aspect, height],
+            pixel,
+        )
     }
 
     /// Aspect ratio of the active camera's actual render rectangle. Model
@@ -1173,7 +1181,9 @@ impl Scene {
     /// Convert a `ModelTile`'s normalized iced rectangle (top-left origin) to
     /// the (lower_left, upper_right) pair the VPort table uses (bottom-left
     /// origin).
-    fn tile_rect_to_vport(rect: iced::Rectangle) -> (document::types::Vector2, document::types::Vector2) {
+    fn tile_rect_to_vport(
+        rect: iced::Rectangle,
+    ) -> (document::types::Vector2, document::types::Vector2) {
         let lower_left = document::types::Vector2 {
             x: rect.x as f64,
             y: (1.0 - rect.y - rect.height) as f64,
@@ -1412,7 +1422,10 @@ impl Scene {
                     .get(&entry.sun_handle)
                     .and_then(|object| match object {
                         document::objects::ObjectType::ClassObject(value)
-                            if matches!(&value.data, document::objects::ClassObjectData::Sun(_)) =>
+                            if matches!(
+                                &value.data,
+                                document::objects::ClassObjectData::Sun(_)
+                            ) =>
                         {
                             Some(value.clone())
                         }
@@ -1760,14 +1773,12 @@ impl Scene {
         if min == max {
             max += glam::Vec3::splat(1.0);
         }
-        self.camera
-            .borrow_mut()
-            .fit_to_bounds_bordered_f32(
-                min,
-                max,
-                self.last_render_aspect.get().max(0.01),
-                self.active_camera_pixels(),
-            );
+        self.camera.borrow_mut().fit_to_bounds_bordered_f32(
+            min,
+            max,
+            self.last_render_aspect.get().max(0.01),
+            self.active_camera_pixels(),
+        );
         self.camera_generation += 1;
     }
 
@@ -1893,8 +1904,8 @@ impl Scene {
             {
                 continue;
             }
-            let is_infinite =
-                entity.is_some_and(|entity| matches!(entity, EntityType::XLine(_) | EntityType::Ray(_)));
+            let is_infinite = entity
+                .is_some_and(|entity| matches!(entity, EntityType::XLine(_) | EntityType::Ray(_)));
             if is_infinite {
                 infinite_base.extend(
                     wire.key_vertices
@@ -1943,7 +1954,10 @@ impl Scene {
             None,
         ) {
             if let Some([x0, y0, z0, x1, y1, z1]) = set.instance_aabb {
-                fold!(Some((glam::DVec3::new(x0, y0, z0), glam::DVec3::new(x1, y1, z1))));
+                fold!(Some((
+                    glam::DVec3::new(x0, y0, z0),
+                    glam::DVec3::new(x1, y1, z1)
+                )));
             }
         }
 

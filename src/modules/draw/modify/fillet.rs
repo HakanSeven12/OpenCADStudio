@@ -885,7 +885,11 @@ fn restore_infinite(original: Option<&EntityType>, trimmed: EntityType) -> Entit
     if matches!(original, EntityType::XLine(_)) {
         far_ends.push(stand_in.start);
     }
-    let is_far = |p: Vector3| far_ends.iter().any(|f| (*f - p).length() < INFINITE_REACH * 1e-9);
+    let is_far = |p: Vector3| {
+        far_ends
+            .iter()
+            .any(|f| (*f - p).length() < INFINITE_REACH * 1e-9)
+    };
     for (far, cut) in [(line.end, line.start), (line.start, line.end)] {
         if is_far(far) && (far - cut).length() > 1e-12 {
             return EntityType::Ray(document::entities::Ray {
@@ -974,7 +978,10 @@ fn compute_fillet_entities(
     fn arc_segment(entity: &FilletEntity) -> Option<(&LwPolyline, usize, ArcEnt, bool)> {
         match entity {
             FilletEntity::LwPoly { poly, seg_idx, .. }
-                if poly.vertices.get(*seg_idx).is_some_and(|v| v.bulge.abs() > 1e-12) =>
+                if poly
+                    .vertices
+                    .get(*seg_idx)
+                    .is_some_and(|v| v.bulge.abs() > 1e-12) =>
             {
                 let (arc, reversed) = lwpoly_seg_as_arc(poly, *seg_idx)?;
                 Some((poly, *seg_idx, arc, reversed))
@@ -985,17 +992,17 @@ fn compute_fillet_entities(
     let (s1, s2) = (arc_segment(e1), arc_segment(e2));
     if s1.is_some() || s2.is_some() {
         // Two segments of one polyline round their shared corner elsewhere.
-        if let (
-            FilletEntity::LwPoly { handle: h1, .. },
-            FilletEntity::LwPoly { handle: h2, .. },
-        ) = (e1, e2)
+        if let (FilletEntity::LwPoly { handle: h1, .. }, FilletEntity::LwPoly { handle: h2, .. }) =
+            (e1, e2)
         {
             if h1 == h2 {
                 return None;
             }
         }
         let as_arc = |segment: &Option<(&LwPolyline, usize, ArcEnt, bool)>| {
-            segment.as_ref().map(|(_, _, arc, _)| FilletEntity::Arc(arc.clone()))
+            segment
+                .as_ref()
+                .map(|(_, _, arc, _)| FilletEntity::Arc(arc.clone()))
         };
         let (a1, a2) = (as_arc(&s1), as_arc(&s2));
         let (r1, r2, fillet) = compute_fillet_entities(
@@ -1005,16 +1012,16 @@ fn compute_fillet_entities(
             click2,
             radius,
         )?;
-        let back = |segment: &Option<(&LwPolyline, usize, ArcEnt, bool)>, result: EntityType| {
-            match (segment, result) {
-                (Some((poly, seg_idx, _, reversed)), EntityType::Arc(arc)) => Some(
-                    EntityType::LwPolyline(rebuild_poly_from_trimmed_arc(
-                        poly, *seg_idx, *reversed, &arc,
-                    )),
-                ),
-                (None, result) => Some(result),
-                _ => None,
+        let back = |segment: &Option<(&LwPolyline, usize, ArcEnt, bool)>, result: EntityType| match (
+            segment, result,
+        ) {
+            (Some((poly, seg_idx, _, reversed)), EntityType::Arc(arc)) => {
+                Some(EntityType::LwPolyline(rebuild_poly_from_trimmed_arc(
+                    poly, *seg_idx, *reversed, &arc,
+                )))
             }
+            (None, result) => Some(result),
+            _ => None,
         };
         return Some((back(&s1, r1)?, back(&s2, r2)?, fillet));
     }
@@ -1544,7 +1551,10 @@ fn fillet_arc_arc(
 
     // Same construction as the line-and-arc case, from the same place: the
     // centre is where an offset of one circle crosses an offset of the other.
-    if let Some(fillet) = ranked_fillets(&arc_curve(a1), click1, &arc_curve(a2), click2, radius).into_iter().next() {
+    if let Some(fillet) = ranked_fillets(&arc_curve(a1), click1, &arc_curve(a2), click2, radius)
+        .into_iter()
+        .next()
+    {
         // Each arc is cut back to its touch, or extended to it.
         let new_a1 = arc_to_angle(
             a1,
@@ -2052,8 +2062,7 @@ impl CadCommand for FilletCommand {
                 if upper == "U" || upper == "UNDO" {
                     return self.undo_last();
                 }
-                if matches!(self.step, FilletStep::First) && (upper == "M" || upper == "MULTIPLE")
-                {
+                if matches!(self.step, FilletStep::First) && (upper == "M" || upper == "MULTIPLE") {
                     self.multiple = true;
                     return Some(CmdResult::NeedPoint);
                 }
@@ -3187,8 +3196,15 @@ mod tests {
         );
         assert_eq!(keywords(&command), ["P", "R", "T", "M"]);
         assert!(command.on_text_input("U").is_none(), "nothing to undo yet");
-        assert!(matches!(command.on_text_input("M"), Some(CmdResult::NeedPoint)));
-        assert_eq!(keywords(&command), ["P", "R", "T"], "Multiple is not offered twice");
+        assert!(matches!(
+            command.on_text_input("M"),
+            Some(CmdResult::NeedPoint)
+        ));
+        assert_eq!(
+            keywords(&command),
+            ["P", "R", "T"],
+            "Multiple is not offered twice"
+        );
         command.on_entity_pick(Handle::new(1), DVec3::new(5.0, 0.0, 0.0));
         assert!(matches!(
             command.on_entity_pick(Handle::new(2), DVec3::new(0.0, 5.0, 0.0)),
@@ -3258,9 +3274,18 @@ mod tests {
             let [EntityType::LwPolyline(p)] = joined.1.as_slice() else {
                 panic!("one polyline");
             };
-            let points: Vec<[f64; 2]> =
-                p.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
-            let mut expected = vec![[0.0, 10.0], [0.0, 1.0], [1.0, 0.0], [10.0, 0.0], [10.0, 5.0]];
+            let points: Vec<[f64; 2]> = p
+                .vertices
+                .iter()
+                .map(|v| [v.location.x, v.location.y])
+                .collect();
+            let mut expected = vec![
+                [0.0, 10.0],
+                [0.0, 1.0],
+                [1.0, 0.0],
+                [10.0, 0.0],
+                [10.0, 5.0],
+            ];
             // The polyline runs whichever way the first one ran.
             let fillet_start = if flip_first {
                 expected.reverse();
@@ -3268,7 +3293,11 @@ mod tests {
             } else {
                 1
             };
-            assert_eq!(points.len(), expected.len(), "{flip_first} {flip_second}: {points:?}");
+            assert_eq!(
+                points.len(),
+                expected.len(),
+                "{flip_first} {flip_second}: {points:?}"
+            );
             for (got, want) in points.iter().zip(&expected) {
                 assert!(
                     (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
@@ -3281,7 +3310,11 @@ mod tests {
                 assert_eq!(curved, k == fillet_start, "{flip_first} {flip_second}: {k}");
             }
             let turn = p.vertices[fillet_start].bulge.signum();
-            assert_eq!(turn, if flip_first { -1.0 } else { 1.0 }, "{flip_first} {flip_second}");
+            assert_eq!(
+                turn,
+                if flip_first { -1.0 } else { 1.0 },
+                "{flip_first} {flip_second}"
+            );
         }
     }
 
@@ -3554,7 +3587,10 @@ mod tests {
             assert!(matches!(command.step, ChamferStep::Second { .. }));
             command.on_hover_entity(Handle::new(2), DVec3::new(0.0, 5.0, 0.0))
         };
-        assert_eq!(wire_names(&preview(0.0, true)), ["chamfer_l1", "chamfer_l2"]);
+        assert_eq!(
+            wire_names(&preview(0.0, true)),
+            ["chamfer_l1", "chamfer_l2"]
+        );
         assert!(wire_names(&preview(0.0, false)).is_empty());
         assert_eq!(
             wire_names(&preview(1.0, true)),
@@ -3571,8 +3607,11 @@ mod tests {
         poly.add_point(document::types::Vector2::new(10.0, 10.0));
         poly.common.handle = Handle::new(3);
         let assert_sharp_corner = |out: &LwPolyline| {
-            let points: Vec<[f64; 2]> =
-                out.vertices.iter().map(|v| [v.location.x, v.location.y]).collect();
+            let points: Vec<[f64; 2]> = out
+                .vertices
+                .iter()
+                .map(|v| [v.location.x, v.location.y])
+                .collect();
             assert_eq!(points.len(), 3, "no duplicate corner vertex: {points:?}");
             for (got, want) in points.iter().zip([[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]) {
                 assert!(

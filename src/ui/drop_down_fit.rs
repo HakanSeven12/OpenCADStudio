@@ -124,10 +124,13 @@ impl Widget<Message, Theme, Renderer> for DropDownFit<'_> {
             width: viewport.x + viewport.width,
             height: viewport.y + viewport.height,
         };
-        let inner = self
-            .content
-            .as_widget_mut()
-            .overlay(tree, layout, renderer, &from_corner, translation)?;
+        let inner = self.content.as_widget_mut().overlay(
+            tree,
+            layout,
+            renderer,
+            &from_corner,
+            translation,
+        )?;
         Some(overlay::Element::new(Box::new(FitOverlay { inner })))
     }
 }

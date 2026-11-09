@@ -151,7 +151,10 @@ impl MLeaderCommand {
         }
     }
 
-    pub fn with_style(style: document::objects::MultiLeaderStyle, annotation_multiplier: f64) -> Self {
+    pub fn with_style(
+        style: document::objects::MultiLeaderStyle,
+        annotation_multiplier: f64,
+    ) -> Self {
         let display_scale = if style.is_annotative {
             annotation_multiplier
         } else {
@@ -426,9 +429,8 @@ impl CadCommand for MLeaderCommand {
     fn prompt(&self) -> String {
         use crate::tr;
         let num = |v: f64| format!("{v:.4}");
-        let angle = |a: Option<f64>| {
-            a.map_or("0".to_string(), |r| format!("{}", r.to_degrees().round()))
-        };
+        let angle =
+            |a: Option<f64>| a.map_or("0".to_string(), |r| format!("{}", r.to_degrees().round()));
         match self.step {
             Step::Options => {
                 let default = match self.last_option {
@@ -460,7 +462,11 @@ impl CadCommand for MLeaderCommand {
                 tr!("mleader-prompt", "use-landing", current = current)
             }
             Step::LandingLength => {
-                tr!("mleader-prompt", "landing-distance", current = num(self.landing_length))
+                tr!(
+                    "mleader-prompt",
+                    "landing-distance",
+                    current = num(self.landing_length)
+                )
             }
             Step::ContentType => {
                 let current = match self.content_type {
@@ -471,13 +477,25 @@ impl CadCommand for MLeaderCommand {
                 tr!("mleader-prompt", "content-type", current = current)
             }
             Step::MaxPoints => {
-                tr!("mleader-prompt", "max-points", current = self.max_points.to_string())
+                tr!(
+                    "mleader-prompt",
+                    "max-points",
+                    current = self.max_points.to_string()
+                )
             }
             Step::FirstAngle => {
-                tr!("mleader-prompt", "first-angle", current = angle(self.first_angle))
+                tr!(
+                    "mleader-prompt",
+                    "first-angle",
+                    current = angle(self.first_angle)
+                )
             }
             Step::SecondAngle => {
-                tr!("mleader-prompt", "second-angle", current = angle(self.second_angle))
+                tr!(
+                    "mleader-prompt",
+                    "second-angle",
+                    current = angle(self.second_angle)
+                )
             }
             Step::Layer => {
                 let current = if self.layer.is_empty() {
@@ -740,9 +758,17 @@ impl CadCommand for MLeaderCommand {
         let text = input.trim();
         let upper = text.to_ascii_uppercase();
         let upper = upper.trim_start_matches('_');
-        let invalid_keyword = || Some(CmdResult::ReportError(t!("Invalid option keyword.").into_owned()));
-        let invalid_input =
-            || Some(CmdResult::ReportError(crate::tr!("mleader-prompt", "invalid-input")));
+        let invalid_keyword = || {
+            Some(CmdResult::ReportError(
+                t!("Invalid option keyword.").into_owned(),
+            ))
+        };
+        let invalid_input = || {
+            Some(CmdResult::ReportError(crate::tr!(
+                "mleader-prompt",
+                "invalid-input"
+            )))
+        };
         match self.step {
             Step::PickPoints if self.verts.is_empty() => {
                 let order = match (upper, self.order) {
@@ -837,8 +863,7 @@ impl CadCommand for MLeaderCommand {
             }
             Step::MaxPoints => {
                 // 0 leaves the count open (Enter ends the leader).
-                let Some(value) = text.parse::<usize>().ok().filter(|v| *v == 0 || *v >= 2)
-                else {
+                let Some(value) = text.parse::<usize>().ok().filter(|v| *v == 0 || *v >= 2) else {
                     return invalid_input();
                 };
                 self.max_points = value;
@@ -863,17 +888,15 @@ impl CadCommand for MLeaderCommand {
                 }
                 self.step = Step::Options;
             }
-            Step::Layer => {
-                match upper {
-                    "" => return None,
-                    "X" | "EXIT" => self.step = Step::Options,
-                    "?" => {
-                        return Some(CmdResult::ReportMeasurement(self.layers.join("\n")));
-                    }
-                    "." => self.set_layer(""),
-                    _ => self.set_layer(text.trim_matches('"')),
+            Step::Layer => match upper {
+                "" => return None,
+                "X" | "EXIT" => self.step = Step::Options,
+                "?" => {
+                    return Some(CmdResult::ReportMeasurement(self.layers.join("\n")));
                 }
-            }
+                "." => self.set_layer(""),
+                _ => self.set_layer(text.trim_matches('"')),
+            },
             Step::PreEnterText => {
                 self.text = input.to_string();
                 self.content_type = LeaderContentType::MText;
@@ -903,7 +926,11 @@ impl CadCommand for MLeaderCommand {
 
     fn drawing_variable_update(&self) -> Option<(&'static str, String)> {
         self.layer_set.then(|| {
-            let value = if self.layer.is_empty() { "." } else { &self.layer };
+            let value = if self.layer.is_empty() {
+                "."
+            } else {
+                &self.layer
+            };
             ("MLEADERLAYER", value.to_string())
         })
     }
@@ -1033,13 +1060,17 @@ pub(crate) fn build_mleader(
         text_location.y += top;
     }
     // The content base is the landing's end.
-    let base = ml.context.leader_roots.first().map_or(text_location, |root| {
-        Vector3::new(
-            root.connection_point.x + root.direction.x * landing_distance,
-            root.connection_point.y + root.direction.y * landing_distance,
-            root.connection_point.z,
-        )
-    });
+    let base = ml
+        .context
+        .leader_roots
+        .first()
+        .map_or(text_location, |root| {
+            Vector3::new(
+                root.connection_point.x + root.direction.x * landing_distance,
+                root.connection_point.y + root.direction.y * landing_distance,
+                root.connection_point.z,
+            )
+        });
 
     ml.context.text_location = text_location;
     ml.context.content_base_point = base;

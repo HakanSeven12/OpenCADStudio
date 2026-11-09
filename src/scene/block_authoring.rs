@@ -1,6 +1,6 @@
 //! Shared native graph construction for Block Editor authoring objects.
-pub(crate) mod graph;
 pub(crate) mod edit;
+pub(crate) mod graph;
 pub(crate) mod metadata;
 use document::objects::{
     BlockEvalExpression, BlockEvalValue, DynamicBlockData, DynamicBlockObject, ObjectType,
@@ -487,7 +487,11 @@ pub(crate) fn export_graph(
     let Some(ObjectType::Dictionary(dictionary)) = document.objects.get(&root) else {
         return None;
     };
-    if !dictionary.entries.iter().any(|(key, _)| key == "ACAD_ENHANCEDBLOCK") {
+    if !dictionary
+        .entries
+        .iter()
+        .any(|(key, _)| key == "ACAD_ENHANCEDBLOCK")
+    {
         return None;
     }
     let left = |key: &str| matches!(key, "ACAD_SORTENTS" | "ACAD_ASSOCNETWORK");
@@ -503,7 +507,11 @@ pub(crate) fn export_graph(
         .objects
         .keys()
         .copied()
-        .filter(|handle| dropped.iter().any(|top| document.owner_chain_reaches(*handle, *top)))
+        .filter(|handle| {
+            dropped
+                .iter()
+                .any(|top| document.owner_chain_reaches(*handle, *top))
+        })
         .collect();
     let mut document = document.clone();
     for handle in gone {
@@ -557,11 +565,7 @@ pub(super) fn element_id(entity: &EntityType) -> Option<i32> {
         })
 }
 
-pub(super) fn set_entity_tag(
-    document: &mut Document,
-    handle: Handle,
-    record: ExtendedDataRecord,
-) {
+pub(super) fn set_entity_tag(document: &mut Document, handle: Handle, record: ExtendedDataRecord) {
     let app = document
         .app_ids
         .get(&record.application_name)

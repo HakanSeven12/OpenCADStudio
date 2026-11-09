@@ -376,11 +376,7 @@ impl Scene {
         &self,
         changed: &rustc_hash::FxHashSet<Handle>,
     ) -> Vec<Handle> {
-        if self
-            .associative_centerline_source_cache
-            .borrow()
-            .is_none()
-        {
+        if self.associative_centerline_source_cache.borrow().is_none() {
             let mut by_source: HashMap<Handle, Vec<Handle>> = HashMap::default();
             let mut order: HashMap<Handle, usize> = HashMap::default();
             for (position, entity) in self.document.entities().enumerate() {
@@ -418,9 +414,8 @@ impl Scene {
                 }
             }
         }
-        handles.sort_unstable_by_key(|handle| {
-            index.order.get(handle).copied().unwrap_or(usize::MAX)
-        });
+        handles
+            .sort_unstable_by_key(|handle| index.order.get(handle).copied().unwrap_or(usize::MAX));
         handles
     }
 
@@ -483,7 +478,8 @@ impl Scene {
         let pick = |document: &document::Document, (handle, point): (Handle, DVec3)| {
             picked_source(document.get_entity(handle)?, handle, point)
         };
-        let (Some(first), Some(second)) = (pick(&self.document, first), pick(&self.document, second))
+        let (Some(first), Some(second)) =
+            (pick(&self.document, first), pick(&self.document, second))
         else {
             return false;
         };
@@ -629,9 +625,7 @@ impl Scene {
             // The association flags just changed. Drop the index; the bump
             // below re-indexes from the new xdata (an all-disassociated bump
             // rebuilds an empty index and refreshes nothing).
-            self.associative_centerline_source_cache
-                .borrow_mut()
-                .take();
+            self.associative_centerline_source_cache.borrow_mut().take();
             let changes: Vec<_> = candidates
                 .iter()
                 .map(|(handle, _, _)| (*handle, ChangeKind::Modified))
@@ -689,7 +683,8 @@ impl Scene {
         let EntityType::Line(line) = self.document.get_entity(handle)? else {
             return None;
         };
-        if let Some(mark) = document::entities::CenterMarkAssociation::read(&line.common.extended_data)
+        if let Some(mark) =
+            document::entities::CenterMarkAssociation::read(&line.common.extended_data)
         {
             return Some((true, mark.associated));
         }
@@ -721,7 +716,10 @@ impl Scene {
             let Some((mark, false)) = self.center_object_state(*handle) else {
                 continue;
             };
-            let before = recording.before.get(handle).and_then(|before| before.as_deref());
+            let before = recording
+                .before
+                .get(handle)
+                .and_then(|before| before.as_deref());
             let was_associated = match before {
                 Some(EntityType::Line(line)) => {
                     document::entities::CenterMarkAssociation::read(&line.common.extended_data)
@@ -807,7 +805,10 @@ mod tests {
         let Some(EntityType::Line(line)) = scene.document.get_entity(handle) else {
             panic!("carrier is not a line");
         };
-        assert!((line.start.y - line.end.y).abs() < 1e-9, "carrier not horizontal");
+        assert!(
+            (line.start.y - line.end.y).abs() < 1e-9,
+            "carrier not horizontal"
+        );
         line.start.y
     }
 
@@ -855,7 +856,10 @@ mod tests {
         let early = scene.add_entity(carrier(first, second));
         move_line(&mut scene, first, 2.0);
         scene.bump_entities(&[(first, ChangeKind::Modified)]);
-        assert!((carrier_y(&scene, early) - 6.0).abs() < 1e-9, "index is warm");
+        assert!(
+            (carrier_y(&scene, early) - 6.0).abs() < 1e-9,
+            "index is warm"
+        );
 
         let pasted = scene
             .document
@@ -889,10 +893,7 @@ mod tests {
 
         // One bump naming both the source and the inner carrier.
         move_line(&mut scene, a, 4.0);
-        scene.bump_entities(&[
-            (a, ChangeKind::Modified),
-            (inner, ChangeKind::Modified),
-        ]);
+        scene.bump_entities(&[(a, ChangeKind::Modified), (inner, ChangeKind::Modified)]);
         assert!((carrier_y(&scene, inner) - 7.0).abs() < 1e-9);
         assert!((carrier_y(&scene, outer) - 13.5).abs() < 1e-9);
     }

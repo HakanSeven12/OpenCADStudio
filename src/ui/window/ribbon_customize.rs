@@ -58,14 +58,24 @@ pub fn view_window<'a>(
                 .on_press(msg(Msg::Select(index)))
                 .width(Length::Fill)
                 .padding([3, 6])
-                .style(if selected { button::primary } else { button::text }),
+                .style(if selected {
+                    button::primary
+                } else {
+                    button::text
+                }),
         );
     }
     let left = column![
-        text(crate::tr!("ribbon-customize", "panels")).size(11).style(muted_style),
+        text(crate::tr!("ribbon-customize", "panels"))
+            .size(11)
+            .style(muted_style),
         container(scrollable(list)).height(Length::Fixed(220.0)),
         row![
-            dialog_button(crate::tr!("ribbon-customize", "new-panel"), msg(Msg::NewPanel), false),
+            dialog_button(
+                crate::tr!("ribbon-customize", "new-panel"),
+                msg(Msg::NewPanel),
+                false
+            ),
             small("↑", Msg::MovePanel(true)),
             small("↓", Msg::MovePanel(false)),
             small("×", Msg::DeletePanel),
@@ -95,21 +105,32 @@ pub fn view_window<'a>(
                 );
             }
             column![
-                text(crate::tr!("ribbon-customize", "title")).size(11).style(muted_style),
+                text(crate::tr!("ribbon-customize", "title"))
+                    .size(11)
+                    .style(muted_style),
                 text_input("", &panel.title)
                     .on_input(|title| msg(Msg::Title(title)))
                     .size(12)
                     .padding([3, 6]),
-                text(crate::tr!("ribbon-customize", "commands")).size(11).style(muted_style),
+                text(crate::tr!("ribbon-customize", "commands"))
+                    .size(11)
+                    .style(muted_style),
                 container(scrollable(commands)).height(Length::Fixed(170.0)),
                 row![
-                    text_input(&crate::tr!("ribbon-customize", "command-placeholder"), &state.draft)
-                        .on_input(|typed| msg(Msg::Draft(typed)))
-                        .on_submit(msg(Msg::AddCommand))
-                        .size(12)
-                        .padding([3, 6])
-                        .width(Length::Fill),
-                    dialog_button(crate::tr!("ribbon-customize", "add"), msg(Msg::AddCommand), false),
+                    text_input(
+                        &crate::tr!("ribbon-customize", "command-placeholder"),
+                        &state.draft
+                    )
+                    .on_input(|typed| msg(Msg::Draft(typed)))
+                    .on_submit(msg(Msg::AddCommand))
+                    .size(12)
+                    .padding([3, 6])
+                    .width(Length::Fill),
+                    dialog_button(
+                        crate::tr!("ribbon-customize", "add"),
+                        msg(Msg::AddCommand),
+                        false
+                    ),
                 ]
                 .spacing(4),
             ]
@@ -119,12 +140,22 @@ pub fn view_window<'a>(
     };
 
     column![
-        text(crate::tr!("ribbon-customize", "hint")).size(11).style(muted_style),
+        text(crate::tr!("ribbon-customize", "hint"))
+            .size(11)
+            .style(muted_style),
         row![left, container(right).width(sizing.width)].spacing(14),
         row![
-            dialog_button(crate::tr!("ribbon-customize", "shortcuts"), msg(Msg::Shortcuts), false),
+            dialog_button(
+                crate::tr!("ribbon-customize", "shortcuts"),
+                msg(Msg::Shortcuts),
+                false
+            ),
             Space::new().width(Length::Fill),
-            dialog_button(crate::tr!("ribbon-customize", "close"), Message::CloseModal, true),
+            dialog_button(
+                crate::tr!("ribbon-customize", "close"),
+                Message::CloseModal,
+                true
+            ),
         ]
         .spacing(6),
     ]

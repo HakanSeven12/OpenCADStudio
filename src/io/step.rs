@@ -56,7 +56,11 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
             }
         }
         let size = (hi[0] - lo[0]).hypot(hi[1] - lo[1]).hypot(hi[2] - lo[2]);
-        let grid = if size.is_finite() && size > 0.0 { size * 1e-9 } else { 1.0 };
+        let grid = if size.is_finite() && size > 0.0 {
+            size * 1e-9
+        } else {
+            1.0
+        };
         let mut points: Vec<[f64; 3]> = Vec::new();
         let mut by_position: std::collections::HashMap<[i64; 3], usize> =
             std::collections::HashMap::new();
@@ -177,7 +181,11 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
                 }
                 let (lp, bound) = (alloc(), alloc());
                 writeln!(data, "#{lp} = EDGE_LOOP('',({edge_ids}));").ok();
-                let kind = if index == 0 { "FACE_OUTER_BOUND" } else { "FACE_BOUND" };
+                let kind = if index == 0 {
+                    "FACE_OUTER_BOUND"
+                } else {
+                    "FACE_BOUND"
+                };
                 writeln!(data, "#{bound} = {kind}('',#{lp},.T.);").ok();
                 if !bound_ids.is_empty() {
                     bound_ids.push(',');
@@ -331,13 +339,21 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
          'automotive_design',2000,#{app});"
     )
     .ok();
-    writeln!(data, "#{product_context} = PRODUCT_CONTEXT('',#{app},'mechanical');").ok();
+    writeln!(
+        data,
+        "#{product_context} = PRODUCT_CONTEXT('',#{app},'mechanical');"
+    )
+    .ok();
     writeln!(
         data,
         "#{product} = PRODUCT('OpenCADStudio','OpenCADStudio','',(#{product_context}));"
     )
     .ok();
-    writeln!(data, "#{formation} = PRODUCT_DEFINITION_FORMATION('','',#{product});").ok();
+    writeln!(
+        data,
+        "#{formation} = PRODUCT_DEFINITION_FORMATION('','',#{product});"
+    )
+    .ok();
     writeln!(
         data,
         "#{definition_context} = PRODUCT_DEFINITION_CONTEXT('part definition',#{app},'design');"
@@ -348,14 +364,26 @@ pub fn build_step(meshes: &[&MeshModel]) -> Option<String> {
         "#{definition} = PRODUCT_DEFINITION('design','',#{formation},#{definition_context});"
     )
     .ok();
-    writeln!(data, "#{definition_shape} = PRODUCT_DEFINITION_SHAPE('','',#{definition});").ok();
+    writeln!(
+        data,
+        "#{definition_shape} = PRODUCT_DEFINITION_SHAPE('','',#{definition});"
+    )
+    .ok();
     writeln!(
         data,
         "#{category} = PRODUCT_RELATED_PRODUCT_CATEGORY('part',$,(#{product}));"
     )
     .ok();
-    writeln!(data, "#{length} = (LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));").ok();
-    writeln!(data, "#{angle} = (NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));").ok();
+    writeln!(
+        data,
+        "#{length} = (LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));"
+    )
+    .ok();
+    writeln!(
+        data,
+        "#{angle} = (NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));"
+    )
+    .ok();
     writeln!(
         data,
         "#{solid_angle} = (NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT());"
@@ -689,8 +717,14 @@ mod tests {
         // A square with a square hole, as eight triangles in one plane.
         let p = |x: f32, y: f32| [x, y, 0.0];
         let verts = vec![
-            p(0.0, 0.0), p(3.0, 0.0), p(3.0, 3.0), p(0.0, 3.0),
-            p(1.0, 1.0), p(2.0, 1.0), p(2.0, 2.0), p(1.0, 2.0),
+            p(0.0, 0.0),
+            p(3.0, 0.0),
+            p(3.0, 3.0),
+            p(0.0, 3.0),
+            p(1.0, 1.0),
+            p(2.0, 1.0),
+            p(2.0, 2.0),
+            p(1.0, 2.0),
         ];
         let indices = vec![
             0, 1, 5, 0, 5, 4, 1, 2, 6, 1, 6, 5, 2, 3, 7, 2, 7, 6, 3, 0, 4, 3, 4, 7,
@@ -704,6 +738,4 @@ mod tests {
         assert_eq!(step.matches("FACE_OUTER_BOUND").count(), 1);
         assert_eq!(step.matches("= FACE_BOUND").count(), 1);
     }
-
 }
-

@@ -149,11 +149,7 @@ fn move_attributes(document: &mut Document, name: &str, old: Vector3, new: Vecto
         }
     }
 }
-pub(crate) fn reframe(
-    document: &mut Document,
-    definition: Handle,
-    transform: &Transform,
-) -> usize {
+pub(crate) fn reframe(document: &mut Document, definition: Handle, transform: &Transform) -> usize {
     let Some((handle, _)) = parameter(document, definition) else {
         return 0;
     };

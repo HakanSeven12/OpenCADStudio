@@ -242,9 +242,7 @@ impl CadCommand for EllipseCommand {
             CtrStep::MinorRatio { center, major } => {
                 let (center, major) = (*center, *major);
                 let ratio = minor_ratio(center, major, pt);
-                CmdResult::CommitAndExit(make_ellipse(
-                    center, major, ratio, 0.0, TAU, self.plane,
-                ))
+                CmdResult::CommitAndExit(make_ellipse(center, major, ratio, 0.0, TAU, self.plane))
             }
         }
     }
@@ -375,9 +373,7 @@ impl CadCommand for EllipseAxisCommand {
             AxisStep::MinorRatio { center, major } => {
                 let (center, major) = (*center, *major);
                 let ratio = minor_ratio(center, major, pt);
-                CmdResult::CommitAndExit(make_ellipse(
-                    center, major, ratio, 0.0, TAU, self.plane,
-                ))
+                CmdResult::CommitAndExit(make_ellipse(center, major, ratio, 0.0, TAU, self.plane))
             }
         }
     }

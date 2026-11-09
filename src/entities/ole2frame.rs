@@ -2,11 +2,11 @@ use document::entities::{Ole2Frame, OleObjectType};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{center_grip, edit_prop as edit, ro_prop as ro, square_grip};
-use crate::t;
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
 use crate::scene::model::object::{GripApply, GripDef, PropSection};
 use crate::scene::model::wire_model::SnapHint;
+use crate::t;
 
 fn to_render(ole: &Ole2Frame) -> RenderEntity {
     let x0 = ole.upper_left_corner.x;
@@ -235,7 +235,10 @@ fn properties(ole: &Ole2Frame) -> Vec<PropSection> {
 
 fn apply_geom_prop(ole: &mut Ole2Frame, field: &str, value: &str) {
     if field == "ole_plot_quality" {
-        if let Some(index) = plot_quality_labels().iter().position(|label| label == value) {
+        if let Some(index) = plot_quality_labels()
+            .iter()
+            .position(|label| label == value)
+        {
             ole.lock_aspect = index as u8;
         } else if let Ok(index) = value.trim().parse::<u8>() {
             ole.lock_aspect = index.min(2);

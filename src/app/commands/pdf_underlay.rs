@@ -173,7 +173,8 @@ impl OpenCADStudio {
             if let Some(document::EntityType::Extended(extended)) =
                 self.tabs[i].scene.document.get_entity_mut(*handle)
             {
-                if let document::entities::ExtendedEntityData::PointCloudEx(data) = &mut extended.data
+                if let document::entities::ExtendedEntityData::PointCloudEx(data) =
+                    &mut extended.data
                 {
                     edit(data);
                 }

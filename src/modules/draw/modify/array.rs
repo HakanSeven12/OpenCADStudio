@@ -534,9 +534,13 @@ use std::f64::consts::TAU as FTAU;
 enum PathStep {
     SelectPath,
     /// Divide: the item count, spread over the whole path.
-    Count { path_entity: EntityType },
+    Count {
+        path_entity: EntityType,
+    },
     /// Measure: the distance between items.
-    Spacing { path_entity: EntityType },
+    Spacing {
+        path_entity: EntityType,
+    },
     /// Measure: how many items, at most as many as the path holds.
     MeasuredCount {
         path_entity: EntityType,
@@ -566,7 +570,12 @@ pub struct ArrayPathCommand {
 /// The Method option button, labelled with the current method.
 fn method_option(measure: bool) -> crate::command::CmdOption {
     crate::command::CmdOption {
-        label: crate::t!(if measure { "Method: Measure" } else { "Method: Divide" }).into_owned(),
+        label: crate::t!(if measure {
+            "Method: Measure"
+        } else {
+            "Method: Divide"
+        })
+        .into_owned(),
         keyword: "M".to_string(),
     }
 }
@@ -664,7 +673,11 @@ impl ArrayPathCommand {
         }
         let along = (length / spacing + 1e-9).floor();
         // A closed path ends where it starts: the last place is the first.
-        let items = if curve.is_closed() { along } else { along + 1.0 };
+        let items = if curve.is_closed() {
+            along
+        } else {
+            along + 1.0
+        };
         items.clamp(1.0, MAX_ARRAY_ITEMS as f64) as u32
     }
 
@@ -677,10 +690,10 @@ impl ArrayPathCommand {
         // Walk from the end nearest the pick, as Divide does.
         let start_point = curve.point_at_distance(0.0);
         let end_point = curve.point_at_distance(length);
-        let from_end = self
-            .pick_pt
-            .distance_squared(DVec3::from_array(end_point))
-            < self.pick_pt.distance_squared(DVec3::from_array(start_point));
+        let from_end = self.pick_pt.distance_squared(DVec3::from_array(end_point))
+            < self
+                .pick_pt
+                .distance_squared(DVec3::from_array(start_point));
         (0..count)
             .map(|i| {
                 let along = (spacing * i as f64).min(length);
@@ -883,7 +896,10 @@ impl CadCommand for ArrayPathCommand {
     fn options(&self) -> Vec<crate::command::CmdOption> {
         match self.step {
             PathStep::Count { .. } | PathStep::Spacing { .. } => {
-                vec![method_option(self.measure), associative_option(self.associative)]
+                vec![
+                    method_option(self.measure),
+                    associative_option(self.associative),
+                ]
             }
             _ => Vec::new(),
         }
@@ -966,9 +982,9 @@ impl CadCommand for ArrayPathCommand {
             "MEASURE" | "_MEASURE" => Some(true),
             _ => None,
         };
-        if let Some(measure) = method.filter(|_| {
-            matches!(self.step, PathStep::Count { .. } | PathStep::Spacing { .. })
-        }) {
+        if let Some(measure) = method
+            .filter(|_| matches!(self.step, PathStep::Count { .. } | PathStep::Spacing { .. }))
+        {
             self.measure = measure;
             defaults::set_array_path_measure(f64::from(u8::from(self.measure)));
             let path_entity = match std::mem::replace(&mut self.step, PathStep::SelectPath) {
@@ -1394,4 +1410,3 @@ mod item_limit_tests {
         ));
     }
 }
-

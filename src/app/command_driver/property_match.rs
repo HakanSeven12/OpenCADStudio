@@ -23,9 +23,10 @@ impl OpenCADStudio {
             self.push_undo_snapshot(i, if copy { "COPYTOLAYER" } else { "LAYMATCH" });
             // Create the copies now; placement continues without another undo entry.
             let dest = if copy {
-                self.tabs[i]
-                    .scene
-                    .copy_entities(&dest, &crate::command::EntityTransform::Translate(glam::DVec3::ZERO))
+                self.tabs[i].scene.copy_entities(
+                    &dest,
+                    &crate::command::EntityTransform::Translate(glam::DVec3::ZERO),
+                )
             } else {
                 dest
             };
@@ -183,9 +184,7 @@ impl OpenCADStudio {
             // Clear the consumed target selection and keep prompting.
             self.tabs[i].scene.deselect_all();
             self.tabs[i].scene.set_command_preview_hatches(Vec::new());
-            let source_glow = self.tabs[i]
-                .scene
-                .matchprop_source_highlight_wires(src);
+            let source_glow = self.tabs[i].scene.matchprop_source_highlight_wires(src);
             self.tabs[i].scene.set_preview_wires(source_glow);
             if let Some(cmd) = &self.tabs[i].active_cmd {
                 self.command_line.push_info(&cmd.prompt());

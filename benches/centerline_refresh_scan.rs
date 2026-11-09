@@ -35,10 +35,7 @@ const RUNS: usize = 3;
 const WARMUP: usize = 1;
 
 fn line_at(y: f64) -> Line {
-    Line::from_points(
-        Vector3::new(0.0, y, 0.0),
-        Vector3::new(100.0, y, 0.0),
-    )
+    Line::from_points(Vector3::new(0.0, y, 0.0), Vector3::new(100.0, y, 0.0))
 }
 
 fn association(first: Handle, second: Handle) -> CenterLineAssociation {
@@ -85,7 +82,10 @@ fn carrier_y(scene: &Scene, handle: Handle) -> f64 {
     let Some(EntityType::Line(line)) = scene.document.get_entity(handle) else {
         panic!("the centre line carrier is not a line");
     };
-    assert!((line.start.y - line.end.y).abs() < 1e-9, "carrier is not horizontal");
+    assert!(
+        (line.start.y - line.end.y).abs() < 1e-9,
+        "carrier is not horizontal"
+    );
     line.start.y
 }
 

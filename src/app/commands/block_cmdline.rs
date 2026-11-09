@@ -318,8 +318,8 @@ impl OpenCADStudio {
     /// world placement is folded back through the insert transform, so the
     /// definitions keep sitting on the geometry they were authored against.
     pub(in crate::app) fn attredef_block(&mut self, i: usize, block: &str) {
-        use document::Entity as _;
         use document::entities::{AttributeDefinition, EntityType};
+        use document::Entity as _;
 
         let doc = &self.tabs[i].scene.document;
         let Some(record) = doc
@@ -327,9 +327,8 @@ impl OpenCADStudio {
             .iter()
             .find(|record| record.name.eq_ignore_ascii_case(block))
         else {
-            self.command_line.push_error(
-                crate::tf!("ATTREDEF: no block named \"{block}\".").as_ref(),
-            );
+            self.command_line
+                .push_error(crate::tf!("ATTREDEF: no block named \"{block}\".").as_ref());
             return;
         };
         let name = record.name.clone();
@@ -457,7 +456,9 @@ impl OpenCADStudio {
             }
         }
         if let Some(record) = doc.block_records.get_mut(&name) {
-            record.entity_handles.retain(|handle| !replaced.contains(handle));
+            record
+                .entity_handles
+                .retain(|handle| !replaced.contains(handle));
             for handle in &new_handles {
                 if !record.entity_handles.contains(handle) {
                     record.entity_handles.push(*handle);

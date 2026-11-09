@@ -71,10 +71,7 @@ fn build_fixture(with_constraints: bool) -> (Scene, Vec<Handle>) {
         for pair in others.chunks_exact(2) {
             set.add(
                 ConstraintKind::Parallel,
-                vec![
-                    ParametricRef::whole(pair[0]),
-                    ParametricRef::whole(pair[1]),
-                ],
+                vec![ParametricRef::whole(pair[0]), ParametricRef::whole(pair[1])],
                 None,
             );
         }
@@ -115,9 +112,7 @@ fn measure(label: &str, with_constraints: bool) {
         .parametric_constraint_set(ParametricScope::ModelSpace)
         .map(|set| set.constraints.len())
         .unwrap_or(0);
-    println!(
-        "{label}: {SELECTED} selected lines, {constraint_count} constraints, rotation"
-    );
+    println!("{label}: {SELECTED} selected lines, {constraint_count} constraints, rotation");
 
     for _ in 0..WARMUP {
         scene.transform_entities(black_box(&handles), black_box(&rotate));
@@ -142,12 +137,9 @@ fn measure(label: &str, with_constraints: bool) {
     let recording = scene.take_undo_recording().expect("recording was open");
     let (entity_records, object_records, constraint_records, _, _) =
         recording.into_recorded_images();
-    let undo_records =
-        entity_records.len() + object_records.len() + constraint_records.len();
+    let undo_records = entity_records.len() + object_records.len() + constraint_records.len();
 
-    println!(
-        "  median {median:.4} ms/call  samples {samples:?}  warmup+timed sink {sink}"
-    );
+    println!("  median {median:.4} ms/call  samples {samples:?}  warmup+timed sink {sink}");
     println!("  digest {digest:#018x}  undo_records {undo_records}");
 }
 

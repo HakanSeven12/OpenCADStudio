@@ -88,7 +88,10 @@ impl ActionCommand {
         if !matches!(kind, Kind::Move | Kind::Flip) {
             return None;
         }
-        let source = self.candidates.iter().find(|p| Some(p.handle) == self.parameter)?;
+        let source = self
+            .candidates
+            .iter()
+            .find(|p| Some(p.handle) == self.parameter)?;
         Some((kind, source.id))
     }
     fn point_choices(&self) -> Option<(Kind, i32, Vec<(Handle, i32, String)>)> {
@@ -700,13 +703,17 @@ impl CadCommand for ActionCommand {
     }
     fn selection_marker_selected(&self, handle: Handle) -> bool {
         self.target_source().is_some_and(|(kind, source)| {
-            self.targets.contains(&handle) && self.candidates.iter().any(|p| {
-                p.handle == handle && p.is_action_target(kind, source)
-            })
+            self.targets.contains(&handle)
+                && self
+                    .candidates
+                    .iter()
+                    .any(|p| p.handle == handle && p.is_action_target(kind, source))
         })
     }
     fn clear_selection_markers(&mut self) {
-        let Some((kind, source)) = self.target_source() else { return };
+        let Some((kind, source)) = self.target_source() else {
+            return;
+        };
         self.targets.retain(|h| {
             !self
                 .candidates

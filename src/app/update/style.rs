@@ -3,9 +3,7 @@
 #![allow(unused_imports)]
 use super::util::*;
 use super::{format_size, VIEWCUBE_HIT_SIZE};
-use crate::app::helpers::{
-    parse_coord, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind,
-};
+use crate::app::helpers::{parse_coord, ucs_rotate_vec, ucs_to_wcs, ucs_z_axis, CoordKind};
 use crate::app::{Message, OpenCADStudio, POLY_START_DELAY_MS};
 use crate::modules::ModuleEvent;
 use crate::scene::model::object::GripApply;
@@ -176,17 +174,15 @@ impl OpenCADStudio {
         self.ts_cell = cell.name.clone();
         self.ts_cell_name.clear();
         self.ts_cell_height = crate::entities::common::format_length(format.text_height);
-        self.ts_cell_angle =
-            crate::entities::common::format_length(format.rotation.to_degrees());
+        self.ts_cell_angle = crate::entities::common::format_length(format.rotation.to_degrees());
         let (horizontal, vertical) = data.margins().unwrap_or(margins);
         self.ts_cell_hmargin = crate::entities::common::format_length(horizontal);
         self.ts_cell_vmargin = crate::entities::common::format_length(vertical);
         self.ts_cell_format = format.value_format_string.clone();
         for (slot, edge) in document::objects::TABLE_GRID_EDGES.iter().enumerate() {
-            let spacing = data.grid(*edge).map_or(
-                0.25 * format.text_height,
-                |grid| grid.border.double_line_spacing,
-            );
+            let spacing = data.grid(*edge).map_or(0.25 * format.text_height, |grid| {
+                grid.border.double_line_spacing
+            });
             self.ts_edge_spacing[slot] = crate::entities::common::format_length(spacing);
         }
     }
@@ -880,20 +876,24 @@ impl OpenCADStudio {
     fn table_cell_style_in_use(&self, tab: usize, name: &str) -> bool {
         use document::objects::ObjectType;
         let document = &self.tabs[tab].scene.document;
-        let found = document.objects.iter().find_map(|(handle, object)| match object {
-            ObjectType::TableStyle(style) if style.name == self.tablestyle_selected => style
-                .cell_style(name)
-                .map(|cell| (*handle, cell.id, style.template())),
-            _ => None,
-        });
+        let found = document
+            .objects
+            .iter()
+            .find_map(|(handle, object)| match object {
+                ObjectType::TableStyle(style) if style.name == self.tablestyle_selected => style
+                    .cell_style(name)
+                    .map(|cell| (*handle, cell.id, style.template())),
+                _ => None,
+            });
         let Some((handle, id, template)) = found else {
             return false;
         };
-        let uses = |table: &document::entities::Table| {
-            table.rows.iter().any(|row| {
-                row.style_id == id || row.cells.iter().any(|cell| cell.style_id == id)
-            }) || table.columns.iter().any(|column| column.style_id == id)
-        };
+        let uses =
+            |table: &document::entities::Table| {
+                table.rows.iter().any(|row| {
+                    row.style_id == id || row.cells.iter().any(|cell| cell.style_id == id)
+                }) || table.columns.iter().any(|column| column.style_id == id)
+            };
         // The style's own starting table counts too.
         let template_uses = template
             .and_then(|template| match document.objects.get(&template) {
@@ -1017,7 +1017,10 @@ impl OpenCADStudio {
         value: String,
     ) -> Task<Message> {
         use document::objects::TableBorderType;
-        let Some(mask) = document::objects::TABLE_GRID_EDGES.get(edge as usize).copied() else {
+        let Some(mask) = document::objects::TABLE_GRID_EDGES
+            .get(edge as usize)
+            .copied()
+        else {
             return Task::none();
         };
         match field {
@@ -1037,7 +1040,9 @@ impl OpenCADStudio {
                 let handle = u64::from_str_radix(value.trim(), 16)
                     .map(document::Handle::new)
                     .unwrap_or(document::Handle::NULL);
-                self.edit_table_cell_style(|cell| cell.cell_style.grid_mut(mask).line_type = handle);
+                self.edit_table_cell_style(|cell| {
+                    cell.cell_style.grid_mut(mask).line_type = handle
+                });
             }
             "color" => {
                 let color = match value.trim().parse::<i16>() {
@@ -1046,7 +1051,9 @@ impl OpenCADStudio {
                     Ok(index @ 1..=255) => document::types::Color::Index(index as u8),
                     _ => return Task::none(),
                 };
-                self.edit_table_cell_style(|cell| cell.cell_style.grid_mut(mask).border.color = color);
+                self.edit_table_cell_style(|cell| {
+                    cell.cell_style.grid_mut(mask).border.color = color
+                });
             }
             "double" => {
                 let double = value == "1";
@@ -1110,17 +1117,23 @@ impl OpenCADStudio {
     fn table_style_template_picked(&mut self, table: Option<document::Handle>) {
         use document::objects::ObjectType;
         let i = self.active_tab;
-        let picked = table.and_then(|handle| match self.tabs[i].scene.document.get_entity(handle) {
-            Some(document::EntityType::Table(table)) => Some(table.as_ref().clone()),
-            _ => None,
-        });
+        let picked =
+            table.and_then(
+                |handle| match self.tabs[i].scene.document.get_entity(handle) {
+                    Some(document::EntityType::Table(table)) => Some(table.as_ref().clone()),
+                    _ => None,
+                },
+            );
         let selected = self.tablestyle_selected.clone();
         if let Some(mut template) = picked {
             let document = &mut self.tabs[i].scene.document;
-            let style_handle = document.objects.iter().find_map(|(handle, object)| match object {
-                ObjectType::TableStyle(style) if style.name == selected => Some(*handle),
-                _ => None,
-            });
+            let style_handle = document
+                .objects
+                .iter()
+                .find_map(|(handle, object)| match object {
+                    ObjectType::TableStyle(style) if style.name == selected => Some(*handle),
+                    _ => None,
+                });
             if let Some(style_handle) = style_handle {
                 let handle = document.allocate_handle();
                 crate::entities::table::detach_fields(&mut template);
@@ -1393,11 +1406,9 @@ impl OpenCADStudio {
     ) -> Task<Message> {
         let i = self.active_tab;
         if field == "arrowhead_handle" {
-            let handle = crate::entities::arrowheads::resolve(
-                &mut self.tabs[i].scene.document,
-                &value,
-            )
-            .filter(|h| !h.is_null());
+            let handle =
+                crate::entities::arrowheads::resolve(&mut self.tabs[i].scene.document, &value)
+                    .filter(|h| !h.is_null());
             if let Some(s) = self.mleaderstyle_mut(i) {
                 s.arrowhead_handle = handle;
             }
@@ -1630,10 +1641,9 @@ impl OpenCADStudio {
             Some(crate::app::ColorPickTarget::MLeader(f)) => {
                 Some(Message::MLeaderStyleEdit { field: f, value: s })
             }
-            Some(crate::app::ColorPickTarget::Table(f)) => Some(Message::TableStyleCellEdit {
-                field: f,
-                value: s,
-            }),
+            Some(crate::app::ColorPickTarget::Table(f)) => {
+                Some(Message::TableStyleCellEdit { field: f, value: s })
+            }
             Some(crate::app::ColorPickTarget::Properties) => {
                 return self.set_property_color(color, name);
             }
@@ -1712,7 +1722,8 @@ impl OpenCADStudio {
                 .unwrap_or(document::types::Handle::NULL)
         } else {
             // A standard arrowhead's block is created on first use.
-            crate::entities::arrowheads::resolve(doc, &value).unwrap_or(document::types::Handle::NULL)
+            crate::entities::arrowheads::resolve(doc, &value)
+                .unwrap_or(document::types::Handle::NULL)
         };
         // Staged: persists on Apply.
         if let Some(ds) = self.tabs[i].scene.document.dim_styles.get_mut(&name) {

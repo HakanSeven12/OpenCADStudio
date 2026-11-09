@@ -320,8 +320,14 @@ pub(crate) fn layout(
     match inspection.shape {
         Shape::None => {}
         Shape::Round => {
-            out.push(line(along(center, left, half_h), along(center, right, half_h)));
-            out.push(line(along(center, left, -half_h), along(center, right, -half_h)));
+            out.push(line(
+                along(center, left, half_h),
+                along(center, right, half_h),
+            ));
+            out.push(line(
+                along(center, left, -half_h),
+                along(center, right, -half_h),
+            ));
             for (end, start, sweep) in [
                 (left, std::f64::consts::FRAC_PI_2, std::f64::consts::PI),
                 (right, -std::f64::consts::FRAC_PI_2, std::f64::consts::PI),

@@ -324,7 +324,11 @@ impl CadCommand for MTextCommand {
                 default = num(self.column_default(Step::TotalWidth))
             ),
             Step::ColumnCount => {
-                crate::tr!("mtext-cmd", "column-count", default = self.column_count.to_string())
+                crate::tr!(
+                    "mtext-cmd",
+                    "column-count",
+                    default = self.column_count.to_string()
+                )
             }
             Step::ColumnWidth => crate::tr!(
                 "mtext-cmd",
@@ -427,7 +431,12 @@ impl CadCommand for MTextCommand {
                     "BL" => AttachmentPoint::BottomLeft,
                     "BC" => AttachmentPoint::BottomCenter,
                     "BR" => AttachmentPoint::BottomRight,
-                    _ => return Some(CmdResult::ReportError(crate::tr!("text-cmd", "invalid-keyword"))),
+                    _ => {
+                        return Some(CmdResult::ReportError(crate::tr!(
+                            "text-cmd",
+                            "invalid-keyword"
+                        )))
+                    }
                 };
                 self.resume_point_step();
             }
@@ -438,7 +447,10 @@ impl CadCommand for MTextCommand {
                 } else if "EXACTLY".starts_with(word) {
                     LineSpacingStyle::Exactly
                 } else {
-                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "invalid-keyword")));
+                    return Some(CmdResult::ReportError(crate::tr!(
+                        "text-cmd",
+                        "invalid-keyword"
+                    )));
                 };
                 self.step = Step::LineSpacing;
             }
@@ -454,7 +466,10 @@ impl CadCommand for MTextCommand {
                     }
                 };
                 if !(0.25..=4.0).contains(&value) {
-                    return Some(CmdResult::ReportError(crate::tr!("mtext-cmd", "spacing-range")));
+                    return Some(CmdResult::ReportError(crate::tr!(
+                        "mtext-cmd",
+                        "spacing-range"
+                    )));
                 }
                 self.line_spacing = value;
                 self.resume_point_step();
@@ -490,7 +505,10 @@ impl CadCommand for MTextCommand {
                 } else if "NO COLUMNS".starts_with(word) {
                     0
                 } else {
-                    return Some(CmdResult::ReportError(crate::tr!("text-cmd", "invalid-keyword")));
+                    return Some(CmdResult::ReportError(crate::tr!(
+                        "text-cmd",
+                        "invalid-keyword"
+                    )));
                 };
                 self.step = match self.column_type {
                     0 => {

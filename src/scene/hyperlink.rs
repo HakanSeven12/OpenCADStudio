@@ -123,4 +123,3 @@ pub(crate) fn set_url(document: &mut Document, handle: Handle, url: &str) {
         set(document, handle, Some(&link));
     }
 }
-

@@ -481,7 +481,12 @@ fn find_shape_file(file: &str, lin_dir: Option<&std::path::Path>) -> Option<Stri
             std::fs::read_dir(dir)
                 .ok()?
                 .filter_map(Result::ok)
-                .find(|entry| entry.file_name().to_string_lossy().eq_ignore_ascii_case(name))
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(name)
+                })
                 .map(|entry| entry.path())
         })
         .or_else(|| crate::io::font_repo::local_font_file(name))
@@ -1010,7 +1015,9 @@ mod shape_file_tests {
         populate_document_from_source(&mut doc, source, Some(&dir));
         let lt = document_complex_lt(&doc, "TICKS").expect("the shape was dropped");
         let shape = lt.segments.iter().find_map(|s| match s {
-            LtSegment::Shape { number, shx_file, .. } => Some((*number, shx_file.clone())),
+            LtSegment::Shape {
+                number, shx_file, ..
+            } => Some((*number, shx_file.clone())),
             _ => None,
         });
         let _ = std::fs::remove_dir_all(&dir);

@@ -138,7 +138,11 @@ impl DimCommand {
     /// DIM running a command it handed off (the Baseline and Continue
     /// series); Enter at that command's first prompt comes back to DIM.
     pub fn adopt(&mut self, command: Box<dyn CadCommand>, continued: bool) {
-        let kind = if continued { Kind::Continued } else { Kind::Series };
+        let kind = if continued {
+            Kind::Continued
+        } else {
+            Kind::Series
+        };
         self.inner = Some((kind, command));
     }
 
@@ -159,7 +163,13 @@ impl DimCommand {
 
     /// A pick replayed into a dimension command whose first prompt picks an
     /// object.
-    fn start_picked(&mut self, kind: Kind, entity: EntityType, handle: Handle, point: DVec3) -> CmdResult {
+    fn start_picked(
+        &mut self,
+        kind: Kind,
+        entity: EntityType,
+        handle: Handle,
+        point: DVec3,
+    ) -> CmdResult {
         let command = self.start(kind);
         if !command.needs_entity_pick() {
             // DIMLINEAR / DIMALIGNED pick objects after an Enter.
@@ -354,7 +364,10 @@ impl CadCommand for DimCommand {
 
     #[allow(deprecated)]
     fn wants_text_input(&self) -> bool {
-        self.layer || self.inner().is_some_and(|command| command.wants_text_input())
+        self.layer
+            || self
+                .inner()
+                .is_some_and(|command| command.wants_text_input())
     }
 
     fn point_step_accepts_keywords(&self) -> bool {
@@ -532,7 +545,10 @@ impl CadCommand for DimCommand {
                 }
             });
         }
-        let keyword = text.trim().trim_start_matches(['_', '.']).to_ascii_uppercase();
+        let keyword = text
+            .trim()
+            .trim_start_matches(['_', '.'])
+            .to_ascii_uppercase();
         if self.radial.is_some()
             && self
                 .inner()

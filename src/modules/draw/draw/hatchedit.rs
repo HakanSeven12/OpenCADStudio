@@ -38,7 +38,11 @@ pub struct HatcheditCommand {
     annotative_current: bool,
     style_current: document::entities::HatchStyleType,
     input: Option<&'static str>,
-    source_appearance: Option<(document::types::Color, String, document::types::Transparency)>,
+    source_appearance: Option<(
+        document::types::Color,
+        String,
+        document::types::Transparency,
+    )>,
     current_color: document::types::Color,
     current_transparency: document::types::Transparency,
     boundary_region: bool,

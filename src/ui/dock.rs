@@ -1229,7 +1229,8 @@ pub fn strip_tab_h(title: &str, labelled: bool) -> f32 {
     if !labelled {
         return STRIP_CELL_H;
     }
-    STRIP_CELL_H - 4.0 + crate::ui::style::text_metrics::width(title, STRIP_LABEL_SIZE, false).ceil()
+    STRIP_CELL_H - 4.0
+        + crate::ui::style::text_metrics::width(title, STRIP_LABEL_SIZE, false).ceil()
         + STRIP_LABEL_PAD
 }
 
@@ -1254,7 +1255,9 @@ pub fn strip_hit(y: f32, layout: &[StripGroup]) -> StripHit {
             // The tab boundary nearest the pointer.
             let index = (0..=g.cells.len())
                 .min_by(|&a, &b| {
-                    (g.cell_top(a) - y).abs().total_cmp(&(g.cell_top(b) - y).abs())
+                    (g.cell_top(a) - y)
+                        .abs()
+                        .total_cmp(&(g.cell_top(b) - y).abs())
                 })
                 .unwrap_or(0);
             return StripHit::Join {
@@ -1386,11 +1389,14 @@ pub fn detach_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Mes
     .on_press(Message::Dock(DockMsg::Detach(id)))
     .style(button::subtle)
     .padding([3, 5]);
-    let detach =
-        container(detach).id(iced::widget::Id::new(crate::ui::modal::DETACH_BUTTON_ID));
-    tooltip(detach, text(crate::t!("Open in its own window")).size(10), tip)
-        .gap(4)
-        .into()
+    let detach = container(detach).id(iced::widget::Id::new(crate::ui::modal::DETACH_BUTTON_ID));
+    tooltip(
+        detach,
+        text(crate::t!("Open in its own window")).size(10),
+        tip,
+    )
+    .gap(4)
+    .into()
 }
 
 pub fn close_button<'a>(id: PanelId, tip: tooltip::Position) -> Element<'a, Message> {
@@ -1804,10 +1810,8 @@ mod tests {
     #[test]
     fn strip_hit_maps_dividers_icons_and_the_end() {
         // Two groups: three icons, then one.
-        let (layout, plus_top) = strip_layout(&[
-            (0, vec![STRIP_CELL_H; 3]),
-            (2, vec![STRIP_CELL_H]),
-        ]);
+        let (layout, plus_top) =
+            strip_layout(&[(0, vec![STRIP_CELL_H; 3]), (2, vec![STRIP_CELL_H])]);
         let g0 = layout[0].clone();
         let g1 = layout[1].clone();
         assert_eq!(g0.icons_top, STRIP_PAD);

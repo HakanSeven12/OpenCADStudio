@@ -2,8 +2,8 @@ use document::entities::{AttachmentPoint, DrawingDirection, MText};
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro,
-    oriented_triangle_grip, square_grip, triangle_grip,
+    edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, oriented_triangle_grip,
+    ro_prop as ro, square_grip, triangle_grip,
 };
 use crate::entities::text_support::{
     clamp_mtext_column_count, layout_mtext, resolve_text_style, GlyphBox, MTextColumns,
@@ -289,7 +289,11 @@ pub(crate) fn explode_mtext(t: &MText, document: &document::Document) -> Vec<doc
             }
             let mut text = document::entities::Text::with_value(
                 run.text,
-                document::types::Vector3::new(stroke.origin[0], stroke.origin[1], t.insertion_point.z),
+                document::types::Vector3::new(
+                    stroke.origin[0],
+                    stroke.origin[1],
+                    t.insertion_point.z,
+                ),
             );
             text.common = t.common.clone();
             text.common.handle = document::Handle::NULL;
@@ -881,7 +885,6 @@ impl crate::entities::traits::TextContent for document::entities::MText {
     }
 }
 
-
 #[cfg(test)]
 mod inline_bylayer_tests {
     use super::*;
@@ -913,11 +916,13 @@ mod inline_bylayer_tests {
             .filter_map(|s| s.run.as_ref().map(|r| (r.text.clone(), s.color)))
             .collect();
         assert!(
-            runs.iter().any(|(text, c)| text.contains("SCALE") && *c == yellow),
+            runs.iter()
+                .any(|(text, c)| text.contains("SCALE") && *c == yellow),
             "{runs:?}"
         );
         assert!(
-            runs.iter().any(|(text, c)| text.contains("TITLE") && c.is_none()),
+            runs.iter()
+                .any(|(text, c)| text.contains("TITLE") && c.is_none()),
             "{runs:?}"
         );
     }

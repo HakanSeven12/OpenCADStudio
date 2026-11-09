@@ -63,7 +63,15 @@ fn authored_flip_links_require_complete_ordered_selections() {
     assert!(!retarget(&mut doc, def, linked, &selection, None).unwrap());
     let before = doc.clone();
     assert!(retarget(&mut doc, def, movement, &geometry[..1], None).is_err());
-    assert!(create(&mut doc, def, Kind::Move, linear, &geometry[1..], DVec3::ZERO).is_err());
+    assert!(create(
+        &mut doc,
+        def,
+        Kind::Move,
+        linear,
+        &geometry[1..],
+        DVec3::ZERO
+    )
+    .is_err());
     assert_eq!(doc, before);
     assert!(retarget(&mut doc, def, linked, &geometry[1..], None).unwrap());
     assert_eq!(dependencies(&doc), geometry[1..]);
@@ -95,9 +103,14 @@ fn reciprocal_native_flips_preserve_perpendicular_axes_and_compose() {
     )
     .unwrap();
     let linear = distance::create(
-        &mut doc, def, distance::Kind::Linear,
-        Vector3::new(2., 1., 0.), Vector3::new(4., 1., 0.), Vector3::UNIT_X,
-    ).unwrap();
+        &mut doc,
+        def,
+        distance::Kind::Linear,
+        Vector3::new(2., 1., 0.),
+        Vector3::new(4., 1., 0.),
+        Vector3::UNIT_X,
+    )
+    .unwrap();
     let parameters = all_parameters(&doc, def);
     let a = create(&mut doc, def, Kind::Flip, first, &geometry, DVec3::ZERO).unwrap();
     let b = create(&mut doc, def, Kind::Flip, second, &geometry, DVec3::ZERO).unwrap();
@@ -113,7 +126,13 @@ fn reciprocal_native_flips_preserve_perpendicular_axes_and_compose() {
         action.action.action_ids.push(base_id);
         for parameter in [target, linear] {
             action.action.dependencies.push(parameter);
-            action.action.action_ids.push(parameters.iter().find(|p| p.handle == parameter).unwrap().id);
+            action.action.action_ids.push(
+                parameters
+                    .iter()
+                    .find(|p| p.handle == parameter)
+                    .unwrap()
+                    .id,
+            );
         }
     }
     let insert = doc
@@ -123,9 +142,10 @@ fn reciprocal_native_flips_preserve_perpendicular_axes_and_compose() {
         )))
         .unwrap();
     for order in [[first, second], [second, first]] {
-        let mut evaluated = instance::evaluate_value(
-            &doc, insert, linear, Value::Point(DVec3::new(6., 1., 0.)),
-        ).unwrap().unwrap();
+        let mut evaluated =
+            instance::evaluate_value(&doc, insert, linear, Value::Point(DVec3::new(6., 1., 0.)))
+                .unwrap()
+                .unwrap();
         for axis in order {
             evaluated = instance::evaluate_value(&evaluated, insert, axis, Value::Flip(true))
                 .unwrap()
@@ -778,7 +798,8 @@ fn coupled_refresh_migrates_polar_and_rotation_values() {
         if flips.is_empty() {
             create(&mut doc, def, Kind::Flip, flip, &selection, DVec3::ZERO).unwrap();
         } else {
-            let action = create(&mut doc, def, Kind::Flip, flip, &geometry[1..], DVec3::ZERO).unwrap();
+            let action =
+                create(&mut doc, def, Kind::Flip, flip, &geometry[1..], DVec3::ZERO).unwrap();
             assert!(retarget(&mut doc, def, action, &selection, None).unwrap());
         }
         flips.push(flip);

@@ -185,7 +185,9 @@ fn block_parameter_metadata_rejects_collisions_foreign_objects_and_invalid_field
         "Foreign"
     )
     .is_err());
-    let graph = crate::scene::block_authoring::graph(&doc, def).unwrap().unwrap();
+    let graph = crate::scene::block_authoring::graph(&doc, def)
+        .unwrap()
+        .unwrap();
     assert!(set_text(&mut doc, def, graph, Field::Name, "Graph").is_err());
     assert!(set_chain(&mut doc, def, graph, true).is_err());
     assert_eq!(doc, before);

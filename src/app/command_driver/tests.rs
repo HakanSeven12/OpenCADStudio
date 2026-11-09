@@ -157,7 +157,10 @@ mod trim_extend_history_tests {
         // A filled hatch does not appear in entity_wires(): previously the
         // command snapshot omitted it, making every inside click a no-op.
         let _ = app.dispatch_command("TRIM");
-        let cmd = app.tabs[i].active_cmd.as_mut().expect("TRIM command active");
+        let cmd = app.tabs[i]
+            .active_cmd
+            .as_mut()
+            .expect("TRIM command active");
         assert_eq!(cmd.name(), "TRIM");
         let result = cmd.on_entity_pick(hatch_handle, glam::DVec3::new(2.0, 5.0, 0.0));
         assert!(matches!(result, CmdResult::ReplaceEntity(h, edited)
@@ -227,10 +230,12 @@ mod parametric_constraint_undo_tests {
     fn add_line(app: &mut OpenCADStudio, x1: f64, y1: f64, x2: f64, y2: f64) -> Handle {
         app.tabs[app.active_tab]
             .scene
-            .add_entity(document::EntityType::Line(document::entities::Line::from_points(
-                document::types::Vector3::new(x1, y1, 0.0),
-                document::types::Vector3::new(x2, y2, 0.0),
-            )))
+            .add_entity(document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::types::Vector3::new(x1, y1, 0.0),
+                    document::types::Vector3::new(x2, y2, 0.0),
+                ),
+            ))
     }
 
     fn add_circle(app: &mut OpenCADStudio, cx: f64, cy: f64, radius: f64) -> Handle {
@@ -260,12 +265,7 @@ mod parametric_constraint_undo_tests {
             .add_entity(document::EntityType::Arc(arc))
     }
 
-    fn add_coincident_at(
-        app: &mut OpenCADStudio,
-        first: Handle,
-        second: Handle,
-        point: [f64; 2],
-    ) {
+    fn add_coincident_at(app: &mut OpenCADStudio, first: Handle, second: Handle, point: [f64; 2]) {
         let pick = |handle| crate::command::CoincidentPick {
             handle: Some(handle),
             point: glam::DVec3::new(point[0], point[1], 0.0),
@@ -352,12 +352,7 @@ mod parametric_constraint_undo_tests {
         }
     }
 
-    fn assert_segment_unmoved(
-        app: &OpenCADStudio,
-        handle: Handle,
-        start: [f64; 2],
-        end: [f64; 2],
-    ) {
+    fn assert_segment_unmoved(app: &OpenCADStudio, handle: Handle, start: [f64; 2], end: [f64; 2]) {
         let (s, e) = line_segment(app, handle);
         assert!(
             (s[0] - start[0]).abs() < 1e-9
@@ -444,10 +439,7 @@ mod parametric_constraint_undo_tests {
         let reversed = add_line(&mut app, 0.0, 50.0, -100.0, 50.0);
         let _ = app.apply_cmd_result(CmdResult::AddParametricConstraint {
             kind: ConstraintKind::Parallel,
-            refs: vec![
-                ParametricRef::whole(datum),
-                ParametricRef::whole(reversed),
-            ],
+            refs: vec![ParametricRef::whole(datum), ParametricRef::whole(reversed)],
             driving_param: None,
             label: "Parallel constraint",
         });
@@ -553,7 +545,9 @@ mod parametric_constraint_undo_tests {
         assert_segment_unmoved(&app, line, [-100.0, 0.0], [100.0, 0.0]);
         let (center, radius) = circle_center_radius(&app, circle);
         assert!(
-            center[0].abs() < 1e-9 && (center[1] - 20.0).abs() < 1e-9 && (radius - 20.0).abs() < 1e-9,
+            center[0].abs() < 1e-9
+                && (center[1] - 20.0).abs() < 1e-9
+                && (radius - 20.0).abs() < 1e-9,
             "the circle should slide onto the line along the normal: {center:?} r {radius}"
         );
     }
@@ -1087,7 +1081,10 @@ mod parametric_constraint_undo_tests {
         assert_eq!(shown(&app), !start, "button must show the new state");
 
         let _ = app.update(Message::ShowConstraintValuesChanged(!shown(&app)));
-        assert_eq!(app.show_constraint_values, start, "second press turns it back");
+        assert_eq!(
+            app.show_constraint_values, start,
+            "second press turns it back"
+        );
         assert_eq!(shown(&app), start);
     }
 
@@ -1519,12 +1516,13 @@ mod delobj_tests {
         let profile = app.tabs[i]
             .scene
             .add_entity(document::EntityType::Circle(circle));
-        let path = app.tabs[i]
-            .scene
-            .add_entity(document::EntityType::Line(document::Line::from_points(
-                Vector3::new(0.0, 0.0, 0.0),
-                Vector3::new(0.0, 0.0, 5.0),
-            )));
+        let path =
+            app.tabs[i]
+                .scene
+                .add_entity(document::EntityType::Line(document::Line::from_points(
+                    Vector3::new(0.0, 0.0, 0.0),
+                    Vector3::new(0.0, 0.0, 5.0),
+                )));
         app.delete_objects = value;
 
         let _ = app.apply_cmd_result(CmdResult::SweepEntities {
@@ -1768,10 +1766,12 @@ mod dispatched_command_task_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
 
-        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            document::types::Vector3::new(10.0, 20.0, 0.0),
-            document::types::Vector3::new(30.0, 40.0, 0.0),
-        )));
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::new(10.0, 20.0, 0.0),
+                document::types::Vector3::new(30.0, 40.0, 0.0),
+            ),
+        ));
 
         // Unselected entity - AutoLISP (command "_MOVE" ss "" "_NONE" pt "_NONE" '(0 0 0)) produces:
         assert!(app.tabs[i].scene.selected_entities().is_empty());
@@ -1781,10 +1781,26 @@ mod dispatched_command_task_tests {
 
         let moved = app.tabs[i].scene.document.get_entity(handle).unwrap();
         if let document::EntityType::Line(l) = moved {
-            assert!((l.start.x - 0.0).abs() < 1e-4, "Expected start.x == 0, got {}", l.start.x);
-            assert!((l.start.y - 0.0).abs() < 1e-4, "Expected start.y == 0, got {}", l.start.y);
-            assert!((l.end.x - 20.0).abs() < 1e-4, "Expected end.x == 20, got {}", l.end.x);
-            assert!((l.end.y - 20.0).abs() < 1e-4, "Expected end.y == 20, got {}", l.end.y);
+            assert!(
+                (l.start.x - 0.0).abs() < 1e-4,
+                "Expected start.x == 0, got {}",
+                l.start.x
+            );
+            assert!(
+                (l.start.y - 0.0).abs() < 1e-4,
+                "Expected start.y == 0, got {}",
+                l.start.y
+            );
+            assert!(
+                (l.end.x - 20.0).abs() < 1e-4,
+                "Expected end.x == 20, got {}",
+                l.end.x
+            );
+            assert!(
+                (l.end.y - 20.0).abs() < 1e-4,
+                "Expected end.y == 20, got {}",
+                l.end.y
+            );
         } else {
             panic!("Expected line entity");
         }
@@ -1796,10 +1812,12 @@ mod dispatched_command_task_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
 
-        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(document::entities::Line::from_points(
-            document::types::Vector3::new(10.0, 20.0, 0.0),
-            document::types::Vector3::new(30.0, 40.0, 0.0),
-        )));
+        let handle = app.tabs[i].scene.add_entity(document::EntityType::Line(
+            document::entities::Line::from_points(
+                document::types::Vector3::new(10.0, 20.0, 0.0),
+                document::types::Vector3::new(30.0, 40.0, 0.0),
+            ),
+        ));
 
         // User pre-selects the entity in the GUI
         app.tabs[i].scene.select_entity(handle, true);
@@ -1812,10 +1830,26 @@ mod dispatched_command_task_tests {
 
         let moved = app.tabs[i].scene.document.get_entity(handle).unwrap();
         if let document::EntityType::Line(l) = moved {
-            assert!((l.start.x - 0.0).abs() < 1e-4, "Expected start.x == 0, got {}", l.start.x);
-            assert!((l.start.y - 0.0).abs() < 1e-4, "Expected start.y == 0, got {}", l.start.y);
-            assert!((l.end.x - 20.0).abs() < 1e-4, "Expected end.x == 20, got {}", l.end.x);
-            assert!((l.end.y - 20.0).abs() < 1e-4, "Expected end.y == 20, got {}", l.end.y);
+            assert!(
+                (l.start.x - 0.0).abs() < 1e-4,
+                "Expected start.x == 0, got {}",
+                l.start.x
+            );
+            assert!(
+                (l.start.y - 0.0).abs() < 1e-4,
+                "Expected start.y == 0, got {}",
+                l.start.y
+            );
+            assert!(
+                (l.end.x - 20.0).abs() < 1e-4,
+                "Expected end.x == 20, got {}",
+                l.end.x
+            );
+            assert!(
+                (l.end.y - 20.0).abs() < 1e-4,
+                "Expected end.y == 20, got {}",
+                l.end.y
+            );
         } else {
             panic!("Expected line entity");
         }
@@ -2273,18 +2307,17 @@ mod bedit_characterization_tests {
         let tab = app.active_tab;
 
         // Create line1 on layer "0" (unlocked)
-        let h_unlocked = app.tabs[tab]
-            .scene
-            .add_entity(document::EntityType::Line(Line::from_points(
-                Vector3::ZERO,
-                Vector3::new(10.0, 0.0, 0.0),
-            )));
+        let h_unlocked =
+            app.tabs[tab]
+                .scene
+                .add_entity(document::EntityType::Line(Line::from_points(
+                    Vector3::ZERO,
+                    Vector3::new(10.0, 0.0, 0.0),
+                )));
 
         // Create line2 on layer "LOCKED_LAYER" and lock it
-        let mut line2 = Line::from_points(
-            Vector3::new(0.0, 10.0, 0.0),
-            Vector3::new(10.0, 10.0, 0.0),
-        );
+        let mut line2 =
+            Line::from_points(Vector3::new(0.0, 10.0, 0.0), Vector3::new(10.0, 10.0, 0.0));
         line2.common.layer = "LOCKED_LAYER".to_string();
         let h_locked = app.tabs[tab]
             .scene
@@ -2785,11 +2818,7 @@ mod block_base_point_tests {
             .expect("the block record");
         let marker = record.block_entity_handle.value();
         let end = record.block_end_handle.value();
-        let body: Vec<_> = record
-            .entity_handles
-            .iter()
-            .map(|h| h.value())
-            .collect();
+        let body: Vec<_> = record.entity_handles.iter().map(|h| h.value()).collect();
         assert!(
             body.iter().all(|h| *h > marker),
             "body handles follow the BLOCK marker: {body:?}"
@@ -2800,7 +2829,10 @@ mod block_base_point_tests {
         );
         assert!(
             matches!(
-                app.tabs[i].scene.document.get_entity(document::Handle::new(end)),
+                app.tabs[i]
+                    .scene
+                    .document
+                    .get_entity(document::Handle::new(end)),
                 Some(EntityType::BlockEnd(_))
             ),
             "the record's end handle names an ENDBLK entity"
@@ -2902,10 +2934,14 @@ mod sweep_path_end_tests {
         let mut hexagon = LwPolyline::new();
         for k in 0..6 {
             let a = (60.0 * k as f64).to_radians();
-            hexagon.vertices.push(LwVertex::new(Vector2::new(5.0 * a.cos(), 5.0 * a.sin())));
+            hexagon
+                .vertices
+                .push(LwVertex::new(Vector2::new(5.0 * a.cos(), 5.0 * a.sin())));
         }
         hexagon.is_closed = true;
-        let profile = app.tabs[i].scene.add_entity(document::EntityType::LwPolyline(hexagon));
+        let profile = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::LwPolyline(hexagon));
         let mut path = LwPolyline::new();
         path.vertices.push(LwVertex::new(Vector2::new(20.0, 0.0)));
         path.vertices.push(LwVertex::with_bulge(
@@ -2914,7 +2950,9 @@ mod sweep_path_end_tests {
         ));
         path.vertices.push(LwVertex::new(Vector2::new(80.0, 20.0)));
         path.vertices.push(LwVertex::new(Vector2::new(80.0, 60.0)));
-        let path = app.tabs[i].scene.add_entity(document::EntityType::LwPolyline(path));
+        let path = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::LwPolyline(path));
         let options = crate::command::SweepOptions {
             path_pick: Some(glam::DVec3::new(80.0, 40.0, 0.0)),
             ..crate::command::SweepOptions::default()
@@ -3405,8 +3443,7 @@ mod attedit_dash_tests {
         let i = app.active_tab;
         let handles = (0..3)
             .map(|n| {
-                let mut insert =
-                    Insert::new("TITLEBLOCK", Vector3::new(n as f64 * 50.0, 0.0, 0.0));
+                let mut insert = Insert::new("TITLEBLOCK", Vector3::new(n as f64 * 50.0, 0.0, 0.0));
                 insert
                     .attributes
                     .push(AttributeEntity::new("TITLE".into(), "old".into()));
@@ -3890,11 +3927,7 @@ mod attedit_dash_tests {
         }
     }
 
-    fn attribute_value(
-        app: &OpenCADStudio,
-        handle: document::Handle,
-        tag: &str,
-    ) -> String {
+    fn attribute_value(app: &OpenCADStudio, handle: document::Handle, tag: &str) -> String {
         let entity = app.tabs[app.active_tab]
             .scene
             .document
@@ -4059,9 +4092,12 @@ mod dim_update_regen_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        let line = app.tabs[i].scene.add_entity(document::EntityType::Line(
-            Line::from_points(Vector3::ZERO, Vector3::new(40.0, 0.0, 0.0)),
-        ));
+        let line = app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(Line::from_points(
+                Vector3::ZERO,
+                Vector3::new(40.0, 0.0, 0.0),
+            )));
         let dimension = app.tabs[i].scene.add_entity(
             crate::modules::annotate::linear_dim::linear_dimension_entity(
                 glam::DVec3::ZERO,
@@ -4649,7 +4685,10 @@ mod mission_m060_tests {
 
         let output = all_output(&app);
         assert!(output.contains("Publishing 3 sheet(s)"), "{output}");
-        assert!(output.contains("Published:") && output.contains("3 page(s)"), "{output}");
+        assert!(
+            output.contains("Published:") && output.contains("3 page(s)"),
+            "{output}"
+        );
         for name in &names {
             assert!(output.contains(&format!("  {name}:")), "{output}");
         }
@@ -4695,8 +4734,14 @@ mod mission_m060_tests {
         let _ = app.run_command_line(&format!("PUBLISH {} MISSING-SHEET", path.display()));
 
         let output = all_output(&app);
-        assert!(output.contains("no layout named 'MISSING-SHEET'"), "{output}");
-        assert!(!path.exists(), "nothing should be written on an unknown sheet");
+        assert!(
+            output.contains("no layout named 'MISSING-SHEET'"),
+            "{output}"
+        );
+        assert!(
+            !path.exists(),
+            "nothing should be written on an unknown sheet"
+        );
     }
 }
 
@@ -4739,8 +4784,7 @@ mod mission_m042_tests {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
-        app.tabs[i].scene.document.source_path =
-            Some(r"C:\work\TITLEBLOCK.dwg".to_string());
+        app.tabs[i].scene.document.source_path = Some(r"C:\work\TITLEBLOCK.dwg".to_string());
         let text = add_text(&mut app);
 
         let _ = app.run_command_line(&format!("-FIELD {:X} FILENAME", text.value()));
@@ -4748,11 +4792,8 @@ mod mission_m042_tests {
         let output = all_output(&app);
         assert!(output.contains(r"\AcVar Filename"), "{output}");
         assert_eq!(text_value(&app, text), "TITLEBLOCK.dwg", "{output}");
-        let (code, _) = crate::entities::field::whole_text_field(
-            &app.tabs[i].scene.document,
-            text,
-        )
-        .expect("the text must carry a field expression");
+        let (code, _) = crate::entities::field::whole_text_field(&app.tabs[i].scene.document, text)
+            .expect("the text must carry a field expression");
         assert!(code.contains("Filename"), "{code}");
 
         app.tabs[i].scene.document.source_path = Some(r"C:\work\PLAN.dwg".to_string());
@@ -4771,10 +4812,7 @@ mod mission_m042_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let text = add_text(&mut app);
 
-        let _ = app.run_command_line(&format!(
-            r#"-FIELD {:X} DATE "yyyy/MM/dd""#,
-            text.value()
-        ));
+        let _ = app.run_command_line(&format!(r#"-FIELD {:X} DATE "yyyy/MM/dd""#, text.value()));
 
         let output = all_output(&app);
         assert!(output.contains("yyyy/MM/dd"), "{output}");
@@ -4783,7 +4821,10 @@ mod mission_m042_tests {
         assert_eq!(bytes.len(), 10, "date value: {value}");
         assert_eq!(bytes[4], b'/');
         assert_eq!(bytes[7], b'/');
-        assert!(value.chars().filter(char::is_ascii_digit).count() == 8, "{value}");
+        assert!(
+            value.chars().filter(char::is_ascii_digit).count() == 8,
+            "{value}"
+        );
     }
 
     #[test]
@@ -4886,7 +4927,11 @@ mod mission_m055_tests {
 
         let _ = app.run_command_line("VPORTS RESTORE FOUR");
         assert!(all_output(&app).contains("restored 'FOUR' with 4 viewport(s)"));
-        assert_eq!(viewport_rects(&app), saved, "restore must recreate the same rectangles");
+        assert_eq!(
+            viewport_rects(&app),
+            saved,
+            "restore must recreate the same rectangles"
+        );
     }
 
     #[test]
@@ -4912,7 +4957,10 @@ mod mission_m055_tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(!listed.contains("TWO  (2 viewport(s))"), "{listed}");
-        assert!(listed.contains("No saved viewport configurations."), "{listed}");
+        assert!(
+            listed.contains("No saved viewport configurations."),
+            "{listed}"
+        );
 
         let _ = app.run_command_line("VPORTS RESTORE TWO");
         assert!(all_output(&app).contains("no saved configuration named 'TWO'"));
@@ -4974,11 +5022,7 @@ mod mission_m058_tests {
     }
 
     fn vp(app: &OpenCADStudio, handle: document::Handle) -> &document::entities::Viewport {
-        match app.tabs[app.active_tab]
-            .scene
-            .document
-            .get_entity(handle)
-        {
+        match app.tabs[app.active_tab].scene.document.get_entity(handle) {
             Some(document::EntityType::Viewport(vp)) => vp,
             _ => panic!("viewport missing"),
         }
@@ -4995,10 +5039,7 @@ mod mission_m058_tests {
         let (target, other) = (handles[0], handles[1]);
         let i = app.active_tab;
 
-        let ((x0, y0), (x1, y1)) = app.tabs[i]
-            .scene
-            .printable_area_limits()
-            .unwrap();
+        let ((x0, y0), (x1, y1)) = app.tabs[i].scene.printable_area_limits().unwrap();
         if let Some(document::EntityType::Viewport(vp)) =
             app.tabs[i].scene.document.get_entity_mut(target)
         {
@@ -5038,13 +5079,15 @@ mod mission_m058_tests {
         assert!((restored.center.z - before.center.z).abs() < 1e-9);
         assert!((restored.view_target.x - before.view_target.x).abs() < 1e-9);
         assert!(restored.status.locked);
-        assert!((crate::scene::vp_effective_scale(
-            restored.custom_scale,
-            restored.view_height,
-            restored.height
-        ) - 0.02)
-            .abs()
-            < 1e-9);
+        assert!(
+            (crate::scene::vp_effective_scale(
+                restored.custom_scale,
+                restored.view_height,
+                restored.height
+            ) - 0.02)
+                .abs()
+                < 1e-9
+        );
         assert_eq!(app.tabs[i].scene.active_viewport, Some(target));
         let other_after = vp(&app, other);
         assert!((other_after.width - other_before.width).abs() < 1e-9);
@@ -5130,14 +5173,17 @@ mod mission_m059_tests {
 
         let _ = app.run_command_line("-PAGESETUP LIST");
         let output = all_output(&app);
-        assert!(output.contains("A3-MONO: 420.0×297.0 mm  style=mono.ctb"), "{output}");
-        assert!(output.contains("A1-COLOUR: 841.0×594.0 mm  style=colour.ctb"), "{output}");
+        assert!(
+            output.contains("A3-MONO: 420.0×297.0 mm  style=mono.ctb"),
+            "{output}"
+        );
+        assert!(
+            output.contains("A1-COLOUR: 841.0×594.0 mm  style=colour.ctb"),
+            "{output}"
+        );
 
         let _ = app.run_command_line("-PAGESETUP APPLY A3-MONO");
-        let applied = app.tabs[i]
-            .scene
-            .effective_plot_settings()
-            .unwrap();
+        let applied = app.tabs[i].scene.effective_plot_settings().unwrap();
         assert!((applied.paper_width - 420.0).abs() < 1e-9, "{applied:?}");
         assert!((applied.paper_height - 297.0).abs() < 1e-9, "{applied:?}");
         assert_eq!(applied.current_style_sheet, "mono.ctb");
@@ -5161,7 +5207,10 @@ mod mission_m059_tests {
         let _ = app.run_command_line("-PAGESETUP SAVE OLD");
 
         let _ = app.run_command_line("-PAGESETUP RENAME OLD NEW");
-        assert_eq!(app.tabs[i].scene.page_setup_names(), vec!["NEW".to_string()]);
+        assert_eq!(
+            app.tabs[i].scene.page_setup_names(),
+            vec!["NEW".to_string()]
+        );
         assert!(app.tabs[i].scene.page_setup_get("NEW").is_some());
 
         let _ = app.run_command_line("-PAGESETUP DELETE NEW");
@@ -5278,7 +5327,10 @@ mod mission_m061_tests {
         assert!(output.contains("420.0×297.0 mm"), "{output}");
         let svg = std::fs::read_to_string(&path).expect("the preview file must exist");
         let (width, height) = viewbox(&svg).expect("the SVG has a viewBox");
-        assert!((width / height - 420.0 / 297.0).abs() < 0.01, "{width}x{height}");
+        assert!(
+            (width / height - 420.0 / 297.0).abs() < 0.01,
+            "{width}x{height}"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -5377,16 +5429,28 @@ mod mission_m070_tests {
         let _ = app.run_command_line("XBIND PLAN LAYER WALLS");
         let output = all_output(&app);
         assert!(output.contains("layer WALLS -> PLAN$0$WALLS"), "{output}");
-        assert!(app.tabs[i].scene.document.layers.get("PLAN$0$WALLS").is_some());
-        assert!(app.tabs[i].scene.document.layers.get("PLAN$0$HIDDEN").is_none());
         assert!(app.tabs[i]
             .scene
             .document
-            .block_records
-            .get("PLAN")
-            .unwrap()
-            .flags
-            .is_xref);
+            .layers
+            .get("PLAN$0$WALLS")
+            .is_some());
+        assert!(app.tabs[i]
+            .scene
+            .document
+            .layers
+            .get("PLAN$0$HIDDEN")
+            .is_none());
+        assert!(
+            app.tabs[i]
+                .scene
+                .document
+                .block_records
+                .get("PLAN")
+                .unwrap()
+                .flags
+                .is_xref
+        );
 
         let _ = app.run_command_line("XBIND PLAN BLOCK TITLE");
         let output = all_output(&app);
@@ -5464,12 +5528,7 @@ mod mission_m076_tests {
         let i = app.active_tab;
         let mut layer = document::tables::Layer::new(name);
         layer.handle = app.tabs[i].scene.document.allocate_handle();
-        app.tabs[i]
-            .scene
-            .document
-            .layers
-            .add(layer)
-            .unwrap();
+        app.tabs[i].scene.document.layers.add(layer).unwrap();
     }
 
     fn layer_off(app: &OpenCADStudio, name: &str) -> bool {
@@ -5545,7 +5604,10 @@ mod mission_m076_tests {
         }
         let output = all_output(&app);
         assert!(output.contains("restored \"ALL-ON\""), "{output}");
-        assert!(app.active_modal.is_none(), "-LAYERSTATE must not open the dialog");
+        assert!(
+            app.active_modal.is_none(),
+            "-LAYERSTATE must not open the dialog"
+        );
     }
 
     #[test]
@@ -5580,10 +5642,7 @@ mod mission_m076_tests {
         let _ = app.run_command_line("-LAYERSTATE SAVE OLD-NAME");
         let path = temp_las("roundtrip");
 
-        let _ = app.run_command_line(&format!(
-            "-LAYERSTATE EXPORT OLD-NAME {}",
-            path.display()
-        ));
+        let _ = app.run_command_line(&format!("-LAYERSTATE EXPORT OLD-NAME {}", path.display()));
         assert!(path.exists(), "{}", all_output(&app));
         let _ = app.run_command_line("-LAYERSTATE RENAME OLD-NAME NEW-NAME");
         assert!(app.tabs[app.active_tab]
@@ -5657,7 +5716,9 @@ mod mission_m078_tests {
         let i = app.active_tab;
         let mut line = document::entities::Line::new();
         line.common.layer = layer.to_string();
-        app.tabs[i].scene.add_entity(document::EntityType::Line(line));
+        app.tabs[i]
+            .scene
+            .add_entity(document::EntityType::Line(line));
     }
 
     fn line_layers(app: &OpenCADStudio) -> Vec<String> {
@@ -5698,21 +5759,30 @@ mod mission_m078_tests {
         add_line(&mut app, "A-WALL");
         add_line(&mut app, "0");
 
-        let _ = app.run_command_line(&format!(
-            "-LAYTRANS {} A-WALL=WALLS",
-            standards.display()
-        ));
+        let _ = app.run_command_line(&format!("-LAYTRANS {} A-WALL=WALLS", standards.display()));
 
         let output = all_output(&app);
-        assert!(output.contains("LAYTRANS: \"A-WALL\" -> \"WALLS\" (1 object(s))."), "{output}");
-        assert!(output.contains("translated 1 layer(s), 1 object(s)"), "{output}");
-        assert_eq!(line_layers(&app), vec!["WALLS".to_string(), "0".to_string()]);
+        assert!(
+            output.contains("LAYTRANS: \"A-WALL\" -> \"WALLS\" (1 object(s))."),
+            "{output}"
+        );
+        assert!(
+            output.contains("translated 1 layer(s), 1 object(s)"),
+            "{output}"
+        );
+        assert_eq!(
+            line_layers(&app),
+            vec!["WALLS".to_string(), "0".to_string()]
+        );
         assert!(app.tabs[i].scene.document.layers.get("WALLS").is_some());
         assert!(
             app.tabs[i].scene.document.layers.get("A-WALL").is_none(),
             "the empty source layer is purged"
         );
-        assert!(app.active_modal.is_none(), "-LAYTRANS must not open the dialog");
+        assert!(
+            app.active_modal.is_none(),
+            "-LAYTRANS must not open the dialog"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -5751,7 +5821,10 @@ mod mission_m078_tests {
             standards.display()
         ));
         let output = all_output(&app);
-        assert!(output.contains("translated 2 layer(s), 2 object(s)"), "{output}");
+        assert!(
+            output.contains("translated 2 layer(s), 2 object(s)"),
+            "{output}"
+        );
         let mut layers = line_layers(&app);
         layers.sort();
         assert_eq!(layers, vec!["DOORS".to_string(), "WALLS".to_string()]);
@@ -5767,13 +5840,13 @@ mod mission_m078_tests {
         add_layer(&mut app, "A-WALL");
         add_line(&mut app, "A-WALL");
 
-        let _ = app.run_command_line(&format!(
-            "-LAYTRANS {} A-WALL=GHOST",
-            standards.display()
-        ));
+        let _ = app.run_command_line(&format!("-LAYTRANS {} A-WALL=GHOST", standards.display()));
 
         let output = all_output(&app);
-        assert!(output.contains("target layer is not in the loaded set"), "{output}");
+        assert!(
+            output.contains("target layer is not in the loaded set"),
+            "{output}"
+        );
         assert_eq!(line_layers(&app), vec!["A-WALL".to_string()]);
         assert!(app.tabs[app.active_tab]
             .scene
@@ -5862,7 +5935,10 @@ mod mission_m100_tests {
         let handle = add_mleader(&mut app);
         let _ = app.run_command_line("MLEADERSTYLE APPLY NOTE-2.5 ALL");
         let output = all_output(&app);
-        assert!(output.contains("applied 'NOTE-2.5' to 1 multileader(s)"), "{output}");
+        assert!(
+            output.contains("applied 'NOTE-2.5' to 1 multileader(s)"),
+            "{output}"
+        );
 
         let styled = leader(&app, handle);
         assert_eq!(styled.style_handle, Some(created.handle));
@@ -5919,10 +5995,18 @@ mod mission_m100_tests {
         let _ = app.run_command_line("MLEADERSTYLE NEW NOTE-2.5 TEXT 2.5");
 
         let _ = app.run_command_line("MLEADERSTYLE SET NOTE-2.5 WIDTH 4");
-        assert!(all_output(&app).contains("unknown property 'width'"), "{}", all_output(&app));
+        assert!(
+            all_output(&app).contains("unknown property 'width'"),
+            "{}",
+            all_output(&app)
+        );
 
         let _ = app.run_command_line("MLEADERSTYLE APPLY GHOST ALL");
-        assert!(all_output(&app).contains("'GHOST' not found"), "{}", all_output(&app));
+        assert!(
+            all_output(&app).contains("'GHOST' not found"),
+            "{}",
+            all_output(&app)
+        );
     }
 }
 
@@ -5965,7 +6049,12 @@ mod polygon_flow_tests {
         for (x, y) in &vertices {
             assert!((x.hypot(*y) - 10.0).abs() < 1e-9, "vertex on the circle");
         }
-        let lowest: Vec<_> = vertices.iter().filter(|(_, y)| (*y - vertices.iter().map(|v| v.1).fold(f64::MAX, f64::min)).abs() < 1e-9).collect();
+        let lowest: Vec<_> = vertices
+            .iter()
+            .filter(|(_, y)| {
+                (*y - vertices.iter().map(|v| v.1).fold(f64::MAX, f64::min)).abs() < 1e-9
+            })
+            .collect();
         assert_eq!(lowest.len(), 2, "bottom edge level: {vertices:?}");
     }
 
@@ -5974,7 +6063,10 @@ mod polygon_flow_tests {
         let vertices = drawn("POLYGON 4 0,0 C 10");
         assert_eq!(vertices.len(), 4);
         for (x, y) in &vertices {
-            assert!((x.abs() - 10.0).abs() < 1e-9 && (y.abs() - 10.0).abs() < 1e-9, "{vertices:?}");
+            assert!(
+                (x.abs() - 10.0).abs() < 1e-9 && (y.abs() - 10.0).abs() < 1e-9,
+                "{vertices:?}"
+            );
         }
     }
 
@@ -5982,7 +6074,12 @@ mod polygon_flow_tests {
     fn enter_at_the_option_keeps_the_default_and_a_picked_point_finishes() {
         let vertices = drawn("POLYGON 5 0,0  0,8");
         assert_eq!(vertices.len(), 5);
-        assert!(vertices.iter().any(|(x, y)| x.abs() < 1e-9 && (y - 8.0).abs() < 1e-9), "{vertices:?}");
+        assert!(
+            vertices
+                .iter()
+                .any(|(x, y)| x.abs() < 1e-9 && (y - 8.0).abs() < 1e-9),
+            "{vertices:?}"
+        );
     }
 }
 
@@ -6013,7 +6110,10 @@ mod measuregeom_quick_tests {
             panic!("expected the area");
         };
         let area = plain(area);
-        assert!(area.contains("Area = 40") && area.contains("Perimeter = 28"), "{area}");
+        assert!(
+            area.contains("Area = 40") && area.contains("Perimeter = 28"),
+            "{area}"
+        );
     }
 }
 
@@ -6042,7 +6142,11 @@ mod dynamic_options_tests {
         // CIRCLE's first option is 3P; Enter picks it.
         let _ = app.update(Message::CommandFinalize);
         assert!(!app.context_menu_open());
-        let prompt = app.tabs[app.active_tab].active_cmd.as_ref().unwrap().prompt();
+        let prompt = app.tabs[app.active_tab]
+            .active_cmd
+            .as_ref()
+            .unwrap()
+            .prompt();
         assert!(prompt.to_uppercase().contains("FIRST POINT"), "{prompt}");
     }
 
@@ -6060,7 +6164,12 @@ mod dynamic_options_tests {
     fn ctrl_9_hides_and_shows_the_command_line() {
         let mut app = OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        let key = if cfg!(target_os = "macos") { "CMD+9" } else { "CTRL+9" }.to_string();
+        let key = if cfg!(target_os = "macos") {
+            "CMD+9"
+        } else {
+            "CTRL+9"
+        }
+        .to_string();
         let _ = app.update(Message::ShortcutPressed(key.clone()));
         assert!(app.command_line_hidden);
         let _ = app.update(Message::ShortcutPressed(key));
@@ -6179,15 +6288,15 @@ mod batch4_tests {
         let mut got = lines(&mut app);
         got.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap());
         assert_eq!(got.len(), 2, "{got:?}");
-        assert!((got[0].2 - 0.0).abs() < 1e-6 && (got[0].3 - 10.0).abs() < 1e-6, "{got:?}");
+        assert!(
+            (got[0].2 - 0.0).abs() < 1e-6 && (got[0].3 - 10.0).abs() < 1e-6,
+            "{got:?}"
+        );
         assert!((got[1].2 - 10.0).abs() < 1e-6, "{got:?}");
     }
 
     fn out(app: &OpenCADStudio) -> String {
-        app.command_line
-            .history_plain_text()
-            .trim()
-            .to_string()
+        app.command_line.history_plain_text().trim().to_string()
     }
 
     fn enter_layout(app: &mut OpenCADStudio) {
@@ -6319,10 +6428,8 @@ mod batch4_tests {
 
         let _ = app.run_command_line("OBJECTSCALE ADD 1:100");
         assert!(app.command_line.last_error.is_none(), "{}", out(&app));
-        let after_add = crate::scene::annotative::object_scale_memberships(
-            &app.tabs[i].scene.document,
-            handle,
-        );
+        let after_add =
+            crate::scene::annotative::object_scale_memberships(&app.tabs[i].scene.document, handle);
         assert!(
             after_add.iter().any(|(name, _)| name == "1:100"),
             "{after_add:?}"
@@ -6330,10 +6437,8 @@ mod batch4_tests {
 
         let _ = app.run_command_line("OBJECTSCALE DELETE 1:100");
         assert!(app.command_line.last_error.is_none(), "{}", out(&app));
-        let after_del = crate::scene::annotative::object_scale_memberships(
-            &app.tabs[i].scene.document,
-            handle,
-        );
+        let after_del =
+            crate::scene::annotative::object_scale_memberships(&app.tabs[i].scene.document, handle);
         assert!(
             !after_del.iter().any(|(name, _)| name == "1:100"),
             "{after_del:?}"
@@ -6400,9 +6505,11 @@ mod batch4_tests {
             .objects
             .values()
             .find_map(|object| match object {
-                document::objects::ObjectType::Dictionary(dict) => {
-                    dict.entries.iter().find(|(key, _)| key == "TEAM").map(|_| ())
-                }
+                document::objects::ObjectType::Dictionary(dict) => dict
+                    .entries
+                    .iter()
+                    .find(|(key, _)| key == "TEAM")
+                    .map(|_| ()),
                 _ => None,
             });
         assert!(keyed.is_some(), "the group dictionary lost the new name");
@@ -6510,8 +6617,7 @@ mod batch4_tests {
             .add_entity(document::EntityType::AttributeDefinition(variable.clone()))
             .unwrap();
 
-        let mut constant =
-            AttributeDefinition::new("SHEET".into(), String::new(), "A-101".into());
+        let mut constant = AttributeDefinition::new("SHEET".into(), String::new(), "A-101".into());
         constant.insertion_point = Vector3::new(1.0, 4.0, 0.0);
         constant.alignment_point = constant.insertion_point;
         constant.flags.constant = true;
@@ -6528,7 +6634,9 @@ mod batch4_tests {
         attribute.insertion_point = Vector3::new(101.0, 51.0, 0.0);
         attribute.alignment_point = attribute.insertion_point;
         insert.attributes.push(attribute);
-        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+        let insert_handle = doc
+            .add_entity(document::EntityType::Insert(insert))
+            .unwrap();
 
         let _ = app.run_command_line("SELECTALL");
         let _ = app.run_command_line("BURST");
@@ -6542,9 +6650,11 @@ mod batch4_tests {
         let texts: Vec<(String, f64, f64)> = doc
             .entities()
             .filter_map(|entity| match entity {
-                document::EntityType::Text(text) => {
-                    Some((text.value.clone(), text.insertion_point.x, text.insertion_point.y))
-                }
+                document::EntityType::Text(text) => Some((
+                    text.value.clone(),
+                    text.insertion_point.x,
+                    text.insertion_point.y,
+                )),
                 _ => None,
             })
             .collect();
@@ -6592,7 +6702,9 @@ mod batch4_tests {
         definition.height = 2.5;
         definition.common.owner_handle = owner;
         let definition_handle = doc
-            .add_entity(document::EntityType::AttributeDefinition(definition.clone()))
+            .add_entity(document::EntityType::AttributeDefinition(
+                definition.clone(),
+            ))
             .unwrap();
         doc.block_records
             .get_mut("TAGBLOCK")
@@ -6604,7 +6716,9 @@ mod batch4_tests {
         attribute.insertion_point = Vector3::new(101.0, 51.0, 0.0);
         attribute.alignment_point = attribute.insertion_point;
         insert.attributes.push(attribute);
-        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+        let insert_handle = doc
+            .add_entity(document::EntityType::Insert(insert))
+            .unwrap();
 
         // The reference is the authority: its value and placement changed.
         if let Some(document::EntityType::Insert(insert)) = doc.get_entity_mut(insert_handle) {
@@ -6624,11 +6738,7 @@ mod batch4_tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(
-            definitions.len(),
-            1,
-            "the old definition must be replaced"
-        );
+        assert_eq!(definitions.len(), 1, "the old definition must be replaced");
         let definition = definitions[0];
         assert_eq!(definition.tag, "STATUS");
         assert_eq!(
@@ -6707,12 +6817,12 @@ mod batch4_tests {
             .add(document::tables::Layer::new("DEST"))
             .unwrap();
         let insert = Insert::new("XUNIT", Vector3::new(5.0, 5.0, 0.0));
-        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+        let insert_handle = doc
+            .add_entity(document::EntityType::Insert(insert))
+            .unwrap();
         app.tabs[i].scene.selected.insert(insert_handle);
 
-        let _ = app.run_command_line(
-            "XPLODE COLOR 1 LAYER DEST LINETYPE DASHED LINEWEIGHT 0.50",
-        );
+        let _ = app.run_command_line("XPLODE COLOR 1 LAYER DEST LINETYPE DASHED LINEWEIGHT 0.50");
         assert!(app.command_line.last_error.is_none(), "{}", out(&app));
 
         let doc = &app.tabs[i].scene.document;
@@ -6758,20 +6868,19 @@ mod batch4_tests {
         );
 
         let doc = &mut app.tabs[i].scene.document;
-        let definition = match doc.get_entity(
-            doc.block_records
-                .get("OLDBLOCK")
-                .unwrap()
-                .entity_handles[1],
-        ) {
-            Some(document::EntityType::AttributeDefinition(definition)) => definition.clone(),
-            _ => panic!("the old definition is there"),
-        };
+        let definition =
+            match doc.get_entity(doc.block_records.get("OLDBLOCK").unwrap().entity_handles[1]) {
+                Some(document::EntityType::AttributeDefinition(definition)) => definition.clone(),
+                _ => panic!("the old definition is there"),
+            };
         let mut insert = Insert::new("OLDBLOCK", Vector3::new(20.0, 10.0, 0.0));
-        insert
-            .attributes
-            .push(AttributeEntity::from_definition(&definition, Some("KEPT".into())));
-        let insert_handle = doc.add_entity(document::EntityType::Insert(insert)).unwrap();
+        insert.attributes.push(AttributeEntity::from_definition(
+            &definition,
+            Some("KEPT".into()),
+        ));
+        let insert_handle = doc
+            .add_entity(document::EntityType::Insert(insert))
+            .unwrap();
 
         let _ = app.run_command_line("BLOCKREPLACE");
         let _ = app.feed_active_cmd("OLDBLOCK");

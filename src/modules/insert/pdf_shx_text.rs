@@ -387,7 +387,8 @@ fn compared_chars() -> impl Iterator<Item = char> {
 
 fn font_shapes(spec: &str) -> Option<FontShapes> {
     let face = Face::resolve(spec);
-    let to_p = |s: &Vec<[f32; 2]>| -> Vec<P> { s.iter().map(|p| [p[0] as f64, p[1] as f64]).collect() };
+    let to_p =
+        |s: &Vec<[f32; 2]>| -> Vec<P> { s.iter().map(|p| [p[0] as f64, p[1] as f64]).collect() };
     let cap = face
         .glyph('H')
         .map(|g| {
@@ -399,12 +400,18 @@ fn font_shapes(spec: &str) -> Option<FontShapes> {
     // A character the font lacks is no candidate (the text fallback would
     // offer another font's glyph for it).
     for ch in compared_chars() {
-        let Some(g) = face.own_glyph(ch) else { continue };
+        let Some(g) = face.own_glyph(ch) else {
+            continue;
+        };
         let strokes: Vec<Vec<P>> = g
             .strokes
             .iter()
             .filter(|s| !s.is_empty())
-            .map(|s| s.iter().map(|p| [p[0] as f64 / cap, p[1] as f64 / cap]).collect())
+            .map(|s| {
+                s.iter()
+                    .map(|p| [p[0] as f64 / cap, p[1] as f64 / cap])
+                    .collect()
+            })
             .collect();
         if strokes.is_empty() {
             continue;
@@ -479,23 +486,23 @@ fn x_sweep(boxes: &[BBox], pad: impl Fn(usize) -> f64, mut visit: impl FnMut(usi
 
 fn pieces_of(strokes: &[Stroke]) -> Vec<Piece> {
     let boxes: Vec<BBox> = strokes.iter().map(|s| BBox::of(&s.points)).collect();
-    let tiny = boxes
-        .iter()
-        .map(|b| b.size())
-        .fold(0.0f64, f64::max)
-        * 1e-9;
+    let tiny = boxes.iter().map(|b| b.size()).fold(0.0f64, f64::max) * 1e-9;
     let eps = |a: usize, b: usize| 0.03 * boxes[a].size().min(boxes[b].size()) + tiny;
     let mut parent: Vec<usize> = (0..strokes.len()).collect();
     let widest = boxes.iter().map(|b| b.size()).fold(0.0f64, f64::max);
-    x_sweep(&boxes, |_| 0.03 * widest + tiny, |a, b| {
-        let e = eps(a, b);
-        if !boxes[a].near(&boxes[b], e) {
-            return;
-        }
-        if polyline_dist(&strokes[a].points, &strokes[b].points) <= e {
-            union(&mut parent, a, b);
-        }
-    });
+    x_sweep(
+        &boxes,
+        |_| 0.03 * widest + tiny,
+        |a, b| {
+            let e = eps(a, b);
+            if !boxes[a].near(&boxes[b], e) {
+                return;
+            }
+            if polyline_dist(&strokes[a].points, &strokes[b].points) <= e {
+                union(&mut parent, a, b);
+            }
+        },
+    );
     let mut map: std::collections::BTreeMap<usize, Piece> = Default::default();
     for (i, b) in boxes.iter().enumerate() {
         let root = find(&mut parent, i);
@@ -520,21 +527,25 @@ fn lines_of(strokes: &[Stroke], pieces: Vec<Piece>) -> Vec<Line> {
     };
     let mut parent: Vec<usize> = (0..pieces.len()).collect();
     let tallest = boxes.iter().map(|b| b.h()).fold(0.0f64, f64::max);
-    x_sweep(&boxes, |_| 2.0 * tallest, |a, b| {
-        if !comparable(a, b) {
-            return;
-        }
-        let (ba, bb) = (&boxes[a], &boxes[b]);
-        let overlap = ba.max[1].min(bb.max[1]) - ba.min[1].max(bb.min[1]);
-        if overlap < 0.3 * ba.h().min(bb.h()) {
-            return;
-        }
-        // Measured: two words 1.8 heights apart are one line, 2.2 apart two.
-        let gap = (ba.min[0].max(bb.min[0]) - ba.max[0].min(bb.max[0])).max(0.0);
-        if gap <= 2.0 * ba.h().max(bb.h()) {
-            union(&mut parent, a, b);
-        }
-    });
+    x_sweep(
+        &boxes,
+        |_| 2.0 * tallest,
+        |a, b| {
+            if !comparable(a, b) {
+                return;
+            }
+            let (ba, bb) = (&boxes[a], &boxes[b]);
+            let overlap = ba.max[1].min(bb.max[1]) - ba.min[1].max(bb.min[1]);
+            if overlap < 0.3 * ba.h().min(bb.h()) {
+                return;
+            }
+            // Measured: two words 1.8 heights apart are one line, 2.2 apart two.
+            let gap = (ba.min[0].max(bb.min[0]) - ba.max[0].min(bb.max[0])).max(0.0);
+            if gap <= 2.0 * ba.h().max(bb.h()) {
+                union(&mut parent, a, b);
+            }
+        },
+    );
     // A piece with no comparable neighbour is a "small" one when something
     // at least three times its size is close by.
     let mut members = std::collections::HashMap::<usize, usize>::new();
@@ -610,7 +621,11 @@ fn lines_of(strokes: &[Stroke], pieces: Vec<Piece>) -> Vec<Line> {
         let mut first = usize::MAX;
         let mut height = 0.0f64;
         for c in &mut chars {
-            c.geometry = c.strokes.iter().map(|s| strokes[*s].points.clone()).collect();
+            c.geometry = c
+                .strokes
+                .iter()
+                .map(|s| strokes[*s].points.clone())
+                .collect();
             bbox.union(&c.bbox);
             first = first.min(c.strokes.iter().copied().min().unwrap_or(usize::MAX));
             height = height.max(c.bbox.h());
@@ -640,10 +655,10 @@ fn groups_of(lines: &[Line]) -> Vec<Vec<usize>> {
             if small <= 0.0 {
                 continue;
             }
-            let x_gap = (la.bbox.min[0].max(lb.bbox.min[0]) - la.bbox.max[0].min(lb.bbox.max[0]))
-                .max(0.0);
-            let y_gap = (la.bbox.min[1].max(lb.bbox.min[1]) - la.bbox.max[1].min(lb.bbox.max[1]))
-                .max(0.0);
+            let x_gap =
+                (la.bbox.min[0].max(lb.bbox.min[0]) - la.bbox.max[0].min(lb.bbox.max[0])).max(0.0);
+            let y_gap =
+                (la.bbox.min[1].max(lb.bbox.min[1]) - la.bbox.max[1].min(lb.bbox.max[1])).max(0.0);
             let joins = if y_gap <= 0.5 * small {
                 small >= 0.35 * large && x_gap <= 2.0 * small
             } else {
@@ -916,7 +931,10 @@ fn line_text(line: &Line, m: &LineMatch, font: &FontShapes) -> Option<(String, B
 fn without_oversized(strokes: &[Stroke]) -> Vec<Stroke> {
     let mut boxes: std::collections::HashMap<Handle, BBox> = Default::default();
     for s in strokes {
-        boxes.entry(s.handle).or_insert_with(BBox::empty).union(&BBox::of(&s.points));
+        boxes
+            .entry(s.handle)
+            .or_insert_with(BBox::empty)
+            .union(&BBox::of(&s.points));
     }
     let diagonal = |b: &BBox| b.w().hypot(b.h());
     let mean = boxes.values().map(diagonal).sum::<f64>() / boxes.len().max(1) as f64;
@@ -969,7 +987,11 @@ pub fn recognize(
                 .iter()
                 .enumerate()
                 .flat_map(|(k, l)| {
-                    lines[*l].chars.iter().enumerate().map(move |(c, ch)| (k, c, ch))
+                    lines[*l]
+                        .chars
+                        .iter()
+                        .enumerate()
+                        .map(move |(c, ch)| (k, c, ch))
                 })
                 .filter(|(k, c, _)| recognised(*k, *c))
                 .flat_map(|(_, _, ch)| ch.strokes.iter().map(|s| strokes[*s].handle))
@@ -982,7 +1004,10 @@ pub fn recognize(
         let mut best: Option<(usize, u32, Vec<LineMatch>)> = None;
         let mut chosen: Option<(usize, u32, Vec<LineMatch>)> = None;
         for (fi, (_, shapes)) in fonts.iter().enumerate() {
-            let matches: Vec<LineMatch> = group.iter().map(|l| match_line(&lines[*l], shapes)).collect();
+            let matches: Vec<LineMatch> = group
+                .iter()
+                .map(|l| match_line(&lines[*l], shapes))
+                .collect();
             let recognised = objects(&|k, c| matches[k].glyphs[c].is_some());
             let pct = percent(recognised, total);
             if pct >= u32::from(settings.threshold) && !settings.best_font {
@@ -1132,7 +1157,11 @@ impl CadCommand for ShxSettingsCommand {
             }
             SettingsStep::Layer => format!(
                 "Create text on [Current/Geometry] layer <{}>:",
-                if s.current_layer { "Current" } else { "Geometry" }
+                if s.current_layer {
+                    "Current"
+                } else {
+                    "Geometry"
+                }
             ),
             SettingsStep::BestFont => format!(
                 "Use best matching font? [Yes/No] <{}>:",
@@ -1172,7 +1201,11 @@ impl CadCommand for ShxSettingsCommand {
             return Some(self.on_enter());
         }
         let mut s = settings();
-        let invalid = || Some(CmdResult::ReportError("Invalid option keyword.".to_string()));
+        let invalid = || {
+            Some(CmdResult::ReportError(
+                "Invalid option keyword.".to_string(),
+            ))
+        };
         match self.step {
             SettingsStep::Option => {
                 self.step = match token.as_str() {
@@ -1194,7 +1227,9 @@ impl CadCommand for ShxSettingsCommand {
                     .iter()
                     .find(|n| !s.fonts.iter().any(|f| f.label().eq_ignore_ascii_case(n)))
                 {
-                    return Some(CmdResult::ReportError(format!("Font \"{bad}\" is not in the list.")));
+                    return Some(CmdResult::ReportError(format!(
+                        "Font \"{bad}\" is not in the list."
+                    )));
                 }
                 // The named fonts first, in the order given and enabled; the
                 // rest after them, off.
@@ -1268,5 +1303,10 @@ pub const OPEN_SETTINGS: &str = "_PDFSHXTEXTSETUP";
 pub const APPLY: &str = "_PDFSHXTEXTAPPLY";
 
 inventory::submit!(crate::command::CommandRegistration {
-    names: &["PDFSHXTEXT", "PDFSHXLAYER", "PDFSHXBESTFONT", "PDFSHXTEXTSETTINGS"]
+    names: &[
+        "PDFSHXTEXT",
+        "PDFSHXLAYER",
+        "PDFSHXBESTFONT",
+        "PDFSHXTEXTSETTINGS"
+    ]
 });

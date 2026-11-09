@@ -24,9 +24,7 @@ use iced::touch;
 use iced::widget::scrollable::{self, AbsoluteOffset, Scrollable};
 use iced::widget::text_input::{self, TextInput};
 use iced::window;
-use iced::{
-    Element, Event, Length, Padding, Pixels, Point, Rectangle, Size, Theme, Vector,
-};
+use iced::{Element, Event, Length, Padding, Pixels, Point, Rectangle, Size, Theme, Vector};
 
 use std::borrow::Borrow;
 use std::cell::{Cell, RefCell};
@@ -35,9 +33,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 pub use iced::widget::combo_box::Catalog as ComboBoxCatalog;
-pub use iced::widget::pick_list::{
-    default, Catalog, Handle, Icon, Status, Style, StyleFn,
-};
+pub use iced::widget::pick_list::{default, Catalog, Handle, Icon, Status, Style, StyleFn};
 
 static DROPDOWN_CAPTURED_ARROW: AtomicBool = AtomicBool::new(false);
 static DROPDOWN_CAPTURED_ESCAPE: AtomicBool = AtomicBool::new(false);
@@ -221,7 +217,7 @@ impl Operation for EnsureVisible {
 
     fn scrollable(
         &mut self,
-        _id: Option<& iced::advanced::widget::Id>,
+        _id: Option<&iced::advanced::widget::Id>,
         bounds: Rectangle,
         content_bounds: Rectangle,
         translation: Vector,
@@ -641,8 +637,9 @@ pub mod menu {
                 style.background,
             );
 
-            self.list
-                .draw(self.tree, renderer, theme, defaults, layout, cursor, &bounds);
+            self.list.draw(
+                self.tree, renderer, theme, defaults, layout, cursor, &bounds,
+            );
         }
     }
 
@@ -843,9 +840,7 @@ pub mod menu {
                         }
                         keyboard::Key::Named(Named::PageDown) => {
                             if len > 0 {
-                                let next = self
-                                    .hovered_option
-                                    .map_or(0, |i| (i + 8).min(len - 1));
+                                let next = self.hovered_option.map_or(0, |i| (i + 8).min(len - 1));
                                 *self.hovered_option = Some(next);
                                 self.shared_hover.set(Some(next));
                             }
@@ -855,9 +850,7 @@ pub mod menu {
                         }
                         keyboard::Key::Named(Named::PageUp) => {
                             if len > 0 {
-                                let prev = self
-                                    .hovered_option
-                                    .map_or(0, |i| i.saturating_sub(8));
+                                let prev = self.hovered_option.map_or(0, |i| i.saturating_sub(8));
                                 *self.hovered_option = Some(prev);
                                 self.shared_hover.set(Some(prev));
                             }
@@ -924,9 +917,11 @@ pub mod menu {
                                         ) {
                                             *self.hovered_option = Some(matched);
                                             self.shared_hover.set(Some(matched));
-                                            if let Some(on_option_hovered) = self.on_option_hovered {
+                                            if let Some(on_option_hovered) = self.on_option_hovered
+                                            {
                                                 if let Some(option) = self.options.get(matched) {
-                                                    shell.publish(on_option_hovered(option.clone()));
+                                                    shell
+                                                        .publish(on_option_hovered(option.clone()));
                                                 }
                                             }
                                         }
@@ -989,7 +984,8 @@ pub mod menu {
             let start = (offset / option_height) as usize;
             let end = ((offset + viewport.height) / option_height).ceil() as usize;
 
-            let visible_options = &self.options[start.min(self.options.len())..end.min(self.options.len())];
+            let visible_options =
+                &self.options[start.min(self.options.len())..end.min(self.options.len())];
 
             for (i, option) in visible_options.iter().enumerate() {
                 let i = start + i;
@@ -1296,7 +1292,9 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let state = tree.state.downcast_mut::<PickListState<Renderer::Paragraph>>();
+        let state = tree
+            .state
+            .downcast_mut::<PickListState<Renderer::Paragraph>>();
 
         let font = self.font.unwrap_or_else(|| renderer.default_font());
         let text_size = self.text_size.unwrap_or_else(|| renderer.default_size());
@@ -1379,7 +1377,9 @@ where
         shell: &mut Shell<'_, Message>,
         _viewport: &Rectangle,
     ) {
-        let state = tree.state.downcast_mut::<PickListState<Renderer::Paragraph>>();
+        let state = tree
+            .state
+            .downcast_mut::<PickListState<Renderer::Paragraph>>();
 
         match event {
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
@@ -1519,7 +1519,9 @@ where
     ) {
         let font = self.font.unwrap_or_else(|| renderer.default_font());
         let selected = self.selected.as_ref().map(Borrow::borrow);
-        let state = tree.state.downcast_ref::<PickListState<Renderer::Paragraph>>();
+        let state = tree
+            .state
+            .downcast_ref::<PickListState<Renderer::Paragraph>>();
 
         let bounds = layout.bounds();
 
@@ -1646,7 +1648,9 @@ where
             return None;
         };
 
-        let state = tree.state.downcast_mut::<PickListState<Renderer::Paragraph>>();
+        let state = tree
+            .state
+            .downcast_mut::<PickListState<Renderer::Paragraph>>();
         let font = self.font.unwrap_or_else(|| renderer.default_font());
 
         if state.is_open {
@@ -1722,8 +1726,8 @@ where
 // ── Enhanced ComboBox ──────────────────────────────────────────────────────
 
 pub mod combo_box {
-    use super::*;
     pub use super::ComboBoxCatalog as Catalog;
+    use super::*;
 
     pub fn combo_box<'a, T, Message, Theme, Renderer>(
         state: &'a State<T>,
@@ -1805,10 +1809,7 @@ pub mod combo_box {
             self
         }
 
-        pub fn on_option_hovered(
-            mut self,
-            on_option_hovered: impl Fn(T) -> Message + 'a,
-        ) -> Self {
+        pub fn on_option_hovered(mut self, on_option_hovered: impl Fn(T) -> Message + 'a) -> Self {
             self.on_option_hovered = Some(Box::new(on_option_hovered));
             self
         }
@@ -1907,10 +1908,7 @@ pub mod combo_box {
         }
 
         #[must_use]
-        pub fn menu_class(
-            mut self,
-            class: impl Into<<Theme as menu::Catalog>::Class<'a>>,
-        ) -> Self {
+        pub fn menu_class(mut self, class: impl Into<<Theme as menu::Catalog>::Class<'a>>) -> Self {
             self.menu_class = class.into();
             self
         }
@@ -2217,7 +2215,8 @@ pub mod combo_box {
                         if let Some(on_option_hovered) = &mut self.on_option_hovered {
                             let hovered_option = menu.hovered_option.unwrap_or(0);
 
-                            if let Some(option) = state.filtered_options.options.get(hovered_option) {
+                            if let Some(option) = state.filtered_options.options.get(hovered_option)
+                            {
                                 shell.publish(on_option_hovered(option.clone()));
                                 published_message_to_shell = true;
                             }
@@ -2234,7 +2233,8 @@ pub mod combo_box {
                         match (named_key, shift_modifier) {
                             (key::Named::Enter, _) => {
                                 if let Some(index) = &menu.hovered_option {
-                                    if let Some(option) = state.filtered_options.options.get(*index) {
+                                    if let Some(option) = state.filtered_options.options.get(*index)
+                                    {
                                         menu.new_selection = Some(option.clone());
                                     }
                                 }
@@ -2589,13 +2589,7 @@ pub struct DropdownList<'a, Message> {
 
 impl<'a, Message: Clone + 'a> DropdownList<'a, Message> {
     pub fn new(rows: Vec<DropdownRow<'a, Message>>) -> Self {
-        Self::with_options(
-            rows,
-            Length::Shrink,
-            Length::Fill,
-            0.0,
-            Padding::ZERO,
-        )
+        Self::with_options(rows, Length::Shrink, Length::Fill, 0.0, Padding::ZERO)
     }
 
     pub fn with_options(
@@ -2864,12 +2858,9 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer> for Dropdow
         renderer: &iced::Renderer,
         operation: &mut dyn Operation,
     ) {
-        self.scrollable.as_widget_mut().operate(
-            &mut tree.children[0],
-            layout,
-            renderer,
-            operation,
-        );
+        self.scrollable
+            .as_widget_mut()
+            .operate(&mut tree.children[0], layout, renderer, operation);
     }
 
     fn update(
@@ -3003,9 +2994,10 @@ impl<'a, Message: Clone + 'a> Widget<Message, Theme, iced::Renderer> for Dropdow
                     let cur_pos = state
                         .highlighted
                         .and_then(|h| selectable_indices.iter().position(|&i| i == h));
-                    let matched_pos = state
-                        .type_ahead
-                        .backspace(Instant::now(), cur_pos, labels.into_iter());
+                    let matched_pos =
+                        state
+                            .type_ahead
+                            .backspace(Instant::now(), cur_pos, labels.into_iter());
                     if let Some(matched_pos) = matched_pos {
                         if let Some(&row_idx) = selectable_indices.get(matched_pos) {
                             state.highlighted = Some(row_idx);
@@ -3280,13 +3272,7 @@ impl<'a, Message> Widget<Message, Theme, iced::Renderer> for DropdownListInner<'
             };
 
             child.as_widget_mut().update(
-                child_tree,
-                event,
-                row_layout,
-                row_cursor,
-                renderer,
-                shell,
-                viewport,
+                child_tree, event, row_layout, row_cursor, renderer, shell, viewport,
             );
         }
     }
@@ -3350,7 +3336,14 @@ mod tests {
     #[test]
     fn test_type_ahead_prefix_matching() {
         let mut ta = TypeAhead::new();
-        let items = vec!["0", "Annotations", "Dimensions", "Doors", "Walls", "Windows"];
+        let items = vec![
+            "0",
+            "Annotations",
+            "Dimensions",
+            "Doors",
+            "Walls",
+            "Windows",
+        ];
         let now = Instant::now();
 
         // Typing 'd' matches "Dimensions"

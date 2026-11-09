@@ -19,9 +19,12 @@ fn node_id(req: &Value, key: &str) -> Parsed<NodeId> {
 
 fn port(req: &Value, key: &str) -> Parsed<Port> {
     let value = &req[key];
-    let field = value["field"]
-        .as_str()
-        .ok_or_else(|| failure("port_required", format!("Supply {key}: {{\"node\":id,\"field\":name}}")))?;
+    let field = value["field"].as_str().ok_or_else(|| {
+        failure(
+            "port_required",
+            format!("Supply {key}: {{\"node\":id,\"field\":name}}"),
+        )
+    })?;
     Ok(Port {
         node: node_id(value, "node")?,
         field: field.to_owned(),
@@ -346,16 +349,27 @@ mod shape_node_tests {
         let _ = app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
         let spec = super::ops::resolve(node).expect("node type");
-        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        let id = app.tabs[i].graph.add_node(
+            super::PaletteItem::Op(spec),
+            Vec::new(),
+            iced::Point::ORIGIN,
+        );
         for (field, value) in inputs.as_object().unwrap() {
-            let port = super::Port { node: id, field: field.clone() };
+            let port = super::Port {
+                node: id,
+                field: field.clone(),
+            };
             let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
         }
         let i = app.active_tab;
-        let made = app.tabs[i].scene.document.entities().find_map(|entity| match entity {
-            document::EntityType::LwPolyline(polyline) => Some(polyline.clone()),
-            _ => None,
-        });
+        let made = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .find_map(|entity| match entity {
+                document::EntityType::LwPolyline(polyline) => Some(polyline.clone()),
+                _ => None,
+            });
         made.unwrap_or_else(|| panic!("{node} made no polyline"))
     }
 
@@ -363,21 +377,42 @@ mod shape_node_tests {
     #[test]
     fn the_shape_nodes_draw_their_polylines() {
         let corners = |p: &document::entities::LwPolyline| -> Vec<(f64, f64)> {
-            p.vertices.iter().map(|v| (v.location.x, v.location.y)).collect()
+            p.vertices
+                .iter()
+                .map(|v| (v.location.x, v.location.y))
+                .collect()
         };
-        let rectangle = made("Rectangle", json!({"corner": {"x": 1, "y": 2, "z": 3}, "width": 4, "height": 2}));
-        assert_eq!(corners(&rectangle), [(1.0, 2.0), (5.0, 2.0), (5.0, 4.0), (1.0, 4.0)]);
+        let rectangle = made(
+            "Rectangle",
+            json!({"corner": {"x": 1, "y": 2, "z": 3}, "width": 4, "height": 2}),
+        );
+        assert_eq!(
+            corners(&rectangle),
+            [(1.0, 2.0), (5.0, 2.0), (5.0, 4.0), (1.0, 4.0)]
+        );
         assert_eq!(rectangle.elevation, 3.0);
 
-        let square = made("Polygon", json!({"center": {"x": 0, "y": 0}, "radius": 1, "sides": 4, "circumscribed": true}));
+        let square = made(
+            "Polygon",
+            json!({"center": {"x": 0, "y": 0}, "radius": 1, "sides": 4, "circumscribed": true}),
+        );
         for (x, y) in corners(&square) {
-            assert!((x.abs() - 1.0).abs() < 1e-9 && (y.abs() - 1.0).abs() < 1e-9, "{x},{y}");
+            assert!(
+                (x.abs() - 1.0).abs() < 1e-9 && (y.abs() - 1.0).abs() < 1e-9,
+                "{x},{y}"
+            );
         }
 
-        let donut = made("Donut", json!({"center": {"x": 0, "y": 0}, "inside": 2, "outside": 4}));
+        let donut = made(
+            "Donut",
+            json!({"center": {"x": 0, "y": 0}, "inside": 2, "outside": 4}),
+        );
         assert_eq!(donut.constant_width, 1.0);
 
-        let cloud = made("Revision Cloud", json!({"points": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}], "arc length": 1}));
+        let cloud = made(
+            "Revision Cloud",
+            json!({"points": [{"x": 0, "y": 0}, {"x": 10, "y": 0}, {"x": 10, "y": 10}], "arc length": 1}),
+        );
         assert!(cloud.vertices.len() > 10 && cloud.vertices.iter().any(|v| v.bulge != 0.0));
     }
 }
@@ -394,20 +429,40 @@ mod radial_dimension_node_tests {
             let _ = app.automation_op(r#"{"op":"new"}"#);
             let _ = app.run_command_line("CIRCLE 0,0 5");
             let i = app.active_tab;
-            let circle = app.tabs[i].scene.document.entities().next().unwrap().common().handle;
+            let circle = app.tabs[i]
+                .scene
+                .document
+                .entities()
+                .next()
+                .unwrap()
+                .common()
+                .handle;
             let spec = super::ops::resolve(node).expect("node type");
-            let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+            let id = app.tabs[i].graph.add_node(
+                super::PaletteItem::Op(spec),
+                Vec::new(),
+                iced::Point::ORIGIN,
+            );
             for (field, value) in [
                 ("object", json!({"handle": circle.value()})),
                 ("location", json!({"x": 8, "y": 0})),
             ] {
-                let port = super::Port { node: id, field: field.into() };
+                let port = super::Port {
+                    node: id,
+                    field: field.into(),
+                };
                 let _ = app.on_graph(super::GraphMsg::Set(port, value));
             }
-            let dimension = app.tabs[i].scene.document.entities().find_map(|entity| match entity {
-                document::EntityType::Dimension(dimension) => Some(dimension.base().actual_measurement),
-                _ => None,
-            });
+            let dimension = app.tabs[i]
+                .scene
+                .document
+                .entities()
+                .find_map(|entity| match entity {
+                    document::EntityType::Dimension(dimension) => {
+                        Some(dimension.base().actual_measurement)
+                    }
+                    _ => None,
+                });
             assert_eq!(dimension, Some(measured), "{node}");
         }
     }
@@ -420,13 +475,26 @@ mod object_node_tests {
     /// #2590: Hatch, Multiline, Multileader and Helix nodes make their object.
     #[test]
     fn the_new_object_nodes_make_their_objects() {
-        for kind in [ObjectKind::Hatch, ObjectKind::MLine, ObjectKind::MultiLeader, ObjectKind::Helix] {
+        for kind in [
+            ObjectKind::Hatch,
+            ObjectKind::MLine,
+            ObjectKind::MultiLeader,
+            ObjectKind::Helix,
+        ] {
             let mut app = crate::app::OpenCADStudio::new_for_test();
             let _ = app.automation_op(r#"{"op":"new"}"#);
             let i = app.active_tab;
-            app.tabs[i].graph.add_node(super::PaletteItem::Object(kind), Vec::new(), iced::Point::ORIGIN);
+            app.tabs[i].graph.add_node(
+                super::PaletteItem::Object(kind),
+                Vec::new(),
+                iced::Point::ORIGIN,
+            );
             let _ = app.graph_run(i);
-            let made = app.tabs[i].scene.document.entities().any(|entity| kind.matches(entity));
+            let made = app.tabs[i]
+                .scene
+                .document
+                .entities()
+                .any(|entity| kind.matches(entity));
             assert!(made, "{} made nothing", kind.name());
         }
     }
@@ -450,12 +518,24 @@ mod create_node_tests {
     fn made(line: &str, node: &str, inputs: impl Fn(Value) -> Value) -> Vec<String> {
         let mut app = app_with(line);
         let i = app.active_tab;
-        let first = app.tabs[i].scene.document.entities().next().map(|e| json!({"handle": e.common().handle.value()}));
+        let first = app.tabs[i]
+            .scene
+            .document
+            .entities()
+            .next()
+            .map(|e| json!({"handle": e.common().handle.value()}));
         let before = app.tabs[i].scene.document.entities().count();
         let spec = super::ops::resolve(node).expect("node type");
-        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        let id = app.tabs[i].graph.add_node(
+            super::PaletteItem::Op(spec),
+            Vec::new(),
+            iced::Point::ORIGIN,
+        );
         for (field, value) in inputs(first.unwrap_or(Value::Null)).as_object().unwrap() {
-            let port = super::Port { node: id, field: field.clone() };
+            let port = super::Port {
+                node: id,
+                field: field.clone(),
+            };
             let _ = app.on_graph(super::GraphMsg::Set(port, value.clone()));
         }
         app.tabs[i]
@@ -482,18 +562,45 @@ mod create_node_tests {
     /// The node library makes every kind of object the drawing commands make.
     #[test]
     fn the_create_nodes_make_their_objects() {
-        for node in ["Box", "Wedge", "Cylinder", "Cone", "Sphere", "Torus", "Pyramid"] {
-            assert_eq!(made("", node, |_| json!({"corner": p(1.0, 2.0), "center": p(1.0, 2.0)})), ["3D Solid"], "{node}");
+        for node in [
+            "Box", "Wedge", "Cylinder", "Cone", "Sphere", "Torus", "Pyramid",
+        ] {
+            assert_eq!(
+                made(
+                    "",
+                    node,
+                    |_| json!({"corner": p(1.0, 2.0), "center": p(1.0, 2.0)})
+                ),
+                ["3D Solid"],
+                "{node}"
+            );
         }
-        assert_eq!(made("CIRCLE 0,0 5", "Region", |o| json!({"object": o})), ["Region"]);
-        assert_eq!(made("CIRCLE 0,0 5", "Extrude", |o| json!({"object": o})), ["3D Solid"]);
-        assert_eq!(made("LINE 0,0 10,0 ", "Extrude", |o| json!({"object": o})), ["Surface"]);
         assert_eq!(
-            made("", "Ordinate Dimension", |_| json!({"feature": p(3.0, 4.0), "leader": p(3.0, 9.0)})),
+            made("CIRCLE 0,0 5", "Region", |o| json!({"object": o})),
+            ["Region"]
+        );
+        assert_eq!(
+            made("CIRCLE 0,0 5", "Extrude", |o| json!({"object": o})),
+            ["3D Solid"]
+        );
+        assert_eq!(
+            made("LINE 0,0 10,0 ", "Extrude", |o| json!({"object": o})),
+            ["Surface"]
+        );
+        assert_eq!(
+            made(
+                "",
+                "Ordinate Dimension",
+                |_| json!({"feature": p(3.0, 4.0), "leader": p(3.0, 9.0)})
+            ),
             ["Ordinate Dimension"]
         );
         assert_eq!(
-            made("ARC 10,0 0,10 -10,0", "Arc Length Dimension", |o| json!({"object": o, "location": p(0.0, 14.0)})),
+            made(
+                "ARC 10,0 0,10 -10,0",
+                "Arc Length Dimension",
+                |o| json!({"object": o, "location": p(0.0, 14.0)})
+            ),
             ["Arc Length Dimension"]
         );
         assert_eq!(
@@ -512,42 +619,96 @@ mod create_node_tests {
         ] {
             let mut app = app_with("");
             let i = app.active_tab;
-            app.tabs[i].graph.add_node(super::PaletteItem::Object(kind), Vec::new(), iced::Point::ORIGIN);
+            app.tabs[i].graph.add_node(
+                super::PaletteItem::Object(kind),
+                Vec::new(),
+                iced::Point::ORIGIN,
+            );
             let _ = app.graph_run(i);
-            assert!(app.tabs[i].scene.document.entities().any(|e| kind.matches(e)), "{}", kind.name());
+            assert!(
+                app.tabs[i]
+                    .scene
+                    .document
+                    .entities()
+                    .any(|e| kind.matches(e)),
+                "{}",
+                kind.name()
+            );
         }
     }
 }
 
-
 #[cfg(test)]
 mod modify_node_tests {
     use serde_json::{json, Value};
-    fn p(x: f64, y: f64, z: f64) -> Value { json!({"x": x, "y": y, "z": z}) }
+    fn p(x: f64, y: f64, z: f64) -> Value {
+        json!({"x": x, "y": y, "z": z})
+    }
     fn h(app: &crate::app::OpenCADStudio, n: usize) -> Value {
-        let e = app.tabs[app.active_tab].scene.document.entities().nth(n).unwrap();
+        let e = app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .nth(n)
+            .unwrap();
         json!({"handle": e.common().handle.value()})
     }
     fn hs(app: &crate::app::OpenCADStudio) -> Value {
-        Value::Array(app.tabs[app.active_tab].scene.document.entities().map(|e| json!({"handle": e.common().handle.value()})).collect())
+        Value::Array(
+            app.tabs[app.active_tab]
+                .scene
+                .document
+                .entities()
+                .map(|e| json!({"handle": e.common().handle.value()}))
+                .collect(),
+        )
     }
     fn state(app: &crate::app::OpenCADStudio) -> Vec<String> {
-        app.tabs[app.active_tab].scene.document.entities().map(|e| {
-            let mut j = crate::app::automation::entity_json(&app.tabs[app.active_tab].scene.document, e, "geometry", None);
-            for k in ["handle", "layer", "color", "linetype", "lineweight", "type", "transparency", "owner", "display_type", "space"] { if let Some(o) = j.as_object_mut() { o.remove(k); } }
-            let t = j.to_string();
-            // A solid's JSON has no geometry; its ACIS data stands in for it.
-            let body = match e {
-                document::EntityType::Solid3D(solid) => {
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                    format!("{:?}", solid.acis_data).hash(&mut hasher);
-                    hasher.finish().to_string()
+        app.tabs[app.active_tab]
+            .scene
+            .document
+            .entities()
+            .map(|e| {
+                let mut j = crate::app::automation::entity_json(
+                    &app.tabs[app.active_tab].scene.document,
+                    e,
+                    "geometry",
+                    None,
+                );
+                for k in [
+                    "handle",
+                    "layer",
+                    "color",
+                    "linetype",
+                    "lineweight",
+                    "type",
+                    "transparency",
+                    "owner",
+                    "display_type",
+                    "space",
+                ] {
+                    if let Some(o) = j.as_object_mut() {
+                        o.remove(k);
+                    }
                 }
-                _ => String::new(),
-            };
-            format!("{}{}{body}", crate::entities::names::ui_name(e), &t[..t.len().min(90)])
-        }).collect()
+                let t = j.to_string();
+                // A solid's JSON has no geometry; its ACIS data stands in for it.
+                let body = match e {
+                    document::EntityType::Solid3D(solid) => {
+                        use std::hash::{Hash, Hasher};
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        format!("{:?}", solid.acis_data).hash(&mut hasher);
+                        hasher.finish().to_string()
+                    }
+                    _ => String::new(),
+                };
+                format!(
+                    "{}{}{body}",
+                    crate::entities::names::ui_name(e),
+                    &t[..t.len().min(90)]
+                )
+            })
+            .collect()
     }
     fn go(lines: &[&str], node: &str, inputs: impl Fn(&crate::app::OpenCADStudio) -> Value) {
         go_with(lines, |_| {}, node, inputs)
@@ -560,15 +721,27 @@ mod modify_node_tests {
     ) {
         let mut app = crate::app::OpenCADStudio::new_for_test();
         let _ = app.automation_op(r#"{"op":"new"}"#);
-        for l in lines { let _ = app.run_command_line(l); }
+        for l in lines {
+            let _ = app.run_command_line(l);
+        }
         prepare(&mut app);
         let i = app.active_tab;
         let before = state(&app);
         let inputs = inputs(&app);
         let spec = super::ops::resolve(node).unwrap();
-        let id = app.tabs[i].graph.add_node(super::PaletteItem::Op(spec), Vec::new(), iced::Point::ORIGIN);
+        let id = app.tabs[i].graph.add_node(
+            super::PaletteItem::Op(spec),
+            Vec::new(),
+            iced::Point::ORIGIN,
+        );
         for (field, value) in inputs.as_object().unwrap() {
-            let _ = app.on_graph(super::GraphMsg::Set(super::Port { node: id, field: field.clone() }, value.clone()));
+            let _ = app.on_graph(super::GraphMsg::Set(
+                super::Port {
+                    node: id,
+                    field: field.clone(),
+                },
+                value.clone(),
+            ));
         }
         let after = state(&app);
         // A second evaluation must not pile up.
@@ -583,53 +756,205 @@ mod modify_node_tests {
     #[test]
     fn the_modify_and_model_nodes_run_their_commands() {
         let l2 = ["LINE 0,0 10,0 ", "LINE 10,0 10,10 "];
-        go(&["LINE 0,0 10,0 ", "LINE 5,-5 5,5 "], "Trim", |a| json!({"object": h(a,0), "point": p(8.,0.,0.)}));
-        go(&["LINE 0,0 4,0 ", "LINE 10,-5 10,5 "], "Extend", |a| json!({"object": h(a,0), "point": p(3.,0.,0.)}));
-        go(&l2, "Fillet", |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(10.,5.,0.), "radius": 2}));
-        go(&l2, "Chamfer", |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(10.,5.,0.)}));
-        go(&["LINE 0,0 5,0 ", "LINE 10,5 15,5 "], "Blend", |a| json!({"first": h(a,0), "first point": p(4.,0.,0.), "second": h(a,1), "second point": p(11.,5.,0.)}));
-        go(&["LINE 0,0 10,0 "], "Break", |a| json!({"object": h(a,0), "first point": p(3.,0.,0.), "second point": p(6.,0.,0.)}));
-        go(&["LINE 0,0 10,0 "], "Break At Point", |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}));
-        go(&["LINE 0,0 10,0 "], "Lengthen", |a| json!({"object": h(a,0), "point": p(9.,0.,0.), "delta": 2}));
-        go(&["LINE 0,0 5,0 ", "LINE 5,0 10,0 "], "Join", |a| json!({"objects": hs(a)}));
-        go(&["RECTANG 0,0 10,10"], "Explode", |a| json!({"objects": hs(a)}));
-        go(&["LINE 0,0 10,0 "], "Convert To Polyline", |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}));
-        go(&["LINE 0,0 10,0 "], "Reverse", |a| json!({"objects": hs(a)}));
-        go(&["RECTANG 0,0 10,10"], "Stretch", |_| json!({"first corner": p(8.,-1.,0.), "second corner": p(12.,11.,0.), "base": p(0.,0.,0.), "second": p(5.,0.,0.)}));
-        go(&["LINE 0,0 10,0 "], "Align", |a| json!({"objects": hs(a), "first source": p(0.,0.,0.), "first target": p(0.,5.,0.), "second source": p(10.,0.,0.), "second target": p(0.,15.,0.)}));
-        go(&["CIRCLE 0,0 1"], "Rectangular Array", |a| json!({"objects": hs(a)}));
-        go(&["CIRCLE 10,0 1"], "Polar Array", |a| json!({"objects": [h(a,0)], "center": p(0.,0.,0.), "count": 4}));
-        go(&["CIRCLE 0,0 1", "LINE 0,0 20,0 "], "Path Array", |a| json!({"objects": [h(a,0)], "path": h(a,1)}));
-        go(&["RECTANG 0,0 10,10"], "Boundary", |_| json!({"point": p(5.,5.,0.)}));
-        go(&["RECTANG 0,0 10,10"], "Hatch At Point", |_| json!({"point": p(5.,5.,0.)}));
-        go(&["RECTANG 0,0 10,10"], "Hatch Objects", |a| json!({"objects": hs(a)}));
-        go(&["LINE 0,0 10,0 ", "LINE 0,4 10,4 "], "Centerline", |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(5.,4.,0.)}));
-        go(&["CIRCLE 0,0 5"], "Center Mark", |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}));
+        go(
+            &["LINE 0,0 10,0 ", "LINE 5,-5 5,5 "],
+            "Trim",
+            |a| json!({"object": h(a,0), "point": p(8.,0.,0.)}),
+        );
+        go(
+            &["LINE 0,0 4,0 ", "LINE 10,-5 10,5 "],
+            "Extend",
+            |a| json!({"object": h(a,0), "point": p(3.,0.,0.)}),
+        );
+        go(
+            &l2,
+            "Fillet",
+            |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(10.,5.,0.), "radius": 2}),
+        );
+        go(
+            &l2,
+            "Chamfer",
+            |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(10.,5.,0.)}),
+        );
+        go(
+            &["LINE 0,0 5,0 ", "LINE 10,5 15,5 "],
+            "Blend",
+            |a| json!({"first": h(a,0), "first point": p(4.,0.,0.), "second": h(a,1), "second point": p(11.,5.,0.)}),
+        );
+        go(
+            &["LINE 0,0 10,0 "],
+            "Break",
+            |a| json!({"object": h(a,0), "first point": p(3.,0.,0.), "second point": p(6.,0.,0.)}),
+        );
+        go(
+            &["LINE 0,0 10,0 "],
+            "Break At Point",
+            |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}),
+        );
+        go(
+            &["LINE 0,0 10,0 "],
+            "Lengthen",
+            |a| json!({"object": h(a,0), "point": p(9.,0.,0.), "delta": 2}),
+        );
+        go(
+            &["LINE 0,0 5,0 ", "LINE 5,0 10,0 "],
+            "Join",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["RECTANG 0,0 10,10"],
+            "Explode",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["LINE 0,0 10,0 "],
+            "Convert To Polyline",
+            |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}),
+        );
+        go(
+            &["LINE 0,0 10,0 "],
+            "Reverse",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["RECTANG 0,0 10,10"],
+            "Stretch",
+            |_| json!({"first corner": p(8.,-1.,0.), "second corner": p(12.,11.,0.), "base": p(0.,0.,0.), "second": p(5.,0.,0.)}),
+        );
+        go(
+            &["LINE 0,0 10,0 "],
+            "Align",
+            |a| json!({"objects": hs(a), "first source": p(0.,0.,0.), "first target": p(0.,5.,0.), "second source": p(10.,0.,0.), "second target": p(0.,15.,0.)}),
+        );
+        go(
+            &["CIRCLE 0,0 1"],
+            "Rectangular Array",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["CIRCLE 10,0 1"],
+            "Polar Array",
+            |a| json!({"objects": [h(a,0)], "center": p(0.,0.,0.), "count": 4}),
+        );
+        go(
+            &["CIRCLE 0,0 1", "LINE 0,0 20,0 "],
+            "Path Array",
+            |a| json!({"objects": [h(a,0)], "path": h(a,1)}),
+        );
+        go(
+            &["RECTANG 0,0 10,10"],
+            "Boundary",
+            |_| json!({"point": p(5.,5.,0.)}),
+        );
+        go(
+            &["RECTANG 0,0 10,10"],
+            "Hatch At Point",
+            |_| json!({"point": p(5.,5.,0.)}),
+        );
+        go(
+            &["RECTANG 0,0 10,10"],
+            "Hatch Objects",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["LINE 0,0 10,0 ", "LINE 0,4 10,4 "],
+            "Centerline",
+            |a| json!({"first": h(a,0), "first point": p(5.,0.,0.), "second": h(a,1), "second point": p(5.,4.,0.)}),
+        );
+        go(
+            &["CIRCLE 0,0 5"],
+            "Center Mark",
+            |a| json!({"object": h(a,0), "point": p(5.,0.,0.)}),
+        );
         let boxes = ["BOX 0,0,0 10,10 10", "BOX 5,5,5 15,15 10"];
         go(&boxes, "Union", |a| json!({"objects": hs(a)}));
-        go(&boxes, "Subtract", |a| json!({"from": [h(a,0)], "objects": [h(a,1)]}));
+        go(
+            &boxes,
+            "Subtract",
+            |a| json!({"from": [h(a,0)], "objects": [h(a,1)]}),
+        );
         go(&boxes, "Intersection", |a| json!({"objects": hs(a)}));
-        go(&["RECTANG 5,0 10,10"], "Revolve", |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(0.,10.,0.)}));
-        go(&["CIRCLE 0,0 1", "LINE 0,0,0 0,0,10 "], "Sweep", |a| json!({"objects": [h(a,0)], "path": h(a,1)}));
-        go(&["CIRCLE 0,0 5", "CIRCLE 0,0,10 3"], "Loft", |a| json!({"sections": hs(a)}));
-        go(&["CIRCLE 0,0 1", "LINE 0,0,0 0,0,10 "], "Extrude Along Path", |a| json!({"objects": [h(a,0)], "path": h(a,1)}));
-        go(&["CIRCLE 0,0 5"], "Extrude Tapered", |a| json!({"objects": hs(a)}));
-        go(&["BOX 0,0,0 10,10 10"], "Fillet Edge", |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}));
-        go(&["BOX 0,0,0 10,10 10"], "Chamfer Edge", |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}));
-        go(&["BOX 0,0,0 10,10 10"], "Shell", |a| json!({"solid": h(a,0), "face point": p(5.,5.,10.)}));
-        go(&["BOX 0,0,0 10,10 10"], "Slice", |a| json!({"objects": hs(a), "first": p(5.,0.,0.), "second": p(5.,1.,0.), "third": p(5.,0.,1.), "keep": p(8.,5.,5.)}));
+        go(
+            &["RECTANG 5,0 10,10"],
+            "Revolve",
+            |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(0.,10.,0.)}),
+        );
+        go(
+            &["CIRCLE 0,0 1", "LINE 0,0,0 0,0,10 "],
+            "Sweep",
+            |a| json!({"objects": [h(a,0)], "path": h(a,1)}),
+        );
+        go(
+            &["CIRCLE 0,0 5", "CIRCLE 0,0,10 3"],
+            "Loft",
+            |a| json!({"sections": hs(a)}),
+        );
+        go(
+            &["CIRCLE 0,0 1", "LINE 0,0,0 0,0,10 "],
+            "Extrude Along Path",
+            |a| json!({"objects": [h(a,0)], "path": h(a,1)}),
+        );
+        go(
+            &["CIRCLE 0,0 5"],
+            "Extrude Tapered",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["BOX 0,0,0 10,10 10"],
+            "Fillet Edge",
+            |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}),
+        );
+        go(
+            &["BOX 0,0,0 10,10 10"],
+            "Chamfer Edge",
+            |a| json!({"solid": h(a,0), "edge point": p(5.,0.,10.)}),
+        );
+        go(
+            &["BOX 0,0,0 10,10 10"],
+            "Shell",
+            |a| json!({"solid": h(a,0), "face point": p(5.,5.,10.)}),
+        );
+        go(
+            &["BOX 0,0,0 10,10 10"],
+            "Slice",
+            |a| json!({"objects": hs(a), "first": p(5.,0.,0.), "second": p(5.,1.,0.), "third": p(5.,0.,1.), "keep": p(8.,5.,5.)}),
+        );
         // A surface: an open line extruded.
         let surface = |app: &mut crate::app::OpenCADStudio| {
             use crate::command::StepInput;
-            let line = app.tabs[app.active_tab].scene.document.entities().next().unwrap().common().handle;
+            let line = app.tabs[app.active_tab]
+                .scene
+                .document
+                .entities()
+                .next()
+                .unwrap()
+                .common()
+                .handle;
             let _ = app.run_command_line("EXTRUDE");
             let _ = app.feed_command(StepInput::SelectionComplete(vec![line]));
             let _ = app.feed_command(StepInput::Enter);
             let _ = app.feed_command(StepInput::Text("10".into()));
         };
-        go_with(&["LINE 0,0 10,0 "], surface, "Thicken", |a| json!({"objects": hs(a)}));
-        go(&["RECTANG 0,0 10,10"], "Presspull", |a| json!({"object": h(a,0), "point": p(5.,5.,0.)}));
-        go(&["BOX 0,0,0 10,10 10"], "3D Rotate", |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(1.,0.,0.)}));
-        go(&["BOX 0,0,0 10,10 10"], "3D Mirror", |a| json!({"objects": hs(a), "first": p(20.,0.,0.), "second": p(20.,1.,0.), "third": p(20.,0.,1.)}));
+        go_with(
+            &["LINE 0,0 10,0 "],
+            surface,
+            "Thicken",
+            |a| json!({"objects": hs(a)}),
+        );
+        go(
+            &["RECTANG 0,0 10,10"],
+            "Presspull",
+            |a| json!({"object": h(a,0), "point": p(5.,5.,0.)}),
+        );
+        go(
+            &["BOX 0,0,0 10,10 10"],
+            "3D Rotate",
+            |a| json!({"objects": hs(a), "axis start": p(0.,0.,0.), "axis end": p(1.,0.,0.)}),
+        );
+        go(
+            &["BOX 0,0,0 10,10 10"],
+            "3D Mirror",
+            |a| json!({"objects": hs(a), "first": p(20.,0.,0.), "second": p(20.,1.,0.), "third": p(20.,0.,1.)}),
+        );
     }
 }

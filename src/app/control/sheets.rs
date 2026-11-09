@@ -522,7 +522,9 @@ impl OpenCADStudio {
                 )
                 .with_height(0.0001);
                 text.common.invisible = true;
-                let handle = self.tabs[i].scene.add_entity(document::EntityType::Text(text));
+                let handle = self.tabs[i]
+                    .scene
+                    .add_entity(document::EntityType::Text(text));
                 crate::scene::view::dispatch::set_entity_xdata(
                     &mut self.tabs[i].scene.document,
                     handle,

@@ -297,7 +297,15 @@ mod drawing_properties_loss {
         let _ = app.update(Message::ConversionLossBack);
         assert_eq!(app.active_modal, None);
         assert!(!path.exists());
-        assert!(app.tabs[0].scene.document.summary_info.custom_properties.len() == 3);
+        assert!(
+            app.tabs[0]
+                .scene
+                .document
+                .summary_info
+                .custom_properties
+                .len()
+                == 3
+        );
     }
 
     // S5
@@ -317,7 +325,12 @@ mod drawing_properties_loss {
         let scratch = Scratch::new("round-trip");
         let path = scratch.0.join("new.dwg");
         let mut app = app_with_properties();
-        let expected = app.tabs[0].scene.document.summary_info.custom_properties.clone();
+        let expected = app.tabs[0]
+            .scene
+            .document
+            .summary_info
+            .custom_properties
+            .clone();
         let _ = run(save_as(&mut app, &path, document::DxfVersion::AC1032));
         assert_eq!(app.active_modal, None);
         assert!(path.exists());
@@ -331,7 +344,12 @@ mod drawing_properties_loss {
         let scratch = Scratch::new("round-trip-dxf");
         let path = scratch.0.join("new.dxf");
         let mut app = app_with_properties();
-        let expected = app.tabs[0].scene.document.summary_info.custom_properties.clone();
+        let expected = app.tabs[0]
+            .scene
+            .document
+            .summary_info
+            .custom_properties
+            .clone();
         let _ = run(save_as(&mut app, &path, document::DxfVersion::AC1032));
         assert_eq!(app.active_modal, None);
         let reopened = crate::io::load_file(&path).expect("reopen saved drawing");

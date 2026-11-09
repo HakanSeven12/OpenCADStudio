@@ -256,7 +256,10 @@ impl OpenCADStudio {
                     }));
                     index += len;
                 }
-                let plain = || rows.iter().filter(|row| !matches!(row.widget, RowWidget::Group));
+                let plain = || {
+                    rows.iter()
+                        .filter(|row| !matches!(row.widget, RowWidget::Group))
+                };
                 let header = NodeRow {
                     field: format!("{SECTION}{}", props.first().map_or("", |p| p.field)),
                     label: section.title.clone(),
@@ -291,7 +294,12 @@ impl OpenCADStudio {
 
     /// The port of `handle` called `name` by field or by label, as
     /// `(field, value)`.
-    pub(super) fn graph_field(&self, i: usize, handle: Handle, name: &str) -> Option<(String, Value)> {
+    pub(super) fn graph_field(
+        &self,
+        i: usize,
+        handle: Handle,
+        name: &str,
+    ) -> Option<(String, Value)> {
         let name = name.trim();
         self.graph_entity_sections(i, handle)
             .into_iter()
@@ -302,7 +310,12 @@ impl OpenCADStudio {
 
     /// An object node's rows: its object handle(s), then the panel page of its
     /// first entity. With several entities the values shown are the lists.
-    fn graph_object_sections(&self, i: usize, id: NodeId, kind: Option<ObjectKind>) -> Vec<NodeSection> {
+    fn graph_object_sections(
+        &self,
+        i: usize,
+        id: NodeId,
+        kind: Option<ObjectKind>,
+    ) -> Vec<NodeSection> {
         let graph = &self.tabs[i].graph;
         let first = graph.ui.get(&id).and_then(|ui| ui.handles.first()).copied();
         let outputs = graph.engine.node(id).map(|node| &node.outputs);
@@ -466,7 +479,10 @@ impl OpenCADStudio {
         let tab = &mut self.tabs[i];
         let applied = std::mem::take(&mut tab.graph.applied);
         let created = std::mem::take(&mut tab.graph.created);
-        for (handle, record) in std::mem::take(&mut tab.graph.applied_records).into_iter().rev() {
+        for (handle, record) in std::mem::take(&mut tab.graph.applied_records)
+            .into_iter()
+            .rev()
+        {
             tab.scene.document.objects.insert(handle, record);
         }
         if applied.is_empty() && created.is_empty() {
@@ -478,7 +494,8 @@ impl OpenCADStudio {
             if tab.scene.document.get_entity(handle).is_some() {
                 tab.scene.update_entity(entity);
             } else {
-                tab.scene.restore_erased_entities(vec![std::sync::Arc::new(entity)]);
+                tab.scene
+                    .restore_erased_entities(vec![std::sync::Arc::new(entity)]);
             }
             restored.push(handle);
         }
@@ -505,7 +522,12 @@ impl OpenCADStudio {
                 .node(id)
                 .is_some_and(|node| matches!(node.kind, Kind::Object(_)))
         };
-        if !graph.engine.links.iter().any(|link| is_object(link.to.node)) {
+        if !graph
+            .engine
+            .links
+            .iter()
+            .any(|link| is_object(link.to.node))
+        {
             return;
         }
         let sections = self.graph_all_sections(i);
@@ -674,7 +696,9 @@ impl OpenCADStudio {
                     !drawing.is_empty() && drawing == document.header.fingerprint_guid;
                 for node in &graph.engine.nodes {
                     let kind = match &node.kind {
-                        Kind::Object(name) => ObjectKind::from_name(name).filter(|kind| kind.owns()),
+                        Kind::Object(name) => {
+                            ObjectKind::from_name(name).filter(|kind| kind.owns())
+                        }
                         Kind::Op(_) => None,
                     };
                     if let Some(ui) = graph.ui.get_mut(&node.id) {
@@ -740,7 +764,8 @@ impl OpenCADStudio {
                 format!("{{{}}}", crate::app::control::new_guid_v4().to_uppercase());
             tab.dirty = true;
         }
-        tab.graph.to_file(&tab.scene.document.header.fingerprint_guid)
+        tab.graph
+            .to_file(&tab.scene.document.header.fingerprint_guid)
     }
 
     /// Turns the drafts of `ports` into the values of their inputs, then runs

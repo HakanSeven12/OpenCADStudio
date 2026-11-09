@@ -71,13 +71,19 @@ impl OpenCADStudio {
             },
             _ => {
                 let length = match first_point {
-                    Some(first) => typed_point(value, Some(first)).map(|second| first.distance(second)),
-                    None => value.parse::<f64>().ok().filter(|length| length.is_finite()),
+                    Some(first) => {
+                        typed_point(value, Some(first)).map(|second| first.distance(second))
+                    }
+                    None => value
+                        .parse::<f64>()
+                        .ok()
+                        .filter(|length| length.is_finite()),
                 };
                 if let (None, None, Some(first)) = (first_point, length, typed_point(value, None)) {
                     // A point starts a length measured between two points.
                     self.command_line.push_output(&second_prompt());
-                    self.pending_setvar = Some(format!("{name}@{},{},{}", first.x, first.y, first.z));
+                    self.pending_setvar =
+                        Some(format!("{name}@{},{},{}", first.x, first.y, first.z));
                     return true;
                 }
                 match length {
@@ -100,7 +106,8 @@ impl OpenCADStudio {
                 match first_point {
                     Some(first) => {
                         self.command_line.push_output(&second_prompt());
-                        self.pending_setvar = Some(format!("{name}@{},{},{}", first.x, first.y, first.z));
+                        self.pending_setvar =
+                            Some(format!("{name}@{},{},{}", first.x, first.y, first.z));
                     }
                     None => {
                         self.command_line.push_output(&prompt);

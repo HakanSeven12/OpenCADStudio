@@ -36,7 +36,9 @@ fn resolve_visibility_state(
     evaluated_def: Option<Handle>,
 ) -> Option<(String, String)> {
     if let Some(prop) = OpenCADStudio::visibility_property(doc, insert_handle) {
-        if let PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } = prop.value {
+        if let PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } =
+            prop.value
+        {
             if !selected.is_empty() {
                 return Some((prop.label, selected));
             }
@@ -437,7 +439,7 @@ fn is_dimension_text(s: &str) -> bool {
             current.push(ch);
         }
     }
-    if ! sep_found {
+    if !sep_found {
         return false;
     }
     parts.push(current.trim().to_string());
@@ -781,8 +783,7 @@ impl OpenCADStudio {
         {
             match prop.value {
                 PropValue::BlockNumber { value, .. } => {
-                    if let Some(num) = crate::app::block_parameter_properties::parse_value(&value)
-                    {
+                    if let Some(num) = crate::app::block_parameter_properties::parse_value(&value) {
                         dyn_props.insert(prop.label, json!(clean_float(num)));
                     } else {
                         dyn_props.insert(prop.label, json!(value));
@@ -800,7 +801,8 @@ impl OpenCADStudio {
                         options.get(selected).map_or(Value::Null, |opt| json!(opt)),
                     );
                 }
-                PropValue::Choice { selected, .. } | PropValue::ChoiceWithTooltip { selected, .. } => {
+                PropValue::Choice { selected, .. }
+                | PropValue::ChoiceWithTooltip { selected, .. } => {
                     dyn_props.insert(prop.label, json!(selected));
                 }
                 PropValue::ReadOnly(val) | PropValue::PlainText(val) | PropValue::EditText(val) => {
@@ -904,9 +906,10 @@ impl OpenCADStudio {
         let layer_filter = req.get("layer").and_then(Value::as_str);
 
         let handles_filter: Option<FxHashSet<Handle>> = if let Some(h) = req["handle"].as_str() {
-            let parsed = u64::from_str_radix(h.trim_start_matches("0x").trim_start_matches("0X"), 16)
-                .map(Handle::new)
-                .map_err(|_| failure("invalid_handle", "handle must be hexadecimal"))?;
+            let parsed =
+                u64::from_str_radix(h.trim_start_matches("0x").trim_start_matches("0X"), 16)
+                    .map(Handle::new)
+                    .map_err(|_| failure("invalid_handle", "handle must be hexadecimal"))?;
             let mut set = FxHashSet::default();
             set.insert(parsed);
             Some(set)
@@ -947,7 +950,10 @@ impl OpenCADStudio {
                     ])
                 })
                 .ok_or_else(|| {
-                    failure("invalid_bounds", "bounds expects [min_x, min_y, max_x, max_y]")
+                    failure(
+                        "invalid_bounds",
+                        "bounds expects [min_x, min_y, max_x, max_y]",
+                    )
                 })?;
             if !b.iter().all(|x| x.is_finite()) || b[0] > b[2] || b[1] > b[3] {
                 return Err(failure(
@@ -1010,10 +1016,10 @@ impl OpenCADStudio {
             }
 
             // Match against `names` glob patterns
-            if !patterns
-                .iter()
-                .any(|pat| glob_match_ci(pat, &effective_name) || (include_anonymous && glob_match_ci(pat, &ins.block_name)))
-            {
+            if !patterns.iter().any(|pat| {
+                glob_match_ci(pat, &effective_name)
+                    || (include_anonymous && glob_match_ci(pat, &ins.block_name))
+            }) {
                 continue;
             }
 
@@ -1033,9 +1039,15 @@ impl OpenCADStudio {
             let mut record = Map::new();
             record.insert("name".into(), Value::String(effective_name.clone()));
             if ins.block_name != effective_name {
-                record.insert("anonymous_name".into(), Value::String(ins.block_name.clone()));
+                record.insert(
+                    "anonymous_name".into(),
+                    Value::String(ins.block_name.clone()),
+                );
             }
-            record.insert("handle".into(), Value::String(format!("{:X}", handle.value())));
+            record.insert(
+                "handle".into(),
+                Value::String(format!("{:X}", handle.value())),
+            );
             record.insert("layer".into(), Value::String(ins.common.layer.clone()));
             record.insert(
                 "position".into(),
@@ -1106,7 +1118,9 @@ impl OpenCADStudio {
                             ok = false;
                             break;
                         }
-                        Err(e) => return Err(failure("invalid_where", format!("where filter: {e}"))),
+                        Err(e) => {
+                            return Err(failure("invalid_where", format!("where filter: {e}")))
+                        }
                     }
                 }
                 if !ok {
@@ -1186,10 +1200,9 @@ mod tests {
             ],
         );
         let mut col_insert = Insert::new("COL_SCHED", Vector3::new(50.0, 60.0, 0.0));
-        col_insert.attributes.push(AttributeEntity::new(
-            "TAG".to_string(),
-            "P.12".to_string(),
-        ));
+        col_insert
+            .attributes
+            .push(AttributeEntity::new("TAG".to_string(), "P.12".to_string()));
         let col_handle = app.tabs[i].scene.add_entity(EntityType::Insert(col_insert));
 
         // 3. Unlinked internal anonymous block (*U99) — should be filtered out by default
@@ -1302,7 +1315,10 @@ mod tests {
             .expect("DOOR_DYN resolved from *U");
         assert_eq!(door["handle"], format!("{:X}", door_insert_h.value()));
         assert_eq!(door["anonymous_name"], anon_copy);
-        assert_eq!(door["dynamic_properties"]["Visibility1"], "VisibilityState0");
+        assert_eq!(
+            door["dynamic_properties"]["Visibility1"],
+            "VisibilityState0"
+        );
 
         // Test `where` filter on extracted attributes
         let (filtered, _) = app.control_request(json!({

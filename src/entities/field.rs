@@ -410,7 +410,12 @@ pub(crate) fn os_currency_symbol() -> String {
         let mut buffer = [0u16; 16];
         // LOCALE_SCURRENCY of the user's default locale.
         let len = unsafe {
-            GetLocaleInfoEx(std::ptr::null(), 0x14, buffer.as_mut_ptr(), buffer.len() as i32)
+            GetLocaleInfoEx(
+                std::ptr::null(),
+                0x14,
+                buffer.as_mut_ptr(),
+                buffer.len() as i32,
+            )
         };
         if len > 1 {
             return String::from_utf16_lossy(&buffer[..len as usize - 1]);
@@ -791,7 +796,11 @@ mod tests {
             r"\AcVar CustomDP.CLIENT",
             r"%<\AcVar CustomDP.Client>%",
         ] {
-            assert_eq!(evaluate(&document, code, &[], None).as_deref(), Some("Acme"), "{code}");
+            assert_eq!(
+                evaluate(&document, code, &[], None).as_deref(),
+                Some("Acme"),
+                "{code}"
+            );
         }
         assert_eq!(
             evaluate(&document, r"\AcVar CustomDP.job no", &[], None).as_deref(),

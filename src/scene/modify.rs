@@ -1783,7 +1783,8 @@ impl Scene {
                 .map(std::sync::Arc::new);
             self.record_undo_before(handle, before);
             if let Some(EntityType::Surface(surface)) = self.document.get_entity_mut(handle) {
-                surface.acis_data = document::entities::AcisData::from_sat(&document.to_sat_string());
+                surface.acis_data =
+                    document::entities::AcisData::from_sat(&document.to_sat_string());
                 if let document::entities::SurfaceData::Swept { options, .. } =
                     &mut surface.surface_data
                 {
@@ -1862,7 +1863,8 @@ impl Scene {
                 .map(std::sync::Arc::new);
             self.record_undo_before(handle, before);
             if let Some(EntityType::Surface(surface)) = self.document.get_entity_mut(handle) {
-                surface.acis_data = document::entities::AcisData::from_sat(&document.to_sat_string());
+                surface.acis_data =
+                    document::entities::AcisData::from_sat(&document.to_sat_string());
                 surface.surface_data = fresh.surface_data;
                 surface.point_of_reference = fresh.point_of_reference;
             }
@@ -1913,7 +1915,10 @@ impl Scene {
             let source = |handle: Handle| self.document.get_entity(handle).cloned();
             // The surface made again: a history step, or a body with its data.
             let made: Option<
-                Result<SolidHistoryOperation, (kernel::brep::Body, document::entities::SurfaceData)>,
+                Result<
+                    SolidHistoryOperation,
+                    (kernel::brep::Body, document::entities::SurfaceData),
+                >,
             > = match &sources {
                 SurfaceSources::Extrude {
                     profile,
@@ -2330,7 +2335,8 @@ impl Scene {
         match self.document.get_entity_mut(handle) {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
-                entity.acis_data = document::entities::AcisData::from_sat(&document.to_sat_string());
+                entity.acis_data =
+                    document::entities::AcisData::from_sat(&document.to_sat_string());
                 if let Some(data) = surface_data {
                     if matches!(&data, document::entities::SurfaceData::Extruded { .. }) {
                         entity.kind = document::entities::SurfaceKind::Extruded;
@@ -2372,7 +2378,8 @@ impl Scene {
         match self.document.get_entity_mut(handle) {
             Some(EntityType::Solid3D(entity)) => entity.set_sat_document(&document),
             Some(EntityType::Surface(entity)) => {
-                entity.acis_data = document::entities::AcisData::from_sat(&document.to_sat_string());
+                entity.acis_data =
+                    document::entities::AcisData::from_sat(&document.to_sat_string());
                 if let Some(data) = surface_data {
                     if matches!(&data, document::entities::SurfaceData::Extruded { .. }) {
                         entity.kind = document::entities::SurfaceKind::Extruded;
@@ -2791,7 +2798,10 @@ impl Scene {
         }
         if grip_id == GROUP_GRIP_ID {
             if let GripApply::Translate(delta) = apply {
-                self.transform_entities(&[handle], &crate::command::EntityTransform::Translate(delta));
+                self.transform_entities(
+                    &[handle],
+                    &crate::command::EntityTransform::Translate(delta),
+                );
             }
             return;
         }
@@ -2963,7 +2973,10 @@ mod leader_annotation_reactor_tests {
     fn add_pair(scene: &mut Scene) -> (Handle, Handle) {
         let leader = scene.add_entity(EntityType::Leader(document::entities::Leader::default()));
         let annotation = scene.add_entity(EntityType::MText(Box::new(
-            document::entities::MText::with_value("note", document::types::Vector3::new(10.0, 5.0, 0.0)),
+            document::entities::MText::with_value(
+                "note",
+                document::types::Vector3::new(10.0, 5.0, 0.0),
+            ),
         )));
         (leader, annotation)
     }
@@ -4189,8 +4202,10 @@ mod copy_entities_subhandle_tests {
         .map(|e| doc.add_entity(e).unwrap())
         .collect();
 
-        let copies =
-            scene.copy_entities(&sources, &EntityTransform::Translate(DVec3::new(100.0, 0.0, 0.0)));
+        let copies = scene.copy_entities(
+            &sources,
+            &EntityTransform::Translate(DVec3::new(100.0, 0.0, 0.0)),
+        );
         assert_eq!(copies.len(), sources.len());
 
         let mut seen = std::collections::HashSet::new();
@@ -4199,7 +4214,10 @@ mod copy_entities_subhandle_tests {
             assert!(!subs.is_empty());
             for s in subs {
                 assert!(!s.is_null(), "sub-handle of {h:?} must be set");
-                assert!(seen.insert(s), "sub-handle {s:?} is shared between entities");
+                assert!(
+                    seen.insert(s),
+                    "sub-handle {s:?} is shared between entities"
+                );
             }
         }
     }
@@ -4210,9 +4228,15 @@ mod copy_entities_subhandle_tests {
     fn copied_polyfaces_keep_their_vertices_through_a_dwg_roundtrip() {
         let mut scene = Scene::new();
         let mesh = loaded_polyface(&mut scene.document);
-        let src = scene.document.add_entity(EntityType::PolyfaceMesh(mesh)).unwrap();
+        let src = scene
+            .document
+            .add_entity(EntityType::PolyfaceMesh(mesh))
+            .unwrap();
         for dx in [100.0, 200.0] {
-            scene.copy_entities(&[src], &EntityTransform::Translate(DVec3::new(dx, 0.0, 0.0)));
+            scene.copy_entities(
+                &[src],
+                &EntityTransform::Translate(DVec3::new(dx, 0.0, 0.0)),
+            );
         }
 
         let bytes = document::DwgWriter::write_to_vec(&scene.document).unwrap();
@@ -4381,7 +4405,9 @@ mod copy_field_tests {
         let mut scene = Scene::new();
         let src = scene
             .document
-            .add_entity(EntityType::MText(Box::new(document::entities::MText::new())))
+            .add_entity(EntityType::MText(
+                Box::new(document::entities::MText::new()),
+            ))
             .unwrap();
         let (root, text, child) = add_field_tree(&mut scene.document, src);
         scene
@@ -4409,15 +4435,18 @@ mod copy_field_tests {
     #[test]
     fn copied_insert_attribute_gets_its_own_field_tree() {
         let mut scene = Scene::new();
-        let mut insert = document::entities::Insert::new(
-            "TITLE".to_string(),
-            document::types::Vector3::ZERO,
-        );
-        insert.attributes.push(document::entities::AttributeEntity::new(
-            "CLIENT".to_string(),
-            "ACME".to_string(),
-        ));
-        let src = scene.document.add_entity(EntityType::Insert(insert)).unwrap();
+        let mut insert =
+            document::entities::Insert::new("TITLE".to_string(), document::types::Vector3::ZERO);
+        insert
+            .attributes
+            .push(document::entities::AttributeEntity::new(
+                "CLIENT".to_string(),
+                "ACME".to_string(),
+            ));
+        let src = scene
+            .document
+            .add_entity(EntityType::Insert(insert))
+            .unwrap();
         let src_attribute = match scene.document.get_entity(src) {
             Some(EntityType::Insert(ins)) => ins.attributes[0].common.handle,
             _ => unreachable!(),
@@ -4438,7 +4467,10 @@ mod copy_field_tests {
             other => panic!("expected the copied insert, got {other:?}"),
         };
         let copy_root = copy_root.expect("copied attribute has an extension dictionary");
-        assert_ne!(copy_root, root, "copied attribute shares the source's dictionary");
+        assert_ne!(
+            copy_root, root,
+            "copied attribute shares the source's dictionary"
+        );
         match scene.document.objects.get(&copy_root) {
             Some(ObjectType::Dictionary(d)) => assert_eq!(d.owner, copy_attribute),
             other => panic!("expected a dictionary, got {other:?}"),

@@ -341,7 +341,9 @@ impl QdimCommand {
         ]);
         (
             self.plane
-                .place_entity(EntityType::Dimension(Box::new(Dimension::Linear(dimension)))),
+                .place_entity(EntityType::Dimension(Box::new(Dimension::Linear(
+                    dimension,
+                )))),
             association,
         )
     }
@@ -366,7 +368,9 @@ impl QdimCommand {
         dimension.refresh_measurement();
         (
             self.plane
-                .place_entity(EntityType::Dimension(Box::new(Dimension::Ordinate(dimension)))),
+                .place_entity(EntityType::Dimension(Box::new(Dimension::Ordinate(
+                    dimension,
+                )))),
             DimensionAssociationInput::Explicit(vec![point.sources.first().copied()]),
         )
     }

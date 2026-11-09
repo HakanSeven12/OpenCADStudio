@@ -66,8 +66,7 @@ fn base_camera() -> Camera {
 /// inputs `grid_segments` receives every rebuild during navigation.
 fn pan_sequence(bounds: Rectangle) -> Vec<(Mat4, DVec3, f32, f32)> {
     let base = base_camera();
-    let (step_x, step_y) =
-        compute_grid_steps(1.0, 1.0, base.distance, base.fov_y, bounds, true);
+    let (step_x, step_y) = compute_grid_steps(1.0, 1.0, base.distance, base.fov_y, bounds, true);
     (0..PAN_STEPS)
         .map(|i| {
             let mut cam = base.clone();

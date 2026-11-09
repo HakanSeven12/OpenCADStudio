@@ -72,7 +72,6 @@ fn resolve_style(
     style_name: &str,
     document: &Document,
 ) -> ResolvedTextStyle {
-
     let mut font_name = if let Some(style) = style {
         // A style names a font *file* — `GOST2304_TypeA_italic.ttf`,
         // `romans.shx`, sometimes with a directory; `true_type_font` carries the
@@ -114,7 +113,11 @@ fn resolve_style(
             } else if explicit_shx {
                 // A missing .shx file draws with the stroke substitute of its
                 // name, never with an installed TrueType face (measured).
-                file.rsplit(['/', '\\']).next().unwrap_or(file).trim().to_string()
+                file.rsplit(['/', '\\'])
+                    .next()
+                    .unwrap_or(file)
+                    .trim()
+                    .to_string()
             } else if let Some(family) = resolve_font_reference(file) {
                 // The file is installed, so its family is the face to draw with.
                 // Substituting a stroke font instead drops every letter that
@@ -670,9 +673,12 @@ pub fn adapt_mtext_paragraphs(
     // starts with i, l, r or t; alignment (`ql`, `qc`, …) and spacing codes
     // don't.
     let sets_indent = |props: &str| {
-        props.split(';').next().unwrap_or("").split(',').any(|code| {
-            code.starts_with(['i', 'l', 'r', 't'])
-        })
+        props
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .split(',')
+            .any(|code| code.starts_with(['i', 'l', 'r', 't']))
     };
     let (mut has_px_indent, mut has_bare_p_indent) = (false, false);
     for (i, _) in s.match_indices("\\p") {
@@ -2522,7 +2528,10 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     side_bearing(atom, entity_h, base_wf, &base_font_name, trailing)
                 })
             };
-            (bearing(visible.first(), false), bearing(visible.last(), true))
+            (
+                bearing(visible.first(), false),
+                bearing(visible.last(), true),
+            )
         };
         let line_w = line_w - lead - trail;
         line_widths.push(line_w);
@@ -2627,7 +2636,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         // own single-glyph run so the SDF path draws it at its
                         // cell origin; 1.4×height is the classic vertical cell
                         // advance.
-                        let color = atom.state.color.as_ref().and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
+                        let color = atom
+                            .state
+                            .color
+                            .as_ref()
+                            .and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
                         let cell = run_h * 1.4;
                         // Word wrap, vertically: a word that would overrun the
                         // column limit moves WHOLE to the next column (the
@@ -2728,7 +2741,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                         2 => line_max_h - run_h,
                         _ => 0.0,
                     };
-                    let color = atom.state.color.as_ref().and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
+                    let color = atom
+                        .state
+                        .color
+                        .as_ref()
+                        .and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
 
                     let lx = cursor_x;
                     let ly = valign_dy;
@@ -2922,7 +2939,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                     let oblique = base_oblique + atom.state.oblique_rad;
                     let font_name = resolve_font(&atom.state, &base_font_name);
                     let tracking = atom.state.tracking;
-                    let color = atom.state.color.as_ref().and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
+                    let color = atom
+                        .state
+                        .color
+                        .as_ref()
+                        .and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
                     let valign_dy = match atom.state.valign {
                         1 => (line_max_h - run_h) * 0.5,
                         2 => line_max_h - run_h,
@@ -3138,7 +3159,11 @@ pub fn layout_mtext(opts: &MTextRenderOpts) -> MTextLayout {
                             2 => line_max_h - run_h,
                             _ => 0.0,
                         };
-                        let color = atom.state.color.as_ref().and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
+                        let color = atom
+                            .state
+                            .color
+                            .as_ref()
+                            .and_then(|c| resolve_inline_color(c, opts.layer_color.as_ref()));
                         let lx = cursor_x;
                         let ly = valign_dy;
                         let origin: [f64; 2] = [
@@ -4068,7 +4093,11 @@ mod v_anchor_tests {
             .expect("the list item must wrap");
         assert!(layout.strokes[0].origin[0].abs() < 1e-3);
         assert!((first.origin[0] - 36.0).abs() < 1e-3, "{:?}", first.origin);
-        assert!((wrapped.origin[0] - 36.0).abs() < 1e-3, "{:?}", wrapped.origin);
+        assert!(
+            (wrapped.origin[0] - 36.0).abs() < 1e-3,
+            "{:?}",
+            wrapped.origin
+        );
     }
 
     /// Paragraph indents with bare `\p` and paragraph alignment `\pxqc` or `\pqc`
@@ -4079,8 +4108,16 @@ mod v_anchor_tests {
         // Case 1: AutoCAD standard bare \pi with drawing units (e.g. beam label SB5: height 250, indent -250, left 500)
         let doc1 = adapt_mtext_paragraphs("\\A1;\\pi-250,l500,t500,1000;{\\W1;SB5}", 250.0, true);
         assert_eq!(doc1.len(), 1);
-        assert!((doc1[0].indent_first - 250.0).abs() < 1e-3, "first indent should be 250, got {}", doc1[0].indent_first);
-        assert!((doc1[0].indent_left - 500.0).abs() < 1e-3, "left margin should be 500, got {}", doc1[0].indent_left);
+        assert!(
+            (doc1[0].indent_first - 250.0).abs() < 1e-3,
+            "first indent should be 250, got {}",
+            doc1[0].indent_first
+        );
+        assert!(
+            (doc1[0].indent_left - 500.0).abs() < 1e-3,
+            "left margin should be 500, got {}",
+            doc1[0].indent_left
+        );
         assert_eq!(doc1[0].tab_stops.len(), 2);
         assert!((doc1[0].tab_stops[0].position - 500.0).abs() < 1e-3);
         assert!((doc1[0].tab_stops[1].position - 1000.0).abs() < 1e-3);
@@ -4088,18 +4125,38 @@ mod v_anchor_tests {
         // Case 2: \pxqc paragraph alignment combined with bare \pi indents
         let doc2 = adapt_mtext_paragraphs("\\pxqc;\\pi-250,l500;SB5", 250.0, true);
         assert_eq!(doc2.len(), 1);
-        assert!((doc2[0].indent_first - 250.0).abs() < 1e-3, "first indent should be 250, got {}", doc2[0].indent_first);
-        assert!((doc2[0].indent_left - 500.0).abs() < 1e-3, "left margin should be 500, got {}", doc2[0].indent_left);
+        assert!(
+            (doc2[0].indent_first - 250.0).abs() < 1e-3,
+            "first indent should be 250, got {}",
+            doc2[0].indent_first
+        );
+        assert!(
+            (doc2[0].indent_left - 500.0).abs() < 1e-3,
+            "left margin should be 500, got {}",
+            doc2[0].indent_left
+        );
 
         // Case 3: Bare \p with alignment first (\pqc,i-250,l500;)
         let doc3 = adapt_mtext_paragraphs("\\pqc,i-250,l500;SB5", 250.0, true);
         assert_eq!(doc3.len(), 1);
-        assert!((doc3[0].indent_first - 250.0).abs() < 1e-3, "first indent should be 250, got {}", doc3[0].indent_first);
-        assert!((doc3[0].indent_left - 500.0).abs() < 1e-3, "left margin should be 500, got {}", doc3[0].indent_left);
+        assert!(
+            (doc3[0].indent_first - 250.0).abs() < 1e-3,
+            "first indent should be 250, got {}",
+            doc3[0].indent_first
+        );
+        assert!(
+            (doc3[0].indent_left - 500.0).abs() < 1e-3,
+            "left margin should be 500, got {}",
+            doc3[0].indent_left
+        );
 
         // Case 4: left alignment beside the extended form keeps text heights.
         let doc4 = adapt_mtext_paragraphs("\\pql;\\pxi-1,l2;SB5", 250.0, true);
-        assert!((doc4[0].indent_left - 500.0).abs() < 1e-3, "got {}", doc4[0].indent_left);
+        assert!(
+            (doc4[0].indent_left - 500.0).abs() < 1e-3,
+            "got {}",
+            doc4[0].indent_left
+        );
     }
 
     #[test]

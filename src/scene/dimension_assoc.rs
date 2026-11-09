@@ -1850,7 +1850,9 @@ impl Scene {
             self.record_undo_object_before(owner, Some(before));
         }
         if let Some(ObjectType::Dictionary(dictionary)) = self.document.objects.get_mut(&owner) {
-            dictionary.entries.retain(|(_, handle)| *handle != association);
+            dictionary
+                .entries
+                .retain(|(_, handle)| *handle != association);
         }
         self.document.objects.remove(&association);
         let holders: Vec<Handle> = self
@@ -1865,7 +1867,10 @@ impl Scene {
                 self.record_undo_before(handle, before);
             }
             if let Some(entity) = self.document.get_entity_mut(handle) {
-                entity.common_mut().reactors.retain(|reactor| *reactor != association);
+                entity
+                    .common_mut()
+                    .reactors
+                    .retain(|reactor| *reactor != association);
             }
         }
         self.invalidate_dependency_index();
@@ -2025,7 +2030,10 @@ impl Scene {
                     (2, arc.end_point_wcs()),
                 ]);
             }
-            T::Line { index, object: handle } => {
+            T::Line {
+                index,
+                object: handle,
+            } => {
                 let Some(EntityType::Line(line)) = object(*handle) else {
                     return false;
                 };

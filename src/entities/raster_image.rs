@@ -565,7 +565,8 @@ impl Grippable for Wipeout {
                 };
                 if let Some(clip) = wipeout_world_to_clip(self, new_w) {
                     let closes = self.clip_boundary_vertices.len() > 3
-                        && self.clip_boundary_vertices.first() == self.clip_boundary_vertices.last();
+                        && self.clip_boundary_vertices.first()
+                            == self.clip_boundary_vertices.last();
                     self.clip_boundary_vertices[grip_id] = clip;
                     // The first corner is repeated to close the boundary.
                     if grip_id == 0 && closes {
@@ -707,13 +708,21 @@ impl PropertyEditable for Wipeout {
                 props: vec![
                     toggle("Show image", "wo_show_image", show_image),
                     toggle("Show clipped", "wo_show_clipped", show_clipped),
-                    toggle("Background transparency", "wo_bg_transparency", bg_transparency),
+                    toggle(
+                        "Background transparency",
+                        "wo_bg_transparency",
+                        bg_transparency,
+                    ),
                 ],
             },
             // The transparent colour of a bitonal image; a wipeout has none.
             PropSection {
                 title: t!("Misc").into_owned(),
-                props: vec![ro(t!("Transparency Color").as_ref(), "wo_transparency_color", "")],
+                props: vec![ro(
+                    t!("Transparency Color").as_ref(),
+                    "wo_transparency_color",
+                    "",
+                )],
             },
         ]
     }
@@ -727,7 +736,11 @@ impl PropertyEditable for Wipeout {
             _ => None,
         };
         if let Some(flag) = flag {
-            let on = if value == "toggle" { !self.flags.contains(flag) } else { value == "true" };
+            let on = if value == "toggle" {
+                !self.flags.contains(flag)
+            } else {
+                value == "true"
+            };
             self.flags.set(flag, on);
             if flag == Flags::USE_CLIPPING_BOUNDARY {
                 self.clipping_enabled = on;
@@ -736,7 +749,9 @@ impl PropertyEditable for Wipeout {
         }
         if field == "wo_scale" {
             // Scale about the insertion point; the row reads 1 again after.
-            if let Some(factor) = parse_f64(value).filter(|factor| factor.is_finite() && *factor > 0.0) {
+            if let Some(factor) =
+                parse_f64(value).filter(|factor| factor.is_finite() && *factor > 0.0)
+            {
                 for vector in [&mut self.u_vector, &mut self.v_vector] {
                     vector.x *= factor;
                     vector.y *= factor;

@@ -122,9 +122,10 @@ impl OpenCADStudio {
         let rows = conditions
             .into_iter()
             .map(|condition| {
-                let ticked = condition.property.as_ref().is_none_or(|property| {
-                    SAMPLE_TICKED_FIELDS.contains(&property.field.as_str())
-                });
+                let ticked = condition
+                    .property
+                    .as_ref()
+                    .is_none_or(|property| SAMPLE_TICKED_FIELDS.contains(&property.field.as_str()));
                 (condition, ticked)
             })
             .collect();

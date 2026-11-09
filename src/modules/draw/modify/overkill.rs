@@ -359,7 +359,8 @@ fn close(a: &serde_json::Value, b: &serde_json::Value, tolerance: f64) -> bool {
         }
         (V::Object(x), V::Object(y)) => {
             x.len() == y.len()
-                && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| close(v, w, tolerance)))
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| close(v, w, tolerance)))
         }
         _ => a == b,
     }
@@ -420,7 +421,8 @@ fn compare(
                 return None;
             }
             let mut line = l.clone();
-            line.start = document::types::Vector3::new(union.start[0], union.start[1], union.start[2]);
+            line.start =
+                document::types::Vector3::new(union.start[0], union.start[1], union.start[2]);
             line.end = document::types::Vector3::new(union.end[0], union.end[1], union.end[2]);
             Some(Outcome::Merge(EntityType::Line(line)))
         }
@@ -460,7 +462,10 @@ fn compare(
 pub fn run(
     items: &mut [(Handle, EntityType)],
     s: &Settings,
-) -> (std::collections::HashSet<Handle>, std::collections::HashSet<Handle>) {
+) -> (
+    std::collections::HashSet<Handle>,
+    std::collections::HashSet<Handle>,
+) {
     let mut changed = std::collections::HashSet::new();
     let mut removed = std::collections::HashSet::new();
     if s.optimize {
@@ -497,9 +502,13 @@ pub fn run(
                 } else {
                     (b, a)
                 };
-                let Some(outcome) =
-                    compare(&items[keep].1, &items[drop].1, &entries[keep], &entries[drop], s)
-                else {
+                let Some(outcome) = compare(
+                    &items[keep].1,
+                    &items[drop].1,
+                    &entries[keep],
+                    &entries[drop],
+                    s,
+                ) else {
                     continue;
                 };
                 progress = true;

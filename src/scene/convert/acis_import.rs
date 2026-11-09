@@ -36,7 +36,11 @@ fn class(document: &SatDocument) -> Option<Class> {
             .and_then(|at| document.record(at))
             .is_some_and(|surface| surface.entity_type == "plane-surface")
     });
-    Some(if planar { Class::Region } else { Class::Surface })
+    Some(if planar {
+        Class::Region
+    } else {
+        Class::Surface
+    })
 }
 
 /// One body's document as its drawing object.
@@ -89,11 +93,18 @@ pub(crate) fn packed_true_colour(r: u8, g: u8, b: u8) -> i32 {
 
 /// Hangs colour attributes on a record: a true colour first, then its
 /// index, as imported models carry them.
-fn paint_record(document: &mut document::entities::acis::SatDocument, owner: usize, color: document::types::Color) {
+fn paint_record(
+    document: &mut document::entities::acis::SatDocument,
+    owner: usize,
+    color: document::types::Color,
+) {
     use document::entities::acis::{SatPointer, SatRecord, SatToken};
     let mut chain: Vec<(&str, i64)> = Vec::new();
     if let document::types::Color::Rgb { r, g, b } = color {
-        chain.push(("truecolor-adesk-attrib", i64::from(packed_true_colour(r, g, b))));
+        chain.push((
+            "truecolor-adesk-attrib",
+            i64::from(packed_true_colour(r, g, b)),
+        ));
     }
     chain.push(("color-adesk-attrib", attribute_index(color)));
     let Some(existing) = document.record(owner).map(|record| record.attribute) else {
@@ -103,8 +114,16 @@ fn paint_record(document: &mut document::entities::acis::SatDocument, owner: usi
     let count = chain.len() as i32;
     for (k, (kind, value)) in chain.into_iter().enumerate() {
         let at = first + k as i32;
-        let next = if k as i32 + 1 < count { SatPointer::new(at + 1) } else { existing };
-        let previous = if k == 0 { SatPointer::NULL } else { SatPointer::new(at - 1) };
+        let next = if k as i32 + 1 < count {
+            SatPointer::new(at + 1)
+        } else {
+            existing
+        };
+        let previous = if k == 0 {
+            SatPointer::NULL
+        } else {
+            SatPointer::new(at - 1)
+        };
         let mut record = SatRecord::new(-1, kind);
         record.tokens = vec![
             SatToken::Pointer(next),

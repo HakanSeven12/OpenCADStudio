@@ -51,7 +51,9 @@ impl OpenCADStudio {
             return Task::none();
         }
         if perpendicular && kind != crate::scene::block_orientation_parameter::Kind::Alignment {
-            self.command_line.push_error(crate::t!("Alignment type is only available for Alignment parameters.").as_ref());
+            self.command_line.push_error(
+                crate::t!("Alignment type is only available for Alignment parameters.").as_ref(),
+            );
             return Task::none();
         }
         self.push_undo_snapshot(i, &format!("{} parameter", kind.name()));
@@ -82,14 +84,25 @@ impl OpenCADStudio {
             .expect("validated Rotation grip count");
         }
         if perpendicular {
-            crate::scene::block_orientation_parameter::set_alignment_type(&mut self.tabs[i].scene.document, definition, parameter, true)
-                .expect("validated Alignment parameter placement");
+            crate::scene::block_orientation_parameter::set_alignment_type(
+                &mut self.tabs[i].scene.document,
+                definition,
+                parameter,
+                true,
+            )
+            .expect("validated Alignment parameter placement");
         }
         let option_error = {
             use crate::scene::block_authoring::metadata;
             let document = &mut self.tabs[i].scene.document;
             let description = options.description.as_deref().map(|value| {
-                metadata::set_text(document, definition, parameter, metadata::Field::Description, value)
+                metadata::set_text(
+                    document,
+                    definition,
+                    parameter,
+                    metadata::Field::Description,
+                    value,
+                )
             });
             let named = matches!(
                 kind,
@@ -285,9 +298,10 @@ impl OpenCADStudio {
                     value,
                 )
             });
-            let angle_label = options.angle_label.as_deref().filter(|_| {
-                kind == crate::scene::block_distance_parameter::Kind::Polar
-            });
+            let angle_label = options
+                .angle_label
+                .as_deref()
+                .filter(|_| kind == crate::scene::block_distance_parameter::Kind::Polar);
             let angle_label = angle_label.map(|value| {
                 metadata::set_text(
                     document,
@@ -338,8 +352,13 @@ impl OpenCADStudio {
             return Some("Open a block in the Block Editor before placing a parameter.");
         };
         match kind.to_ascii_uppercase().as_str() {
-            "BASEPOINT"|"BASE"|"B" => crate::scene::block_basepoint::placement_error(&tab.scene.document,session.br_handle),
-            "LOOKUP" => crate::scene::block_lookup::placement_error(&tab.scene.document,session.br_handle),
+            "BASEPOINT" | "BASE" | "B" => crate::scene::block_basepoint::placement_error(
+                &tab.scene.document,
+                session.br_handle,
+            ),
+            "LOOKUP" => {
+                crate::scene::block_lookup::placement_error(&tab.scene.document, session.br_handle)
+            }
             "POINT" | "O" => crate::scene::block_point_parameter::placement_error(
                 &tab.scene.document,
                 session.br_handle,
@@ -351,7 +370,13 @@ impl OpenCADStudio {
                     session.br_handle,
                 )
             }
-            "ROTATION" | "R" | "ALIGNMENT" | "A" | "FLIP" | "F" => crate::scene::block_orientation_parameter::placement_error(&tab.scene.document, session.br_handle, crate::scene::block_orientation_parameter::Kind::parse(kind).unwrap()),
+            "ROTATION" | "R" | "ALIGNMENT" | "A" | "FLIP" | "F" => {
+                crate::scene::block_orientation_parameter::placement_error(
+                    &tab.scene.document,
+                    session.br_handle,
+                    crate::scene::block_orientation_parameter::Kind::parse(kind).unwrap(),
+                )
+            }
             "VISIBILITY" | "V" => {
                 visibility::placement_error(&tab.scene.document, session.br_handle)
             }
@@ -675,7 +700,9 @@ impl OpenCADStudio {
             }
             "BACTIONSET" => Some(self.start_block_action_set()),
             "BASSOCIATE" => Some(self.start_block_action_association()),
-            cmd if cmd=="BACTIONBAR" || cmd.starts_with("BACTIONBAR ") => Some(self.start_action_bar_command(cmd.strip_prefix("BACTIONBAR").unwrap().trim())),
+            cmd if cmd == "BACTIONBAR" || cmd.starts_with("BACTIONBAR ") => {
+                Some(self.start_action_bar_command(cmd.strip_prefix("BACTIONBAR").unwrap().trim()))
+            }
             cmd if cmd == "BACTION"
                 || cmd.starts_with("BACTION ")
                 || cmd == "BACTIONTOOL"
@@ -684,13 +711,11 @@ impl OpenCADStudio {
                 || cmd.starts_with("BARRAY ") =>
             {
                 Some(
-                    self.start_block_action(
-                        if cmd == "BARRAY" || cmd.starts_with("BARRAY ") {
-                            "ARRAY"
-                        } else {
-                            cmd.split_once(' ').map_or("", |(_, args)| args.trim())
-                        },
-                    ),
+                    self.start_block_action(if cmd == "BARRAY" || cmd.starts_with("BARRAY ") {
+                        "ARRAY"
+                    } else {
+                        cmd.split_once(' ').map_or("", |(_, args)| args.trim())
+                    }),
                 )
             }
             cmd if cmd == "BLOOKUPTABLE" || cmd.starts_with("BLOOKUPTABLE ") => {
@@ -698,7 +723,8 @@ impl OpenCADStudio {
             }
             cmd if cmd == "BTABLE"
                 || cmd == "BPROPERTIESTABLE"
-                || cmd.starts_with("BPROPERTIESTABLE ") => {
+                || cmd.starts_with("BPROPERTIESTABLE ") =>
+            {
                 Some(self.open_block_properties_table())
             }
             "RESETBLOCK" | "RESETBLOCK APPLY" => {
@@ -743,10 +769,11 @@ impl OpenCADStudio {
                     } else if kind == crate::scene::block_orientation_parameter::Kind::Flip {
                         // Scene creation always names a Flip parameter `Flip`,
                         // so the prompt default must not be numbered.
-                        let label = crate::scene::block_orientation_parameter::next_flip_state_label(
-                            &self.tabs[i].scene.document,
-                            block,
-                        );
+                        let label =
+                            crate::scene::block_orientation_parameter::next_flip_state_label(
+                                &self.tabs[i].scene.document,
+                                block,
+                            );
                         command = command.with_name("Flip".to_owned()).with_label(label);
                     }
                     self.command_line.push_info(&command.prompt());
@@ -1001,12 +1028,11 @@ impl OpenCADStudio {
                     .unwrap_or_default();
                 self.open_lookup_table(&name)
             }
-            Some(command) if command.starts_with("BACTION ") => {
-                self.start_block_action_for_parameter(
+            Some(command) if command.starts_with("BACTION ") => self
+                .start_block_action_for_parameter(
                     command.trim_start_matches("BACTION "),
                     parameter,
-                )
-            }
+                ),
             Some(command) => self.dispatch_command(command),
             None => Task::none(),
         }

@@ -140,10 +140,11 @@ impl OpenCADStudio {
             "LOGFILEOFF" => false,
             _ => match value.map(str::trim).filter(|value| !value.is_empty()) {
                 None => {
-                    self.command_line.push_output(&crate::ui::command_line::value_prompt(
-                        "LOGFILEMODE",
-                        &u8::from(log_file_mode()),
-                    ));
+                    self.command_line
+                        .push_output(&crate::ui::command_line::value_prompt(
+                            "LOGFILEMODE",
+                            &u8::from(log_file_mode()),
+                        ));
                     self.pending_setvar = Some("LOGFILEMODE".to_string());
                     return;
                 }
@@ -164,7 +165,9 @@ impl OpenCADStudio {
         }
         if !on {
             self.command_line.push_info(
-                &log_file_path().map(|path| path.display().to_string()).unwrap_or_default(),
+                &log_file_path()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
             );
         }
         set_log_file_mode(on);
@@ -188,7 +191,10 @@ impl OpenCADStudio {
                 #[cfg(target_arch = "wasm32")]
                 let shown = String::new();
                 self.command_line
-                    .push_output(&crate::ui::command_line::value_prompt("SAVEFILEPATH", &shown));
+                    .push_output(&crate::ui::command_line::value_prompt(
+                        "SAVEFILEPATH",
+                        &shown,
+                    ));
                 self.pending_setvar = Some("SAVEFILEPATH".to_string());
             }
             Some(".") => {
@@ -210,7 +216,10 @@ impl OpenCADStudio {
                     .map(|folder| folder.display().to_string())
                     .unwrap_or_default();
                 self.command_line
-                    .push_output(&crate::ui::command_line::value_prompt("LOGFILEPATH", &shown));
+                    .push_output(&crate::ui::command_line::value_prompt(
+                        "LOGFILEPATH",
+                        &shown,
+                    ));
                 self.pending_setvar = Some("LOGFILEPATH".to_string());
             }
             Some(".") => {
@@ -232,7 +241,10 @@ mod tests {
         let mut app = crate::app::OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let folder = std::env::temp_dir().join(format!("ocs-logfile-{}", std::process::id()));
-        app.automation_op(&serde_json::json!({"op": "run", "cmd": format!("LOGFILEPATH {}", folder.display())}).to_string());
+        app.automation_op(
+            &serde_json::json!({"op": "run", "cmd": format!("LOGFILEPATH {}", folder.display())})
+                .to_string(),
+        );
         app.automation_op(r#"{"op":"run","cmd":"LOGFILEON"}"#);
         app.command_line.push_output("a line for the log");
         let path = super::log_file_path().expect("a log file");

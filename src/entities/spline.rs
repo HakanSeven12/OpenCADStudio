@@ -150,7 +150,11 @@ fn clamped(
         let mut updated = control[..=span - degree].to_vec();
         for i in span - degree + 1..=span {
             let width = knots[i + degree] - knots[i];
-            let alpha = if width.abs() < 1e-15 { 0.0 } else { (u - knots[i]) / width };
+            let alpha = if width.abs() < 1e-15 {
+                0.0
+            } else {
+                (u - knots[i]) / width
+            };
             updated.push(std::array::from_fn(|a| {
                 control[i - 1][a] * (1.0 - alpha) + control[i][a] * alpha
             }));
@@ -1428,9 +1432,12 @@ mod tests {
                 [a.cos() * (2.0 + (i % 2) as f64), a.sin() * 3.0, 0.0]
             })
             .collect();
-        let points: Vec<[f64; 3]> =
-            (0..ring.len() + degree).map(|i| ring[i % ring.len()]).collect();
-        let knots: Vec<f64> = (0..points.len() + degree + 1).map(|i| i as f64 - 2.0).collect();
+        let points: Vec<[f64; 3]> = (0..ring.len() + degree)
+            .map(|i| ring[i % ring.len()])
+            .collect();
+        let knots: Vec<f64> = (0..points.len() + degree + 1)
+            .map(|i| i as f64 - 2.0)
+            .collect();
         let weights = vec![1.0; points.len()];
         let open =
             super::NurbsCurve3::new_strict(degree, points.clone(), knots.clone(), weights.clone())
@@ -1446,7 +1453,10 @@ mod tests {
         for step in 0..=60 {
             let t = step as f64 / 60.0;
             let (p, q) = (open.point_at(t), clamped.point_at(t));
-            assert!((0..3).all(|a| (p[a] - q[a]).abs() < 1e-9), "t={t}: {p:?} vs {q:?}");
+            assert!(
+                (0..3).all(|a| (p[a] - q[a]).abs() < 1e-9),
+                "t={t}: {p:?} vs {q:?}"
+            );
         }
     }
 

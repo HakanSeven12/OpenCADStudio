@@ -40,7 +40,10 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, 1, delta_safe);
         let is_associative_dimension = matches!(
             crate::entities::dimension::as_dimension(&entity),
-            Some(document::entities::Dimension::Linear(_) | document::entities::Dimension::Aligned(_))
+            Some(
+                document::entities::Dimension::Linear(_)
+                    | document::entities::Dimension::Aligned(_)
+            )
         );
         let association_enabled = self.tabs[i].scene.document.header.dimension_associativity == 2;
         let committed = if preserve_commit_layer {
@@ -256,7 +259,10 @@ impl OpenCADStudio {
         let pending = self.begin_undo(i, label, 1, delta_safe);
         let is_associative_dimension = matches!(
             crate::entities::dimension::as_dimension(&entity),
-            Some(document::entities::Dimension::Linear(_) | document::entities::Dimension::Aligned(_))
+            Some(
+                document::entities::Dimension::Linear(_)
+                    | document::entities::Dimension::Aligned(_)
+            )
         );
         let association_enabled = self.tabs[i].scene.document.header.dimension_associativity == 2;
         let committed = if preserve_commit_layer {
@@ -507,7 +513,10 @@ impl OpenCADStudio {
 
     pub(super) fn handle_commit_dimensions_and_exit(
         &mut self,
-        dimensions: Vec<(document::EntityType, crate::command::DimensionAssociationInput)>,
+        dimensions: Vec<(
+            document::EntityType,
+            crate::command::DimensionAssociationInput,
+        )>,
     ) {
         let i = self.active_tab;
         let association_mode = self.tabs[i].scene.document.header.dimension_associativity;
@@ -866,7 +875,10 @@ impl OpenCADStudio {
     fn hatch_commit_layer(
         &self,
         i: usize,
-    ) -> (String, Option<crate::modules::draw::draw::hatch::HatchSettings>) {
+    ) -> (
+        String,
+        Option<crate::modules::draw::draw::hatch::HatchSettings>,
+    ) {
         let settings = self.tabs[i]
             .active_cmd
             .as_ref()
@@ -964,7 +976,9 @@ impl OpenCADStudio {
             hatch.pattern_type = document::entities::HatchPatternType::UserDefined;
             hatch.is_double = double;
         }
-        self.tabs[i].scene.update_entity(document::EntityType::Hatch(hatch));
+        self.tabs[i]
+            .scene
+            .update_entity(document::EntityType::Hatch(hatch));
     }
 
     pub(super) fn handle_commit_hatch(&mut self, hatch: crate::scene::HatchModel) {
@@ -1097,7 +1111,9 @@ impl OpenCADStudio {
         let label = self.history_label_from_active_cmd(i, "HATCH");
         let pending = self.begin_undo(i, label, 1, self.hatch_undo_delta_safe(i));
         let (layer, hatch_options) = self.hatch_commit_layer(i);
-        let new_handle = self.tabs[i].scene.add_hatch(hatch, Some(&layer), entity_style);
+        let new_handle = self.tabs[i]
+            .scene
+            .add_hatch(hatch, Some(&layer), entity_style);
         self.apply_hatch_commit_options(i, new_handle, hatch_options.as_ref());
         self.tabs[i].dirty = true;
         if let Some(pd) = pending {
@@ -1291,7 +1307,8 @@ impl OpenCADStudio {
                 br.entity_handles
                     .iter()
                     .filter_map(|&h| {
-                        if let Some(document::EntityType::AttributeDefinition(ad)) = doc.get_entity(h)
+                        if let Some(document::EntityType::AttributeDefinition(ad)) =
+                            doc.get_entity(h)
                         {
                             Some(ad.clone())
                         } else {

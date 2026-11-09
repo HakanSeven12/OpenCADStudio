@@ -78,7 +78,9 @@ fn line_at(index: usize) -> Line {
 /// Order-independent per-candidate digest: FNV-1a over the wire name plus
 /// its point count, sorted before folding so a change in candidate iteration
 /// order alone cannot move the sink.
-fn candidate_digest(candidates: &OpenCADStudio::scene::pick::interaction_index::InteractionCandidates) -> u64 {
+fn candidate_digest(
+    candidates: &OpenCADStudio::scene::pick::interaction_index::InteractionCandidates,
+) -> u64 {
     let mut digests: Vec<u64> = candidates
         .iter()
         .map(|wire| {
@@ -90,9 +92,9 @@ fn candidate_digest(candidates: &OpenCADStudio::scene::pick::interaction_index::
         })
         .collect();
     digests.sort_unstable();
-    digests
-        .iter()
-        .fold(candidates.len() as u64, |acc, digest| acc.wrapping_add(*digest))
+    digests.iter().fold(candidates.len() as u64, |acc, digest| {
+        acc.wrapping_add(*digest)
+    })
 }
 
 fn measure(label: &str, mut run: impl FnMut() -> u64) -> f64 {
@@ -129,7 +131,10 @@ fn main() {
     // Install the interaction index exactly as the app's background builder
     // does, while the scene is still at its initial epoch.
     let wires = scene.hit_test_wires();
-    assert!(wires.len() >= ENTITY_COUNT, "resident set carries every line");
+    assert!(
+        wires.len() >= ENTITY_COUNT,
+        "resident set carries every line"
+    );
     let key = scene
         .interaction_index_build_key(&wires, BOUNDS.height)
         .expect("a fresh large resident source needs its index");

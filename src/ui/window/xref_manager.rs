@@ -1146,7 +1146,9 @@ fn direct_identities(doc: &Document) -> HashSet<(u64, String)> {
                 ids.insert((handle.value(), def.file_path.clone()));
             }
             ObjectType::ClassObject(object) => {
-                if let document::objects::ClassObjectData::PointCloudDefinitionEx(def) = &object.data {
+                if let document::objects::ClassObjectData::PointCloudDefinitionEx(def) =
+                    &object.data
+                {
                     ids.insert((handle.value(), def.source_filename.clone()));
                 }
             }
@@ -2084,10 +2086,7 @@ fn host_row<'a>(
         .into()
 }
 
-fn details_pane<'a>(
-    entry: Option<&'a ReferenceEntry>,
-    doc: &'a Document,
-) -> Element<'a, Message> {
+fn details_pane<'a>(entry: Option<&'a ReferenceEntry>, doc: &'a Document) -> Element<'a, Message> {
     let inner: Element<'_, Message> = match entry {
         None => text(crate::t!("Select a reference to inspect its details"))
             .size(11)
@@ -2496,7 +2495,8 @@ mod tests {
                 8.0,
             );
             ent.definition_handle = Some(h);
-            doc.add_entity(document::EntityType::RasterImage(ent)).unwrap();
+            doc.add_entity(document::EntityType::RasterImage(ent))
+                .unwrap();
         }
         doc
     }
@@ -2512,10 +2512,15 @@ mod tests {
         let mut def = ImageDefinition::with_dimensions(img_path.clone(), 8, 8);
         def.handle = h;
         doc.objects.insert(h, ObjectType::ImageDefinition(def));
-        let mut ent =
-            document::entities::RasterImage::new(&img_path, document::types::Vector3::ZERO, 8.0, 8.0);
+        let mut ent = document::entities::RasterImage::new(
+            &img_path,
+            document::types::Vector3::ZERO,
+            8.0,
+            8.0,
+        );
         ent.definition_handle = Some(h);
-        doc.add_entity(document::EntityType::RasterImage(ent)).unwrap();
+        doc.add_entity(document::EntityType::RasterImage(ent))
+            .unwrap();
         doc
     }
 

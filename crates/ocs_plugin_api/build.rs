@@ -73,7 +73,10 @@ fn generate_type_registry(out_dir: &Path) {
     let types: Vec<(&str, TraceFn)> = vec![
         ("EntityType", trace::<document::EntityType>),
         ("ObjectType", trace::<document::objects::ObjectType>),
-        ("HeaderVariables", trace::<document::document::HeaderVariables>),
+        (
+            "HeaderVariables",
+            trace::<document::document::HeaderVariables>,
+        ),
         ("SummaryInfo", trace::<document::document::SummaryInfo>),
         ("LineType", trace::<document::LineType>),
         ("TextStyle", trace::<document::TextStyle>),
@@ -90,7 +93,10 @@ fn generate_type_registry(out_dir: &Path) {
             trace::<document::objects::BlockVisibilityParameter>,
         ),
         ("FieldDef", trace::<document::document::FieldDef>),
-        ("DgnLsDefinition", trace::<document::objects::DgnLsDefinition>),
+        (
+            "DgnLsDefinition",
+            trace::<document::objects::DgnLsDefinition>,
+        ),
         ("DgnLsComponent", trace::<document::objects::DgnLsComponent>),
         (
             "NotificationCollection",
@@ -181,7 +187,10 @@ fn generate_type_registry(out_dir: &Path) {
             "AssocViewObjectActionParamKind",
             trace_simple::<document::objects::AssocViewObjectActionParamKind>,
         ),
-        ("AcisVersion", trace_simple::<document::entities::AcisVersion>),
+        (
+            "AcisVersion",
+            trace_simple::<document::entities::AcisVersion>,
+        ),
         (
             "AssociativeData",
             trace_simple::<document::objects::AssociativeData>,
@@ -366,7 +375,10 @@ fn generate_type_registry(out_dir: &Path) {
             "PlotPaperUnits",
             trace_simple::<document::objects::PlotPaperUnits>,
         ),
-        ("PlotRotation", trace_simple::<document::objects::PlotRotation>),
+        (
+            "PlotRotation",
+            trace_simple::<document::objects::PlotRotation>,
+        ),
         ("PlotType", trace_simple::<document::objects::PlotType>),
         (
             "PreviewFormat",
@@ -401,8 +413,14 @@ fn generate_type_registry(out_dir: &Path) {
             "SolidHistoryOperation",
             trace_simple::<document::objects::SolidHistoryOperation>,
         ),
-        ("SurfaceData", trace_simple::<document::entities::SurfaceData>),
-        ("SurfaceKind", trace_simple::<document::entities::SurfaceKind>),
+        (
+            "SurfaceData",
+            trace_simple::<document::entities::SurfaceData>,
+        ),
+        (
+            "SurfaceKind",
+            trace_simple::<document::entities::SurfaceKind>,
+        ),
         (
             "SurfaceSmoothType",
             trace_simple::<document::entities::SurfaceSmoothType>,
@@ -484,9 +502,18 @@ fn generate_type_registry(out_dir: &Path) {
             trace_simple::<document::entities::WipeoutClipType>,
         ),
         ("WireType", trace_simple::<document::entities::WireType>),
-        ("ArchKind", trace_simple::<document::classes::arch::ArchKind>),
-        ("NumberRole", trace_simple::<document::classes::arch::NumberRole>),
-        ("PreviewRecord", trace_simple::<document::classes::arch::PreviewRecord>),
+        (
+            "ArchKind",
+            trace_simple::<document::classes::arch::ArchKind>,
+        ),
+        (
+            "NumberRole",
+            trace_simple::<document::classes::arch::NumberRole>,
+        ),
+        (
+            "PreviewRecord",
+            trace_simple::<document::classes::arch::PreviewRecord>,
+        ),
     ];
     for (name, trace) in enums {
         trace(&mut tracer);
@@ -914,7 +941,10 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
         samples,
         &document::entities::SmoothSurfaceType::QuadraticBSpline,
     );
-    let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::CubicBSpline);
+    let _ = tracer.trace_value(
+        samples,
+        &document::entities::SmoothSurfaceType::CubicBSpline,
+    );
     let _ = tracer.trace_value(samples, &document::entities::SmoothSurfaceType::Bezier);
 
     let _ = tracer.trace_value(samples, &document::entities::AttachmentPoint::TopLeft);
@@ -939,8 +969,14 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
         samples,
         &document::xdata::XDataValue::ControlString(String::new()),
     );
-    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::LayerName(String::new()));
-    let _ = tracer.trace_value(samples, &document::xdata::XDataValue::BinaryData(Vec::new()));
+    let _ = tracer.trace_value(
+        samples,
+        &document::xdata::XDataValue::LayerName(String::new()),
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &document::xdata::XDataValue::BinaryData(Vec::new()),
+    );
     let _ = tracer.trace_value(
         samples,
         &document::xdata::XDataValue::Handle(document::Handle::default()),
@@ -990,8 +1026,14 @@ fn add_enum_samples(tracer: &mut Tracer, samples: &mut Samples) {
 
     // Proxy reference kinds pulled in by XRecord.object_references
     let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::Undefined);
-    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::SoftOwnership);
-    let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::HardOwnership);
+    let _ = tracer.trace_value(
+        samples,
+        &document::objects::ProxyReferenceKind::SoftOwnership,
+    );
+    let _ = tracer.trace_value(
+        samples,
+        &document::objects::ProxyReferenceKind::HardOwnership,
+    );
     let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::SoftPointer);
     let _ = tracer.trace_value(samples, &document::objects::ProxyReferenceKind::HardPointer);
 

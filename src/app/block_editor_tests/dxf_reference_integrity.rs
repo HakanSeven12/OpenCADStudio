@@ -3,12 +3,11 @@ use document::{
     objects::{
         BlockEvaluationGraph, Dictionary, DictionaryWithDefault, DynamicBlockData, ObjectType,
         PlaceHolder, ProxyObject, ProxyObjectReference, ProxyPayload, ProxyReferenceKind,
-        RegisteredClassObject, SemanticProperty, SemanticPropertyValue, SortEntitiesTable,
-        XRecord,
+        RegisteredClassObject, SemanticProperty, SemanticPropertyValue, SortEntitiesTable, XRecord,
     },
     tables::AppId,
     xdata::{ExtendedData, ExtendedDataRecord, XDataValue},
-    DxfVersion, Document,
+    Document, DxfVersion,
 };
 
 struct DimContainerFixture {
@@ -62,10 +61,7 @@ fn synthetic_dimcontainer2_dynamic_block_fixture() -> DimContainerFixture {
     let (mut app, reference) = fixture();
     let i = app.active_tab;
     begin(&mut app, reference);
-    let block_def = app.tabs[i]
-        .active_block_edit_session()
-        .unwrap()
-        .br_handle;
+    let block_def = app.tabs[i].active_block_edit_session().unwrap().br_handle;
     let target_line = members(&app)[0];
 
     let param_handle = crate::scene::block_distance_parameter::create(
@@ -190,8 +186,10 @@ fn synthetic_dimcontainer2_dynamic_block_fixture() -> DimContainerFixture {
     grand_child_xrec.owner = child_ext_dict_handle;
     grand_child_xrec.add_string(1, "OWNED_BY_OMITTED");
     child_ext_dict.add_entry("CHILD", grand_child_xrec_handle);
-    doc.objects
-        .insert(child_ext_dict_handle, ObjectType::Dictionary(child_ext_dict));
+    doc.objects.insert(
+        child_ext_dict_handle,
+        ObjectType::Dictionary(child_ext_dict),
+    );
     doc.objects.insert(
         grand_child_xrec_handle,
         ObjectType::XRecord(grand_child_xrec),
@@ -350,21 +348,16 @@ fn synthetic_dimcontainer2_dynamic_block_fixture() -> DimContainerFixture {
 fn temp_test_path(stem: &str, ext: &str) -> std::path::PathBuf {
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "ocs_{stem}_{}_{id}.{ext}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("ocs_{stem}_{}_{id}.{ext}", std::process::id()))
 }
 
 fn evaluation_graph_handle(doc: &Document) -> Handle {
     doc.objects
         .values()
         .find_map(|object| match object {
-            ObjectType::DynamicBlock(object) => matches!(
-                object.data,
-                DynamicBlockData::EvaluationGraph(_)
-            )
-            .then_some(object.handle),
+            ObjectType::DynamicBlock(object) => {
+                matches!(object.data, DynamicBlockData::EvaluationGraph(_)).then_some(object.handle)
+            }
             _ => None,
         })
         .expect("the authored definition carries an evaluation graph")
@@ -375,11 +368,7 @@ fn same_version_dwg_preserves_dimcontainer2_records_and_dynamic_block_graph() {
     let mut fx = synthetic_dimcontainer2_dynamic_block_fixture();
     let i = fx.app.active_tab;
     assert_eq!(
-        crate::io::dropped_on_save_count(
-            &fx.app.tabs[i].scene.document,
-            DxfVersion::AC1032,
-            false
-        ),
+        crate::io::dropped_on_save_count(&fx.app.tabs[i].scene.document, DxfVersion::AC1032, false),
         0
     );
 
@@ -389,7 +378,10 @@ fn same_version_dwg_preserves_dimcontainer2_records_and_dynamic_block_graph() {
         "target_version": "2018",
         "allow_lossy": false,
     });
-    let res = fx.app.save_verified_request(&req).expect("save_verified DWG");
+    let res = fx
+        .app
+        .save_verified_request(&req)
+        .expect("save_verified DWG");
     assert_eq!(res["ok"], true, "{res}");
     assert_eq!(res["verified"], true, "{res}");
     assert_eq!(res["dropped_on_save"], 0, "{res}");
@@ -429,11 +421,7 @@ fn dxf_export_warns_when_unacknowledged_and_prunes_dangling_references_when_ackn
     let mut fx = synthetic_dimcontainer2_dynamic_block_fixture();
     let i = fx.app.active_tab;
     assert_eq!(
-        crate::io::dropped_on_save_count(
-            &fx.app.tabs[i].scene.document,
-            DxfVersion::AC1032,
-            true
-        ),
+        crate::io::dropped_on_save_count(&fx.app.tabs[i].scene.document, DxfVersion::AC1032, true),
         3
     );
 
@@ -461,7 +449,10 @@ fn dxf_export_warns_when_unacknowledged_and_prunes_dangling_references_when_ackn
         "{refused}"
     );
     assert_eq!(refused["dropped_on_save"], 3, "{refused}");
-    assert!(!dxf_path.exists(), "refused save must not write output file");
+    assert!(
+        !dxf_path.exists(),
+        "refused save must not write output file"
+    );
 
     // Acknowledged lossy DXF conversion must prune references to omitted records
     // and pass structural DXF verification without dangling or orphaned handles.
@@ -470,7 +461,10 @@ fn dxf_export_warns_when_unacknowledged_and_prunes_dangling_references_when_ackn
         "target_version": "2018",
         "allow_lossy": true,
     });
-    let saved = fx.app.save_verified_request(&allowed_req).expect("acknowledged lossy save");
+    let saved = fx
+        .app
+        .save_verified_request(&allowed_req)
+        .expect("acknowledged lossy save");
     assert_eq!(saved["ok"], true, "{saved}");
     assert_eq!(saved["verified"], true, "{saved}");
     assert_eq!(saved["dropped_on_save"], 3, "{saved}");

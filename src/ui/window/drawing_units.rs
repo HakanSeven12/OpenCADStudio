@@ -97,11 +97,12 @@ fn drop_row<'a>(
     selected: Option<Choice>,
     ctor: fn(i16) -> Field,
 ) -> Element<'a, Message> {
-    let picker = crate::ui::dropdown_list::pick_list(selected, options, |choice| choice.to_string())
-        .on_select(move |choice| Message::DrawingUnitsField(ctor(choice.code)))
-        .text_size(12)
-        .padding([3, 6])
-        .width(Fill);
+    let picker =
+        crate::ui::dropdown_list::pick_list(selected, options, |choice| choice.to_string())
+            .on_select(move |choice| Message::DrawingUnitsField(ctor(choice.code)))
+            .text_size(12)
+            .padding([3, 6])
+            .width(Fill);
     row![text(label).size(11).style(muted).width(78), picker]
         .spacing(8)
         .align_y(iced::Center)

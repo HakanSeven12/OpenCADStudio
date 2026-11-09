@@ -376,14 +376,15 @@ mod browser {
         set(
             &type_entry,
             "description",
-            &JsValue::from_str(if ext.eq_ignore_ascii_case("ifccad") || ext.eq_ignore_ascii_case("ifcx")
-            {
-                "IFCCAD"
-            } else if ext.eq_ignore_ascii_case("dxf") {
-                "DXF Drawing"
-            } else {
-                "DWG Drawing"
-            }),
+            &JsValue::from_str(
+                if ext.eq_ignore_ascii_case("ifccad") || ext.eq_ignore_ascii_case("ifcx") {
+                    "IFCCAD"
+                } else if ext.eq_ignore_ascii_case("dxf") {
+                    "DXF Drawing"
+                } else {
+                    "DWG Drawing"
+                },
+            ),
         );
         set(&type_entry, "accept", &accept);
         let types = js_sys::Array::new();

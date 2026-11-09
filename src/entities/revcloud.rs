@@ -75,7 +75,11 @@ pub(crate) fn chord_range(arc_length: f64, variance: bool) -> (f64, f64) {
 // ponytail: the reference's factor drifts by 0.1% with the window aspect;
 // 0.05 of the diagonal is the measured mean.
 pub(crate) fn view_arc_length(view_height: f64, aspect: f64) -> f64 {
-    let aspect = if aspect.is_finite() && aspect > 0.0 { aspect } else { 1.0 };
+    let aspect = if aspect.is_finite() && aspect > 0.0 {
+        aspect
+    } else {
+        1.0
+    };
     0.05 * view_height * (1.0 + aspect * aspect).sqrt()
 }
 
@@ -133,7 +137,8 @@ fn looks_like_cloud(pline: &LwPolyline) -> bool {
     first.is_finite()
         && first.abs() > 1.0e-9
         && pline.vertices.iter().all(|vertex| {
-            vertex.bulge.signum() == first.signum() && (vertex.bulge.abs() - first.abs()).abs() <= 0.15
+            vertex.bulge.signum() == first.signum()
+                && (vertex.bulge.abs() - first.abs()).abs() <= 0.15
         })
         && (0.35..=0.65).contains(&first.abs())
 }
@@ -202,15 +207,29 @@ pub(crate) fn cloud_along(
         .collect();
     let tolerance = arc_length * 1.0e-9;
     points.dedup_by(|right, left| Vec2::from(*left).distance(Vec2::from(*right)) <= tolerance);
-    if closed && points.len() >= 2 && Vec2::from(points[0]).distance(Vec2::from(*points.last()?)) <= tolerance {
+    if closed
+        && points.len() >= 2
+        && Vec2::from(points[0]).distance(Vec2::from(*points.last()?)) <= tolerance
+    {
         points.pop();
     }
     if points.len() < 2 || (closed && points.len() < 3) {
         return None;
     }
-    let outward = if signed_area(&points) > 0.0 { 1.0 } else { -1.0 };
+    let outward = if signed_area(&points) > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
     let sign = if reverse { -outward } else { outward };
-    Some(from_points(&points, closed, sign * arc_bulge(), calligraphy, arc_length, variance))
+    Some(from_points(
+        &points,
+        closed,
+        sign * arc_bulge(),
+        calligraphy,
+        arc_length,
+        variance,
+    ))
 }
 
 fn from_points(
@@ -254,7 +273,11 @@ fn is_reversed(pline: &LwPolyline) -> bool {
         .iter()
         .map(|vertex| [vertex.location.x, vertex.location.y])
         .collect();
-    let outward = if signed_area(&points) > 0.0 { 1.0 } else { -1.0 };
+    let outward = if signed_area(&points) > 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
     pline
         .vertices
         .first()
@@ -429,7 +452,11 @@ fn intersect_lines(a: ([f64; 2], [f64; 2]), b: ([f64; 2], [f64; 2])) -> Option<[
 
 fn polygon_curve(corners: &[[f64; 2]]) -> Curve {
     Curve::Polyline(Polyline {
-        vertices: corners.iter().copied().map(PolylineVertex::straight).collect(),
+        vertices: corners
+            .iter()
+            .copied()
+            .map(PolylineVertex::straight)
+            .collect(),
         closed: true,
     })
 }
@@ -442,7 +469,10 @@ fn circle_curve(center: [f64; 2], radius: f64, start: [f64; 2]) -> Curve {
         vertices: (0..steps)
             .map(|k| {
                 let angle = start_angle + std::f64::consts::TAU * k as f64 / steps as f64;
-                PolylineVertex::straight([center[0] + radius * angle.cos(), center[1] + radius * angle.sin()])
+                PolylineVertex::straight([
+                    center[0] + radius * angle.cos(),
+                    center[1] + radius * angle.sin(),
+                ])
             })
             .collect(),
         closed: true,
@@ -468,7 +498,10 @@ pub(crate) fn grips(pline: &LwPolyline) -> Vec<GripDef> {
                     let angle = std::f64::consts::FRAC_PI_2 * k as f64;
                     square_grip(
                         k + 1,
-                        at([center[0] + radius * angle.cos(), center[1] + radius * angle.sin()]),
+                        at([
+                            center[0] + radius * angle.cos(),
+                            center[1] + radius * angle.sin(),
+                        ]),
                     )
                 }))
                 .collect()
@@ -510,7 +543,10 @@ pub(crate) fn apply_grip(pline: &mut LwPolyline, grip_id: usize, apply: GripAppl
                 return;
             }
             let angle = std::f64::consts::FRAC_PI_2 * (grip_id - 1) as f64;
-            let quadrant = [center[0] + radius * angle.cos(), center[1] + radius * angle.sin()];
+            let quadrant = [
+                center[0] + radius * angle.cos(),
+                center[1] + radius * angle.sin(),
+            ];
             let to = target(quadrant);
             let new_radius = Vec2::from(to).distance(Vec2::from(center));
             if new_radius <= 0.0 || !new_radius.is_finite() {
@@ -541,7 +577,11 @@ pub(crate) struct OnCloud {
 /// The nearest place on the cloud to `point`.
 pub(crate) fn nearest(pline: &LwPolyline, point: [f64; 2]) -> Option<OnCloud> {
     let n = pline.vertices.len();
-    let count = if pline.is_closed { n } else { n.saturating_sub(1) };
+    let count = if pline.is_closed {
+        n
+    } else {
+        n.saturating_sub(1)
+    };
     (0..count)
         .filter_map(|index| {
             let a = &pline.vertices[index];
@@ -593,11 +633,17 @@ fn run(pline: &LwPolyline, from: OnCloud, to: OnCloud) -> Vec<([f64; 2], f64)> {
     if from.segment == to.segment && ahead(from.segment, from.point, to.point) {
         out.push((from.point, part(from.segment, from.point, to.point)));
     } else {
-        out.push((from.point, part(from.segment, from.point, location(from.segment + 1))));
+        out.push((
+            from.point,
+            part(from.segment, from.point, location(from.segment + 1)),
+        ));
         let mut segment = (from.segment + 1) % n;
         for _ in 0..n {
             if segment == to.segment {
-                out.push((location(segment), part(segment, location(segment), to.point)));
+                out.push((
+                    location(segment),
+                    part(segment, location(segment), to.point),
+                ));
                 break;
             }
             out.push((location(segment), pline.vertices[segment].bulge));
@@ -647,9 +693,16 @@ pub(crate) fn modified(
     } else {
         (forward, path.iter().rev().copied().collect())
     };
-    let sign = pline.vertices.first().map_or(1.0, |vertex| vertex.bulge.signum());
+    let sign = pline
+        .vertices
+        .first()
+        .map_or(1.0, |vertex| vertex.bulge.signum());
     let new_curve = Curve::Polyline(Polyline {
-        vertices: new_path.iter().copied().map(PolylineVertex::straight).collect(),
+        vertices: new_path
+            .iter()
+            .copied()
+            .map(PolylineVertex::straight)
+            .collect(),
         closed: false,
     });
     let distances = stations(new_curve.length(), false, arc_length, arc_variance())?;
@@ -689,7 +742,8 @@ pub(crate) fn modified(
         cloud.vertices.push(vertex);
     }
     cloud.vertices.dedup_by(|b, a| {
-        Vec2::new(a.location.x, a.location.y).distance(Vec2::new(b.location.x, b.location.y)) < 1.0e-9
+        Vec2::new(a.location.x, a.location.y).distance(Vec2::new(b.location.x, b.location.y))
+            < 1.0e-9
     });
     (cloud.vertices.len() >= 3).then_some(cloud)
 }
@@ -715,7 +769,10 @@ mod tests {
     fn uniform_chords_follow_the_path_and_cut_corners() {
         let cloud = rectangle(10.0);
         assert_eq!(cloud.vertices.len(), 32);
-        assert!(cloud.vertices.iter().all(|vertex| (vertex.bulge + arc_bulge()).abs() < 1e-12));
+        assert!(cloud
+            .vertices
+            .iter()
+            .all(|vertex| (vertex.bulge + arc_bulge()).abs() < 1e-12));
         assert_eq!(arc_length_of(&cloud), Some(10.0));
         let Some(Guide::Polygon(corners)) = guide(&cloud) else {
             panic!("a polygon guide");
@@ -723,7 +780,10 @@ mod tests {
         let want = [[0.0, 0.0], [0.0, 60.0], [100.0, 60.0], [100.0, 0.0]];
         assert_eq!(corners.len(), want.len());
         for (got, want) in corners.iter().zip(want) {
-            assert!((got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9, "{corners:?}");
+            assert!(
+                (got[0] - want[0]).abs() < 1e-9 && (got[1] - want[1]).abs() < 1e-9,
+                "{corners:?}"
+            );
         }
     }
 }

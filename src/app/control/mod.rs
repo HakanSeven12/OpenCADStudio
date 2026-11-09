@@ -928,8 +928,7 @@ impl OpenCADStudio {
                     "activate" | "switch_document" | "close" | "entities_copy_to"
                 )
             {
-                if req["active_only"].as_bool() == Some(true)
-                    || !query && !background_mutation(op)
+                if req["active_only"].as_bool() == Some(true) || !query && !background_mutation(op)
                 {
                     return (
                         failure(
@@ -1038,10 +1037,9 @@ impl OpenCADStudio {
                 "get_selection" => self.control_get_selection(),
                 "text_search" => self.control_text_search(&req).unwrap_or_else(|e| e),
                 "text_audit" => self.control_text_audit(&req).unwrap_or_else(|e| e),
-                "blocks"
-                | "block_instances"
-                | "cad_get_blocks"
-                | "cad_extract_block_instances" => self.control_blocks(&req).unwrap_or_else(|e| e),
+                "blocks" | "block_instances" | "cad_get_blocks" | "cad_extract_block_instances" => {
+                    self.control_blocks(&req).unwrap_or_else(|e| e)
+                }
                 "history" => {
                     json!({"ok":true,"entries":self.command_line.history.iter().map(|e|json!({"kind":format!("{:?}",e.kind),"text":e.text})).collect::<Vec<_>>()})
                 }
@@ -1059,7 +1057,10 @@ impl OpenCADStudio {
             && self.dialog_open(crate::app::ModalKind::InsertAttributes)
             && matches!(
                 req["name"].as_str(),
-                Some("dialog_answer") | Some("dialog_ok") | Some("dialog_cancel") | Some("close_modal")
+                Some("dialog_answer")
+                    | Some("dialog_ok")
+                    | Some("dialog_cancel")
+                    | Some("close_modal")
             );
         // Another client's command ends only on an explicit `force`; a command
         // the user holds stays cancellable, as Esc is (#2484).
@@ -1198,7 +1199,10 @@ impl OpenCADStudio {
     fn control_request_in_background(&mut self, id: u64, req: Value) -> (Value, Task<Message>) {
         let visible = self.tabs[self.active_tab].id;
         let Some(target) = self.tabs.iter().position(|t| t.id == id) else {
-            return (failure("document_closed", "Document no longer exists"), Task::none());
+            return (
+                failure("document_closed", "Document no longer exists"),
+                Task::none(),
+            );
         };
         self.active_tab = target;
         let (response, task) = self.control_request(req);
@@ -2236,7 +2240,11 @@ mod tests {
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
         let visible = app.active_tab;
         let revision = |app: &OpenCADStudio| {
-            app.tabs.iter().find(|t| t.id == target).unwrap().edit_revision
+            app.tabs
+                .iter()
+                .find(|t| t.id == target)
+                .unwrap()
+                .edit_revision
         };
         let send = |app: &mut OpenCADStudio, mut req: Value| {
             req["protocol"] = json!(1);
@@ -2387,10 +2395,12 @@ mod tests {
         app.tabs[i]
             .scene
             .document
-            .add_entity(document::entities::EntityType::Ray(document::entities::Ray::new(
-                document::types::Vector3::ZERO,
-                document::types::Vector3::UNIT_X,
-            )))
+            .add_entity(document::entities::EntityType::Ray(
+                document::entities::Ray::new(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::UNIT_X,
+                ),
+            ))
             .unwrap();
         let path = std::env::temp_dir().join(format!(
             "ocs_allow_lossy_converter_{}.ifcx",
@@ -2548,8 +2558,18 @@ mod tests {
                 Vector3::UNIT_X,
             ))],
         );
-        let definition = scene.document.block_records.get("DYN_PROPS").unwrap().handle;
-        let member = scene.document.block_records.get("DYN_PROPS").unwrap().entity_handles[0];
+        let definition = scene
+            .document
+            .block_records
+            .get("DYN_PROPS")
+            .unwrap()
+            .handle;
+        let member = scene
+            .document
+            .block_records
+            .get("DYN_PROPS")
+            .unwrap()
+            .entity_handles[0];
         let doc = &mut scene.document;
         let parameter = distance::create(
             doc,
@@ -2569,10 +2589,8 @@ mod tests {
             glam::DVec3::ZERO,
         )
         .unwrap();
-        let reference = scene.add_entity(EntityType::Insert(Insert::new(
-            "DYN_PROPS",
-            Vector3::ZERO,
-        )));
+        let reference =
+            scene.add_entity(EntityType::Insert(Insert::new("DYN_PROPS", Vector3::ZERO)));
         assert_eq!(
             request(&mut app, json!({"op":"select","type":"INSERT"}))["ok"],
             true
@@ -2621,10 +2639,7 @@ mod tests {
             .expect("X component row")
             .clone();
         let depth = app.tabs[i].history.undo_stack.len();
-        let changed = request(
-            &mut app,
-            json!({"op":"property","field":x["id"],"value":3}),
-        );
+        let changed = request(&mut app, json!({"op":"property","field":x["id"],"value":3}));
         assert_eq!(changed["ok"], true, "{changed}");
         assert_eq!(app.tabs[i].history.undo_stack.len(), depth + 1);
         let after = rows(&mut app);
@@ -2814,7 +2829,10 @@ mod tests {
         let before = revision(&app);
         request(&mut app, json!({"op":"select","handles":[&lines[0]]}));
         let first = revision(&app);
-        assert!(first > before, "the first select left the counter at {first}");
+        assert!(
+            first > before,
+            "the first select left the counter at {first}"
+        );
 
         request(&mut app, json!({"op":"select","handles":[&lines[1]]}));
         let second = revision(&app);
@@ -2865,14 +2883,22 @@ mod tests {
         );
         assert_eq!(fed["ok"], true, "{fed}");
         request(&mut app, json!({"op":"input","kind":"enter"}));
-        request(&mut app, json!({"op":"input","kind":"point","point":[0,0,0]}));
-        request(&mut app, json!({"op":"input","kind":"point","point":[5,5,0]}));
+        request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[0,0,0]}),
+        );
+        request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[5,5,0]}),
+        );
         let applied = request(&mut app, json!({"op":"input","kind":"enter"}));
         assert_eq!(applied["ok"], true, "{applied}");
 
         let document = &app.tabs[app.active_tab].scene.document;
         let document::EntityType::Line(line) = document
-            .get_entity(document::Handle::new(u64::from_str_radix(&handle, 16).unwrap()))
+            .get_entity(document::Handle::new(
+                u64::from_str_radix(&handle, 16).unwrap(),
+            ))
             .unwrap()
         else {
             panic!("expected the line");
@@ -2894,7 +2920,10 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         for y in [0.0, 4.0, 8.0] {
-            request(&mut app, json!({"op":"run","cmd":format!("LINE 0,{y} 10,{y}")}));
+            request(
+                &mut app,
+                json!({"op":"run","cmd":format!("LINE 0,{y} 10,{y}")}),
+            );
         }
         let i = app.active_tab;
         app.tabs[i].scene.selection.borrow_mut().view.vp_size = (1600.0, 900.0);
@@ -2909,7 +2938,10 @@ mod tests {
                 json!({"op":"click","point":[2.0,y,0.0],"modifiers":modifiers}),
             );
             assert_eq!(r["ok"], true, "{r}");
-            app.tabs[app.active_tab].scene.selected_handles_in_order().len()
+            app.tabs[app.active_tab]
+                .scene
+                .selected_handles_in_order()
+                .len()
         };
         assert_eq!(click(&mut app, 0.0, ""), 1, "the first plain click picks");
         assert_eq!(click(&mut app, 4.0, ""), 2, "a second plain click adds");
@@ -2919,7 +2951,11 @@ mod tests {
             1,
             "Shift-click on an unselected line leaves the set alone"
         );
-        assert_eq!(click(&mut app, 8.0, ""), 2, "the set accumulates afterwards");
+        assert_eq!(
+            click(&mut app, 8.0, ""),
+            2,
+            "the set accumulates afterwards"
+        );
 
         // PICKADD 0 swaps the plain pick's rule to replace, and Shift becomes
         // the toggle that puts an unselected object into the set.
@@ -2930,7 +2966,11 @@ mod tests {
             2,
             "PICKADD 0 Shift-click adds an unselected line"
         );
-        assert_eq!(click(&mut app, 4.0, "shift"), 1, "and the next one takes it back");
+        assert_eq!(
+            click(&mut app, 4.0, "shift"),
+            1,
+            "and the next one takes it back"
+        );
     }
 
     /// A region capture frames the camera from `bounds`; without them there is
@@ -2941,14 +2981,20 @@ mod tests {
     fn a_region_capture_without_bounds_is_refused_by_name() {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
-        let r = request(&mut app, json!({"op":"capture","path":"x.png","view":"region"}));
+        let r = request(
+            &mut app,
+            json!({"op":"capture","path":"x.png","view":"region"}),
+        );
         assert_eq!(r["ok"], false, "{r}");
         assert_eq!(r["code"], "invalid_request", "{r}");
         let r = request(
             &mut app,
             json!({"op":"capture","path":"x.png","view":"region","bounds":[-1,-1,1,1]}),
         );
-        assert_eq!(r["code"], "gui_required", "well-formed, only the window is missing: {r}");
+        assert_eq!(
+            r["code"], "gui_required",
+            "well-formed, only the window is missing: {r}"
+        );
     }
 
     /// CPCONSTRAINT's point pick resolves against the addressable points in
@@ -2964,11 +3010,11 @@ mod tests {
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
         request(&mut app, json!({"op":"run","cmd":"CIRCLE 5,5 2"}));
-        let circle =
-            request(&mut app, json!({"op":"query","type":"Circle"}))["entities"][0]["handle"]
-                .as_str()
-                .unwrap()
-                .to_string();
+        let circle = request(&mut app, json!({"op":"query","type":"Circle"}))["entities"][0]
+            ["handle"]
+            .as_str()
+            .unwrap()
+            .to_string();
         let constraints = |app: &OpenCADStudio| {
             app.tabs[app.active_tab]
                 .scene
@@ -2977,20 +3023,39 @@ mod tests {
         };
 
         request(&mut app, json!({"op":"run","cmd":"CPCONSTRAINT"}));
-        request(&mut app, json!({"op":"input","kind":"selection","handles":[&circle]}));
+        request(
+            &mut app,
+            json!({"op":"input","kind":"selection","handles":[&circle]}),
+        );
         request(&mut app, json!({"op":"input","kind":"enter"}));
-        let r = request(&mut app, json!({"op":"input","kind":"point","point":[5,5,0]}));
+        let r = request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[5,5,0]}),
+        );
         assert_eq!(r["ok"], false, "{r}");
         assert!(
-            r["error"].as_str().unwrap_or("").contains("didn't land on a point"),
+            r["error"]
+                .as_str()
+                .unwrap_or("")
+                .contains("didn't land on a point"),
             "{r}"
         );
-        assert_eq!(constraints(&app), 0, "the target's own centre is not a point pick");
+        assert_eq!(
+            constraints(&app),
+            0,
+            "the target's own centre is not a point pick"
+        );
 
         request(&mut app, json!({"op":"run","cmd":"CPCONSTRAINT"}));
-        request(&mut app, json!({"op":"input","kind":"selection","handles":[&circle]}));
+        request(
+            &mut app,
+            json!({"op":"input","kind":"selection","handles":[&circle]}),
+        );
         request(&mut app, json!({"op":"input","kind":"enter"}));
-        let r = request(&mut app, json!({"op":"input","kind":"point","point":[0,0,0]}));
+        let r = request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[0,0,0]}),
+        );
         assert_eq!(r["ok"], true, "{r}");
         assert_eq!(
             constraints(&app),
@@ -3056,17 +3121,34 @@ mod tests {
             let r = request(&mut app, json!({"op":"input","kind":"point","point":point}));
             assert_eq!(r["ok"], true, "picks 1-3 are not judged yet: {r}");
         }
-        assert_eq!(constraints(&app), 0, "nothing is judged before the fourth pick");
-        let r = request(&mut app, json!({"op":"input","kind":"point","point":[10.0,5.0,0.0]}));
+        assert_eq!(
+            constraints(&app),
+            0,
+            "nothing is judged before the fourth pick"
+        );
+        let r = request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[10.0,5.0,0.0]}),
+        );
         assert_eq!(r["ok"], true, "{r}");
-        assert_eq!(constraints(&app), 1, "four exact endpoints make the constraint");
+        assert_eq!(
+            constraints(&app),
+            1,
+            "four exact endpoints make the constraint"
+        );
 
         request(&mut app, json!({"op":"run","cmd":"EDCONSTRAINT"}));
         for point in [[0.0, 0.0, 0.0], [10.0, 0.0, 0.0], [0.0, 5.0, 0.0]] {
             request(&mut app, json!({"op":"input","kind":"point","point":point}));
         }
-        let r = request(&mut app, json!({"op":"input","kind":"point","point":[5.0,2.0,0.0]}));
-        assert_eq!(r["ok"], false, "a point on nothing is refused at the fourth: {r}");
+        let r = request(
+            &mut app,
+            json!({"op":"input","kind":"point","point":[5.0,2.0,0.0]}),
+        );
+        assert_eq!(
+            r["ok"], false,
+            "a point on nothing is refused at the fourth: {r}"
+        );
         assert_eq!(constraints(&app), 1);
     }
 
@@ -3081,13 +3163,13 @@ mod tests {
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,5 4,5"}));
-        let handles: Vec<String> =
-            request(&mut app, json!({"op":"query","type":"Line"}))["entities"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|entity| entity["handle"].as_str().unwrap().to_string())
-                .collect();
+        let handles: Vec<String> = request(&mut app, json!({"op":"query","type":"Line"}))
+            ["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entity| entity["handle"].as_str().unwrap().to_string())
+            .collect();
         assert_eq!(handles.len(), 2);
         let constraints = |app: &OpenCADStudio| {
             app.tabs[app.active_tab]
@@ -3099,7 +3181,9 @@ mod tests {
             let document::EntityType::Line(line) = app.tabs[app.active_tab]
                 .scene
                 .document
-                .get_entity(document::Handle::new(u64::from_str_radix(handle, 16).unwrap()))
+                .get_entity(document::Handle::new(
+                    u64::from_str_radix(handle, 16).unwrap(),
+                ))
                 .unwrap()
             else {
                 panic!("expected a line");
@@ -3153,7 +3237,8 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]
+            ["handle"]
             .as_str()
             .unwrap()
             .to_string();
@@ -3230,8 +3315,7 @@ mod tests {
         assert!(
             solved["changes"].as_array().is_some_and(|changes| changes
                 .iter()
-                .any(|change| change["handle"] == sloped.as_str()
-                    && change["kind"] == "Modified")),
+                .any(|change| change["handle"] == sloped.as_str() && change["kind"] == "Modified")),
             "a line the solver levelled is named: {solved}"
         );
     }
@@ -3245,7 +3329,8 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]["handle"]
+        let handle = request(&mut app, json!({"op":"query","type":"Line"}))["entities"][0]
+            ["handle"]
             .as_str()
             .unwrap()
             .to_string();
@@ -3292,19 +3377,26 @@ mod tests {
         app.tabs[i].scene.define_block_raw(
             "HIDE_ME",
             document::types::Vector3::ZERO,
-            vec![document::EntityType::Line(document::entities::Line::from_points(
-                document::types::Vector3::ZERO,
-                document::types::Vector3::UNIT_X,
-            ))],
+            vec![document::EntityType::Line(
+                document::entities::Line::from_points(
+                    document::types::Vector3::ZERO,
+                    document::types::Vector3::UNIT_X,
+                ),
+            )],
         );
-        let definition = app.tabs[i].scene.document.block_records.get("HIDE_ME").unwrap().handle;
+        let definition = app.tabs[i]
+            .scene
+            .document
+            .block_records
+            .get("HIDE_ME")
+            .unwrap()
+            .handle;
         let reference = app.tabs[i]
             .scene
             .document
-            .add_entity(document::EntityType::Insert(document::entities::Insert::new(
-                "HIDE_ME",
-                document::types::Vector3::ZERO,
-            )))
+            .add_entity(document::EntityType::Insert(
+                document::entities::Insert::new("HIDE_ME", document::types::Vector3::ZERO),
+            ))
             .unwrap();
         let _ = app.dispatch_command(&format!("BEDIT_BEGIN:{}", reference.value()));
         assert!(app.tabs[i].active_block_edit.is_some());
@@ -3315,7 +3407,10 @@ mod tests {
             .get("HIDE_ME")
             .unwrap()
             .entity_handles[0];
-        request(&mut app, json!({"op":"select","handles":[format!("{:X}", line.value())]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[format!("{:X}", line.value())]}),
+        );
         request(&mut app, json!({"op":"run","cmd":"GCHORIZONTAL"}));
         let id = app.tabs[i]
             .scene
@@ -3463,7 +3558,10 @@ mod tests {
         };
 
         // Two lines form a collinear pair, so the alias applies it.
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &lines[1]]}),
+        );
         let colinear = request(&mut app, json!({"op":"run","cmd":"LCONSTRAINT"}));
         assert_eq!(colinear["ok"], true, "{colinear}");
         assert!(
@@ -3484,7 +3582,10 @@ mod tests {
         );
 
         // A line and a circle are a normal pair, so the alias applies it.
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &circle]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &circle]}),
+        );
         let normal = request(&mut app, json!({"op":"run","cmd":"NRCONSTRAINT"}));
         assert_eq!(normal["ok"], true, "{normal}");
         assert!(
@@ -3502,7 +3603,10 @@ mod tests {
 
         // Two objects are more than the point-on-curve alias can place a
         // point against, so it refuses instead of answering success.
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &circle]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &circle]}),
+        );
         let on_curve = request(&mut app, json!({"op":"run","cmd":"OCCONSTRAINT"}));
         assert_eq!(
             on_curve["ok"], false,
@@ -3511,7 +3615,10 @@ mod tests {
         assert!(app.tabs[app.active_tab].active_cmd.is_none());
 
         // The distance alias takes one object; two is a refusal.
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &lines[1]]}),
+        );
         let distance = request(&mut app, json!({"op":"run","cmd":"DCONSTRAINT"}));
         assert_eq!(
             distance["ok"], false,
@@ -3522,13 +3629,17 @@ mod tests {
         // With nothing picked it asks for the objects instead.
         request(&mut app, json!({"op":"select","clear":true}));
         let distance_prompt = request(&mut app, json!({"op":"run","cmd":"DCONSTRAINT"}));
-        assert_eq!(distance_prompt["status"], "waiting_input", "{distance_prompt}");
+        assert_eq!(
+            distance_prompt["status"], "waiting_input",
+            "{distance_prompt}"
+        );
         app.tabs[app.active_tab].active_cmd = None;
 
         // One object the distance alias cannot measure: refuse, and name the
         // objects it does accept.
         request(&mut app, json!({"op":"run","cmd":"POINT 5,5"}));
-        let point = request(&mut app, json!({"op":"query","type":"Point"}))["entities"][0]["handle"]
+        let point = request(&mut app, json!({"op":"query","type":"Point"}))["entities"][0]
+            ["handle"]
             .as_str()
             .unwrap()
             .to_string();
@@ -3545,12 +3656,18 @@ mod tests {
         for cmd in ["QCONSTRAINT", "TCONSTRAINT"] {
             request(&mut app, json!({"op":"select","handles":[&lines[0]]}));
             let refused = request(&mut app, json!({"op":"run","cmd":cmd}));
-            assert_eq!(refused["ok"], false, "{cmd} must refuse one object: {refused}");
+            assert_eq!(
+                refused["ok"], false,
+                "{cmd} must refuse one object: {refused}"
+            );
             assert!(app.tabs[app.active_tab].active_cmd.is_none());
         }
 
         // A refusal must not leave the symmetric command mid-flight.
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &lines[1]]}),
+        );
         let symmetric = request(&mut app, json!({"op":"run","cmd":"SYCONSTRAINT"}));
         assert_eq!(symmetric["ok"], false, "{symmetric}");
         assert!(
@@ -3619,7 +3736,9 @@ mod tests {
             .and_then(|set| set.dimensions.values().next())
             .expect("the dimensional constraint created its dimension");
         assert!(
-            !app.tabs[app.active_tab].scene.dimension_is_annotational(dimension),
+            !app.tabs[app.active_tab]
+                .scene
+                .dimension_is_annotational(dimension),
             "a new dimensional constraint starts in the dynamic form"
         );
 
@@ -3652,20 +3771,26 @@ mod tests {
             "converting the selection finishes the command"
         );
         assert!(
-            app.tabs[app.active_tab].scene.dimension_is_annotational(dimension),
+            app.tabs[app.active_tab]
+                .scene
+                .dimension_is_annotational(dimension),
             "the selected constraint now uses the annotational form: {converted}"
         );
         // The conversion is one undo step; redo re-applies it.
         let undone = request(&mut app, json!({"op":"run","cmd":"UNDO"}));
         assert_eq!(undone["ok"], true, "{undone}");
         assert!(
-            !app.tabs[app.active_tab].scene.dimension_is_annotational(dimension),
+            !app.tabs[app.active_tab]
+                .scene
+                .dimension_is_annotational(dimension),
             "UNDO restores the dynamic form: {undone}"
         );
         let redone = request(&mut app, json!({"op":"run","cmd":"REDO"}));
         assert_eq!(redone["ok"], true, "{redone}");
         assert!(
-            app.tabs[app.active_tab].scene.dimension_is_annotational(dimension),
+            app.tabs[app.active_tab]
+                .scene
+                .dimension_is_annotational(dimension),
             "REDO re-applies the annotational form: {redone}"
         );
         let annotational = record(&mut app);
@@ -3685,11 +3810,15 @@ mod tests {
         assert_eq!(same["ok"], true, "{same}");
         let undone = request(&mut app, json!({"op":"run","cmd":"UNDO"}));
         assert!(
-            !app.tabs[app.active_tab].scene.dimension_is_annotational(dimension),
+            !app.tabs[app.active_tab]
+                .scene
+                .dimension_is_annotational(dimension),
             "a repeated answer leaves no phantom undo step: {undone}"
         );
         request(&mut app, json!({"op":"run","cmd":"REDO"}));
-        assert!(app.tabs[app.active_tab].scene.dimension_is_annotational(dimension));
+        assert!(app.tabs[app.active_tab]
+            .scene
+            .dimension_is_annotational(dimension));
 
         // And back, so the conversion works both ways.
         request(
@@ -3697,10 +3826,15 @@ mod tests {
             json!({"op":"select","handles":[format!("{:X}", dimension.value())]}),
         );
         request(&mut app, json!({"op":"run","cmd":"DCFORM"}));
-        let converted = request(&mut app, json!({"op":"input","kind":"token","text":"Dynamic"}));
+        let converted = request(
+            &mut app,
+            json!({"op":"input","kind":"token","text":"Dynamic"}),
+        );
         assert_eq!(converted["ok"], true, "{converted}");
         assert!(
-            !app.tabs[app.active_tab].scene.dimension_is_annotational(dimension),
+            !app.tabs[app.active_tab]
+                .scene
+                .dimension_is_annotational(dimension),
             "the selected constraint is dynamic again: {converted}"
         );
 
@@ -3837,8 +3971,9 @@ mod tests {
             .and_then(|set| set.dimensions.values().next().copied())
             .expect("the constraint drives a dimension");
         let placement = |document: &document::Document| {
-            let document::EntityType::Dimension(printed) =
-                document.get_entity(dimension).expect("the dimension is in the document")
+            let document::EntityType::Dimension(printed) = document
+                .get_entity(dimension)
+                .expect("the dimension is in the document")
             else {
                 panic!("the constraint's dimension is a dimension");
             };
@@ -4019,7 +4154,10 @@ mod tests {
                     .count()
             })
             .unwrap_or(0);
-        assert_eq!(horizontal, 2, "Enter applied the remembered type: {accepted}");
+        assert_eq!(
+            horizontal, 2,
+            "Enter applied the remembered type: {accepted}"
+        );
     }
 
     /// The dedicated geometric-constraint names run the same handlers as the
@@ -4039,7 +4177,10 @@ mod tests {
             .map(|entity| entity["handle"].as_str().unwrap().to_string())
             .collect();
 
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &lines[1]]}),
+        );
         let parallel = request(&mut app, json!({"op":"run","cmd":"GCPARALLEL"}));
         assert_eq!(parallel["ok"], true, "{parallel}");
         let parallel_count = app.tabs[app.active_tab]
@@ -4067,7 +4208,10 @@ mod tests {
             .iter()
             .map(|entity| entity["handle"].as_str().unwrap().to_string())
             .collect();
-        request(&mut app, json!({"op":"select","handles":[&lines[0], &lines[1]]}));
+        request(
+            &mut app,
+            json!({"op":"select","handles":[&lines[0], &lines[1]]}),
+        );
         let collinear = request(&mut app, json!({"op":"run","cmd":"GCCOLLINEAR"}));
         assert_eq!(collinear["ok"], true, "{collinear}");
         let collinear_count = app.tabs[app.active_tab]
@@ -4181,8 +4325,9 @@ mod tests {
             let queried = request(&mut app, json!({"op":"query","type":"3DSOLID"}));
             let handle = queried["entities"][0]["handle"].clone();
             if center[0] != 0.0 {
-                let key =
-                    document::Handle::new(u64::from_str_radix(handle.as_str().unwrap(), 16).unwrap());
+                let key = document::Handle::new(
+                    u64::from_str_radix(handle.as_str().unwrap(), 16).unwrap(),
+                );
                 let scene = &mut app.tabs[app.active_tab].scene;
                 assert!(scene.meshes.contains_key(&key));
                 // Keep the real mesh but force bounds to use its double-single vertices.
@@ -4304,7 +4449,9 @@ mod tests {
         let scene = &mut app.tabs[app.active_tab].scene;
         let handle = scene
             .document
-            .add_entity(document::EntityType::Solid3D(document::entities::Solid3D::new()))
+            .add_entity(document::EntityType::Solid3D(
+                document::entities::Solid3D::new(),
+            ))
             .unwrap();
         let entity = scene.document.get_entity(handle).unwrap();
         let (min, max) = crate::scene::convert::tess::entity_bounds_in(&scene.document, entity);
@@ -4534,7 +4681,10 @@ mod tests {
     fn close_confirmation_prompt_is_automatable() {
         use crate::app::ModalKind;
         let mut app = OpenCADStudio::new_for_test();
-        assert_eq!(request(&mut app, json!({"op":"new"}))["status"], "completed");
+        assert_eq!(
+            request(&mut app, json!({"op":"new"}))["status"],
+            "completed"
+        );
         assert_eq!(
             request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}))["status"],
             "completed"
@@ -4562,7 +4712,10 @@ mod tests {
         assert_eq!(request(&mut app, json!({"op":"entities"}))["total"], 0);
         // Save closes the drawing through the save flow rather than refusing.
         let mut app = OpenCADStudio::new_for_test();
-        assert_eq!(request(&mut app, json!({"op":"new"}))["status"], "completed");
+        assert_eq!(
+            request(&mut app, json!({"op":"new"}))["status"],
+            "completed"
+        );
         let path = std::env::temp_dir().join(format!("ocs-close-{}.dwg", session_id()));
         assert_eq!(
             request(&mut app, json!({"op":"save","path":path}))["ok"],
@@ -4672,7 +4825,10 @@ mod tests {
         assert_eq!(refused["code"], "command_busy");
         assert_eq!(refused["owner_client_id"], "a");
         assert!(!app.control_state()["command"].is_null());
-        let forced = send(&mut app, json!({"op":"cancel","client_id":"b","force":true}));
+        let forced = send(
+            &mut app,
+            json!({"op":"cancel","client_id":"b","force":true}),
+        );
         assert_ne!(forced["code"], "command_busy");
         assert!(app.control_state()["command"].is_null());
     }
@@ -4689,7 +4845,11 @@ mod tests {
         );
         assert_eq!(result["code"], "command_busy");
         assert_eq!(result["command"], "LINE");
-        assert_eq!(result["owner_client_id"], Value::Null, "the user holds it now");
+        assert_eq!(
+            result["owner_client_id"],
+            Value::Null,
+            "the user holds it now"
+        );
     }
     #[test]
     fn control_preserves_other_documents_and_waits_for_async_open() {
@@ -5740,7 +5900,9 @@ mod tests {
         app.control.routing = true;
         app.control.note_history_changes(changes());
         assert_eq!(
-            app.control.take_history_changes().map(|changes| changes.len()),
+            app.control
+                .take_history_changes()
+                .map(|changes| changes.len()),
             Some(1)
         );
     }
@@ -5753,8 +5915,8 @@ mod tests {
         let mut app = OpenCADStudio::new_for_test();
         request(&mut app, json!({"op":"new"}));
         request(&mut app, json!({"op":"run","cmd":"LINE 0,0 10,0"}));
-        let first = app.control_request(json!({"op":"query","type":"Line"})).0
-            ["entities"][0]["handle"]
+        let first = app.control_request(json!({"op":"query","type":"Line"})).0["entities"][0]
+            ["handle"]
             .as_str()
             .unwrap()
             .to_string();
@@ -5808,7 +5970,10 @@ mod tests {
             &mut app,
             i,
             "ATTDIA_SCRIPT",
-            vec![askable("WIDTH", "Width", "100"), askable("HEIGHT", "", "20")],
+            vec![
+                askable("WIDTH", "Width", "100"),
+                askable("HEIGHT", "", "20"),
+            ],
         );
         park_insert(&mut app, i, "ATTDIA_SCRIPT");
         assert_eq!(
@@ -5848,7 +6013,9 @@ mod tests {
 
     #[test]
     fn a_declined_attribute_form_drops_the_placement() {
-        use crate::app::insert_attributes_tests::{askable, define, park_insert, placed_attributes};
+        use crate::app::insert_attributes_tests::{
+            askable, define, park_insert, placed_attributes,
+        };
         let mut app = OpenCADStudio::new_for_test();
         assert_eq!(request(&mut app, json!({"op":"new"}))["ok"], true);
         let i = app.active_tab;

@@ -809,8 +809,9 @@ impl OpenCADStudio {
                 .into_iter()
                 .map(|(name, filter)| serde_json::json!({ "name": name, "filter": filter }))
                 .collect();
-        let text = serde_json::to_string_pretty(&serde_json::json!({ "version": 1, "filters": filters }))
-            .unwrap_or_default();
+        let text =
+            serde_json::to_string_pretty(&serde_json::json!({ "version": 1, "filters": filters }))
+                .unwrap_or_default();
         match std::fs::write(path, text) {
             Ok(()) => self
                 .command_line

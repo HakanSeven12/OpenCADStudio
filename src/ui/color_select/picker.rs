@@ -472,9 +472,15 @@ impl ColorPicker {
         .spacing(8);
 
         let panel = column![].spacing(12).width(PANEL_WIDTH);
-        container(panel.push(self.tabs()).push(self.preview_row()).push(body).push(actions))
-            .id(PANEL_ID)
-            .into()
+        container(
+            panel
+                .push(self.tabs())
+                .push(self.preview_row())
+                .push(body)
+                .push(actions),
+        )
+        .id(PANEL_ID)
+        .into()
     }
 
     fn tabs(&self) -> Element<'_, Message> {
@@ -493,7 +499,10 @@ impl ColorPicker {
             row![]
                 .push(document)
                 .push(tab(t!("Index Color").into_owned(), ColorPickerTab::Index))
-                .push(tab(t!("True Color").into_owned(), ColorPickerTab::TrueColor))
+                .push(tab(
+                    t!("True Color").into_owned(),
+                    ColorPickerTab::TrueColor,
+                ))
                 .push(books)
                 .spacing(2),
         )

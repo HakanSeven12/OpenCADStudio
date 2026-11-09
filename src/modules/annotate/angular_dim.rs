@@ -232,7 +232,9 @@ impl AngularDimensionCommand {
     }
 
     fn commit(&self, dimension: Dimension) -> CmdResult {
-        let entity = self.plane.place_entity(EntityType::Dimension(Box::new(dimension)));
+        let entity = self
+            .plane
+            .place_entity(EntityType::Dimension(Box::new(dimension)));
         CmdResult::CommitDimension {
             entity,
             association: DimensionAssociationInput::Explicit(self.source_refs.clone()),

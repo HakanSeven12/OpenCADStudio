@@ -13,7 +13,9 @@ fn hex(handles: &[Handle]) -> String {
 }
 
 fn keyword(text: &str) -> String {
-    text.trim().trim_start_matches(['_', '.']).to_ascii_uppercase()
+    text.trim()
+        .trim_start_matches(['_', '.'])
+        .to_ascii_uppercase()
 }
 
 /// HYPERLINK without a pickfirst selection: `Select objects:`, then the
@@ -264,11 +266,9 @@ impl CadCommand for DashHyperlinkCommand {
 
     fn on_enter(&mut self) -> CmdResult {
         match self.step {
-            Step::Option
-            | Step::InsertOption
-            | Step::Url
-            | Step::Location
-            | Step::Description => self.on_text_input("").unwrap_or(CmdResult::NeedPoint),
+            Step::Option | Step::InsertOption | Step::Url | Step::Location | Step::Description => {
+                self.on_text_input("").unwrap_or(CmdResult::NeedPoint)
+            }
             _ => CmdResult::NeedPoint,
         }
     }

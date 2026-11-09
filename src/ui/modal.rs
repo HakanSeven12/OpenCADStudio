@@ -529,20 +529,22 @@ pub fn tool_frame<'a>(
             .align_x(iced::alignment::Horizontal::Right)
             .align_y(iced::alignment::Vertical::Bottom),
     ];
-    let framed = container(body).padding(10).style(|theme: &Theme| container::Style {
-        background: Some(Background::Color(theme.palette().background.base.color)),
-        border: Border {
-            color: theme.palette().background.neutral.color,
-            width: 1.0,
-            radius: 6.0.into(),
-        },
-        shadow: iced::Shadow {
-            color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-            offset: Vector::new(0.0, 4.0),
-            blur_radius: 14.0,
-        },
-        ..Default::default()
-    });
+    let framed = container(body)
+        .padding(10)
+        .style(|theme: &Theme| container::Style {
+            background: Some(Background::Color(theme.palette().background.base.color)),
+            border: Border {
+                color: theme.palette().background.neutral.color,
+                width: 1.0,
+                radius: 6.0.into(),
+            },
+            shadow: iced::Shadow {
+                color: iced::Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 14.0,
+            },
+            ..Default::default()
+        });
     // The frame is opaque to the pointer; around it the drawing takes it.
     let framed = opaque(mouse_area(framed).on_press(raise));
     let pad = Padding {

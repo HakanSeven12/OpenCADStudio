@@ -144,7 +144,10 @@ fn vdmx_square(data: &[u8]) -> Vec<(u16, i16, i16)> {
     let ratios = usize::from(ratios);
     let pick = (0..ratios).find(|&r| {
         let at = 6 + 4 * r;
-        matches!(data.get(at..at + 4), Some([_, 0, 0, 0]) | Some([_, 1, 1, 1]))
+        matches!(
+            data.get(at..at + 4),
+            Some([_, 0, 0, 0]) | Some([_, 1, 1, 1])
+        )
     });
     let Some(group) = pick.and_then(|r| u16_at(6 + 4 * ratios + 2 * r)) else {
         return Vec::new();
@@ -169,28 +172,32 @@ fn ascent(font: &Font) -> f64 {
 /// reaches below its baseline and how long it runs, per unit of height.
 fn run_metrics(font: &Font, value: &str) -> Option<(f64, f64)> {
     let weight = fontdb::Weight(font.weight.clamp(1, 1000) as u16);
-    [font.face.as_str(), "Arial"].into_iter().find_map(|family| {
-        crate::scene::text::sysfont::with_face_data_weighted(family, weight, |data, index| {
-            let face = ttf_parser::Face::parse(data, index).ok()?;
-            let upem = f64::from(face.units_per_em());
-            let cap = face
-                .capital_height()
-                .filter(|&c| c > 0)
-                .map_or(0.7 * upem, f64::from);
-            let descent = face
-                .tables()
-                .os2
-                .map_or(-f64::from(face.descender()), |os2| -f64::from(os2.windows_descender()));
-            let advance: f64 = value
-                .chars()
-                .filter_map(|ch| face.glyph_index(ch))
-                .filter_map(|glyph| face.glyph_hor_advance(glyph))
-                .map(f64::from)
-                .sum();
-            Some((descent / cap, advance / cap))
+    [font.face.as_str(), "Arial"]
+        .into_iter()
+        .find_map(|family| {
+            crate::scene::text::sysfont::with_face_data_weighted(family, weight, |data, index| {
+                let face = ttf_parser::Face::parse(data, index).ok()?;
+                let upem = f64::from(face.units_per_em());
+                let cap = face
+                    .capital_height()
+                    .filter(|&c| c > 0)
+                    .map_or(0.7 * upem, f64::from);
+                let descent = face
+                    .tables()
+                    .os2
+                    .map_or(-f64::from(face.descender()), |os2| {
+                        -f64::from(os2.windows_descender())
+                    });
+                let advance: f64 = value
+                    .chars()
+                    .filter_map(|ch| face.glyph_index(ch))
+                    .filter_map(|glyph| face.glyph_hor_advance(glyph))
+                    .map(f64::from)
+                    .sum();
+                Some((descent / cap, advance / cap))
+            })
+            .flatten()
         })
-        .flatten()
-    })
 }
 
 /// [`file_ascent`] of the font's installed face.
@@ -198,15 +205,20 @@ fn run_metrics(font: &Font, value: &str) -> Option<(f64, f64)> {
 fn ascent_from_file(font: &Font) -> f64 {
     let weight = fontdb::Weight(font.weight.clamp(1, 1000) as u16);
     // A face that is not installed falls back to the usual sans faces.
-    [font.face.as_str(), "Arial", "Liberation Sans", "DejaVu Sans"]
-        .into_iter()
-        .find_map(|family| {
-            crate::scene::text::sysfont::with_face_data_weighted(family, weight, |data, index| {
-                file_ascent(&ttf_parser::Face::parse(data, index).ok()?, font.height)
-            })
-            .flatten()
+    [
+        font.face.as_str(),
+        "Arial",
+        "Liberation Sans",
+        "DejaVu Sans",
+    ]
+    .into_iter()
+    .find_map(|family| {
+        crate::scene::text::sysfont::with_face_data_weighted(family, weight, |data, index| {
+            file_ascent(&ttf_parser::Face::parse(data, index).ok()?, font.height)
         })
-        .unwrap_or(0.9 * font.height.abs())
+        .flatten()
+    })
+    .unwrap_or(0.9 * font.height.abs())
 }
 
 #[derive(Clone)]
@@ -243,7 +255,11 @@ struct Player {
 
 impl Player {
     fn at(&self, x: f64, y: f64) -> Vector3 {
-        Vector3::new((x - self.origin[0]) * self.scale[0], (y - self.origin[1]) * self.scale[1], 0.0)
+        Vector3::new(
+            (x - self.origin[0]) * self.scale[0],
+            (y - self.origin[1]) * self.scale[1],
+            0.0,
+        )
     }
 
     fn polyline(&mut self, points: &[[f64; 2]], closed: bool, width: f64, rgb: [u8; 3]) {
@@ -381,7 +397,9 @@ fn arc_points(bounds: [f64; 4], start: [f64; 2], end: [f64; 2]) -> Vec<[f64; 2]>
         // Up to the end.
         Some(to) if to > start_angle => (first..).take_while(|k| under(k, to)).collect(),
         // Round to a whole turn, then from zero up to the end.
-        Some(to) => (first..=ARC_STEPS).chain((0..).take_while(|k| under(k, to))).collect(),
+        Some(to) => (first..=ARC_STEPS)
+            .chain((0..).take_while(|k| under(k, to)))
+            .collect(),
         // Round to a whole turn.
         None => (first..=ARC_STEPS).collect(),
     };
@@ -498,13 +516,16 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
     for (function, p) in &records {
         let s = |k: usize| p.get(k).map(|w| *w as i16 as f64).unwrap_or(0.0);
         let points = |from: usize, count: usize| -> Vec<[f64; 2]> {
-            (0..count).map(|k| [s(from + 2 * k), s(from + 2 * k + 1)]).collect()
+            (0..count)
+                .map(|k| [s(from + 2 * k), s(from + 2 * k + 1)])
+                .collect()
         };
-        let create = |table: &mut Vec<Option<Object>>, object: Object| {
-            match table.iter().position(Option::is_none) {
-                Some(slot) => table[slot] = Some(object),
-                None => table.push(Some(object)),
-            }
+        let create = |table: &mut Vec<Option<Object>>, object: Object| match table
+            .iter()
+            .position(Option::is_none)
+        {
+            Some(slot) => table[slot] = Some(object),
+            None => table.push(Some(object)),
         };
         match function {
             // CREATEPENINDIRECT
@@ -513,7 +534,10 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
                 Object::Pen(Pen {
                     null: p.first().is_some_and(|style| style & 0x0f == 5),
                     width: s(1),
-                    rgb: colorref(p.get(3).copied().unwrap_or(0), p.get(4).copied().unwrap_or(0)),
+                    rgb: colorref(
+                        p.get(3).copied().unwrap_or(0),
+                        p.get(4).copied().unwrap_or(0),
+                    ),
                 }),
             ),
             // CREATEBRUSHINDIRECT
@@ -521,7 +545,10 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
                 &mut table,
                 Object::Brush(Brush {
                     null: p.first() == Some(&1),
-                    rgb: colorref(p.get(1).copied().unwrap_or(0), p.get(2).copied().unwrap_or(0)),
+                    rgb: colorref(
+                        p.get(1).copied().unwrap_or(0),
+                        p.get(2).copied().unwrap_or(0),
+                    ),
                 }),
             ),
             // CREATEFONTINDIRECT: height, width, escapement, ... face at
@@ -561,7 +588,12 @@ pub fn read(bytes: &[u8], fit: [f64; 2]) -> Option<Picture> {
             // SETTEXTALIGN
             0x012E => text_align = p.first().copied().unwrap_or(0),
             // SETTEXTCOLOR
-            0x0209 => text_rgb = colorref(p.first().copied().unwrap_or(0), p.get(1).copied().unwrap_or(0)),
+            0x0209 => {
+                text_rgb = colorref(
+                    p.first().copied().unwrap_or(0),
+                    p.get(1).copied().unwrap_or(0),
+                )
+            }
             // MOVETO, LINETO (y, x)
             0x0214 => current = [s(1), s(0)],
             0x0213 => {

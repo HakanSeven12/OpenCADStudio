@@ -169,7 +169,12 @@ fn extent(wires: &[WireModel]) -> Option<(DVec3, DVec3)> {
 }
 
 fn rgba([r, g, b]: [u8; 3], alpha: f32) -> [f32; 4] {
-    [f32::from(r) / 255.0, f32::from(g) / 255.0, f32::from(b) / 255.0, alpha]
+    [
+        f32::from(r) / 255.0,
+        f32::from(g) / 255.0,
+        f32::from(b) / 255.0,
+        alpha,
+    ]
 }
 
 /// Compare `current` with the drawing `other`, in the space `current`
@@ -235,7 +240,13 @@ pub fn compare(current: &Scene, other: Document, settings: CompareSettings) -> C
             }
         };
         if let Some(bounds) = bounds {
-            differences.push(Difference { change, object, layer, handle, bounds });
+            differences.push(Difference {
+                change,
+                object,
+                layer,
+                handle,
+                bounds,
+            });
         }
     }
     for handle in only_there {

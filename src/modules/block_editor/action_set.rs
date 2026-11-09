@@ -197,7 +197,11 @@ impl ActionSetCommand {
     fn has_point_choices(&self) -> bool {
         self.chosen
             .and_then(|i| self.candidates[i].target_source)
-            .is_some_and(|(kind, source)| self.parameters.iter().any(|p| p.is_action_target(kind, source)))
+            .is_some_and(|(kind, source)| {
+                self.parameters
+                    .iter()
+                    .any(|p| p.is_action_target(kind, source))
+            })
     }
 
     fn finish_polygon(&self) -> CmdResult {
@@ -267,7 +271,8 @@ impl CadCommand for ActionSetCommand {
         if matches!(self.mode, Some(Mode::New | Mode::Add | Mode::Remove))
             && self.has_point_choices()
         {
-            return if self.candidates[self.chosen.unwrap()].target_source
+            return if self.candidates[self.chosen.unwrap()]
+                .target_source
                 .is_some_and(|(kind, _)| kind == Kind::Flip)
             {
                 crate::tr!("block-action-targets", "flip-prompt")
@@ -547,7 +552,8 @@ impl CadCommand for ActionSetCommand {
         if !matches!(self.mode, Some(Mode::New | Mode::Add | Mode::Remove)) {
             return Vec::new();
         }
-        let Some((kind, source)) = self.chosen.and_then(|i| self.candidates[i].target_source) else {
+        let Some((kind, source)) = self.chosen.and_then(|i| self.candidates[i].target_source)
+        else {
             return Vec::new();
         };
         let hits = point_markers_in_region(
@@ -588,9 +594,10 @@ impl CadCommand for ActionSetCommand {
     fn on_selection_complete(&mut self, handles: Vec<Handle>) -> CmdResult {
         let source = self.candidates[self.chosen.unwrap()].target_source;
         self.picked.retain(|handle| {
-            self.parameters
-                .iter()
-                .any(|p| p.handle == *handle && source.is_some_and(|(kind, source)| p.is_action_target(kind, source)))
+            self.parameters.iter().any(|p| {
+                p.handle == *handle
+                    && source.is_some_and(|(kind, source)| p.is_action_target(kind, source))
+            })
         });
         self.picked.extend(handles);
         CmdResult::NeedPoint

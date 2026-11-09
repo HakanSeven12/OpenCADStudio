@@ -169,12 +169,16 @@ impl OpenCADStudio {
             self.tabs[i].dirty = true;
             let count = consumed.len();
             let message = match self.tabs[i].scene.document.get_entity(source) {
-                Some(document::EntityType::Arc(_)) if count == 1 => crate::tf!("{count} arc joined to source"),
+                Some(document::EntityType::Arc(_)) if count == 1 => {
+                    crate::tf!("{count} arc joined to source")
+                }
                 Some(document::EntityType::Arc(_)) => crate::tf!("{count} arcs joined to source"),
                 Some(document::EntityType::Line(_)) if line_source && count == 1 => {
                     crate::tf!("{count} line joined to source")
                 }
-                Some(document::EntityType::Line(_)) if line_source => crate::tf!("{count} lines joined to source"),
+                Some(document::EntityType::Line(_)) if line_source => {
+                    crate::tf!("{count} lines joined to source")
+                }
                 _ => crate::tf!("{count} segments added to polyline"),
             };
             self.command_line.push_output(message.as_ref());
@@ -221,13 +225,23 @@ impl OpenCADStudio {
                 let all = |test: fn(&document::EntityType) -> bool| joined.iter().all(|e| test(e));
                 let polylines = joined
                     .iter()
-                    .filter(|e| matches!(e, document::EntityType::LwPolyline(_) | document::EntityType::Polyline2D(_)))
+                    .filter(|e| {
+                        matches!(
+                            e,
+                            document::EntityType::LwPolyline(_)
+                                | document::EntityType::Polyline2D(_)
+                        )
+                    })
                     .count();
                 let summary = match (merged.as_slice(), merged.len()) {
-                    ([document::EntityType::Line(_)], _) if all(|e| matches!(e, document::EntityType::Line(_))) => {
+                    ([document::EntityType::Line(_)], _)
+                        if all(|e| matches!(e, document::EntityType::Line(_))) =>
+                    {
                         crate::tf!("{count_in} lines joined into 1 line").into_owned()
                     }
-                    ([document::EntityType::Arc(_)], _) if all(|e| matches!(e, document::EntityType::Arc(_))) => {
+                    ([document::EntityType::Arc(_)], _)
+                        if all(|e| matches!(e, document::EntityType::Arc(_))) =>
+                    {
                         crate::tf!("{count_in} arcs joined into 1 arc").into_owned()
                     }
                     (_, 1) if polylines > 0 => {
@@ -239,7 +253,9 @@ impl OpenCADStudio {
                         }
                     }
                     (_, 1) => crate::tf!("{count_in} objects converted to 1 polyline").into_owned(),
-                    (_, count) => crate::tf!("{count_in} objects converted to {count} polylines").into_owned(),
+                    (_, count) => {
+                        crate::tf!("{count_in} objects converted to {count} polylines").into_owned()
+                    }
                 } + &discarded_note(pairs.len() - count_in);
                 let label = self.history_label_from_active_cmd(i, "JOIN");
                 self.push_undo_snapshot(i, label);
@@ -262,7 +278,8 @@ impl OpenCADStudio {
                 self.tabs[i].scene.clear_preview_wire();
                 self.restore_pre_cmd_tangent();
                 self.command_line.push_output(
-                    crate::tf!("0 objects joined, {count} objects discarded from the operation").as_ref(),
+                    crate::tf!("0 objects joined, {count} objects discarded from the operation")
+                        .as_ref(),
                 );
             }
         }
@@ -525,7 +542,8 @@ impl OpenCADStudio {
                                     entry.gpu,
                                     crate::scene::model::hatch_model::HatchPattern::Solid
                                 );
-                                hatch.pattern_type = document::entities::HatchPatternType::Predefined;
+                                hatch.pattern_type =
+                                    document::entities::HatchPatternType::Predefined;
                                 hatch.gradient_color.enabled = false;
                             }
                         } else {

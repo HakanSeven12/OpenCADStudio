@@ -34,9 +34,8 @@ fn app_with(styles: Vec<TextStyle>) -> OpenCADStudio {
 fn font_list_open() -> OpenCADStudio {
     let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/web/fonts/latin.ttf"))
         .expect("bundled web font");
-    let (family, _) =
-        crate::scene::text::sysfont::register_font_file("FontList-Test.ttf", &bytes)
-            .expect("a face");
+    let (family, _) = crate::scene::text::sysfont::register_font_file("FontList-Test.ttf", &bytes)
+        .expect("a face");
     let mut app = app_with(vec![
         style("Notes", "txt.shx", ""),
         style("Office", "FontList-Test.ttf", &family),
@@ -93,8 +92,14 @@ fn the_font_list_opens_right_under_the_font_field() {
         // up; the open list covers it, framed and padded by 2 + 6.
         let field = shown(&mut ui, "Regular");
         let title = shown(&mut ui, "IN THIS DRAWING");
-        assert!((title.x - field.x - 8.0).abs() < 1.0, "{width}: {field:?} {title:?}");
-        assert!((title.y - field.y).abs() < 20.0, "{width}: {field:?} {title:?}");
+        assert!(
+            (title.x - field.x - 8.0).abs() < 1.0,
+            "{width}: {field:?} {title:?}"
+        );
+        assert!(
+            (title.y - field.y).abs() < 20.0,
+            "{width}: {field:?} {title:?}"
+        );
     }
 }
 

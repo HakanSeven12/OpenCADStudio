@@ -25,7 +25,9 @@ use document::{EntityType, Handle};
 // from the kernel; only the entity conversion stays here.
 use crate::t;
 use glam::{DVec3, Vec3};
-use kernel::geom2d::{offset_polyline_with_gap, Polyline as KernelPolyline, PolylineVertex as KernelVertex};
+use kernel::geom2d::{
+    offset_polyline_with_gap, Polyline as KernelPolyline, PolylineVertex as KernelVertex,
+};
 
 use crate::command::{CadCommand, CmdResult};
 use crate::modules::draw::defaults;
@@ -469,7 +471,11 @@ pub fn set_gap_type(value: u8) {
 /// line OFFSET prints as it starts.
 pub fn current_settings_line() -> String {
     let erase = if ERASE_SOURCE.get() { "Yes" } else { "No" };
-    let layer = if LAYER_CURRENT.get() { "Current" } else { "Source" };
+    let layer = if LAYER_CURRENT.get() {
+        "Current"
+    } else {
+        "Source"
+    };
     t!(
         "Current settings: Erase source=%{erase}  Layer=%{layer}  OFFSETGAPTYPE=%{gap}",
         erase = erase,
@@ -672,11 +678,18 @@ impl CadCommand for OffsetCommand {
         match self.awaiting {
             Some(Await::Erase) => {
                 let d = if self.erase_source { "Yes" } else { "No" };
-                return t!("OFFSET  Erase source object after offsetting? [Yes/No] <%{d}>:", d = d)
-                    .into_owned();
+                return t!(
+                    "OFFSET  Erase source object after offsetting? [Yes/No] <%{d}>:",
+                    d = d
+                )
+                .into_owned();
             }
             Some(Await::Layer) => {
-                let d = if self.layer_current { "Current" } else { "Source" };
+                let d = if self.layer_current {
+                    "Current"
+                } else {
+                    "Source"
+                };
                 return t!(
                     "OFFSET  Enter layer option for offset objects [Current/Source] <%{d}>:",
                     d = d
@@ -692,8 +705,11 @@ impl CadCommand for OffsetCommand {
                 } else {
                     format!("{:.4}", defaults::get_offset_dist())
                 };
-                t!("OFFSET  Specify offset distance or [Through/Erase/Layer] <%{d}>:", d = d)
-                    .into_owned()
+                t!(
+                    "OFFSET  Specify offset distance or [Through/Erase/Layer] <%{d}>:",
+                    d = d
+                )
+                .into_owned()
             }
 
             Step::ReferenceSecond { .. } => {
@@ -793,7 +809,11 @@ impl CadCommand for OffsetCommand {
                     opts.push(CmdOption::new("Multiple", "M"));
                 }
                 opts.push(CmdOption::new("Undo", "U"));
-                opts.push(CmdOption::enter(if *multiple { "next object" } else { "Exit" }));
+                opts.push(CmdOption::enter(if *multiple {
+                    "next object"
+                } else {
+                    "Exit"
+                }));
                 opts
             }
             Step::ReferenceSecond { .. } => Vec::new(),

@@ -123,7 +123,10 @@ fn build_fixture() -> (Scene, Vec<Handle>) {
     }
     set.add(
         ConstraintKind::Parallel,
-        vec![ParametricRef::whole(chain[0]), ParametricRef::whole(gap_line)],
+        vec![
+            ParametricRef::whole(chain[0]),
+            ParametricRef::whole(gap_line),
+        ],
         None,
     );
     set.add(
@@ -135,7 +138,12 @@ fn build_fixture() -> (Scene, Vec<Handle>) {
         Some(DrivingValue::Named("gap".to_string())),
     );
 
-    let mut targets = vec![chain[0], chain[CHAIN_LINES / 2], chain[CHAIN_LINES - 1], gap_line];
+    let mut targets = vec![
+        chain[0],
+        chain[CHAIN_LINES / 2],
+        chain[CHAIN_LINES - 1],
+        gap_line,
+    ];
     for (index, length) in [7.0f64, 13.0].into_iter().enumerate() {
         let mut block = BlockRecord::new(format!("scope_block_{index}"));
         block.handle = scene.document.allocate_handle();
@@ -340,9 +348,7 @@ fn graph_digest(scene: &Scene) -> String {
     // sorted keys of the referenced closure objects.
     let mask = |text: &str| {
         map_handle_text(text, &|value| {
-            closure_values
-                .contains(&value)
-                .then(|| "H".to_string())
+            closure_values.contains(&value).then(|| "H".to_string())
         })
     };
     let mut keys: Vec<String> = raws.iter().map(|raw| mask(raw)).collect();
@@ -352,8 +358,7 @@ fn graph_digest(scene: &Scene) -> String {
             .iter()
             .enumerate()
             .map(|(index, own)| {
-                let mut linked: Vec<&str> =
-                    own.iter().map(|&j| previous[j].as_str()).collect();
+                let mut linked: Vec<&str> = own.iter().map(|&j| previous[j].as_str()).collect();
                 linked.sort_unstable();
                 format!("{}|{}", previous[index], linked.join(","))
             })

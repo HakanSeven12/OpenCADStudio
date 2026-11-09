@@ -40,10 +40,7 @@ const RUNS: usize = 3;
 const WARMUP: usize = 1;
 
 fn line_at(y: f64) -> Line {
-    Line::from_points(
-        Vector3::new(0.0, y, 0.0),
-        Vector3::new(100.0, y, 0.0),
-    )
+    Line::from_points(Vector3::new(0.0, y, 0.0), Vector3::new(100.0, y, 0.0))
 }
 
 fn association(first: Handle, second: Handle, y: f64) -> CenterLineAssociation {

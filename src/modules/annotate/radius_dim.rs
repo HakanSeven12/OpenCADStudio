@@ -136,10 +136,7 @@ impl CadCommand for RadiusDimensionCommand {
             return t!("DIMRADIUS  Specify text angle (degrees):").into_owned();
         }
         match self.step {
-            Step::SelectObject => {
-                t!("DIMRADIUS  Select arc or circle:")
-                    .into_owned()
-            }
+            Step::SelectObject => t!("DIMRADIUS  Select arc or circle:").into_owned(),
             Step::DimLine(_) => {
                 t!("DIMRADIUS  Specify dimension line location  [Mtext/Text/Angle]:").into_owned()
             }

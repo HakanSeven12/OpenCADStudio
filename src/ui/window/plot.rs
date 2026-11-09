@@ -1476,8 +1476,18 @@ pub fn view_window(
         let folder_choice = folders.get(s.output_folder as usize).cloned();
         let name_choice = names.get(s.output_name as usize).cloned();
         let dpi = row![
-            field_row(crate::tr!("plot", "raster-dpi").into(), &s.raster_dpi, PlotDlgMsg::RasterDpi, 60),
-            field_row(crate::tr!("plot", "vector-dpi").into(), &s.vector_dpi, PlotDlgMsg::VectorDpi, 60),
+            field_row(
+                crate::tr!("plot", "raster-dpi").into(),
+                &s.raster_dpi,
+                PlotDlgMsg::RasterDpi,
+                60
+            ),
+            field_row(
+                crate::tr!("plot", "vector-dpi").into(),
+                &s.vector_dpi,
+                PlotDlgMsg::VectorDpi,
+                60
+            ),
         ]
         .spacing(8);
         let name_row = drop_row(

@@ -147,9 +147,8 @@ pub struct MeasureGeomCommand {
     /// QUICK readout for the last hovered cursor position.
     quick: std::cell::RefCell<Option<String>>,
     /// QUICK: the closed areas a click can measure, gathered on first hover.
-    quick_sources: std::cell::RefCell<
-        Option<rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>>,
-    >,
+    quick_sources:
+        std::cell::RefCell<Option<rustc_hash::FxHashMap<Handle, crate::scene::BoundarySource>>>,
 }
 
 impl MeasureGeomCommand {
@@ -372,7 +371,10 @@ impl MeasureGeomCommand {
     /// Text that starts with a letter is an option keyword; anything else
     /// (a coordinate, a distance) is left to the point reader.
     fn is_keyword(input: &str) -> bool {
-        input.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        input
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
     }
 
     // ── ARea / Volume boundary ─────────────────────────────────────────────
@@ -487,8 +489,12 @@ impl MeasureGeomCommand {
                 angle: value.to_radians(),
             },
             sub @ Sub::ArcCenterAngle { .. } => {
-                let (e, bulge) =
-                    arc_for(sub, a, DVec2::new(value.to_radians(), 0.0), self.entry_tangent())?;
+                let (e, bulge) = arc_for(
+                    sub,
+                    a,
+                    DVec2::new(value.to_radians(), 0.0),
+                    self.entry_tangent(),
+                )?;
                 return Some(self.push_arc(e, bulge));
             }
             sub @ Sub::ArcCenterLength { .. } => {
@@ -692,11 +698,7 @@ impl MeasureGeomCommand {
     }
 
     fn finish_volume(&mut self, volume: f64) -> CmdResult {
-        let message = crate::tr!(
-            "measurement",
-            "volume-result",
-            volume = area_text(volume)
-        );
+        let message = crate::tr!("measurement", "volume-result", volume = area_text(volume));
         self.report(volume, message)
     }
 
@@ -1082,10 +1084,8 @@ impl MeasureGeomCommand {
         if self.arc {
             return match self.arc_sub {
                 Sub::None => {
-                    let mut options = vec![
-                        CmdOption::new("Angle", "A"),
-                        CmdOption::new("CEnter", "CE"),
-                    ];
+                    let mut options =
+                        vec![CmdOption::new("Angle", "A"), CmdOption::new("CEnter", "CE")];
                     if self.points.len() >= 2 {
                         options.push(CmdOption::new("CLose", "CL"));
                     }
@@ -1339,11 +1339,18 @@ impl MeasureGeomCommand {
     /// (world): a line or straight polyline segment's length, as that edge,
     /// or an arc's or circle's radius, as a line from the centre. The edge
     /// comes back too, for the distance between two parallel ones.
-    fn quick_object(entity: &EntityType, hit: DVec3) -> Option<(Vec<DVec3>, String, Option<[DVec3; 2]>)> {
+    fn quick_object(
+        entity: &EntityType,
+        hit: DVec3,
+    ) -> Option<(Vec<DVec3>, String, Option<[DVec3; 2]>)> {
         let v = |p: document::Vector3| DVec3::new(p.x, p.y, p.z);
         let length = |a: DVec3, b: DVec3| {
             let value = crate::entities::common::format_length(a.distance(b));
-            (vec![a, b], crate::tr!("measurement", "quick-length", value = value), Some([a, b]))
+            (
+                vec![a, b],
+                crate::tr!("measurement", "quick-length", value = value),
+                Some([a, b]),
+            )
         };
         let radius = |center: DVec3, r: f64| (vec![center, hit], Self::radius_msg(r), None);
         match entity {
@@ -1405,7 +1412,8 @@ impl MeasureGeomCommand {
             };
             let mut local = c;
             local[slot / 2] += offset;
-            let Some((points, line, edge)) = Self::quick_object(entity, plane.to_world(local)) else {
+            let Some((points, line, edge)) = Self::quick_object(entity, plane.to_world(local))
+            else {
                 continue;
             };
             edges[slot] = edge;
@@ -1433,7 +1441,10 @@ impl MeasureGeomCommand {
             let foot = |x: DVec3, a: DVec3| a + dir * (x - a).dot(dir);
             let mid = foot(cursor, a);
             let across = foot(mid, p);
-            wires.push(Self::preview_wire("measuregeom_quick_parallel", vec![mid, across]));
+            wires.push(Self::preview_wire(
+                "measuregeom_quick_parallel",
+                vec![mid, across],
+            ));
             let value = crate::entities::common::format_length(mid.distance(across));
             lines.push(crate::tr!("measurement", "quick-parallel", value = value));
         }
@@ -1510,9 +1521,7 @@ impl CadCommand for MeasureGeomCommand {
 
     fn prompt(&self) -> String {
         match self.mode {
-            Mode::Choose => {
-                return crate::tr!("measurement", "option-prompt", default = self.last)
-            }
+            Mode::Choose => return crate::tr!("measurement", "option-prompt", default = self.last),
             Mode::AskMode => return crate::tr!("measurement", "mode-prompt"),
             Mode::Quick => return crate::tr!("measurement", "quick-options", command = self.name),
             Mode::Area => return self.area_prompt(),
@@ -1648,7 +1657,11 @@ impl CadCommand for MeasureGeomCommand {
                 let quick = match input.as_str() {
                     "Y" | "YES" => true,
                     "N" | "NO" => false,
-                    _ => return Some(CmdResult::ReportError(t!("Invalid option keyword.").into_owned())),
+                    _ => {
+                        return Some(CmdResult::ReportError(
+                            t!("Invalid option keyword.").into_owned(),
+                        ))
+                    }
                 };
                 set_quick_default(quick);
                 // Yes goes straight on to quick measure; No to the option
@@ -1725,14 +1738,18 @@ impl CadCommand for MeasureGeomCommand {
             return Vec::new();
         }
         if self.quick_sources.borrow().is_none() {
-            *self.quick_sources.borrow_mut() = Some(scene.boundary_sources_on_plane(self.plane, 1e-6));
+            *self.quick_sources.borrow_mut() =
+                Some(scene.boundary_sources_on_plane(self.plane, 1e-6));
         }
         let (hits, handles) = Self::quick_hits(scene, self.plane, cursor);
         let (mut wires, readout) = Self::quick_result(self.plane, cursor, hits);
-        let (object_wires, object_lines) = Self::quick_objects(scene, self.plane, cursor, hits, handles);
+        let (object_wires, object_lines) =
+            Self::quick_objects(scene, self.plane, cursor, hits, handles);
         wires.extend(object_wires);
         let readout = match readout {
-            Some(text) if !object_lines.is_empty() => Some(format!("{text}\n{}", object_lines.join("\n"))),
+            Some(text) if !object_lines.is_empty() => {
+                Some(format!("{text}\n{}", object_lines.join("\n")))
+            }
             other => other,
         };
         *self.quick.borrow_mut() = readout;
@@ -1808,7 +1825,9 @@ impl CadCommand for MeasureGeomCommand {
                         self.points = vec![center, point];
                         CmdResult::NeedPoint
                     }
-                    None => CmdResult::ReportError(crate::tr!("measurement", "not-line-arc-circle")),
+                    None => {
+                        CmdResult::ReportError(crate::tr!("measurement", "not-line-arc-circle"))
+                    }
                 }
             }
             _ => CmdResult::NeedPoint,

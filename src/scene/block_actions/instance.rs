@@ -3,7 +3,11 @@
 use super::*;
 use document::objects::{Dictionary, XRecord, XRecordEntry, XRecordValue};
 
-pub(super) fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<Handle>, &'static str> {
+pub(super) fn entry(
+    doc: &Document,
+    owner: Handle,
+    key: &str,
+) -> Result<Option<Handle>, &'static str> {
     let Some(ObjectType::Dictionary(d)) = doc.objects.get(&owner) else {
         return Err("The reference contains an invalid parameter dictionary.");
     };
@@ -13,7 +17,11 @@ pub(super) fn entry(doc: &Document, owner: Handle, key: &str) -> Result<Option<H
         .map(|(_, h)| *h))
 }
 
-pub(super) fn cache(doc: &Document, insert: Handle, id: i32) -> Result<Option<Handle>, &'static str> {
+pub(super) fn cache(
+    doc: &Document,
+    insert: Handle,
+    id: i32,
+) -> Result<Option<Handle>, &'static str> {
     let Some(mut owner) = doc.extension_dictionary_handle(insert) else {
         return Ok(None);
     };
@@ -40,7 +48,11 @@ pub(super) fn cache(doc: &Document, insert: Handle, id: i32) -> Result<Option<Ha
     Ok(result)
 }
 
-pub(super) fn remove_cache(doc: &mut Document, insert: Handle, id: i32) -> Result<(), &'static str> {
+pub(super) fn remove_cache(
+    doc: &mut Document,
+    insert: Handle,
+    id: i32,
+) -> Result<(), &'static str> {
     let Some(handle) = cache(doc, insert, id)? else {
         return Ok(());
     };
@@ -195,7 +207,11 @@ pub(crate) fn grip_parameter(
 ) -> Result<Parameter, &'static str> {
     let mut result = p.clone();
     if p.flip {
-        let frame = if testing { test_frame(doc, insert, p)? } else { frame(doc, insert, p)? };
+        let frame = if testing {
+            test_frame(doc, insert, p)?
+        } else {
+            frame(doc, insert, p)?
+        };
         let delta = frame.base - p.base;
         result.base = frame.base;
         result.end = frame.end;
@@ -206,23 +222,30 @@ pub(crate) fn grip_parameter(
 }
 
 pub(crate) fn action_grips(
-    doc: &Document, baseline: &Document, definition: Handle, insert: Handle,
-    parameter: &Parameter, value: Value, testing: bool,
+    doc: &Document,
+    baseline: &Document,
+    definition: Handle,
+    insert: Handle,
+    parameter: &Parameter,
+    value: Value,
+    testing: bool,
 ) -> Vec<crate::scene::block_grips::runtime::Grip> {
-    let mut grips = crate::scene::block_grips::runtime::action_grips(baseline, definition, parameter, value);
+    let mut grips =
+        crate::scene::block_grips::runtime::action_grips(baseline, definition, parameter, value);
     if let Some(plan) = super::flip_graph::Plan::new(baseline, definition) {
-        if plan.present_grips(doc, baseline, definition, insert, parameter, value, testing, &mut grips).is_err() {
+        if plan
+            .present_grips(
+                doc, baseline, definition, insert, parameter, value, testing, &mut grips,
+            )
+            .is_err()
+        {
             return Vec::new();
         }
     }
     grips
 }
 
-pub(crate) fn value(
-    doc: &Document,
-    insert: Handle,
-    p: &Parameter,
-) -> Result<Value, &'static str> {
+pub(crate) fn value(doc: &Document, insert: Handle, p: &Parameter) -> Result<Value, &'static str> {
     if !p.flip {
         let frame = frame(doc, insert, p)?;
         return Ok(frame_value(p, frame));
@@ -419,10 +442,17 @@ pub(crate) fn save_action_base(
         let Some(ObjectType::XRecord(record)) = doc.objects.get_mut(&h) else {
             return Err("The reference action cache is unavailable.");
         };
-        if let Some(entry) = record.entries.iter_mut().find(|e| matches!(e.value, XRecordValue::Point3D(..))) {
+        if let Some(entry) = record
+            .entries
+            .iter_mut()
+            .find(|e| matches!(e.value, XRecordValue::Point3D(..)))
+        {
             entry.value = XRecordValue::Point3D(base.x, base.y, base.z);
         } else {
-            record.entries.push(XRecordEntry::new(10, XRecordValue::Point3D(base.x, base.y, base.z)));
+            record.entries.push(XRecordEntry::new(
+                10,
+                XRecordValue::Point3D(base.x, base.y, base.z),
+            ));
         }
         record.raw_data.clear();
         record.raw_dwg_data = None;
@@ -488,25 +518,38 @@ pub(crate) fn save_action_bases(
 
 /// Preserve accumulated displacement while an authored pivot moves; caches
 /// belonging to a new association or an independent action cannot be reused.
-fn migrate_action_bases(doc: &mut Document, before: &Document, insert: Handle, definition: Handle) -> Result<(), &'static str> {
+fn migrate_action_bases(
+    doc: &mut Document,
+    before: &Document,
+    insert: Handle,
+    definition: Handle,
+) -> Result<(), &'static str> {
     let parameters = all_parameters(doc, definition);
     let previous_parameters = all_parameters(before, definition);
-    let actions: Vec<_> = super::actions(doc, definition).into_iter()
+    let actions: Vec<_> = super::actions(doc, definition)
+        .into_iter()
         .filter(|(_, _, kind, _)| *kind == Kind::Scale)
-        .map(|(handle, _, _, code)| (handle, code)).collect();
+        .map(|(handle, _, _, code)| (handle, code))
+        .collect();
     for (handle, code) in actions {
-        let Some(id) = super::action_node_id(doc, handle) else { continue };
+        let Some(id) = super::action_node_id(doc, handle) else {
+            continue;
+        };
         let current = super::options::base(doc, handle).cloned();
         let previous = super::options::base(before, handle);
-        let old_code = super::actions(before, definition).into_iter()
-            .find(|(h, _, kind, _)| *h == handle && *kind == Kind::Scale).map(|(_, _, _, code)| code);
+        let old_code = super::actions(before, definition)
+            .into_iter()
+            .find(|(h, _, kind, _)| *h == handle && *kind == Kind::Scale)
+            .map(|(_, _, _, code)| code);
         let parameter = parameters.iter().find(|p| p.id == code);
         let old_parameter = previous_parameters.iter().find(|p| Some(p.id) == old_code);
         match (current, previous, parameter, old_parameter) {
             (Some(current), Some(previous), Some(p), Some(old))
-                if current.dependent && previous.dependent && p.handle == old.handle => {
+                if current.dependent && previous.dependent && p.handle == old.handle =>
+            {
                 if let Some(base) = action_base(doc, insert, id)? {
-                    let delta = super::options::pivot(&current, p.base)? - super::options::pivot(previous, old.base)?;
+                    let delta = super::options::pivot(&current, p.base)?
+                        - super::options::pivot(previous, old.base)?;
                     if delta.length_squared() > 0. {
                         save_action_base(doc, insert, id, base + delta)?;
                     }
@@ -519,9 +562,16 @@ fn migrate_action_bases(doc: &mut Document, before: &Document, insert: Handle, d
 }
 
 /// Reset discards per-reference dependent pivots along with parameter frames.
-fn clear_action_bases(doc: &mut Document, insert: Handle, definition: Handle) -> Result<(), &'static str> {
-    let ids: Vec<_> = super::actions(doc, definition).into_iter()
-        .filter(|(handle, _, kind, _)| *kind == Kind::Scale && super::options::base(doc, *handle).is_some_and(|a| a.dependent))
+fn clear_action_bases(
+    doc: &mut Document,
+    insert: Handle,
+    definition: Handle,
+) -> Result<(), &'static str> {
+    let ids: Vec<_> = super::actions(doc, definition)
+        .into_iter()
+        .filter(|(handle, _, kind, _)| {
+            *kind == Kind::Scale && super::options::base(doc, *handle).is_some_and(|a| a.dependent)
+        })
         .filter_map(|(handle, _, _, _)| super::action_node_id(doc, handle))
         .collect();
     for id in ids {
@@ -557,7 +607,10 @@ pub(crate) fn update_action_bases(
         let prev_frame = previous_frames
             .get(&p.handle)
             .copied()
-            .unwrap_or(ParameterFrame { base: p.base, end: p.end });
+            .unwrap_or(ParameterFrame {
+                base: p.base,
+                end: p.end,
+            });
         let pivot_def = super::options::pivot(action_with_base, p.base)?;
         let prev_act_base = bases
             .get(&handle)
@@ -569,7 +622,9 @@ pub(crate) fn update_action_bases(
             let mut p_with_base = p.clone();
             p_with_base.end += new_frame.base - p_with_base.base;
             p_with_base.base = new_frame.base;
-            if let Ok(constrained) = super::constrain_parameter_position(doc, &p_with_base, new_frame.end) {
+            if let Ok(constrained) =
+                super::constrain_parameter_position(doc, &p_with_base, new_frame.end)
+            {
                 new_frame.end = constrained;
             }
             let prev_dist = prev_frame.end.distance(prev_frame.base);
@@ -593,7 +648,9 @@ pub(crate) fn update_action_bases(
 }
 
 fn write_rotation_reference(record: &mut XRecord, point: DVec3) -> Result<(), &'static str> {
-    let entry = record.entries.iter_mut()
+    let entry = record
+        .entries
+        .iter_mut()
         .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)))
         .nth(3)
         .ok_or("The rotation parameter cache has no reference point.")?;
@@ -621,11 +678,7 @@ pub(super) fn migrate_rotation_reference(
     Ok(())
 }
 
-fn ensure_cache(
-    doc: &mut Document,
-    insert: Handle,
-    p: &Parameter,
-) -> Result<Handle, &'static str> {
+fn ensure_cache(doc: &mut Document, insert: Handle, p: &Parameter) -> Result<Handle, &'static str> {
     if !matches!(doc.get_entity(insert), Some(EntityType::Insert(_))) {
         return Err("Select a block reference.");
     }
@@ -898,7 +951,10 @@ fn evaluate_input(
     let def =
         definition(doc, insert).ok_or("Select a uniformly scaled dynamic block reference.")?;
     if let Some(plan) = super::flip_graph::Plan::new(doc, def) {
-        let input = requested.map_or(input, |f| Value::Frame { base: f.base, end: f.end });
+        let input = requested.map_or(input, |f| Value::Frame {
+            base: f.base,
+            end: f.end,
+        });
         return plan.evaluate(doc, doc, def, insert, parameter, input, false);
     }
     let parameters = all_parameters(doc, def);
@@ -1164,10 +1220,7 @@ pub(crate) fn evaluate_test_value(
 }
 
 /// Restore one reference without changing the definition or another reference.
-pub(crate) fn reset(
-    doc: &Document,
-    insert: Handle,
-) -> Result<Option<Document>, &'static str> {
+pub(crate) fn reset(doc: &Document, insert: Handle) -> Result<Option<Document>, &'static str> {
     let def = doc
         .dynamic_definition_for_insert(insert)
         .ok_or("Select a dynamic block reference.")?;
@@ -1183,22 +1236,31 @@ pub(crate) fn reset(
         Some(owner) => entry(doc, owner, "ACAD_ENHANCEDBLOCKHISTORY")?,
         None => None,
     };
-    let unchanged = parameters
-        .iter()
-        .all(|p| {
-            if p.flip {
-                value(doc, insert, p).ok() == Some(default(p))
-                    && frame(doc, insert, p).ok() == Some(ParameterFrame { base: p.base, end: p.end })
-            } else {
-                frame(doc, insert, p).ok() == Some(ParameterFrame { base: p.base, end: p.end })
-            }
-        })
-        && (crate::scene::block_visibility::parameter(doc, def).is_none()
-            || super::representation::visibility_state(doc, doc, def, insert) == Some(0))
+    let unchanged = parameters.iter().all(|p| {
+        if p.flip {
+            value(doc, insert, p).ok() == Some(default(p))
+                && frame(doc, insert, p).ok()
+                    == Some(ParameterFrame {
+                        base: p.base,
+                        end: p.end,
+                    })
+        } else {
+            frame(doc, insert, p).ok()
+                == Some(ParameterFrame {
+                    base: p.base,
+                    end: p.end,
+                })
+        }
+    }) && (crate::scene::block_visibility::parameter(doc, def).is_none()
+        || super::representation::visibility_state(doc, doc, def, insert) == Some(0))
         && history.is_none()
         && load_action_bases(doc, insert, def)?.is_empty()
         && doc.get_entity(insert).is_none_or(|entity| {
-            entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_none()
+            entity
+                .common()
+                .extended_data
+                .get_record(super::flip_graph::INPUTS)
+                .is_none()
         });
     if unchanged {
         return Ok(None);
@@ -1212,7 +1274,15 @@ pub(crate) fn reset(
     for p in &parameters {
         if p.flip {
             save(&mut result, insert, p, default(p))?;
-            save_frame(&mut result, insert, p, ParameterFrame { base: p.base, end: p.end })?;
+            save_frame(
+                &mut result,
+                insert,
+                p,
+                ParameterFrame {
+                    base: p.base,
+                    end: p.end,
+                },
+            )?;
         } else {
             save_frame(
                 &mut result,
@@ -1257,7 +1327,15 @@ pub(crate) fn reset_test(
         if cache(doc, insert, p.id)?.is_some() {
             if p.flip {
                 save(&mut result, insert, p, value)?;
-                save_frame(&mut result, insert, p, ParameterFrame { base: p.base, end: p.end })?;
+                save_frame(
+                    &mut result,
+                    insert,
+                    p,
+                    ParameterFrame {
+                        base: p.base,
+                        end: p.end,
+                    },
+                )?;
             } else {
                 save_frame(
                     &mut result,
@@ -1366,16 +1444,25 @@ pub(crate) fn table_history_row(
 ) -> Option<usize> {
     let owner = table_history_owner(doc, insert).ok()??;
     let handle = entry(doc, owner, "ACAD_ENHANCEDBLOCKHISTORY").ok()??;
-    let ObjectType::XRecord(record) = doc.objects.get(&handle)? else { return None };
+    let ObjectType::XRecord(record) = doc.objects.get(&handle)? else {
+        return None;
+    };
     let entries = &record.entries;
-    if entries.first()?.code != 1070 || entries[0].value != XRecordValue::Int16(3)
+    if entries.first()?.code != 1070
+        || entries[0].value != XRecordValue::Int16(3)
         || entries.get(1)?.code != 1071
-        || entries[1].value != XRecordValue::Int32(view.table.parameter.parameter.element.eval.node_id)
-        || entries.get(3)?.code != 70 {
+        || entries[1].value
+            != XRecordValue::Int32(view.table.parameter.parameter.element.eval.node_id)
+        || entries.get(3)?.code != 70
+    {
         return None;
     }
-    let XRecordValue::Int16(row) = entries[3].value else { return None };
-    usize::try_from(row).ok().filter(|row| *row < view.rows.len())
+    let XRecordValue::Int16(row) = entries[3].value else {
+        return None;
+    };
+    usize::try_from(row)
+        .ok()
+        .filter(|row| *row < view.rows.len())
 }
 
 pub(crate) fn evaluate_table_row(
@@ -1412,7 +1499,8 @@ fn evaluate_table_row_context(
         .rows
         .get(row)
         .ok_or("The selected table row is unavailable.")?;
-    let reflects_parameters = super::flip_graph::Plan::for_rebuild(baseline.unwrap_or(doc), def).is_some();
+    let reflects_parameters =
+        super::flip_graph::Plan::for_rebuild(baseline.unwrap_or(doc), def).is_some();
     let mut staged = doc.clone();
     for (column, value) in columns.iter().zip(values) {
         let p = all_parameters(&staged, def)
@@ -1426,10 +1514,15 @@ fn evaluate_table_row_context(
         };
         let base = current_frame.base;
         let input = if column.connection_name.eq_ignore_ascii_case("UpdatedAngle") {
-            Value::Point(base + DVec3::new(value.cos(), value.sin(), 0.0) * current_frame.end.distance(base))
+            Value::Point(
+                base + DVec3::new(value.cos(), value.sin(), 0.0) * current_frame.end.distance(base),
+            )
         } else {
-            let axis = if p.polar || (p.linear && reflects_parameters) { (current_frame.end - base).normalize() }
-                else { (p.end - p.base).normalize() };
+            let axis = if p.polar || (p.linear && reflects_parameters) {
+                (current_frame.end - base).normalize()
+            } else {
+                (p.end - p.base).normalize()
+            };
             Value::Point(base + axis * *value)
         };
         let next = if let Some(baseline) = baseline {
@@ -1550,7 +1643,11 @@ pub(crate) fn refresh_after_edit(
             let state = super::representation::visibility_state(&staged, before, def, insert);
             let has_inputs = |doc: &Document| {
                 doc.get_entity(insert).is_some_and(|entity| {
-                    entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_some()
+                    entity
+                        .common()
+                        .extended_data
+                        .get_record(super::flip_graph::INPUTS)
+                        .is_some()
                 })
             };
             staged = if leaving && !has_inputs(&staged) && has_inputs(before) {
@@ -1567,14 +1664,28 @@ pub(crate) fn refresh_after_edit(
     }
     if inserts.iter().any(|insert| {
         doc.get_entity(*insert).is_some_and(|entity| {
-            entity.common().extended_data.get_record(super::flip_graph::INPUTS).is_some()
+            entity
+                .common()
+                .extended_data
+                .get_record(super::flip_graph::INPUTS)
+                .is_some()
         })
     }) {
         return Err(super::flip_graph::FRAME_ERROR);
     }
-    let has_chain = super::chains::Graph::new(before, def)?.receivers().next().is_some()
-        || super::chains::Graph::new(doc, def)?.receivers().next().is_some();
-    let previous_parameters = if has_chain { all_parameters(before, def) } else { Vec::new() };
+    let has_chain = super::chains::Graph::new(before, def)?
+        .receivers()
+        .next()
+        .is_some()
+        || super::chains::Graph::new(doc, def)?
+            .receivers()
+            .next()
+            .is_some();
+    let previous_parameters = if has_chain {
+        all_parameters(before, def)
+    } else {
+        Vec::new()
+    };
     for insert in inserts {
         let mut evaluated = staged.clone();
         let parameters = all_parameters(&staged, def);
@@ -1583,7 +1694,10 @@ pub(crate) fn refresh_after_edit(
             .iter()
             .map(|p| {
                 let previous = match frame(before, insert, p) {
-                    Err(_) if p.flip => Ok(ParameterFrame { base: p.base, end: p.end }),
+                    Err(_) if p.flip => Ok(ParameterFrame {
+                        base: p.base,
+                        end: p.end,
+                    }),
                     previous => previous,
                 };
                 previous.map(|frame| (p.handle, frame))
@@ -1639,14 +1753,16 @@ pub(crate) fn materialize(
         return Err("Could not isolate the dynamic block reference.");
     }
     super::representation::reconcile(&mut scene, def, &name, evaluated)?;
-    if let Some((_, basepoint)) = crate::scene::block_basepoint::parameter(evaluated, def)
-        .filter(|(handle, basepoint)| {
+    if let Some((_, basepoint)) =
+        crate::scene::block_basepoint::parameter(evaluated, def).filter(|(handle, basepoint)| {
             let id = basepoint.parameter.parameter.element.eval.node_id;
-            super::actions(evaluated, def).iter().any(|(_, action, kind, _)| {
-                matches!(kind, Kind::Stretch | Kind::Flip)
-                    && action.dependencies.contains(handle)
-                    && action.action_ids.contains(&id)
-            })
+            super::actions(evaluated, def)
+                .iter()
+                .any(|(_, action, kind, _)| {
+                    matches!(kind, Kind::Stretch | Kind::Flip)
+                        && action.dependencies.contains(handle)
+                        && action.action_ids.contains(&id)
+                })
         })
     {
         let Some(EntityType::Insert(original)) = doc.get_entity(insert) else {
@@ -1672,9 +1788,13 @@ pub(crate) fn materialize(
             let Some(ObjectType::XRecord(record)) = scene.document.objects.get_mut(&handle) else {
                 return Err("The reference contains an invalid parameter record.");
             };
-            let mut points = record.entries.iter_mut()
+            let mut points = record
+                .entries
+                .iter_mut()
                 .filter(|entry| matches!(entry.value, XRecordValue::Point3D(..)));
-            let point = points.next().filter(|_| record.entries_complete && points.next().is_none())
+            let point = points
+                .next()
+                .filter(|_| record.entries_complete && points.next().is_none())
                 .ok_or("The reference parameter cache has no finite endpoint.")?;
             let value = XRecordValue::Point3D(location.x, location.y, location.z);
             if point.value != value {

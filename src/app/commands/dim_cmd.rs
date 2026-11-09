@@ -44,7 +44,11 @@ impl OpenCADStudio {
                     .eq_ignore_ascii_case(&document.header.current_dimstyle_name)
             })
             .map(|style| style.dimdli)
-            .unwrap_or(if document.header.measurement == 1 { 3.75 } else { 0.38 })
+            .unwrap_or(if document.header.measurement == 1 {
+                3.75
+            } else {
+                0.38
+            })
     }
 
     fn recent_dimension(&self, i: usize) -> Option<document::EntityType> {
@@ -59,7 +63,11 @@ impl OpenCADStudio {
     /// DIMBASELINE; from DIM (`in_dim`) the base is picked rather than taken
     /// from the last dimension.
     pub(crate) fn dim_baseline_command(&self, i: usize, in_dim: bool) -> DimBaselineCommand {
-        let recent = if in_dim { None } else { self.recent_dimension(i) };
+        let recent = if in_dim {
+            None
+        } else {
+            self.recent_dimension(i)
+        };
         // Baseline dimensions are spaced by the drawing's DIMDLI, whatever
         // the base dimension's own value is (DIMCONTINUEMODE included).
         let mut command = DimBaselineCommand::new(
@@ -74,7 +82,11 @@ impl OpenCADStudio {
     }
 
     pub(crate) fn dim_continue_command(&self, i: usize, in_dim: bool) -> DimContinueCommand {
-        let recent = if in_dim { None } else { self.recent_dimension(i) };
+        let recent = if in_dim {
+            None
+        } else {
+            self.recent_dimension(i)
+        };
         let style_text_move = self.tabs[i]
             .scene
             .document
@@ -124,13 +136,22 @@ impl OpenCADStudio {
     fn dim_offset_settings(&mut self, i: usize) {
         let offset = self.current_dimdli(i);
         self.command_line.push_output(
-            crate::tr!("dim-cmd", "offset-settings", offset = format!("{offset:.6}")).as_ref(),
+            crate::tr!(
+                "dim-cmd",
+                "offset-settings",
+                offset = format!("{offset:.6}")
+            )
+            .as_ref(),
         );
     }
 
     pub(super) fn dispatch_dim_cmd(&mut self, cmd: &str, i: usize) -> Option<Task<Message>> {
         let (name, rest) = cmd.split_once(' ').unwrap_or((cmd, ""));
-        match name.trim_start_matches(['_', '.']).to_ascii_uppercase().as_str() {
+        match name
+            .trim_start_matches(['_', '.'])
+            .to_ascii_uppercase()
+            .as_str()
+        {
             "DIM" => self.start_dim(i),
             // Layer: DIMLAYER for the dimensions DIM makes next; the prompt
             // repeats until Enter or eXit.

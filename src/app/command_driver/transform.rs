@@ -381,13 +381,14 @@ impl OpenCADStudio {
             // Subtract only this entity's explicitly removed vertices. The same
             // predicate gates preview, geometry mutation and inferred constraints.
             let in_win = |x: f64, y: f64| -> bool {
-                windows.iter().any(|(min, max)| {
-                    x >= min.x && x <= max.x && y >= min.y && y <= max.y
-                }) && !crate::modules::draw::modify::stretch::is_excluded(
-                    &excluded_points,
-                    *handle,
-                    glam::DVec3::new(x, y, 0.0),
-                )
+                windows
+                    .iter()
+                    .any(|(min, max)| x >= min.x && x <= max.x && y >= min.y && y <= max.y)
+                    && !crate::modules::draw::modify::stretch::is_excluded(
+                        &excluded_points,
+                        *handle,
+                        glam::DVec3::new(x, y, 0.0),
+                    )
             };
             let before = self.tabs[i].scene.document.get_entity_arc(*handle);
             if let Some(entity) = before.as_deref() {

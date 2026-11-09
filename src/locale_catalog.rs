@@ -2400,7 +2400,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "Isolines" => Some(("model", "isolines")),
         "Italic" => Some(("properties", "italic")),
         "JIS" => Some(("common", "jis")),
-        
+
         "JOIN: {count_in} object(s) joined into {count_out}." => Some(("common", "join-count-in-object-s-joined-into-count-out")),
         "JUSTIFYTEXT  [Left / Center / Right / Middle / Aligned / Fit]:" => Some(("annotate", "justifytext-left-center-right-middle-aligned-f")),
         "JUSTIFYTEXT: select text objects first." => Some(("annotate", "justifytext-select-text-objects-first")),
@@ -2505,7 +2505,7 @@ pub(super) fn message_attribute(source: &str) -> Option<(&'static str, &'static 
         "LINETYPE: \"{name}\" is not loaded. Use LINETYPE LIST to see available linetypes." => Some(("styles", "linetype-name-is-not-loaded-use-linetype-list")),
         "LIST: no entities selected. Select entities first." => Some(("inquiry", "list-no-entities-selected-select-entities-firs")),
         "LOFT  Select first cross-section:" => Some(("insert", "loft-select-first-cross-section")),
-        
+
         "LOFT: could not loft profiles. Ensure sections have the same edge count and are compatible." => Some(("common", "loft-could-not-loft-profiles-ensure-sections-h")),
         "LOFT: solid created from {} profiles." => Some(("common", "loft-solid-created-from-profiles")),
         "LTSCALE  new global line-type scale:" => Some(("styles", "ltscale-new-global-line-type-scale")),

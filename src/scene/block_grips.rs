@@ -184,7 +184,8 @@ mod tests {
         table.handle = doc.allocate_handle();
         table.owner_handle = xdict;
         let sort = table.handle;
-        doc.objects.insert(sort, ObjectType::SortEntitiesTable(table));
+        doc.objects
+            .insert(sort, ObjectType::SortEntitiesTable(table));
         if let Some(ObjectType::Dictionary(d)) = doc.objects.get_mut(&xdict) {
             d.add_entry("ACAD_SORTENTS", sort);
         }

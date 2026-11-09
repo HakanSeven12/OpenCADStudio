@@ -8,7 +8,9 @@
 
 use std::sync::Mutex;
 
-use document::entities::{AttachmentPoint, TextHorizontalAlignment as HA, TextVerticalAlignment as VA};
+use document::entities::{
+    AttachmentPoint, TextHorizontalAlignment as HA, TextVerticalAlignment as VA,
+};
 use document::types::Vector3;
 use document::{Document, EntityType, Handle};
 use glam::DVec3;
@@ -209,7 +211,9 @@ impl Justify {
 }
 
 fn keyword(text: &str) -> String {
-    text.trim().trim_start_matches(['_', '.']).to_ascii_uppercase()
+    text.trim()
+        .trim_start_matches(['_', '.'])
+        .to_ascii_uppercase()
 }
 
 fn hex(handles: &[Handle]) -> String {
@@ -264,8 +268,8 @@ impl TextFrame {
                     p.width_factor,
                     p.oblique_angle,
                 );
-                let advance = b.as_ref().map_or(0.0, |b| b.advance as f64)
-                    * (p.width_factor as f64).signum();
+                let advance =
+                    b.as_ref().map_or(0.0, |b| b.advance as f64) * (p.width_factor as f64).signum();
                 let ink = b
                     .as_ref()
                     .map_or(height * 0.5, |b| (b.ink_min[1] + b.ink_max[1]) as f64 * 0.5);
@@ -338,7 +342,6 @@ impl TextFrame {
     fn width(&self) -> f64 {
         (self.right - self.left).abs()
     }
-
 }
 
 fn v3(p: [f64; 2], z: f64) -> Vector3 {
@@ -348,7 +351,10 @@ fn v3(p: [f64; 2], z: f64) -> Vector3 {
 /// The justification the object has now.
 pub fn current_justification(entity: &EntityType) -> Option<Justify> {
     match entity {
-        EntityType::Text(t) => Some(Justify::of_text(t.horizontal_alignment, t.vertical_alignment)),
+        EntityType::Text(t) => Some(Justify::of_text(
+            t.horizontal_alignment,
+            t.vertical_alignment,
+        )),
         EntityType::MText(m) => Some(Justify::of_attachment(m.attachment_point)),
         _ => None,
     }
@@ -397,7 +403,13 @@ pub fn scaled(
     let frame = TextFrame::of(entity, doc)?;
     let j = base.or_else(|| current_justification(entity))?;
     let a = frame.anchor(j);
-    let about = |p: Vector3| Vector3::new(a[0] + (p.x - a[0]) * factor, a[1] + (p.y - a[1]) * factor, p.z);
+    let about = |p: Vector3| {
+        Vector3::new(
+            a[0] + (p.x - a[0]) * factor,
+            a[1] + (p.y - a[1]) * factor,
+            p.z,
+        )
+    };
     let mut out = entity.clone();
     match &mut out {
         EntityType::Text(t) => {
@@ -500,7 +512,11 @@ fn options(labels: &[&'static str]) -> Vec<CmdOption> {
         .iter()
         .map(|label| {
             let keyword: String = label.chars().filter(|c| c.is_ascii_uppercase()).collect();
-            let keyword = if keyword.is_empty() { label.to_string() } else { keyword };
+            let keyword = if keyword.is_empty() {
+                label.to_string()
+            } else {
+                keyword
+            };
             CmdOption::new(label, &keyword)
         })
         .collect()
@@ -516,7 +532,10 @@ pub struct JustifyTextCommand {
 
 impl JustifyTextCommand {
     pub fn new(handles: Vec<Handle>) -> Self {
-        Self { handles, retry: false }
+        Self {
+            handles,
+            retry: false,
+        }
     }
 
     fn default_option() -> Justify {
@@ -528,7 +547,11 @@ impl JustifyTextCommand {
 
     fn apply(&mut self, j: Justify) -> CmdResult {
         settings().last_option = Some(BaseOption::At(j));
-        CmdResult::Dispatch(format!("_JUSTIFYTEXTAPPLY {} {}", j.label(), hex(&self.handles)))
+        CmdResult::Dispatch(format!(
+            "_JUSTIFYTEXTAPPLY {} {}",
+            j.label(),
+            hex(&self.handles)
+        ))
     }
 }
 
@@ -700,7 +723,11 @@ impl CadCommand for ScaleTextCommand {
                 if self.retry {
                     options
                 } else {
-                    format!("{}\n{}", crate::tr!("text-edit", "scale-base-title"), options)
+                    format!(
+                        "{}\n{}",
+                        crate::tr!("text-edit", "scale-base-title"),
+                        options
+                    )
                 }
             }
             ScaleStep::Height => crate::tr!(
@@ -732,7 +759,11 @@ impl CadCommand for ScaleTextCommand {
     fn options(&self) -> Vec<CmdOption> {
         match self.step {
             ScaleStep::Base => std::iter::once(CmdOption::new("Existing", "E"))
-                .chain(SCALE_BASES.iter().map(|j| CmdOption::new(j.label(), j.label())))
+                .chain(
+                    SCALE_BASES
+                        .iter()
+                        .map(|j| CmdOption::new(j.label(), j.label())),
+                )
                 .collect(),
             ScaleStep::Height => options(&["Paper height", "Match object", "Scale factor"]),
             ScaleStep::Factor => options(&["Reference"]),
@@ -989,7 +1020,11 @@ impl TextAlignCommand {
 
     fn spacing_mode() -> String {
         let s = settings();
-        crate::tr!("text-edit", "align-spacing-mode", spacing = spacing_label(s.spacing, s.set_spacing))
+        crate::tr!(
+            "text-edit",
+            "align-spacing-mode",
+            spacing = spacing_label(s.spacing, s.set_spacing)
+        )
     }
 
     fn back_to_select(&mut self) -> CmdResult {
@@ -1163,13 +1198,15 @@ impl CadCommand for TextAlignCommand {
                 }
                 _ => return None,
             },
-            AlignStep::Alignment => match Justify::parse(&word).filter(|j| ALIGN_OPTIONS.contains(j)) {
-                Some(j) => {
-                    settings().align = j;
-                    self.back_to_select()
+            AlignStep::Alignment => {
+                match Justify::parse(&word).filter(|j| ALIGN_OPTIONS.contains(j)) {
+                    Some(j) => {
+                        settings().align = j;
+                        self.back_to_select()
+                    }
+                    None => invalid_keyword(),
                 }
-                None => invalid_keyword(),
-            },
+            }
             AlignStep::Options | AlignStep::SecondOptions => match Self::spacing_option(&word) {
                 Some(Spacing::Set) => {
                     self.step = if self.step == AlignStep::Options {
@@ -1240,13 +1277,21 @@ impl CadCommand for TextAlignCommand {
 /// Where TEXTALIGN puts each anchor, in the order of `anchors` (each the
 /// anchor point and the box's width and height): along the line from
 /// `first` towards `second`.
-pub fn align_positions(anchors: &[([f64; 2], f64, f64)], first: [f64; 2], second: [f64; 2]) -> Vec<[f64; 2]> {
+pub fn align_positions(
+    anchors: &[([f64; 2], f64, f64)],
+    first: [f64; 2],
+    second: [f64; 2],
+) -> Vec<[f64; 2]> {
     let s = settings();
     let (spacing, gap) = (s.spacing, s.set_spacing);
     drop(s);
     let d = [second[0] - first[0], second[1] - first[1]];
     let len = d[0].hypot(d[1]);
-    let u = if len > 1e-12 { [d[0] / len, d[1] / len] } else { [0.0, -1.0] };
+    let u = if len > 1e-12 {
+        [d[0] / len, d[1] / len]
+    } else {
+        [0.0, -1.0]
+    };
     let project = |p: [f64; 2]| {
         let t = (p[0] - first[0]) * u[0] + (p[1] - first[1]) * u[1];
         [first[0] + u[0] * t, first[1] + u[1] * t]
@@ -1271,7 +1316,11 @@ pub fn align_positions(anchors: &[([f64; 2], f64, f64)], first: [f64; 2], second
         Spacing::Distribute => {
             let n = order.len();
             for (rank, &k) in order.iter().enumerate() {
-                let t = if n > 1 { rank as f64 / (n - 1) as f64 } else { 0.0 };
+                let t = if n > 1 {
+                    rank as f64 / (n - 1) as f64
+                } else {
+                    0.0
+                };
                 out[k] = [first[0] + d[0] * t, first[1] + d[1] * t];
             }
         }
@@ -1283,7 +1332,11 @@ pub fn align_positions(anchors: &[([f64; 2], f64, f64)], first: [f64; 2], second
             for &k in &order {
                 out[k] = at;
                 let (_, w, h) = anchors[k];
-                let step = if vertical { (h + gap) / u[1].abs() } else { (w + gap) / u[0].abs() };
+                let step = if vertical {
+                    (h + gap) / u[1].abs()
+                } else {
+                    (w + gap) / u[0].abs()
+                };
                 at = [at[0] + u[0] * step, at[1] + u[1] * step];
             }
         }

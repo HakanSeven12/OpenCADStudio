@@ -87,7 +87,10 @@ fn open_apply_switch_and_close_keep_the_style_exact() {
     assert_eq!(stored(&app, "Exact"), Some(expected));
     // Not only the style: nothing in the drawing changed.
     assert!(app.tabs[i].scene.document == before, "the drawing changed");
-    assert!(!app.tabs[i].dirty, "an untouched Apply must not dirty the tab");
+    assert!(
+        !app.tabs[i].dirty,
+        "an untouched Apply must not dirty the tab"
+    );
     assert_eq!(app.tabs[i].history.undo_stack.len(), depth);
 }
 
@@ -168,7 +171,10 @@ fn rename_start_keeps_the_typed_value() {
         field: "height",
         value: "5".to_string(),
     });
-    let _ = app.update(Message::StyleRenameStart(StyleKind::Text, "Exact".to_string()));
+    let _ = app.update(Message::StyleRenameStart(
+        StyleKind::Text,
+        "Exact".to_string(),
+    ));
     assert_eq!(app.textstyle_draft.height.text, "5.0000");
 }
 

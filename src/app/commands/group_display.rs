@@ -21,8 +21,11 @@ impl OpenCADStudio {
     /// selection is next made, as in the reference.
     pub(super) fn group_display_setvar(&mut self, value: Option<&str>) {
         let ask = |app: &mut Self| {
-            app.command_line.push_output(&crate::ui::command_line::value_prompt("GROUPDISPLAYMODE", &group_display_mode()
-            ));
+            app.command_line
+                .push_output(&crate::ui::command_line::value_prompt(
+                    "GROUPDISPLAYMODE",
+                    &group_display_mode(),
+                ));
             app.pending_setvar = Some("GROUPDISPLAYMODE".to_string());
         };
         let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
@@ -63,7 +66,10 @@ impl OpenCADStudio {
         };
         // A larger whole number keeps its low 32 bits, as the reference does
         // (4294967296 → 0, 99999999999 → 1215752191).
-        let wrapped = value.parse::<u128>().ok().map(|v| (v % (1u128 << 32)) as u32);
+        let wrapped = value
+            .parse::<u128>()
+            .ok()
+            .map(|v| (v % (1u128 << 32)) as u32);
         match wrapped.ok_or(()) {
             Ok(mode) => {
                 if mode != match_mode() {

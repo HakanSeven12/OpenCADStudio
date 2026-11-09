@@ -7,8 +7,8 @@ use crate::modules::annotate::field_cmd::{
     FieldObjectPickCommand, FieldPlaceCommand, FieldTablePickCommand,
 };
 use crate::ui::window::field_dialog::{
-    fields_of, nav_props, object_properties, typed_object_ids, FieldDialogMsg, FieldDialogState, FieldTarget,
-    DATE_FORMATS, NAMED_TYPES,
+    fields_of, nav_props, object_properties, typed_object_ids, FieldDialogMsg, FieldDialogState,
+    FieldTarget, DATE_FORMATS, NAMED_TYPES,
 };
 use iced::Task;
 
@@ -46,8 +46,7 @@ impl OpenCADStudio {
                     Some(document::EntityType::Text(_) | document::EntityType::MText(_))
                 ) {
                     self.command_line.push_error(
-                        crate::t!("-FIELD: the handle must name a Text or MText object.")
-                            .as_ref(),
+                        crate::t!("-FIELD: the handle must name a Text or MText object.").as_ref(),
                     );
                     return Some(Task::none());
                 }
@@ -79,10 +78,8 @@ impl OpenCADStudio {
                     "CODE" if !tail.is_empty() => tail.trim_matches('"').to_string(),
                     _ => {
                         self.command_line.push_error(
-                            crate::t!(
-                                "-FIELD: use FILENAME, DATE <format> or CODE <expression>."
-                            )
-                            .as_ref(),
+                            crate::t!("-FIELD: use FILENAME, DATE <format> or CODE <expression>.")
+                                .as_ref(),
                         );
                         return Some(Task::none());
                     }
@@ -118,7 +115,10 @@ impl OpenCADStudio {
                 let current = crate::entities::field::fieldeval(&self.tabs[i].scene.document);
                 let ask = |app: &mut Self| {
                     app.command_line
-                        .push_output(&crate::ui::command_line::value_prompt("FIELDEVAL", &current));
+                        .push_output(&crate::ui::command_line::value_prompt(
+                            "FIELDEVAL",
+                            &current,
+                        ));
                     app.pending_setvar = Some("FIELDEVAL".into());
                 };
                 match value.parse::<i32>() {
@@ -286,7 +286,9 @@ impl OpenCADStudio {
         let document = &self.tabs[i].scene.document;
         if let Some(state) = self.field_dialog.as_mut() {
             let property = state.seed_from_code(&code, &objects);
-            let object = objects.first().and_then(|handle| document.get_entity(*handle));
+            let object = objects
+                .first()
+                .and_then(|handle| document.get_entity(*handle));
             if let (Some(property), Some(entity)) = (property, object) {
                 let props = object_properties(entity);
                 state.object = Some((
@@ -814,7 +816,9 @@ mod tests {
         square.is_closed = true;
         let document = &mut app.tabs[i].scene.document;
         let polyline = document.add_entity(EntityType::LwPolyline(square)).unwrap();
-        let text = document.add_entity(EntityType::MText(Box::new(MText::new()))).unwrap();
+        let text = document
+            .add_entity(EntityType::MText(Box::new(MText::new())))
+            .unwrap();
         crate::entities::field::set_text_field(
             document,
             text,
@@ -882,7 +886,10 @@ mod tests {
     }
 
     /// A text showing `code` for `object`, opened in the Field dialog.
-    fn editing(code: &str, object: EntityType) -> (OpenCADStudio, document::Handle, document::Handle) {
+    fn editing(
+        code: &str,
+        object: EntityType,
+    ) -> (OpenCADStudio, document::Handle, document::Handle) {
         let mut app = OpenCADStudio::new_for_test();
         app.automation_op(r#"{"op":"new"}"#);
         let i = app.active_tab;
@@ -996,7 +1003,10 @@ mod tests {
     }
 
     fn area_operand(handle: document::Handle) -> String {
-        format!("%<\\AcObjProp Object(%<\\_ObjId {:X}>%).Area>%", handle.value())
+        format!(
+            "%<\\AcObjProp Object(%<\\_ObjId {:X}>%).Area>%",
+            handle.value()
+        )
     }
 
     /// A new text's Field dialog on the Formula field, with `formula` typed.
@@ -1013,7 +1023,11 @@ mod tests {
     #[test]
     fn insert_field_adds_the_picked_field_to_the_formula() {
         let (mut app, i) = formula_dialog("2*");
-        let room = app.tabs[i].scene.document.add_entity(rectangle(2.0, 2.0)).unwrap();
+        let room = app.tabs[i]
+            .scene
+            .document
+            .add_entity(rectangle(2.0, 2.0))
+            .unwrap();
 
         let _ = app.on_field_dialog(FieldDialogMsg::InsertField);
         let operand = app.field_dialog.as_ref().unwrap();
@@ -1037,7 +1051,10 @@ mod tests {
         app.close_field_dialog();
 
         let formula = app.field_dialog.as_ref().expect("the formula comes back");
-        assert_eq!((formula.target, formula.formula.as_str()), (FieldTarget::NewText, "2*"));
+        assert_eq!(
+            (formula.target, formula.formula.as_str()),
+            (FieldTarget::NewText, "2*")
+        );
         assert_eq!(app.active_modal, Some(crate::app::ModalKind::Field));
     }
 
@@ -1051,7 +1068,9 @@ mod tests {
             document.add_entity(rectangle(2.0, 2.0)).unwrap(),
             document.add_entity(rectangle(1.0, 3.0)).unwrap(),
         );
-        let text = document.add_entity(EntityType::MText(Box::new(MText::new()))).unwrap();
+        let text = document
+            .add_entity(EntityType::MText(Box::new(MText::new())))
+            .unwrap();
         let code = "\\AcExpr (%<\\AcObjProp Object(%<\\_ObjIdx 0>%).Area>%+\
                     %<\\AcObjProp Object(%<\\_ObjIdx 1>%).Area>%)";
         crate::entities::field::set_text_field(
@@ -1071,7 +1090,10 @@ mod tests {
         assert_eq!(state.preview, "7.000000");
 
         let _ = app.on_field_dialog(FieldDialogMsg::Ok);
-        assert_eq!(written(&app, text), (code.to_string(), "7.000000".to_string()));
+        assert_eq!(
+            written(&app, text),
+            (code.to_string(), "7.000000".to_string())
+        );
     }
 
     #[test]

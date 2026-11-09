@@ -846,7 +846,10 @@ impl Grippable for Surface {
             return;
         }
         if let GripApply::Translate(delta) = apply {
-            translate_surface(self, document::types::Vector3::new(delta.x, delta.y, delta.z));
+            translate_surface(
+                self,
+                document::types::Vector3::new(delta.x, delta.y, delta.z),
+            );
         }
     }
 }

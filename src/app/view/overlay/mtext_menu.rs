@@ -85,11 +85,7 @@ fn mark_cell(mark: Mark) -> Element<'static, Message> {
 }
 
 /// A menu row: check/icon column, then the label.
-fn row_button(
-    mark: impl Into<Mark>,
-    name: String,
-    on_press: Message,
-) -> Element<'static, Message> {
+fn row_button(mark: impl Into<Mark>, name: String, on_press: Message) -> Element<'static, Message> {
     button(
         row![
             mark_cell(mark.into()),
@@ -603,13 +599,7 @@ fn symbols_panel() -> Element<'static, Message> {
         } else {
             cells.remove(0)
         };
-        panel = panel.push(
-            row![
-                container(left).width(Fill),
-                container(right).width(Fill)
-            ]
-            .into(),
-        );
+        panel = panel.push(row![container(left).width(Fill), container(right).width(Fill)].into());
     }
     panel.build()
 }
@@ -728,20 +718,13 @@ fn fraction_panel(ed: &MTextEditorState) -> Element<'static, Message> {
 }
 
 /// A row that cannot act here, with the reason as its hint.
-fn inert(
-    mark: impl Into<Mark>,
-    name: String,
-    reason: String,
-) -> Element<'static, Message> {
+fn inert(mark: impl Into<Mark>, name: String, reason: String) -> Element<'static, Message> {
     iced::widget::tooltip(
         button(
-            row![
-                mark_cell(mark.into()),
-                text(name).size(11).width(Fill),
-            ]
-            .spacing(2)
-            .align_y(iced::Alignment::Center)
-            .height(Fill),
+            row![mark_cell(mark.into()), text(name).size(11).width(Fill),]
+                .spacing(2)
+                .align_y(iced::Alignment::Center)
+                .height(Fill),
         )
         .padding([0, 6])
         .width(Fill)

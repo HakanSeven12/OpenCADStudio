@@ -938,7 +938,8 @@ impl PropertyEditable for AttributeDefinition {
                 // The text stays where it is: the baseline start is kept and
                 // the alignment point moves to the new anchor.
                 if !is_two_point(self) {
-                    let (dx, dy) = justify_offset(&definition_run(self)).map_or((0.0, 0.0), |o| rotate(self, o));
+                    let (dx, dy) = justify_offset(&definition_run(self))
+                        .map_or((0.0, 0.0), |o| rotate(self, o));
                     let s = self.insertion_point;
                     self.alignment_point = Vector3::new(s.x + dx, s.y + dy, s.z);
                     return;
@@ -947,7 +948,8 @@ impl PropertyEditable for AttributeDefinition {
                     .hypot(self.alignment_point.y - self.insertion_point.y);
                 if !was_two_point || span < 1.0e-9 {
                     // A baseline as long as the tag.
-                    let length = justify_offset(&definition_run(self)).map_or(self.height, |(advance, _)| advance);
+                    let length = justify_offset(&definition_run(self))
+                        .map_or(self.height, |(advance, _)| advance);
                     let (sin, cos) = self.rotation.sin_cos();
                     self.alignment_point = Vector3::new(
                         self.insertion_point.x + cos * length,

@@ -78,7 +78,9 @@ impl OpenCADStudio {
             .next()
             .map(str::trim)
             .filter(|value| !value.is_empty());
-        if name == "BCONSTATUSMODE" { return Some(self.dispatch_constraint_status_mode(i, value)); }
+        if name == "BCONSTATUSMODE" {
+            return Some(self.dispatch_constraint_status_mode(i, value));
+        }
         if let Some(current) = self.block_editor_preferences.display_variable(&name) {
             if let Some(value) = value {
                 match self
@@ -89,7 +91,9 @@ impl OpenCADStudio {
                         if self.pending_setvar.as_deref() == Some(name.as_str()) {
                             self.pending_setvar = None;
                         }
-                        if name == "BACTIONBARMODE" { self.refresh_properties(); }
+                        if name == "BACTIONBARMODE" {
+                            self.refresh_properties();
+                        }
                         self.persist_settings_if_changed();
                         self.command_line.push_output(&format!(
                             "{name} = {}",

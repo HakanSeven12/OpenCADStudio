@@ -284,8 +284,7 @@ impl CadCommand for ArcLengthDimensionCommand {
         }
         match self.step {
             Step::SelectObject => {
-                crate::t!("DIMARC  Select arc or polyline arc segment:")
-                    .into_owned()
+                crate::t!("DIMARC  Select arc or polyline arc segment:").into_owned()
             }
             Step::DimLine(selection) => {
                 let leader_option = if selection.sweep() > std::f64::consts::FRAC_PI_2 {

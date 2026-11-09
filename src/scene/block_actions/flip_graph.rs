@@ -191,7 +191,11 @@ impl Plan {
             return None;
         }
         let mut order = chain_order(doc, def, &all).ok()?;
-        let flips: Vec<_> = all.iter().filter(|entry| entry.2 == Kind::Flip).map(|entry| entry.0).collect();
+        let flips: Vec<_> = all
+            .iter()
+            .filter(|entry| entry.2 == Kind::Flip)
+            .map(|entry| entry.0)
+            .collect();
         order_linked_scales(doc, def, &all, &flips, &mut order);
         let mut steps = Vec::new();
         for index in order.iter().copied() {

@@ -2,8 +2,8 @@ use super::*;
 
 use kernel::geom2d::{
     bounded_faces, closest_point, contains, distance_to, gap_bridges, intersect,
-    ring_nesting_depths, segment_crossing, signed_area, triangulate, Curve, Line,
-    SegmentCrossing, Tolerance, Transform as CurveTransform,
+    ring_nesting_depths, segment_crossing, signed_area, triangulate, Curve, Line, SegmentCrossing,
+    Tolerance, Transform as CurveTransform,
 };
 
 use crate::command::WorkingPlane;
@@ -441,7 +441,9 @@ fn exact_boundary_edge(
     next: [f64; 2],
     whole_curve: bool,
 ) -> document::entities::BoundaryEdge {
-    use document::entities::{BoundaryEdge, CircularArcEdge, EllipticArcEdge, LineEdge, SplineEdge};
+    use document::entities::{
+        BoundaryEdge, CircularArcEdge, EllipticArcEdge, LineEdge, SplineEdge,
+    };
     use document::types::{Vector2, Vector3};
 
     let Some(curve) = curve else {
@@ -612,9 +614,15 @@ pub(crate) fn new_hatch_paths(
         Some(sources.get(first)?.curves.first()?.point_at(0.0))
     };
     let bounds = |ring: &Vec<[f64; 2]>| {
-        ring.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
-            [b[0].min(p[0]), b[1].min(p[1]), b[2].max(p[0]), b[3].max(p[1])]
-        })
+        ring.iter()
+            .fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, p| {
+                [
+                    b[0].min(p[0]),
+                    b[1].min(p[1]),
+                    b[2].max(p[0]),
+                    b[3].max(p[1]),
+                ]
+            })
     };
     let boxes: Vec<[f64; 4]> = rings.iter().map(bounds).collect();
     let area = |b: &[f64; 4]| (b[2] - b[0]) * (b[3] - b[1]);
@@ -647,9 +655,12 @@ pub(crate) fn new_hatch_paths(
         let holder = container(index);
         let shifted = depth > 0
             && source_of(index) == HatchLoopSource::Selected
-            && holder.and_then(circle_centre).zip(start_point(index)).is_some_and(
-                |(centre, start)| (start[1] - centre[1]).abs() <= 1.0e-9 * centre[1].abs().max(1.0),
-            );
+            && holder
+                .and_then(circle_centre)
+                .zip(start_point(index))
+                .is_some_and(|(centre, start)| {
+                    (start[1] - centre[1]).abs() <= 1.0e-9 * centre[1].abs().max(1.0)
+                });
         if shifted {
             level[index] = depth - 1;
             selected_bits[index] = Some(base(depth - 1) | BoundaryPathFlags::OUTERMOST.bits());
@@ -884,7 +895,9 @@ pub(crate) fn boundary_entities(
             polyline.is_closed = true;
             polyline.vertices = points
                 .into_iter()
-                .map(|[x, y]| document::entities::LwVertex::new(document::types::Vector2::new(x, y)))
+                .map(|[x, y]| {
+                    document::entities::LwVertex::new(document::types::Vector2::new(x, y))
+                })
                 .collect();
             Some(plane.place_entity(document::EntityType::LwPolyline(polyline)))
         })
@@ -1023,8 +1036,9 @@ fn boundary_polyline(
         .iter()
         .enumerate()
         .map(|(index, point)| {
-            let mut vertex =
-                document::entities::LwVertex::new(document::types::Vector2::new(point[0], point[1]));
+            let mut vertex = document::entities::LwVertex::new(document::types::Vector2::new(
+                point[0], point[1],
+            ));
             vertex.bulge = edge_curves
                 .get(index)
                 .and_then(|curve| curve.as_ref())
@@ -1114,7 +1128,10 @@ impl Scene {
             let Some(EntityType::Hatch(hatch)) = self.document.get_entity_mut(pair[1]) else {
                 continue;
             };
-            if hatch.is_associative && hatch.paths.len() == 1 && hatch.paths[0].boundary_handles.is_empty() {
+            if hatch.is_associative
+                && hatch.paths.len() == 1
+                && hatch.paths[0].boundary_handles.is_empty()
+            {
                 hatch.paths[0].boundary_handles = vec![pair[0]];
                 self.associative_hatch_source_cache.borrow_mut().take();
             }
@@ -1501,10 +1518,14 @@ impl Scene {
         }
         let (min_x, max_x) = corners
             .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c.x), hi.max(c.x)));
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
+                (lo.min(c.x), hi.max(c.x))
+            });
         let (min_y, max_y) = corners
             .iter()
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| (lo.min(c.y), hi.max(c.y)));
+            .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), c| {
+                (lo.min(c.y), hi.max(c.y))
+            });
         let on_screen = |line: &Line| {
             line.start[0].max(line.end[0]) >= min_x
                 && line.start[0].min(line.end[0]) <= max_x
@@ -1790,14 +1811,17 @@ pub(crate) fn boundary_faces_around(
             segments_bounds(&source.segments, tolerance).map(|(min, max)| (min, max, source))
         })
         .collect();
-    let Some((all_min, all_max)) = boxes.iter().map(|&(min, max, _)| (min, max)).reduce(
-        |(a_min, a_max), (b_min, b_max)| {
-            (
-                [a_min[0].min(b_min[0]), a_min[1].min(b_min[1])],
-                [a_max[0].max(b_max[0]), a_max[1].max(b_max[1])],
-            )
-        },
-    ) else {
+    let Some((all_min, all_max)) =
+        boxes
+            .iter()
+            .map(|&(min, max, _)| (min, max))
+            .reduce(|(a_min, a_max), (b_min, b_max)| {
+                (
+                    [a_min[0].min(b_min[0]), a_min[1].min(b_min[1])],
+                    [a_max[0].max(b_max[0]), a_max[1].max(b_max[1])],
+                )
+            })
+    else {
         return Vec::new();
     };
     let nearest = boxes
@@ -1883,7 +1907,10 @@ mod boundary_xline_tests {
         ];
         let [sx, sy] = hatch_path_seed(&path).expect("a seed");
         assert!(sx < 50.0 && (0.0..30.0).contains(&sy));
-        assert!((sx - 25.0).hypot(sy - 15.0) > 20.0, "seed {sx},{sy} is inside the circle");
+        assert!(
+            (sx - 25.0).hypot(sy - 15.0) > 20.0,
+            "seed {sx},{sy} is inside the circle"
+        );
     }
 
     #[test]
@@ -2055,20 +2082,35 @@ mod boundary_xline_tests {
                 .count()
         };
         let all = boundary_faces(&sources, tolerance);
-        for point in [[51.0, 51.0], [55.0, 55.0], [5.0, 115.0], [119.0, 1.0], [200.0, 5.0]] {
+        for point in [
+            [51.0, 51.0],
+            [55.0, 55.0],
+            [5.0, 115.0],
+            [119.0, 1.0],
+            [200.0, 5.0],
+        ] {
             let near = boundary_faces_around(&sources, point, tolerance);
             assert_eq!(innermost(&near, point), innermost(&all, point), "{point:?}");
             assert!(near.len() <= all.len());
         }
         let room = boundary_faces_around(&sources, [51.0, 51.0], tolerance);
         assert_eq!(islands(&room), 1, "the island in the picked room is kept");
-        assert!(room.len() < all.len() / 4, "only the neighbourhood is built");
+        assert!(
+            room.len() < all.len() / 4,
+            "only the neighbourhood is built"
+        );
     }
 
     #[test]
     fn gap_tolerance_closes_a_corner_gap_that_fits() {
         // A square whose right side stops 0.5 short of the bottom one.
-        let corners = [[0.0, 0.0], [10.0, 0.0], [10.0, 0.5], [10.0, 10.0], [0.0, 10.0]];
+        let corners = [
+            [0.0, 0.0],
+            [10.0, 0.0],
+            [10.0, 0.5],
+            [10.0, 10.0],
+            [0.0, 10.0],
+        ];
         let sources: rustc_hash::FxHashMap<_, _> = [(0, 1), (2, 3), (3, 4), (4, 0)]
             .into_iter()
             .enumerate()

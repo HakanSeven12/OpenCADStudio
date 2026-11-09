@@ -13,7 +13,9 @@ pub(crate) fn control_points(e: &EntityType) -> Result<Vec<DVec3>, &'static str>
             vec![v(a.start_point_wcs()), v(a.end_point_wcs())]
         }
         EntityType::Circle(c) => {
-            vec![v(document::types::Matrix3::arbitrary_axis(c.normal) * c.center)]
+            vec![v(
+                document::types::Matrix3::arbitrary_axis(c.normal) * c.center
+            )]
         }
         EntityType::Ellipse(e) => vec![v(e.center)],
         EntityType::Point(p) => vec![v(p.location)],
@@ -217,7 +219,11 @@ pub(crate) fn validate_options(a: &BlockStretchAction) -> Result<(), &'static st
     Ok(())
 }
 
-pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchAction) -> Result<(), &'static str> {
+pub(crate) fn validate(
+    doc: &Document,
+    definition: Handle,
+    a: &BlockStretchAction,
+) -> Result<(), &'static str> {
     validate_options(a)?;
     basepoint_target(doc, definition, a)?;
     if a.points.len() < 2
@@ -252,7 +258,13 @@ pub(crate) fn validate(doc: &Document, definition: Handle, a: &BlockStretchActio
         }
     }
     // Selected objects without a partial vertex binding move as a whole.
-    for h in super::targets::geometry(doc, definition, Kind::Stretch, a.connections[0].code, &a.action.dependencies)? {
+    for h in super::targets::geometry(
+        doc,
+        definition,
+        Kind::Stretch,
+        a.connections[0].code,
+        &a.action.dependencies,
+    )? {
         control_points(
             doc.get_entity(h)
                 .ok_or("A Stretch target is unavailable.")?,
@@ -274,7 +286,9 @@ fn basepoint_target(
     let node = basepoint.parameter.parameter.element.eval.node_id;
     let mut bindings = action.codes.iter().filter(|binding| binding.code == node);
     if !action.action.action_ids.contains(&node)
-        || !bindings.next().is_some_and(|binding| binding.indexes == [0])
+        || !bindings
+            .next()
+            .is_some_and(|binding| binding.indexes == [0])
         || bindings.next().is_some()
     {
         return Err("The Stretch action has an invalid Base Point binding.");
@@ -283,14 +297,23 @@ fn basepoint_target(
 }
 
 pub(crate) fn polar_key_point(a: &BlockPolarStretchAction) -> Result<XyKeyPoint, &'static str> {
-    let key = match [a.connections[0].name.as_str(), a.connections[1].name.as_str()] {
+    let key = match [
+        a.connections[0].name.as_str(),
+        a.connections[1].name.as_str(),
+    ] {
         ["BaseXDelta", "BaseYDelta"] => XyKeyPoint::Base,
         ["EndXDelta", "EndYDelta"] => XyKeyPoint::End,
         _ => return Err("This Polar Stretch action uses unsupported key-point connections."),
     };
     let connection_code = a.connections[0].code;
     if a.connections.iter().any(|c| c.code != connection_code)
-        || a.connections[2..].iter().map(|c| c.name.as_str()).ne(["Base", "End", "UpdatedBase", "UpdatedEnd"]) {
+        || a.connections[2..].iter().map(|c| c.name.as_str()).ne([
+            "Base",
+            "End",
+            "UpdatedBase",
+            "UpdatedEnd",
+        ])
+    {
         return Err("This Polar Stretch action uses unsupported frame connections.");
     }
     Ok(key)
@@ -312,13 +335,17 @@ pub(crate) fn validate_polar(
     {
         return Err("This Polar Stretch action uses options not supported yet.");
     }
-    let geometric = super::targets::geometry(doc, definition, Kind::PolarStretch, a.connections[0].code, &a.action.dependencies)?;
+    let geometric = super::targets::geometry(
+        doc,
+        definition,
+        Kind::PolarStretch,
+        a.connections[0].code,
+        &a.action.dependencies,
+    )?;
     let mut handles = a.handles.clone();
     handles.sort();
     handles.dedup();
-    if handles.len() != a.handles.len()
-        || handles.iter().any(|h| !geometric.contains(h))
-    {
+    if handles.len() != a.handles.len() || handles.iter().any(|h| !geometric.contains(h)) {
         return Err("The Polar Stretch action has invalid target bindings.");
     }
     let mut seen = std::collections::BTreeSet::new();
@@ -504,9 +531,17 @@ pub(crate) fn apply_polar_frame(
         XyKeyPoint::Base => (old_end, old_base, new_end, new_base),
         _ => unreachable!(),
     };
-    apply_polar(entity, action, pivot, old_tip, pivot + (new_tip - new_pivot))?;
-    super::super::view::dispatch::apply_transform(entity,
-        &crate::command::EntityTransform::Translate(new_pivot - pivot));
+    apply_polar(
+        entity,
+        action,
+        pivot,
+        old_tip,
+        pivot + (new_tip - new_pivot),
+    )?;
+    super::super::view::dispatch::apply_transform(
+        entity,
+        &crate::command::EntityTransform::Translate(new_pivot - pivot),
+    );
     Ok(())
 }
 

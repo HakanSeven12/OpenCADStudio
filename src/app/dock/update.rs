@@ -824,15 +824,17 @@ impl OpenCADStudio {
             // comes back when the pick ends or is cancelled.
             PanelId::Laywalk => {
                 let tab = &self.tabs[self.active_tab];
-                tab.layer_walk.is_some()
-                    && !(tab.layer_walk_picking && tab.active_cmd.is_some())
+                tab.layer_walk.is_some() && !(tab.layer_walk_picking && tab.active_cmd.is_some())
             }
             PanelId::QuickCalc => self.quick_calc.show,
             PanelId::CommandHistory => self.show_command_history,
             PanelId::GraphicAttributes => self.show_graphic_attributes,
             PanelId::Plugin(num) => {
                 if let Some(panel_id) = self.plugin_panel_by_num.get(&num) {
-                    self.plugin_panels.get(panel_id).map(|p| p.visible).unwrap_or(false)
+                    self.plugin_panels
+                        .get(panel_id)
+                        .map(|p| p.visible)
+                        .unwrap_or(false)
                 } else {
                     false
                 }

@@ -70,7 +70,11 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
         .iter()
         .enumerate()
         .map(|(index, kind)| {
-            row_button(kind_label(kind), index == state.kind, RenameMsg::Kind(index))
+            row_button(
+                kind_label(kind),
+                index == state.kind,
+                RenameMsg::Kind(index),
+            )
         })
         .collect();
     let items = state
@@ -91,9 +95,12 @@ pub(crate) fn view(state: &State, sizing: crate::ui::modal::ModalSizing) -> Elem
         ]
         .spacing(4)
         .width(Length::FillPortion(2)),
-        column![text(crate::tr!("rename-dialog", "items")).size(12), list(items)]
-            .spacing(4)
-            .width(Length::FillPortion(3)),
+        column![
+            text(crate::tr!("rename-dialog", "items")).size(12),
+            list(items)
+        ]
+        .spacing(4)
+        .width(Length::FillPortion(3)),
     ]
     .spacing(12)
     .height(Fill);

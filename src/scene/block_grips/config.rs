@@ -1184,8 +1184,6 @@ mod tests {
         }
     }
 
-
-
     #[test]
     fn block_grip_counts_reject_malformed_and_shared_dependencies_atomically() {
         let (doc, definition, parameter) = fixture(1);

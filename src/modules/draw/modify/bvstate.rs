@@ -160,9 +160,7 @@ impl CadCommand for BvStateCommand {
                     "S" | "SHOW" => Self::done(&["NEW", name, "SHOW"]),
                     "H" | "HIDE" => Self::done(&["NEW", name, "HIDE"]),
                     "" | "K" | "KEEP" => Self::done(&["NEW", name]),
-                    _ => CmdResult::ReportError(
-                        crate::t!("Invalid option keyword.").into_owned(),
-                    ),
+                    _ => CmdResult::ReportError(crate::t!("Invalid option keyword.").into_owned()),
                 })
             }
             Step::SetName => {

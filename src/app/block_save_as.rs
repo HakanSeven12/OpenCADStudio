@@ -417,7 +417,8 @@ pub(super) fn copy_definition(
                     .get(&parameter.owner)
                     .copied()
                     .unwrap_or(parameter.owner);
-                if let document::objects::BlockEvalValue::Handle(handle) = &mut parameter.eval_value {
+                if let document::objects::BlockEvalValue::Handle(handle) = &mut parameter.eval_value
+                {
                     *handle = handles.get(handle).copied().unwrap_or(*handle);
                 }
                 for handle in

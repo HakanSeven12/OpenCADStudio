@@ -1771,9 +1771,9 @@ impl ArcCommand {
         if r < 1e-9 || len <= 0.0 || len >= TAU * r {
             return None;
         }
-        let toward = self
-            .cursor
-            .map(|cursor| (angle_xy(c, cursor, self.plane) - angle_xy(c, s, self.plane)).rem_euclid(TAU));
+        let toward = self.cursor.map(|cursor| {
+            (angle_xy(c, cursor, self.plane) - angle_xy(c, s, self.plane)).rem_euclid(TAU)
+        });
         let ccw = match toward {
             Some(span) if span > 1e-9 => span <= std::f64::consts::PI,
             _ => !self.cw,

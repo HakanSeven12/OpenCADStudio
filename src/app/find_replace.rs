@@ -394,25 +394,29 @@ fn replace_match_text(
 fn describe_match(document: &document::Document, key: FindMatchKey) -> FindResult {
     let (text, kind, layer) = match key {
         FindMatchKey::Entity(handle) | FindMatchKey::BlockEntityInInsert { entity: handle, .. } => {
-            document.get_entity(handle).map_or_else(Default::default, |entity| {
-                (
-                    entity.text_content().unwrap_or_default(),
-                    crate::entities::traits::entity_type_name(entity).to_string(),
-                    entity.common().layer.clone(),
-                )
-            })
+            document
+                .get_entity(handle)
+                .map_or_else(Default::default, |entity| {
+                    (
+                        entity.text_content().unwrap_or_default(),
+                        crate::entities::traits::entity_type_name(entity).to_string(),
+                        entity.common().layer.clone(),
+                    )
+                })
         }
         FindMatchKey::InsertAttribute { insert, index } => match document.get_entity(insert) {
-            Some(EntityType::Insert(entity)) => entity.attributes.get(index).map_or_else(
-                Default::default,
-                |attribute| {
-                    (
-                        attribute.get_value().to_string(),
-                        "Attribute".to_string(),
-                        attribute.common.layer.clone(),
-                    )
-                },
-            ),
+            Some(EntityType::Insert(entity)) => {
+                entity
+                    .attributes
+                    .get(index)
+                    .map_or_else(Default::default, |attribute| {
+                        (
+                            attribute.get_value().to_string(),
+                            "Attribute".to_string(),
+                            attribute.common.layer.clone(),
+                        )
+                    })
+            }
             _ => Default::default(),
         },
     };

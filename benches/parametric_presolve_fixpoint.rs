@@ -123,7 +123,9 @@ fn main() {
         }
         let per_call = started.elapsed().as_secs_f64() * 1000.0 / ITERATIONS as f64;
         best = best.min(per_call);
-        println!("parametric_presolve_fixpoint: run {run} {ITERATIONS} calls: {per_call:.3} ms/call");
+        println!(
+            "parametric_presolve_fixpoint: run {run} {ITERATIONS} calls: {per_call:.3} ms/call"
+        );
     }
 
     // The grip edit production applies before a moving preview solve.
@@ -131,7 +133,11 @@ fn main() {
         line.end.x += 1.0;
     }
     let moved = solve(&scene);
-    assert_eq!(moved.len(), LINES - 1, "every other line follows the length");
+    assert_eq!(
+        moved.len(),
+        LINES - 1,
+        "every other line follows the length"
+    );
     println!(
         "parametric_presolve_fixpoint: {LINES} lines, {} constraints, moved-grip digest {:#018x}; best {best:.3} ms/call",
         2 * (LINES - 1) + 1,

@@ -327,12 +327,14 @@ fn format_attribute_with(
     arguments: &[(&str, &str)],
 ) -> Option<String> {
     let arguments = arguments.iter().copied().collect();
-    loader.with_fluent_message_and_bundle(message, |message, bundle| {
-        let pattern = message.get_attribute(attribute)?;
-        let mut errors = Vec::new();
-        let rendered = bundle.format_pattern(pattern.value(), Some(&arguments), &mut errors);
-        errors.is_empty().then(|| rendered.into_owned())
-    }).flatten()
+    loader
+        .with_fluent_message_and_bundle(message, |message, bundle| {
+            let pattern = message.get_attribute(attribute)?;
+            let mut errors = Vec::new();
+            let rendered = bundle.format_pattern(pattern.value(), Some(&arguments), &mut errors);
+            errors.is_empty().then(|| rendered.into_owned())
+        })
+        .flatten()
 }
 
 /// Translate a catalog message and replace the named values used by legacy
@@ -579,8 +581,13 @@ mod tests {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).unwrap();
             let created = loader.get_attr("block-action-targets", "create-prompt");
-            assert!(created.contains("Parameter") && created.contains("\"…\""), "{language:?}: {created}");
-            assert!(!loader.get_attr("block-action-targets", "create-stale").is_empty());
+            assert!(
+                created.contains("Parameter") && created.contains("\"…\""),
+                "{language:?}: {created}"
+            );
+            assert!(!loader
+                .get_attr("block-action-targets", "create-stale")
+                .is_empty());
             let prompt = loader.get_attr("block-action-targets", "prompt");
             assert!(prompt.contains("Parameter"), "{language:?}: {prompt}");
             assert!(prompt.contains("\"…\""), "{language:?}: {prompt}");
@@ -589,25 +596,36 @@ mod tests {
             let flip = loader.get_attr("block-history-kinds", "flip");
             for rendered in [&prompt, &created] {
                 assert!(
-                    [&point, &linear, &flip].iter().all(|label| rendered.contains(label.as_str())),
+                    [&point, &linear, &flip]
+                        .iter()
+                        .all(|label| rendered.contains(label.as_str())),
                     "{language:?}: {rendered}"
                 );
             }
-            assert!(!loader.get_attr("block-action-targets", "unique-point").is_empty());
+            assert!(!loader
+                .get_attr("block-action-targets", "unique-point")
+                .is_empty());
             for attribute in ["flip-prompt", "flip-create-prompt"] {
                 let rendered = loader.get_attr("block-action-targets", attribute);
                 assert!(
-                    rendered.contains("Parameter") && rendered.contains(&linear) && rendered.contains(&flip),
+                    rendered.contains("Parameter")
+                        && rendered.contains(&linear)
+                        && rendered.contains(&flip),
                     "{language:?}: {rendered}"
                 );
             }
-            assert!(!loader.get_attr("block-action-targets", "flip-invalid").is_empty());
+            assert!(!loader
+                .get_attr("block-action-targets", "flip-invalid")
+                .is_empty());
         }
     }
 
     #[test]
     fn parameters_manager_footer_formats_both_counts_in_every_locale() {
-        for language in Language::ALL.into_iter().filter(|language| *language != Language::System) {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).unwrap();
             let footer = format_attribute_with(
@@ -615,29 +633,67 @@ mod tests {
                 "parameters-manager",
                 "footer",
                 &[("shown", "7"), ("total", "13")],
-            ).expect("the localized footer must format");
-            assert!(footer.contains('7') && footer.contains("13"), "{language:?}: {footer:?}");
+            )
+            .expect("the localized footer must format");
+            assert!(
+                footer.contains('7') && footer.contains("13"),
+                "{language:?}: {footer:?}"
+            );
         }
     }
 
     #[test]
     fn formatted_history_preserves_authored_values_in_every_locale() {
-        for language in Language::ALL.into_iter().filter(|language| *language != Language::System) {
+        for language in Language::ALL
+            .into_iter()
+            .filter(|language| *language != Language::System)
+        {
             let loader = FluentLanguageLoader::new("opencadstudio", "en-US".parse().unwrap());
             load_language(&loader, language).unwrap();
-            for attribute in ["action", "parameter", "edit-block", "save-block", "delete-block"] {
-                for authored in ["Revert", "  Door { $label } \\ literal __ocs_fmt_0__ \n", "باب — 扉"] {
+            for attribute in [
+                "action",
+                "parameter",
+                "edit-block",
+                "save-block",
+                "delete-block",
+            ] {
+                for authored in [
+                    "Revert",
+                    "  Door { $label } \\ literal __ocs_fmt_0__ \n",
+                    "باب — 扉",
+                ] {
                     let rendered = format_attribute_with(
-                        &loader, "block-formatted-history", attribute, &[("label", authored)],
-                    ).expect("history template must format without errors");
-                    assert!(rendered.contains(authored), "{language:?}/{attribute}: {rendered:?}");
+                        &loader,
+                        "block-formatted-history",
+                        attribute,
+                        &[("label", authored)],
+                    )
+                    .expect("history template must format without errors");
+                    assert!(
+                        rendered.contains(authored),
+                        "{language:?}/{attribute}: {rendered:?}"
+                    );
                 }
             }
-            for source in ["Move", "Scale", "Rotate", "Flip", "Stretch", "Polar Stretch", "Array", "Basepoint", "Lookup"] {
-                let (message, attribute) = catalog_ids(source).expect("kind must have a Fluent key");
+            for source in [
+                "Move",
+                "Scale",
+                "Rotate",
+                "Flip",
+                "Stretch",
+                "Polar Stretch",
+                "Array",
+                "Basepoint",
+                "Lookup",
+            ] {
+                let (message, attribute) =
+                    catalog_ids(source).expect("kind must have a Fluent key");
                 assert!(!loader.get_attr(message, attribute).is_empty());
             }
-            assert!(format_attribute_with(&loader, "block-formatted-history", "edit-block", &[]).is_none());
+            assert!(
+                format_attribute_with(&loader, "block-formatted-history", "edit-block", &[])
+                    .is_none()
+            );
         }
     }
 
@@ -652,7 +708,10 @@ mod tests {
             for (attribute, tokens) in [
                 ("prompt-selection", &["[Convert/Revert/Show/Hide]"][..]),
                 ("prompt-operation", &["[Convert/Revert]", "<Convert>"][..]),
-                ("choose-operation", &["Convert", "Revert", "Show", "Hide"][..]),
+                (
+                    "choose-operation",
+                    &["Convert", "Revert", "Show", "Hide"][..],
+                ),
             ] {
                 let translated = loader.get_attr("block-construction", attribute);
                 for token in tokens {
@@ -1093,11 +1152,16 @@ mod tests {
         load_language(&chinese, Language::ZhCn).expect("Chinese Fluent resources must parse");
         let cache = RefCell::new((0, rustc_hash::FxHashMap::default()));
         let source = "Draw";
-        let english_label = cached_translation_with(&english, &cache, 0, source, "ribbon-tab", "draw");
-        let chinese_label = cached_translation_with(&chinese, &cache, 1, source, "ribbon-tab", "draw");
+        let english_label =
+            cached_translation_with(&english, &cache, 0, source, "ribbon-tab", "draw");
+        let chinese_label =
+            cached_translation_with(&chinese, &cache, 1, source, "ribbon-tab", "draw");
         assert_eq!(english_label, "Draw");
         assert_eq!(chinese_label, chinese.get_attr("ribbon-tab", "draw"));
-        assert_ne!(english_label, chinese_label, "the memo must re-render on a language switch");
+        assert_ne!(
+            english_label, chinese_label,
+            "the memo must re-render on a language switch"
+        );
     }
 
     #[test]

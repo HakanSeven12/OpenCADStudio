@@ -180,9 +180,10 @@ pub fn normalize_to_origin(out: &mut Document) {
     if !(min.x.is_finite() && min.y.is_finite() && min.z.is_finite()) {
         return;
     }
-    let shift = crate::command::EntityTransform::Affine(document::types::Transform::from_translation(
-        document::types::Vector3::new(-min.x, -min.y, -min.z),
-    ));
+    let shift =
+        crate::command::EntityTransform::Affine(document::types::Transform::from_translation(
+            document::types::Vector3::new(-min.x, -min.y, -min.z),
+        ));
     // Only what sits in model space moves; a definition's own entities keep
     // their coordinates and the reference carries them.
     for entity in out.entities_mut() {

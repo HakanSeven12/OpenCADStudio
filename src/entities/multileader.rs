@@ -103,8 +103,8 @@ pub(crate) fn active_vertical_attachment(ml: &MultiLeader) -> TextAttachmentType
 
 use crate::command::EntityTransform;
 use crate::entities::common::{
-    edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row,
-    ro_prop as ro, square_grip, triangle_grip,
+    edit_angle_prop as edit_angle, edit_prop as edit, num_prop as num_row, ro_prop as ro,
+    square_grip, triangle_grip,
 };
 use crate::entities::traits::RenderConvertible;
 use crate::scene::convert::acad_to_render::{RenderEntity, RenderObject};
@@ -291,7 +291,11 @@ fn to_render(ml: &MultiLeader, document: &document::Document) -> Option<RenderEn
         let (elbow_pt, text_edge_pt) = if far_side {
             let d = &root.direction;
             let dl = (d.x * d.x + d.y * d.y).sqrt().max(1e-12);
-            let reach = if dogleg > 0.0 { root.landing_distance.max(0.0) } else { 0.0 };
+            let reach = if dogleg > 0.0 {
+                root.landing_distance.max(0.0)
+            } else {
+                0.0
+            };
             (
                 cp_f,
                 [cp.x + d.x / dl * reach, cp.y + d.y / dl * reach, cp.z],
@@ -647,7 +651,11 @@ pub(crate) fn add_leader_line(ml: &mut MultiLeader, arrow: document::types::Vect
         let span = (far[0] - tl.x) * dx + (far[1] - tl.y) * dy;
         let side = |p: &document::types::Vector3| {
             let along = (p.x - tl.x) * dx + (p.y - tl.y) * dy;
-            if along >= span * 0.5 { 1.0 } else { -1.0 }
+            if along >= span * 0.5 {
+                1.0
+            } else {
+                -1.0
+            }
         };
         let arrow_side = side(&arrow);
         match ml
@@ -660,7 +668,11 @@ pub(crate) fn add_leader_line(ml: &mut MultiLeader, arrow: document::types::Vect
             None => {
                 let landing = ml.context.leader_roots[0].landing_distance;
                 let reach = landing + ml.context.landing_gap.max(0.0);
-                let edge = if arrow_side > 0.0 { span.max(0.0) } else { span.min(0.0) };
+                let edge = if arrow_side > 0.0 {
+                    span.max(0.0)
+                } else {
+                    span.min(0.0)
+                };
                 let along = edge + arrow_side * reach;
                 let template_root = ml.context.leader_roots[0].clone();
                 // Same height across the text as the first root's landing.
@@ -672,7 +684,8 @@ pub(crate) fn add_leader_line(ml: &mut MultiLeader, arrow: document::types::Vect
                     tl.y + dy * along + dx * across,
                     tl.z,
                 );
-                root.direction = document::types::Vector3::new(-arrow_side * dx, -arrow_side * dy, 0.0);
+                root.direction =
+                    document::types::Vector3::new(-arrow_side * dx, -arrow_side * dy, 0.0);
                 root.landing_distance = landing;
                 root.text_attachment_direction = template_root.text_attachment_direction;
                 target = ml.context.leader_roots.len() - 1;
@@ -854,10 +867,7 @@ fn apply_grip(ml: &mut MultiLeader, grip_id: usize, apply: GripApply) {
             };
             let across = text_offset_across(ml, old_elbow, axis);
             set_mleader_text_side(ml, new_sign >= 0.0);
-            set_mleader_text_location(
-                ml,
-                target + axis * (new_sign * (dogleg + gap)) + across,
-            );
+            set_mleader_text_location(ml, target + axis * (new_sign * (dogleg + gap)) + across);
 
             if let Some(root) = ml.context.leader_roots.first_mut() {
                 root.connection_point.x = target.x;
@@ -878,9 +888,7 @@ fn apply_grip(ml: &mut MultiLeader, grip_id: usize, apply: GripApply) {
             let old_end = old_elbow + axis * (old_sign * dogleg);
             let target = match apply {
                 GripApply::Absolute(a) => DVec3::new(a.x as f64, a.y as f64, a.z as f64),
-                GripApply::Translate(d) => {
-                    old_end + DVec3::new(d.x as f64, d.y as f64, d.z as f64)
-                }
+                GripApply::Translate(d) => old_end + DVec3::new(d.x as f64, d.y as f64, d.z as f64),
             };
             let new_length = ((target - old_elbow).dot(axis) * old_sign).max(1.0e-6);
             let across = text_offset_across(ml, old_elbow, axis);
@@ -1999,22 +2007,23 @@ pub(crate) fn block_content_insert(
     // Each attribute definition shows the value the leader stores for it,
     // matched by definition handle, else by position.
     let transform = crate::scene::render_graph::insert_transform(document, &insert);
-    let definitions = record
-        .entity_handles
-        .iter()
-        .filter_map(|handle| match document.get_entity(*handle) {
-            Some(document::EntityType::AttributeDefinition(definition)) => Some(definition),
-            _ => None,
-        });
+    let definitions =
+        record
+            .entity_handles
+            .iter()
+            .filter_map(|handle| match document.get_entity(*handle) {
+                Some(document::EntityType::AttributeDefinition(definition)) => Some(definition),
+                _ => None,
+            });
     for (index, definition) in definitions.enumerate() {
         let value = ml
             .block_attributes
             .iter()
             .find(|a| a.attribute_definition_handle == Some(definition.common.handle))
             .or_else(|| {
-                ml.block_attributes.iter().find(|a| {
-                    a.attribute_definition_handle.is_none() && a.index as usize == index
-                })
+                ml.block_attributes
+                    .iter()
+                    .find(|a| a.attribute_definition_handle.is_none() && a.index as usize == index)
             })
             .map(|a| a.text.clone());
         // A justified definition stores the start of its tag; the value
@@ -2258,8 +2267,9 @@ impl MultiLeaderFrameTess for MultiLeader {
 
         let name = handle.value().to_string();
         let nan = [f32::NAN; 3];
-        let p3 =
-            |v: &document::types::Vector3| -> [f32; 3] { [(v.x) as f32, (v.y) as f32, (v.z) as f32] };
+        let p3 = |v: &document::types::Vector3| -> [f32; 3] {
+            [(v.x) as f32, (v.y) as f32, (v.z) as f32]
+        };
 
         // ── Scaling ──────────────────────────────────────────────────────────────
         // Used only when a context omits an already-resolved content size.
@@ -3230,7 +3240,10 @@ mod tests {
 
         assert_eq!(mask_color(true, false), None, "291 alone draws no fill");
         let stored = mask_color(false, true).expect("292 fills");
-        assert!(stored[..3].iter().all(|c| (c - grey).abs() < 1e-3), "{stored:?}");
+        assert!(
+            stored[..3].iter().all(|c| (c - grey).abs() < 1e-3),
+            "{stored:?}"
+        );
         assert_eq!(mask_color(true, true), Some([0.1, 0.2, 0.3, 1.0]));
         assert_eq!(mask_color(false, false), None);
     }
@@ -3363,7 +3376,10 @@ mod tests {
         root.connection_point = Vector3::new(10.0, 0.0, 0.0);
         root.direction = Vector3::new(-1.0, 0.0, 0.0);
         root.landing_distance = 2.0;
-        root.create_line(vec![Vector3::new(15.0, -5.0, 0.0), Vector3::new(10.0, 0.0, 0.0)]);
+        root.create_line(vec![
+            Vector3::new(15.0, -5.0, 0.0),
+            Vector3::new(10.0, 0.0, 0.0),
+        ]);
 
         let wires = ml.tessellate(
             &doc,
@@ -3385,7 +3401,10 @@ mod tests {
             .iter()
             .filter(|p| p[0].is_finite())
             .fold(f32::MIN, |m, p| m.max(p[1]));
-        assert!(leader_top <= 1.0e-4, "leader rises above the landing: {leader_top}");
+        assert!(
+            leader_top <= 1.0e-4,
+            "leader rises above the landing: {leader_top}"
+        );
         let underline = wires
             .iter()
             .find(|w| w.points.len() == 2 && w.text_verts.is_empty())
@@ -3394,7 +3413,10 @@ mod tests {
             assert!(p[1].abs() < 1.0e-3, "underline off the landing: {p:?}");
         }
         let right = underline.points[0][0].max(underline.points[1][0]);
-        assert!((right - 8.0).abs() < 1.0e-3, "underline stops short of the landing: {right}");
+        assert!(
+            (right - 8.0).abs() < 1.0e-3,
+            "underline stops short of the landing: {right}"
+        );
     }
 
     use crate::scene::model::wire_model::WireModel;
@@ -3617,8 +3639,11 @@ mod tests {
         let mut doc = Document::default();
         let mut record = document::tables::BlockRecord::new("LABEL");
         record.handle = doc.allocate_handle();
-        let circle = document::entities::Circle::from_center_radius(Vector3::new(0.0, 0.0, 0.0), 4.0);
-        let handle = doc.add_entity(document::EntityType::Circle(circle)).unwrap();
+        let circle =
+            document::entities::Circle::from_center_radius(Vector3::new(0.0, 0.0, 0.0), 4.0);
+        let handle = doc
+            .add_entity(document::EntityType::Circle(circle))
+            .unwrap();
         record.entity_handles.push(handle);
         let mut ml = MultiLeader::default();
         ml.content_type = LeaderContentType::Block;
@@ -3762,4 +3787,3 @@ pub(crate) fn set_mleader_text_side(ml: &mut MultiLeader, to_right: bool) {
         ml.text_alignment = alignment;
     }
 }
-

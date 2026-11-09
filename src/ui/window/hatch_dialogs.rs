@@ -34,7 +34,12 @@ pub fn view_warning<'a>(
 ) -> Element<'a, Message> {
     let tr = |key: &str| crate::i18n::loader().get_attr("hatch-warning", key);
     let toggle = button(
-        text(if state.details { tr("hide-details") } else { tr("show-details") }).size(11),
+        text(if state.details {
+            tr("hide-details")
+        } else {
+            tr("show-details")
+        })
+        .size(11),
     )
     .on_press(msg(HatchDialogMsg::WarningDetails(!state.details)))
     .style(button::text)

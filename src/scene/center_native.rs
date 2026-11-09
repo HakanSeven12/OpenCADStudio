@@ -36,8 +36,22 @@ const UNSET: f64 = 1.0e60;
 /// writes: (DXF name, class name, application, proxy flags, DWG version,
 /// maintenance version).
 const CLASSES: &[(&str, &str, &str, u16, i32, i32)] = &[
-    ("ACDBASSOCNETWORK", "AcDbAssocNetwork", "ObjectDBX Classes", 1025, 27, 45),
-    ("ACDBASSOCACTION", "AcDbAssocAction", "ObjectDBX Classes", 1025, 27, 45),
+    (
+        "ACDBASSOCNETWORK",
+        "AcDbAssocNetwork",
+        "ObjectDBX Classes",
+        1025,
+        27,
+        45,
+    ),
+    (
+        "ACDBASSOCACTION",
+        "AcDbAssocAction",
+        "ObjectDBX Classes",
+        1025,
+        27,
+        45,
+    ),
     (MARK_BODY, MARK_BODY, "AcDbSmartCenter", 1153, 33, 377),
     (LINE_BODY, LINE_BODY, "AcDbSmartCenter", 1153, 33, 377),
     (
@@ -56,11 +70,19 @@ const CLASSES: &[(&str, &str, &str, u16, i32, i32)] = &[
         27,
         50,
     ),
-    ("ACDBASSOCDEPENDENCY", "AcDbAssocDependency", "ObjectDBX Classes", 1025, 27, 50),
+    (
+        "ACDBASSOCDEPENDENCY",
+        "AcDbAssocDependency",
+        "ObjectDBX Classes",
+        1025,
+        27,
+        50,
+    ),
 ];
 
 fn register_classes(document: &mut Document) {
-    for &(dxf_name, cpp_class_name, application, proxy, dwg_version, maintenance_version) in CLASSES {
+    for &(dxf_name, cpp_class_name, application, proxy, dwg_version, maintenance_version) in CLASSES
+    {
         if document.classes.get_by_name(dxf_name).is_some() {
             continue;
         }
@@ -180,8 +202,16 @@ fn mark_picture(association: &CenterMarkAssociation) -> Picture {
     let start = half + association.cross_gap.max(0.0);
     let local = [-DVec3::X, DVec3::X, -DVec3::Y, DVec3::Y];
     let mut lines = vec![
-        ([DVec3::new(-half, 0.0, 0.0), DVec3::new(half, 0.0, 0.0)], false, true),
-        ([DVec3::new(0.0, -half, 0.0), DVec3::new(0.0, half, 0.0)], false, true),
+        (
+            [DVec3::new(-half, 0.0, 0.0), DVec3::new(half, 0.0, 0.0)],
+            false,
+            true,
+        ),
+        (
+            [DVec3::new(0.0, -half, 0.0), DVec3::new(0.0, half, 0.0)],
+            false,
+            true,
+        ),
     ];
     for (slot, index) in STORED_DIRECTIONS.into_iter().enumerate() {
         let end = (association.radius
@@ -193,7 +223,11 @@ fn mark_picture(association: &CenterMarkAssociation) -> Picture {
         let near = direction * start;
         let far = direction * end;
         // The negative sides run from the far end in, as stored.
-        let line = if slot % 2 == 0 { [far, near] } else { [near, far] };
+        let line = if slot % 2 == 0 {
+            [far, near]
+        } else {
+            [near, far]
+        };
         lines.push((line, true, association.show_extensions));
     }
     Picture {
@@ -222,7 +256,11 @@ fn subent(source_kind_segment: Option<(usize, usize)>) -> AssocPersistentSubentI
         Some((index, vertices)) => AssocPersistentSubentId {
             class_name: "AcDbAssocEdgePersSubentId".to_string(),
             class_code: 3,
-            values: vec![0, index as i32 + 1, ((index + 1) % vertices.max(1)) as i32 + 1],
+            values: vec![
+                0,
+                index as i32 + 1,
+                ((index + 1) % vertices.max(1)) as i32 + 1,
+            ],
             ..Default::default()
         },
         None => AssocPersistentSubentId {
@@ -243,12 +281,21 @@ fn vertex_count(document: &Document, handle: Handle) -> usize {
 
 /// The cached edge of a centre mark source: centre, normal, reference axis,
 /// radius and the arc's angles.
-fn arc_curve(document: &Document, source: &CenterMarkSource, center: DVec3, radius: f64) -> Vec<AssocCurveValue> {
+fn arc_curve(
+    document: &Document,
+    source: &CenterMarkSource,
+    center: DVec3,
+    radius: f64,
+) -> Vec<AssocCurveValue> {
     let (normal, start, end) = match document.get_entity(source.handle) {
         Some(EntityType::Arc(arc)) => (dvec(arc.normal), arc.start_angle, arc.end_angle),
         Some(EntityType::Circle(circle)) => (dvec(circle.normal), 0.0, std::f64::consts::TAU),
-        Some(EntityType::LwPolyline(polyline)) => (dvec(polyline.normal), 0.0, std::f64::consts::TAU),
-        Some(EntityType::Polyline2D(polyline)) => (dvec(polyline.normal), 0.0, std::f64::consts::TAU),
+        Some(EntityType::LwPolyline(polyline)) => {
+            (dvec(polyline.normal), 0.0, std::f64::consts::TAU)
+        }
+        Some(EntityType::Polyline2D(polyline)) => {
+            (dvec(polyline.normal), 0.0, std::f64::consts::TAU)
+        }
         _ => (DVec3::Z, 0.0, std::f64::consts::TAU),
     };
     let (x, _) = crate::scene::view::transform::ocs_axes(tuple(normal));
@@ -291,8 +338,9 @@ pub(crate) fn export(document: &mut Document) {
                 return None;
             };
             let data = &line.common.extended_data;
-            (CenterMarkAssociation::read(data).is_some() || CenterLineAssociation::read(data).is_some())
-                .then_some(line.common.handle)
+            (CenterMarkAssociation::read(data).is_some()
+                || CenterLineAssociation::read(data).is_some())
+            .then_some(line.common.handle)
         })
         .collect();
     if carriers.is_empty() {
@@ -327,7 +375,12 @@ fn export_one(document: &mut Document, handle: Handle) {
             curve: (
                 11,
                 AssocSubcurveKind::Arc,
-                arc_curve(document, &association.source, dvec(association.center), association.radius),
+                arc_curve(
+                    document,
+                    &association.source,
+                    dvec(association.center),
+                    association.radius,
+                ),
             ),
         }],
         (None, Some(association)) => [&association.first, &association.second]
@@ -338,7 +391,10 @@ fn export_one(document: &mut Document, handle: Handle) {
                 Source {
                     handle: source.handle,
                     segment: (source.segment_index >= 0).then(|| {
-                        (source.segment_index as usize, vertex_count(document, source.handle))
+                        (
+                            source.segment_index as usize,
+                            vertex_count(document, source.handle),
+                        )
                     }),
                     curve: (
                         23,
@@ -356,7 +412,9 @@ fn export_one(document: &mut Document, handle: Handle) {
     let associated = mark
         .as_ref()
         .map(|association| association.associated)
-        .or(center_line.as_ref().map(|association| association.associated))
+        .or(center_line
+            .as_ref()
+            .map(|association| association.associated))
         .unwrap_or(false)
         && sources
             .iter()
@@ -409,8 +467,10 @@ fn export_one(document: &mut Document, handle: Handle) {
     }
 
     // The block reference takes the carrier's place and handle.
-    let insert_ocs =
-        crate::scene::view::transform::wcs_point_to_ocs(tuple(picture.insert_point), tuple(picture.normal));
+    let insert_ocs = crate::scene::view::transform::wcs_point_to_ocs(
+        tuple(picture.insert_point),
+        tuple(picture.normal),
+    );
     let mut insert = Insert::new(name, Vector3::new(insert_ocs.0, insert_ocs.1, insert_ocs.2));
     insert.rotation = picture.rotation;
     insert.normal = vector(picture.normal);
@@ -563,11 +623,19 @@ fn export_one(document: &mut Document, handle: Handle) {
             let diameter = association.radius * 2.0;
             values.push(text(
                 "CrossHairLengthExpression",
-                &measure_expression(association.cross_size, association.cross_size_relative, diameter),
+                &measure_expression(
+                    association.cross_size,
+                    association.cross_size_relative,
+                    diameter,
+                ),
             ));
             values.push(text(
                 "CrossHairGapExpression",
-                &measure_expression(association.cross_gap, association.cross_gap_relative, diameter),
+                &measure_expression(
+                    association.cross_gap,
+                    association.cross_gap_relative,
+                    diameter,
+                ),
             ));
             values.push(variant(
                 "CenterDepId",
@@ -593,8 +661,14 @@ fn export_one(document: &mut Document, handle: Handle) {
                 }
             };
             vec![
-                real("StartExtLength", ext_length(association.start_length_adjustment)),
-                real("EndExtLength", ext_length(association.end_length_adjustment)),
+                real(
+                    "StartExtLength",
+                    ext_length(association.start_length_adjustment),
+                ),
+                real(
+                    "EndExtLength",
+                    ext_length(association.end_length_adjustment),
+                ),
                 real("StartOvershoot", association.start_extension),
                 real("EndOvershoot", association.end_extension),
                 variant(
@@ -602,11 +676,19 @@ fn export_one(document: &mut Document, handle: Handle) {
                     vec![
                         (
                             90,
-                            AssocEvalValue::Long(direction_ending(document, &association.first, axis)),
+                            AssocEvalValue::Long(direction_ending(
+                                document,
+                                &association.first,
+                                axis,
+                            )),
                         ),
                         (
                             90,
-                            AssocEvalValue::Long(direction_ending(document, &association.second, axis)),
+                            AssocEvalValue::Long(direction_ending(
+                                document,
+                                &association.second,
+                                axis,
+                            )),
                         ),
                     ],
                 ),
@@ -625,7 +707,10 @@ fn export_one(document: &mut Document, handle: Handle) {
     values.push(text("SubentLineType", &linetype));
     values.push(real("SubentLineWeight", weight));
     values.push(real("SubentLinetypeScale", line.common.linetype_scale));
-    values.push(real("CachedAssociateStatus", if associated { 1.0 } else { 0.0 }));
+    values.push(real(
+        "CachedAssociateStatus",
+        if associated { 1.0 } else { 0.0 },
+    ));
     if !associated {
         values.push(real("IsExplicitlyDeassociatived", 1.0));
     }
@@ -714,13 +799,15 @@ fn stored_objects(document: &Document) -> Vec<Stored> {
             if !matches!(dependency.data, AssociativeData::Dependency(_)) {
                 continue;
             }
-            let Some(ObjectType::Associative(action)) = document.objects.get(&dependency.owner) else {
+            let Some(ObjectType::Associative(action)) = document.objects.get(&dependency.owner)
+            else {
                 continue;
             };
             let AssociativeData::Action(data) = &action.data else {
                 continue;
             };
-            let Some(ObjectType::Associative(body)) = document.objects.get(&data.action_body) else {
+            let Some(ObjectType::Associative(body)) = document.objects.get(&data.action_body)
+            else {
                 continue;
             };
             if !matches!(body.data, AssociativeData::SmartCenterActionBody(_)) {
@@ -784,7 +871,11 @@ fn action_sources(document: &Document, action: &AssocAction) -> Vec<(Handle, i32
 fn insert_frame(insert: &Insert) -> (DVec3, DVec3, DVec3) {
     let normal = dvec(insert.normal).normalize_or(DVec3::Z);
     let origin = crate::scene::view::transform::ocs_point_to_wcs(
-        (insert.insert_point.x, insert.insert_point.y, insert.insert_point.z),
+        (
+            insert.insert_point.x,
+            insert.insert_point.y,
+            insert.insert_point.z,
+        ),
         tuple(normal),
     );
     let (ocs_x, ocs_y) = crate::scene::view::transform::ocs_axes(tuple(normal));
@@ -898,8 +989,11 @@ fn import_one(document: &mut Document, stored: Stored) {
         let kind = mark_source_kind(source_entity).unwrap_or(CenterMarkSourceKind::Circle);
         let pick = origin + x_axis * radius;
         let diameter = radius * 2.0;
-        let (cross_size, size_relative) =
-            parse_measure(param_text(values, "CrossHairLengthExpression"), diameter, 0.1);
+        let (cross_size, size_relative) = parse_measure(
+            param_text(values, "CrossHairLengthExpression"),
+            diameter,
+            0.1,
+        );
         let (cross_gap, gap_relative) =
             parse_measure(param_text(values, "CrossHairGapExpression"), diameter, 0.05);
         let overshoot = |name: &str| param_real(values, name).unwrap_or(0.0) * scale;
@@ -916,7 +1010,8 @@ fn import_one(document: &mut Document, stored: Stored) {
         .enumerate()
         {
             overshoots[slot] = overshoot(over) - extension_length;
-            if let Some(length) = param_real(values, extension).filter(|value| *value < UNSET * 0.5) {
+            if let Some(length) = param_real(values, extension).filter(|value| *value < UNSET * 0.5)
+            {
                 length_adjustments[slot] = length * scale - radius;
             }
         }
@@ -1042,7 +1137,8 @@ fn import_one(document: &mut Document, stored: Stored) {
     {
         document.objects.remove(&handle);
     }
-    if let Some(ObjectType::Associative(network)) = document.objects.get_mut(&action.owning_network) {
+    if let Some(ObjectType::Associative(network)) = document.objects.get_mut(&action.owning_network)
+    {
         if let AssociativeData::Network(network) = &mut network.data {
             network
                 .actions

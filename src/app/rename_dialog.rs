@@ -42,7 +42,10 @@ fn items(doc: &document::Document, kind: &str) -> Vec<String> {
         "UCS" => doc.ucss.iter().map(|u| u.name.clone()).collect(),
         _ => doc.views.iter().map(|v| v.name.clone()).collect(),
     };
-    let mut names: Vec<String> = names.into_iter().filter(|name| !name.contains('|')).collect();
+    let mut names: Vec<String> = names
+        .into_iter()
+        .filter(|name| !name.contains('|'))
+        .collect();
     names.sort_by_key(|name| name.to_lowercase());
     names
 }
@@ -98,4 +101,3 @@ impl OpenCADStudio {
         Task::none()
     }
 }
-

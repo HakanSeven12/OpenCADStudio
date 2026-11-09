@@ -164,10 +164,9 @@ pub fn nav_nodes(
                 c.prop("Name").unwrap_or("").to_string(),
                 false,
             ));
-            for v in all
-                .iter()
-                .filter(|v| document::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id()))
-            {
+            for v in all.iter().filter(|v| {
+                document::sheet_set::SheetSetDatabase::view_category_of(v) == Some(c.id())
+            }) {
                 out.push((2, v.id().to_string(), number_and_title(v), true));
             }
         }
@@ -623,7 +622,10 @@ impl FieldDialogState {
             .into_iter()
             .map(|n| (n.to_string(), self.name == n, FieldDialogMsg::Name(n)))
             .collect();
-        if CATEGORIES.get(self.category).is_some_and(|(c, _)| *c == "Document") {
+        if CATEGORIES
+            .get(self.category)
+            .is_some_and(|(c, _)| *c == "Document")
+        {
             rows.extend(self.custom_properties.iter().map(|property| {
                 (
                     property.clone(),
@@ -903,7 +905,9 @@ impl FieldDialogState {
                 .unwrap_or(rest);
             self.formula = typed_object_ids(inner, objects);
         } else if evaluator.starts_with("\\AcObjProp") {
-            let property = rest.rsplit_once(").").map(|(_, property)| property.trim())?;
+            let property = rest
+                .rsplit_once(").")
+                .map(|(_, property)| property.trim())?;
             if property == "Name" {
                 self.name = "NamedObject";
                 return None;
@@ -1262,9 +1266,11 @@ fn format_panel<'a>(state: &'a FieldDialogState) -> Element<'a, Message> {
         ]
         .spacing(8)
         .into(),
-        FieldKind::Text | FieldKind::CustomProperty => column![text(t!("Format")).size(12), case_list(state)]
-            .spacing(8)
-            .into(),
+        FieldKind::Text | FieldKind::CustomProperty => {
+            column![text(t!("Format")).size(12), case_list(state)]
+                .spacing(8)
+                .into()
+        }
         FieldKind::Filename => {
             let part = |label: &str, bits: u8| {
                 checkbox(state.file_parts == bits)

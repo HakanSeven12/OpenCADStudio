@@ -170,7 +170,10 @@ impl super::OpenCADStudio {
             self.open_tolerance_dialog(Some(target));
             return iced::Task::none();
         }
-        if matches!(self.tabs[i].scene.document.get_entity(target), Some(EntityType::Table(_))) {
+        if matches!(
+            self.tabs[i].scene.document.get_entity(target),
+            Some(EntityType::Table(_))
+        ) {
             self.open_table_cell_editor(target, 0, 0);
             return self.unfocus_widgets();
         }

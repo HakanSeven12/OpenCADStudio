@@ -157,11 +157,7 @@ impl InsertStyleSpec {
 }
 
 impl BlockStyle {
-    pub fn for_entity(
-        document: &Document,
-        entity: &EntityType,
-        viewport: Option<Handle>,
-    ) -> Self {
+    pub fn for_entity(document: &Document, entity: &EntityType, viewport: Option<Handle>) -> Self {
         Self {
             insert: render_style_for_viewport(document, entity, viewport),
             layer0: layer_render_style_viewport(document, &entity.common().layer, viewport),
@@ -258,7 +254,11 @@ impl InstanceContext {
     }
 
     pub fn style_for(&self, document: &Document, entity: &EntityType) -> ResolvedStyle {
-        if self.insert_path.iter().any(|insert| crate::scene::block_construction::is_construction(&insert.common)) {
+        if self
+            .insert_path
+            .iter()
+            .any(|insert| crate::scene::block_construction::is_construction(&insert.common))
+        {
             return crate::scene::block_construction::display_style();
         }
         self.block_style
@@ -613,7 +613,13 @@ impl<'a> RenderSceneGraph<'a> {
     fn document_visible(&self, entity: &EntityType, member: bool) -> bool {
         let common = entity.common();
         if crate::scene::block_construction::is_construction(common) {
-            if member || !self.visibility_reveal.is_some_and(|handles| handles.contains(&common.handle)) { return false; }
+            if member
+                || !self
+                    .visibility_reveal
+                    .is_some_and(|handles| handles.contains(&common.handle))
+            {
+                return false;
+            }
         }
         if common.invisible
             && !self
@@ -1259,12 +1265,7 @@ fn block_contains_kind(
                     .into_iter()
                     .filter(|block_use| block_use.active)
                     .any(|block_use| {
-                        block_contains_kind(
-                            document,
-                            &block_use.insert.block_name,
-                            memo,
-                            is_kind,
-                        )
+                        block_contains_kind(document, &block_use.insert.block_name, memo, is_kind)
                     }),
                 _ => false,
             })
@@ -1314,9 +1315,8 @@ mod tests {
         let leaves = |document: &Document| {
             let depths = rustc_hash::FxHashMap::default();
             let graph = RenderSceneGraph::new(document, None, None, true, &depths);
-            let arrow =
-                block_use_from_handle(document, block, BlockRole::ArrowHead, Vector3::ZERO)
-                    .unwrap();
+            let arrow = block_use_from_handle(document, block, BlockRole::ArrowHead, Vector3::ZERO)
+                .unwrap();
             let mut count = 0;
             graph.walk_block_use(&arrow, block, |_, _| true, |_, _| count += 1);
             count

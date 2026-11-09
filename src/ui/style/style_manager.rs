@@ -259,13 +259,17 @@ pub(crate) fn import_view<'a>(
     if let Some(name) = &draft.conflict {
         content = content
             .push(text(name.clone()).size(14))
-            .push(text(t!("A style with this name already exists. Overwrite it?")))
-            .push(row![
-                button(text(t!("Overwrite"))).on_press(Message::StyleImportConfirm(true)),
-                button(text(t!("Skip"))).on_press(Message::StyleImportConfirm(false)),
-                button(text(t!("Cancel"))).on_press(Message::StyleImportCancel),
-            ]
-            .spacing(8));
+            .push(text(t!(
+                "A style with this name already exists. Overwrite it?"
+            )))
+            .push(
+                row![
+                    button(text(t!("Overwrite"))).on_press(Message::StyleImportConfirm(true)),
+                    button(text(t!("Skip"))).on_press(Message::StyleImportConfirm(false)),
+                    button(text(t!("Cancel"))).on_press(Message::StyleImportCancel),
+                ]
+                .spacing(8),
+            );
     } else {
         let mut rows = column![].spacing(4);
         for (name, on) in &draft.selected {
@@ -284,16 +288,19 @@ pub(crate) fn import_view<'a>(
         if draft.selected.is_empty() {
             rows = rows.push(text(t!("No styles found in this drawing.")));
         }
-        content = content
-            .push(scrollable(rows).height(sizing.height))
-            .push(row![
+        content = content.push(scrollable(rows).height(sizing.height)).push(
+            row![
                 button(text(t!("Import"))).on_press_maybe(
-                    draft.selected.iter().any(|(_, on)| *on)
+                    draft
+                        .selected
+                        .iter()
+                        .any(|(_, on)| *on)
                         .then_some(Message::StyleImportApply)
                 ),
                 button(text(t!("Cancel"))).on_press(Message::StyleImportCancel),
             ]
-            .spacing(8));
+            .spacing(8),
+        );
     }
     container(content)
         .padding(16)
@@ -332,8 +339,11 @@ pub fn comparison_row<'a>(comparison: Option<EditorComparison>) -> Element<'a, M
     match comparison {
         Some(comparison) if !comparison.options.is_empty() => row![
             text(t!("Compare with")).size(10).style(muted_text_style),
-            crate::ui::dropdown_list::pick_list(Some(comparison.selected), comparison.options, |value| value
-                .to_string(),)
+            crate::ui::dropdown_list::pick_list(
+                Some(comparison.selected),
+                comparison.options,
+                |value| value.to_string(),
+            )
             .on_select(comparison.on_select)
             .text_size(11)
             .width(150),

@@ -2367,10 +2367,9 @@ impl OpenCADStudio {
                 });
                 if !inserted {
                     let saved = std::mem::replace(&mut scene.current_layout, "Model".to_string());
-                    scene.add_entity(document::EntityType::Insert(document::entities::Insert::new(
-                        xref,
-                        Vector3::ZERO,
-                    )));
+                    scene.add_entity(document::EntityType::Insert(
+                        document::entities::Insert::new(xref, Vector3::ZERO),
+                    ));
                     scene.current_layout = saved;
                 }
                 // The viewport: lower-left corner at the point, the view at the scale.

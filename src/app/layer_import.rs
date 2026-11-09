@@ -101,7 +101,10 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
     let mut deps = crate::app::ClipboardDeps::default();
     let bring_linetype = |document: &Document, deps: &mut crate::app::ClipboardDeps, name: &str| {
         if document.line_types.contains(name)
-            || deps.linetypes.iter().any(|lt| lt.name.eq_ignore_ascii_case(name))
+            || deps
+                .linetypes
+                .iter()
+                .any(|lt| lt.name.eq_ignore_ascii_case(name))
         {
             return;
         }
@@ -118,7 +121,11 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
                 .iter()
                 .find(|style| style.handle == complex.style_handle)
             {
-                if !deps.linetype_styles.iter().any(|s| s.handle == style.handle) {
+                if !deps
+                    .linetype_styles
+                    .iter()
+                    .any(|s| s.handle == style.handle)
+                {
                     deps.linetype_styles.push(style.clone());
                 }
             }
@@ -150,7 +157,9 @@ pub fn import_layers(document: &mut Document, state: &LayerImportState) -> Impor
                 }
                 report.overwritten += 1;
                 report.overwritten_names.push(source.name.clone());
-                report.targets.push((source.name.clone(), source.name.clone()));
+                report
+                    .targets
+                    .push((source.name.clone(), source.name.clone()));
                 continue;
             }
             (true, OnConflict::Rename) => (2..)

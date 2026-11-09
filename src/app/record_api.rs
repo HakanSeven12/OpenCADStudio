@@ -327,7 +327,8 @@ fn representation_definition(
 /// report the inserts under the definition they display, and keep the
 /// generated record from advertising them a second time.
 fn block_record_records(document: &document::Document) -> Result<Vec<Value>, String> {
-    let mut folded: rustc_hash::FxHashMap<document::Handle, Vec<document::Handle>> = Default::default();
+    let mut folded: rustc_hash::FxHashMap<document::Handle, Vec<document::Handle>> =
+        Default::default();
     let mut generated = rustc_hash::FxHashSet::default();
     for record in document.block_records.iter() {
         if record.insert_handles.is_empty() {
@@ -1843,7 +1844,9 @@ impl OpenCADStudio {
                             .into_iter()
                             .flatten()
                             .filter_map(|update| update["path"].as_str())
-                            .find(|path| *path == "/insert_handles" || path.starts_with("/insert_handles/"))
+                            .find(|path| {
+                                *path == "/insert_handles" || path.starts_with("/insert_handles/")
+                            })
                         {
                             return Err(failure(
                                 "invalid_update",
@@ -2185,7 +2188,8 @@ mod tests {
         let not_colour = set_layer(&mut app, "layer-desc", "/description", json!(3));
         assert_ne!(not_colour["status"], "completed", "{not_colour}");
 
-        let line = document::entities::Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
+        let line =
+            document::entities::Line::from_points(Vector3::ZERO, Vector3::new(1.0, 0.0, 0.0));
         let entity = app.tabs[i].scene.add_entity(EntityType::Line(line));
         let red = execute(
             &mut app,
@@ -2465,10 +2469,7 @@ mod tests {
             &[members[1]],
             false,
         );
-        crate::scene::block_visibility::finish_editing(
-            &mut app.tabs[i].scene.document,
-            definition,
-        );
+        crate::scene::block_visibility::finish_editing(&mut app.tabs[i].scene.document, definition);
 
         let insert = app.tabs[i].scene.add_entity(EntityType::Insert(Insert::new(
             "DOOR_DYN",

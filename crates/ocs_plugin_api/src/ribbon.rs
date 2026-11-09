@@ -6,8 +6,7 @@ pub mod owned;
 // ── Events ────────────────────────────────────────────────────────────────
 
 /// Events a module tool can emit to the host application.
-#[derive(Debug, Clone)]
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum ModuleEvent {
     /// Fire a named CAD command (e.g. "LINE", "CIRCLE").
     Command(String),

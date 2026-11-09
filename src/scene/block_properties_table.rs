@@ -374,7 +374,11 @@ pub(crate) fn apply(
         table.parameter.property_count = eval + 1;
     }
     let graph = graph_handle(&working, definition).ok_or("The authoring graph is unavailable.")?;
-    if new_table_eval.is_some() || previous.as_ref().is_none_or(|view| view.table.parameter.property_count > 0) {
+    if new_table_eval.is_some()
+        || previous
+            .as_ref()
+            .is_none_or(|view| view.table.parameter.property_count > 0)
+    {
         ensure_grip(&mut working, definition, graph, handle)?;
     }
     let _ = graph;
@@ -472,11 +476,29 @@ fn ensure_grip(
         );
     }
     for (index, handle) in [grip, x, y].into_iter().enumerate() {
-        authoring::append_single(document, graph, authoring::Slots { node: slots.node + index as i32, eval: slots.eval + index as i32, edge: slots.edge }, handle);
+        authoring::append_single(
+            document,
+            graph,
+            authoring::Slots {
+                node: slots.node + index as i32,
+                eval: slots.eval + index as i32,
+                edge: slots.edge,
+            },
+            handle,
+        );
     }
-    let ObjectType::DynamicBlock(object) = document.objects.get_mut(&graph).unwrap() else { unreachable!() };
-    let DynamicBlockData::EvaluationGraph(native) = &mut object.data else { unreachable!() };
-    let parameter_node = native.nodes.iter().find(|node| node.next_id == table_eval).ok_or("The table parameter node is unavailable.")?.id;
+    let ObjectType::DynamicBlock(object) = document.objects.get_mut(&graph).unwrap() else {
+        unreachable!()
+    };
+    let DynamicBlockData::EvaluationGraph(native) = &mut object.data else {
+        unreachable!()
+    };
+    let parameter_node = native
+        .nodes
+        .iter()
+        .find(|node| node.next_id == table_eval)
+        .ok_or("The table parameter node is unavailable.")?
+        .id;
     authoring::graph::link(native, slots.node, parameter_node)?;
     authoring::graph::link(native, parameter_node, slots.node + 1)?;
     authoring::graph::link(native, parameter_node, slots.node + 2)?;
@@ -489,44 +511,119 @@ fn ensure_grip(
 }
 
 /// Repair the former three-object append layout, preserving all unrelated nodes.
-pub(crate) fn repair_grip_graph(doc: &mut Document, definition: Handle, table: Handle) -> Result<bool, &'static str> {
-    let graph_handle = authoring::graph(doc, definition)?.ok_or("The authoring graph is unavailable.")?;
-    let Some(ObjectType::DynamicBlock(table_object)) = doc.objects.get(&table) else { return Ok(false) };
-    let DynamicBlockData::PropertiesTable(table_data) = &table_object.data else { return Ok(false) };
+pub(crate) fn repair_grip_graph(
+    doc: &mut Document,
+    definition: Handle,
+    table: Handle,
+) -> Result<bool, &'static str> {
+    let graph_handle =
+        authoring::graph(doc, definition)?.ok_or("The authoring graph is unavailable.")?;
+    let Some(ObjectType::DynamicBlock(table_object)) = doc.objects.get(&table) else {
+        return Ok(false);
+    };
+    let DynamicBlockData::PropertiesTable(table_data) = &table_object.data else {
+        return Ok(false);
+    };
     let id = table_data.parameter.property_count;
     let grip = doc.objects.values().find_map(|object| match object {
         ObjectType::DynamicBlock(object) if object.owner == graph_handle => match &object.data {
-            DynamicBlockData::PropertiesTableGrip(grip) if grip.element.eval.node_id == id => Some((object.handle, grip.flags_91, grip.flags_92)),
+            DynamicBlockData::PropertiesTableGrip(grip) if grip.element.eval.node_id == id => {
+                Some((object.handle, grip.flags_91, grip.flags_92))
+            }
             _ => None,
         },
         _ => None,
     });
-    let Some((grip_handle, x_id, y_id)) = grip else { return Ok(false) };
-    let ObjectType::DynamicBlock(object) = &doc.objects[&graph_handle] else { unreachable!() };
-    let DynamicBlockData::EvaluationGraph(original) = &object.data else { unreachable!() };
-    if original.nodes.iter().all(|node| authoring::graph::valid_lists(original, node.id)) { return Ok(false) }
-    let node_for = |id| original.nodes.iter().find(|node| node.next_id == id).map(|node| node.id);
+    let Some((grip_handle, x_id, y_id)) = grip else {
+        return Ok(false);
+    };
+    let ObjectType::DynamicBlock(object) = &doc.objects[&graph_handle] else {
+        unreachable!()
+    };
+    let DynamicBlockData::EvaluationGraph(original) = &object.data else {
+        unreachable!()
+    };
+    if original
+        .nodes
+        .iter()
+        .all(|node| authoring::graph::valid_lists(original, node.id))
+    {
+        return Ok(false);
+    }
+    let node_for = |id| {
+        original
+            .nodes
+            .iter()
+            .find(|node| node.next_id == id)
+            .map(|node| node.id)
+    };
     let (Some(g), Some(x), Some(y), Some(p)) = (
-        original.nodes.iter().find(|node| node.expression == grip_handle).map(|node| node.id),
-        node_for(x_id), node_for(y_id), original.nodes.iter().find(|node| node.expression == table).map(|node| node.id),
-    ) else { return Ok(false) };
+        original
+            .nodes
+            .iter()
+            .find(|node| node.expression == grip_handle)
+            .map(|node| node.id),
+        node_for(x_id),
+        node_for(y_id),
+        original
+            .nodes
+            .iter()
+            .find(|node| node.expression == table)
+            .map(|node| node.id),
+    ) else {
+        return Ok(false);
+    };
     let legacy = [g, x, y];
-    if legacy.iter().collect::<std::collections::BTreeSet<_>>().len() != 3 || legacy.contains(&p) { return Ok(false) }
-    let edges = original.edges.iter().filter(|edge| legacy.contains(&edge.source_node) || legacy.contains(&edge.destination_node)).collect::<Vec<_>>();
-    let actual = edges.iter().map(|edge| (edge.source_node, edge.destination_node)).collect::<std::collections::BTreeSet<_>>();
-    let expected = [(x, g), (g, x), (g, y)].into_iter().collect::<std::collections::BTreeSet<_>>();
-    if edges.len() != 3 || actual != expected || edges.iter().any(|edge| edge.next_id != 0 || edge.outgoing_edges[4] != -1)
-        || original.nodes.iter().filter(|node| !legacy.contains(&node.id)).any(|node| !authoring::graph::valid_lists(original, node.id)) {
+    if legacy
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != 3
+        || legacy.contains(&p)
+    {
+        return Ok(false);
+    }
+    let edges = original
+        .edges
+        .iter()
+        .filter(|edge| {
+            legacy.contains(&edge.source_node) || legacy.contains(&edge.destination_node)
+        })
+        .collect::<Vec<_>>();
+    let actual = edges
+        .iter()
+        .map(|edge| (edge.source_node, edge.destination_node))
+        .collect::<std::collections::BTreeSet<_>>();
+    let expected = [(x, g), (g, x), (g, y)]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    if edges.len() != 3
+        || actual != expected
+        || edges
+            .iter()
+            .any(|edge| edge.next_id != 0 || edge.outgoing_edges[4] != -1)
+        || original
+            .nodes
+            .iter()
+            .filter(|node| !legacy.contains(&node.id))
+            .any(|node| !authoring::graph::valid_lists(original, node.id))
+    {
         return Ok(false);
     }
     let removed = edges.iter().map(|edge| edge.id).collect::<Vec<_>>();
     let mut graph = original.clone();
     graph.edges.retain(|edge| !removed.contains(&edge.id));
-    for node in &mut graph.nodes { if legacy.contains(&node.id) { node.node_data = [-1; 4]; } }
+    for node in &mut graph.nodes {
+        if legacy.contains(&node.id) {
+            node.node_data = [-1; 4];
+        }
+    }
     authoring::graph::link(&mut graph, g, p)?;
     authoring::graph::link(&mut graph, p, x)?;
     authoring::graph::link(&mut graph, p, y)?;
-    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&graph_handle).unwrap() else { unreachable!() };
+    let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&graph_handle).unwrap() else {
+        unreachable!()
+    };
     object.data = DynamicBlockData::EvaluationGraph(graph);
     Ok(true)
 }
@@ -703,57 +800,145 @@ mod tests {
         let rows = vec![vec![10.; columns.len()]];
         let table_handle = apply(&mut doc, definition, &columns, &rows, false).unwrap();
         let graph_handle = authoring::graph(&doc, definition).unwrap().unwrap();
-        let ObjectType::DynamicBlock(table_object) = &doc.objects[&table_handle] else { panic!() };
-        let DynamicBlockData::PropertiesTable(native) = &table_object.data else { panic!() };
+        let ObjectType::DynamicBlock(table_object) = &doc.objects[&table_handle] else {
+            panic!()
+        };
+        let DynamicBlockData::PropertiesTable(native) = &table_object.data else {
+            panic!()
+        };
         let grip_id = native.parameter.property_count;
-        let grip = doc.objects.values().find_map(|object| match object {
-            ObjectType::DynamicBlock(object) => match &object.data {
-                DynamicBlockData::PropertiesTableGrip(grip) if grip.element.eval.node_id == grip_id => Some((object.handle, grip.flags_91, grip.flags_92)),
+        let grip = doc
+            .objects
+            .values()
+            .find_map(|object| match object {
+                ObjectType::DynamicBlock(object) => match &object.data {
+                    DynamicBlockData::PropertiesTableGrip(grip)
+                        if grip.element.eval.node_id == grip_id =>
+                    {
+                        Some((object.handle, grip.flags_91, grip.flags_92))
+                    }
+                    _ => None,
+                },
                 _ => None,
-            },
-            _ => None,
-        }).unwrap();
-        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&graph_handle).unwrap() else { panic!() };
-        let DynamicBlockData::EvaluationGraph(graph) = &mut object.data else { panic!() };
-        assert!(graph.nodes.iter().all(|node| authoring::graph::valid_lists(graph, node.id)));
-        let p = graph.nodes.iter().find(|node| node.expression == table_handle).unwrap().id;
-        let g = graph.nodes.iter().find(|node| node.expression == grip.0).unwrap().id;
-        let x = graph.nodes.iter().find(|node| node.next_id == grip.1).unwrap().id;
-        let y = graph.nodes.iter().find(|node| node.next_id == grip.2).unwrap().id;
-        let edge_ids = graph.edges.iter().filter(|edge| [g, x, y].contains(&edge.source_node) || [g, x, y].contains(&edge.destination_node)).map(|edge| edge.id).collect::<Vec<_>>();
+            })
+            .unwrap();
+        let ObjectType::DynamicBlock(object) = doc.objects.get_mut(&graph_handle).unwrap() else {
+            panic!()
+        };
+        let DynamicBlockData::EvaluationGraph(graph) = &mut object.data else {
+            panic!()
+        };
+        assert!(graph
+            .nodes
+            .iter()
+            .all(|node| authoring::graph::valid_lists(graph, node.id)));
+        let p = graph
+            .nodes
+            .iter()
+            .find(|node| node.expression == table_handle)
+            .unwrap()
+            .id;
+        let g = graph
+            .nodes
+            .iter()
+            .find(|node| node.expression == grip.0)
+            .unwrap()
+            .id;
+        let x = graph
+            .nodes
+            .iter()
+            .find(|node| node.next_id == grip.1)
+            .unwrap()
+            .id;
+        let y = graph
+            .nodes
+            .iter()
+            .find(|node| node.next_id == grip.2)
+            .unwrap()
+            .id;
+        let edge_ids = graph
+            .edges
+            .iter()
+            .filter(|edge| {
+                [g, x, y].contains(&edge.source_node) || [g, x, y].contains(&edge.destination_node)
+            })
+            .map(|edge| edge.id)
+            .collect::<Vec<_>>();
         assert_eq!(edge_ids.len(), 3);
-        let [e0, e1, e2] = <[i32;3]>::try_from(edge_ids).unwrap();
+        let [e0, e1, e2] = <[i32; 3]>::try_from(edge_ids).unwrap();
         for node in &mut graph.nodes {
-            if node.id == p { node.node_data = [-1; 4]; }
-            if node.id == g { node.node_data = [e0, e0, e1, e2]; }
-            if node.id == x { node.node_data = [e1, e1, -1, -1]; }
-            if node.id == y { node.node_data = [e2, e2, -1, -1]; }
+            if node.id == p {
+                node.node_data = [-1; 4];
+            }
+            if node.id == g {
+                node.node_data = [e0, e0, e1, e2];
+            }
+            if node.id == x {
+                node.node_data = [e1, e1, -1, -1];
+            }
+            if node.id == y {
+                node.node_data = [e2, e2, -1, -1];
+            }
         }
         for edge in &mut graph.edges {
-            if edge.id == e0 { edge.source_node = x; edge.destination_node = g; edge.outgoing_edges = [-1; 5]; }
-            if edge.id == e1 { edge.source_node = g; edge.destination_node = x; edge.outgoing_edges = [-1, -1, -1, e2, -1]; }
-            if edge.id == e2 { edge.source_node = g; edge.destination_node = y; edge.outgoing_edges = [-1, -1, e1, -1, -1]; }
+            if edge.id == e0 {
+                edge.source_node = x;
+                edge.destination_node = g;
+                edge.outgoing_edges = [-1; 5];
+            }
+            if edge.id == e1 {
+                edge.source_node = g;
+                edge.destination_node = x;
+                edge.outgoing_edges = [-1, -1, -1, e2, -1];
+            }
+            if edge.id == e2 {
+                edge.source_node = g;
+                edge.destination_node = y;
+                edge.outgoing_edges = [-1, -1, e1, -1, -1];
+            }
         }
         let legacy = doc.clone();
         for mut saved in [
             legacy.clone(),
-            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&legacy).unwrap())).read().unwrap(),
-            DxfReader::from_reader(Cursor::new(DxfWriter::new(&legacy).write_to_vec().unwrap())).unwrap().read().unwrap(),
+            DwgReader::from_stream(Cursor::new(DwgWriter::write_to_vec(&legacy).unwrap()))
+                .read()
+                .unwrap(),
+            DxfReader::from_reader(Cursor::new(DxfWriter::new(&legacy).write_to_vec().unwrap()))
+                .unwrap()
+                .read()
+                .unwrap(),
         ] {
             let before = saved.clone();
             assert!(repair_grip_graph(&mut saved, definition, table_handle).unwrap());
             assert_eq!(saved.objects[&table_handle], before.objects[&table_handle]);
             assert_eq!(saved.objects[&grip.0], before.objects[&grip.0]);
-            let ObjectType::DynamicBlock(object) = &saved.objects[&graph_handle] else { panic!() };
-            let DynamicBlockData::EvaluationGraph(graph) = &object.data else { panic!() };
-            assert!(graph.nodes.iter().all(|node| authoring::graph::valid_lists(graph, node.id)));
+            let ObjectType::DynamicBlock(object) = &saved.objects[&graph_handle] else {
+                panic!()
+            };
+            let DynamicBlockData::EvaluationGraph(graph) = &object.data else {
+                panic!()
+            };
+            assert!(graph
+                .nodes
+                .iter()
+                .all(|node| authoring::graph::valid_lists(graph, node.id)));
             assert!(!repair_grip_graph(&mut saved, definition, table_handle).unwrap());
             assert_eq!(table(&saved, definition).unwrap().unwrap().rows, rows);
         }
         let mut unknown = legacy;
-        let ObjectType::DynamicBlock(object) = unknown.objects.get_mut(&graph_handle).unwrap() else { panic!() };
-        let DynamicBlockData::EvaluationGraph(graph) = &mut object.data else { panic!() };
-        graph.edges.iter_mut().find(|edge| edge.id == e0).unwrap().next_id = 9;
+        let ObjectType::DynamicBlock(object) = unknown.objects.get_mut(&graph_handle).unwrap()
+        else {
+            panic!()
+        };
+        let DynamicBlockData::EvaluationGraph(graph) = &mut object.data else {
+            panic!()
+        };
+        graph
+            .edges
+            .iter_mut()
+            .find(|edge| edge.id == e0)
+            .unwrap()
+            .next_id = 9;
         let before = unknown.clone();
         assert!(!repair_grip_graph(&mut unknown, definition, table_handle).unwrap());
         assert_eq!(unknown, before);

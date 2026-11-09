@@ -130,7 +130,9 @@ impl GradientEditorState {
 fn rgb(color: &AcadColor) -> Color {
     let (r, g, b) = match color {
         AcadColor::Rgb { r, g, b } => (*r, *g, *b),
-        AcadColor::Index(i) => document::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128)),
+        AcadColor::Index(i) => {
+            document::types::aci_table::aci_to_rgb(*i).unwrap_or((128, 128, 128))
+        }
         _ => (255, 255, 255),
     };
     Color::from_rgb8(r, g, b)

@@ -130,6 +130,7 @@ mod command;
 pub(crate) mod context_menu;
 mod dialog;
 mod dynamic;
+pub(in crate::app) mod linetype_manager;
 mod file;
 mod graphic_attributes;
 mod keytips;
@@ -257,7 +258,7 @@ impl OpenCADStudio {
         }
         if matches!(
             self.active_modal,
-            Some(TextStyle | DimStyle | TableStyle | MLeaderStyle | MlStyle)
+            Some(TextStyle | DimStyle | TableStyle | MLeaderStyle | MlStyle | LinetypeManager)
         ) {
             self.style_stage_discard();
         }
@@ -796,6 +797,26 @@ impl OpenCADStudio {
         // closes it and every other keystroke-derived message is swallowed;
         // the modal's own text fields keep working because they emit their own
         // (non-blocked) messages. (#126)
+        if self.active_modal == Some(super::ModalKind::LinetypeManager) {
+            let step = match &msg {
+                Message::ShortcutPressed(key) if key == "ARROWUP" => Some(false),
+                Message::ShortcutPressed(key) if key == "ARROWDOWN" => Some(true),
+                Message::ArrowKeyPressed {
+                    direction: ArrowKey::Up,
+                    extend_selection: false,
+                    ..
+                } => Some(false),
+                Message::ArrowKeyPressed {
+                    direction: ArrowKey::Down,
+                    extend_selection: false,
+                    ..
+                } => Some(true),
+                _ => None,
+            };
+            if let Some(down) = step {
+                return self.linetype_list_step(down);
+            }
+        }
         if self.active_modal.is_some() {
             if matches!(msg, Message::CommandEscape)
                 || matches!(&msg, Message::ShortcutPressed(key) if key.rsplit('+').next() == Some("ESCAPE"))
@@ -14209,13 +14230,20 @@ impl OpenCADStudio {
             // ── Plot Style Table ──────────────────────────────────────────────
             Message::LinetypeLoaded(Some((lin_dir, source))) => {
                 let i = self.active_tab;
-                self.push_undo_snapshot(i, "LINETYPE");
+                // In the open Linetype Manager a load is staged like its
+                // other changes: Apply keeps it, Close drops it.
+                let staged = self.linetypes_are_staged();
+                if !staged {
+                    self.push_undo_snapshot(i, "LINETYPE");
+                }
                 let added = crate::io::linetypes::populate_document_from_source(
                     &mut self.tabs[i].scene.document,
                     &source,
                     lin_dir.as_deref(),
                 );
-                if added > 0 {
+                if staged {
+                    self.load_linetype_bufs(i);
+                } else if added > 0 {
                     self.tabs[i].dirty = true;
                     self.tabs[i].scene.bump_geometry();
                 }
@@ -14797,6 +14825,7 @@ impl OpenCADStudio {
             }
 
             // ── MLineStyle Dialog ─────────────────────────────────────────────
+            Message::Linetype(message) => self.on_linetype_message(message),
             Message::MlStyleDialogOpen => self.on_ml_style_dialog_open(),
             Message::MlStyleDialogClose => {
                 self.close_active_modal();

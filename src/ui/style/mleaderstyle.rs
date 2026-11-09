@@ -1036,6 +1036,8 @@ pub fn view_window<'a>(
         on_set_current: Message::MLeaderStyleDialogSetCurrent,
         on_apply: Message::MLeaderStyleApply,
         read_only: false,
+        locked_keeps_actions: false,
+        on_list_scroll: None,
         in_use_filter: None,
         apply_blocked: None,
         rows: None,

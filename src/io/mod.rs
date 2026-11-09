@@ -2234,6 +2234,17 @@ mod save_failure_tests {
 /// and page setups naming it resolve after a restart.
 /// Pick a `.lin` linetype definition file and return its folder (where the
 /// shape files it names are looked for; none on the web) and text (#1588).
+/// Where a linetype export is written, or `None` when the user cancelled.
+pub async fn pick_linetype_export_path(suggested: String) -> Option<String> {
+    let handle = crate::sys::file_dialog()
+        .set_title(crate::t!("Export Linetypes").as_ref())
+        .add_filter(crate::t!("Linetype Files").as_ref(), &["lin", "LIN"])
+        .set_file_name(suggested)
+        .save_file()
+        .await?;
+    Some(crate::sys::handle_path(&handle).display().to_string())
+}
+
 pub async fn pick_linetype_file() -> Option<(Option<std::path::PathBuf>, String)> {
     let handle = crate::sys::file_dialog()
         .set_title(crate::t!("Load Linetypes").as_ref())

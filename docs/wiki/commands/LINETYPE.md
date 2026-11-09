@@ -1,11 +1,23 @@
 ---
-summary: Lists, loads, creates, renames and deletes the drawing's linetypes, or sets the current linetype.
+summary: Opens the Linetype Manager, where you create, edit, load and set the drawing's linetypes.
 related: LAYER, PROPERTIES, SETBYLAYER, PURGE
 ---
 
 ## Usage
-1. At `LINETYPE  [List / Set / Load]:`, type an option.
-2. For **Set**, type the linetype name at the next prompt.
+`LINETYPE` opens the Linetype Manager. On the left is every linetype in the drawing with the number of objects, layers and styles using it. On the right are a preview and three tabs.
+
+| Tab | What it does |
+|---|---|
+| **Pattern** | The description and the elements: dashes, gaps and dots, added, removed and reordered. |
+| **Scale** | `LTSCALE`, `CELTSCALE`, `MSLTSCALE` and `PSLTSCALE`. |
+| **Library** | Exports linetypes to a file, saves one to your own library, or reloads your library. Not in the web version. |
+
+The toolbar has **New**, **Copy**, **Delete**, **Import** (loads a `.lin` file), **Set Current** and **Apply**. Double-click a name to rename it, and use the Up and Down arrow keys to move through the list. Nothing changes in the drawing until **Apply**, and closing the window without it drops your changes.
+
+`ByLayer`, `ByBlock`, `Continuous` and linetypes from an external reference are locked, but can be made current or copied. A linetype with text or shapes can be copied, renamed and deleted, but its pattern cannot be edited here yet.
+
+## Typed options
+Type an option after the command, or use `-LINETYPE` for the full command-line form. In a script, a bare `LINETYPE` asks for these at the prompt instead of opening the window.
 
 ## Options
 | Option | What it does |

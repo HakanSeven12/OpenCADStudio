@@ -80,7 +80,7 @@ Set the colour for new objects with `COLOR`, or in the **Properties** panel of t
 
 ## Linetypes
 
-<img src="images/icons/bylayer.svg" width="20" alt=""> `LINETYPE` (`LT`) lists the loaded linetypes, sets the current one and loads more from a linetype file (dashed, centre, hidden and many others, including linetypes with text and shapes). `-LINETYPE` also creates, renames and deletes linetypes from the command line.
+<img src="images/icons/bylayer.svg" width="20" alt=""> `LINETYPE` (`LT`) opens the Linetype Manager, where you create and edit linetypes, set the current one and load more from a linetype file (dashed, centre, hidden and many others, including linetypes with text and shapes). `-LINETYPE` also creates, renames and deletes linetypes from the command line.
 
 | Variable | Scales |
 |---|---|

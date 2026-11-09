@@ -654,6 +654,23 @@ impl OpenCADStudio {
             .into()
     }
 
+    /// Bring tool `kind`'s window of its own to the front and give it the
+    /// focus. `None` when it has no such window.
+    pub(crate) fn raise_tool_window(&self, kind: ModalKind) -> Option<Task<Message>> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.os_windows
+                .iter()
+                .find(|window| window.content == Detached::Tool(kind))
+                .map(|window| iced::window::gain_focus(window.id))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = kind;
+            None
+        }
+    }
+
     /// Raise tool `kind` to the front.
     pub(crate) fn raise_tool(&mut self, kind: ModalKind) -> Task<Message> {
         if let Some(index) = self.tool_windows.iter().position(|tool| tool.kind == kind) {

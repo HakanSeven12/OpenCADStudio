@@ -13,6 +13,7 @@
 * **`EATTEDIT`:** The command reaches the editor `ATTEDIT` opens, on a selected block reference or after the pick, and completes from the command line.
 * **`-LINETYPE`:** The command-line form creates, renames and deletes linetypes as well as listing, loading and setting them, with quoted names for scripts.
 * **Linetype Files:** `-LINETYPE EXPORT` writes linetypes to a `.lin` file, including their text and shapes; `-LINETYPE SAVE` adds one to your own library; `-LINETYPE RELOAD` picks up new `.lin` files without a restart.
+* **Linetype Manager:** `LINETYPE` opens a manager in the style of the other style managers: create, copy, rename and delete linetypes, edit their dashes, gaps and dots against a live preview, and set the linetype scales and your library in one place.
 
 ### 🐛 Bug Fixes
 

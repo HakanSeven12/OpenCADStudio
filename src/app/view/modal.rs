@@ -118,6 +118,7 @@ impl OpenCADStudio {
             Some(K::Plotstyle) => crate::tr!("modal", "plot-style-editor"),
             Some(K::TextStyle) => crate::tr!("modal", "text-style-manager"),
             Some(K::MlStyle) => crate::tr!("modal", "multiline-style-manager"),
+            Some(K::LinetypeManager) => crate::tr!("modal", "linetype-manager"),
             Some(K::TableStyle) => crate::tr!("modal", "table-style-manager"),
             Some(K::MLeaderStyle) => crate::tr!("modal", "multileader-style-manager"),
             Some(K::DimStyle) => crate::tr!("modal", "dimension-style-manager"),
@@ -1093,6 +1094,50 @@ impl OpenCADStudio {
                             annotative: draft.style.annotative,
                             rename_active: self.style_rename.as_deref(),
                             rename_buf: &self.style_rename_buf,
+                        },
+                        flow,
+                    )
+                })
+            }
+            super::super::ModalKind::LinetypeManager => {
+                let (styles, rows) = self.linetype_list();
+                let current = {
+                    let name = &self.tabs[self.active_tab]
+                        .scene
+                        .document
+                        .header
+                        .current_linetype_name;
+                    if name.is_empty() {
+                        "ByLayer".to_string()
+                    } else {
+                        name.clone()
+                    }
+                };
+                let locked = self.linetype_is_locked(&self.linetype_selected);
+                let complex = self.linetype_is_complex();
+                let preview = self.linetype_preview();
+                let in_use =
+                    self.style_in_use(crate::app::StyleKind::Linetype, &self.linetype_selected);
+                let apply_blocked = self.linetype_draft_error();
+                sized_flow(ex, 960, 680, |flow| {
+                    crate::ui::style::linetype::view_window(
+                        crate::ui::style::linetype::LinetypeView {
+                            styles: styles.clone(),
+                            rows: rows.clone(),
+                            selected: &self.linetype_selected,
+                            current: current.clone(),
+                            tab: self.linetype_tab,
+                            in_use_only: self.linetype_in_use_only,
+                            draft: &self.linetype_draft,
+                            editable: !locked && !complex,
+                            complex,
+                            locked,
+                            in_use,
+                            preview: preview.clone(),
+                            apply_blocked: apply_blocked.clone(),
+                            rename_active: self.style_rename.as_deref(),
+                            rename_buf: &self.style_rename_buf,
+                            library_status: &self.linetype_library_status,
                         },
                         flow,
                     )

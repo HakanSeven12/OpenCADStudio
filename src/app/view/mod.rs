@@ -404,8 +404,8 @@ pub(crate) fn main_window_event(
         {
             Some(Message::OsWindowMoved(win_id, at))
         }
-        // Keys typed in a window of its own stay with its widgets; only Esc
-        // and an unclaimed Enter reach its dialog.
+        // Keys typed in a window of its own stay with its widgets; only Esc,
+        // an unclaimed Enter and the list's Up and Down reach its dialog.
         #[cfg(not(target_arch = "wasm32"))]
         iced::Event::Keyboard(keyboard::Event::KeyPressed { key, .. })
             if !crate::app::tool_windows::is_main_window(win_id) =>
@@ -414,6 +414,16 @@ pub(crate) fn main_window_event(
                 keyboard::Key::Named(keyboard::key::Named::Escape) => "ESCAPE",
                 keyboard::Key::Named(keyboard::key::Named::Enter) if status == Status::Ignored => {
                     "ENTER"
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowUp)
+                    if status == Status::Ignored =>
+                {
+                    "ARROWUP"
+                }
+                keyboard::Key::Named(keyboard::key::Named::ArrowDown)
+                    if status == Status::Ignored =>
+                {
+                    "ARROWDOWN"
                 }
                 _ => return None,
             };

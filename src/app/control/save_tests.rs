@@ -386,3 +386,102 @@ fn control_save_missing_current_file_through_directory_alias_keeps_fingerprint()
         }
     }
 }
+
+#[cfg(unix)]
+fn add_relative_xref(app: &mut OpenCADStudio, saved: &str) {
+    let doc = &mut app.tabs[app.active_tab].scene.document;
+    let mut record = document::tables::BlockRecord::new("SAVE_ALIAS_REF");
+    record.flags.is_xref = true;
+    record.xref_path = saved.to_string();
+    record.handle = doc.allocate_handle();
+    doc.block_records.add(record).unwrap();
+    crate::io::xref::ensure_block_entities(doc, "SAVE_ALIAS_REF");
+    edit(app);
+}
+
+#[cfg(unix)]
+fn assert_relative_xref(app: &OpenCADStudio, saved: &str, expected: &Path) {
+    let tab = &app.tabs[app.active_tab];
+    let record = tab
+        .scene
+        .document
+        .block_records
+        .get("SAVE_ALIAS_REF")
+        .unwrap();
+    assert_eq!(record.xref_path, saved);
+    let base = tab.current_path.as_ref().unwrap().parent().unwrap();
+    let resolved = crate::io::xref::resolve_path(&record.xref_path, base).unwrap();
+    assert_eq!(
+        std::fs::canonicalize(resolved).unwrap(),
+        std::fs::canonicalize(expected).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn control_save_directory_alias_keeps_parent_relative_xref_base() {
+    for windowed in [false, true] {
+        for save_alias in [false, true] {
+            let scratch = Scratch::new();
+            let project = scratch.0.join("data/project");
+            let shared = scratch.0.join("data/shared");
+            let links = scratch.0.join("links");
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::create_dir_all(&shared).unwrap();
+            std::fs::create_dir(&links).unwrap();
+            std::os::unix::fs::symlink(&project, links.join("project")).unwrap();
+            let path = project.join("current.dxf");
+            let alias = links.join("project/current.dxf");
+            let reference = shared.join("ref.dxf");
+            drop(open_drawing(&path, false));
+            drop(open_drawing(&reference, false));
+            let mut app = reopen_drawing(&alias, windowed);
+            add_relative_xref(&mut app, "../shared/ref.dxf");
+            assert_relative_xref(&app, "../shared/ref.dxf", &reference);
+            let destination = if save_alias { &alias } else { &path };
+            let saved = request(&mut app, json!({"op":"save","path":destination}));
+            assert_eq!(saved["ok"], true, "{saved}");
+            assert_eq!(app.tabs[app.active_tab].current_path.as_ref(), Some(&alias));
+            assert_relative_xref(&app, "../shared/ref.dxf", &reference);
+            drop(app);
+            let reopened = reopen_drawing(&alias, false);
+            assert_relative_xref(&reopened, "../shared/ref.dxf", &reference);
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn control_save_file_alias_keeps_cross_directory_xref_base() {
+    for windowed in [false, true] {
+        for open_alias in [false, true] {
+            for save_alias in [false, true] {
+                let scratch = Scratch::new();
+                let real = scratch.0.join("real");
+                let links = scratch.0.join("links/sub");
+                std::fs::create_dir(&real).unwrap();
+                std::fs::create_dir_all(&links).unwrap();
+                let path = real.join("current.dxf");
+                let alias = links.join("current.dxf");
+                drop(open_drawing(&path, false));
+                std::os::unix::fs::symlink(&path, &alias).unwrap();
+                let source = if open_alias { &alias } else { &path };
+                let reference_dir = source.parent().unwrap().join("x");
+                std::fs::create_dir(&reference_dir).unwrap();
+                let reference = reference_dir.join("ref.dxf");
+                drop(open_drawing(&reference, false));
+                let mut app = reopen_drawing(source, windowed);
+                add_relative_xref(&mut app, "x/ref.dxf");
+                let destination = if save_alias { &alias } else { &path };
+                let saved = request(&mut app, json!({"op":"save","path":destination}));
+                assert_eq!(saved["ok"], true, "{saved}");
+                assert!(alias.is_symlink());
+                assert_eq!(app.tabs[app.active_tab].current_path.as_ref(), Some(source));
+                assert_relative_xref(&app, "x/ref.dxf", &reference);
+                drop(app);
+                let reopened = reopen_drawing(source, false);
+                assert_relative_xref(&reopened, "x/ref.dxf", &reference);
+            }
+        }
+    }
+}

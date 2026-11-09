@@ -1443,12 +1443,12 @@ impl OpenCADStudio {
                     .current_path
                     .as_deref()
                     .is_some_and(|current| super::update::native_paths_match(current, &path));
-                // An atomic replacement must update the drawing a file alias
-                // names, rather than replacing the symlink itself.
-                let path = if destination_is_current {
-                    std::fs::canonicalize(&path).unwrap_or(path)
-                } else {
-                    path
+                // Keep the document's logical reference base for a current
+                // file reached through another spelling. The writer resolves
+                // its physical destination without moving the document.
+                let path = match self.tabs[i].current_path.as_ref() {
+                    Some(current) if destination_is_current => current.clone(),
+                    _ => path,
                 };
                 let require_new_destination =
                     !destination_is_current && req["overwrite"].as_bool() != Some(true);

@@ -48,8 +48,9 @@ drawing was opened and respects a known edit-lock conflict. Supplying that
 same path explicitly does not waive either check. Directory aliases are
 compared using the native path-matching rules.
 For a current-file symlink, the save replaces its resolved drawing target
-and preserves the symlink. Directory aliases retain the current-file check
-even if the drawing was deleted externally.
+and preserves the symlink and logical document path. Relative references
+keep that logical path as their base. Directory aliases retain the
+current-file check even if the drawing was deleted externally.
 
 A different existing destination is refused with `destination_exists` unless
 the native control request includes `"overwrite":true`. A new destination

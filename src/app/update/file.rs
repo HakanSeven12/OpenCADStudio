@@ -2108,9 +2108,14 @@ impl OpenCADStudio {
 
         self.prepare_native_save(i);
         let snapshot = self.tabs[i].scene.document_for_save();
+        let write_path = if path_changed {
+            path.clone()
+        } else {
+            std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
+        };
         crate::io::save_owned_as_version_atomic(
             snapshot,
-            &path,
+            &write_path,
             version,
             self.backup_on_save,
             expected_fingerprint,
@@ -3795,7 +3800,13 @@ impl OpenCADStudio {
                 );
             }
         };
-        let worker_path = path.clone();
+        // Resolve only the writer's path. The logical path below remains the
+        // reference base and the path installed on successful completion.
+        let worker_path = if destination_is_current {
+            std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone())
+        } else {
+            path.clone()
+        };
         let capture_window = thumbnail.and(capture_bounds).and(self.main_window);
         let mut work = Some((
             snapshot,

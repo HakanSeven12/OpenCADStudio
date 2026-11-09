@@ -5323,16 +5323,9 @@ impl Scene {
             }
             Arc::new(pv)
         };
-        // Stable per-viewport identity (tagged so tile / sheet / content /
-        // implicit-model instances never collide), so a reused pipeline slot
-        // can tell it changed occupant and reset its caches.
-        let instance_id: u64 = if let Some(t) = inst.tile_idx {
-            0x1000_0000_0000_0000 | (t as u64)
-        } else if inst.paper_sheet {
-            0x2000_0000_0000_0000
-        } else {
-            0x3000_0000_0000_0000 | inst.handle.value()
-        };
+        // Stable per-viewport identity, so a reused pipeline slot can tell it
+        // changed occupant and reset its caches.
+        let instance_id = self.render_instance_id(inst);
         // A paper content viewport with a non-rectangular clip entity gets its
         // boundary projected into this render target's NDC (paper shape mapped
         // through the same visible-sub-rect crop as the content). Rectangular

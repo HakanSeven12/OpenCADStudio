@@ -4235,19 +4235,19 @@ mod mission_m025_tests {
             "1:75"
         );
         let _ = app.run_command_line("SETVAR CANNOSCALE");
-        assert!(all_output(&app).contains("CANNOSCALE = 1:75"));
+        assert!(all_output(&app).contains("CANNOSCALE <\"1:75\">"));
 
         let _ = app.run_command_line("SETVAR ANNOALLVISIBLE 0");
         assert!(!app.tabs[app.active_tab].scene.annotation_all_visible());
         let _ = app.run_command_line("SETVAR ANNOALLVISIBLE 1");
         assert!(app.tabs[app.active_tab].scene.annotation_all_visible());
         let _ = app.run_command_line("SETVAR ANNOALLVISIBLE");
-        assert!(all_output(&app).contains("ANNOALLVISIBLE = 1"));
+        assert!(all_output(&app).contains("ANNOALLVISIBLE <1>"));
 
         let _ = app.run_command_line("SETVAR ANNOAUTOSCALE 2");
         assert_eq!(app.annotation_auto_scale, 2);
         let _ = app.run_command_line("SETVAR ANNOAUTOSCALE");
-        assert!(all_output(&app).contains("ANNOAUTOSCALE = 2"));
+        assert!(all_output(&app).contains("ANNOAUTOSCALE <2>"));
 
         let _ = app.run_command_line("SETVAR HPLAYER");
         assert!(all_output(&app).contains("HPLAYER = ."));
@@ -4260,10 +4260,10 @@ mod mission_m025_tests {
 
         let _ = app.run_command_line("SETVAR ANNOAUTOSCALE 9");
         assert_eq!(app.annotation_auto_scale, -4);
-        assert!(all_output(&app).contains("integer from -4 through 4"));
+        assert!(all_output(&app).contains("Requires an integer between -4 and 4."));
 
         let _ = app.run_command_line("SETVAR ANNOALLVISIBLE 2");
-        assert!(all_output(&app).contains("enter 0 or 1"));
+        assert!(all_output(&app).contains("Requires 0 or 1 only."));
     }
 }
 
@@ -4318,7 +4318,7 @@ mod mission_m027_tests {
             )));
 
         let _ = app.run_command_line("ANNOUPDATE ALL");
-        assert!(all_output(&app).contains("no annotative objects"));
+        assert!(all_output(&app).contains("1 found 0 were updated"));
     }
 
     #[test]
@@ -4334,9 +4334,14 @@ mod mission_m027_tests {
             )));
         app.tabs[tab].scene.select_entity(line, false);
 
+        let before = format!("{:?}", app.tabs[tab].scene.document.get_entity(line));
         let _ = app.run_command_line("ANNOUPDATE");
         let output = all_output(&app);
-        assert!(output.contains("not annotative"), "{output}");
+        assert!(output.contains("Select objects:"), "{output}");
+        assert_eq!(
+            format!("{:?}", app.tabs[tab].scene.document.get_entity(line)),
+            before
+        );
     }
 }
 

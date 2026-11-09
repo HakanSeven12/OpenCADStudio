@@ -1231,6 +1231,9 @@ impl OpenCADStudio {
             || tokens[0].eq_ignore_ascii_case("TOOLBAR")
             || tokens[0].eq_ignore_ascii_case("-TOOLBAR")
             || tokens[0].eq_ignore_ascii_case("WSCURRENT")
+            // `OBJECTSCALE ADD|DELETE <scale>` names its scale on the same
+            // line; a bare OBJECTSCALE asks for objects first.
+            || tokens[0].eq_ignore_ascii_case("OBJECTSCALE")
             // DIMUPDATE takes its KEEP / CLEAR answer on the same line.
             || tokens[0].eq_ignore_ascii_case("DIMUPDATE")
             // TEXTMASK takes OFFSET <n> / OFF on the same line.

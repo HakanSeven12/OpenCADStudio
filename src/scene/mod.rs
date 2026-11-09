@@ -6853,54 +6853,6 @@ impl Scene {
         self.bump_scale_epoch();
     }
 
-    /// The scale list of the reference's new metric drawing, in its order:
-    /// its template's scales stored in metres (the first, `1:1000`, its unit
-    /// scale), then the standard list with the names they clash with
-    /// suffixed `_1`. The current annotation scale is `1:1_1`.
-    const NEW_DRAWING_SCALES: &'static [(&'static str, f64, f64)] = &[
-        ("1:1000", 1.0, 1.0),
-        ("1:1", 1.0, 0.001),
-        ("1:2", 1.0, 0.002),
-        ("1:5", 1.0, 0.005),
-        ("1:10", 1.0, 0.01),
-        ("1:20", 1.0, 0.02),
-        ("1:50", 1.0, 0.05),
-        ("1:100", 1.0, 0.1),
-        ("1:1_1", 1.0, 1.0),
-        ("1:2_1", 1.0, 2.0),
-        ("1:4", 1.0, 4.0),
-        ("1:5_1", 1.0, 5.0),
-        ("1:8", 1.0, 8.0),
-        ("1:10_1", 1.0, 10.0),
-        ("1:16", 1.0, 16.0),
-        ("1:20_1", 1.0, 20.0),
-        ("1:30", 1.0, 30.0),
-        ("1:40", 1.0, 40.0),
-        ("1:50_1", 1.0, 50.0),
-        ("1:100_1", 1.0, 100.0),
-        ("2:1", 2.0, 1.0),
-        ("4:1", 4.0, 1.0),
-        ("8:1", 8.0, 1.0),
-        ("10:1", 10.0, 1.0),
-        ("100:1", 100.0, 1.0),
-    ];
-
-    /// A new drawing's own scale list (see `NEW_DRAWING_SCALES`).
-    pub(crate) fn populate_new_drawing_scales(&mut self) {
-        if self.has_own_scales() {
-            return;
-        }
-        for (index, &(name, paper, drawing)) in Self::NEW_DRAWING_SCALES.iter().enumerate() {
-            self.add_scale(name, paper, drawing);
-            if let Some(handle) = self.scale_object_handle(name) {
-                if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
-                    scale.is_unit_scale = index == 0;
-                }
-            }
-        }
-        self.document.header.current_annotation_scale = "1:1_1".to_string();
-    }
-
     /// `-SCALELISTEDIT` Reset: every scale except `keep` goes, then the
     /// standard set is added after the kept ones.
     pub fn reset_scale_list(&mut self, keep: &[String]) {

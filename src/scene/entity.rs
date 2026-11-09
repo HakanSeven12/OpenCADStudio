@@ -4018,8 +4018,6 @@ impl Scene {
         // The name alone leaves the header pointing at the previous style, and
         // a DWG writes the current style by handle only.
         self.document.header.current_dimstyle_handle = iso;
-        // Its scale list and current annotation scale.
-        self.populate_new_drawing_scales();
         // The annotation multiplier depends on those units; Scene::new()
         // left it at the unitless 1, which drew annotative objects 1000x too
         // large until the first CANNOSCALE change shrank them. (#1674)

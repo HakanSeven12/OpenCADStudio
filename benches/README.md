@@ -15,7 +15,62 @@ cargo bench --bench performance_benchmarks -- --quick
 ```
 
 > [!NOTE]
-> Benchmarks are registered under `[[bench]]` with `harness = false`. They are **never** executed by regular `cargo test` runs, preventing CI slowdowns.
+> The Rust benchmarks are registered under `[[bench]]` with `harness = false`.
+> They are **never** executed by regular `cargo test` runs, preventing CI slowdowns.
+
+## Drawing startup and memory
+
+The DXF parser benchmark below uses synthetic lines and circles; it does not
+measure opening a text-heavy drawing in the GUI. For that path, build a fresh
+release executable and run this Python 3.10+ benchmark in a graphical desktop
+session on Windows, macOS, or Linux from the repo root, using a drawing you
+have permission to read:
+
+```sh
+cargo build --release --locked --bin OpenCADStudio
+python -m pip install -r benches/requirements.txt
+python benches/drawing_startup.py --executable PATH_TO_RELEASE_EXECUTABLE --drawing PATH_TO_DRAWING
+```
+
+Each run starts its own editor (`--new-instance`) with `PERF` and startup
+logging enabled. It measures from process launch until the application's
+`open-ui-thread` diagnostic arrives, then samples process resident memory
+(RSS) and, where available, unique set size (USS) 15 seconds later. It also
+records the peak RSS observed at the polling interval. The open diagnostic is
+emitted after document installation; it does not prove that the first frame,
+window responsiveness, or all background work has completed. It is a different
+metric from a window-ready measurement. GPU memory and child-process memory
+are not included. USS is private resident memory, not private committed memory.
+Tracing affects timings, so compare only runs with the same instrumentation.
+
+The report defaults to `target/drawing-startup-benchmark.json`; use `-Output`
+to choose another path. It records the drawing and executable SHA-256 hashes,
+OS, CPU, graphics driver, launch settings, and individual runs. Compare only
+reports with the same drawing hash, machine, GPU adapter and driver, viewport
+size, working directory, graphics and shader-cache settings, sampling settings,
+fonts, and external drawing references. Executable hashes may differ when
+comparing builds. Window and viewport size are not detected; keep them fixed
+manually. The script does not clear caches: the first observed launch and
+later launches must be compared separately, and none is guaranteed to be a cold
+start. It hashes the input and executable after the runs, which can warm the
+filesystem cache for a subsequent invocation. The app may update its normal
+recent-file and other user settings while running.
+
+Each run uses its own empty GPU-crash sentinel directory, so ending a short
+benchmark cannot mark the user's normal graphics session as crashed or force a
+different backend on the next sample. The effective saved graphics preferences
+are copied into that directory for each run. This measures normal startup, not
+crash recovery. The benchmark terminates only the process it starts after each
+sample. Check the report's `adapter_consistent`, `workload_consistent`,
+`gpu_adapter`, and `termination` fields before comparing samples; investigate
+missing or different values. Workload consistency is unknown unless the entity,
+wire-model and text-vertex counts were all observed.
+
+Run the benchmark's process-lifecycle and report tests without opening a GUI:
+
+```sh
+python -m unittest discover -s benches -p 'test_drawing_startup.py'
+```
 
 ---
 

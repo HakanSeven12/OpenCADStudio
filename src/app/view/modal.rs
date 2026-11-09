@@ -889,12 +889,25 @@ impl OpenCADStudio {
             super::super::ModalKind::AnnoObjectScale => {
                 let tab = &self.tabs[self.active_tab];
                 let entity = self.anno_object_scale_target;
-                // Which scales the object currently has a representation for.
-                let members: Vec<document::types::Handle> = entity
+                // The scales every edited object has a representation for.
+                let mut objects: Vec<document::types::Handle> = entity.into_iter().collect();
+                objects.extend(self.anno_object_scale_extra.iter().copied());
+                let scale_sets: Vec<Vec<document::types::Handle>> = objects
+                    .iter()
                     .map(|h| {
-                        crate::scene::annotative::object_scale_memberships(&tab.scene.document, h)
+                        crate::scene::annotative::object_scale_memberships(&tab.scene.document, *h)
                             .into_iter()
                             .map(|(_, sh)| sh)
+                            .collect()
+                    })
+                    .collect();
+                let members: Vec<document::types::Handle> = scale_sets
+                    .first()
+                    .map(|first| {
+                        first
+                            .iter()
+                            .copied()
+                            .filter(|sh| scale_sets.iter().all(|set| set.contains(sh)))
                             .collect()
                     })
                     .unwrap_or_default();
@@ -907,6 +920,7 @@ impl OpenCADStudio {
                         document::EntityType::MultiLeader(_) => "MULTILEADER",
                         _ => "OBJECT",
                     })
+                    .map(|label| if objects.len() > 1 { "MULTIPLE" } else { label })
                     .unwrap_or("—");
                 let scales: Vec<(String, String, bool)> = tab
                     .scene

@@ -6783,6 +6783,12 @@ impl Scene {
         if self.has_own_scales() {
             return false;
         }
+        self.add_default_scales();
+        true
+    }
+
+    /// Add the standard scale set, skipping names the drawing already has.
+    fn add_default_scales(&mut self) {
         let unit_factor = self.default_scale_unit_factor();
         for &(label, factor) in self.default_scales() {
             // Fallback labels are "paper:drawing"; parse them for tidy whole
@@ -6798,6 +6804,63 @@ impl Scene {
             self.add_scale(label, paper, drawing / unit_factor);
         }
         self.bump_scale_epoch();
+    }
+
+    /// `-SCALELISTEDIT` Reset: every scale except `keep` goes, then the
+    /// standard set is added after the kept ones.
+    pub fn reset_scale_list(&mut self, keep: &[String]) {
+        let names = self.scale_names_in_list_order();
+        for name in names {
+            if !keep.iter().any(|kept| kept.eq_ignore_ascii_case(&name)) {
+                self.remove_scale(&name);
+            }
+        }
+        self.add_default_scales();
+    }
+
+    /// The drawing's own scale names in the order its scale list holds them;
+    /// the substituted standard set when it holds none.
+    pub fn scale_names_in_list_order(&self) -> Vec<String> {
+        let listed: Vec<String> = self
+            .scalelist_dict_handle()
+            .and_then(|handle| match self.document.objects.get(&handle) {
+                Some(ObjectType::Dictionary(dictionary)) => Some(
+                    dictionary
+                        .entries
+                        .iter()
+                        .filter_map(|(_, handle)| match self.document.objects.get(handle) {
+                            Some(ObjectType::Scale(scale))
+                                if !scale.is_temporary
+                                    && !scale.name.contains('|')
+                                    && !scale.name.to_ascii_uppercase().ends_with("_XREF") =>
+                            {
+                                Some(scale.name.clone())
+                            }
+                            _ => None,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            })
+            .unwrap_or_default();
+        if listed.is_empty() {
+            self.scale_list().into_iter().map(|(name, _, _)| name).collect()
+        } else {
+            listed
+        }
+    }
+
+    /// Give an existing scale a new ratio.
+    pub fn redefine_scale(&mut self, name: &str, paper: f64, drawing: f64) -> bool {
+        let Some(handle) = self.scale_object_handle(name) else {
+            return false;
+        };
+        if let Some(ObjectType::Scale(scale)) = self.document.objects.get_mut(&handle) {
+            scale.paper_units = paper;
+            scale.drawing_units = drawing;
+        }
+        self.bump_scale_epoch();
+        self.invalidate_annotation_dependencies();
         true
     }
 

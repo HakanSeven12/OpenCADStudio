@@ -867,6 +867,8 @@ impl OpenCADStudio {
             ole_hide: crate::entities::ole2frame::hide_mode(),
             ole_quality: crate::app::commands::ole_quality(),
             group_display_mode: crate::app::commands::group_display_mode(),
+            selection_anno_display: crate::app::commands::selection_anno_display(),
+            anno_monitor: crate::app::commands::anno_monitor(),
             log_file_mode: crate::app::commands::log_file_mode(),
             log_file_path: crate::app::commands::log_file_folder_setting(),
             save_file_path: self.save_file_path.clone(),
@@ -1079,6 +1081,8 @@ impl OpenCADStudio {
         crate::entities::ole2frame::set_hide_mode(s.ole_hide);
         crate::app::commands::set_ole_quality(s.ole_quality);
         crate::app::commands::set_group_display_mode(s.group_display_mode);
+        crate::app::commands::set_selection_anno_display(s.selection_anno_display);
+        crate::app::commands::set_anno_monitor(s.anno_monitor);
         // The log's folder and mode are process-wide, and every test that builds
         // an app comes through here beside the one test that turns the log on.
         if !cfg!(test) {

@@ -6752,28 +6752,28 @@ impl OpenCADStudio {
                 Task::none()
             }
             Message::AnnoObjectScaleOpen => {
-                // The dialog edits a single object's per-scale memberships.
+                // The dialog edits the selected objects' per-scale memberships.
                 let i = self.active_tab;
-                let handles = self.property_target_handles(i);
-                if handles.len() == 1 {
-                    let ok = self.tabs[i]
-                        .scene
-                        .document
-                        .get_entity(handles[0])
-                        .is_some_and(crate::scene::annotative::supports_annotation_context);
-                    if ok {
-                        self.anno_object_scale_target = Some(handles[0]);
-                        self.active_modal = Some(crate::app::ModalKind::AnnoObjectScale);
-                    } else {
-                        self.command_line.push_info(
-                            crate::t!("The selected object does not support annotation scales.")
-                                .as_ref(),
-                        );
-                    }
-                } else {
+                let handles: Vec<_> = self
+                    .property_target_handles(i)
+                    .into_iter()
+                    .filter(|handle| {
+                        self.tabs[i]
+                            .scene
+                            .document
+                            .get_entity(*handle)
+                            .is_some_and(crate::scene::annotative::supports_annotation_context)
+                    })
+                    .collect();
+                if handles.is_empty() {
                     self.command_line.push_info(
-                        crate::t!("Select one object first, then run OBJECTSCALE.").as_ref(),
+                        crate::t!("The selected object does not support annotation scales.")
+                            .as_ref(),
                     );
+                } else {
+                    self.anno_object_scale_target = Some(handles[0]);
+                    self.anno_object_scale_extra = handles[1..].to_vec();
+                    self.active_modal = Some(crate::app::ModalKind::AnnoObjectScale);
                 }
                 Task::none()
             }
@@ -6882,19 +6882,36 @@ impl OpenCADStudio {
                 }
                 if let Some(sh) = self.tabs[i].scene.scale_handle_ensuring(&name) {
                     self.push_undo_snapshot(i, "OBJECTSCALE");
+                    let mut targets = vec![entity];
+                    targets.extend(self.anno_object_scale_extra.iter().copied());
+                    targets.retain(|handle| !self.tabs[i].scene.is_layer_locked(*handle));
                     let doc = &mut self.tabs[i].scene.document;
-                    let is_member = crate::scene::annotative::object_scale_memberships(doc, entity)
-                        .iter()
-                        .any(|(_, h)| *h == sh);
-                    if is_member {
-                        crate::scene::annotative::remove_annotation_context_for_scale(
-                            doc, entity, sh,
-                        );
-                    } else {
-                        crate::scene::annotative::create_annotation_context(doc, entity, sh);
+                    let has = |doc: &document::Document, handle| {
+                        crate::scene::annotative::object_scale_memberships(doc, handle)
+                            .iter()
+                            .any(|(_, h)| *h == sh)
+                    };
+                    // A scale every object has is taken off them all (none
+                    // loses its last scale); otherwise the others get it.
+                    let all = targets.iter().all(|handle| has(doc, *handle));
+                    for handle in &targets {
+                        if all {
+                            if crate::scene::annotative::object_scale_memberships(doc, *handle).len() > 1 {
+                                crate::scene::annotative::remove_annotation_context_for_scale(
+                                    doc, *handle, sh,
+                                );
+                            }
+                        } else if !has(doc, *handle) {
+                            crate::scene::annotative::create_annotation_context(doc, *handle, sh);
+                        }
                     }
                     self.tabs[i].dirty = true;
-                    self.invalidate_property_targets(i, &[entity]);
+                    let changes: Vec<_> = targets
+                        .iter()
+                        .map(|handle| (*handle, crate::scene::ChangeKind::Modified))
+                        .collect();
+                    self.tabs[i].scene.bump_entities(&changes);
+                    self.invalidate_property_targets(i, &targets);
                     self.refresh_properties();
                 } else {
                     self.command_line

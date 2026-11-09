@@ -937,6 +937,11 @@ pub struct UserSettings {
     /// GROUPDISPLAYMODE: a picked group shows member grips (0), a centre
     /// grip (1) or a centre grip and a box (2).
     pub group_display_mode: i16,
+    /// SELECTIONANNODISPLAY: a selected annotative object shows its other
+    /// scale representations dimmed (1) or not (0).
+    pub selection_anno_display: i16,
+    /// ANNOMONITOR: the annotation monitor (-2 to 2).
+    pub anno_monitor: i16,
     /// LOGFILEMODE: the command line is also written to a log file.
     pub log_file_mode: bool,
     /// LOGFILEPATH: the folder log files go to; empty for the default.
@@ -1509,6 +1514,8 @@ impl Default for UserSettings {
             ole_hide: 0,
             ole_quality: 3,
             group_display_mode: 2,
+            selection_anno_display: 1,
+            anno_monitor: -2,
             log_file_mode: false,
             log_file_path: String::new(),
             save_file_path: String::new(),

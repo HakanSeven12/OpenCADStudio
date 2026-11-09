@@ -2138,6 +2138,8 @@ pub(super) struct OpenCADStudio {
     /// The entity the Annotation Object Scale dialog is editing (its per-object
     /// annotation-scale membership).
     anno_object_scale_target: Option<document::types::Handle>,
+    /// The other objects the dialog edits together with the target.
+    anno_object_scale_extra: Vec<document::types::Handle>,
     /// Open transaction for the scale manager — restored if the window closes
     /// without Apply, mirroring the style managers' staging.
     scale_stage: Option<crate::app::style_ops::ScaleStage>,
@@ -6745,6 +6747,7 @@ impl OpenCADStudio {
             scale_manager_drawing_buf: String::new(),
             scale_rename: None,
             anno_object_scale_target: None,
+            anno_object_scale_extra: Vec::new(),
             scale_rename_buf: String::new(),
             scale_stage: None,
             table_insert: Default::default(),

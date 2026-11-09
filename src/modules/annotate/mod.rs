@@ -306,29 +306,31 @@ impl CadModule for AnnotateModule {
                 RibbonGroup {
                     title: "Annotation Scaling",
                     tools: vec![
-                        RibbonItem::LabeledDropdown {
+                        RibbonItem::LargeDropdown {
                             id: "ANNOTATION_CURRENT_SCALE",
-                            label: "Add Current Scale",
+                            // Split button: the face runs and names the item
+                            // picked last.
+                            label: ocs_plugin_api::ribbon::FOLLOW_CHOSEN,
                             icon: crate::modules::IconKind::Svg(include_bytes!(
                                 "../../../assets/icons/add_scale.svg"
                             )),
                             items: vec![
                                 (
-                                    "OBJECTSCALE ADD",
+                                    "AIOBJECTSCALEADD",
                                     "Add Current Scale",
                                     crate::modules::IconKind::Svg(include_bytes!(
                                         "../../../assets/icons/add_scale.svg"
                                     )),
                                 ),
                                 (
-                                    "OBJECTSCALE DELETE",
+                                    "AIOBJECTSCALEREMOVE",
                                     "Delete Current Scale",
                                     crate::modules::IconKind::Svg(include_bytes!(
                                         "../../../assets/icons/add_scale.svg"
                                     )),
                                 ),
                             ],
-                            default: "OBJECTSCALE ADD",
+                            default: "AIOBJECTSCALEADD",
                         },
                         RibbonItem::Tool(crate::modules::ToolDef {
                             id: "SCALELISTEDIT",

@@ -6679,7 +6679,7 @@ impl OpenCADStudio {
             }
         }
         d.default_printer = crate::io::plot_device::default_printer_name();
-        d.plot_styles = crate::io::plot_style::available_ctb_names();
+        d.plot_styles = crate::io::plot_style::available_table_names();
         d.scales = scales;
         d.plot_views = plot_views;
         if d.scale.eq_ignore_ascii_case("fit") {

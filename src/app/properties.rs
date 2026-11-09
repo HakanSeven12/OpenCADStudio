@@ -2475,7 +2475,7 @@ impl OpenCADStudio {
                         .map(|(name, _, _)| name)
                         .collect();
                     let mut plot_table_options = vec!["None".to_string()];
-                    plot_table_options.extend(crate::io::plot_style::available_ctb_names());
+                    plot_table_options.extend(crate::io::plot_style::available_table_names());
                     let visual_style = match tab.visual_style.as_str() {
                         "Wireframe 2D" => "2D Wireframe".to_string(),
                         "Wireframe 3D" => "3D Wireframe".to_string(),

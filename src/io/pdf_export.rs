@@ -8,7 +8,7 @@
 // is needed — we shift the coordinates by (offset_x, offset_y) to place the
 // drawing origin at the paper origin.
 
-use crate::io::plot_style::PlotStyleTable;
+use crate::io::plot_style::{PlotStyleTable, PlotStyleTableExt};
 use crate::scene::model::hatch_model::HatchModel;
 use crate::scene::model::hatch_model::HatchPattern;
 use crate::scene::model::wire_model::SearchableTextRun;
@@ -871,16 +871,16 @@ fn append_pdf_page(
             let mut join = None;
             if let Some(ctb) = plot_style {
                 if wire.aci > 0 {
-                    if let Some([cr, cg, cb]) = ctb.resolve_color(wire.aci) {
+                    if let Some([cr, cg, cb]) = ctb.resolve_style_color(wire.aci) {
                         r = cr;
                         g = cg;
                         b = cb;
                         color_overridden = true;
                     }
                     lw_override = ctb
-                        .resolve_lineweight(wire.aci)
+                        .resolve_style_lineweight(wire.aci)
                         .map(|mm| (mm * MM_TO_PT).max(0.1));
-                    screening = ctb.resolve_screening(wire.aci);
+                    screening = ctb.resolve_style_screening(wire.aci);
                     if let Some(entry) = ctb.aci_entries.get(wire.aci as usize) {
                         cap = match entry.end_style {
                             0 => Some(LineCapStyle::Butt),
@@ -1586,11 +1586,11 @@ fn emit_wire_fills(
             let mut color_overridden = false;
             if let Some(table) = plot_style {
                 if wire.aci > 0 {
-                    if let Some(color) = table.resolve_color(wire.aci) {
+                    if let Some(color) = table.resolve_style_color(wire.aci) {
                         [r, g, b] = color;
                         color_overridden = true;
                     }
-                    screening = table.resolve_screening(wire.aci);
+                    screening = table.resolve_style_screening(wire.aci);
                 }
             }
             if !color_overridden {
@@ -1716,15 +1716,15 @@ fn emit_hatch(
     if !is_wipeout {
         if let Some(table) = plot_style {
             if hatch.aci > 0 {
-                if let Some([cr, cg, cb]) = table.resolve_color(hatch.aci) {
+                if let Some([cr, cg, cb]) = table.resolve_style_color(hatch.aci) {
                     r = cr;
                     g = cg;
                     b = cb;
                     color_overridden = true;
                 }
-                screening = table.resolve_screening(hatch.aci);
+                screening = table.resolve_style_screening(hatch.aci);
                 lw_override = table
-                    .resolve_lineweight(hatch.aci)
+                    .resolve_style_lineweight(hatch.aci)
                     .map(|mm| (mm * MM_TO_PT).max(0.1));
             }
         }
@@ -1988,8 +1988,8 @@ fn emit_searchable_text(
         let mut screening = 1.0;
         if let Some(ctb) = plot_style {
             if wire.aci > 0 {
-                ctb_color = ctb.resolve_color(wire.aci);
-                screening = ctb.resolve_screening(wire.aci);
+                ctb_color = ctb.resolve_style_color(wire.aci);
+                screening = ctb.resolve_style_screening(wire.aci);
             }
         }
         for run in &wire.searchable_text {
@@ -2373,11 +2373,11 @@ fn emit_text(
         let mut screening = 1.0;
         if let Some(ctb) = plot_style {
             if wire.aci > 0 {
-                ctb_color = ctb.resolve_color(wire.aci);
+                ctb_color = ctb.resolve_style_color(wire.aci);
                 lw_override = options
                     .object_lineweights
                     .then(|| {
-                        ctb.resolve_lineweight(wire.aci).map(|mm| {
+                        ctb.resolve_style_lineweight(wire.aci).map(|mm| {
                             let divisor = if options.scale_lineweights {
                                 1.0
                             } else {
@@ -2387,7 +2387,7 @@ fn emit_text(
                         })
                     })
                     .flatten();
-                screening = ctb.resolve_screening(wire.aci);
+                screening = ctb.resolve_style_screening(wire.aci);
             }
         }
         let mut gi = 0;
@@ -3162,6 +3162,39 @@ mod tests {
         widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
         widths.dedup_by(|a, b| (*a - *b).abs() < 0.01);
         widths
+    }
+
+    #[test]
+    fn named_style_table_recolors_wires_through_normal() {
+        // An STB table applies its `Normal` object style to everything that
+        // does not name a style explicitly: objects carry no plot-style
+        // handle in this build, so Normal is the honoured style.
+        let make_page = || {
+            let mut wire = PlotWire {
+                wire: WireModel::solid(
+                    "test".into(),
+                    vec![[0.0, 0.0, 0.0], [50.0, 50.0, 0.0]],
+                    [1.0, 0.0, 0.0, 1.0],
+                    false,
+                ),
+                draw_depth: 0.0,
+            };
+            wire.wire.aci = 1;
+            test_page(vec![wire])
+        };
+        let mut named = PlotStyleTable::identity("Mono.stb");
+        named.is_stb = true;
+        let mut normal = crate::io::plot_style::PlotStyleEntry::default();
+        normal.name = "Normal".to_string();
+        normal.color = Some([0, 0, 0]);
+        normal.color_policy = 0;
+        normal.screening = 100;
+        named.named_entries.insert("Normal".to_string(), normal);
+        let styled = pdf_stream_text(&render_pdf_bytes(&[make_page()], Some(&named)).unwrap());
+        assert!(
+            !styled.contains("1 0 0 rg") && !styled.contains("1 0 0 RG"),
+            "STB Normal (black) must recolor the wire"
+        );
     }
 
     #[test]

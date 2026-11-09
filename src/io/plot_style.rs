@@ -81,8 +81,9 @@ pub fn ensure_plot_styles_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// CTB files available to the Plot dialog.
-pub fn available_ctb_names() -> Vec<String> {
+/// Plot style tables available to the Plot dialog: CTB and STB files in the
+/// folder, the shipped tables, and the tables picked this session.
+pub fn available_table_names() -> Vec<String> {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let Ok(dir) = ensure_plot_styles_dir() else {
@@ -101,14 +102,16 @@ pub fn available_ctb_names() -> Vec<String> {
             .filter_map(|entry| {
                 let path = entry.path();
                 path.extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("ctb"))
+                    .is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("ctb") || ext.eq_ignore_ascii_case("stb")
+                    })
                     .then(|| entry.file_name().to_string_lossy().into_owned())
             })
             .collect();
         names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
         // Empty on native (nothing registers there); on the web this is
         // where the tables picked this session surface.
-        names.extend(session_ctb_names());
+        names.extend(session_table_names());
         names.sort_by_key(|name| name.to_ascii_lowercase());
         names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         names
@@ -118,7 +121,7 @@ pub fn available_ctb_names() -> Vec<String> {
         let mut names = vec![DEFAULT_PLOT_STYLE.into(), MONOCHROME_PLOT_STYLE.into()];
         names.extend(STANDARD_PLOT_STYLES.iter().map(|name| (*name).to_string()));
         // No folder to scan — the tables picked this session stand in.
-        names.extend(session_ctb_names());
+        names.extend(session_table_names());
         names.sort_by_key(|name| name.to_ascii_lowercase());
         names.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
         names
@@ -163,18 +166,114 @@ pub fn session_table(name: &str) -> Option<Arc<Vec<u8>>> {
         .map(|(_, bytes)| Arc::clone(bytes))
 }
 
-/// The colour-dependent (.ctb) names picked this session, for the Plot
-/// dialog's table list. Named (.stb) tables are left out: the plotter is
-/// color-dependent, so they cannot be applied anyway.
-fn session_ctb_names() -> Vec<String> {
+/// The colour-dependent (.ctb) and named (.stb) tables picked this session,
+/// for the Plot dialog's table list. Named tables now apply: objects resolve
+/// through the table's `Normal` object style.
+fn session_table_names() -> Vec<String> {
     session_tables()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .keys()
-        .filter(|name| name.to_ascii_lowercase().ends_with(".ctb"))
         .cloned()
         .collect()
 }
+
+/// The `Normal` object style of a named table, whether by exact or
+/// case-insensitive name; the first entry when there is no `Normal`.
+fn normal_entry(table: &PlotStyleTable) -> Option<&PlotStyleEntry> {
+    table
+        .named_entries
+        .get("Normal")
+        .or_else(|| {
+            table
+                .named_entries
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("Normal"))
+                .map(|(_, entry)| entry)
+        })
+        .or_else(|| table.named_entries.values().next())
+}
+
+    // Names in a named table: the packed RGB the codec reads and writes.
+    fn packed_rgb([r, g, b]: [u8; 3]) -> i32 {
+        u32::from_be_bytes([0xC2, r, g, b]) as i32
+    }
+
+    /// Encode a named-style (STB) table as the file bytes the codec reads
+    /// back. `PlotStyleTable::to_bytes` writes colour tables, so STB tables
+    /// need their own writer.
+    pub fn encode_stb(table: &PlotStyleTable) -> Result<Vec<u8>, String> {
+        let mut body = String::new();
+        let description = table.description.replace(['\r', '\n'], " ");
+        body.push_str(&format!("description=\"{description}\n"));
+        body.push_str("aci_table_available=TRUE\n");
+        body.push_str(&format!(
+            "scale_factor={}\n",
+            full_real_stb(table.scale_factor)
+        ));
+        body.push_str(&format!(
+            "apply_factor={}\n",
+            if table.apply_factor { "TRUE" } else { "FALSE" }
+        ));
+        body.push_str(&format!(
+            "custom_lineweight_display_units={}\n",
+            table.custom_lineweight_display_units
+        ));
+        body.push_str("plot_style{\n");
+        for (index, (name, entry)) in table.named_entries.iter().enumerate() {
+            let localized_name = if entry.localized_name.is_empty() {
+                name.as_str()
+            } else {
+                entry.localized_name.as_str()
+            };
+            body.push_str(&format!(" {index}{{\n"));
+            body.push_str(&format!("  name=\"{name}\n"));
+            body.push_str(&format!("  localized_name=\"{localized_name}\n"));
+            body.push_str(&format!(
+                "  description=\"{}\n",
+                entry.description.replace(['\r', '\n'], " ")
+            ));
+            let color = entry.color.map(packed_rgb).unwrap_or(-1);
+            body.push_str(&format!("  color={color}\n  mode_color={color}\n"));
+            body.push_str(&format!("  color_policy={}\n", entry.color_policy));
+            body.push_str(&format!(
+                "  physical_pen_number={}\n  virtual_pen_number={}\n",
+                entry.physical_pen_number, entry.virtual_pen_number
+            ));
+            body.push_str(&format!("  screen={}\n", entry.screening));
+            body.push_str(&format!(
+                "  linepattern_size={}\n  linetype={}\n  adaptive_linetype={}\n",
+                entry.linepattern_size,
+                entry.linetype,
+                if entry.adaptive_linetype { "TRUE" } else { "FALSE" }
+            ));
+            body.push_str(&format!("  lineweight={}\n", entry.lineweight));
+            body.push_str(&format!(
+                "  fill_style={}\n  end_style={}\n  join_style={}\n }}\n",
+                entry.fill_style, entry.end_style, entry.join_style
+            ));
+        }
+        body.push_str("}\ncustom_lineweight_table{\n");
+        for (index, weight) in table.lineweights.iter().enumerate() {
+            body.push_str(&format!(" {index}={}\n", full_real_stb(*weight)));
+        }
+        body.push_str("}\n");
+        let mut encoder =
+            flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+        use std::io::Write as _;
+        encoder
+            .write_all(body.as_bytes())
+            .map_err(|error| error.to_string())?;
+        encoder.finish().map_err(|error| error.to_string())
+    }
+
+    fn full_real_stb(value: f32) -> String {
+        let rendered = format!("{value:.10}");
+        rendered
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
 
 /// Where Open CAD Studio finds plot style tables: on disk, in this session's
 /// registry, and among the shipped ones.
@@ -183,6 +282,14 @@ pub trait PlotStyleTableExt: Sized {
     fn builtin(name: &str) -> Result<Self, String>;
     fn load_named(name: &str) -> Result<Self, String>;
     fn save(&self, path: &Path) -> Result<(), String>;
+    /// The plotted colour of an object, honouring a named table's `Normal`
+    /// object style (STB) as well as a colour table's ACI row (CTB).
+    fn resolve_style_color(&self, aci: u8) -> Option<[f32; 3]>;
+    /// The plotted lineweight in millimetres, or `None` to keep the
+    /// object's own lineweight.
+    fn resolve_style_lineweight(&self, aci: u8) -> Option<f32>;
+    /// Screening factor 0–1 for the style this object takes.
+    fn resolve_style_screening(&self, aci: u8) -> f32;
 }
 
 impl PlotStyleTableExt for PlotStyleTable {
@@ -246,18 +353,12 @@ impl PlotStyleTableExt for PlotStyleTable {
         {
             return Err(format!("Invalid plot style name: {name}"));
         }
-        if path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("stb"))
-        {
-            return Err(
-                crate::tf!("Named plot style tables (.stb) are not supported yet: {name}")
-                    .into_owned(),
-            );
-        }
         if !path
             .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("ctb"))
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("stb"))
+            && !path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("ctb"))
         {
             return Err(format!("Invalid plot style name: {name}"));
         }
@@ -302,6 +403,60 @@ impl PlotStyleTableExt for PlotStyleTable {
         let bytes = self.to_bytes().map_err(|e| e.to_string())?;
         std::fs::write(path, bytes).map_err(|e| e.to_string())
     }
+
+    fn resolve_style_color(&self, aci: u8) -> Option<[f32; 3]> {
+        if !self.is_stb {
+            return self.resolve_color(aci);
+        }
+        let entry = normal_entry(self)?;
+        let mut color = entry
+            .color
+            .map(|[r, g, b]| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]);
+        if entry.color_policy & 2 != 0 {
+            let rgb = color.or_else(|| {
+                if aci == 7 {
+                    Some([0.0; 3])
+                } else {
+                    document::types::aci_to_rgb(aci).map(|(r, g, b)| {
+                        [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]
+                    })
+                }
+            })?;
+            let gray = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+            color = Some([gray; 3]);
+        }
+        color
+    }
+
+    fn resolve_style_lineweight(&self, aci: u8) -> Option<f32> {
+        if !self.is_stb {
+            return self.resolve_lineweight(aci);
+        }
+        let entry = normal_entry(self)?;
+        if matches!(entry.lineweight, 0 | 255) {
+            None
+        } else {
+            self.lineweights
+                .get(entry.lineweight as usize)
+                .copied()
+                .map(|weight| {
+                    if self.apply_factor {
+                        weight * self.scale_factor.max(0.0)
+                    } else {
+                        weight
+                    }
+                })
+        }
+    }
+
+    fn resolve_style_screening(&self, aci: u8) -> f32 {
+        if self.is_stb {
+            return normal_entry(self)
+                .map(|entry| entry.screening.min(100) as f32 / 100.0)
+                .unwrap_or(1.0);
+        }
+        self.resolve_screening(aci)
+    }
 }
 
 /// A table that screens every color to `percent`.
@@ -336,14 +491,14 @@ mod round_trip_tests {
     }
 
     /// The Plot dialog's table list includes the session-registered colour
-    /// tables, but never a named (.stb) one.
+    /// tables and the named (.stb) ones, since named tables now apply.
     #[test]
     fn available_names_include_session_registered_tables() {
         let bytes = PlotStyleTable::identity("x").to_bytes().expect("encode");
         let bytes = std::sync::Arc::new(bytes);
         super::register_session_table("DialogPens.ctb", std::sync::Arc::clone(&bytes));
         super::register_session_table("Named.stb", bytes);
-        let names = super::available_ctb_names();
+        let names = super::available_table_names();
         assert!(
             names
                 .iter()
@@ -351,7 +506,7 @@ mod round_trip_tests {
             "{names:?}"
         );
         assert!(
-            !names
+            names
                 .iter()
                 .any(|name| name.eq_ignore_ascii_case("Named.stb")),
             "{names:?}"
@@ -365,8 +520,27 @@ mod lenient_loading_tests {
 
     #[test]
     fn named_tables_and_missing_files_get_a_reason() {
-        let error = PlotStyleTable::load_named("styles.stb").unwrap_err();
-        assert!(error.contains(".stb"), "{error}");
+        // A named table now loads: the `Normal` object style, resolving
+        // object colour/lineweight/screening, is what the plot honours.
+        let mut table = PlotStyleTable::identity("Mono.stb");
+        table.is_stb = true;
+        let mut normal = crate::io::plot_style::PlotStyleEntry::default();
+        normal.name = "Normal".to_string();
+        normal.color = Some([0, 0, 0]);
+        normal.color_policy = 0;
+        normal.screening = 100;
+        table.named_entries.insert("Normal".to_string(), normal);
+        let bytes = super::encode_stb(&table).expect("encode STB");
+        let loaded = PlotStyleTable::from_bytes("Mono.stb", &bytes).expect("STB round-trips");
+        assert!(loaded.is_stb);
+        assert_eq!(loaded.named_entries["Normal"].color, Some([0, 0, 0]));
+        assert_eq!(loaded.resolve_style_color(1), Some([0.0, 0.0, 0.0]));
+        assert_eq!(loaded.resolve_style_color(7), Some([0.0, 0.0, 0.0]));
+        let error = PlotStyleTable::load_named("nowhere-to-be-found.stb").unwrap_err();
+        assert!(
+            error.to_lowercase().contains("stb"),
+            "the refusal names the extension: {error}"
+        );
         let error = PlotStyleTable::load_named("nowhere-to-be-found.ctb").unwrap_err();
         assert!(error.contains("nowhere-to-be-found.ctb"), "{error}");
         assert!(PlotStyleTable::load_named("../escape.ctb").is_err());

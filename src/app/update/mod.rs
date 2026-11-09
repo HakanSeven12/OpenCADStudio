@@ -14257,7 +14257,7 @@ impl OpenCADStudio {
                 if self.dialog_open(super::ModalKind::Plotstyle) {
                     self.plotstyle_panel_baseline = Some(self.active_plot_style.clone());
                 }
-                self.plot_dialog.plot_styles = crate::io::plot_style::available_ctb_names();
+                self.plot_dialog.plot_styles = crate::io::plot_style::available_table_names();
                 Task::none()
             }
             Message::PlotStyleLoaded(Ok(None)) => Task::none(),
@@ -14414,7 +14414,7 @@ impl OpenCADStudio {
                             self.plot_dialog.style_name = table_name;
                             self.plot_dialog.style_missing = false;
                             self.plot_dialog.plot_styles =
-                                crate::io::plot_style::available_ctb_names();
+                                crate::io::plot_style::available_table_names();
                             self.tabs[self.active_tab]
                                 .scene
                                 .invalidate_display_plot_style();
@@ -14466,7 +14466,7 @@ impl OpenCADStudio {
                             self.plot_dialog.style_name = name;
                             self.plot_dialog.style_missing = false;
                             self.plot_dialog.plot_styles =
-                                crate::io::plot_style::available_ctb_names();
+                                crate::io::plot_style::available_table_names();
                             self.tabs[self.active_tab]
                                 .scene
                                 .invalidate_display_plot_style();
